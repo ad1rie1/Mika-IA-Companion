@@ -83,3 +83,13 @@ CLAUDE_MODEL = env("CLAUDE_MODEL", default="claude-sonnet-4-5-20250929")
 MEMORY_SHORT_TERM_LIMIT = env.int("MEMORY_SHORT_TERM_LIMIT", default=20)
 API_PORT = env.int("API_PORT", default=8000)
 PERSONALITY_PATH = PROJECT_ROOT / "personality.yaml"
+
+# --- Contextual Memory ---
+CHROMA_PERSIST_DIR = env("CHROMA_PERSIST_DIR", default=str(PROJECT_ROOT / "data" / "chromadb"))
+CONSOLIDATION_INTERVAL = env.int("CONSOLIDATION_INTERVAL", default=300)  # seconds
+MEMORY_DECAY_RATE = env.float("MEMORY_DECAY_RATE", default=0.95)  # per day
+MEMORY_MIN_IMPORTANCE = env.float("MEMORY_MIN_IMPORTANCE", default=0.1)
+MEMORY_RETRIEVAL_SOUVENIRS = env.int("MEMORY_RETRIEVAL_SOUVENIRS", default=5)
+MEMORY_RETRIEVAL_CONNAISSANCES = env.int("MEMORY_RETRIEVAL_CONNAISSANCES", default=10)
+EMBEDDING_MODEL = env("EMBEDDING_MODEL", default="paraphrase-multilingual-MiniLM-L12-v2")
+HAIKU_MODEL = env("HAIKU_MODEL", default="claude-haiku-4-5-20251001")

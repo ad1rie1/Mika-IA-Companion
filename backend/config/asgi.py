@@ -44,6 +44,8 @@ class LifespanWrapper:
         logger.info("All modules started")
 
     async def _shutdown(self):
+        await memory_manager.shutdown()
+        logger.info("Memory system shut down")
         await module_manager.stop_all()
         logger.info("VTuber Engine shut down cleanly")
 

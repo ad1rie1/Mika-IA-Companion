@@ -11,7 +11,10 @@ class ClaudeClient:
         self.system_prompt = personality.to_system_prompt()
 
     async def chat(
-        self, message: str, conversation_history: list[dict] | None = None
+        self,
+        message: str,
+        conversation_history: list[dict] | None = None,
+        memory_context: str = "",
     ) -> tuple[str, Emotion]:
         """Send a message to Claude and return (clean_response, emotion)."""
         messages = []
@@ -19,10 +22,14 @@ class ClaudeClient:
             messages.extend(conversation_history)
         messages.append({"role": "user", "content": message})
 
+        system = self.system_prompt
+        if memory_context:
+            system += "\n\n" + memory_context
+
         response = await self.client.messages.create(
             model=settings.CLAUDE_MODEL,
             max_tokens=1024,
-            system=self.system_prompt,
+            system=system,
             messages=messages,
         )
 

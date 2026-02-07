@@ -57,8 +57,13 @@ class ChatConsumer(AsyncWebsocketConsumer):
 async def handle_chat(message: str, source: str = "frontend"):
     """Process a chat message from any source and broadcast to all clients."""
     try:
+        # Retrieve relevant long-term memories for context
+        memory_context = await memory_manager.get_memory_context(message)
+
         history = memory_manager.get_conversation_context()
-        response_text, emotion = await claude_client.chat(message, history)
+        response_text, emotion = await claude_client.chat(
+            message, history, memory_context=memory_context
+        )
     except Exception:
         logger.exception("Claude API error while processing message")
         response_text = "Oups, j'ai eu un petit bug... Tu peux réessayer ?"
