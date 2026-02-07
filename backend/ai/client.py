@@ -11,10 +11,13 @@ class ClaudeClient:
     def __init__(self):
         self.system_prompt = personality.to_system_prompt()
         # Set the token from Django settings for claude_agent_sdk
-        api_key = settings.CLAUDE_OAUTH_TOKEN or settings.ANTHROPIC_API_KEY
-        if not api_key:
+        # SDK looks for CLAUDE_CODE_OAUTH_TOKEN for OAuth, or ANTHROPIC_API_KEY for API key
+        if settings.CLAUDE_OAUTH_TOKEN:
+            os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = settings.CLAUDE_OAUTH_TOKEN
+        elif settings.ANTHROPIC_API_KEY:
+            os.environ["ANTHROPIC_API_KEY"] = settings.ANTHROPIC_API_KEY
+        else:
             raise ValueError("Either CLAUDE_OAUTH_TOKEN or ANTHROPIC_API_KEY must be set")
-        os.environ["ANTHROPIC_API_KEY"] = api_key
 
     async def chat(
         self,
