@@ -22,6 +22,12 @@ class BaseModule(ABC):
     async def on_message(self, message: str, source: str) -> str | None:
         ...
 
+    async def on_tick(self):
+        """Called by the scheduler on each cron tick (default: every 60s).
+        Override in subclasses that need periodic work.
+        Default is a no-op."""
+        pass
+
     async def start(self):
         self.logger.info("Starting module: %s", self.name)
         self._running = True

@@ -84,6 +84,19 @@ MEMORY_SHORT_TERM_LIMIT = env.int("MEMORY_SHORT_TERM_LIMIT", default=20)
 API_PORT = env.int("API_PORT", default=8000)
 PERSONALITY_PATH = PROJECT_ROOT / "personality.yaml"
 
+# --- Scheduler ---
+CRON_TICK_INTERVAL = env.int("CRON_TICK_INTERVAL", default=60)  # seconds
+
+# --- Email Module ---
+IMAP_HOST = env("IMAP_HOST", default="")
+IMAP_PORT = env.int("IMAP_PORT", default=993)
+IMAP_USER = env("IMAP_USER", default="")
+IMAP_PASSWORD = env("IMAP_PASSWORD", default="")
+SMTP_HOST = env("SMTP_HOST", default="")
+SMTP_PORT = env.int("SMTP_PORT", default=587)
+SMTP_USER = env("SMTP_USER", default="")
+SMTP_PASSWORD = env("SMTP_PASSWORD", default="")
+
 # --- Contextual Memory ---
 CHROMA_PERSIST_DIR = env("CHROMA_PERSIST_DIR", default=str(PROJECT_ROOT / "data" / "chromadb"))
 CONSOLIDATION_INTERVAL = env.int("CONSOLIDATION_INTERVAL", default=300)  # seconds

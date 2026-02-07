@@ -9,6 +9,8 @@ class ModulesConfig(AppConfig):
         from modules.manager import module_manager
         from modules.telegram import TelegramModule
         from modules.wake import WakeModule
+        from modules.email import EmailModule
 
         module_manager.register(TelegramModule())
         module_manager.register(WakeModule(poll_interval=30.0))
+        module_manager.register(EmailModule())
