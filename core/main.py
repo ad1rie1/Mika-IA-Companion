@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI
@@ -6,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from core.config import personality, settings
 from core.modules.telegram_module import TelegramModule
+from core.modules.wake_module import WakeModule
 from core.server.api_routes import handle_chat, memory, router
 
 logging.basicConfig(
@@ -14,7 +16,31 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title=f"VTuber Engine - {personality.name}")
+telegram = TelegramModule()
+wake = WakeModule(poll_interval=30.0)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- Startup ---
+    await memory.initialize()
+    logger.info("Memory system initialized")
+
+    telegram.set_chat_handler(handle_chat)
+    await telegram.start()
+
+    wake.set_chat_handler(handle_chat)
+    await wake.start()
+
+    yield
+
+    # --- Shutdown ---
+    await wake.stop()
+    await telegram.stop()
+    logger.info("VTuber Engine shut down cleanly")
+
+
+app = FastAPI(title=f"VTuber Engine - {personality.name}", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -27,17 +53,39 @@ app.add_middleware(
 app.include_router(router)
 
 
-telegram = TelegramModule()
+# --- Wake API routes ---
 
 
-@app.on_event("startup")
-async def startup():
-    await memory.initialize()
-    logger.info("Memory system initialized")
+@app.post("/api/wake")
+async def api_wake(body: dict | None = None):
+    """Trigger a wake request via API.
 
-    # Start Telegram module
-    telegram.set_chat_handler(handle_chat)
-    await telegram.start()
+    Body (optional JSON):
+        {"prompt": "Custom wake prompt", "source": "cron"}
+
+    If no prompt is provided, the default wake prompt is used.
+    The wake module's poll loop will pick it up, or you can use
+    /api/wake/now to trigger immediately.
+    """
+    body = body or {}
+    source = body.get("source", "api")
+    prompt = body.get("prompt")
+    wake_id = await wake.trigger_wake(source=source, prompt=prompt)
+    return {"status": "queued", "wake_id": wake_id}
+
+
+@app.post("/api/wake/now")
+async def api_wake_now(body: dict | None = None):
+    """Trigger an immediate wake: creates the request AND processes it right away."""
+    from core.memory import database as db
+
+    body = body or {}
+    source = body.get("source", "api")
+    prompt = body.get("prompt")
+
+    wake_id = await db.create_wake_request(source=source, prompt=prompt)
+    await wake._process_pending_requests()
+    return {"status": "processed", "wake_id": wake_id}
 
 
 def main():

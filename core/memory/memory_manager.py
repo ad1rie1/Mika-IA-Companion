@@ -1,4 +1,3 @@
-import asyncio
 import logging
 
 from core.config import settings
@@ -24,16 +23,17 @@ class MemoryManager:
         self._initialized = True
         logger.info("Memory initialized, conversation_id=%d", self.conversation_id)
 
-    def add_message(self, role: str, content: str, source: str = "frontend"):
+    async def add_message(self, role: str, content: str, source: str = "frontend"):
         """Add a message to short-term memory and persist to DB."""
         self.short_term.append({"role": role, "content": content})
         if len(self.short_term) > self.max_short_term:
             self.short_term = self.short_term[-self.max_short_term :]
 
         if self._initialized and self.conversation_id is not None:
-            asyncio.create_task(
-                db.save_message(self.conversation_id, role, content, source)
-            )
+            try:
+                await db.save_message(self.conversation_id, role, content, source)
+            except Exception:
+                logger.exception("Failed to persist message to DB")
 
     def get_conversation_context(self) -> list[dict]:
         """Return the current conversation history for Claude."""

@@ -27,6 +27,15 @@ CREATE TABLE IF NOT EXISTS memories (
     keywords TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS wake_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL DEFAULT 'cron',
+    prompt TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    processed_at TIMESTAMP
+);
 """
 
 
@@ -80,3 +89,35 @@ async def get_memories(limit: int = 5) -> list[str]:
         )
         rows = await cursor.fetchall()
         return [row[0] for row in rows]
+
+
+# --- Wake requests ---
+
+
+async def create_wake_request(source: str = "cron", prompt: str | None = None) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "INSERT INTO wake_requests (source, prompt) VALUES (?, ?)",
+            (source, prompt),
+        )
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def get_pending_wake_requests() -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT id, source, prompt, created_at FROM wake_requests WHERE status = 'pending' ORDER BY created_at ASC"
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+
+async def mark_wake_processed(wake_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE wake_requests SET status = 'processed', processed_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (wake_id,),
+        )
+        await db.commit()

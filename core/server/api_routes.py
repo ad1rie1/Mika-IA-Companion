@@ -15,6 +15,8 @@ router = APIRouter()
 claude = ClaudeClient()
 memory = MemoryManager()
 
+MAX_MESSAGE_LENGTH = 2000
+
 
 @router.get("/health")
 async def health():
@@ -52,7 +54,12 @@ async def websocket_endpoint(websocket: WebSocket):
             data = json.loads(raw)
 
             if data.get("type") == "chat":
-                await handle_chat(data["message"], source="frontend")
+                message = data.get("message", "")
+                if not isinstance(message, str) or not message.strip():
+                    continue
+                if len(message) > MAX_MESSAGE_LENGTH:
+                    message = message[:MAX_MESSAGE_LENGTH]
+                await handle_chat(message.strip(), source="frontend")
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
@@ -63,11 +70,16 @@ async def websocket_endpoint(websocket: WebSocket):
 
 async def handle_chat(message: str, source: str = "frontend"):
     """Process a chat message from any source and broadcast response."""
-    history = memory.get_conversation_context()
-    response_text, emotion = await claude.chat(message, history)
+    try:
+        history = memory.get_conversation_context()
+        response_text, emotion = await claude.chat(message, history)
+    except Exception:
+        logger.exception("Claude API error while processing message")
+        response_text = "Oups, j'ai eu un petit bug... Tu peux réessayer ?"
+        emotion = Emotion.SAD
 
-    memory.add_message("user", message, source=source)
-    memory.add_message("assistant", response_text)
+    await memory.add_message("user", message, source=source)
+    await memory.add_message("assistant", response_text)
 
     await manager.broadcast(
         {

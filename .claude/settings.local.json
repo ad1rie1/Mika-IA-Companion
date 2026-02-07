@@ -7,7 +7,10 @@
       "Bash(nvm use:*)",
       "Bash(pip install:*)",
       "Bash(npx tsc:*)",
-      "Bash(python -c:*)"
+      "Bash(python -c:*)",
+      "Bash(dir:*)",
+      "Bash(findstr:*)",
+      "Bash(del \"c:\\\\Users\\\\ad1ri\\\\OneDrive\\\\Bureau\\\\vtuber\\\\core__init__.py\")"
     ]
   }
 }

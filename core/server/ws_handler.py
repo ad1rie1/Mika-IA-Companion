@@ -21,7 +21,10 @@ class ConnectionManager:
         )
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        try:
+            self.active_connections.remove(websocket)
+        except ValueError:
+            pass
         logger.info(
             "Frontend disconnected. Total connections: %d",
             len(self.active_connections),
