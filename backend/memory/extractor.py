@@ -6,42 +6,64 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-EXTRACTION_PROMPT = """\
-Tu es un systeme d'analyse de memoire. Analyse ces messages de conversation \
-et extrais les informations importantes.
+# fmt: off
+EXTRACTION_PROMPT_TEMPLATE = """\
+Tu es le systeme de memoire interne de {name}.
+{name} est: {description}.
+Son style: {tone}.
+Ses traits: {traits}.
 
-Pour chaque information trouvee, determine:
-1. TYPE: "souvenir" (evenement passe, action, activite) ou "connaissance" (fait durable, preference, verite sur une personne/chose)
-2. STOCKER: true/false — cette information vaut-elle le coup d'etre retenue?
-   (ignore les banalites, salutations, questions generiques, et messages sans substance)
-3. CONTENU: resume concis et autonome de l'information (comprehensible sans contexte)
-4. THEMES: liste de themes/categories pertinents (ex: ["sport", "velo", "loisir"])
-5. ENTITES: liste de personnes/objets/lieux impliques avec leur type
+Tu analyses les conversations de {name} et tu construis ses souvenirs et ses connaissances.
 
-Regles:
-- "Il aime le cafe" → connaissance (fait durable)
-- "Il a bu un cafe ce matin" → souvenir (evenement)
-- "Salut ca va?" → NE PAS STOCKER
-- "Je m'appelle Thomas" → connaissance
-- "J'ai fait du velo hier" → souvenir
-- Chaque extraction doit etre AUTONOME (comprehensible seule, sans les messages)
+DEUX TYPES DE MEMOIRE:
+
+1. SOUVENIR (evenement vecu):
+   - Ecrit du point de vue SUBJECTIF de {name}, avec SES emotions et SA personnalite
+   - {name} ressent les choses a sa maniere: colore le souvenir selon qui elle est
+   - Inclus l'emotion ressentie par {name} (neutral, happy, sad, angry, surprised, thinking, love)
+   - Exemple avec personnalite aimante: "Thomas a ete un peu sec avec moi, mais je sais qu'il a eu une dure journee, je le soutiens"
+   - Exemple avec personnalite rancuniere: "Thomas m'a mal parle alors qu'il a juste eu une mauvaise journee, il va voir"
+   - Le souvenir doit sonner comme un JOURNAL INTIME de {name}
+
+2. CONNAISSANCE (fait objectif durable):
+   - Ecrit de maniere OBJECTIVE, sans emotion ni personnalite
+   - Une verite factuelle sur une personne, un objet, un lieu
+   - Exemple: "Thomas est developpeur Python", "La cafetiere tombe souvent en panne"
+
+REGLES:
+- "Il aime le cafe" → connaissance (fait durable, objectif)
+- "Il a bu un cafe ce matin" → souvenir (vecu, subjectif, emotion de {name})
+- "Salut ca va?" → NE PAS STOCKER (banalite)
+- "Je m'appelle Thomas" → connaissance (fait objectif)
+- "On a joue a Zelda ensemble!" → souvenir (joie de {name}, subjectif)
+- Chaque extraction doit etre AUTONOME (comprehensible seule)
+- Les souvenirs sont ecrits a la 1ere personne du point de vue de {name}
+- Les connaissances sont ecrites a la 3eme personne, factuelles
 
 Retourne UNIQUEMENT du JSON valide, sans texte autour:
-{
+{{
   "extractions": [
-    {
+    {{
       "type": "souvenir",
       "store": true,
-      "content": "L'utilisateur a fait du velo avec Thierry le 7 fevrier",
-      "themes": ["sport", "velo", "loisir"],
-      "entities": [{"name": "Thierry", "type": "person"}]
-    }
+      "content": "On a passe un super moment a jouer a Zelda avec Thomas, j'adore quand il partage ses passions avec moi!",
+      "emotion": "happy",
+      "themes": ["gaming", "zelda", "moment-partage"],
+      "entities": [{{"name": "Thomas", "type": "person"}}]
+    }},
+    {{
+      "type": "connaissance",
+      "store": true,
+      "content": "Thomas aime les jeux retro, en particulier Zelda",
+      "themes": ["gaming", "preference"],
+      "entities": [{{"name": "Thomas", "type": "person"}}]
+    }}
   ]
-}
+}}
 
-Si aucune information ne vaut le coup d'etre stockee, retourne:
-{"extractions": []}
+Si aucune information ne vaut le coup, retourne: {{"extractions": []}}
 """
+# fmt: on
 
 VALIDITY_CHECK_PROMPT = """\
 Tu es un systeme de verification de memoire. On te donne une connaissance \
@@ -68,21 +90,40 @@ Retourne UNIQUEMENT du JSON valide:
 
 
 class MemoryExtractor:
-    """Uses Claude Haiku to analyze messages and extract structured memories."""
+    """Uses Claude Haiku to analyze messages and extract structured memories.
+    Souvenirs are written from the VTuber's subjective POV (personality + emotion).
+    Connaissances are objective facts."""
 
     def __init__(self):
         self.client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
         self.model = settings.HAIKU_MODEL
+        self._system_prompt: str | None = None
+
+    def _get_system_prompt(self) -> str:
+        """Build the extraction prompt with personality context."""
+        if self._system_prompt is None:
+            from config.personality import personality
+
+            self._system_prompt = EXTRACTION_PROMPT_TEMPLATE.format(
+                name=personality.name,
+                description=personality.description,
+                tone=personality.tone,
+                traits=", ".join(personality.traits),
+            )
+        return self._system_prompt
 
     async def analyze_messages(self, messages: list[dict]) -> list[dict]:
         """Analyze a batch of messages and extract souvenirs + connaissances.
+
+        Souvenirs are colored by the VTuber's personality and emotions.
+        Connaissances remain objective.
 
         Args:
             messages: list of {"role": "user"|"assistant", "content": "..."}
 
         Returns:
             list of extraction dicts with keys:
-            type, store, content, themes, entities
+            type, store, content, emotion (souvenirs only), themes, entities
         """
         if not messages:
             return []
@@ -96,7 +137,7 @@ class MemoryExtractor:
             response = await self.client.messages.create(
                 model=self.model,
                 max_tokens=1024,
-                system=EXTRACTION_PROMPT,
+                system=self._get_system_prompt(),
                 messages=[{"role": "user", "content": conversation_text}],
             )
             raw = response.content[0].text.strip()

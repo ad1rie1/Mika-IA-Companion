@@ -148,8 +148,10 @@ class MemoryConsolidator:
                     entity_objs.append(entity)
 
                 if extraction["type"] == "souvenir":
+                    emotion = extraction.get("emotion", "neutral")
                     souvenir = await sync_to_async(Souvenir.objects.create)(
                         content=extraction["content"],
+                        emotion=emotion,
                         importance=1.0,
                         occurred_at=now,
                     )
@@ -164,6 +166,7 @@ class MemoryConsolidator:
                         content=extraction["content"],
                         metadata={
                             "importance": 1.0,
+                            "emotion": emotion,
                             "occurred_at": now.isoformat(),
                             "themes": ",".join(t.name for t in theme_objs),
                         },

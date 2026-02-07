@@ -60,6 +60,7 @@ class MemoryRetriever:
 
                 enriched.append({
                     "content": souvenir.content,
+                    "emotion": souvenir.emotion,
                     "importance": souvenir.importance,
                     "occurred_at": souvenir.occurred_at,
                     "themes": themes,
@@ -67,9 +68,11 @@ class MemoryRetriever:
                 })
             except Exception:
                 # Fallback: use ChromaDB data only
+                meta = r.get("metadata", {})
                 enriched.append({
                     "content": r["content"],
-                    "importance": r.get("metadata", {}).get("importance", 0.5),
+                    "emotion": meta.get("emotion", "neutral"),
+                    "importance": meta.get("importance", 0.5),
                     "occurred_at": None,
                     "themes": [],
                     "entities": [],
@@ -121,13 +124,12 @@ class MemoryRetriever:
                 lines.append(f"  - {c['content']}{entities_str} [{conf_label}]")
 
         if souvenirs:
-            lines.append("\n[Evenements passes]")
+            lines.append("\n[Tes souvenirs vecus]")
             for s in souvenirs:
                 time_str = self._time_ago(s["occurred_at"]) if s["occurred_at"] else "?"
-                entities_str = ""
-                if s["entities"]:
-                    entities_str = f" (avec: {', '.join(s['entities'])})"
-                lines.append(f"  - ({time_str}) {s['content']}{entities_str}")
+                emotion = s.get("emotion", "neutral")
+                emotion_str = f" [{emotion}]" if emotion != "neutral" else ""
+                lines.append(f"  - ({time_str}){emotion_str} {s['content']}")
 
         lines.append("\n--- FIN SOUVENIRS ---")
         return "\n".join(lines)

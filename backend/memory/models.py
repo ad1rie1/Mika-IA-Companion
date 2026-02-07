@@ -79,10 +79,15 @@ class Entity(models.Model):
 
 
 class Souvenir(models.Model):
-    """An episodic memory — a log of something that happened.
+    """An episodic memory — a log of something that happened, written from
+    the VTuber's subjective point of view (colored by personality + emotion).
     Importance decays over time; very old souvenirs get pruned."""
 
     content = models.TextField()
+    emotion = models.CharField(
+        max_length=20, default="neutral",
+        help_text="How the VTuber felt about this event",
+    )
     themes = models.ManyToManyField(Theme, blank=True, related_name="souvenirs")
     entities = models.ManyToManyField(Entity, blank=True, related_name="souvenirs")
     importance = models.FloatField(default=1.0)
@@ -97,7 +102,7 @@ class Souvenir(models.Model):
         ordering = ["-occurred_at"]
 
     def __str__(self):
-        return f"[{self.importance:.1f}] {self.content[:80]}"
+        return f"[{self.importance:.1f}/{self.emotion}] {self.content[:80]}"
 
 
 class Connaissance(models.Model):
