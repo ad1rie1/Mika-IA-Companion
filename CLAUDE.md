@@ -4,12 +4,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Development Commands
 
+**Authentication** (Choose ONE method):
+
+*Method 1: OAuth Token* (Recommended - uses your Claude.ai login):
+```bash
+# Create .env at project root with:
+CLAUDE_OAUTH_TOKEN=your-oauth-token-here
+```
+
+*Method 2: API Key* (Legacy - requires paid Anthropic API account):
+```bash
+# Create .env at project root with:
+ANTHROPIC_API_KEY=sk-ant-xxxxx
+```
+
 **Backend** (Django + Channels on Uvicorn):
 ```bash
 pip install -r backend/requirements.txt
 python run.py                    # starts on http://localhost:8000, ws://localhost:8000/ws
 ```
-Requires `.env` at project root with `ANTHROPIC_API_KEY` (see `.env.example`).
 
 **Frontend** (Vite + Three.js + TypeScript):
 ```bash
@@ -44,7 +57,8 @@ This is a VTuber engine: a 3D avatar driven by Claude AI responses with real-tim
 - **Entry point**: `run.py` — adds `backend/` to sys.path, configures Django, launches Uvicorn with lifespan support
 - **ASGI**: `config/asgi.py` — `LifespanWrapper` handles startup (memory init, emotion engine init, module start) and shutdown
 - **WebSocket**: `chat/consumers.py` — `ChatConsumer` handles connections with per-connection `person_id`; `handle_chat()` is the core message processing function (used by frontend, Telegram, and wake module)
-- **AI**: `ai/client.py` — `ClaudeClient` wraps `anthropic.AsyncAnthropic`, accepts `emotion_context` for system prompt injection
+- **AI**:
+  - `ai/client.py` — `ClaudeClient` uses `claude_agent_sdk.query()` for Claude API communication, accepts `emotion_context` for system prompt injection. Reads `CLAUDE_OAUTH_TOKEN` from settings and sets `CLAUDE_CODE_OAUTH_TOKEN` env var for the SDK, or uses `ANTHROPIC_API_KEY` as fallback.
 - **Emotion system** (3 layers):
   - `ai/emotion_types.py` — 29 emotions in 4 categories (positive/negative/complex/neutral), `EmotionData` dataclass, `extract_emotion()` with `[EMOTION:name:intensity]` format
   - `ai/emotion_state.py` — `PersonMood`, `GlobalMood`, `Temperament`, `MessageEmotion` dataclasses
@@ -88,11 +102,27 @@ A `.vrm` file must be placed at `frontend/public/models/default.vrm`. Without it
 - **Singletons**: `claude_client`, `memory_manager`, `emotion_engine`, `personality`, `module_manager` are module-level instances imported throughout the backend
 - **Django settings** in `backend/config/settings.py` — `PROJECT_ROOT` points to the repo root (where `.env` and `personality.yaml` live), `BASE_DIR` points to `backend/`
 
+## Authentication
+
+The VTuber engine supports **two authentication methods**:
+
+1. **OAuth Token** (Recommended): Uses your Claude.ai OAuth token. Set `CLAUDE_OAUTH_TOKEN` in `.env`. The system internally converts this to `CLAUDE_CODE_OAUTH_TOKEN` for the Claude Agent SDK.
+2. **API Key** (Legacy): Set `ANTHROPIC_API_KEY` in `.env`. Requires a paid Anthropic API account.
+
+The client will try OAuth token first, then fall back to API key if available.
+
+**Technical details:**
+- OAuth tokens start with `sk-ant-oat01-` and are session tokens from Claude.ai
+- API keys start with `sk-ant-api...` and require a paid Anthropic account
+- The `claude_agent_sdk` expects `CLAUDE_CODE_OAUTH_TOKEN` for OAuth authentication
+- The backend automatically handles the conversion from `CLAUDE_OAUTH_TOKEN` → `CLAUDE_CODE_OAUTH_TOKEN`
+
 ## Environment Variables
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | Yes | — | Claude API key |
+| `CLAUDE_OAUTH_TOKEN` | No* | `""` | Claude OAuth token (*required if not using API key) |
+| `ANTHROPIC_API_KEY` | No* | `""` | Claude API key (*required if not using OAuth token) |
 | `TELEGRAM_TOKEN` | No | `""` | Telegram bot token |
 | `VTUBER_NAME` | No | `Mika` | Display name |
 | `CLAUDE_MODEL` | No | `claude-sonnet-4-5-20250929` | Model ID |
