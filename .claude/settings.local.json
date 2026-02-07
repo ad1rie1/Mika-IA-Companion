@@ -10,7 +10,8 @@
       "Bash(python -c:*)",
       "Bash(dir:*)",
       "Bash(findstr:*)",
-      "Bash(del \"c:\\\\Users\\\\ad1ri\\\\OneDrive\\\\Bureau\\\\vtuber\\\\core__init__.py\")"
+      "Bash(del \"c:\\\\Users\\\\ad1ri\\\\OneDrive\\\\Bureau\\\\vtuber\\\\core__init__.py\")",
+      "Bash(ANTHROPIC_API_KEY=test-key python manage.py:*)"
     ]
   }
 }

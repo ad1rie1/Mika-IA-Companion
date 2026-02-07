@@ -1,7 +1,7 @@
 import json
 import logging
 
-from channels.generic.websocket import AsyncWebSocketConsumer
+from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.layers import get_channel_layer
 
 from ai.client import claude_client
@@ -15,7 +15,7 @@ BROADCAST_GROUP = "vtuber_broadcast"
 MAX_MESSAGE_LENGTH = 2000
 
 
-class ChatConsumer(AsyncWebSocketConsumer):
+class ChatConsumer(AsyncWebsocketConsumer):
     """WebSocket consumer for the VTuber chat."""
 
     async def connect(self):
