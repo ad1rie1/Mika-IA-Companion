@@ -27,10 +27,17 @@ app.add_middleware(
 app.include_router(router)
 
 
+telegram = TelegramModule()
+
+
 @app.on_event("startup")
 async def startup():
     await memory.initialize()
     logger.info("Memory system initialized")
+
+    # Start Telegram module
+    telegram.set_chat_handler(handle_chat)
+    await telegram.start()
 
 
 def main():
