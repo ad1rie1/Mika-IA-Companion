@@ -106,3 +106,7 @@ MEMORY_RETRIEVAL_SOUVENIRS = env.int("MEMORY_RETRIEVAL_SOUVENIRS", default=5)
 MEMORY_RETRIEVAL_CONNAISSANCES = env.int("MEMORY_RETRIEVAL_CONNAISSANCES", default=10)
 EMBEDDING_MODEL = env("EMBEDDING_MODEL", default="paraphrase-multilingual-MiniLM-L12-v2")
 HAIKU_MODEL = env("HAIKU_MODEL", default="claude-haiku-4-5-20251001")
+
+# --- Emotion Engine ---
+EMOTION_DECAY_RATE = env.float("EMOTION_DECAY_RATE", default=0.02)  # intensity lost per second
+EMOTION_MOOD_SHIFT_RATE = env.float("EMOTION_MOOD_SHIFT_RATE", default=0.01)

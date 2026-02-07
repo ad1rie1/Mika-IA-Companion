@@ -19,13 +19,16 @@ class Message(models.Model):
     role = models.CharField(max_length=20)
     content = models.TextField()
     source = models.CharField(max_length=50, default="frontend")
+    emotion = models.CharField(max_length=30, blank=True, default="")
+    emotion_intensity = models.FloatField(default=0.0)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["created_at"]
 
     def __str__(self):
-        return f"[{self.role}] {self.content[:60]}"
+        emotion_str = f" [{self.emotion}:{self.emotion_intensity:.1f}]" if self.emotion else ""
+        return f"[{self.role}]{emotion_str} {self.content[:60]}"
 
 
 class Memory(models.Model):
@@ -85,7 +88,7 @@ class Souvenir(models.Model):
 
     content = models.TextField()
     emotion = models.CharField(
-        max_length=20, default="neutral",
+        max_length=30, default="neutral",
         help_text="How the VTuber felt about this event",
     )
     themes = models.ManyToManyField(Theme, blank=True, related_name="souvenirs")
@@ -127,6 +130,28 @@ class Connaissance(models.Model):
     def __str__(self):
         valid = "valid" if self.is_valid else "INVALID"
         return f"[{valid} {self.confidence:.1f}] {self.content[:80]}"
+
+
+class EmotionSnapshot(models.Model):
+    """Periodic snapshot of the VTuber's emotional state."""
+    conversation = models.ForeignKey(
+        Conversation, on_delete=models.CASCADE, related_name="emotion_snapshots",
+    )
+    person_id = models.CharField(max_length=100, default="anonymous")
+    primary_emotion = models.CharField(max_length=30)
+    primary_intensity = models.FloatField()
+    global_emotion = models.CharField(max_length=30, default="neutral")
+    global_intensity = models.FloatField(default=0.0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return (
+            f"[{self.person_id}] {self.primary_emotion}:{self.primary_intensity:.1f} "
+            f"(global: {self.global_emotion}) @ {self.created_at:%H:%M}"
+        )
 
 
 class ConsolidationLog(models.Model):

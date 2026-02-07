@@ -1,11 +1,13 @@
 import json
 import logging
+import uuid
 
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.layers import get_channel_layer
 
 from ai.client import claude_client
-from ai.emotions import Emotion
+from ai.emotion_engine import emotion_engine
+from ai.emotion_types import Emotion, EmotionData
 from config.personality import personality
 from memory.manager import memory_manager
 
@@ -22,12 +24,18 @@ class ChatConsumer(AsyncWebsocketConsumer):
         await self.channel_layer.group_add(BROADCAST_GROUP, self.channel_name)
         await self.accept()
 
-        # Send greeting
+        # Generate a unique person_id for this connection
+        self.person_id = str(uuid.uuid4())[:8]
+
+        # Send greeting with current emotional state
+        msg_emotion = emotion_engine.compute_message_emotion(self.person_id)
         await self.send(text_data=json.dumps(
             {
                 "type": "speech",
                 "text": personality.greeting,
                 "emotion": Emotion.HAPPY.value,
+                "emotion_intensity": 0.7,
+                "emotion_state": emotion_engine.get_state_dict(self.person_id),
             },
             ensure_ascii=False,
         ))
@@ -45,7 +53,15 @@ class ChatConsumer(AsyncWebsocketConsumer):
             message = data.get("message", "")
             if not isinstance(message, str) or not message.strip():
                 return
-            await handle_chat(message.strip()[:MAX_MESSAGE_LENGTH], source="frontend")
+
+            # Allow client to provide a person_id, otherwise use connection-generated one
+            person_id = data.get("person_id", getattr(self, "person_id", "anonymous"))
+
+            await handle_chat(
+                message.strip()[:MAX_MESSAGE_LENGTH],
+                source="frontend",
+                person_id=person_id,
+            )
 
     # --- Group message handler ---
 
@@ -54,23 +70,40 @@ class ChatConsumer(AsyncWebsocketConsumer):
         await self.send(text_data=json.dumps(event["data"], ensure_ascii=False))
 
 
-async def handle_chat(message: str, source: str = "frontend"):
+async def handle_chat(
+    message: str,
+    source: str = "frontend",
+    person_id: str = "anonymous",
+):
     """Process a chat message from any source and broadcast to all clients."""
     try:
-        # Retrieve relevant long-term memories for context
+        # Get memory context
         memory_context = await memory_manager.get_memory_context(message)
 
+        # Get emotion context for this person
+        emotion_context = emotion_engine.get_emotion_context(person_id)
+
         history = memory_manager.get_conversation_context()
-        response_text, emotion = await claude_client.chat(
-            message, history, memory_context=memory_context
+        response_text, emotion_data = await claude_client.chat(
+            message, history,
+            memory_context=memory_context,
+            emotion_context=emotion_context,
         )
+
+        # Process through EmotionEngine (transitions, momentum, opposition, bleed)
+        updated_person = emotion_engine.process_emotion(emotion_data, person_id)
+
     except Exception:
         logger.exception("Claude API error while processing message")
         response_text = "Oups, j'ai eu un petit bug... Tu peux réessayer ?"
-        emotion = Emotion.SAD
+        emotion_data = EmotionData(emotion=Emotion.SAD, intensity=0.6)
+        updated_person = emotion_engine.process_emotion(emotion_data, person_id)
 
     await memory_manager.add_message("user", message, source=source)
     await memory_manager.add_message("assistant", response_text)
+
+    # Compute final message emotion (blend of person + global)
+    msg_emotion = emotion_engine.compute_message_emotion(person_id)
 
     channel_layer = get_channel_layer()
     await channel_layer.group_send(
@@ -80,10 +113,12 @@ async def handle_chat(message: str, source: str = "frontend"):
             "data": {
                 "type": "speech",
                 "text": response_text,
-                "emotion": emotion.value,
+                "emotion": msg_emotion.emotion.value,
+                "emotion_intensity": msg_emotion.intensity,
+                "emotion_state": emotion_engine.get_state_dict(person_id),
                 "source": source,
             },
         },
     )
 
-    return response_text, emotion
+    return response_text, emotion_data

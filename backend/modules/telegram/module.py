@@ -58,8 +58,9 @@ class TelegramModule(BaseModule):
             return
 
         if self._chat_handler:
+            person_id = f"tg_{update.message.from_user.id}"
             response_text, _ = await self._chat_handler(
-                update.message.text, source="telegram"
+                update.message.text, source="telegram", person_id=person_id,
             )
             await update.message.reply_text(response_text)
         else:

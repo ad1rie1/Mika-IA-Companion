@@ -60,7 +60,10 @@ class WakeModule(BaseModule):
 
             if self._chat_handler:
                 try:
-                    await self._chat_handler(prompt, f"wake:{req.source}")
+                    await self._chat_handler(
+                        prompt, source=f"wake:{req.source}",
+                        person_id=f"wake_{req.source}",
+                    )
                 except Exception:
                     self.logger.exception("Failed to process wake #%d", req.pk)
 

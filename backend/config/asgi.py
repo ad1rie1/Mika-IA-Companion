@@ -36,16 +36,26 @@ class LifespanWrapper:
 
     async def _startup(self):
         from chat.consumers import handle_chat
+        from ai.emotion_engine import emotion_engine
 
         await memory_manager.initialize()
         logger.info("Memory system initialized")
+
+        await emotion_engine.initialize()
+        logger.info("Emotion engine initialized")
 
         await module_manager.start_all(handle_chat)
         logger.info("All modules started")
 
     async def _shutdown(self):
+        from ai.emotion_engine import emotion_engine
+
+        await emotion_engine.shutdown()
+        logger.info("Emotion engine shut down")
+
         await memory_manager.shutdown()
         logger.info("Memory system shut down")
+
         await module_manager.stop_all()
         logger.info("VTuber Engine shut down cleanly")
 
