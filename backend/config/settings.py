@@ -76,7 +76,8 @@ STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # --- VTuber settings ---
-ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY")
+CLAUDE_OAUTH_TOKEN = env("CLAUDE_OAUTH_TOKEN", default="")
+ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", default="")
 TELEGRAM_TOKEN = env("TELEGRAM_TOKEN", default="")
 VTUBER_NAME = env("VTUBER_NAME", default="Mika")
 CLAUDE_MODEL = env("CLAUDE_MODEL", default="claude-sonnet-4-5-20250929")

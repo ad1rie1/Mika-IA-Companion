@@ -1,5 +1,7 @@
-import anthropic
+import os
 from django.conf import settings
+from claude_agent_sdk import query, AssistantMessage, TextBlock
+from claude_agent_sdk.types import ClaudeAgentOptions
 
 from ai.emotion_types import EmotionData, extract_emotion
 from config.personality import personality
@@ -7,8 +9,12 @@ from config.personality import personality
 
 class ClaudeClient:
     def __init__(self):
-        self.client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
         self.system_prompt = personality.to_system_prompt()
+        # Set the token from Django settings for claude_agent_sdk
+        api_key = settings.CLAUDE_OAUTH_TOKEN or settings.ANTHROPIC_API_KEY
+        if not api_key:
+            raise ValueError("Either CLAUDE_OAUTH_TOKEN or ANTHROPIC_API_KEY must be set")
+        os.environ["ANTHROPIC_API_KEY"] = api_key
 
     async def chat(
         self,
@@ -18,11 +24,7 @@ class ClaudeClient:
         emotion_context: str = "",
     ) -> tuple[str, EmotionData]:
         """Send a message to Claude and return (clean_response, EmotionData)."""
-        messages = []
-        if conversation_history:
-            messages.extend(conversation_history)
-        messages.append({"role": "user", "content": message})
-
+        # Build the full system prompt
         system = self.system_prompt
         if emotion_context:
             system += (
@@ -33,14 +35,35 @@ class ClaudeClient:
         if memory_context:
             system += "\n\n" + memory_context
 
-        response = await self.client.messages.create(
+        # Build full prompt with conversation history
+        full_prompt = ""
+        if conversation_history:
+            for msg in conversation_history:
+                role = msg["role"]
+                content = msg["content"]
+                if role == "user":
+                    full_prompt += f"User: {content}\n\n"
+                elif role == "assistant":
+                    full_prompt += f"Assistant: {content}\n\n"
+        full_prompt += f"User: {message}"
+
+        # Use claude_agent_sdk query with options
+        options = ClaudeAgentOptions(
+            system_prompt=system,
             model=settings.CLAUDE_MODEL,
-            max_tokens=1024,
-            system=system,
-            messages=messages,
+            max_turns=1,  # Single turn conversation
         )
 
-        raw_text = response.content[0].text
+        response_stream = query(prompt=full_prompt, options=options)
+
+        # Extract text from response
+        raw_text = ""
+        async for msg in response_stream:
+            if isinstance(msg, AssistantMessage):
+                for block in msg.content:
+                    if isinstance(block, TextBlock):
+                        raw_text += block.text
+
         clean_text, emotion_data = extract_emotion(raw_text)
         return clean_text, emotion_data
 
