@@ -52,7 +52,9 @@ This is a VTuber engine: a 3D avatar driven by Claude AI responses with real-tim
   - `ai/emotions.py` — backward-compatibility shim re-exporting from `emotion_types.py`
 - **Personality**: `config/personality.py` — loads `personality.yaml` (including `temperament` block), generates Claude system prompt with 29 emotions + intensity format
 - **Memory**: `memory/manager.py` — `MemoryManager` with in-memory short-term list (last 20 messages) + Django ORM long-term persistence (`Conversation`, `Message`, `Memory`, `Souvenir`, `Connaissance` models)
-- **Modules**: Pluggable system via `modules/base.py` (`BaseModule` ABC) and `modules/manager.py` (`ModuleManager` registry). Modules: Telegram bot, Wake, Email.
+- **Modules**: Pluggable system via `modules/base.py` (`BaseModule` ABC with `on_tick()`) and `modules/manager.py` (`ModuleManager` registry + cron scheduler). Each module lives in its own subfolder (`modules/telegram/`, `modules/wake/`, `modules/email/`). All module Django models stay in `modules/models.py`.
+- **Cron scheduler**: Built into `ModuleManager`, runs every `CRON_TICK_INTERVAL` seconds (default 60). Calls `on_tick()` on each running module. Modules decide internally if they have work to do.
+- **Email module** (`modules/email/`): IMAP/SMTP integration. On each tick, checks inbox for unread emails, sends them to Haiku for triage (notify? memorize? reply?), stores `ProcessedEmail` for dedup, creates `Souvenir`/`Connaissance` memories, broadcasts notifications via WebSocket, optionally auto-replies via SMTP. Disabled gracefully if no IMAP config.
 
 ### Emotion System (3 layers)
 
@@ -98,3 +100,12 @@ A `.vrm` file must be placed at `frontend/public/models/default.vrm`. Without it
 | `MEMORY_SHORT_TERM_LIMIT` | No | `20` | Messages kept in context |
 | `EMOTION_DECAY_RATE` | No | `0.02` | Emotion intensity lost per second |
 | `EMOTION_MOOD_SHIFT_RATE` | No | `0.01` | How fast mood adapts |
+| `CRON_TICK_INTERVAL` | No | `60` | Scheduler tick interval in seconds |
+| `IMAP_HOST` | No | `""` | IMAP server hostname |
+| `IMAP_PORT` | No | `993` | IMAP server port (SSL) |
+| `IMAP_USER` | No | `""` | IMAP login email |
+| `IMAP_PASSWORD` | No | `""` | IMAP login password |
+| `SMTP_HOST` | No | `""` | SMTP server hostname |
+| `SMTP_PORT` | No | `587` | SMTP server port (TLS) |
+| `SMTP_USER` | No | `""` | SMTP login email |
+| `SMTP_PASSWORD` | No | `""` | SMTP login password |
