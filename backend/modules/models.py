@@ -5,5 +5,5 @@ Each module keeps its models in its own folder; this file re-exports
 them so Django migrations stay under modules/migrations/.
 """
 
-from modules.email.models import ProcessedEmail  # noqa: F401
+from modules.email.models import Contact, Email, EmailAccount  # noqa: F401
 from modules.wake.models import WakeRequest  # noqa: F401

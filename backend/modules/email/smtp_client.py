@@ -3,7 +3,6 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 import aiosmtplib
-from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -11,11 +10,15 @@ logger = logging.getLogger(__name__)
 class SMTPClient:
     """Async SMTP client for sending email replies."""
 
-    def __init__(self):
-        self.host = settings.SMTP_HOST
-        self.port = settings.SMTP_PORT
-        self.user = settings.SMTP_USER
-        self.password = settings.SMTP_PASSWORD
+    def __init__(self, host: str, port: int, user: str, password: str):
+        self.host = host
+        self.port = port
+        self.user = user
+        self.password = password
+
+    @classmethod
+    def from_account(cls, account) -> "SMTPClient":
+        return cls(account.smtp_host, account.smtp_port, account.smtp_user, account.smtp_password)
 
     async def send_reply(
         self,
