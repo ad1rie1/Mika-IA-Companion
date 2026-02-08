@@ -32,8 +32,10 @@ class MemoryManager:
         self.conversation = await Conversation.objects.acreate()
         logger.info("Memory initialized, conversation_id=%d", self.conversation.pk)
 
-        # Initialize contextual memory
+        # Initialize contextual memory (requires chromadb, not yet compatible with Python 3.14+)
         try:
+            import chromadb  # noqa: F401 — test import before loading subsystems
+
             from memory.consolidator import MemoryConsolidator
             from memory.extractor import MemoryExtractor
             from memory.retriever import MemoryRetriever
@@ -45,6 +47,16 @@ class MemoryManager:
             self.consolidator = MemoryConsolidator(self.extractor, self.vector_store)
             await self.consolidator.start()
             logger.info("Contextual memory system initialized")
+        except ImportError:
+            import sys
+            if sys.version_info >= (3, 14):
+                logger.warning(
+                    "chromadb is not compatible with Python %s — "
+                    "contextual memory disabled, using basic memory only",
+                    sys.version,
+                )
+            else:
+                logger.warning("chromadb not installed — contextual memory disabled")
         except Exception:
             logger.exception("Failed to initialize contextual memory (falling back to basic)")
 

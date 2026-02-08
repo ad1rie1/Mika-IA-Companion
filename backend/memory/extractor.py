@@ -1,8 +1,10 @@
 import json
 import logging
+import os
 
-import anthropic
 from django.conf import settings
+from claude_agent_sdk import query, AssistantMessage, TextBlock
+from claude_agent_sdk.types import ClaudeAgentOptions
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +97,6 @@ class MemoryExtractor:
     Connaissances are objective facts."""
 
     def __init__(self):
-        self.client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
         self.model = settings.HAIKU_MODEL
         self._system_prompt: str | None = None
 
@@ -134,13 +135,18 @@ class MemoryExtractor:
         )
 
         try:
-            response = await self.client.messages.create(
+            options = ClaudeAgentOptions(
+                system_prompt=self._get_system_prompt(),
                 model=self.model,
-                max_tokens=1024,
-                system=self._get_system_prompt(),
-                messages=[{"role": "user", "content": conversation_text}],
+                max_turns=1,
             )
-            raw = response.content[0].text.strip()
+            raw_text = ""
+            async for msg in query(prompt=conversation_text, options=options):
+                if isinstance(msg, AssistantMessage):
+                    for block in msg.content:
+                        if isinstance(block, TextBlock):
+                            raw_text += block.text
+            raw = raw_text.strip()
             data = json.loads(raw)
             extractions = data.get("extractions", [])
             # Keep only items marked for storage
@@ -166,12 +172,17 @@ class MemoryExtractor:
         )
 
         try:
-            response = await self.client.messages.create(
+            options = ClaudeAgentOptions(
                 model=self.model,
-                max_tokens=256,
-                messages=[{"role": "user", "content": prompt}],
+                max_turns=1,
             )
-            raw = response.content[0].text.strip()
+            raw_text = ""
+            async for msg in query(prompt=prompt, options=options):
+                if isinstance(msg, AssistantMessage):
+                    for block in msg.content:
+                        if isinstance(block, TextBlock):
+                            raw_text += block.text
+            raw = raw_text.strip()
             data = json.loads(raw)
             still_valid = data.get("still_valid", True)
             confidence = float(data.get("new_confidence", 1.0))

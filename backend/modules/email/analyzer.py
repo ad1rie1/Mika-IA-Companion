@@ -2,8 +2,9 @@ import json
 import logging
 from dataclasses import dataclass, field
 
-import anthropic
 from django.conf import settings
+from claude_agent_sdk import query, AssistantMessage, TextBlock
+from claude_agent_sdk.types import ClaudeAgentOptions
 
 from modules.email.prompts import EMAIL_TRIAGE_SYSTEM_PROMPT
 
@@ -25,7 +26,6 @@ class EmailAnalyzer:
     """Uses Claude (Haiku) to analyze incoming emails and decide actions."""
 
     def __init__(self):
-        self.client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
         self.model = settings.HAIKU_MODEL
         self._system_prompt: str | None = None
 
@@ -51,13 +51,18 @@ class EmailAnalyzer:
         )
 
         try:
-            response = await self.client.messages.create(
+            options = ClaudeAgentOptions(
+                system_prompt=self._get_system_prompt(),
                 model=self.model,
-                max_tokens=512,
-                system=self._get_system_prompt(),
-                messages=[{"role": "user", "content": email_text}],
+                max_turns=1,
             )
-            raw = response.content[0].text.strip()
+            raw_text = ""
+            async for msg in query(prompt=email_text, options=options):
+                if isinstance(msg, AssistantMessage):
+                    for block in msg.content:
+                        if isinstance(block, TextBlock):
+                            raw_text += block.text
+            raw = raw_text.strip()
             data = json.loads(raw)
             return EmailAnalysis(
                 should_notify=data.get("should_notify", False),
