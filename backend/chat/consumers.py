@@ -76,6 +76,8 @@ async def handle_chat(
     person_id: str = "anonymous",
 ):
     """Process a chat message from any source and broadcast to all clients."""
+    from modules.manager import module_manager
+
     try:
         # Get memory context
         memory_context = await memory_manager.get_memory_context(message)
@@ -83,12 +85,30 @@ async def handle_chat(
         # Get emotion context for this person
         emotion_context = emotion_engine.get_emotion_context(person_id)
 
+        # Get module context for system prompt
+        module_context = module_manager.collect_context()
+
         history = memory_manager.get_conversation_context()
-        response_text, emotion_data = await claude_client.chat(
-            message, history,
-            memory_context=memory_context,
-            emotion_context=emotion_context,
-        )
+
+        # Use tool-enabled path if modules expose tools
+        mcp_server = module_manager.get_mcp_server()
+        tool_names = module_manager.get_tool_names()
+
+        if mcp_server and tool_names:
+            response_text, emotion_data, _ = await claude_client.chat_with_tools(
+                message, history,
+                memory_context=memory_context,
+                emotion_context=emotion_context,
+                module_context=module_context,
+                mcp_server=mcp_server,
+                tool_names=tool_names,
+            )
+        else:
+            response_text, emotion_data = await claude_client.chat(
+                message, history,
+                memory_context=memory_context,
+                emotion_context=emotion_context,
+            )
 
         # Process through EmotionEngine (transitions, momentum, opposition, bleed)
         updated_person = emotion_engine.process_emotion(emotion_data, person_id)

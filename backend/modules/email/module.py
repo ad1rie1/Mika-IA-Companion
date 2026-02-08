@@ -1,8 +1,19 @@
+"""Email module — IMAP/SMTP integration with AI triage."""
+
+from __future__ import annotations
+
 import logging
 
 from django.conf import settings
 
 from modules.base import BaseModule
+from modules.types import (
+    ModuleNotification,
+    ModuleStatus,
+    ModuleTool,
+    ToolParameter,
+    ToolParameterType,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -10,22 +21,21 @@ logger = logging.getLogger(__name__)
 class EmailModule(BaseModule):
     """IMAP/SMTP module that checks for new emails on each cron tick."""
 
+    CRON_INTERVAL = 60  # Check every 60 seconds
+
     def __init__(self):
         super().__init__("email")
-        self._chat_handler = None
         self._imap = None
         self._smtp = None
         self._analyzer = None
+        self._unread_count = 0
 
-    def set_chat_handler(self, handler):
-        self._chat_handler = handler
+    # ── Lifecycle ─────────────────────────────────────────────────
 
-    async def on_start(self):
-        if not getattr(settings, "IMAP_HOST", ""):
-            self.logger.warning("No IMAP settings configured, email module disabled")
-            self._running = False
-            return
+    def is_available(self) -> bool:
+        return bool(getattr(settings, "IMAP_HOST", ""))
 
+    async def instantiate(self) -> None:
         from modules.email.analyzer import EmailAnalyzer
         from modules.email.imap_client import IMAPClient
         from modules.email.smtp_client import SMTPClient
@@ -41,16 +51,15 @@ class EmailModule(BaseModule):
             self.logger.exception("Failed to connect to IMAP")
             self._running = False
 
-    async def on_stop(self):
+    async def shutdown(self) -> None:
         if self._imap:
             await self._imap.disconnect()
         self.logger.info("Email module stopped")
 
-    async def on_message(self, message: str, source: str) -> str | None:
-        return None
+    # ── Cron ──────────────────────────────────────────────────────
 
-    async def on_tick(self):
-        """Called every cron tick. Check IMAP for new emails."""
+    async def worker_cron(self) -> None:
+        """Check IMAP for new emails."""
         if not self._imap or not self._analyzer:
             return
 
@@ -65,16 +74,16 @@ class EmailModule(BaseModule):
                 self.logger.exception("IMAP reconnect failed")
             return
 
+        self._unread_count = len(emails)
         for email_msg in emails:
             await self._process_email(email_msg)
 
     async def _process_email(self, email_msg):
-        """Process a single email: check if already processed, analyze, act."""
+        """Process a single email: deduplicate, analyze, act."""
         from asgiref.sync import sync_to_async
 
-        from modules.models import ProcessedEmail
+        from modules.email.models import ProcessedEmail
 
-        # Deduplicate by message_id
         exists = await sync_to_async(
             ProcessedEmail.objects.filter(message_id=email_msg.message_id).exists
         )()
@@ -85,14 +94,12 @@ class EmailModule(BaseModule):
             "New email from %s: %s", email_msg.from_addr, email_msg.subject
         )
 
-        # AI analysis
         analysis = await self._analyzer.analyze_email(
             from_addr=email_msg.from_addr,
             subject=email_msg.subject,
             body=email_msg.body_text,
         )
 
-        # Persist as processed
         await sync_to_async(ProcessedEmail.objects.create)(
             message_id=email_msg.message_id,
             uid=email_msg.uid,
@@ -104,19 +111,30 @@ class EmailModule(BaseModule):
             replied=analysis.should_reply,
         )
 
-        # Store memories if the AI extracted any
         if analysis.memories:
             await self._store_memories(analysis.memories)
 
-        # Notify user via WebSocket if AI says so
-        if analysis.should_notify:
-            await self._broadcast_notification(email_msg, analysis)
+        # Notify AI for important emails (replaces direct broadcast)
+        if analysis.should_notify and self._notify_ai:
+            await self._notify_ai(
+                ModuleNotification(
+                    source_module=self.name,
+                    summary=f"Email from {email_msg.from_addr}: {email_msg.subject}",
+                    details=(
+                        f"De: {email_msg.from_addr}\n"
+                        f"Objet: {email_msg.subject}\n"
+                        f"Priorite: {analysis.priority}\n"
+                        f"Contenu: {email_msg.body_text[:500]}"
+                    ),
+                    urgency="high" if analysis.priority in ("high", "urgent") else "normal",
+                    suggested_action=analysis.notification_text,
+                    metadata={"email_from": email_msg.from_addr},
+                )
+            )
 
-        # Send reply if AI says so
         if analysis.should_reply and analysis.reply_text:
             await self._send_reply(email_msg, analysis)
 
-        # Mark as seen in IMAP
         await self._imap.mark_as_seen(email_msg.uid)
 
     async def _store_memories(self, memories: list[dict]):
@@ -130,7 +148,6 @@ class EmailModule(BaseModule):
 
         for mem in memories:
             try:
-                # Resolve themes
                 theme_objs = []
                 for theme_name in mem.get("themes", []):
                     theme, _ = await sync_to_async(Theme.objects.get_or_create)(
@@ -138,7 +155,6 @@ class EmailModule(BaseModule):
                     )
                     theme_objs.append(theme)
 
-                # Resolve entities
                 entity_objs = []
                 for ent in mem.get("entities", []):
                     entity, _ = await sync_to_async(Entity.objects.get_or_create)(
@@ -174,31 +190,6 @@ class EmailModule(BaseModule):
             except Exception:
                 self.logger.exception("Failed to store email memory: %s", mem)
 
-    async def _broadcast_notification(self, email_msg, analysis):
-        """Send notification to all connected WebSocket clients."""
-        from channels.layers import get_channel_layer
-
-        from chat.consumers import BROADCAST_GROUP
-
-        channel_layer = get_channel_layer()
-        await channel_layer.group_send(
-            BROADCAST_GROUP,
-            {
-                "type": "chat.broadcast",
-                "data": {
-                    "type": "email_notification",
-                    "text": analysis.notification_text,
-                    "emotion": analysis.notification_emotion,
-                    "source": "email",
-                    "metadata": {
-                        "from": email_msg.from_addr,
-                        "subject": email_msg.subject,
-                        "priority": analysis.priority,
-                    },
-                },
-            },
-        )
-
     async def _send_reply(self, email_msg, analysis):
         """Send an email reply via SMTP."""
         if not self._smtp:
@@ -215,3 +206,118 @@ class EmailModule(BaseModule):
             )
         except Exception:
             self.logger.exception("Failed to send email reply")
+
+    # ── Tools ─────────────────────────────────────────────────────
+
+    def return_tools(self) -> list[ModuleTool]:
+        tools = [
+            ModuleTool(
+                name="list_recent_emails",
+                description="List recent processed emails with sender, subject, and priority",
+                parameters=[
+                    ToolParameter(
+                        name="limit",
+                        type=ToolParameterType.INTEGER,
+                        description="Max emails to return (default 5)",
+                        required=False,
+                    ),
+                ],
+                handler=self._tool_list_emails,
+            ),
+        ]
+
+        if self._smtp:
+            tools.append(
+                ModuleTool(
+                    name="send_email",
+                    description="Send an email",
+                    parameters=[
+                        ToolParameter(
+                            name="to",
+                            type=ToolParameterType.STRING,
+                            description="Recipient email address",
+                        ),
+                        ToolParameter(
+                            name="subject",
+                            type=ToolParameterType.STRING,
+                            description="Email subject line",
+                        ),
+                        ToolParameter(
+                            name="body",
+                            type=ToolParameterType.STRING,
+                            description="Email body text",
+                        ),
+                    ],
+                    handler=self._tool_send_email,
+                )
+            )
+
+        return tools
+
+    async def _tool_list_emails(self, args: dict) -> dict:
+        from asgiref.sync import sync_to_async
+
+        from modules.email.models import ProcessedEmail
+
+        limit = args.get("limit", 5)
+        emails = await sync_to_async(
+            lambda: list(
+                ProcessedEmail.objects.order_by("-processed_at")[:limit].values(
+                    "from_addr", "subject", "priority", "processed_at"
+                )
+            )
+        )()
+
+        if not emails:
+            return {"content": [{"type": "text", "text": "No processed emails found."}]}
+
+        lines = []
+        for e in emails:
+            lines.append(
+                f"- [{e['priority']}] {e['from_addr']}: {e['subject']} "
+                f"({e['processed_at'].strftime('%Y-%m-%d %H:%M')})"
+            )
+        return {"content": [{"type": "text", "text": "\n".join(lines)}]}
+
+    async def _tool_send_email(self, args: dict) -> dict:
+        if not self._smtp:
+            return {
+                "content": [{"type": "text", "text": "SMTP not configured."}],
+                "isError": True,
+            }
+        try:
+            await self._smtp.send_reply(
+                to_addr=args["to"],
+                subject=args["subject"],
+                body=args["body"],
+            )
+            return {
+                "content": [
+                    {"type": "text", "text": f"Email sent to {args['to']}."}
+                ]
+            }
+        except Exception as e:
+            return {
+                "content": [
+                    {"type": "text", "text": f"Failed to send email: {e}"}
+                ],
+                "isError": True,
+            }
+
+    # ── Context ───────────────────────────────────────────────────
+
+    def get_context(self) -> str:
+        if self._unread_count > 0:
+            return f"Tu as {self._unread_count} email(s) non lu(s)."
+        return ""
+
+    # ── Status ────────────────────────────────────────────────────
+
+    def get_status(self) -> ModuleStatus:
+        status = super().get_status()
+        status.details = {
+            "imap_connected": self._imap is not None,
+            "smtp_available": self._smtp is not None,
+            "unread_count": self._unread_count,
+        }
+        return status

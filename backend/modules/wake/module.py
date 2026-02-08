@@ -1,8 +1,22 @@
-import asyncio
+"""Wake module — triggers spontaneous AI messages via cron or API."""
+
+from __future__ import annotations
+
+import json
 import logging
-from typing import Awaitable, Callable
+
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
 
 from modules.base import BaseModule
+from modules.types import (
+    ModuleNotification,
+    ModuleRoute,
+    ModuleStatus,
+    ModuleTool,
+    ToolParameter,
+    ToolParameterType,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -15,54 +29,49 @@ DEFAULT_WAKE_PROMPT = (
 class WakeModule(BaseModule):
     """Polls for wake requests and triggers AI responses."""
 
-    def __init__(self, poll_interval: float = 30.0):
+    CRON_INTERVAL = 30  # Check every 30 seconds
+
+    def __init__(self):
         super().__init__("wake")
-        self._chat_handler: Callable[[str, str], Awaitable] | None = None
-        self._poll_interval = poll_interval
-        self._poll_task: asyncio.Task | None = None
 
-    def set_chat_handler(self, handler: Callable[[str, str], Awaitable]):
-        self._chat_handler = handler
+    # ── Lifecycle ─────────────────────────────────────────────────
 
-    async def on_start(self):
-        self._poll_task = asyncio.create_task(self._poll_loop())
-        self.logger.info("Wake module started (polling every %.0fs)", self._poll_interval)
+    async def instantiate(self) -> None:
+        self.logger.info("Wake module started (cron every %ds)", self.CRON_INTERVAL)
 
-    async def on_stop(self):
-        if self._poll_task and not self._poll_task.done():
-            self._poll_task.cancel()
-            try:
-                await self._poll_task
-            except asyncio.CancelledError:
-                pass
+    async def shutdown(self) -> None:
         self.logger.info("Wake module stopped")
 
-    async def on_message(self, message: str, source: str) -> str | None:
-        return None
+    # ── Cron ──────────────────────────────────────────────────────
 
-    async def _poll_loop(self):
-        while self._running:
-            try:
-                await self._process_pending()
-            except Exception:
-                self.logger.exception("Error processing wake requests")
-            await asyncio.sleep(self._poll_interval)
+    async def worker_cron(self) -> None:
+        await self._process_pending()
 
-    async def _process_pending(self):
+    async def _process_pending(self) -> None:
         from django.utils import timezone
 
-        from modules.models import WakeRequest
+        from modules.wake.models import WakeRequest
 
-        pending = WakeRequest.objects.filter(status=WakeRequest.Status.PENDING).order_by("created_at")
+        pending = WakeRequest.objects.filter(
+            status=WakeRequest.Status.PENDING
+        ).order_by("created_at")
+
         async for req in pending:
             prompt = req.prompt or DEFAULT_WAKE_PROMPT
-            self.logger.info("Processing wake request #%d from %s", req.pk, req.source)
+            self.logger.info(
+                "Processing wake request #%d from %s", req.pk, req.source
+            )
 
-            if self._chat_handler:
+            if self._notify_ai:
                 try:
-                    await self._chat_handler(
-                        prompt, source=f"wake:{req.source}",
-                        person_id=f"wake_{req.source}",
+                    await self._notify_ai(
+                        ModuleNotification(
+                            source_module=self.name,
+                            summary=f"Wake request from {req.source}",
+                            details=prompt,
+                            urgency="normal",
+                            metadata={"person_id": f"wake_{req.source}"},
+                        )
                     )
                 except Exception:
                     self.logger.exception("Failed to process wake #%d", req.pk)
@@ -71,9 +80,95 @@ class WakeModule(BaseModule):
             req.processed_at = timezone.now()
             await req.asave()
 
-    async def trigger_wake(self, source: str = "api", prompt: str | None = None) -> int:
-        from modules.models import WakeRequest
+    async def trigger_wake(
+        self, source: str = "api", prompt: str | None = None
+    ) -> int:
+        """Create a new wake request. Returns the request PK."""
+        from modules.wake.models import WakeRequest
 
         req = await WakeRequest.objects.acreate(source=source, prompt=prompt)
         self.logger.info("Wake request #%d created from %s", req.pk, source)
         return req.pk
+
+    # ── Tools ─────────────────────────────────────────────────────
+
+    def return_tools(self) -> list[ModuleTool]:
+        return [
+            ModuleTool(
+                name="trigger_wake",
+                description=(
+                    "Trigger a wake event to make the VTuber spontaneously speak. "
+                    "Useful to schedule a self-wake or initiate a new topic."
+                ),
+                parameters=[
+                    ToolParameter(
+                        name="prompt",
+                        type=ToolParameterType.STRING,
+                        description="Optional prompt for the wake message",
+                        required=False,
+                    ),
+                    ToolParameter(
+                        name="source",
+                        type=ToolParameterType.STRING,
+                        description="Source identifier (default: ai_tool)",
+                        required=False,
+                    ),
+                ],
+                handler=self._tool_trigger_wake,
+            ),
+        ]
+
+    async def _tool_trigger_wake(self, args: dict) -> dict:
+        wake_id = await self.trigger_wake(
+            source=args.get("source", "ai_tool"),
+            prompt=args.get("prompt"),
+        )
+        return {
+            "content": [
+                {"type": "text", "text": f"Wake request #{wake_id} created."}
+            ]
+        }
+
+    # ── Routes ────────────────────────────────────────────────────
+
+    def get_routes(self) -> list[ModuleRoute]:
+        return [
+            ModuleRoute(
+                path="",
+                handler=csrf_exempt(self._view_wake),
+                method="POST",
+                name="wake",
+            ),
+            ModuleRoute(
+                path="now",
+                handler=csrf_exempt(self._view_wake_now),
+                method="POST",
+                name="wake_now",
+            ),
+        ]
+
+    async def _view_wake(self, request):
+        """Queue a wake request. Processed on next cron tick."""
+        body = json.loads(request.body) if request.body else {}
+        wake_id = await self.trigger_wake(
+            source=body.get("source", "api"),
+            prompt=body.get("prompt"),
+        )
+        return JsonResponse({"status": "queued", "wake_id": wake_id})
+
+    async def _view_wake_now(self, request):
+        """Create AND process a wake request immediately."""
+        body = json.loads(request.body) if request.body else {}
+        wake_id = await self.trigger_wake(
+            source=body.get("source", "api"),
+            prompt=body.get("prompt"),
+        )
+        await self._process_pending()
+        return JsonResponse({"status": "processed", "wake_id": wake_id})
+
+    # ── Status ────────────────────────────────────────────────────
+
+    def get_status(self) -> ModuleStatus:
+        status = super().get_status()
+        status.details = {"cron_interval": self.CRON_INTERVAL}
+        return status

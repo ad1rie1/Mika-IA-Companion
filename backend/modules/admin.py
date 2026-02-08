@@ -1,6 +1,7 @@
 from django.contrib import admin
 
-from modules.models import ProcessedEmail, WakeRequest
+from modules.email.models import ProcessedEmail
+from modules.wake.models import WakeRequest
 
 
 @admin.register(WakeRequest)
