@@ -115,6 +115,7 @@ class EmailModule(BaseModule):
 
     async def worker_cron(self) -> None:
         """Check all accounts for new emails."""
+        self.logger.debug("Email cron tick — checking %d account(s)", len(self._accounts))
         for account_id, entry in list(self._accounts.items()):
             await self._check_account(account_id, entry)
 
@@ -129,9 +130,12 @@ class EmailModule(BaseModule):
             try:
                 await imap.disconnect()
                 await imap.connect()
+                self.logger.info("IMAP reconnected for %s", account.name)
             except Exception:
                 self.logger.exception("IMAP reconnect failed for %s", account.name)
             return
+
+        self.logger.debug("[%s] Fetched %d unread email(s)", account.name, len(emails))
 
         new_count = 0
         for email_msg in emails:
@@ -142,7 +146,10 @@ class EmailModule(BaseModule):
         self._unread_counts[account.name] = new_count
 
         if new_count > 0:
+            self.logger.info("[%s] %d new email(s) processed", account.name, new_count)
             await self._prune_emails(account)
+        else:
+            self.logger.debug("[%s] No new emails", account.name)
 
     async def _process_email(self, email_msg, account, entry) -> bool:
         """Process a single email. Returns True if it was new."""
@@ -154,16 +161,22 @@ class EmailModule(BaseModule):
             Email.objects.filter(account=account, message_id=email_msg.message_id).exists
         )()
         if exists:
+            self.logger.debug("[%s] Skipping already-known email: %s", account.name, email_msg.subject)
             return False
 
         self.logger.info(
             "[%s] New email from %s: %s", account.name, email_msg.from_addr, email_msg.subject
         )
 
+        self.logger.debug("[%s] Analyzing email: %s", account.name, email_msg.subject)
         analysis = await self._analyzer.analyze_email(
             from_addr=email_msg.from_addr,
             subject=email_msg.subject,
             body=email_msg.body_text,
+        )
+        self.logger.info(
+            "[%s] Analysis result — priority=%s, notify=%s, reply=%s",
+            account.name, analysis.priority, analysis.should_notify, analysis.should_reply,
         )
 
         email_date = self._parse_email_date(email_msg.date)
