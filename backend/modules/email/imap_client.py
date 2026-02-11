@@ -55,10 +55,23 @@ class IMAPClient:
 
     async def fetch_unread(self) -> list[EmailMessage]:
         """Fetch all unread emails from inbox."""
+        return await self._fetch_by_criteria("UNSEEN")
+
+    async def fetch_all(self) -> list[EmailMessage]:
+        """Fetch all emails from inbox."""
+        return await self._fetch_by_criteria("ALL")
+
+    async def fetch_since(self, since_date) -> list[EmailMessage]:
+        """Fetch all emails since a given date (datetime or date object)."""
+        date_str = since_date.strftime("%d-%b-%Y")
+        return await self._fetch_by_criteria(f"SINCE {date_str}")
+
+    async def _fetch_by_criteria(self, criteria: str) -> list[EmailMessage]:
+        """Fetch emails matching IMAP search criteria."""
         if not self._client:
             await self.connect()
 
-        result, data = await self._client.search("UNSEEN")
+        result, data = await self._client.search(criteria)
         if result != "OK" or not data[0]:
             return []
 
@@ -92,10 +105,12 @@ class IMAPClient:
                             has_attachments = True
                             break
 
+                message_id = msg.get("Message-ID", "") or f"<no-msgid-uid-{uid_str}@imap>"
+
                 emails.append(
                     EmailMessage(
                         uid=uid_str,
-                        message_id=msg.get("Message-ID", ""),
+                        message_id=message_id,
                         from_addr=msg.get("From", ""),
                         to_addr=msg.get("To", ""),
                         cc=msg.get("Cc", "") or "",

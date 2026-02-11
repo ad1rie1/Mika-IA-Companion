@@ -15,6 +15,11 @@ class EmailAccount(models.Model):
     smtp_user = models.CharField(max_length=255, blank=True, default="")
     smtp_password = models.CharField(max_length=255, blank=True, default="")
     is_active = models.BooleanField(default=True)
+    initial_sync_done = models.BooleanField(
+        default=False,
+        help_text="Whether the first email sync has completed (replies disabled until then)",
+    )
+    last_fetch = models.DateTimeField(null=True, blank=True, help_text="Last successful IMAP fetch")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

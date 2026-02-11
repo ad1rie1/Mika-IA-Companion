@@ -123,8 +123,15 @@ class EmailModule(BaseModule):
         imap = entry["imap"]
         account = entry["account"]
 
+        is_initial_sync = not account.initial_sync_done
+
         try:
-            emails = await imap.fetch_unread()
+            if is_initial_sync:
+                emails = await imap.fetch_all()
+            elif account.last_fetch:
+                emails = await imap.fetch_since(account.last_fetch)
+            else:
+                emails = await imap.fetch_all()
         except Exception:
             self.logger.exception("IMAP fetch error for %s, attempting reconnect", account.name)
             try:
@@ -135,13 +142,41 @@ class EmailModule(BaseModule):
                 self.logger.exception("IMAP reconnect failed for %s", account.name)
             return
 
-        self.logger.debug("[%s] Fetched %d unread email(s)", account.name, len(emails))
+        if is_initial_sync:
+            self.logger.info("[%s] Initial sync — importing %d email(s) (replies/notifications disabled)", account.name, len(emails))
+        else:
+            self.logger.debug("[%s] Fetched %d email(s) since last sync", account.name, len(emails))
 
         new_count = 0
+        errors = 0
         for email_msg in emails:
-            was_new = await self._process_email(email_msg, account, entry)
-            if was_new:
-                new_count += 1
+            try:
+                was_new = await self._process_email(email_msg, account, entry, allow_actions=not is_initial_sync)
+                if was_new:
+                    new_count += 1
+            except Exception:
+                errors += 1
+                self.logger.exception("[%s] Failed to process email: %s", account.name, email_msg.subject)
+
+        from asgiref.sync import sync_to_async
+        from django.utils import timezone
+        from modules.email.models import EmailAccount
+
+        now = timezone.now()
+        update_fields = {"last_fetch": now}
+
+        if is_initial_sync:
+            if errors == 0:
+                update_fields["initial_sync_done"] = True
+                account.initial_sync_done = True
+                self.logger.info("[%s] Initial sync complete — %d email(s) imported, replies now enabled", account.name, new_count)
+            else:
+                self.logger.warning("[%s] Initial sync incomplete — %d error(s), will retry next tick", account.name, errors)
+
+        await sync_to_async(
+            EmailAccount.objects.filter(pk=account_id).update
+        )(**update_fields)
+        account.last_fetch = now
 
         self._unread_counts[account.name] = new_count
 
@@ -151,8 +186,12 @@ class EmailModule(BaseModule):
         else:
             self.logger.debug("[%s] No new emails", account.name)
 
-    async def _process_email(self, email_msg, account, entry) -> bool:
-        """Process a single email. Returns True if it was new."""
+    async def _process_email(self, email_msg, account, entry, *, allow_actions: bool = True) -> bool:
+        """Process a single email. Returns True if it was new.
+
+        When allow_actions is False (initial sync), emails are stored but
+        notifications and auto-replies are skipped.
+        """
         from asgiref.sync import sync_to_async
 
         from modules.email.models import Email
@@ -168,18 +207,23 @@ class EmailModule(BaseModule):
             "[%s] New email from %s: %s", account.name, email_msg.from_addr, email_msg.subject
         )
 
-        self.logger.debug("[%s] Analyzing email: %s", account.name, email_msg.subject)
-        analysis = await self._analyzer.analyze_email(
-            from_addr=email_msg.from_addr,
-            subject=email_msg.subject,
-            body=email_msg.body_text,
-        )
-        self.logger.info(
-            "[%s] Analysis result — priority=%s, notify=%s, reply=%s",
-            account.name, analysis.priority, analysis.should_notify, analysis.should_reply,
-        )
-
         email_date = self._parse_email_date(email_msg.date)
+
+        if allow_actions:
+            self.logger.debug("[%s] Analyzing email: %s", account.name, email_msg.subject)
+            analysis = await self._analyzer.analyze_email(
+                from_addr=email_msg.from_addr,
+                subject=email_msg.subject,
+                body=email_msg.body_text,
+            )
+            self.logger.info(
+                "[%s] Analysis result — priority=%s, notify=%s, reply=%s",
+                account.name, analysis.priority, analysis.should_notify, analysis.should_reply,
+            )
+            priority = analysis.priority
+        else:
+            analysis = None
+            priority = "low"
 
         await sync_to_async(Email.objects.create)(
             account=account,
@@ -195,10 +239,10 @@ class EmailModule(BaseModule):
             body_html=email_msg.body_html,
             has_attachments=email_msg.has_attachments,
             direction="inbound",
-            priority=analysis.priority,
+            priority=priority,
             is_read=False,
-            notified=analysis.should_notify,
-            replied=analysis.should_reply,
+            notified=False,
+            replied=False,
             email_date=email_date,
         )
 
@@ -212,10 +256,10 @@ class EmailModule(BaseModule):
             if addr:
                 await self._upsert_contact(addr, addr_str.strip(), account, "outbound")
 
-        if analysis.memories:
+        if analysis and analysis.memories:
             await self._store_memories(analysis.memories)
 
-        if analysis.should_notify and self._notify_ai:
+        if analysis and analysis.should_notify and self._notify_ai:
             await self._notify_ai(
                 ModuleNotification(
                     source_module=self.name,
@@ -233,7 +277,7 @@ class EmailModule(BaseModule):
                 )
             )
 
-        if analysis.should_reply and analysis.reply_text:
+        if analysis and analysis.should_reply and analysis.reply_text:
             smtp = entry.get("smtp")
             if smtp:
                 await self._send_reply(smtp, email_msg, analysis, account)
@@ -634,7 +678,7 @@ class EmailModule(BaseModule):
         accounts = await sync_to_async(
             lambda: list(
                 EmailAccount.objects.filter(is_active=True).values(
-                    "id", "name", "email_address",
+                    "id", "name", "email_address", "initial_sync_done", "last_fetch",
                 )
             )
         )()
@@ -646,7 +690,12 @@ class EmailModule(BaseModule):
         for a in accounts:
             connected = a["id"] in self._accounts
             status = "connected" if connected else "disconnected"
-            lines.append(f"- [#{a['id']}] {a['name']} ({a['email_address']}) - {status}")
+            synced = "synced" if a["initial_sync_done"] else "pending initial sync"
+            last = a["last_fetch"].strftime("%Y-%m-%d %H:%M") if a["last_fetch"] else "never"
+            lines.append(
+                f"- [#{a['id']}] {a['name']} ({a['email_address']}) "
+                f"- {status}, {synced}, last fetch: {last}"
+            )
         return {"content": [{"type": "text", "text": "\n".join(lines)}]}
 
     async def _tool_send_email(self, args: dict) -> dict:
