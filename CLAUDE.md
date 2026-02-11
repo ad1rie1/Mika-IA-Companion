@@ -56,9 +56,9 @@ This is a VTuber engine: a 3D avatar driven by Claude AI responses with real-tim
 
 - **Entry point**: `run.py` — adds `backend/` to sys.path, configures Django, launches Uvicorn with lifespan support
 - **ASGI**: `config/asgi.py` — `LifespanWrapper` handles startup (memory init, emotion engine init, module start) and shutdown
-- **WebSocket**: `chat/consumers.py` — `ChatConsumer` handles connections with per-connection `person_id`; `handle_chat()` is the core message processing function (used by frontend, Telegram, and wake module)
+- **WebSocket**: `chat/consumers.py` — `ChatConsumer` handles connections with per-connection `person_id`; `handle_chat()` is the core message processing function (used by frontend). Modules use `notify_ai()` instead. `handle_chat()` auto-detects available module tools and uses `chat_with_tools()` when tools are present.
 - **AI**:
-  - `ai/client.py` — `ClaudeClient` uses `claude_agent_sdk.query()` for Claude API communication, accepts `emotion_context` for system prompt injection. Reads `CLAUDE_OAUTH_TOKEN` from settings and sets `CLAUDE_CODE_OAUTH_TOKEN` env var for the SDK, or uses `ANTHROPIC_API_KEY` as fallback.
+  - `ai/client.py` — `ClaudeClient` uses `claude_agent_sdk.query()` for Claude API communication. Two methods: `chat()` (single turn, no tools) and `chat_with_tools()` (multi-turn with MCP tools, `max_turns=10`, `permission_mode="bypassPermissions"`). Module context, emotion context, and memory context are injected into the system prompt. Reads `CLAUDE_OAUTH_TOKEN` from settings and sets `CLAUDE_CODE_OAUTH_TOKEN` env var for the SDK, or uses `ANTHROPIC_API_KEY` as fallback.
 - **Emotion system** (3 layers):
   - `ai/emotion_types.py` — 29 emotions in 4 categories (positive/negative/complex/neutral), `EmotionData` dataclass, `extract_emotion()` with `[EMOTION:name:intensity]` format
   - `ai/emotion_state.py` — `PersonMood`, `GlobalMood`, `Temperament`, `MessageEmotion` dataclasses
@@ -66,9 +66,20 @@ This is a VTuber engine: a 3D avatar driven by Claude AI responses with real-tim
   - `ai/emotions.py` — backward-compatibility shim re-exporting from `emotion_types.py`
 - **Personality**: `config/personality.py` — loads `personality.yaml` (including `temperament` block), generates Claude system prompt with 29 emotions + intensity format
 - **Memory**: `memory/manager.py` — `MemoryManager` with in-memory short-term list (last 20 messages) + Django ORM long-term persistence (`Conversation`, `Message`, `Memory`, `Souvenir`, `Connaissance` models)
-- **Modules**: Pluggable system via `modules/base.py` (`BaseModule` ABC with `on_tick()`) and `modules/manager.py` (`ModuleManager` registry + cron scheduler). Each module lives in its own subfolder (`modules/telegram/`, `modules/wake/`, `modules/email/`). All module Django models stay in `modules/models.py`.
-- **Cron scheduler**: Built into `ModuleManager`, runs every `CRON_TICK_INTERVAL` seconds (default 60). Calls `on_tick()` on each running module. Modules decide internally if they have work to do.
-- **Email module** (`modules/email/`): IMAP/SMTP integration. On each tick, checks inbox for unread emails, sends them to Haiku for triage (notify? memorize? reply?), stores `ProcessedEmail` for dedup, creates `Souvenir`/`Connaissance` memories, broadcasts notifications via WebSocket, optionally auto-replies via SMTP. Disabled gracefully if no IMAP config.
+- **Module plugin system**: Full plugin infrastructure via `modules/base.py` (`BaseModule` ABC) and `modules/manager.py` (`ModuleManager` singleton). Each module lives in its own subfolder with its own `models.py`. `modules/models.py` re-exports all models for Django discovery.
+- **Module capabilities**: Each module can implement:
+  - `instantiate()` / `shutdown()` — lifecycle (start/stop resources)
+  - `worker_cron()` — periodic task, per-module `CRON_INTERVAL` (or global `CRON_TICK_INTERVAL`)
+  - `return_tools()` — expose AI tools to Claude (via in-process MCP server using `claude_agent_sdk.SdkMcpTool`)
+  - `notify_ai(notification)` — wake Claude with structured info, Claude decides what to do (with tools available)
+  - `get_routes()` — declare HTTP endpoints, auto-mounted under `/api/modules/{name}/`
+  - `get_context()` — inject text into Claude system prompt (e.g. "Tu as 3 emails non lus")
+  - `on_event(event)` — react to inter-module events via event bus
+  - `get_status()` — monitoring/debug introspection
+  - `is_available()` — check preconditions before starting
+- **AI tools**: `ModuleManager` collects tools from all modules, builds an MCP server via `create_sdk_mcp_server()`, injects it into `ClaudeAgentOptions.mcp_servers`. The SDK handles tool_use/tool_result loops automatically when `max_turns > 1`.
+- **Cron scheduler**: Built into `ModuleManager`, ticks every second, dispatches `worker_cron()` per module at their own `CRON_INTERVAL`. Default global interval: `CRON_TICK_INTERVAL` (60s).
+- **Email module** (`modules/email/`): IMAP/SMTP integration. On each tick (60s), checks inbox for unread emails, sends them to Haiku for triage (notify? memorize? reply?), stores `ProcessedEmail` for dedup, creates `Souvenir`/`Connaissance` memories, notifies AI via `notify_ai()`, optionally auto-replies via SMTP. Exposes `list_recent_emails` and `send_email` tools. Disabled gracefully if no IMAP config.
 
 ### Emotion System (3 layers)
 

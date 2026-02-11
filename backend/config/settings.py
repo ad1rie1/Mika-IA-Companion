@@ -47,7 +47,7 @@ ASGI_APPLICATION = "config.asgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": PROJECT_ROOT / "vtuber.db",
+        "NAME": PROJECT_ROOT / "data" / "vtuber.db",
     }
 }
 

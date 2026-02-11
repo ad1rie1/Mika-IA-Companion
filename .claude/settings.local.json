@@ -12,7 +12,13 @@
       "Bash(findstr:*)",
       "Bash(del \"c:\\\\Users\\\\ad1ri\\\\OneDrive\\\\Bureau\\\\vtuber\\\\core__init__.py\")",
       "Bash(ANTHROPIC_API_KEY=test-key python manage.py:*)",
-      "Bash(xargs ls:*)"
+      "Bash(xargs ls:*)",
+      "Bash(del \"c:\\\\Users\\\\ad1ri\\\\OneDrive\\\\Bureau\\\\vtuber\\\\backend\\\\modules\\\\telegram.py\")",
+      "Bash(del \"c:\\\\Users\\\\ad1ri\\\\OneDrive\\\\Bureau\\\\vtuber\\\\backend\\\\modules\\\\wake.py\")",
+      "Bash(python -m django makemigrations:*)",
+      "Bash(python:*)",
+      "Bash(del \"c:\\\\Users\\\\ad1ri\\\\OneDrive\\\\Bureau\\\\vtuber\\\\backend\\\\modules\\\\views.py\")",
+      "Bash(python3 -m py_compile:*)"
     ]
   }
 }
