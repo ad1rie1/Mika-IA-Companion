@@ -19,7 +19,7 @@ class MemoryConsolidator:
 
     Every N seconds:
     1. Fetch unprocessed Messages from Django ORM
-    2. Send to Haiku for extraction (souvenirs + connaissances)
+    2. Send to Claude for extraction (souvenirs + connaissances)
     3. Create ORM records + index in ChromaDB
     4. Apply decay to old souvenirs
     """
@@ -70,10 +70,13 @@ class MemoryConsolidator:
 
     async def _loop(self):
         """Main loop: consolidate every N seconds."""
+        tick = 0
         while self._running:
             try:
                 await asyncio.sleep(self.interval)
                 if self._running:
+                    tick += 1
+                    logger.info("Consolidation tick #%d (last_id=%d)", tick, self._last_processed_id)
                     await self._consolidate()
             except asyncio.CancelledError:
                 break
@@ -86,7 +89,7 @@ class MemoryConsolidator:
 
         try:
             last_log = await sync_to_async(
-                lambda: ConsolidationLog.objects.first()
+                lambda: ConsolidationLog.objects.order_by("-pk").first()
             )()
             if last_log:
                 self._last_processed_id = last_log.last_message_id
@@ -112,16 +115,16 @@ class MemoryConsolidator:
         )
 
         if not messages:
-            # Still apply decay even with no new messages
+            logger.info("Consolidation: no new messages (last_id=%d)", self._last_processed_id)
             await self._apply_decay()
             return
 
         logger.info("Consolidating %d new messages", len(messages))
 
-        # 2. Format for Haiku
+        # 2. Format for Claude
         msg_dicts = [{"role": m["role"], "content": m["content"]} for m in messages]
 
-        # 3. Extract via Haiku
+        # 3. Extract via Claude
         extractions = await self.extractor.analyze_messages(msg_dicts)
 
         souvenirs_created = 0

@@ -1,75 +1,71 @@
+import asyncio
 import json
 import logging
-import os
 
 from django.conf import settings
 from claude_agent_sdk import query, AssistantMessage, TextBlock
 from claude_agent_sdk.types import ClaudeAgentOptions
 
+EXTRACTION_TIMEOUT = 45  # seconds — prevent hanging the consolidation loop
+
 logger = logging.getLogger(__name__)
 
 # fmt: off
 EXTRACTION_PROMPT_TEMPLATE = """\
-Tu es le systeme de memoire interne de {name}.
-{name} est: {description}.
-Son style: {tone}.
-Ses traits: {traits}.
+ROLE: Tu es un module d'extraction de memoire. Tu n'es PAS {name}. Tu ne reponds PAS a la conversation. \
+Tu ANALYSES la conversation ci-dessous et tu extrais les informations importantes sous forme de JSON.
 
-Tu analyses les conversations de {name} et tu construis ses souvenirs et ses connaissances.
+CONTEXTE: {name} est: {description}. Style: {tone}. Traits: {traits}.
 
-DEUX TYPES DE MEMOIRE:
+DEUX TYPES DE MEMOIRE A EXTRAIRE:
 
 1. SOUVENIR (evenement vecu):
-   - Ecrit du point de vue SUBJECTIF de {name}, avec SES emotions et SA personnalite
-   - {name} ressent les choses a sa maniere: colore le souvenir selon qui elle est
-   - Inclus l'emotion ressentie par {name} (neutral, happy, sad, angry, surprised, thinking, love)
-   - Exemple avec personnalite aimante: "Thomas a ete un peu sec avec moi, mais je sais qu'il a eu une dure journee, je le soutiens"
-   - Exemple avec personnalite rancuniere: "Thomas m'a mal parle alors qu'il a juste eu une mauvaise journee, il va voir"
-   - Le souvenir doit sonner comme un JOURNAL INTIME de {name}
+   - Ecrit du point de vue SUBJECTIF de {name} (1ere personne), avec SES emotions
+   - Doit sonner comme un journal intime de {name}
+   - Emotion parmi: neutral, happy, sad, angry, surprised, thinking, love
 
 2. CONNAISSANCE (fait objectif durable):
-   - Ecrit de maniere OBJECTIVE, sans emotion ni personnalite
-   - Une verite factuelle sur une personne, un objet, un lieu
-   - Exemple: "Thomas est developpeur Python", "La cafetiere tombe souvent en panne"
+   - Ecrit de maniere OBJECTIVE (3eme personne), sans emotion
+   - Fait factuel sur une personne, un objet, un lieu
 
 REGLES:
-- "Il aime le cafe" → connaissance (fait durable, objectif)
-- "Il a bu un cafe ce matin" → souvenir (vecu, subjectif, emotion de {name})
+- "Il aime le cafe" → connaissance | "Il a bu un cafe" → souvenir
 - "Salut ca va?" → NE PAS STOCKER (banalite)
-- "Je m'appelle Thomas" → connaissance (fait objectif)
-- "On a joue a Zelda ensemble!" → souvenir (joie de {name}, subjectif)
+- "Je m'appelle Thomas" → connaissance | "On a joue a Zelda!" → souvenir
 - Chaque extraction doit etre AUTONOME (comprehensible seule)
-- Les souvenirs sont ecrits a la 1ere personne du point de vue de {name}
-- Les connaissances sont ecrites a la 3eme personne, factuelles
 
-Retourne UNIQUEMENT du JSON valide, sans texte autour:
+IMPORTANT: Retourne UNIQUEMENT du JSON valide. Pas de texte avant ni apres. Pas de markdown. Juste le JSON.
+
+Format:
 {{
   "extractions": [
     {{
       "type": "souvenir",
       "store": true,
-      "content": "On a passe un super moment a jouer a Zelda avec Thomas, j'adore quand il partage ses passions avec moi!",
+      "content": "On a passe un super moment a jouer a Zelda avec Thomas!",
       "emotion": "happy",
-      "themes": ["gaming", "zelda", "moment-partage"],
+      "themes": ["gaming", "zelda"],
       "entities": [{{"name": "Thomas", "type": "person"}}]
     }},
     {{
       "type": "connaissance",
       "store": true,
-      "content": "Thomas aime les jeux retro, en particulier Zelda",
+      "content": "Thomas aime les jeux retro",
       "themes": ["gaming", "preference"],
       "entities": [{{"name": "Thomas", "type": "person"}}]
     }}
   ]
 }}
 
-Si aucune information ne vaut le coup, retourne: {{"extractions": []}}
+Si rien d'important: {{"extractions": []}}
 """
 # fmt: on
 
 VALIDITY_CHECK_PROMPT = """\
-Tu es un systeme de verification de memoire. On te donne une connaissance \
-existante et un nouveau contexte de conversation.
+Tu es un systeme de verification de memoire. Tu n'es PAS un assistant. \
+Tu reponds UNIQUEMENT en JSON valide, sans texte autour.
+
+On te donne une connaissance existante et un nouveau contexte de conversation.
 
 Connaissance actuelle: "{connaissance}"
 
@@ -84,20 +80,20 @@ nouveau contexte contredit CLAIREMENT l'ancienne information.
 
 Retourne UNIQUEMENT du JSON valide:
 {{
-  "still_valid": true/false,
-  "new_confidence": 0.0-1.0,
+  "still_valid": true,
+  "new_confidence": 1.0,
   "reason": "explication courte"
 }}
 """
 
 
 class MemoryExtractor:
-    """Uses Claude Haiku to analyze messages and extract structured memories.
+    """Uses Claude to analyze messages and extract structured memories.
     Souvenirs are written from the VTuber's subjective POV (personality + emotion).
     Connaissances are objective facts."""
 
     def __init__(self):
-        self.model = settings.HAIKU_MODEL
+        self.model = settings.CLAUDE_MODEL_LIGHT
         self._system_prompt: str | None = None
 
     def _get_system_prompt(self) -> str:
@@ -116,9 +112,6 @@ class MemoryExtractor:
     async def analyze_messages(self, messages: list[dict]) -> list[dict]:
         """Analyze a batch of messages and extract souvenirs + connaissances.
 
-        Souvenirs are colored by the VTuber's personality and emotions.
-        Connaissances remain objective.
-
         Args:
             messages: list of {"role": "user"|"assistant", "content": "..."}
 
@@ -135,50 +128,84 @@ class MemoryExtractor:
         )
 
         try:
-            options = ClaudeAgentOptions(
-                system_prompt=self._get_system_prompt(),
-                model=self.model,
-                max_turns=1,
+            return await asyncio.wait_for(
+                self._call_extraction(conversation_text, len(messages)),
+                timeout=EXTRACTION_TIMEOUT,
             )
-            raw_text = ""
-            msg_count = 0
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Extraction timed out after %ds (model=%s)",
+                EXTRACTION_TIMEOUT, self.model,
+            )
+            return []
+        except Exception:
+            logger.exception("Extraction error (model=%s)", self.model)
+            return []
+
+    async def _call_extraction(self, conversation_text: str, msg_total: int) -> list[dict]:
+        """Inner extraction call — separated so we can wrap it with a timeout."""
+        data = await self._query_model_json(conversation_text)
+        if data is None:
+            return []
+
+        extractions = data.get("extractions", [])
+        stored = [e for e in extractions if e.get("store", False)]
+        logger.info(
+            "Extractor: %d extractions (%d stored) from %d messages",
+            len(extractions), len(stored), msg_total,
+        )
+        return stored
+
+    async def _query_model_json(self, conversation_text: str) -> dict | None:
+        """Query model and parse JSON response. Returns parsed dict or None."""
+        raw = await self._query_model(conversation_text)
+        if raw is None:
+            return None
+
+        # Strip markdown code fences if present
+        text = raw
+        if text.startswith("```"):
+            lines = text.split("\n")
+            lines = [l for l in lines if not l.strip().startswith("```")]
+            text = "\n".join(lines).strip()
+
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as exc:
+            logger.warning(
+                "JSON parse failed (model=%s): %s | raw=%.300s",
+                self.model, exc, repr(raw),
+            )
+            return None
+
+    async def _query_model(self, conversation_text: str) -> str | None:
+        """Send extraction prompt to the model. Returns raw text or None on failure."""
+        options = ClaudeAgentOptions(
+            system_prompt=self._get_system_prompt(),
+            model=self.model,
+            max_turns=1,
+        )
+        raw_text = ""
+        msg_count = 0
+        try:
             async for msg in query(prompt=conversation_text, options=options):
                 msg_count += 1
-                logger.debug(
-                    "Extractor SDK msg #%d: type=%s", msg_count, type(msg).__name__,
-                )
                 if isinstance(msg, AssistantMessage):
                     for block in msg.content:
                         if isinstance(block, TextBlock):
                             raw_text += block.text
-                        else:
-                            logger.debug(
-                                "Extractor non-text block: %s", type(block).__name__,
-                            )
-            raw = raw_text.strip()
-            if not raw:
-                logger.warning(
-                    "Extractor got empty response from model=%s (%d SDK messages received)",
-                    self.model, msg_count,
-                )
-                return []
-            data = json.loads(raw)
-            extractions = data.get("extractions", [])
-            stored = [e for e in extractions if e.get("store", False)]
-            logger.info(
-                "Extractor: %d extractions (%d stored) from %d messages",
-                len(extractions), len(stored), len(messages),
-            )
-            return stored
-        except json.JSONDecodeError as exc:
-            logger.warning(
-                "Failed to parse extraction response (model=%s): %s | raw=%.200s",
-                self.model, exc, raw_text,
-            )
-            return []
         except Exception:
-            logger.exception("Extraction API error (model=%s)", self.model)
-            return []
+            logger.exception("SDK query failed (model=%s)", self.model)
+            return None
+
+        raw = raw_text.strip()
+        if not raw:
+            logger.warning(
+                "Empty response from model=%s (%d SDK messages received)",
+                self.model, msg_count,
+            )
+            return None
+        return raw
 
     async def check_connaissance_validity(
         self, connaissance_content: str, recent_context: str
@@ -194,18 +221,18 @@ class MemoryExtractor:
         )
 
         try:
-            options = ClaudeAgentOptions(
-                model=self.model,
-                max_turns=1,
-            )
-            raw_text = ""
-            async for msg in query(prompt=prompt, options=options):
-                if isinstance(msg, AssistantMessage):
-                    for block in msg.content:
-                        if isinstance(block, TextBlock):
-                            raw_text += block.text
-            raw = raw_text.strip()
-            data = json.loads(raw)
+            raw = await self._query_model(prompt)
+            if raw is None:
+                return True, 1.0
+
+            # Strip markdown code fences
+            text = raw
+            if text.startswith("```"):
+                lines = text.split("\n")
+                lines = [l for l in lines if not l.strip().startswith("```")]
+                text = "\n".join(lines).strip()
+
+            data = json.loads(text)
             still_valid = data.get("still_valid", True)
             confidence = float(data.get("new_confidence", 1.0))
             reason = data.get("reason", "")
@@ -217,5 +244,5 @@ class MemoryExtractor:
                 )
             return still_valid, max(0.0, min(1.0, confidence))
         except Exception:
-            logger.exception("Haiku validity check error")
+            logger.exception("Validity check error")
             return True, 1.0  # Conservative: keep valid on error

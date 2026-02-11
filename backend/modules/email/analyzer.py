@@ -23,10 +23,10 @@ class EmailAnalysis:
 
 
 class EmailAnalyzer:
-    """Uses Claude (Haiku) to analyze incoming emails and decide actions."""
+    """Uses Claude to analyze incoming emails and decide actions."""
 
     def __init__(self):
-        self.model = settings.HAIKU_MODEL
+        self.model = settings.CLAUDE_MODEL_LIGHT
         self._system_prompt: str | None = None
 
     def _get_system_prompt(self) -> str:

@@ -80,7 +80,8 @@ CLAUDE_OAUTH_TOKEN = env("CLAUDE_OAUTH_TOKEN", default="")
 ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", default="")
 TELEGRAM_TOKEN = env("TELEGRAM_TOKEN", default="")
 VTUBER_NAME = env("VTUBER_NAME", default="Mika")
-CLAUDE_MODEL = env("CLAUDE_MODEL", default="claude-sonnet-4-5-20250929")
+CLAUDE_MODEL = env("CLAUDE_MODEL", default="claude-opus-4-6")
+CLAUDE_MODEL_LIGHT = env("CLAUDE_MODEL_LIGHT", default="claude-sonnet-4-5")
 MEMORY_SHORT_TERM_LIMIT = env.int("MEMORY_SHORT_TERM_LIMIT", default=20)
 API_PORT = env.int("API_PORT", default=8000)
 PERSONALITY_PATH = PROJECT_ROOT / "personality.yaml"
@@ -106,7 +107,6 @@ MEMORY_MIN_IMPORTANCE = env.float("MEMORY_MIN_IMPORTANCE", default=0.1)
 MEMORY_RETRIEVAL_SOUVENIRS = env.int("MEMORY_RETRIEVAL_SOUVENIRS", default=5)
 MEMORY_RETRIEVAL_CONNAISSANCES = env.int("MEMORY_RETRIEVAL_CONNAISSANCES", default=10)
 EMBEDDING_MODEL = env("EMBEDDING_MODEL", default="paraphrase-multilingual-MiniLM-L12-v2")
-HAIKU_MODEL = env("HAIKU_MODEL", default="claude-haiku-4-5-20251001")
 
 # --- Emotion Engine ---
 EMOTION_DECAY_RATE = env.float("EMOTION_DECAY_RATE", default=0.02)  # intensity lost per second
