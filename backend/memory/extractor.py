@@ -141,21 +141,43 @@ class MemoryExtractor:
                 max_turns=1,
             )
             raw_text = ""
+            msg_count = 0
             async for msg in query(prompt=conversation_text, options=options):
+                msg_count += 1
+                logger.debug(
+                    "Extractor SDK msg #%d: type=%s", msg_count, type(msg).__name__,
+                )
                 if isinstance(msg, AssistantMessage):
                     for block in msg.content:
                         if isinstance(block, TextBlock):
                             raw_text += block.text
+                        else:
+                            logger.debug(
+                                "Extractor non-text block: %s", type(block).__name__,
+                            )
             raw = raw_text.strip()
+            if not raw:
+                logger.warning(
+                    "Extractor got empty response from model=%s (%d SDK messages received)",
+                    self.model, msg_count,
+                )
+                return []
             data = json.loads(raw)
             extractions = data.get("extractions", [])
-            # Keep only items marked for storage
-            return [e for e in extractions if e.get("store", False)]
-        except (json.JSONDecodeError, KeyError, IndexError) as exc:
-            logger.warning("Failed to parse Haiku extraction response: %s", exc)
+            stored = [e for e in extractions if e.get("store", False)]
+            logger.info(
+                "Extractor: %d extractions (%d stored) from %d messages",
+                len(extractions), len(stored), len(messages),
+            )
+            return stored
+        except json.JSONDecodeError as exc:
+            logger.warning(
+                "Failed to parse extraction response (model=%s): %s | raw=%.200s",
+                self.model, exc, raw_text,
+            )
             return []
         except Exception:
-            logger.exception("Haiku extraction API error")
+            logger.exception("Extraction API error (model=%s)", self.model)
             return []
 
     async def check_connaissance_validity(

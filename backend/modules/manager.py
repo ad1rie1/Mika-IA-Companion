@@ -296,6 +296,11 @@ class ModuleManager:
             "person_id", f"module_{notification.source_module}"
         )
 
+        logger.info(
+            "[notify_ai/%s] person=%s | %s",
+            notification.source_module, person_id, notification.summary,
+        )
+
         try:
             memory_context = await memory_manager.get_memory_context(
                 notification.summary
@@ -342,6 +347,14 @@ class ModuleManager:
             "user", prompt, source=notification.source_module
         )
         await memory_manager.add_message("assistant", response_text)
+
+        logger.info(
+            "[notify_ai/%s/%s] -> %s (emotion=%s intensity=%.2f) | memory_ctx=%d chars",
+            notification.source_module, person_id,
+            response_text[:80],
+            emotion_data.emotion.value, emotion_data.intensity,
+            len(memory_context) if 'memory_context' in dir() else 0,
+        )
 
         # Broadcast to WebSocket
         from channels.layers import get_channel_layer

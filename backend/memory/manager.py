@@ -68,6 +68,11 @@ class MemoryManager:
         if len(self.short_term) > self.max_short_term:
             self.short_term = self.short_term[-self.max_short_term :]
 
+        logger.debug(
+            "Memory add_message: role=%s source=%s short_term=%d content=%.60s",
+            role, source, len(self.short_term), content,
+        )
+
         if self._initialized and self.conversation:
             try:
                 from memory.models import Message
