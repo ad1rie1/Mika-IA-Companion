@@ -27,12 +27,43 @@ class Personality:
         return self._data.get("description", "")
 
     @property
-    def tone(self) -> str:
-        return self._data.get("tone", "")
+    def tone(self) -> dict:
+        raw = self._data.get("tone", {})
+        if isinstance(raw, str):
+            return {"default": raw}
+        return raw
+
+    @property
+    def personality_data(self) -> dict:
+        return self._data.get("personality", {})
 
     @property
     def traits(self) -> list[str]:
-        return self._data.get("traits", [])
+        return self.personality_data.get("core_traits", self._data.get("traits", []))
+
+    @property
+    def quirks(self) -> list[str]:
+        return self.personality_data.get("quirks", [])
+
+    @property
+    def vulnerabilities(self) -> list[str]:
+        return self.personality_data.get("vulnerabilities", [])
+
+    @property
+    def values(self) -> list[str]:
+        return self.personality_data.get("values", [])
+
+    @property
+    def interests(self) -> list[str]:
+        return self.personality_data.get("interests", [])
+
+    @property
+    def speech_patterns(self) -> list[str]:
+        return self._data.get("speech_patterns", [])
+
+    @property
+    def mood_greetings(self) -> dict:
+        return self._data.get("mood_greetings", {})
 
     @property
     def language(self) -> str:
@@ -59,13 +90,52 @@ class Personality:
         )
 
     def to_system_prompt(self) -> str:
-        traits_str = "\n".join(f"- {t}" for t in self.traits)
         emotion_list = ", ".join(e.value for e in Emotion)
+
+        # Tone
+        tone = self.tone
+        tone_str = tone.get("default", "")
+        if tone.get("when_excited"):
+            tone_str += f"\nQuand tu es excitée : {tone['when_excited']}"
+        if tone.get("when_teasing"):
+            tone_str += f"\nQuand tu taquines : {tone['when_teasing']}"
+
+        # Personality sections
+        sections = []
+
+        traits = self.traits
+        if traits:
+            sections.append("Tes traits de caractère :\n" + "\n".join(f"- {t}" for t in traits))
+
+        quirks = self.quirks
+        if quirks:
+            sections.append("Tes petites manies :\n" + "\n".join(f"- {q}" for q in quirks))
+
+        vulnerabilities = self.vulnerabilities
+        if vulnerabilities:
+            sections.append("Tes vulnérabilités :\n" + "\n".join(f"- {v}" for v in vulnerabilities))
+
+        values = self.values
+        if values:
+            sections.append("Tes valeurs :\n" + "\n".join(f"- {v}" for v in values))
+
+        interests = self.interests
+        if interests:
+            sections.append("Tes centres d'intérêt :\n" + "\n".join(f"- {i}" for i in interests))
+
+        personality_block = "\n\n".join(sections)
+
+        # Speech patterns
+        speech = self.speech_patterns
+        speech_str = ""
+        if speech:
+            speech_str = "\n\nTa façon de parler :\n" + "\n".join(f"- {s}" for s in speech)
 
         return (
             f"Tu es {self.name}, {self.description}.\n"
-            f"Ton style : {self.tone}.\n"
-            f"Tes traits de caractère :\n{traits_str}\n"
+            f"Ton style : {tone_str}.\n\n"
+            f"{personality_block}\n"
+            f"{speech_str}\n\n"
             f"Tu parles en {self.language}.\n\n"
             "IMPORTANT: À chaque réponse, tu DOIS inclure une balise d'émotion au tout début "
             "de ta réponse, sous la forme [EMOTION:nom_emotion:intensite].\n"

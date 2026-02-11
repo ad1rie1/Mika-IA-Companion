@@ -125,6 +125,13 @@ async def handle_chat(
     # Compute final message emotion (blend of person + global)
     msg_emotion = emotion_engine.compute_message_emotion(person_id)
 
+    logger.info(
+        "[%s/%s] %s -> %s (emotion=%s intensity=%.2f)",
+        source, person_id,
+        message[:60], response_text[:80],
+        msg_emotion.emotion.value, msg_emotion.intensity,
+    )
+
     channel_layer = get_channel_layer()
     await channel_layer.group_send(
         BROADCAST_GROUP,

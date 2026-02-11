@@ -1,4 +1,6 @@
+import logging
 import os
+from collections.abc import AsyncIterator
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -11,6 +13,8 @@ from django.conf import settings
 
 from ai.emotion_types import EmotionData, extract_emotion
 from config.personality import personality
+
+logger = logging.getLogger(__name__)
 
 
 class ClaudeClient:
@@ -101,6 +105,23 @@ class ClaudeClient:
 
     # ── Chat with tools (MCP) ─────────────────────────────────────
 
+    @staticmethod
+    async def _prompt_stream(text: str) -> AsyncIterator[dict]:
+        """Wrap a prompt string as an async iterable of SDK messages.
+
+        When MCP servers are present, the SDK must receive the prompt as
+        an AsyncIterable so that ``stream_input()`` keeps stdin open for
+        bidirectional control-protocol communication (MCP tool calls).
+        Passing a plain ``str`` causes the SDK to close stdin immediately
+        after sending the user message, which breaks MCP.
+        """
+        yield {
+            "type": "user",
+            "session_id": "",
+            "message": {"role": "user", "content": text},
+            "parent_tool_use_id": None,
+        }
+
     async def chat_with_tools(
         self,
         message: str,
@@ -127,7 +148,10 @@ class ClaudeClient:
         allowed_tools = []
         if mcp_server:
             mcp_servers["vtuber_modules"] = mcp_server
-            allowed_tools = tool_names or []
+            # MCP tool names are prefixed mcp__servername__toolname by the CLI
+            allowed_tools = [
+                f"mcp__vtuber_modules__{name}" for name in (tool_names or [])
+            ]
 
         options = ClaudeAgentOptions(
             system_prompt=system,
@@ -138,7 +162,9 @@ class ClaudeClient:
             permission_mode="bypassPermissions",
         )
 
-        response_stream = query(prompt=full_prompt, options=options)
+        # Pass prompt as AsyncIterable to keep stdin open for MCP
+        prompt_stream = self._prompt_stream(full_prompt)
+        response_stream = query(prompt=prompt_stream, options=options)
 
         raw_text = ""
         tool_calls_made: list[str] = []
@@ -149,7 +175,14 @@ class ClaudeClient:
                     if isinstance(block, TextBlock):
                         raw_text += block.text
                     elif isinstance(block, ToolUseBlock):
+                        logger.info(
+                            "Claude called tool: %s (input=%s)",
+                            block.name, str(block.input)[:200],
+                        )
                         tool_calls_made.append(block.name)
+
+        if tool_calls_made:
+            logger.info("Tools used in this turn: %s", tool_calls_made)
 
         clean_text, emotion_data = extract_emotion(raw_text)
         return clean_text, emotion_data, tool_calls_made

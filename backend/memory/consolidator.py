@@ -172,6 +172,10 @@ class MemoryConsolidator:
                         },
                     )
                     souvenirs_created += 1
+                    logger.info(
+                        "Souvenir created: [%s] %s",
+                        emotion, extraction["content"][:120],
+                    )
 
                 elif extraction["type"] == "connaissance":
                     # Check for duplicate connaissances
@@ -189,6 +193,10 @@ class MemoryConsolidator:
                                 "confidence": existing.confidence,
                                 "is_valid": existing.is_valid,
                             },
+                        )
+                        logger.info(
+                            "Connaissance reinforced (confidence=%.2f): %s",
+                            existing.confidence, existing.content[:120],
                         )
                     else:
                         connaissance = await sync_to_async(
@@ -213,6 +221,10 @@ class MemoryConsolidator:
                             },
                         )
                         connaissances_created += 1
+                        logger.info(
+                            "Connaissance created: %s",
+                            extraction["content"][:120],
+                        )
 
             except Exception:
                 logger.exception("Failed to process extraction: %s", extraction)

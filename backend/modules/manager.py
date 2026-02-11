@@ -170,6 +170,20 @@ class ModuleManager:
         self._tools_cache = tools
         return tools
 
+    @staticmethod
+    def _wrap_handler(name: str, handler):
+        """Wrap a tool handler with logging."""
+        async def logged_handler(params):
+            logger.info("MCP tool called: %s (params=%s)", name, params)
+            try:
+                result = await handler(params)
+                logger.info("MCP tool %s returned: %s", name, str(result)[:200])
+                return result
+            except Exception:
+                logger.exception("MCP tool %s failed", name)
+                raise
+        return logged_handler
+
     def _build_mcp_server(self) -> None:
         """Build an in-process MCP server from all module tools."""
         from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server
@@ -186,7 +200,7 @@ class ModuleManager:
                     name=t.name,
                     description=t.description,
                     input_schema=t.to_json_schema(),
-                    handler=t.handler,
+                    handler=self._wrap_handler(t.name, t.handler),
                 )
             )
 
