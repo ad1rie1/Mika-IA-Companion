@@ -86,11 +86,15 @@ class IMAPClient:
                 if result != "OK":
                     continue
 
+                # aioimaplib returns a list of bytearray/bytes lines.
+                # Find the largest one — that's the actual RFC822 email content.
+                # Small items are IMAP protocol lines (e.g. "44 FETCH (RFC822 {size})").
                 raw_bytes = None
+                max_len = 0
                 for item in msg_data:
-                    if isinstance(item, bytes):
+                    if isinstance(item, (bytes, bytearray)) and len(item) > max_len:
                         raw_bytes = item
-                        break
+                        max_len = len(item)
                 if raw_bytes is None:
                     continue
 
@@ -107,22 +111,26 @@ class IMAPClient:
 
                 message_id = msg.get("Message-ID", "") or f"<no-msgid-uid-{uid_str}@imap>"
 
-                emails.append(
-                    EmailMessage(
-                        uid=uid_str,
-                        message_id=message_id,
-                        from_addr=msg.get("From", ""),
-                        to_addr=msg.get("To", ""),
-                        cc=msg.get("Cc", "") or "",
-                        subject=msg.get("Subject", "(no subject)"),
-                        body_text=body_text[:5000],
-                        body_html=body_html[:10000],
-                        date=msg.get("Date", ""),
-                        in_reply_to=msg.get("In-Reply-To", "") or "",
-                        references=msg.get("References", "") or "",
-                        has_attachments=has_attachments,
-                    )
+                email_msg = EmailMessage(
+                    uid=uid_str,
+                    message_id=message_id,
+                    from_addr=msg.get("From", ""),
+                    to_addr=msg.get("To", ""),
+                    cc=msg.get("Cc", "") or "",
+                    subject=msg.get("Subject", "(no subject)"),
+                    body_text=body_text[:5000],
+                    body_html=body_html[:10000],
+                    date=msg.get("Date", ""),
+                    in_reply_to=msg.get("In-Reply-To", "") or "",
+                    references=msg.get("References", "") or "",
+                    has_attachments=has_attachments,
                 )
+                logger.info(
+                    "Fetched email: from=%s cc=%s subject=%s date=%s has_attachments=%s",
+                    email_msg.from_addr, email_msg.cc, email_msg.subject,
+                    email_msg.date, email_msg.has_attachments,
+                )
+                emails.append(email_msg)
             except Exception:
                 logger.exception("Error fetching email UID %s", uid)
 
