@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from memory.models import Conversation, Memory, Message
+from memory.models import Connaissance, Conversation, Entity, Memory, Message, Souvenir, Theme
 
 
 class MessageInline(admin.TabularInline):
@@ -24,3 +24,40 @@ class MessageAdmin(admin.ModelAdmin):
 @admin.register(Memory)
 class MemoryAdmin(admin.ModelAdmin):
     list_display = ("pk", "summary", "keywords", "created_at")
+
+
+@admin.register(Souvenir)
+class SouvenirAdmin(admin.ModelAdmin):
+    list_display = ("pk", "content_short", "emotion", "importance", "occurred_at")
+    list_filter = ("emotion", "themes")
+    search_fields = ("content",)
+    filter_horizontal = ("themes", "entities")
+
+    @admin.display(description="Contenu")
+    def content_short(self, obj):
+        return obj.content[:80] + "..." if len(obj.content) > 80 else obj.content
+
+
+@admin.register(Connaissance)
+class ConnaissanceAdmin(admin.ModelAdmin):
+    list_display = ("pk", "content_short", "confidence", "is_valid", "created_at")
+    list_filter = ("is_valid", "themes")
+    search_fields = ("content",)
+    filter_horizontal = ("themes", "entities")
+
+    @admin.display(description="Contenu")
+    def content_short(self, obj):
+        return obj.content[:80] + "..." if len(obj.content) > 80 else obj.content
+
+
+@admin.register(Theme)
+class ThemeAdmin(admin.ModelAdmin):
+    list_display = ("pk", "name")
+    search_fields = ("name",)
+
+
+@admin.register(Entity)
+class EntityAdmin(admin.ModelAdmin):
+    list_display = ("pk", "name", "entity_type")
+    list_filter = ("entity_type",)
+    search_fields = ("name",)
