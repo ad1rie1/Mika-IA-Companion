@@ -9,7 +9,6 @@ export class AnimationMixer {
 
   private breatheTimer = 0;
   private isSpeaking = false;
-  private speakTimer = 0;
 
   setVRM(vrm: VRM) {
     this.vrm = vrm;
@@ -19,14 +18,16 @@ export class AnimationMixer {
     this.isSpeaking = speaking;
   }
 
+  getIsSpeaking(): boolean {
+    return this.isSpeaking;
+  }
+
   update(delta: number) {
     if (!this.vrm) return;
 
     this.updateBlink(delta);
     this.updateBreathe(delta);
-    if (this.isSpeaking) {
-      this.updateLipSync(delta);
-    }
+    // Lip sync is now handled by LipSyncController
   }
 
   private updateBlink(delta: number) {
@@ -67,18 +68,5 @@ export class AnimationMixer {
       const breatheAmount = Math.sin(this.breatheTimer * 1.5) * 0.005;
       spine.rotation.x = breatheAmount;
     }
-  }
-
-  private updateLipSync(delta: number) {
-    if (!this.vrm?.expressionManager) return;
-
-    this.speakTimer += delta;
-    // Simple mouth open/close for speaking
-    const mouthValue =
-      (Math.sin(this.speakTimer * 12) * 0.3 +
-        Math.sin(this.speakTimer * 7) * 0.2 +
-        0.1) *
-      0.6;
-    this.vrm.expressionManager.setValue("aa", Math.max(0, mouthValue));
   }
 }
