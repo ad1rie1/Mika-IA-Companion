@@ -22,17 +22,12 @@ logger = logging.getLogger(__name__)
 INTERPRETATION_TIMEOUT = 15  # seconds
 
 # fmt: off
-INTERPRETATION_PROMPT = """\
+INTERPRETATION_SYSTEM_PROMPT = """\
 Tu es le module d'interpretation sensorielle de {name}. \
 Tu ne reponds PAS a la conversation. Tu ANALYSES un signal entrant \
 et tu retournes UNIQUEMENT du JSON valide.
 
 {name} est: {description}. Ses interets: {interests}.
-
-SIGNAL A INTERPRETER:
-Source: {source}
-Type: {event_type}
-Contenu: {content}
 
 RETOURNE ce JSON (rien d'autre):
 {{
@@ -221,25 +216,23 @@ class SignalInterpreter:
         return self._parse_response(raw, event)
 
     def _get_system_prompt(self) -> str:
-        """Build interpretation prompt with personality context."""
+        """Build interpretation system prompt with personality context."""
         if self._system_prompt is None:
             from config.personality import personality
 
             interests = ", ".join(personality.interests) if personality.interests else ""
-            self._system_prompt = INTERPRETATION_PROMPT.format(
+            self._system_prompt = INTERPRETATION_SYSTEM_PROMPT.format(
                 name=personality.name,
                 description=personality.description,
                 interests=interests,
-                source="{source}",
-                event_type="{event_type}",
-                content="{content}",
             )
         return self._system_prompt
 
     def _build_prompt(self, event: ModuleEvent) -> str:
-        """Build the user prompt for Haiku interpretation."""
+        """Build the user prompt for Haiku interpretation with actual event data."""
         content = json.dumps(event.data, ensure_ascii=False, default=str)[:1000]
         return (
+            f"SIGNAL A INTERPRETER:\n"
             f"Source: {event.source_module}\n"
             f"Type: {event.event_type}\n"
             f"Contenu: {content}"

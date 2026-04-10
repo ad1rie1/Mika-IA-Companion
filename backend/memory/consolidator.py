@@ -201,6 +201,9 @@ class MemoryConsolidator:
                     )
 
                 elif extraction["type"] == "connaissance":
+                    # Check if new info contradicts existing connaissances
+                    await self._check_contradictions(extraction["content"])
+
                     # Check for duplicate connaissances
                     existing = await self._find_similar_connaissance(
                         extraction["content"]
@@ -367,6 +370,71 @@ class MemoryConsolidator:
                     "Decayed connaissance #%d confidence to %.2f",
                     conn.pk, conn.confidence,
                 )
+
+    async def _check_contradictions(self, new_content: str) -> None:
+        """Check if new connaissance contradicts existing ones.
+
+        Uses vector search to find semantically related connaissances,
+        then validates each with LLM. Invalidates contradicted ones.
+        """
+        from memory.models import Connaissance
+
+        try:
+            raw = await sync_to_async(self.vector_store.search_connaissances)(
+                new_content, n=5
+            )
+            if not raw:
+                return
+
+            for r in raw:
+                try:
+                    pk = int(r["id"])
+                    conn = await sync_to_async(Connaissance.objects.get)(
+                        pk=pk, is_valid=True
+                    )
+                except (Connaissance.DoesNotExist, ValueError):
+                    continue
+
+                # Skip if very similar (duplicate, not contradiction)
+                if r.get("distance") is not None and r["distance"] < 0.15:
+                    continue
+
+                try:
+                    still_valid, new_confidence = (
+                        await self.extractor.check_connaissance_validity(
+                            conn.content, new_content
+                        )
+                    )
+                except Exception:
+                    logger.warning(
+                        "Validity check failed for connaissance #%d", conn.pk
+                    )
+                    continue
+
+                if not still_valid:
+                    conn.is_valid = False
+                    await sync_to_async(conn.save)(update_fields=["is_valid"])
+                    try:
+                        await sync_to_async(self.vector_store.add_connaissance)(
+                            connaissance_id=conn.pk,
+                            content=conn.content,
+                            metadata={
+                                "confidence": conn.confidence,
+                                "is_valid": False,
+                            },
+                        )
+                    except Exception:
+                        pass
+                    logger.info(
+                        "Consolidator invalidated connaissance #%d: %s (contradicted by: %s)",
+                        conn.pk, conn.content[:80], new_content[:80],
+                    )
+                elif abs(new_confidence - conn.confidence) > 0.05:
+                    conn.confidence = new_confidence
+                    await sync_to_async(conn.save)(update_fields=["confidence"])
+
+        except Exception:
+            logger.debug("Contradiction check failed", exc_info=True)
 
     async def _find_similar_connaissance(self, content: str):
         """Check if a similar connaissance already exists via vector search."""

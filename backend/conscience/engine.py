@@ -49,6 +49,7 @@ class ConscienceEngine:
         self._last_activity: float = time.time()
         self._last_action_time: float = 0.0
         self._greeted_periods: set[str] = set()
+        self._greeted_date: object = None  # date of last greeting reset
         self._initialized = False
 
         # Config (loaded from settings on initialize)
@@ -66,6 +67,9 @@ class ConscienceEngine:
         self._cooldown_seconds = getattr(settings, "CONSCIENCE_COOLDOWN_SECONDS", 300)
         self._threshold = getattr(settings, "CONSCIENCE_ACT_THRESHOLD", 0.5)
 
+        # Restore cooldown from last "act" decision log (survives restarts)
+        await self._restore_cooldown()
+
         await self.observer_registry.start_all()
         self._decision_task = asyncio.create_task(self._decision_loop())
         self._initialized = True
@@ -76,6 +80,33 @@ class ConscienceEngine:
             self._cooldown_seconds,
             self._threshold,
         )
+
+    async def _restore_cooldown(self) -> None:
+        """Restore _last_action_time from the most recent 'act' ConscienceLog.
+
+        This ensures the cooldown survives process restarts — without it,
+        the conscience would act immediately after every restart.
+        """
+        from conscience.models import ConscienceLog
+
+        try:
+            last_act = await sync_to_async(
+                lambda: ConscienceLog.objects.filter(decision="act")
+                .order_by("-created_at")
+                .first()
+            )()
+            if last_act:
+                self._last_action_time = last_act.created_at.timestamp()
+                elapsed = time.time() - self._last_action_time
+                if elapsed < self._cooldown_seconds:
+                    logger.info(
+                        "Conscience cooldown restored: %ds remaining",
+                        int(self._cooldown_seconds - elapsed),
+                    )
+                else:
+                    logger.debug("Last conscience action was %ds ago (cooldown expired)", int(elapsed))
+        except Exception:
+            logger.debug("Could not restore cooldown", exc_info=True)
 
     async def shutdown(self) -> None:
         if self._decision_task:
@@ -171,6 +202,8 @@ class ConscienceEngine:
 
         Protected by _decision_lock to prevent concurrent decisions from
         the periodic loop and high-pertinence fast-path racing.
+        Note: locked() check is safe in asyncio (single-threaded event loop,
+        no preemption between check and acquire within the same coroutine step).
         """
         if self._decision_lock.locked():
             logger.debug("Decision already in progress, skipping")
@@ -202,6 +235,13 @@ class ConscienceEngine:
 
         if decision == "act":
             await self._act(ctx, reason)
+        elif decision == "skip" or decision == "wait":
+            # Mark old pending observations as skipped (older than 30 min
+            # won't be picked up again anyway)
+            await self._mark_stale_observations()
+
+        # Periodic cleanup of old observations
+        await self._cleanup_old_observations()
 
     async def _build_context(self) -> DecisionContext:
         """Gather all context needed for a decision."""
@@ -219,7 +259,7 @@ class ConscienceEngine:
         pending = await sync_to_async(
             lambda: list(
                 Observation.objects.filter(
-                    acted_upon=False,
+                    status="pending",
                     created_at__gte=cutoff,
                 ).order_by("-pertinence")[:20]
             )
@@ -349,6 +389,48 @@ class ConscienceEngine:
 
         return actions
 
+    async def _mark_stale_observations(self) -> None:
+        """Mark pending observations older than 30 min as skipped."""
+        from conscience.models import Observation
+        from django.utils import timezone as tz
+        from datetime import timedelta
+
+        cutoff = tz.now() - timedelta(minutes=30)
+        try:
+            count = await sync_to_async(
+                lambda: Observation.objects.filter(
+                    status="pending",
+                    created_at__lt=cutoff,
+                ).update(status="skipped", acted_upon=True)
+            )()
+            if count:
+                logger.debug("Marked %d stale observations as skipped", count)
+        except Exception:
+            logger.debug("Failed to mark stale observations", exc_info=True)
+
+    async def _cleanup_old_observations(self) -> None:
+        """Delete observations older than 48h that are no longer pending.
+
+        Runs every decision cycle but the query is cheap (indexed).
+        Keeps the Observation table from growing unbounded.
+        """
+        from conscience.models import Observation
+        from django.utils import timezone as tz
+        from datetime import timedelta
+
+        cutoff = tz.now() - timedelta(hours=48)
+        try:
+            count = await sync_to_async(
+                lambda: Observation.objects.filter(
+                    created_at__lt=cutoff,
+                ).exclude(status="pending").delete()
+            )()
+            # .delete() returns (total, {model: count}) tuple
+            if count and count[0]:
+                logger.info("Cleaned up %d old observations", count[0])
+        except Exception:
+            logger.debug("Observation cleanup failed", exc_info=True)
+
     # ── 4. ACT ────────────────────────────────────────────────────
 
     async def _act(self, ctx: DecisionContext, reason: str) -> None:
@@ -441,13 +523,13 @@ class ConscienceEngine:
                 },
             )
 
-            # Mark observations as acted upon
+            # Mark observations as acted
             for obs in ctx.pending_observations:
-                obs.acted_upon = True
                 obs.status = "acted"
+                obs.acted_upon = True  # backward compat
                 obs.action_response = response_text[:200]
                 await sync_to_async(obs.save)(
-                    update_fields=["acted_upon", "status", "action_response"]
+                    update_fields=["status", "acted_upon", "action_response"]
                 )
 
             if tool_calls:

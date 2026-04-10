@@ -118,3 +118,17 @@ EMOTION_MOOD_SHIFT_RATE = env.float("EMOTION_MOOD_SHIFT_RATE", default=0.01)
 CONSCIENCE_DECISION_INTERVAL = env.int("CONSCIENCE_DECISION_INTERVAL", default=30)
 CONSCIENCE_COOLDOWN_SECONDS = env.int("CONSCIENCE_COOLDOWN_SECONDS", default=300)
 CONSCIENCE_ACT_THRESHOLD = env.float("CONSCIENCE_ACT_THRESHOLD", default=0.5)
+
+# RSS Observer
+# Format: comma-separated "name|url" pairs, e.g. "Tech|https://example.com/rss,Gaming|https://other.com/feed"
+_rss_raw = env("RSS_FEEDS", default="")
+RSS_FEEDS = []
+if _rss_raw:
+    for entry in _rss_raw.split(","):
+        entry = entry.strip()
+        if "|" in entry:
+            name, url = entry.split("|", 1)
+            RSS_FEEDS.append({"name": name.strip(), "url": url.strip()})
+        elif entry:
+            RSS_FEEDS.append({"name": entry, "url": entry})
+RSS_POLL_INTERVAL = env.int("RSS_POLL_INTERVAL", default=600)
