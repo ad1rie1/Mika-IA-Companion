@@ -47,6 +47,7 @@ class ModuleManager:
         self._tick_interval: int = DEFAULT_TICK_INTERVAL
         self._tools_cache: list[ModuleTool] | None = None
         self._mcp_server: McpSdkServerConfig | None = None
+        self._conscience_callback: Callable[[ModuleEvent], Awaitable[None]] | None = None
 
     # ── Registration ──────────────────────────────────────────────
 
@@ -256,10 +257,26 @@ class ModuleManager:
                 patterns.append(path(url_path, route.handler, name=url_name))
         return patterns
 
+    # ── Conscience Wiring ────────────────────────────────────────
+
+    def set_conscience(
+        self, callback: Callable[[ModuleEvent], Awaitable[None]]
+    ) -> None:
+        """Wire the Conscience engine to receive all events."""
+        self._conscience_callback = callback
+        logger.info("Conscience callback registered")
+
     # ── Event Bus ─────────────────────────────────────────────────
 
     async def emit_event(self, event: ModuleEvent) -> None:
-        """Broadcast an event to all modules except the source."""
+        """Broadcast an event to Conscience first, then to all modules."""
+        # Forward to Conscience (if wired)
+        if self._conscience_callback:
+            try:
+                await self._conscience_callback(event)
+            except Exception:
+                logger.exception("Error forwarding event to conscience")
+
         for module in self._modules.values():
             if module.name != event.source_module and module.is_running:
                 try:

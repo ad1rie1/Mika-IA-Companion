@@ -37,6 +37,7 @@ class LifespanWrapper:
     async def _startup(self):
         from chat.consumers import handle_chat
         from ai.emotion_engine import emotion_engine
+        from conscience.engine import conscience_engine
 
         await memory_manager.initialize()
         logger.info("Memory system initialized")
@@ -44,11 +45,19 @@ class LifespanWrapper:
         await emotion_engine.initialize()
         logger.info("Emotion engine initialized")
 
+        await conscience_engine.initialize()
+        module_manager.set_conscience(conscience_engine.observe)
+        logger.info("Conscience initialized and wired to event bus")
+
         await module_manager.start_all(handle_chat)
         logger.info("All modules started")
 
     async def _shutdown(self):
         from ai.emotion_engine import emotion_engine
+        from conscience.engine import conscience_engine
+
+        await conscience_engine.shutdown()
+        logger.info("Conscience shut down")
 
         await emotion_engine.shutdown()
         logger.info("Emotion engine shut down")

@@ -27,6 +27,7 @@ INSTALLED_APPS = [
     "ai",
     "chat",
     "memory",
+    "conscience",
     "modules",
 ]
 
@@ -114,7 +115,12 @@ EMOTION_DECAY_RATE = env.float("EMOTION_DECAY_RATE", default=0.02)  # intensity 
 EMOTION_MOOD_SHIFT_RATE = env.float("EMOTION_MOOD_SHIFT_RATE", default=0.01)
 
 # --- Proactive Module ---
-PROACTIVE_ENABLED = env.bool("PROACTIVE_ENABLED", default=True)
+PROACTIVE_ENABLED = env.bool("PROACTIVE_ENABLED", default=False)  # Superseded by Conscience
 PROACTIVE_IDLE_MINUTES = env.int("PROACTIVE_IDLE_MINUTES", default=10)
 PROACTIVE_COOLDOWN_MINUTES = env.int("PROACTIVE_COOLDOWN_MINUTES", default=5)
 PROACTIVE_MOOD_THRESHOLD = env.float("PROACTIVE_MOOD_THRESHOLD", default=0.7)
+
+# --- Conscience ---
+CONSCIENCE_DECISION_INTERVAL = env.int("CONSCIENCE_DECISION_INTERVAL", default=30)
+CONSCIENCE_COOLDOWN_SECONDS = env.int("CONSCIENCE_COOLDOWN_SECONDS", default=300)
+CONSCIENCE_ACT_THRESHOLD = env.float("CONSCIENCE_ACT_THRESHOLD", default=0.5)
