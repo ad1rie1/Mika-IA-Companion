@@ -30,3 +30,4 @@ class DecisionContext:
     in_cooldown: bool           # True if last action was within cooldown window
     max_pertinence: float
     weighted_urgency: float     # Accumulated pertinence score
+    scheduled_actions: list = field(default_factory=list)  # Due ScheduledAction instances

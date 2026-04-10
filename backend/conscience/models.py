@@ -90,3 +90,37 @@ class ConscienceLog(models.Model):
 
     def __str__(self):
         return f"[{self.decision}] {self.reason[:60]} ({self.created_at:%H:%M})"
+
+
+class ScheduledAction(models.Model):
+    """A deferred action scheduled by the conscience or Claude.
+
+    Created via the schedule_action tool. Picked up by the conscience
+    decision loop when scheduled_at <= now, contributing to the score
+    as Factor 6. Executed during _act() alongside pending observations.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending"
+        EXECUTED = "executed"
+        CANCELLED = "cancelled"
+
+    scheduled_at = models.DateTimeField()
+    prompt = models.TextField()
+    priority = models.FloatField(default=0.5)
+    source = models.CharField(max_length=50)
+    context_data = models.JSONField(default=dict)
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.PENDING,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    executed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["scheduled_at"]
+        indexes = [
+            models.Index(fields=["status", "scheduled_at"]),
+        ]
+
+    def __str__(self):
+        return f"[{self.status}] {self.prompt[:60]} @ {self.scheduled_at:%H:%M}"

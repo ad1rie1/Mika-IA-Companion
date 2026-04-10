@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from conscience.models import ConscienceLog, Observation
+from conscience.models import ConscienceLog, Observation, ScheduledAction
 
 
 @admin.register(Observation)
@@ -31,3 +31,14 @@ class ConscienceLogAdmin(admin.ModelAdmin):
         "created_at",
     ]
     list_filter = ["decision"]
+
+
+@admin.register(ScheduledAction)
+class ScheduledActionAdmin(admin.ModelAdmin):
+    list_display = ["pk", "prompt_short", "scheduled_at", "priority", "source", "status"]
+    list_filter = ["status", "source"]
+    readonly_fields = ["created_at", "executed_at"]
+
+    @admin.display(description="Prompt")
+    def prompt_short(self, obj):
+        return obj.prompt[:80] + "..." if len(obj.prompt) > 80 else obj.prompt

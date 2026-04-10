@@ -99,6 +99,10 @@ class WakeModule(BaseModule):
                 description="Programmer un reveil spontane pour parler plus tard",
                 tool_names=["trigger_wake"],
             ),
+            ModuleCapability(
+                description="Programmer une action differee (rappel, verification, message futur)",
+                tool_names=["schedule_action", "list_scheduled_actions", "cancel_scheduled_action"],
+            ),
         ]
 
     def return_tools(self) -> list[ModuleTool]:
@@ -125,6 +129,51 @@ class WakeModule(BaseModule):
                 ],
                 handler=self._tool_trigger_wake,
             ),
+            ModuleTool(
+                name="schedule_action",
+                description=(
+                    "Schedule a deferred action to execute later. "
+                    "The conscience will automatically trigger this action "
+                    "when the scheduled time arrives."
+                ),
+                parameters=[
+                    ToolParameter(
+                        name="prompt",
+                        type=ToolParameterType.STRING,
+                        description="What to say or do when the action triggers",
+                    ),
+                    ToolParameter(
+                        name="delay_minutes",
+                        type=ToolParameterType.INTEGER,
+                        description="Minutes from now to execute (1-1440)",
+                    ),
+                    ToolParameter(
+                        name="priority",
+                        type=ToolParameterType.NUMBER,
+                        description="Priority 0.0-1.0 (default 0.5). Higher = more likely to trigger alone",
+                        required=False,
+                    ),
+                ],
+                handler=self._tool_schedule_action,
+            ),
+            ModuleTool(
+                name="list_scheduled_actions",
+                description="List all pending scheduled actions",
+                parameters=[],
+                handler=self._tool_list_scheduled,
+            ),
+            ModuleTool(
+                name="cancel_scheduled_action",
+                description="Cancel a pending scheduled action by ID",
+                parameters=[
+                    ToolParameter(
+                        name="action_id",
+                        type=ToolParameterType.INTEGER,
+                        description="ID of the scheduled action to cancel",
+                    ),
+                ],
+                handler=self._tool_cancel_scheduled,
+            ),
         ]
 
     async def _tool_trigger_wake(self, args: dict) -> dict:
@@ -137,6 +186,94 @@ class WakeModule(BaseModule):
                 {"type": "text", "text": f"Wake request #{wake_id} created."}
             ]
         }
+
+    async def _tool_schedule_action(self, args: dict) -> dict:
+        from asgiref.sync import sync_to_async
+        from datetime import timedelta
+        from django.utils import timezone
+
+        from conscience.models import ScheduledAction
+
+        delay = max(1, min(1440, args["delay_minutes"]))
+        priority = max(0.0, min(1.0, args.get("priority", 0.5)))
+        scheduled_at = timezone.now() + timedelta(minutes=delay)
+
+        action = await sync_to_async(ScheduledAction.objects.create)(
+            scheduled_at=scheduled_at,
+            prompt=args["prompt"],
+            priority=priority,
+            source="ai_tool",
+        )
+
+        self.logger.info(
+            "Scheduled action #%d in %dmin (priority=%.1f): %s",
+            action.pk, delay, priority, args["prompt"][:80],
+        )
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        f"Action #{action.pk} programmee pour "
+                        f"{scheduled_at.strftime('%H:%M')} "
+                        f"(dans {delay}min, priorite {priority})."
+                    ),
+                }
+            ]
+        }
+
+    async def _tool_list_scheduled(self, args: dict) -> dict:
+        from asgiref.sync import sync_to_async
+        from django.utils import timezone
+
+        from conscience.models import ScheduledAction
+
+        now = timezone.now()
+        actions = await sync_to_async(
+            lambda: list(
+                ScheduledAction.objects.filter(status="pending")
+                .order_by("scheduled_at")
+                .values("id", "prompt", "scheduled_at", "priority", "source")[:20]
+            )
+        )()
+
+        if not actions:
+            return {"content": [{"type": "text", "text": "Aucune action programmee."}]}
+
+        lines = []
+        for a in actions:
+            delta = a["scheduled_at"] - now
+            mins = int(delta.total_seconds() / 60)
+            status = f"dans {mins}min" if mins > 0 else "DUE"
+            lines.append(
+                f"- [#{a['id']}] ({status}, priorite {a['priority']}) "
+                f"{a['prompt'][:80]} [source: {a['source']}]"
+            )
+        return {"content": [{"type": "text", "text": "\n".join(lines)}]}
+
+    async def _tool_cancel_scheduled(self, args: dict) -> dict:
+        from asgiref.sync import sync_to_async
+
+        from conscience.models import ScheduledAction
+
+        try:
+            action = await sync_to_async(ScheduledAction.objects.get)(
+                pk=args["action_id"], status="pending"
+            )
+            action.status = "cancelled"
+            await sync_to_async(action.save)(update_fields=["status"])
+            return {
+                "content": [
+                    {"type": "text", "text": f"Action #{action.pk} annulee."}
+                ]
+            }
+        except ScheduledAction.DoesNotExist:
+            return {
+                "content": [
+                    {"type": "text", "text": f"Action #{args['action_id']} non trouvee ou deja traitee."}
+                ],
+                "isError": True,
+            }
 
     # ── Routes ────────────────────────────────────────────────────
 
@@ -174,6 +311,19 @@ class WakeModule(BaseModule):
         )
         await self._process_pending()
         return JsonResponse({"status": "processed", "wake_id": wake_id})
+
+    # ── Context ───────────────────────────────────────────────────
+
+    def get_context(self) -> str:
+        from conscience.models import ScheduledAction
+
+        try:
+            count = ScheduledAction.objects.filter(status="pending").count()
+            if count:
+                return f"Tu as {count} action(s) programmee(s) en attente."
+        except Exception:
+            pass
+        return ""
 
     # ── Status ────────────────────────────────────────────────────
 

@@ -281,6 +281,9 @@ class ConscienceEngine:
         max_p = max(pertinences) if pertinences else 0.0
         weighted = sum(p * 0.5 for p in pertinences if p > 0.3)
 
+        # Poll due scheduled actions
+        scheduled = await self._poll_scheduled_actions()
+
         return DecisionContext(
             pending_observations=pending,
             global_mood=glob.emotion.value,
@@ -289,7 +292,45 @@ class ConscienceEngine:
             in_cooldown=in_cooldown,
             max_pertinence=max_p,
             weighted_urgency=min(1.0, weighted),
+            scheduled_actions=scheduled,
         )
+
+    async def _poll_scheduled_actions(self) -> list:
+        """Query scheduled actions that are due (scheduled_at <= now)."""
+        from conscience.models import ScheduledAction
+        from django.utils import timezone as tz
+
+        try:
+            return await sync_to_async(
+                lambda: list(
+                    ScheduledAction.objects.filter(
+                        status="pending",
+                        scheduled_at__lte=tz.now(),
+                    ).order_by("scheduled_at")[:10]
+                )
+            )()
+        except Exception:
+            logger.debug("Failed to poll scheduled actions", exc_info=True)
+            return []
+
+    async def _get_upcoming_actions(self, limit: int = 5) -> list[tuple]:
+        """Get future pending actions (not yet due). Returns [(action, minutes_until), ...]."""
+        from conscience.models import ScheduledAction
+        from django.utils import timezone as tz
+
+        now = tz.now()
+        try:
+            actions = await sync_to_async(
+                lambda: list(
+                    ScheduledAction.objects.filter(
+                        status="pending",
+                        scheduled_at__gt=now,
+                    ).order_by("scheduled_at")[:limit]
+                )
+            )()
+            return [(a, int((a.scheduled_at - now).total_seconds() / 60)) for a in actions]
+        except Exception:
+            return []
 
     def _compute_score(self, ctx: DecisionContext) -> tuple[float, str]:
         """Unified scoring. Returns (score, reason_string)."""
@@ -330,6 +371,12 @@ class ConscienceEngine:
         if time_trigger:
             score += 0.35
             parts.append(f"time({time_trigger})")
+
+        # Factor 6: Scheduled actions due
+        if ctx.scheduled_actions:
+            max_priority = max(a.priority for a in ctx.scheduled_actions)
+            score += max_priority * 0.5
+            parts.append(f"scheduled({len(ctx.scheduled_actions)})")
 
         reason = ", ".join(parts) if parts else "no_signal"
         return score, reason
@@ -453,7 +500,7 @@ class ConscienceEngine:
 
         # Build prompt with capabilities summary
         capabilities_summary = module_manager.collect_capabilities_summary()
-        prompt = self._build_action_prompt(ctx, reason, memory_context, capabilities_summary)
+        prompt = await self._build_action_prompt(ctx, reason, memory_context, capabilities_summary)
 
         try:
             # Build filtered MCP server with only relevant modules' tools
@@ -532,6 +579,20 @@ class ConscienceEngine:
                     update_fields=["status", "acted_upon", "action_response"]
                 )
 
+            # Mark scheduled actions as executed
+            if ctx.scheduled_actions:
+                from django.utils import timezone as tz
+                now_tz = tz.now()
+                for action in ctx.scheduled_actions:
+                    action.status = "executed"
+                    action.executed_at = now_tz
+                    await sync_to_async(action.save)(
+                        update_fields=["status", "executed_at"]
+                    )
+                logger.info(
+                    "Executed %d scheduled action(s)", len(ctx.scheduled_actions)
+                )
+
             if tool_calls:
                 logger.info(
                     "Conscience tool calls: %s",
@@ -561,14 +622,17 @@ class ConscienceEngine:
         # Always include modules whose events triggered this decision
         relevant = list(sources)
 
-        # Add wake if we might want to self-schedule
-        if any(obs.pertinence > 0.6 for obs in ctx.pending_observations):
+        # Add wake if we might want to self-schedule or have scheduled actions
+        if (
+            ctx.scheduled_actions
+            or any(obs.pertinence > 0.6 for obs in ctx.pending_observations)
+        ):
             if "wake" not in relevant:
                 relevant.append("wake")
 
         return relevant
 
-    def _build_action_prompt(
+    async def _build_action_prompt(
         self,
         ctx: DecisionContext,
         reason: str,
@@ -576,7 +640,24 @@ class ConscienceEngine:
         capabilities_summary: str = "",
     ) -> str:
         """Build a rich prompt from accumulated observations + memory + capabilities."""
+        import json as _json
+
         parts = []
+
+        # Scheduled actions due (highest priority — these are self-assigned tasks)
+        if ctx.scheduled_actions:
+            action_lines = []
+            for act in ctx.scheduled_actions[:3]:
+                action_lines.append(f"- {act.prompt[:200]}")
+                if act.context_data:
+                    action_lines.append(
+                        f"  Contexte: {_json.dumps(act.context_data, ensure_ascii=False)[:200]}"
+                    )
+            parts.append(
+                "Actions que tu avais programmees et qui sont maintenant dues:\n"
+                + "\n".join(action_lines)
+                + "\nExecute ces actions dans ta reponse."
+            )
 
         # What you've observed
         if ctx.pending_observations:
@@ -615,6 +696,15 @@ class ConscienceEngine:
             parts.append(
                 "Ce que tu peux faire (utilise les outils si pertinent):\n"
                 + capabilities_summary
+            )
+
+        # Upcoming scheduled actions (so Claude knows what's already planned)
+        upcoming = await self._get_upcoming_actions()
+        if upcoming:
+            upcoming_lines = [f"- Dans {mins}min: {a.prompt[:80]}" for a, mins in upcoming]
+            parts.append(
+                "Tu as deja programme ces actions futures:\n"
+                + "\n".join(upcoming_lines)
             )
 
         # Memory context
