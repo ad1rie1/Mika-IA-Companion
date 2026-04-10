@@ -12,6 +12,7 @@ from django.urls import path
 from modules.base import BaseModule
 from modules.types import (
     AIDecision,
+    ModuleCapability,
     ModuleEvent,
     ModuleNotification,
     ModuleStatus,
@@ -226,6 +227,84 @@ class ModuleManager:
         """Force rebuild of tool cache and MCP server on next use."""
         self._tools_cache = None
         self._mcp_server = None
+
+    # ── Capabilities ─────────────────────────────────────────────
+
+    def collect_capabilities(self) -> dict[str, list[ModuleCapability]]:
+        """Collect capabilities from all running modules.
+
+        Returns {module_name: [capabilities]}.
+        Used by the Conscience to know what actions are available
+        without loading all MCP tools.
+        """
+        result: dict[str, list[ModuleCapability]] = {}
+        for module in self._modules.values():
+            if module.is_running:
+                caps = module.get_capabilities()
+                if caps:
+                    result[module.name] = caps
+        return result
+
+    def collect_capabilities_summary(self) -> str:
+        """Format capabilities as a readable summary for prompts.
+
+        Example output:
+          [email] Lire, lister et chercher dans les emails recus
+          [email] Envoyer des emails
+          [wake] Programmer un reveil spontane
+        """
+        lines: list[str] = []
+        for module_name, caps in self.collect_capabilities().items():
+            for cap in caps:
+                lines.append(f"[{module_name}] {cap.description}")
+        return "\n".join(lines)
+
+    def get_tools_for_modules(self, module_names: list[str]) -> list[ModuleTool]:
+        """Collect tools only from specific modules (selective loading)."""
+        tools: list[ModuleTool] = []
+        seen: set[str] = set()
+        for name in module_names:
+            module = self._modules.get(name)
+            if not module or not module.is_running:
+                continue
+            for tool in module.return_tools():
+                if tool.name not in seen:
+                    seen.add(tool.name)
+                    tools.append(tool)
+        return tools
+
+    def build_mcp_server_for(self, module_names: list[str]):
+        """Build an MCP server with tools from specific modules only.
+
+        Returns (server_config, tool_names) or (None, []).
+        """
+        from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server
+
+        tools = self.get_tools_for_modules(module_names)
+        if not tools:
+            return None, []
+
+        sdk_tools = [
+            SdkMcpTool(
+                name=t.name,
+                description=t.description,
+                input_schema=t.to_json_schema(),
+                handler=self._wrap_handler(t.name, t.handler),
+            )
+            for t in tools
+        ]
+
+        server = create_sdk_mcp_server(
+            name="vtuber_modules_filtered",
+            version="1.0.0",
+            tools=sdk_tools,
+        )
+        tool_names = [t.name for t in tools]
+        logger.info(
+            "Built filtered MCP server: %d tool(s) from %s",
+            len(sdk_tools), module_names,
+        )
+        return server, tool_names
 
     # ── Context Aggregation ───────────────────────────────────────
 

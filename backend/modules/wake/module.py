@@ -10,6 +10,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from modules.base import BaseModule
 from modules.types import (
+    ModuleCapability,
     ModuleNotification,
     ModuleRoute,
     ModuleStatus,
@@ -90,7 +91,15 @@ class WakeModule(BaseModule):
         self.logger.info("Wake request #%d created from %s", req.pk, source)
         return req.pk
 
-    # ── Tools ─────────────────────────────────────────────────────
+    # ── Capabilities & Tools ────────────────────────────────────────
+
+    def get_capabilities(self) -> list[ModuleCapability]:
+        return [
+            ModuleCapability(
+                description="Programmer un reveil spontane pour parler plus tard",
+                tool_names=["trigger_wake"],
+            ),
+        ]
 
     def return_tools(self) -> list[ModuleTool]:
         return [

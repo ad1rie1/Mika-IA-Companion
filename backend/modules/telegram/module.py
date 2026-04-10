@@ -16,7 +16,7 @@ from telegram.ext import (
 
 from config.personality import personality
 from modules.base import BaseModule
-from modules.types import ModuleNotification
+from modules.types import ModuleCapability, ModuleEvent, ModuleNotification
 
 logger = logging.getLogger(__name__)
 
@@ -62,12 +62,30 @@ class TelegramModule(BaseModule):
         if not update.message or not update.message.text:
             return
 
+        person_id = f"tg_{update.message.from_user.id}"
+        user_name = update.message.from_user.first_name or str(update.message.from_user.id)
+
+        # Emit event for the Conscience to observe (async, non-blocking)
+        from modules.manager import module_manager
+
+        await module_manager.emit_event(
+            ModuleEvent(
+                event_type="telegram.message",
+                source_module=self.name,
+                data={
+                    "person_id": person_id,
+                    "user_name": user_name,
+                    "text": update.message.text,
+                },
+            )
+        )
+
+        # Direct response — Telegram needs a synchronous reply
         if self._notify_ai:
-            person_id = f"tg_{update.message.from_user.id}"
             decision = await self._notify_ai(
                 ModuleNotification(
                     source_module=self.name,
-                    summary=f"Telegram message from user {update.message.from_user.id}",
+                    summary=f"Telegram message from {user_name}",
                     details=update.message.text,
                     urgency="normal",
                     metadata={"person_id": person_id},
@@ -78,6 +96,15 @@ class TelegramModule(BaseModule):
             await update.message.reply_text(
                 "Je ne suis pas encore connectée au cerveau !"
             )
+
+    # ── Capabilities ──────────────────────────────────────────────
+
+    def get_capabilities(self) -> list[ModuleCapability]:
+        return [
+            ModuleCapability(
+                description="Recevoir et repondre aux messages Telegram",
+            ),
+        ]
 
     # ── Context ───────────────────────────────────────────────────
 

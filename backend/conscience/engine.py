@@ -107,7 +107,7 @@ class ConscienceEngine:
                 await sync_to_async(observation.save)(update_fields=["souvenir"])
 
         # Track activity for idle detection
-        if event.event_type == "chat.message":
+        if event.event_type in ("chat.message", "telegram.message"):
             self._last_activity = time.time()
 
         logger.debug(
@@ -115,6 +115,14 @@ class ConscienceEngine:
             event.source_module, event.event_type,
             signal.category, signal.pertinence,
         )
+
+        # Fast-path: critical signals trigger an immediate decision cycle
+        if signal.pertinence > 0.85:
+            logger.info(
+                "High-pertinence signal (%.2f), triggering immediate decision",
+                signal.pertinence,
+            )
+            await self._decide()
 
     async def _store_observation(self, event, signal):
         """Persist an observation to DB."""
@@ -331,7 +339,12 @@ class ConscienceEngine:
     # ── 4. ACT ────────────────────────────────────────────────────
 
     async def _act(self, ctx: DecisionContext, reason: str) -> None:
-        """Generate a proactive response using accumulated context."""
+        """Generate a proactive response using accumulated context.
+
+        Only loads tools from modules relevant to the current observations,
+        not all 70+ tools. The Conscience uses capabilities to decide
+        which modules are needed.
+        """
         from modules.manager import module_manager
 
         self._last_action_time = time.time()
@@ -340,43 +353,120 @@ class ConscienceEngine:
         queries = [o.summary for o in ctx.pending_observations if o.pertinence > 0.3]
         memory_context = await self.memory.recall_for_context(queries)
 
-        # Build prompt from observations
-        prompt = self._build_action_prompt(ctx, reason, memory_context)
+        # Determine which modules are relevant based on observation sources
+        relevant_modules = self._pick_relevant_modules(ctx)
+
+        # Build prompt with capabilities summary
+        capabilities_summary = module_manager.collect_capabilities_summary()
+        prompt = self._build_action_prompt(ctx, reason, memory_context, capabilities_summary)
 
         try:
-            decision = await module_manager._notify_ai(
-                ModuleNotification(
-                    source_module="conscience",
-                    summary=f"Conscience: {reason}",
-                    details=prompt,
-                    urgency=self._urgency_from_score(ctx),
-                    metadata={"person_id": "conscience_mika"},
+            # Build filtered MCP server with only relevant modules' tools
+            if relevant_modules:
+                mcp_server, tool_names = module_manager.build_mcp_server_for(
+                    relevant_modules
                 )
+            else:
+                mcp_server, tool_names = None, []
+
+            from ai.client import claude_client
+            from ai.emotion_engine import emotion_engine
+            from ai.emotion_types import EmotionData, Emotion
+            from memory.manager import memory_manager
+
+            person_id = "conscience_mika"
+            emotion_context = emotion_engine.get_emotion_context(person_id)
+            module_context = module_manager.collect_context()
+            history = memory_manager.get_conversation_context()
+
+            if mcp_server and tool_names:
+                response_text, emotion_data, tool_calls = (
+                    await claude_client.chat_with_tools(
+                        message=prompt,
+                        conversation_history=history,
+                        memory_context=memory_context,
+                        emotion_context=emotion_context,
+                        module_context=module_context,
+                        mcp_server=mcp_server,
+                        tool_names=tool_names,
+                    )
+                )
+            else:
+                response_text, emotion_data = await claude_client.chat(
+                    message=prompt,
+                    conversation_history=history,
+                    memory_context=memory_context,
+                    emotion_context=emotion_context,
+                )
+                tool_calls = []
+
+            # Process emotion
+            emotion_engine.process_emotion(emotion_data, person_id)
+
+            # Store in memory
+            await memory_manager.add_message("user", prompt, source="conscience")
+            await memory_manager.add_message("assistant", response_text)
+
+            # Broadcast to WebSocket
+            from channels.layers import get_channel_layer
+            from chat.consumers import BROADCAST_GROUP
+
+            msg_emotion = emotion_engine.compute_message_emotion(person_id)
+            channel_layer = get_channel_layer()
+            await channel_layer.group_send(
+                BROADCAST_GROUP,
+                {
+                    "type": "chat.broadcast",
+                    "data": {
+                        "type": "speech",
+                        "text": response_text,
+                        "emotion": msg_emotion.emotion.value,
+                        "emotion_intensity": msg_emotion.intensity,
+                        "emotion_state": emotion_engine.get_state_dict(person_id),
+                        "source": "conscience",
+                    },
+                },
             )
 
             # Mark observations as acted upon
             for obs in ctx.pending_observations:
                 obs.acted_upon = True
-                obs.action_response = decision.response_text[:200]
+                obs.action_response = response_text[:200]
                 await sync_to_async(obs.save)(
                     update_fields=["acted_upon", "action_response"]
                 )
 
             logger.info(
-                "Conscience acted [%s]: %s",
-                reason, decision.response_text[:80],
+                "Conscience acted [%s] (modules=%s, tools=%d): %s",
+                reason, relevant_modules, len(tool_calls),
+                response_text[:80],
             )
 
         except Exception:
             logger.exception("Conscience act failed")
+
+    def _pick_relevant_modules(self, ctx: DecisionContext) -> list[str]:
+        """Determine which modules are relevant based on pending observations."""
+        sources = {obs.source for obs in ctx.pending_observations}
+
+        # Always include modules whose events triggered this decision
+        relevant = list(sources)
+
+        # Add wake if we might want to self-schedule
+        if any(obs.pertinence > 0.6 for obs in ctx.pending_observations):
+            if "wake" not in relevant:
+                relevant.append("wake")
+
+        return relevant
 
     def _build_action_prompt(
         self,
         ctx: DecisionContext,
         reason: str,
         memory_context: str,
+        capabilities_summary: str = "",
     ) -> str:
-        """Build a rich prompt from accumulated observations + memory."""
+        """Build a rich prompt from accumulated observations + memory + capabilities."""
         parts = []
 
         # What you've observed
@@ -411,6 +501,13 @@ class ConscienceEngine:
                 "Dis ce que tu ressens comme si tu pensais a voix haute."
             )
 
+        # Available capabilities (what you CAN do)
+        if capabilities_summary:
+            parts.append(
+                "Ce que tu peux faire (utilise les outils si pertinent):\n"
+                + capabilities_summary
+            )
+
         # Memory context
         if memory_context:
             parts.append(f"\n{memory_context}")
@@ -419,7 +516,8 @@ class ConscienceEngine:
         parts.append(
             "\nExprime-toi naturellement et spontanement, "
             "en accord avec ce que tu observes et ressens. "
-            "Sois breve (1-3 phrases max)."
+            "Sois breve (1-3 phrases max). "
+            "Tu peux utiliser tes outils si la situation le demande."
         )
 
         return "\n\n".join(parts)

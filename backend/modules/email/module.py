@@ -10,6 +10,8 @@ from django.db.models import F, Q
 
 from modules.base import BaseModule
 from modules.types import (
+    ModuleCapability,
+    ModuleEvent,
     ModuleNotification,
     ModuleStatus,
     ModuleTool,
@@ -259,21 +261,23 @@ class EmailModule(BaseModule):
         if analysis and analysis.memories:
             await self._store_memories(analysis.memories)
 
-        if analysis and analysis.should_notify and self._notify_ai:
-            await self._notify_ai(
-                ModuleNotification(
+        if analysis and analysis.should_notify:
+            # Emit event for the Conscience to observe, interpret, and decide
+            from modules.manager import module_manager
+
+            await module_manager.emit_event(
+                ModuleEvent(
+                    event_type="email.received",
                     source_module=self.name,
-                    summary=f"Email from {email_msg.from_addr}: {email_msg.subject}",
-                    details=(
-                        f"Compte: {account.name}\n"
-                        f"De: {email_msg.from_addr}\n"
-                        f"Objet: {email_msg.subject}\n"
-                        f"Priorite: {analysis.priority}\n"
-                        f"Contenu: {email_msg.body_text[:500]}"
-                    ),
-                    urgency="high" if analysis.priority in ("high", "urgent") else "normal",
-                    suggested_action=analysis.notification_text,
-                    metadata={"email_from": email_msg.from_addr, "account": account.name},
+                    data={
+                        "from": email_msg.from_addr,
+                        "subject": email_msg.subject,
+                        "body_preview": (email_msg.body_text or "")[:500],
+                        "priority": analysis.priority,
+                        "account": account.name,
+                        "notification_text": analysis.notification_text,
+                        "should_reply": analysis.should_reply,
+                    },
                 )
             )
 
@@ -434,7 +438,27 @@ class EmailModule(BaseModule):
         except Exception:
             self.logger.exception("Failed to send email reply")
 
-    # ── Tools ─────────────────────────────────────────────────────
+    # ── Capabilities & Tools ────────────────────────────────────────
+
+    def get_capabilities(self) -> list[ModuleCapability]:
+        return [
+            ModuleCapability(
+                description="Lire, lister et chercher dans les emails recus",
+                tool_names=["list_recent_emails", "read_email", "search_emails"],
+            ),
+            ModuleCapability(
+                description="Envoyer des emails",
+                tool_names=["send_email"],
+            ),
+            ModuleCapability(
+                description="Gerer les contacts email (lister, chercher)",
+                tool_names=["list_contacts"],
+            ),
+            ModuleCapability(
+                description="Voir les comptes email configures",
+                tool_names=["list_email_accounts"],
+            ),
+        ]
 
     def return_tools(self) -> list[ModuleTool]:
         return [

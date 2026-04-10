@@ -92,10 +92,31 @@ def _heuristic_chat_disconnect(data: dict) -> InterpretedSignal:
     )
 
 
+def _heuristic_telegram_message(data: dict) -> InterpretedSignal:
+    """Telegram messages are already handled by notify_ai for direct reply.
+    The Conscience just observes them for context accumulation."""
+    user = data.get("user_name", data.get("person_id", "?"))
+    text = data.get("text", "")
+    return InterpretedSignal(
+        summary=f"Message Telegram de {user}: {text[:80]}",
+        category="communication",
+        pertinence=0.4,
+        emotional_reaction="",
+        emotional_intensity=0.0,
+        themes=[],
+        entities=[user] if user != "?" else [],
+        should_remember=False,  # Already handled by notify_ai → memory
+    )
+
+
+# email.received goes through LLM path (rich content, needs interpretation)
+# It is NOT in HEURISTIC_EVENTS, so it falls through to _interpret_with_llm()
+
 HEURISTIC_EVENTS = {
     "chat.message": _heuristic_chat_message,
     "chat.connect": _heuristic_chat_connect,
     "chat.disconnect": _heuristic_chat_disconnect,
+    "telegram.message": _heuristic_telegram_message,
 }
 
 

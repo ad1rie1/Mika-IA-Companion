@@ -115,6 +115,20 @@ class ModuleEvent:
 
 
 @dataclass
+class ModuleCapability:
+    """High-level capability a module provides.
+
+    Used by the Conscience to know what actions are available
+    without loading all MCP tools into every prompt.
+    The Conscience reads capabilities to decide which modules
+    are relevant, then loads only those modules' tools.
+    """
+
+    description: str  # Natural language: "Lire et envoyer des emails"
+    tool_names: list[str] = field(default_factory=list)  # Linked MCP tools
+
+
+@dataclass
 class ModuleStatus:
     """Module health/debug status."""
 

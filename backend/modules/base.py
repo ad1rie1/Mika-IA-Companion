@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from modules.types import (
+    ModuleCapability,
     ModuleEvent,
     ModuleRoute,
     ModuleStatus,
@@ -76,7 +77,18 @@ class BaseModule(ABC):
         Override for periodic work. Default: no-op."""
         pass
 
-    # ── AI Tools ──────────────────────────────────────────────────
+    # ── AI Capabilities & Tools ────────────────────────────────────
+
+    def get_capabilities(self) -> list[ModuleCapability]:
+        """Declare what this module can DO, in natural language.
+
+        The Conscience reads these to know what actions are available
+        without loading all MCP tools. When acting, only tools from
+        relevant modules are loaded into Claude's prompt.
+
+        Each capability links to its MCP tool names for selective loading.
+        """
+        return []
 
     def return_tools(self) -> list[ModuleTool]:
         """Return tools this module exposes to Claude. Default: none."""
