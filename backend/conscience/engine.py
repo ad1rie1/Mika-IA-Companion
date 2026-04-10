@@ -339,7 +339,7 @@ class ConscienceEngine:
     # ── 4. ACT ────────────────────────────────────────────────────
 
     async def _act(self, ctx: DecisionContext, reason: str) -> None:
-        """Generate a proactive response using accumulated context.
+        """Generate a spontaneous response using accumulated context.
 
         Only loads tools from modules relevant to the current observations,
         not all 70+ tools. The Conscience uses capabilities to decide

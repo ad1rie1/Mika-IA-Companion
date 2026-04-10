@@ -6,5 +6,4 @@ them so Django migrations stay under modules/migrations/.
 """
 
 from modules.email.models import Contact, Email, EmailAccount  # noqa: F401
-from modules.proactive.models import ProactiveLog  # noqa: F401
 from modules.wake.models import WakeRequest  # noqa: F401

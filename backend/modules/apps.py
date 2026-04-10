@@ -8,7 +8,6 @@ class ModulesConfig(AppConfig):
     def ready(self):
         from modules.email import EmailModule
         from modules.manager import module_manager
-        from modules.proactive import ProactiveModule
         from modules.telegram import TelegramModule
         from modules.urls import _populate_urls
         from modules.wake import WakeModule
@@ -16,6 +15,5 @@ class ModulesConfig(AppConfig):
         module_manager.register(TelegramModule())
         module_manager.register(WakeModule())
         module_manager.register(EmailModule())
-        module_manager.register(ProactiveModule())
 
         _populate_urls()

@@ -122,7 +122,7 @@ async def handle_chat(
     await memory_manager.add_message("user", message, source=source, person_id=person_id)
     await memory_manager.add_message("assistant", response_text, person_id=person_id)
 
-    # Notify modules of chat activity (used by proactive module for idle tracking)
+    # Notify modules + Conscience of chat activity (idle tracking, observation)
     from modules.types import ModuleEvent
 
     await module_manager.emit_event(
