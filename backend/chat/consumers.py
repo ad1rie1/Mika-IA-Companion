@@ -122,6 +122,17 @@ async def handle_chat(
     await memory_manager.add_message("user", message, source=source)
     await memory_manager.add_message("assistant", response_text)
 
+    # Notify modules of chat activity (used by proactive module for idle tracking)
+    from modules.types import ModuleEvent
+
+    await module_manager.emit_event(
+        ModuleEvent(
+            event_type="chat.message",
+            source_module="chat",
+            data={"person_id": person_id, "source": source},
+        )
+    )
+
     # Compute final message emotion (blend of person + global)
     msg_emotion = emotion_engine.compute_message_emotion(person_id)
 
