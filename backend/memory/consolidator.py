@@ -109,12 +109,14 @@ class MemoryConsolidator:
         )
 
         # 1. Fetch unprocessed messages
-        #    Exclude internal sources (conscience prompts, module notifications)
-        #    that are not real conversations — only process user-facing exchanges
-        INTERNAL_SOURCES = ("conscience", "module_email", "module_wake")
+        #    Exclude module notifications (not user-facing exchanges).
+        #    For conscience: exclude internal prompts (role=user) but keep
+        #    speech output (role=assistant) so Mika remembers her own initiatives.
+        INTERNAL_SOURCES = ("module_email", "module_wake")
         messages = await sync_to_async(list)(
             Message.objects.filter(id__gt=self._last_processed_id)
             .exclude(source__in=INTERNAL_SOURCES)
+            .exclude(source="conscience", role="user")
             .order_by("created_at")
             .values("id", "role", "content", "created_at", "source")
         )

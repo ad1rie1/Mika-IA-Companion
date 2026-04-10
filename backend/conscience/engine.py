@@ -5,7 +5,7 @@ memory, and decides when to speak or act. Tightly coupled to memory
 with full R/W access.
 
 Lifecycle (managed by ASGI lifespan):
-  1. initialize()   — start decision loop + observers
+  1. initialize()   — start decision loop
   2. observe(event)  — called by event bus for every module event
   3. _decision_loop  — periodic evaluation (every 30s)
   4. shutdown()      — stop everything
@@ -24,7 +24,6 @@ from django.conf import settings
 
 from conscience.interpreter import SignalInterpreter
 from conscience.memory_bridge import MemoryBridge
-from conscience.observer import ObserverRegistry
 from conscience.types import DecisionContext, InterpretedSignal
 from modules.types import ModuleEvent, ModuleNotification
 
@@ -41,7 +40,6 @@ class ConscienceEngine:
     def __init__(self):
         self.interpreter = SignalInterpreter()
         self.memory = MemoryBridge()
-        self.observer_registry = ObserverRegistry()
 
         # State
         self._decision_task: asyncio.Task | None = None
@@ -51,6 +49,7 @@ class ConscienceEngine:
         self._greeted_periods: set[str] = set()
         self._greeted_date: object = None  # date of last greeting reset
         self._initialized = False
+        self._consecutive_waits: int = 0
 
         # Config (loaded from settings on initialize)
         self._decision_interval: int = 30
@@ -70,7 +69,6 @@ class ConscienceEngine:
         # Restore cooldown from last "act" decision log (survives restarts)
         await self._restore_cooldown()
 
-        await self.observer_registry.start_all()
         self._decision_task = asyncio.create_task(self._decision_loop())
         self._initialized = True
 
@@ -116,7 +114,6 @@ class ConscienceEngine:
             except asyncio.CancelledError:
                 pass
 
-        await self.observer_registry.stop_all()
         self._initialized = False
         logger.info("Conscience shut down")
 
@@ -127,9 +124,15 @@ class ConscienceEngine:
 
         Called by the event bus (ModuleManager.emit_event callback).
         If the signal is important enough, immediately creates a souvenir.
+        Emotional reactions from interpreted signals feed into the EmotionEngine
+        so the VTuber actually *feels* what she observes.
         """
         signal = await self.interpreter.interpret(event)
         observation = await self._store_observation(event, signal)
+
+        # Feed emotional reaction into the EmotionEngine
+        if signal.emotional_reaction and signal.emotional_intensity > 0.1:
+            self._feed_emotion(signal)
 
         # Immediate memory action for high-pertinence signals
         if signal.should_remember and signal.pertinence > 0.5:
@@ -156,6 +159,31 @@ class ConscienceEngine:
             )
             await self._decide()
 
+    @staticmethod
+    def _feed_emotion(signal: InterpretedSignal) -> None:
+        """Inject an interpreted signal's emotional reaction into the EmotionEngine.
+
+        Uses person_id "conscience_mika" — the VTuber feeling something
+        from her own observation, not from a conversation partner.
+        """
+        from ai.emotion_engine import emotion_engine
+        from ai.emotion_types import Emotion, EmotionData
+
+        try:
+            emotion = Emotion(signal.emotional_reaction)
+        except ValueError:
+            logger.debug(
+                "Unknown emotion from signal: %s", signal.emotional_reaction
+            )
+            return
+
+        data = EmotionData(emotion=emotion, intensity=signal.emotional_intensity)
+        emotion_engine.process_emotion(data, "conscience_mika")
+        logger.debug(
+            "Fed emotion %s:%.2f from observation into EmotionEngine",
+            emotion.value, signal.emotional_intensity,
+        )
+
     async def _store_observation(self, event, signal):
         """Persist an observation to DB."""
         from conscience.models import Observation
@@ -178,16 +206,10 @@ class ConscienceEngine:
     # ── 2. DECISION LOOP ──────────────────────────────────────────
 
     async def _decision_loop(self) -> None:
-        """Periodic evaluation: observe external sources, decide, act."""
+        """Periodic evaluation: decide and act."""
         while True:
             try:
                 await asyncio.sleep(self._decision_interval)
-
-                # Poll external observers
-                now = time.time()
-                external_events = await self.observer_registry.poll_due(now)
-                for event in external_events:
-                    await self.observe(event)
 
                 # Run decision cycle
                 await self._decide()
@@ -230,6 +252,12 @@ class ConscienceEngine:
         else:
             decision = "wait"
 
+        # Update consecutive wait counter
+        if decision == "wait":
+            self._consecutive_waits += 1
+        else:
+            self._consecutive_waits = 0
+
         # Log the decision
         await self._log_decision(ctx, decision, reason, score, memory_actions)
 
@@ -242,6 +270,60 @@ class ConscienceEngine:
 
         # Periodic cleanup of old observations
         await self._cleanup_old_observations()
+
+    async def _introspect(self) -> tuple[int, int]:
+        """Query recent ConscienceLogs for self-awareness.
+
+        Returns:
+            (acts_today, consecutive_ignored_acts)
+        """
+        from conscience.models import ConscienceLog, Observation
+        from django.utils import timezone as tz
+        from datetime import timedelta
+
+        today_start = tz.now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+        try:
+            # Count today's acts
+            acts_today = await sync_to_async(
+                lambda: ConscienceLog.objects.filter(
+                    decision="act", created_at__gte=today_start
+                ).count()
+            )()
+
+            # Get timestamps of recent "act" decisions
+            recent_act_times = await sync_to_async(
+                lambda: list(
+                    ConscienceLog.objects.filter(decision="act")
+                    .order_by("-created_at")[:5]
+                    .values_list("created_at", flat=True)
+                )
+            )()
+
+            if not recent_act_times:
+                return acts_today, 0
+
+            # For each recent act, check if a user response followed within 10 min
+            consecutive_ignored = 0
+            for act_time in recent_act_times:
+                response_window = act_time + timedelta(minutes=10)
+                response_exists = await sync_to_async(
+                    lambda t=act_time, w=response_window: Observation.objects.filter(
+                        event_type__in=("chat.message", "telegram.message"),
+                        created_at__gt=t,
+                        created_at__lte=w,
+                    ).exists()
+                )()
+
+                if response_exists:
+                    break
+                consecutive_ignored += 1
+
+            return acts_today, consecutive_ignored
+
+        except Exception:
+            logger.debug("Introspection failed", exc_info=True)
+            return 0, 0
 
     async def _build_context(self) -> DecisionContext:
         """Gather all context needed for a decision."""
@@ -284,6 +366,9 @@ class ConscienceEngine:
         # Poll due scheduled actions
         scheduled = await self._poll_scheduled_actions()
 
+        # Introspection: query own recent behavior
+        acts_today, consecutive_ignored_acts = await self._introspect()
+
         return DecisionContext(
             pending_observations=pending,
             global_mood=glob.emotion.value,
@@ -293,6 +378,9 @@ class ConscienceEngine:
             max_pertinence=max_p,
             weighted_urgency=min(1.0, weighted),
             scheduled_actions=scheduled,
+            consecutive_waits=self._consecutive_waits,
+            acts_today=acts_today,
+            consecutive_ignored_acts=consecutive_ignored_acts,
         )
 
     async def _poll_scheduled_actions(self) -> list:
@@ -377,6 +465,23 @@ class ConscienceEngine:
             max_priority = max(a.priority for a in ctx.scheduled_actions)
             score += max_priority * 0.5
             parts.append(f"scheduled({len(ctx.scheduled_actions)})")
+
+        # Factor 7: Accumulation pressure (consecutive waits build up)
+        if ctx.consecutive_waits >= 3 and ctx.pending_observations:
+            pressure = min(0.25, (ctx.consecutive_waits - 2) * 0.035)
+            score += pressure
+            parts.append(f"pressure({ctx.consecutive_waits}waits)")
+
+        # Factor 8: Self-regulation (reduce score if being ignored)
+        if ctx.consecutive_ignored_acts >= 2:
+            penalty = min(0.3, ctx.consecutive_ignored_acts * 0.1)
+            score -= penalty
+            parts.append(f"ignored(-{penalty:.2f})")
+
+        # Hard cap: too many ignored acts today → suppress
+        if ctx.acts_today >= 5 and ctx.consecutive_ignored_acts >= 3:
+            score = min(score, 0.1)
+            parts.append("suppressed(too_many_ignored)")
 
         reason = ", ".join(parts) if parts else "no_signal"
         return score, reason
@@ -547,7 +652,7 @@ class ConscienceEngine:
 
             # Store in memory
             await memory_manager.add_message("user", prompt, source="conscience")
-            await memory_manager.add_message("assistant", response_text)
+            await memory_manager.add_message("assistant", response_text, source="conscience")
 
             # Broadcast to WebSocket
             from channels.layers import get_channel_layer
@@ -689,6 +794,15 @@ class ConscienceEngine:
             parts.append(
                 "Tu as une emotion forte non exprimee. "
                 "Dis ce que tu ressens comme si tu pensais a voix haute."
+            )
+
+        # Self-awareness
+        if ctx.acts_today > 0:
+            parts.append(f"Tu as deja pris la parole {ctx.acts_today} fois aujourd'hui.")
+        if ctx.consecutive_ignored_acts >= 2:
+            parts.append(
+                f"Tes {ctx.consecutive_ignored_acts} dernieres interventions "
+                "n'ont recu aucune reponse. Sois plus discrete ou change d'approche."
             )
 
         # Available capabilities (what you CAN do)

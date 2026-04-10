@@ -31,3 +31,6 @@ class DecisionContext:
     max_pertinence: float
     weighted_urgency: float     # Accumulated pertinence score
     scheduled_actions: list = field(default_factory=list)  # Due ScheduledAction instances
+    consecutive_waits: int = 0          # Consecutive "wait" decisions (accumulation pressure)
+    acts_today: int = 0                  # How many "act" decisions today
+    consecutive_ignored_acts: int = 0    # Recent acts with no user response
