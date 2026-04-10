@@ -254,6 +254,12 @@ class MemoryConsolidator:
         await self._apply_decay()
 
     async def _apply_decay(self):
+        """Reduce importance of old souvenirs and confidence of old connaissances.
+        Remove those below threshold."""
+        await self._decay_souvenirs()
+        await self._decay_connaissances()
+
+    async def _decay_souvenirs(self):
         """Reduce importance of old souvenirs. Remove those below threshold."""
         from memory.models import Souvenir
 
@@ -284,6 +290,38 @@ class MemoryConsolidator:
                         "importance": souvenir.importance,
                         "occurred_at": souvenir.occurred_at.isoformat(),
                     },
+                )
+
+    async def _decay_connaissances(self):
+        """Slowly reduce confidence of old connaissances that haven't been reinforced.
+
+        Unlike souvenirs, connaissances are not deleted — they become 'incertain'
+        (low confidence) but stay valid. Only the Conscience can invalidate them.
+        """
+        from memory.models import Connaissance
+
+        now = timezone.now()
+        min_confidence = 0.2  # Floor — don't decay below this
+
+        connaissances = await sync_to_async(list)(
+            Connaissance.objects.filter(is_valid=True, confidence__gt=min_confidence)
+        )
+
+        for conn in connaissances:
+            days_since_update = (now - conn.updated_at).total_seconds() / 86400
+            if days_since_update < 7:
+                continue  # Recently reinforced — skip
+
+            # Gentle decay: lose ~2% confidence per week after 7 days
+            decay = 0.02 * (days_since_update / 7)
+            new_confidence = max(min_confidence, conn.confidence - decay)
+
+            if abs(new_confidence - conn.confidence) > 0.01:
+                conn.confidence = round(new_confidence, 3)
+                await sync_to_async(conn.save)(update_fields=["confidence"])
+                logger.debug(
+                    "Decayed connaissance #%d confidence to %.2f",
+                    conn.pk, conn.confidence,
                 )
 
     async def _find_similar_connaissance(self, content: str):

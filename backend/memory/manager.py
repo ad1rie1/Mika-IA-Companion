@@ -62,15 +62,17 @@ class MemoryManager:
 
         self._initialized = True
 
-    async def add_message(self, role: str, content: str, source: str = "frontend"):
+    async def add_message(
+        self, role: str, content: str, source: str = "frontend", person_id: str = ""
+    ):
         """Add to short-term memory and persist via ORM."""
         self.short_term.append({"role": role, "content": content})
         if len(self.short_term) > self.max_short_term:
             self.short_term = self.short_term[-self.max_short_term :]
 
         logger.debug(
-            "Memory add_message: role=%s source=%s short_term=%d content=%.60s",
-            role, source, len(self.short_term), content,
+            "Memory add_message: role=%s source=%s person=%s short_term=%d content=%.60s",
+            role, source, person_id, len(self.short_term), content,
         )
 
         if self._initialized and self.conversation:
@@ -82,6 +84,7 @@ class MemoryManager:
                     role=role,
                     content=content,
                     source=source,
+                    person_id=person_id,
                 )
             except Exception:
                 logger.exception("Failed to persist message to DB")
@@ -90,12 +93,17 @@ class MemoryManager:
         """Get short-term conversation history for Claude."""
         return list(self.short_term)
 
-    async def get_memory_context(self, query: str) -> str:
-        """Retrieve relevant long-term memories formatted for the system prompt."""
+    async def get_memory_context(self, query: str, person_id: str = "") -> str:
+        """Retrieve relevant long-term memories formatted for the system prompt.
+
+        If person_id is provided, results are boosted for memories
+        related to that person (but not exclusively filtered — Mika
+        should still recall general knowledge).
+        """
         if not self.retriever:
             return ""
         try:
-            return await self.retriever.retrieve(query)
+            return await self.retriever.retrieve(query, person_id=person_id)
         except Exception:
             logger.exception("Memory retrieval error")
             return ""

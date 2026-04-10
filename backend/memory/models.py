@@ -19,6 +19,7 @@ class Message(models.Model):
     role = models.CharField(max_length=20)
     content = models.TextField()
     source = models.CharField(max_length=50, default="frontend")
+    person_id = models.CharField(max_length=100, blank=True, default="")
     emotion = models.CharField(max_length=30, blank=True, default="")
     emotion_intensity = models.FloatField(default=0.0)
     created_at = models.DateTimeField(auto_now_add=True)

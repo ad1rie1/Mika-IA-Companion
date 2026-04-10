@@ -42,7 +42,7 @@ class EmotionEngine:
         self._decay_rate = DEFAULT_DECAY_RATE
 
     async def initialize(self):
-        """Load temperament from personality and start decay loop."""
+        """Load temperament from personality, restore state, start decay loop."""
         if self._initialized:
             return
 
@@ -53,30 +53,142 @@ class EmotionEngine:
             settings, "EMOTION_DECAY_RATE", DEFAULT_DECAY_RATE
         )
 
-        # Set global mood to default
-        self.global_mood.emotion = self.temperament.default_mood
-        self.global_mood.intensity = 0.0
+        # Try to restore state from last session
+        restored = await self._restore_state()
+
+        if not restored:
+            # Set global mood to default
+            self.global_mood.emotion = self.temperament.default_mood
+            self.global_mood.intensity = 0.0
 
         self._decay_task = asyncio.create_task(self._decay_loop())
         self._initialized = True
         logger.info(
             "EmotionEngine initialized (temperament: volatility=%.1f, "
-            "intensity_base=%.1f, recovery=%.1f, default_mood=%s, bleed=%.1f)",
+            "intensity_base=%.1f, recovery=%.1f, default_mood=%s, bleed=%.1f)"
+            "%s",
             self.temperament.volatility,
             self.temperament.intensity_base,
             self.temperament.recovery_speed,
             self.temperament.default_mood.value,
             self.temperament.global_bleed,
+            " [restored from snapshot]" if restored else "",
         )
 
     async def shutdown(self):
+        """Save emotional state and stop decay loop."""
+        await self._save_state()
+
         if self._decay_task:
             self._decay_task.cancel()
             try:
                 await self._decay_task
             except asyncio.CancelledError:
                 pass
-        logger.info("EmotionEngine shut down")
+        logger.info("EmotionEngine shut down (state saved)")
+
+    # ------------------------------------------------------------------
+    # State persistence
+    # ------------------------------------------------------------------
+
+    async def _save_state(self):
+        """Save current emotional state to DB for restoration on next startup."""
+        from asgiref.sync import sync_to_async
+        from memory.manager import memory_manager
+        from memory.models import EmotionSnapshot
+
+        conversation = memory_manager.conversation
+        if not conversation:
+            return
+
+        try:
+            # Save global mood
+            await sync_to_async(EmotionSnapshot.objects.create)(
+                conversation=conversation,
+                person_id="__global__",
+                primary_emotion=self.global_mood.emotion.value,
+                primary_intensity=self.global_mood.intensity,
+                global_emotion=self.global_mood.emotion.value,
+                global_intensity=self.global_mood.intensity,
+            )
+
+            # Save each person's mood
+            for pid, mood in self.person_moods.items():
+                await sync_to_async(EmotionSnapshot.objects.create)(
+                    conversation=conversation,
+                    person_id=pid,
+                    primary_emotion=mood.emotion.value,
+                    primary_intensity=mood.intensity,
+                    global_emotion=self.global_mood.emotion.value,
+                    global_intensity=self.global_mood.intensity,
+                )
+
+            logger.info(
+                "Saved emotion state: global=%s(%.2f), %d person mood(s)",
+                self.global_mood.emotion.value,
+                self.global_mood.intensity,
+                len(self.person_moods),
+            )
+        except Exception:
+            logger.exception("Failed to save emotion state")
+
+    async def _restore_state(self) -> bool:
+        """Restore emotional state from the most recent snapshot.
+
+        Returns True if state was restored.
+        """
+        from asgiref.sync import sync_to_async
+        from memory.models import EmotionSnapshot
+
+        try:
+            # Get the most recent snapshots (all from the same session)
+            latest = await sync_to_async(
+                lambda: EmotionSnapshot.objects.order_by("-created_at").first()
+            )()
+
+            if not latest:
+                return False
+
+            # Get all snapshots from that session (same conversation)
+            snapshots = await sync_to_async(
+                lambda: list(
+                    EmotionSnapshot.objects.filter(
+                        conversation=latest.conversation
+                    )
+                )
+            )()
+
+            for snap in snapshots:
+                if snap.person_id == "__global__":
+                    # Restore global mood
+                    try:
+                        self.global_mood.emotion = Emotion(snap.primary_emotion)
+                    except ValueError:
+                        self.global_mood.emotion = self.temperament.default_mood
+                    self.global_mood.intensity = snap.primary_intensity
+                else:
+                    # Restore person mood (with decayed intensity)
+                    try:
+                        emotion = Emotion(snap.primary_emotion)
+                    except ValueError:
+                        emotion = self.temperament.default_mood
+                    self.person_moods[snap.person_id] = PersonMood(
+                        person_id=snap.person_id,
+                        emotion=emotion,
+                        intensity=snap.primary_intensity * 0.7,  # Decay after restart
+                    )
+
+            logger.info(
+                "Restored emotion state: global=%s(%.2f), %d person(s)",
+                self.global_mood.emotion.value,
+                self.global_mood.intensity,
+                len(self.person_moods),
+            )
+            return True
+
+        except Exception:
+            logger.exception("Failed to restore emotion state")
+            return False
 
     # ------------------------------------------------------------------
     # Person mood management

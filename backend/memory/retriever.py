@@ -12,24 +12,33 @@ logger = logging.getLogger(__name__)
 
 class MemoryRetriever:
     """Retrieves relevant memories for a given query and formats them
-    as a context block for the Claude system prompt."""
+    as a context block for the Claude system prompt.
+
+    Supports:
+    - person_id boosting: memories involving the current person rank higher
+    - recency bias: recent memories are boosted over old ones
+    """
 
     def __init__(self, vector_store: VectorStore):
         self.vector_store = vector_store
 
-    async def retrieve(self, query: str) -> str:
+    async def retrieve(self, query: str, person_id: str = "") -> str:
         """Retrieve and format relevant memories for a user message.
 
         1. Search ChromaDB for relevant souvenirs + connaissances
         2. Enrich with ORM data (themes, entities)
-        3. Format as readable text block for system prompt
+        3. Apply person_id boosting + recency reranking
+        4. Format as readable text block for system prompt
         """
         n_souvenirs = settings.MEMORY_RETRIEVAL_SOUVENIRS
         n_connaissances = settings.MEMORY_RETRIEVAL_CONNAISSANCES
 
-        # Vector search
+        # Fetch more than needed so we can rerank
+        fetch_multiplier = 2
         souvenirs_raw = self.vector_store.search_souvenirs(
-            query, n=n_souvenirs, min_importance=settings.MEMORY_MIN_IMPORTANCE
+            query,
+            n=n_souvenirs * fetch_multiplier,
+            min_importance=settings.MEMORY_MIN_IMPORTANCE,
         )
         connaissances_raw = self.vector_store.search_connaissances(
             query, n=n_connaissances
@@ -42,7 +51,52 @@ class MemoryRetriever:
         souvenirs = await self._enrich_souvenirs(souvenirs_raw)
         connaissances = await self._enrich_connaissances(connaissances_raw)
 
+        # Rerank souvenirs: person_id boost + recency bias
+        souvenirs = self._rerank_souvenirs(souvenirs, person_id)
+
+        # Take top N after reranking
+        souvenirs = souvenirs[:n_souvenirs]
+
         return self._format_context(connaissances, souvenirs)
+
+    def _rerank_souvenirs(
+        self, souvenirs: list[dict], person_id: str
+    ) -> list[dict]:
+        """Rerank souvenirs with recency bias and person_id boosting.
+
+        Score = base_relevance + recency_bonus + person_bonus
+        """
+        now = timezone.now()
+
+        for s in souvenirs:
+            score = s.get("relevance", 0.5)
+
+            # Recency bias: recent memories get a boost
+            occurred = s.get("occurred_at")
+            if occurred:
+                age_hours = (now - occurred).total_seconds() / 3600
+                if age_hours < 1:
+                    score += 0.3        # Last hour: strong boost
+                elif age_hours < 24:
+                    score += 0.2        # Last day
+                elif age_hours < 168:   # 7 days
+                    score += 0.1
+                # Older: no boost
+
+            # Person-id boost: memories involving this person rank higher
+            if person_id:
+                entities = s.get("entities", [])
+                # Check if person_id or person name appears in entities
+                for entity in entities:
+                    entity_lower = entity.lower()
+                    if person_id.lower() in entity_lower:
+                        score += 0.25
+                        break
+
+            s["_score"] = score
+
+        souvenirs.sort(key=lambda s: s.get("_score", 0), reverse=True)
+        return souvenirs
 
     async def _enrich_souvenirs(self, raw_results: list[dict]) -> list[dict]:
         """Load full Souvenir data from ORM."""
@@ -58,6 +112,10 @@ class MemoryRetriever:
                 themes = await sync_to_async(lambda s=souvenir: list(s.themes.values_list("name", flat=True)))()
                 entities = await sync_to_async(lambda s=souvenir: list(s.entities.values_list("name", flat=True)))()
 
+                # Compute base relevance from vector distance (lower = more relevant)
+                distance = r.get("distance")
+                relevance = max(0, 1.0 - (distance or 0.5)) if distance is not None else 0.5
+
                 enriched.append({
                     "content": souvenir.content,
                     "emotion": souvenir.emotion,
@@ -65,6 +123,7 @@ class MemoryRetriever:
                     "occurred_at": souvenir.occurred_at,
                     "themes": themes,
                     "entities": entities,
+                    "relevance": relevance,
                 })
             except Exception:
                 # Fallback: use ChromaDB data only
@@ -76,6 +135,7 @@ class MemoryRetriever:
                     "occurred_at": None,
                     "themes": [],
                     "entities": [],
+                    "relevance": 0.5,
                 })
         return enriched
 

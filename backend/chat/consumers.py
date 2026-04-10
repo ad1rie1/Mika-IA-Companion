@@ -79,8 +79,8 @@ async def handle_chat(
     from modules.manager import module_manager
 
     try:
-        # Get memory context
-        memory_context = await memory_manager.get_memory_context(message)
+        # Get memory context (boosted for this person)
+        memory_context = await memory_manager.get_memory_context(message, person_id=person_id)
 
         # Get emotion context for this person
         emotion_context = emotion_engine.get_emotion_context(person_id)
@@ -119,8 +119,8 @@ async def handle_chat(
         emotion_data = EmotionData(emotion=Emotion.SAD, intensity=0.6)
         updated_person = emotion_engine.process_emotion(emotion_data, person_id)
 
-    await memory_manager.add_message("user", message, source=source)
-    await memory_manager.add_message("assistant", response_text)
+    await memory_manager.add_message("user", message, source=source, person_id=person_id)
+    await memory_manager.add_message("assistant", response_text, person_id=person_id)
 
     # Notify modules of chat activity (used by proactive module for idle tracking)
     from modules.types import ModuleEvent
