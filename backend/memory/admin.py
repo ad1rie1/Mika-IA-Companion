@@ -1,6 +1,9 @@
 from django.contrib import admin
 
-from memory.models import Connaissance, Conversation, Entity, Memory, Message, Souvenir, Theme
+from memory.models import (
+    Connaissance, Conversation, EmotionalSummary, EmotionSnapshot,
+    Entity, Memory, Message, Souvenir, Theme,
+)
 
 
 class MessageInline(admin.TabularInline):
@@ -61,3 +64,17 @@ class EntityAdmin(admin.ModelAdmin):
     list_display = ("pk", "name", "entity_type")
     list_filter = ("entity_type",)
     search_fields = ("name",)
+
+
+@admin.register(EmotionSnapshot)
+class EmotionSnapshotAdmin(admin.ModelAdmin):
+    list_display = ("pk", "person_id", "primary_emotion", "primary_intensity", "created_at")
+    list_filter = ("person_id", "primary_emotion")
+    readonly_fields = ("created_at",)
+
+
+@admin.register(EmotionalSummary)
+class EmotionalSummaryAdmin(admin.ModelAdmin):
+    list_display = ("pk", "person_id", "period_type", "period_start", "dominant_emotion", "trend", "snapshot_count")
+    list_filter = ("person_id", "period_type", "trend")
+    readonly_fields = ("created_at", "updated_at")

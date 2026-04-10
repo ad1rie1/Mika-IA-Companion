@@ -289,6 +289,9 @@ class MemoryConsolidator:
         # 5. Apply decay
         await self._apply_decay()
 
+        # 6. Aggregate emotion snapshots into summaries
+        await self._aggregate_emotion_snapshots()
+
     async def _apply_decay(self):
         """Reduce importance of old souvenirs and confidence of old connaissances.
         Remove those below threshold."""
@@ -370,6 +373,139 @@ class MemoryConsolidator:
                     "Decayed connaissance #%d confidence to %.2f",
                     conn.pk, conn.confidence,
                 )
+
+    # ------------------------------------------------------------------
+    # Emotional memory aggregation
+    # ------------------------------------------------------------------
+
+    POSITIVE_EMOTIONS = frozenset({
+        "happy", "excited", "love", "proud", "grateful",
+        "playful", "amused", "hopeful", "relieved",
+    })
+    NEGATIVE_EMOTIONS = frozenset({
+        "sad", "angry", "scared", "disgusted", "frustrated",
+        "lonely", "anxious", "bored", "jealous",
+    })
+
+    async def _aggregate_emotion_snapshots(self) -> None:
+        """Aggregate raw EmotionSnapshots into EmotionalSummary records.
+
+        Runs after each consolidation cycle. Groups today's snapshots
+        by person_id, computes weighted emotion distribution, dominant
+        emotion, and trend vs yesterday. Then prunes old snapshots.
+        """
+        from memory.models import EmotionalSummary, EmotionSnapshot
+
+        now = timezone.now()
+        today = now.date()
+
+        # Get distinct person_ids with snapshots from today (exclude __global__)
+        person_ids = await sync_to_async(
+            lambda: list(
+                EmotionSnapshot.objects.filter(
+                    created_at__date=today,
+                ).exclude(
+                    person_id="__global__",
+                ).values_list("person_id", flat=True).distinct()
+            )
+        )()
+
+        if not person_ids:
+            return
+
+        for pid in person_ids:
+            snapshots = await sync_to_async(
+                lambda p=pid: list(
+                    EmotionSnapshot.objects.filter(
+                        person_id=p, created_at__date=today,
+                    ).values("primary_emotion", "primary_intensity")
+                )
+            )()
+            if not snapshots:
+                continue
+
+            # Weighted distribution: sum intensity per emotion
+            distribution: dict[str, float] = {}
+            for s in snapshots:
+                emotion = s["primary_emotion"]
+                intensity = s["primary_intensity"]
+                distribution[emotion] = distribution.get(emotion, 0.0) + intensity
+
+            total = sum(distribution.values()) or 1.0
+            normalized = {k: round(v / total, 3) for k, v in distribution.items()}
+            dominant = max(distribution, key=distribution.get)
+            dominant_intensity = round(distribution[dominant] / len(snapshots), 2)
+
+            # Compute trend vs yesterday
+            trend = await self._compute_emotion_trend(pid, normalized, today)
+
+            await sync_to_async(
+                lambda p=pid, d=dominant, di=dominant_intensity, n=normalized, t=trend, sc=len(snapshots): (
+                    EmotionalSummary.objects.update_or_create(
+                        person_id=p,
+                        period_type="daily",
+                        period_start=today,
+                        defaults={
+                            "dominant_emotion": d,
+                            "dominant_intensity": di,
+                            "emotion_distribution": n,
+                            "trend": t,
+                            "snapshot_count": sc,
+                        },
+                    )
+                )
+            )()
+
+        # Prune old snapshots (keep last N days for aggregation overlap)
+        retention_days = getattr(settings, "EMOTION_SNAPSHOT_RETENTION_DAYS", 2)
+        cutoff = now - timedelta(days=retention_days)
+        deleted = await sync_to_async(
+            lambda: EmotionSnapshot.objects.filter(created_at__lt=cutoff).delete()
+        )()
+        if deleted and deleted[0]:
+            logger.info("Pruned %d old emotion snapshots", deleted[0])
+
+        logger.debug(
+            "Emotion aggregation: %d person(s) for %s", len(person_ids), today,
+        )
+
+    async def _compute_emotion_trend(
+        self, person_id: str, today_dist: dict, today_date
+    ) -> str:
+        """Compare today's emotional distribution against yesterday's.
+
+        Returns: 'warming', 'cooling', 'volatile', or 'stable'.
+        """
+        from memory.models import EmotionalSummary
+
+        yesterday = today_date - timedelta(days=1)
+        try:
+            prev = await sync_to_async(
+                EmotionalSummary.objects.get
+            )(person_id=person_id, period_type="daily", period_start=yesterday)
+        except EmotionalSummary.DoesNotExist:
+            return "stable"
+
+        def pos_neg_ratio(dist: dict) -> float:
+            pos = sum(dist.get(e, 0) for e in self.POSITIVE_EMOTIONS)
+            neg = sum(dist.get(e, 0) for e in self.NEGATIVE_EMOTIONS)
+            return pos - neg
+
+        today_ratio = pos_neg_ratio(today_dist)
+        prev_ratio = pos_neg_ratio(prev.emotion_distribution)
+        delta = today_ratio - prev_ratio
+
+        if delta > 0.15:
+            return "warming"
+        elif delta < -0.15:
+            return "cooling"
+        elif len(today_dist) > 4 and abs(delta) > 0.05:
+            return "volatile"
+        return "stable"
+
+    # ------------------------------------------------------------------
+    # Contradiction checking
+    # ------------------------------------------------------------------
 
     async def _check_contradictions(self, new_content: str) -> None:
         """Check if new connaissance contradicts existing ones.

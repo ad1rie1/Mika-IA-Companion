@@ -40,6 +40,8 @@ class EmotionEngine:
         self._decay_task: asyncio.Task | None = None
         self._initialized = False
         self._decay_rate = DEFAULT_DECAY_RATE
+        self._last_snapshot_time: dict[str, float] = {}
+        self._snapshot_interval: int = 30
 
     async def initialize(self):
         """Load temperament from personality, restore state, start decay loop."""
@@ -51,6 +53,9 @@ class EmotionEngine:
 
         self._decay_rate = getattr(
             settings, "EMOTION_DECAY_RATE", DEFAULT_DECAY_RATE
+        )
+        self._snapshot_interval = getattr(
+            settings, "EMOTION_SNAPSHOT_INTERVAL", 30
         )
 
         # Try to restore state from last session
@@ -189,6 +194,45 @@ class EmotionEngine:
         except Exception:
             logger.exception("Failed to restore emotion state")
             return False
+
+    # ------------------------------------------------------------------
+    # Periodic snapshots (for emotional memory)
+    # ------------------------------------------------------------------
+
+    async def _maybe_save_snapshot(self, person_id: str) -> None:
+        """Save a snapshot if enough time has passed since the last one.
+
+        Throttled per person_id to avoid excessive DB writes.
+        """
+        now = time.time()
+        last = self._last_snapshot_time.get(person_id, 0)
+        if now - last < self._snapshot_interval:
+            return
+        self._last_snapshot_time[person_id] = now
+        await self._save_person_snapshot(person_id)
+
+    async def _save_person_snapshot(self, person_id: str) -> None:
+        """Persist a single EmotionSnapshot for one person + current global mood."""
+        from asgiref.sync import sync_to_async
+        from memory.manager import memory_manager
+        from memory.models import EmotionSnapshot
+
+        conversation = memory_manager.conversation
+        if not conversation:
+            return
+
+        person = self._get_person_mood(person_id)
+        try:
+            await sync_to_async(EmotionSnapshot.objects.create)(
+                conversation=conversation,
+                person_id=person_id,
+                primary_emotion=person.emotion.value,
+                primary_intensity=person.intensity,
+                global_emotion=self.global_mood.emotion.value,
+                global_intensity=self.global_mood.intensity,
+            )
+        except Exception:
+            logger.debug("Failed to save snapshot for %s", person_id, exc_info=True)
 
     # ------------------------------------------------------------------
     # Person mood management

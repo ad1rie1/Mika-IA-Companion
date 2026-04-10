@@ -57,7 +57,10 @@ class MemoryRetriever:
         # Take top N after reranking
         souvenirs = souvenirs[:n_souvenirs]
 
-        return self._format_context(connaissances, souvenirs)
+        # Build emotional history block for this person
+        emotional_block = await self._get_emotional_history_block(person_id)
+
+        return self._format_context(connaissances, souvenirs, emotional_block)
 
     def _rerank_souvenirs(
         self, souvenirs: list[dict], person_id: str
@@ -175,7 +178,10 @@ class MemoryRetriever:
     MAX_CONTEXT_CHARS = 4000
 
     def _format_context(
-        self, connaissances: list[dict], souvenirs: list[dict]
+        self,
+        connaissances: list[dict],
+        souvenirs: list[dict],
+        emotional_block: str = "",
     ) -> str:
         """Format memories as a readable text block for the system prompt.
 
@@ -183,6 +189,12 @@ class MemoryRetriever:
         """
         lines = ["--- TES SOUVENIRS ---"]
         current_len = len(lines[0])
+
+        # Emotional history (inserted first, before connaissances)
+        if emotional_block:
+            if current_len + len(emotional_block) < self.MAX_CONTEXT_CHARS:
+                lines.append(emotional_block)
+                current_len += len(emotional_block)
 
         if connaissances:
             lines.append("\n[Ce que tu sais]")
@@ -215,6 +227,66 @@ class MemoryRetriever:
                 current_len += len(line)
 
         lines.append("\n--- FIN SOUVENIRS ---")
+        return "\n".join(lines)
+
+    async def _get_emotional_history_block(self, person_id: str) -> str:
+        """Build a short French text block describing the emotional history with a person.
+
+        Returns empty string if no data or person is unknown.
+        """
+        from memory.models import EmotionalSummary
+
+        if not person_id or person_id in ("anonymous", "__global__"):
+            return ""
+
+        try:
+            summaries = await sync_to_async(
+                lambda: list(
+                    EmotionalSummary.objects.filter(
+                        person_id=person_id,
+                    ).order_by("-period_start")[:7]
+                )
+            )()
+        except Exception:
+            return ""
+
+        if not summaries:
+            return ""
+
+        lines = [f"\n[Ton historique emotionnel avec {person_id}]"]
+
+        # Most recent summary
+        latest = summaries[0]
+        trend_labels = {
+            "warming": "en amelioration",
+            "cooling": "en refroidissement",
+            "volatile": "instable",
+            "stable": "stable",
+        }
+        trend_str = trend_labels.get(latest.trend, latest.trend)
+        lines.append(
+            f"  - Recemment: emotion dominante = {latest.dominant_emotion} "
+            f"(intensite {latest.dominant_intensity:.1f}), tendance {trend_str}"
+        )
+
+        # Overall pattern from available summaries
+        if len(summaries) >= 3:
+            all_emotions: dict[str, float] = {}
+            for s in summaries:
+                for emotion, weight in s.emotion_distribution.items():
+                    all_emotions[emotion] = all_emotions.get(emotion, 0) + weight
+            total = sum(all_emotions.values()) or 1.0
+            top_3 = sorted(all_emotions.items(), key=lambda x: x[1], reverse=True)[:3]
+            pattern_str = ", ".join(f"{e} ({w / total:.0%})" for e, w in top_3)
+            lines.append(f"  - Climat general: {pattern_str}")
+
+            # Trend direction across summaries
+            trends = [s.trend for s in summaries]
+            if trends.count("warming") > len(trends) // 2:
+                lines.append("  - La relation se rechauffe avec le temps.")
+            elif trends.count("cooling") > len(trends) // 2:
+                lines.append("  - La relation se refroidit recemment.")
+
         return "\n".join(lines)
 
     @staticmethod

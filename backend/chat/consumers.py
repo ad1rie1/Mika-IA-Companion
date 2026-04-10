@@ -117,6 +117,7 @@ async def handle_chat(
 
         # Process through EmotionEngine (transitions, momentum, opposition, bleed)
         updated_person = emotion_engine.process_emotion(emotion_data, person_id)
+        await emotion_engine._maybe_save_snapshot(person_id)
 
     except Exception:
         logger.exception("Claude API error while processing message")

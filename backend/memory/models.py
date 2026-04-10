@@ -168,6 +168,44 @@ class EmotionSnapshot(models.Model):
         )
 
 
+class EmotionalSummary(models.Model):
+    """Aggregated emotional profile for a person over a time period.
+
+    Built by the consolidator from raw EmotionSnapshots.
+    Injected into the memory context so the VTuber remembers how she
+    felt with each person over time.
+    """
+
+    PERIOD_CHOICES = [
+        ("daily", "Daily"),
+        ("weekly", "Weekly"),
+    ]
+
+    person_id = models.CharField(max_length=100, db_index=True)
+    period_type = models.CharField(max_length=10, choices=PERIOD_CHOICES)
+    period_start = models.DateField()
+    dominant_emotion = models.CharField(max_length=30)
+    dominant_intensity = models.FloatField(default=0.0)
+    emotion_distribution = models.JSONField(default=dict)
+    trend = models.CharField(max_length=20, default="stable")
+    snapshot_count = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-period_start"]
+        unique_together = [("person_id", "period_type", "period_start")]
+        indexes = [
+            models.Index(fields=["person_id", "-period_start"]),
+        ]
+
+    def __str__(self):
+        return (
+            f"[{self.person_id}] {self.period_type} {self.period_start}: "
+            f"{self.dominant_emotion} ({self.trend})"
+        )
+
+
 class ConsolidationLog(models.Model):
     """Tracks when the consolidation background task ran."""
 

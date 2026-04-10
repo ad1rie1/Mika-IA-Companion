@@ -430,6 +430,7 @@ class ModuleManager:
                 tool_calls = []
 
             emotion_engine.process_emotion(emotion_data, person_id)
+            await emotion_engine._maybe_save_snapshot(person_id)
 
         except Exception:
             logger.exception("notify_ai error for module %s", notification.source_module)
