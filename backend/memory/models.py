@@ -26,6 +26,11 @@ class Message(models.Model):
 
     class Meta:
         ordering = ["created_at"]
+        indexes = [
+            models.Index(fields=["created_at"]),
+            models.Index(fields=["conversation", "created_at"]),
+            models.Index(fields=["person_id", "created_at"]),
+        ]
 
     def __str__(self):
         emotion_str = f" [{self.emotion}:{self.emotion_intensity:.1f}]" if self.emotion else ""
@@ -104,6 +109,10 @@ class Souvenir(models.Model):
 
     class Meta:
         ordering = ["-occurred_at"]
+        indexes = [
+            models.Index(fields=["-importance"]),
+            models.Index(fields=["-occurred_at"]),
+        ]
 
     def __str__(self):
         return f"[{self.importance:.1f}/{self.emotion}] {self.content[:80]}"
@@ -127,6 +136,10 @@ class Connaissance(models.Model):
 
     class Meta:
         ordering = ["-confidence"]
+        indexes = [
+            models.Index(fields=["is_valid", "-confidence"]),
+            models.Index(fields=["-updated_at"]),
+        ]
 
     def __str__(self):
         valid = "valid" if self.is_valid else "INVALID"

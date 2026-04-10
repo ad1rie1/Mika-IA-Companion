@@ -64,36 +64,38 @@ class MemoryRetriever:
     ) -> list[dict]:
         """Rerank souvenirs with recency bias and person_id boosting.
 
-        Score = base_relevance + recency_bonus + person_bonus
+        Score = base_relevance * recency_multiplier * person_multiplier
+        Normalized to [0, 1] range.
         """
         now = timezone.now()
 
         for s in souvenirs:
             score = s.get("relevance", 0.5)
 
-            # Recency bias: recent memories get a boost
+            # Recency bias: multiplicative (keeps score in reasonable range)
             occurred = s.get("occurred_at")
             if occurred:
                 age_hours = (now - occurred).total_seconds() / 3600
                 if age_hours < 1:
-                    score += 0.3        # Last hour: strong boost
+                    score *= 1.5        # Last hour: strong boost
                 elif age_hours < 24:
-                    score += 0.2        # Last day
+                    score *= 1.3        # Last day
                 elif age_hours < 168:   # 7 days
-                    score += 0.1
+                    score *= 1.1
                 # Older: no boost
 
             # Person-id boost: memories involving this person rank higher
             if person_id:
                 entities = s.get("entities", [])
-                # Check if person_id or person name appears in entities
+                pid_lower = person_id.lower()
                 for entity in entities:
-                    entity_lower = entity.lower()
-                    if person_id.lower() in entity_lower:
-                        score += 0.25
+                    # Exact match (case-insensitive) to avoid "john" matching "johnathan"
+                    if entity.lower() == pid_lower:
+                        score *= 1.4
                         break
 
-            s["_score"] = score
+            # Normalize to [0, 1]
+            s["_score"] = min(1.0, score)
 
         souvenirs.sort(key=lambda s: s.get("_score", 0), reverse=True)
         return souvenirs
@@ -168,28 +170,49 @@ class MemoryRetriever:
                 })
         return enriched
 
+    # Max characters for the entire memory context block injected into the prompt.
+    # Prevents memory from dominating the system prompt context window.
+    MAX_CONTEXT_CHARS = 4000
+
     def _format_context(
         self, connaissances: list[dict], souvenirs: list[dict]
     ) -> str:
-        """Format memories as a readable text block for the system prompt."""
+        """Format memories as a readable text block for the system prompt.
+
+        Truncates individual entries and caps total size to MAX_CONTEXT_CHARS.
+        """
         lines = ["--- TES SOUVENIRS ---"]
+        current_len = len(lines[0])
 
         if connaissances:
             lines.append("\n[Ce que tu sais]")
+            current_len += len(lines[-1])
             for c in connaissances:
                 conf_label = self._confidence_label(c["confidence"])
                 entities_str = ""
                 if c["entities"]:
                     entities_str = f" (concerne: {', '.join(c['entities'])})"
-                lines.append(f"  - {c['content']}{entities_str} [{conf_label}]")
+                # Truncate individual content to avoid one memory dominating
+                content = c["content"][:300]
+                line = f"  - {content}{entities_str} [{conf_label}]"
+                if current_len + len(line) > self.MAX_CONTEXT_CHARS:
+                    break
+                lines.append(line)
+                current_len += len(line)
 
         if souvenirs:
             lines.append("\n[Tes souvenirs vecus]")
+            current_len += len(lines[-1])
             for s in souvenirs:
                 time_str = self._time_ago(s["occurred_at"]) if s["occurred_at"] else "?"
                 emotion = s.get("emotion", "neutral")
                 emotion_str = f" [{emotion}]" if emotion != "neutral" else ""
-                lines.append(f"  - ({time_str}){emotion_str} {s['content']}")
+                content = s["content"][:300]
+                line = f"  - ({time_str}){emotion_str} {content}"
+                if current_len + len(line) > self.MAX_CONTEXT_CHARS:
+                    break
+                lines.append(line)
+                current_len += len(line)
 
         lines.append("\n--- FIN SOUVENIRS ---")
         return "\n".join(lines)
