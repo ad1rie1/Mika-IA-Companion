@@ -68,7 +68,7 @@ class MemoryBridge:
         if not memory_manager.vector_store:
             return []
         try:
-            return memory_manager.vector_store.search_souvenirs(text, n=n)
+            return await sync_to_async(memory_manager.vector_store.search_souvenirs)(text, n=n)
         except Exception:
             logger.debug("search_related failed", exc_info=True)
             return []
@@ -93,9 +93,9 @@ class MemoryBridge:
                 occurred_at=timezone.now(),
             )
 
-            # Index in ChromaDB
+            # Index in ChromaDB (sync call — run in thread to avoid blocking event loop)
             if memory_manager.vector_store:
-                memory_manager.vector_store.add_souvenir(
+                await sync_to_async(memory_manager.vector_store.add_souvenir)(
                     souvenir_id=souvenir.pk,
                     content=souvenir.content,
                     metadata={
@@ -226,33 +226,54 @@ class MemoryBridge:
     async def check_contradictions(self, new_info: str) -> list[dict]:
         """Check if new information contradicts existing connaissances.
 
-        Uses check_connaissance_validity() from memory/extractor.py
-        (previously dead code, now activated by the Conscience).
+        Uses vector search to find only RELEVANT connaissances (max 5),
+        then validates each with an LLM call. Much cheaper than checking all 20.
 
         Returns list of {connaissance_id, content, still_valid, new_confidence}.
         """
         from memory.extractor import MemoryExtractor
+        from memory.manager import memory_manager
         from memory.models import Connaissance
 
         results = []
         extractor = MemoryExtractor()
 
         try:
-            # Get recent valid connaissances that might be affected
-            connaissances = await sync_to_async(
-                lambda: list(
-                    Connaissance.objects.filter(is_valid=True)
-                    .order_by("-updated_at")[:20]
-                )
-            )()
+            # Use vector search to find only connaissances semantically related
+            # to the new info — avoids blind LLM calls on unrelated facts
+            candidates = []
+            if memory_manager.vector_store:
+                raw = await sync_to_async(
+                    memory_manager.vector_store.search_connaissances
+                )(new_info, n=5)
+                for r in raw:
+                    try:
+                        pk = int(r["id"])
+                        conn = await sync_to_async(Connaissance.objects.get)(
+                            pk=pk, is_valid=True
+                        )
+                        candidates.append(conn)
+                    except (Connaissance.DoesNotExist, ValueError):
+                        continue
 
-            for conn in connaissances:
-                still_valid, new_confidence = await extractor.check_connaissance_validity(
-                    conn.content, new_info
-                )
+            if not candidates:
+                return results
+
+            for conn in candidates:
+                try:
+                    still_valid, new_confidence = await extractor.check_connaissance_validity(
+                        conn.content, new_info
+                    )
+                except Exception:
+                    logger.warning(
+                        "Validity check failed for connaissance #%d", conn.pk
+                    )
+                    continue
 
                 if not still_valid:
-                    await self.invalidate_connaissance(conn.pk, reason=f"Contradicted by: {new_info[:100]}")
+                    await self.invalidate_connaissance(
+                        conn.pk, reason=f"Contradicted by: {new_info[:100]}"
+                    )
                     results.append({
                         "connaissance_id": conn.pk,
                         "content": conn.content,

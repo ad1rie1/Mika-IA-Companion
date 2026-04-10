@@ -27,6 +27,6 @@ class DecisionContext:
     global_mood: str
     global_intensity: float
     idle_seconds: float
-    recent_action_count: int    # Conscience actions in last N minutes
+    in_cooldown: bool           # True if last action was within cooldown window
     max_pertinence: float
     weighted_urgency: float     # Accumulated pertinence score

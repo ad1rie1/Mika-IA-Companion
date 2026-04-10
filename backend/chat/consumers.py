@@ -80,7 +80,12 @@ async def handle_chat(
 
     try:
         # Get memory context (boosted for this person)
-        memory_context = await memory_manager.get_memory_context(message, person_id=person_id)
+        # Graceful degradation: if memory fails, continue without context
+        try:
+            memory_context = await memory_manager.get_memory_context(message, person_id=person_id)
+        except Exception:
+            logger.warning("Memory retrieval failed, continuing without context")
+            memory_context = ""
 
         # Get emotion context for this person
         emotion_context = emotion_engine.get_emotion_context(person_id)

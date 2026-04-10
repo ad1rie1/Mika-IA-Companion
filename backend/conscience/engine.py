@@ -45,6 +45,7 @@ class ConscienceEngine:
 
         # State
         self._decision_task: asyncio.Task | None = None
+        self._decision_lock = asyncio.Lock()
         self._last_activity: float = time.time()
         self._last_action_time: float = 0.0
         self._greeted_periods: set[str] = set()
@@ -166,7 +167,20 @@ class ConscienceEngine:
                 logger.exception("Conscience decision loop error")
 
     async def _decide(self) -> None:
-        """Core decision: evaluate accumulated signals, maintain memory, maybe act."""
+        """Core decision: evaluate accumulated signals, maintain memory, maybe act.
+
+        Protected by _decision_lock to prevent concurrent decisions from
+        the periodic loop and high-pertinence fast-path racing.
+        """
+        if self._decision_lock.locked():
+            logger.debug("Decision already in progress, skipping")
+            return
+
+        async with self._decision_lock:
+            await self._decide_inner()
+
+    async def _decide_inner(self) -> None:
+        """Inner decision logic (caller must hold _decision_lock)."""
         ctx = await self._build_context()
 
         # Memory maintenance (runs every cycle, even without acting)
@@ -211,16 +225,12 @@ class ConscienceEngine:
             )
         )()
 
-        # Recent actions count (last cooldown window)
-        from conscience.models import ConscienceLog
-
-        action_cutoff = tz.now() - timedelta(seconds=self._cooldown_seconds)
-        recent_actions = await sync_to_async(
-            lambda: ConscienceLog.objects.filter(
-                decision="act",
-                created_at__gte=action_cutoff,
-            ).count()
-        )()
+        # Cooldown check: use in-memory timestamp (faster, no DB query, no race)
+        now_ts = time.time()
+        in_cooldown = (
+            self._last_action_time > 0
+            and (now_ts - self._last_action_time) < self._cooldown_seconds
+        )
 
         # Emotional state
         glob = emotion_engine.global_mood
@@ -236,7 +246,7 @@ class ConscienceEngine:
             global_mood=glob.emotion.value,
             global_intensity=glob.intensity,
             idle_seconds=idle,
-            recent_action_count=recent_actions,
+            in_cooldown=in_cooldown,
             max_pertinence=max_p,
             weighted_urgency=min(1.0, weighted),
         )
@@ -244,8 +254,8 @@ class ConscienceEngine:
     def _compute_score(self, ctx: DecisionContext) -> tuple[float, str]:
         """Unified scoring. Returns (score, reason_string)."""
 
-        # Cooldown check
-        if ctx.recent_action_count > 0:
+        # Cooldown check (in-memory, no DB query)
+        if ctx.in_cooldown:
             return 0.0, "cooldown"
 
         score = 0.0
@@ -288,9 +298,12 @@ class ConscienceEngine:
         """Check for time-based greeting triggers (once per period per day)."""
         now = datetime.now()
         hour = now.hour
+        today = now.date()
 
-        if hour == 0:
+        # Clear greeted set on new day (date-based, not hour-based — avoids midnight race)
+        if not hasattr(self, "_greeted_date") or self._greeted_date != today:
             self._greeted_periods.clear()
+            self._greeted_date = today
 
         if 7 <= hour < 10 and "morning" not in self._greeted_periods:
             self._greeted_periods.add("morning")
@@ -300,7 +313,7 @@ class ConscienceEngine:
             self._greeted_periods.add("evening")
             return "evening"
 
-        if (23 <= hour or hour < 1) and "night" not in self._greeted_periods:
+        if 23 <= hour and "night" not in self._greeted_periods:
             self._greeted_periods.add("night")
             return "night"
 
@@ -431,9 +444,16 @@ class ConscienceEngine:
             # Mark observations as acted upon
             for obs in ctx.pending_observations:
                 obs.acted_upon = True
+                obs.status = "acted"
                 obs.action_response = response_text[:200]
                 await sync_to_async(obs.save)(
-                    update_fields=["acted_upon", "action_response"]
+                    update_fields=["acted_upon", "status", "action_response"]
+                )
+
+            if tool_calls:
+                logger.info(
+                    "Conscience tool calls: %s",
+                    [str(tc)[:120] for tc in tool_calls],
                 )
 
             logger.info(
@@ -444,6 +464,13 @@ class ConscienceEngine:
 
         except Exception:
             logger.exception("Conscience act failed")
+            # Mark observations as failed so they don't retry indefinitely
+            for obs in ctx.pending_observations:
+                try:
+                    obs.status = "failed"
+                    await sync_to_async(obs.save)(update_fields=["status"])
+                except Exception:
+                    pass
 
     def _pick_relevant_modules(self, ctx: DecisionContext) -> list[str]:
         """Determine which modules are relevant based on pending observations."""

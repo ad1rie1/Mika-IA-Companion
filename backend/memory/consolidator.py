@@ -4,6 +4,7 @@ from datetime import timedelta
 
 from asgiref.sync import sync_to_async
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 
 from memory.extractor import MemoryExtractor
@@ -108,18 +109,33 @@ class MemoryConsolidator:
         )
 
         # 1. Fetch unprocessed messages
+        #    Exclude internal sources (conscience prompts, module notifications)
+        #    that are not real conversations — only process user-facing exchanges
+        INTERNAL_SOURCES = ("conscience", "module_email", "module_wake")
         messages = await sync_to_async(list)(
             Message.objects.filter(id__gt=self._last_processed_id)
+            .exclude(source__in=INTERNAL_SOURCES)
             .order_by("created_at")
-            .values("id", "role", "content", "created_at")
+            .values("id", "role", "content", "created_at", "source")
         )
 
+        # Also get the absolute max message ID (including internal) to advance checkpoint
+        all_max_id = await sync_to_async(
+            lambda: Message.objects.filter(id__gt=self._last_processed_id)
+            .order_by("-id")
+            .values_list("id", flat=True)
+            .first()
+        )()
+
         if not messages:
-            logger.info("Consolidation: no new messages (last_id=%d)", self._last_processed_id)
+            # Advance checkpoint past internal-only messages
+            if all_max_id:
+                self._last_processed_id = all_max_id
+            logger.info("Consolidation: no new user messages (last_id=%d)", self._last_processed_id)
             await self._apply_decay()
             return
 
-        logger.info("Consolidating %d new messages", len(messages))
+        logger.info("Consolidating %d new messages (skipped internal)", len(messages))
 
         # 2. Format for Claude
         msg_dicts = [{"role": m["role"], "content": m["content"]} for m in messages]
@@ -163,17 +179,21 @@ class MemoryConsolidator:
                     if entity_objs:
                         await sync_to_async(souvenir.entities.set)(entity_objs)
 
-                    # Index in ChromaDB
-                    self.vector_store.add_souvenir(
-                        souvenir_id=souvenir.pk,
-                        content=extraction["content"],
-                        metadata={
-                            "importance": 1.0,
-                            "emotion": emotion,
-                            "occurred_at": now.isoformat(),
-                            "themes": ",".join(t.name for t in theme_objs),
-                        },
-                    )
+                    # Index in ChromaDB (protected — ORM record exists even if indexing fails)
+                    try:
+                        await sync_to_async(self.vector_store.add_souvenir)(
+                            souvenir_id=souvenir.pk,
+                            content=extraction["content"],
+                            metadata={
+                                "importance": 1.0,
+                                "emotion": emotion,
+                                "occurred_at": now.isoformat(),
+                                "themes": ",".join(t.name for t in theme_objs),
+                            },
+                        )
+                    except Exception:
+                        logger.warning("ChromaDB indexing failed for souvenir #%d", souvenir.pk)
+
                     souvenirs_created += 1
                     logger.info(
                         "Souvenir created: [%s] %s",
@@ -189,14 +209,17 @@ class MemoryConsolidator:
                         # Update confidence of existing
                         existing.confidence = min(1.0, existing.confidence + 0.1)
                         await sync_to_async(existing.save)()
-                        self.vector_store.add_connaissance(
-                            connaissance_id=existing.pk,
-                            content=existing.content,
-                            metadata={
-                                "confidence": existing.confidence,
-                                "is_valid": existing.is_valid,
-                            },
-                        )
+                        try:
+                            await sync_to_async(self.vector_store.add_connaissance)(
+                                connaissance_id=existing.pk,
+                                content=existing.content,
+                                metadata={
+                                    "confidence": existing.confidence,
+                                    "is_valid": existing.is_valid,
+                                },
+                            )
+                        except Exception:
+                            logger.warning("ChromaDB indexing failed for connaissance #%d", existing.pk)
                         logger.info(
                             "Connaissance reinforced (confidence=%.2f): %s",
                             existing.confidence, existing.content[:120],
@@ -214,15 +237,19 @@ class MemoryConsolidator:
                         if entity_objs:
                             await sync_to_async(connaissance.entities.set)(entity_objs)
 
-                        self.vector_store.add_connaissance(
-                            connaissance_id=connaissance.pk,
-                            content=extraction["content"],
-                            metadata={
-                                "confidence": 1.0,
-                                "is_valid": True,
-                                "themes": ",".join(t.name for t in theme_objs),
-                            },
-                        )
+                        try:
+                            await sync_to_async(self.vector_store.add_connaissance)(
+                                connaissance_id=connaissance.pk,
+                                content=extraction["content"],
+                                metadata={
+                                    "confidence": 1.0,
+                                    "is_valid": True,
+                                    "themes": ",".join(t.name for t in theme_objs),
+                                },
+                            )
+                        except Exception:
+                            logger.warning("ChromaDB indexing failed for connaissance #%d", connaissance.pk)
+
                         connaissances_created += 1
                         logger.info(
                             "Connaissance created: %s",
@@ -232,16 +259,22 @@ class MemoryConsolidator:
             except Exception:
                 logger.exception("Failed to process extraction: %s", extraction)
 
-        # 4. Update checkpoint
-        max_id = messages[-1]["id"]
-        self._last_processed_id = max_id
+        # 4. Update checkpoint atomically (transaction protects against crash
+        #    between in-memory update and DB write)
+        max_id = all_max_id or messages[-1]["id"]
 
-        await sync_to_async(ConsolidationLog.objects.create)(
-            messages_processed=len(messages),
-            souvenirs_created=souvenirs_created,
-            connaissances_created=connaissances_created,
-            last_message_id=max_id,
-        )
+        @sync_to_async
+        def _save_checkpoint():
+            with transaction.atomic():
+                ConsolidationLog.objects.create(
+                    messages_processed=len(messages),
+                    souvenirs_created=souvenirs_created,
+                    connaissances_created=connaissances_created,
+                    last_message_id=max_id,
+                )
+
+        await _save_checkpoint()
+        self._last_processed_id = max_id
 
         logger.info(
             "Consolidation complete: %d souvenirs, %d connaissances from %d messages",
@@ -272,31 +305,41 @@ class MemoryConsolidator:
         )
 
         for souvenir in souvenirs:
-            days_old = (now - souvenir.created_at).total_seconds() / 86400
+            # Use occurred_at (when it happened) not created_at (when it was stored)
+            ref_date = souvenir.occurred_at or souvenir.created_at
+            days_old = (now - ref_date).total_seconds() / 86400
             new_importance = decay_rate ** days_old
             if new_importance < min_importance:
-                # Remove from ChromaDB and delete
-                self.vector_store.remove_souvenir(souvenir.pk)
+                try:
+                    await sync_to_async(self.vector_store.remove_souvenir)(souvenir.pk)
+                except Exception:
+                    logger.debug("ChromaDB remove failed for souvenir #%d", souvenir.pk)
                 await sync_to_async(souvenir.delete)()
                 logger.debug("Pruned souvenir #%d (too old)", souvenir.pk)
             elif abs(new_importance - souvenir.importance) > 0.01:
                 souvenir.importance = round(new_importance, 3)
                 await sync_to_async(souvenir.save)(update_fields=["importance"])
-                # Update metadata in ChromaDB
-                self.vector_store.add_souvenir(
-                    souvenir_id=souvenir.pk,
-                    content=souvenir.content,
-                    metadata={
-                        "importance": souvenir.importance,
-                        "occurred_at": souvenir.occurred_at.isoformat(),
-                    },
-                )
+                try:
+                    await sync_to_async(self.vector_store.add_souvenir)(
+                        souvenir_id=souvenir.pk,
+                        content=souvenir.content,
+                        metadata={
+                            "importance": souvenir.importance,
+                            "occurred_at": ref_date.isoformat(),
+                        },
+                    )
+                except Exception:
+                    logger.debug("ChromaDB update failed for souvenir #%d", souvenir.pk)
 
     async def _decay_connaissances(self):
         """Slowly reduce confidence of old connaissances that haven't been reinforced.
 
         Unlike souvenirs, connaissances are not deleted — they become 'incertain'
         (low confidence) but stay valid. Only the Conscience can invalidate them.
+
+        Decay rate: ~2% per week after 7 days without reinforcement.
+        This is gentler than souvenir decay (0.95^days) because knowledge
+        is more durable than episodic memory.
         """
         from memory.models import Connaissance
 
@@ -313,7 +356,8 @@ class MemoryConsolidator:
                 continue  # Recently reinforced — skip
 
             # Gentle decay: lose ~2% confidence per week after 7 days
-            decay = 0.02 * (days_since_update / 7)
+            weeks_past = days_since_update / 7
+            decay = 0.02 * weeks_past
             new_confidence = max(min_confidence, conn.confidence - decay)
 
             if abs(new_confidence - conn.confidence) > 0.01:
@@ -328,7 +372,7 @@ class MemoryConsolidator:
         """Check if a similar connaissance already exists via vector search."""
         from memory.models import Connaissance
 
-        results = self.vector_store.search_connaissances(content, n=1)
+        results = await sync_to_async(self.vector_store.search_connaissances)(content, n=1)
         if results and results[0]["distance"] is not None and results[0]["distance"] < 0.15:
             # Very similar — treat as duplicate
             try:

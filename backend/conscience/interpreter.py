@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 
 from django.conf import settings
 
@@ -57,15 +58,42 @@ REGLES:
 HEURISTIC_EVENTS: dict[str, callable] = {}
 
 
+def _extract_themes_from_text(text: str) -> list[str]:
+    """Extract basic themes from message text via keyword matching.
+
+    Cheap heuristic so that heuristic-path signals can still trigger
+    memory boosting (which relies on themes).
+    """
+    if not text:
+        return []
+    text_lower = text.lower()
+    theme_keywords = {
+        "gaming": ["jeu", "jouer", "game", "gaming", "zelda", "minecraft", "steam"],
+        "musique": ["musique", "chanson", "chanter", "music", "playlist"],
+        "cuisine": ["cuisine", "manger", "recette", "plat", "cook"],
+        "tech": ["code", "programmer", "python", "javascript", "dev", "tech"],
+        "anime": ["anime", "manga", "otaku", "vtuber"],
+        "art": ["dessin", "dessiner", "art", "peindre", "peinture"],
+        "sport": ["sport", "foot", "velo", "courir", "gym"],
+    }
+    return [
+        theme for theme, keywords in theme_keywords.items()
+        if any(kw in text_lower for kw in keywords)
+    ]
+
+
 def _heuristic_chat_message(data: dict) -> InterpretedSignal:
     person = data.get("person_id", "?")
     source = data.get("source", "frontend")
+    text = data.get("text", "")
     return InterpretedSignal(
         summary=f"Message de {person} via {source}",
         category="communication",
         pertinence=0.3,
         emotional_reaction="",
         emotional_intensity=0.0,
+        themes=_extract_themes_from_text(text),
+        entities=[person] if person != "?" else [],
         should_remember=False,
     )
 
@@ -77,6 +105,8 @@ def _heuristic_chat_connect(data: dict) -> InterpretedSignal:
         pertinence=0.1,
         emotional_reaction="",
         emotional_intensity=0.0,
+        themes=[],
+        entities=[],
         should_remember=False,
     )
 
@@ -88,6 +118,8 @@ def _heuristic_chat_disconnect(data: dict) -> InterpretedSignal:
         pertinence=0.1,
         emotional_reaction="",
         emotional_intensity=0.0,
+        themes=[],
+        entities=[],
         should_remember=False,
     )
 
@@ -103,9 +135,9 @@ def _heuristic_telegram_message(data: dict) -> InterpretedSignal:
         pertinence=0.4,
         emotional_reaction="",
         emotional_intensity=0.0,
-        themes=[],
+        themes=_extract_themes_from_text(text),
         entities=[user] if user != "?" else [],
-        should_remember=False,  # Already handled by notify_ai → memory
+        should_remember=False,
     )
 
 
@@ -213,13 +245,26 @@ class SignalInterpreter:
             f"Contenu: {content}"
         )
 
+    @staticmethod
+    def _strip_markdown_json(raw: str) -> str:
+        """Extract JSON from a response that may be wrapped in markdown code fences.
+
+        Uses regex to find the JSON object, which is robust against
+        backticks appearing inside JSON string values.
+        """
+        # Try to find JSON inside code fences first
+        match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
+        if match:
+            return match.group(1)
+        # Try to find a bare JSON object
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if match:
+            return match.group(0)
+        return raw
+
     def _parse_response(self, raw: str, event: ModuleEvent) -> InterpretedSignal:
         """Parse JSON response from the model."""
-        text = raw
-        if text.startswith("```"):
-            lines = text.split("\n")
-            lines = [l for l in lines if not l.strip().startswith("```")]
-            text = "\n".join(lines).strip()
+        text = self._strip_markdown_json(raw)
 
         try:
             data = json.loads(text)
