@@ -166,8 +166,8 @@ class ConscienceEngine:
         Uses person_id "conscience_mika" — the VTuber feeling something
         from her own observation, not from a conversation partner.
         """
-        from conscience.emotion_engine import emotion_engine
-        from conscience.emotion_types import Emotion, EmotionData
+        from emotion.engine import emotion_engine
+        from emotion.types import Emotion, EmotionData
 
         try:
             emotion = Emotion(signal.emotional_reaction)
@@ -329,7 +329,7 @@ class ConscienceEngine:
         """Gather all context needed for a decision."""
         from conscience.models import Observation
 
-        from conscience.emotion_engine import emotion_engine
+        from emotion.engine import emotion_engine
 
         now = time.time()
 
@@ -589,10 +589,11 @@ class ConscienceEngine:
         """Generate a spontaneous response using accumulated context.
 
         Only loads tools from modules relevant to the current observations,
-        not all 70+ tools. The Conscience uses capabilities to decide
-        which modules are needed.
+        not all 70+ tools. Uses the pipeline processor for the AI call.
         """
         from modules.manager import module_manager
+        from pipeline.context import ConversationContext, gather_context
+        from pipeline.processor import process_message
 
         self._last_action_time = time.time()
 
@@ -607,8 +608,13 @@ class ConscienceEngine:
         capabilities_summary = module_manager.collect_capabilities_summary()
         prompt = await self._build_action_prompt(ctx, reason, memory_context, capabilities_summary)
 
+        person_id = "conscience_mika"
+
         try:
-            # Build filtered MCP server with only relevant modules' tools
+            # Build filtered context with only relevant modules' tools
+            base_context = await gather_context(prompt, person_id, include_tools=False)
+
+            # Override with relevant-only tools
             if relevant_modules:
                 mcp_server, tool_names = module_manager.build_mcp_server_for(
                     relevant_modules
@@ -616,70 +622,28 @@ class ConscienceEngine:
             else:
                 mcp_server, tool_names = None, []
 
-            from ai.client import claude_client
-            from conscience.emotion_engine import emotion_engine
-            from conscience.emotion_types import EmotionData, Emotion
-            from memory.manager import memory_manager
+            context = ConversationContext(
+                memory_context=memory_context if memory_context else base_context.memory_context,
+                emotion_context=base_context.emotion_context,
+                module_context=base_context.module_context,
+                history=base_context.history,
+                mcp_server=mcp_server,
+                tool_names=tool_names,
+            )
 
-            person_id = "conscience_mika"
-            emotion_context = emotion_engine.get_emotion_context(person_id)
-            module_context = module_manager.collect_context()
-            history = memory_manager.get_conversation_context()
-
-            if mcp_server and tool_names:
-                response_text, emotion_data, tool_calls = (
-                    await claude_client.chat_with_tools(
-                        message=prompt,
-                        conversation_history=history,
-                        memory_context=memory_context,
-                        emotion_context=emotion_context,
-                        module_context=module_context,
-                        mcp_server=mcp_server,
-                        tool_names=tool_names,
-                    )
-                )
-            else:
-                response_text, emotion_data = await claude_client.chat(
-                    message=prompt,
-                    conversation_history=history,
-                    memory_context=memory_context,
-                    emotion_context=emotion_context,
-                )
-                tool_calls = []
-
-            # Process emotion
-            emotion_engine.process_emotion(emotion_data, person_id)
-
-            # Store in memory
-            await memory_manager.add_message("user", prompt, source="conscience")
-            await memory_manager.add_message("assistant", response_text, source="conscience")
-
-            # Broadcast to WebSocket
-            from channels.layers import get_channel_layer
-            from chat.consumers import BROADCAST_GROUP
-
-            msg_emotion = emotion_engine.compute_message_emotion(person_id)
-            channel_layer = get_channel_layer()
-            await channel_layer.group_send(
-                BROADCAST_GROUP,
-                {
-                    "type": "chat.broadcast",
-                    "data": {
-                        "type": "speech",
-                        "text": response_text,
-                        "emotion": msg_emotion.emotion.value,
-                        "emotion_intensity": msg_emotion.intensity,
-                        "emotion_state": emotion_engine.get_state_dict(person_id),
-                        "source": "conscience",
-                    },
-                },
+            output = await process_message(
+                message=prompt,
+                source="conscience",
+                person_id=person_id,
+                context=context,
+                emit_event=False,
             )
 
             # Mark observations as acted
             for obs in ctx.pending_observations:
                 obs.status = "acted"
                 obs.acted_upon = True  # backward compat
-                obs.action_response = response_text[:200]
+                obs.action_response = output.text[:200]
                 await sync_to_async(obs.save)(
                     update_fields=["status", "acted_upon", "action_response"]
                 )
@@ -698,16 +662,16 @@ class ConscienceEngine:
                     "Executed %d scheduled action(s)", len(ctx.scheduled_actions)
                 )
 
-            if tool_calls:
+            if output.tool_calls:
                 logger.info(
                     "Conscience tool calls: %s",
-                    [str(tc)[:120] for tc in tool_calls],
+                    [str(tc)[:120] for tc in output.tool_calls],
                 )
 
             logger.info(
                 "Conscience acted [%s] (modules=%s, tools=%d): %s",
-                reason, relevant_modules, len(tool_calls),
-                response_text[:80],
+                reason, relevant_modules, len(output.tool_calls),
+                output.text[:80],
             )
 
         except Exception:

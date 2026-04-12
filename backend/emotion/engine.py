@@ -4,7 +4,7 @@ import time
 
 from django.conf import settings
 
-from conscience.emotion_types import (
+from emotion.types import (
     Emotion,
     EmotionCategory,
     EmotionData,
@@ -12,7 +12,7 @@ from conscience.emotion_types import (
     OPPOSITE_CATEGORIES,
     TRANSITION_OVERRIDES,
 )
-from conscience.emotion_state import (
+from emotion.state import (
     EmotionHistoryEntry,
     GlobalMood,
     MessageEmotion,

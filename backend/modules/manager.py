@@ -371,11 +371,9 @@ class ModuleManager:
         """Wake Claude with a module notification and all available tools.
 
         This callback is injected into every module via ``set_notify_ai()``.
+        Uses the pipeline processor to avoid duplicating the conversation flow.
         """
-        from ai.client import claude_client
-        from conscience.emotion_engine import emotion_engine
-        from conscience.emotion_types import Emotion, EmotionData
-        from memory.manager import memory_manager
+        from pipeline.processor import process_message
 
         # Build a structured prompt from the notification
         prompt = (
@@ -397,88 +395,17 @@ class ModuleManager:
             notification.source_module, person_id, notification.summary,
         )
 
-        try:
-            memory_context = await memory_manager.get_memory_context(
-                notification.summary
-            )
-            emotion_context = emotion_engine.get_emotion_context(person_id)
-            module_context = self.collect_context()
-            history = memory_manager.get_conversation_context()
-
-            mcp_server = self.get_mcp_server()
-            tool_names = self.get_tool_names()
-
-            if mcp_server and tool_names:
-                response_text, emotion_data, tool_calls = (
-                    await claude_client.chat_with_tools(
-                        message=prompt,
-                        conversation_history=history,
-                        memory_context=memory_context,
-                        emotion_context=emotion_context,
-                        module_context=module_context,
-                        mcp_server=mcp_server,
-                        tool_names=tool_names,
-                    )
-                )
-            else:
-                response_text, emotion_data = await claude_client.chat(
-                    message=prompt,
-                    conversation_history=history,
-                    memory_context=memory_context,
-                    emotion_context=emotion_context,
-                )
-                tool_calls = []
-
-            emotion_engine.process_emotion(emotion_data, person_id)
-            await emotion_engine._maybe_save_snapshot(person_id)
-
-        except Exception:
-            logger.exception("notify_ai error for module %s", notification.source_module)
-            response_text = "Oups, j'ai eu un petit bug..."
-            emotion_data = EmotionData(emotion=Emotion.SAD, intensity=0.6)
-            emotion_engine.process_emotion(emotion_data, person_id)
-            tool_calls = []
-
-        # Store in memory
-        await memory_manager.add_message(
-            "user", prompt, source=notification.source_module
-        )
-        await memory_manager.add_message("assistant", response_text)
-
-        logger.info(
-            "[notify_ai/%s/%s] -> %s (emotion=%s intensity=%.2f) | memory_ctx=%d chars",
-            notification.source_module, person_id,
-            response_text[:80],
-            emotion_data.emotion.value, emotion_data.intensity,
-            len(memory_context) if 'memory_context' in dir() else 0,
-        )
-
-        # Broadcast to WebSocket
-        from channels.layers import get_channel_layer
-
-        from chat.consumers import BROADCAST_GROUP
-
-        msg_emotion = emotion_engine.compute_message_emotion(person_id)
-        channel_layer = get_channel_layer()
-        await channel_layer.group_send(
-            BROADCAST_GROUP,
-            {
-                "type": "chat.broadcast",
-                "data": {
-                    "type": "speech",
-                    "text": response_text,
-                    "emotion": msg_emotion.emotion.value,
-                    "emotion_intensity": msg_emotion.intensity,
-                    "emotion_state": emotion_engine.get_state_dict(person_id),
-                    "source": notification.source_module,
-                },
-            },
+        output = await process_message(
+            message=prompt,
+            source=notification.source_module,
+            person_id=person_id,
+            emit_event=False,  # avoid recursive event loop
         )
 
         return AIDecision(
-            response_text=response_text,
-            emotion=emotion_data,
-            tool_calls_made=tool_calls,
+            response_text=output.text,
+            emotion=output.emotion_data,
+            tool_calls_made=output.tool_calls,
         )
 
     # ── Status ────────────────────────────────────────────────────

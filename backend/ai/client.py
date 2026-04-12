@@ -1,3 +1,9 @@
+"""ClaudeClient — AI call layer.
+
+Handles the raw AI calls (simple chat and tool-enabled chat).
+Prompt construction is delegated to pipeline.prompt.
+"""
+
 import logging
 import os
 from collections.abc import AsyncIterator
@@ -11,65 +17,20 @@ from claude_agent_sdk import (
 from claude_agent_sdk.types import ClaudeAgentOptions
 from django.conf import settings
 
-from conscience.emotion_types import EmotionData, extract_emotion
+from emotion.types import EmotionData, extract_emotion
 from ai.router import AIRole, ai_router
-from config.personality import personality
+from pipeline.prompt import build_system_prompt, format_conversation
 
 logger = logging.getLogger(__name__)
 
 
 class ClaudeClient:
     def __init__(self):
-        self.system_prompt = personality.to_system_prompt()
         # Ensure env vars are set for claude_agent_sdk (used by chat_with_tools)
-        # The ClaudeProvider in ai/providers/claude.py also does this,
-        # but chat_with_tools() uses claude_agent_sdk directly.
         if settings.CLAUDE_OAUTH_TOKEN:
             os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = settings.CLAUDE_OAUTH_TOKEN
         elif settings.ANTHROPIC_API_KEY:
             os.environ["ANTHROPIC_API_KEY"] = settings.ANTHROPIC_API_KEY
-
-    # ── Shared helpers ────────────────────────────────────────────
-
-    def _build_system_prompt(
-        self,
-        emotion_context: str = "",
-        memory_context: str = "",
-        module_context: str = "",
-    ) -> str:
-        system = self.system_prompt
-        if module_context:
-            system += (
-                "\n\n--- CONTEXTE MODULES ---\n"
-                + module_context
-                + "\n--- FIN CONTEXTE MODULES ---"
-            )
-        if emotion_context:
-            system += (
-                "\n\n--- TON ETAT EMOTIONNEL ACTUEL ---\n"
-                + emotion_context
-                + "\n--- FIN ETAT EMOTIONNEL ---"
-            )
-        if memory_context:
-            system += "\n\n" + memory_context
-        return system
-
-    def _build_prompt(
-        self,
-        message: str,
-        conversation_history: list[dict] | None = None,
-    ) -> str:
-        full_prompt = ""
-        if conversation_history:
-            for msg in conversation_history:
-                role = msg["role"]
-                content = msg["content"]
-                if role == "user":
-                    full_prompt += f"User: {content}\n\n"
-                elif role == "assistant":
-                    full_prompt += f"Assistant: {content}\n\n"
-        full_prompt += f"User: {message}"
-        return full_prompt
 
     # ── Simple chat (no tools) ────────────────────────────────────
 
@@ -82,8 +43,8 @@ class ClaudeClient:
     ) -> tuple[str, EmotionData]:
         """Send a message to the configured AI provider and return (clean_response, EmotionData).
         Single turn, no tools."""
-        system = self._build_system_prompt(emotion_context, memory_context)
-        full_prompt = self._build_prompt(message, conversation_history)
+        system = build_system_prompt(emotion_context, memory_context)
+        full_prompt = format_conversation(message, conversation_history)
 
         raw_text = await ai_router.complete(
             role=AIRole.CONVERSATION,
@@ -130,10 +91,10 @@ class ClaudeClient:
 
         Returns (clean_text, emotion_data, list_of_tool_names_called).
         """
-        system = self._build_system_prompt(
+        system = build_system_prompt(
             emotion_context, memory_context, module_context
         )
-        full_prompt = self._build_prompt(message, conversation_history)
+        full_prompt = format_conversation(message, conversation_history)
 
         mcp_servers = {}
         allowed_tools = []

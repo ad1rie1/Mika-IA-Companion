@@ -26,6 +26,7 @@ INSTALLED_APPS = [
     "channels",
     "ai",
     "chat",
+    "emotion",
     "memory",
     "conscience",
     "modules",
