@@ -25,7 +25,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "channels",
     "ai",
-    "chat",
+    "communication",
     "emotion",
     "memory",
     "conscience",

@@ -1,6 +1,6 @@
 from django.urls import path
 
-from chat.views import get_personality, health
+from communication.views import get_personality, health
 
 urlpatterns = [
     path("health", health),

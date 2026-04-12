@@ -21,7 +21,7 @@ async def broadcast_to_websocket(output: SpeechOutput, source: str) -> None:
     await channel_layer.group_send(
         BROADCAST_GROUP,
         {
-            "type": "chat.broadcast",
+            "type": "communication.broadcast",
             "data": {
                 "type": "speech",
                 "text": output.text,
@@ -34,7 +34,7 @@ async def broadcast_to_websocket(output: SpeechOutput, source: str) -> None:
     )
 
 
-async def emit_chat_event(source: str, person_id: str) -> None:
+async def emit_communication_event(source: str, person_id: str) -> None:
     """Emit a module event for the conversation turn."""
     from modules.manager import module_manager
     from modules.types import ModuleEvent

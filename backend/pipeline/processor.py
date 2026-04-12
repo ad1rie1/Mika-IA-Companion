@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 from emotion.engine import emotion_engine
 from emotion.types import Emotion, EmotionData
-from pipeline.broadcast import broadcast_to_websocket, emit_chat_event, persist_to_memory
+from pipeline.broadcast import broadcast_to_websocket, emit_communication_event, persist_to_memory
 from pipeline.context import ConversationContext, gather_context
 from pipeline.response import call_ai_and_parse
 
@@ -76,7 +76,7 @@ async def process_message(
 
     # 5. Emit module event
     if emit_event:
-        await emit_chat_event(source, person_id)
+        await emit_communication_event(source, person_id)
 
     # 6. Compute final blended emotion
     msg_emotion = emotion_engine.compute_message_emotion(person_id)

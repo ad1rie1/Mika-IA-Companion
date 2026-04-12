@@ -7,7 +7,7 @@ from django.core.asgi import get_asgi_application
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django_asgi_app = get_asgi_application()
 
-from chat.routing import websocket_urlpatterns
+from communication.routing import websocket_urlpatterns
 from memory.manager import memory_manager
 from modules.manager import module_manager
 
@@ -35,7 +35,7 @@ class LifespanWrapper:
             await self.app(scope, receive, send)
 
     async def _startup(self):
-        from chat.consumers import handle_chat
+        from communication.consumers import handle_message
         from emotion.engine import emotion_engine
         from conscience.engine import conscience_engine
 
@@ -49,7 +49,7 @@ class LifespanWrapper:
         module_manager.set_conscience(conscience_engine.observe)
         logger.info("Conscience initialized and wired to event bus")
 
-        await module_manager.start_all(handle_chat)
+        await module_manager.start_all(handle_message)
         logger.info("All modules started")
 
     async def _shutdown(self):

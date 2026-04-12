@@ -15,8 +15,8 @@ BROADCAST_GROUP = "vtuber_broadcast"
 MAX_MESSAGE_LENGTH = 2000
 
 
-class ChatConsumer(AsyncWebsocketConsumer):
-    """WebSocket consumer for the VTuber chat."""
+class CommunicationConsumer(AsyncWebsocketConsumer):
+    """WebSocket consumer — one of the communication channels to the VTuber."""
 
     async def connect(self):
         await self.channel_layer.group_add(BROADCAST_GROUP, self.channel_name)
@@ -55,7 +55,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             # Allow client to provide a person_id, otherwise use connection-generated one
             person_id = data.get("person_id", getattr(self, "person_id", "anonymous"))
 
-            await handle_chat(
+            await handle_message(
                 message.strip()[:MAX_MESSAGE_LENGTH],
                 source="frontend",
                 person_id=person_id,
@@ -63,17 +63,17 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
     # --- Group message handler ---
 
-    async def chat_broadcast(self, event):
+    async def communication_broadcast(self, event):
         """Called when the broadcast group sends a message."""
         await self.send(text_data=json.dumps(event["data"], ensure_ascii=False))
 
 
-async def handle_chat(
+async def handle_message(
     message: str,
     source: str = "frontend",
     person_id: str = "anonymous",
 ):
-    """Process a chat message from any source via the pipeline."""
+    """Process an incoming message from any communication channel via the pipeline."""
     from pipeline.processor import process_message
 
     output = await process_message(
