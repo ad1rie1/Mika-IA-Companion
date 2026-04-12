@@ -7,8 +7,8 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from memory.extractor import MemoryExtractor
-from memory.vector_store import VectorStore
+from memory.extraction.extractor import MemoryExtractor
+from memory.storage.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
 

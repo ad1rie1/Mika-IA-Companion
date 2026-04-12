@@ -105,7 +105,7 @@ class MemoryBridge:
 
         Returns list of {connaissance_id, content, still_valid, new_confidence}.
         """
-        from memory.extractor import MemoryExtractor
+        from memory.extraction import MemoryExtractor
         from memory.manager import memory_manager
 
         results = []

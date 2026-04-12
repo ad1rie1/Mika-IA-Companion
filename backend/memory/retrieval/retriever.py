@@ -5,7 +5,7 @@ from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.utils import timezone
 
-from memory.vector_store import VectorStore
+from memory.storage.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
 

@@ -36,10 +36,9 @@ class MemoryManager:
         try:
             import chromadb  # noqa: F401 — test import before loading subsystems
 
-            from memory.consolidator import MemoryConsolidator
-            from memory.extractor import MemoryExtractor
-            from memory.retriever import MemoryRetriever
-            from memory.vector_store import VectorStore
+            from memory.extraction import MemoryExtractor
+            from memory.retrieval import MemoryRetriever
+            from memory.storage import MemoryConsolidator, VectorStore
 
             self.vector_store = VectorStore()
             self.extractor = MemoryExtractor()

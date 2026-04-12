@@ -2,11 +2,15 @@
 
 Each function in the system (conversation, email triage, memory extraction, etc.)
 can be independently assigned to a different AI provider and model via settings.
+
+All AI calls pass through the router, which provides unified logging:
+timing, role, provider, model, and response length for every call.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from enum import Enum
 
 from django.conf import settings
@@ -131,20 +135,47 @@ class AIRouter:
         user_prompt: str,
         **kwargs,
     ) -> str:
-        """Route a completion request to the configured provider+model."""
+        """Route a completion request to the configured provider+model.
+
+        Wraps every call with unified logging: timing, role, provider,
+        model, prompt size, and response size.
+        """
         provider_name, model = self._role_config[role]
         provider = self._get_provider(provider_name)
 
+        prompt_chars = len(system_prompt) + len(user_prompt)
+        t0 = time.monotonic()
+
         logger.debug(
-            "AI Router: %s → %s:%s", role.value, provider_name, model,
+            "AI call START  role=%s provider=%s model=%s prompt_chars=%d",
+            role.value, provider_name, model, prompt_chars,
         )
 
-        return await provider.complete(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            model=model,
-            **kwargs,
-        )
+        try:
+            result = await provider.complete(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                model=model,
+                **kwargs,
+            )
+            elapsed_ms = (time.monotonic() - t0) * 1000
+            logger.info(
+                "AI call OK     role=%-22s provider=%-7s model=%-30s "
+                "prompt=%5d chars  response=%5d chars  %7.0f ms",
+                role.value, provider_name, model,
+                prompt_chars, len(result), elapsed_ms,
+            )
+            return result
+
+        except Exception:
+            elapsed_ms = (time.monotonic() - t0) * 1000
+            logger.error(
+                "AI call FAILED role=%-22s provider=%-7s model=%-30s "
+                "prompt=%5d chars  %7.0f ms",
+                role.value, provider_name, model,
+                prompt_chars, elapsed_ms,
+            )
+            raise
 
 
 ai_router = AIRouter()
