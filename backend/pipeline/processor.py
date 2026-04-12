@@ -1,11 +1,7 @@
 """Conversation processor — the full pipeline from input to broadcast.
 
-Replaces the duplicated logic in:
-- chat/consumers.py (handle_chat)
-- modules/manager.py (_notify_ai)
-- conscience/engine.py (_act)
-
-Each of those now calls process_message() instead of reimplementing the pipeline.
+Orchestrates: context → prompt → AI call → emotion → persist → broadcast.
+Each step is a named function for readability and testability.
 """
 
 import logging
@@ -13,11 +9,12 @@ from dataclasses import dataclass
 
 from channels.layers import get_channel_layer
 
-from ai.client import claude_client
+from ai.client import ai_client
 from emotion.engine import emotion_engine
-from emotion.types import Emotion, EmotionData
+from emotion.types import Emotion, EmotionData, extract_emotion
 from memory.manager import memory_manager
 from pipeline.context import ConversationContext, gather_context
+from pipeline.prompt import build_system_prompt, format_conversation
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +32,84 @@ class SpeechOutput:
     tool_calls: list[str]
 
 
+# ── Step helpers ─────────────────────────────────────────────────
+
+
+async def _call_ai(
+    context: ConversationContext, message: str
+) -> tuple[str, EmotionData, list[str]]:
+    """Build prompt, call AI, extract emotion from response."""
+    system = build_system_prompt(
+        context.emotion_context, context.memory_context, context.module_context
+    )
+    user_prompt = format_conversation(message, context.history)
+
+    if context.mcp_server and context.tool_names:
+        raw_text, tool_calls = await ai_client.complete_with_tools(
+            system_prompt=system,
+            user_prompt=user_prompt,
+            mcp_server=context.mcp_server,
+            tool_names=context.tool_names,
+        )
+    else:
+        raw_text = await ai_client.complete(
+            system_prompt=system,
+            user_prompt=user_prompt,
+        )
+        tool_calls = []
+
+    clean_text, emotion_data = extract_emotion(raw_text)
+    return clean_text, emotion_data, tool_calls
+
+
+async def _persist_to_memory(
+    message: str, response: str, source: str, person_id: str
+) -> None:
+    """Save user message and assistant response to memory."""
+    await memory_manager.add_message(
+        "user", message, source=source, person_id=person_id
+    )
+    await memory_manager.add_message(
+        "assistant", response, person_id=person_id
+    )
+
+
+async def _emit_chat_event(source: str, person_id: str) -> None:
+    """Emit a module event for the conversation turn."""
+    from modules.manager import module_manager
+    from modules.types import ModuleEvent
+
+    await module_manager.emit_event(
+        ModuleEvent(
+            event_type="chat.message",
+            source_module=source,
+            data={"person_id": person_id, "source": source},
+        )
+    )
+
+
+async def _broadcast_to_websocket(output: SpeechOutput, source: str) -> None:
+    """Broadcast the response to all connected WebSocket clients."""
+    channel_layer = get_channel_layer()
+    await channel_layer.group_send(
+        BROADCAST_GROUP,
+        {
+            "type": "chat.broadcast",
+            "data": {
+                "type": "speech",
+                "text": output.text,
+                "emotion": output.emotion_name,
+                "emotion_intensity": output.emotion_intensity,
+                "emotion_state": output.emotion_state,
+                "source": source,
+            },
+        },
+    )
+
+
+# ── Main entry point ─────────────────────────────────────────────
+
+
 async def process_message(
     message: str,
     source: str = "frontend",
@@ -44,7 +119,7 @@ async def process_message(
     persist: bool = True,
     emit_event: bool = True,
 ) -> SpeechOutput:
-    """Full conversation pipeline: context → AI → emotion → persist → broadcast.
+    """Full conversation pipeline: context → prompt → AI → emotion → persist → broadcast.
 
     Args:
         message: The input message/prompt.
@@ -62,24 +137,8 @@ async def process_message(
         if context is None:
             context = await gather_context(message, person_id)
 
-        # 2. Call AI
-        if context.mcp_server and context.tool_names:
-            response_text, emotion_data, tool_calls = await claude_client.chat_with_tools(
-                message=message,
-                conversation_history=context.history,
-                memory_context=context.memory_context,
-                emotion_context=context.emotion_context,
-                module_context=context.module_context,
-                mcp_server=context.mcp_server,
-                tool_names=context.tool_names,
-            )
-        else:
-            response_text, emotion_data = await claude_client.chat(
-                message=message,
-                conversation_history=context.history,
-                memory_context=context.memory_context,
-                emotion_context=context.emotion_context,
-            )
+        # 2. Prompt → AI call → emotion extraction
+        response_text, emotion_data, tool_calls = await _call_ai(context, message)
 
         # 3. Process emotion
         emotion_engine.process_emotion(emotion_data, person_id)
@@ -93,25 +152,11 @@ async def process_message(
 
     # 4. Persist to memory
     if persist:
-        await memory_manager.add_message(
-            "user", message, source=source, person_id=person_id
-        )
-        await memory_manager.add_message(
-            "assistant", response_text, person_id=person_id
-        )
+        await _persist_to_memory(message, response_text, source, person_id)
 
     # 5. Emit module event
     if emit_event:
-        from modules.manager import module_manager
-        from modules.types import ModuleEvent
-
-        await module_manager.emit_event(
-            ModuleEvent(
-                event_type="chat.message",
-                source_module=source,
-                data={"person_id": person_id, "source": source},
-            )
-        )
+        await _emit_chat_event(source, person_id)
 
     # 6. Compute final blended emotion
     msg_emotion = emotion_engine.compute_message_emotion(person_id)
@@ -123,25 +168,7 @@ async def process_message(
         msg_emotion.emotion.value, msg_emotion.intensity,
     )
 
-    # 7. Broadcast to WebSocket
-    if broadcast:
-        channel_layer = get_channel_layer()
-        await channel_layer.group_send(
-            BROADCAST_GROUP,
-            {
-                "type": "chat.broadcast",
-                "data": {
-                    "type": "speech",
-                    "text": response_text,
-                    "emotion": msg_emotion.emotion.value,
-                    "emotion_intensity": msg_emotion.intensity,
-                    "emotion_state": emotion_engine.get_state_dict(person_id),
-                    "source": source,
-                },
-            },
-        )
-
-    return SpeechOutput(
+    output = SpeechOutput(
         text=response_text,
         emotion_data=emotion_data,
         emotion_name=msg_emotion.emotion.value,
@@ -149,3 +176,9 @@ async def process_message(
         emotion_state=emotion_engine.get_state_dict(person_id),
         tool_calls=tool_calls,
     )
+
+    # 7. Broadcast to WebSocket
+    if broadcast:
+        await _broadcast_to_websocket(output, source)
+
+    return output

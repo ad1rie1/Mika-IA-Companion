@@ -10,9 +10,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 
 from ai.router import AIRole, ai_router
+from utils.parsing import strip_markdown_json
 from conscience.types import InterpretedSignal
 from modules.types import ModuleEvent
 
@@ -227,26 +227,9 @@ class SignalInterpreter:
             f"Contenu: {content}"
         )
 
-    @staticmethod
-    def _strip_markdown_json(raw: str) -> str:
-        """Extract JSON from a response that may be wrapped in markdown code fences.
-
-        Uses regex to find the JSON object, which is robust against
-        backticks appearing inside JSON string values.
-        """
-        # Try to find JSON inside code fences first
-        match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
-        if match:
-            return match.group(1)
-        # Try to find a bare JSON object
-        match = re.search(r"\{.*\}", raw, re.DOTALL)
-        if match:
-            return match.group(0)
-        return raw
-
     def _parse_response(self, raw: str, event: ModuleEvent) -> InterpretedSignal:
         """Parse JSON response from the model."""
-        text = self._strip_markdown_json(raw)
+        text = strip_markdown_json(raw)
 
         try:
             data = json.loads(text)

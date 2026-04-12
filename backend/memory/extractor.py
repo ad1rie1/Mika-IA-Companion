@@ -1,11 +1,11 @@
 import asyncio
 import json
 import logging
-import re
 
 from django.conf import settings
 
 from ai.router import AIRole, ai_router
+from utils.parsing import strip_markdown_json
 
 EXTRACTION_TIMEOUT = 45  # seconds — prevent hanging the consolidation loop
 
@@ -156,28 +156,13 @@ class MemoryExtractor:
         )
         return stored
 
-    @staticmethod
-    def _strip_markdown_json(raw: str) -> str:
-        """Extract JSON from a response that may be wrapped in markdown code fences.
-
-        Uses regex to find the JSON object, which is robust against
-        backticks appearing inside JSON string values.
-        """
-        match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
-        if match:
-            return match.group(1)
-        match = re.search(r"\{.*\}", raw, re.DOTALL)
-        if match:
-            return match.group(0)
-        return raw
-
     async def _query_model_json(self, conversation_text: str) -> dict | None:
         """Query model and parse JSON response. Returns parsed dict or None."""
         raw = await self._query_model(conversation_text, AIRole.MEMORY_EXTRACTION)
         if raw is None:
             return None
 
-        text = self._strip_markdown_json(raw)
+        text = strip_markdown_json(raw)
 
         try:
             return json.loads(text)
@@ -224,7 +209,7 @@ class MemoryExtractor:
             if raw is None:
                 return True, 1.0
 
-            text = self._strip_markdown_json(raw)
+            text = strip_markdown_json(raw)
             data = json.loads(text)
             still_valid = data.get("still_valid", True)
             confidence = float(data.get("new_confidence", 1.0))

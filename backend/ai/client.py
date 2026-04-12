@@ -1,7 +1,7 @@
-"""ClaudeClient — AI call layer.
+"""AI client — pure call layer.
 
-Handles the raw AI calls (simple chat and tool-enabled chat).
-Prompt construction is delegated to pipeline.prompt.
+Handles raw AI calls (simple completion and tool-enabled completion).
+Receives ready-made prompts — prompt construction belongs to the pipeline.
 """
 
 import logging
@@ -17,45 +17,38 @@ from claude_agent_sdk import (
 from claude_agent_sdk.types import ClaudeAgentOptions
 from django.conf import settings
 
-from emotion.types import EmotionData, extract_emotion
 from ai.router import AIRole, ai_router
-from pipeline.prompt import build_system_prompt, format_conversation
 
 logger = logging.getLogger(__name__)
 
 
-class ClaudeClient:
+class AIClient:
     def __init__(self):
-        # Ensure env vars are set for claude_agent_sdk (used by chat_with_tools)
+        # Ensure env vars are set for claude_agent_sdk (used by complete_with_tools)
         if settings.CLAUDE_OAUTH_TOKEN:
             os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = settings.CLAUDE_OAUTH_TOKEN
         elif settings.ANTHROPIC_API_KEY:
             os.environ["ANTHROPIC_API_KEY"] = settings.ANTHROPIC_API_KEY
 
-    # ── Simple chat (no tools) ────────────────────────────────────
+    # ── Simple completion (no tools) ─────────────────────────────
 
-    async def chat(
+    async def complete(
         self,
-        message: str,
-        conversation_history: list[dict] | None = None,
-        memory_context: str = "",
-        emotion_context: str = "",
-    ) -> tuple[str, EmotionData]:
-        """Send a message to the configured AI provider and return (clean_response, EmotionData).
-        Single turn, no tools."""
-        system = build_system_prompt(emotion_context, memory_context)
-        full_prompt = format_conversation(message, conversation_history)
+        system_prompt: str,
+        user_prompt: str,
+        role: AIRole = AIRole.CONVERSATION,
+    ) -> str:
+        """Send a ready-made prompt to the configured AI provider.
 
-        raw_text = await ai_router.complete(
-            role=AIRole.CONVERSATION,
-            system_prompt=system,
-            user_prompt=full_prompt,
+        Returns raw text response (caller handles emotion extraction etc.).
+        """
+        return await ai_router.complete(
+            role=role,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
         )
 
-        clean_text, emotion_data = extract_emotion(raw_text)
-        return clean_text, emotion_data
-
-    # ── Chat with tools (MCP) ─────────────────────────────────────
+    # ── Completion with tools (MCP) ──────────────────────────────
 
     @staticmethod
     async def _prompt_stream(text: str) -> AsyncIterator[dict]:
@@ -64,8 +57,6 @@ class ClaudeClient:
         When MCP servers are present, the SDK must receive the prompt as
         an AsyncIterable so that ``stream_input()`` keeps stdin open for
         bidirectional control-protocol communication (MCP tool calls).
-        Passing a plain ``str`` causes the SDK to close stdin immediately
-        after sending the user message, which breaks MCP.
         """
         yield {
             "type": "user",
@@ -74,39 +65,30 @@ class ClaudeClient:
             "parent_tool_use_id": None,
         }
 
-    async def chat_with_tools(
+    async def complete_with_tools(
         self,
-        message: str,
-        conversation_history: list[dict] | None = None,
-        memory_context: str = "",
-        emotion_context: str = "",
-        module_context: str = "",
+        system_prompt: str,
+        user_prompt: str,
         mcp_server=None,
         tool_names: list[str] | None = None,
-    ) -> tuple[str, EmotionData, list[str]]:
-        """Chat with tool support via MCP server.
+    ) -> tuple[str, list[str]]:
+        """Completion with tool support via MCP server.
 
         The SDK handles the tool_use → tool_result loop internally
         when max_turns > 1.
 
-        Returns (clean_text, emotion_data, list_of_tool_names_called).
+        Returns (raw_text, list_of_tool_names_called).
         """
-        system = build_system_prompt(
-            emotion_context, memory_context, module_context
-        )
-        full_prompt = format_conversation(message, conversation_history)
-
         mcp_servers = {}
         allowed_tools = []
         if mcp_server:
             mcp_servers["vtuber_modules"] = mcp_server
-            # MCP tool names are prefixed mcp__servername__toolname by the CLI
             allowed_tools = [
                 f"mcp__vtuber_modules__{name}" for name in (tool_names or [])
             ]
 
         options = ClaudeAgentOptions(
-            system_prompt=system,
+            system_prompt=system_prompt,
             model=ai_router.get_model(AIRole.CONVERSATION_TOOLS),
             max_turns=10,
             mcp_servers=mcp_servers,
@@ -114,8 +96,7 @@ class ClaudeClient:
             permission_mode="bypassPermissions",
         )
 
-        # Pass prompt as AsyncIterable to keep stdin open for MCP
-        prompt_stream = self._prompt_stream(full_prompt)
+        prompt_stream = self._prompt_stream(user_prompt)
         response_stream = query(prompt=prompt_stream, options=options)
 
         raw_text = ""
@@ -136,8 +117,7 @@ class ClaudeClient:
         if tool_calls_made:
             logger.info("Tools used in this turn: %s", tool_calls_made)
 
-        clean_text, emotion_data = extract_emotion(raw_text)
-        return clean_text, emotion_data, tool_calls_made
+        return raw_text, tool_calls_made
 
 
-claude_client = ClaudeClient()
+ai_client = AIClient()
