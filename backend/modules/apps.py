@@ -9,7 +9,7 @@ class ModulesConfig(AppConfig):
         from modules.email import EmailModule
         from modules.manager import module_manager
         from modules.rss import RSSModule
-        from modules.telegram import TelegramModule
+        from communication.channels import TelegramModule
         from modules.urls import _populate_urls
         from modules.wake import WakeModule
 

@@ -1,4 +1,4 @@
-"""Telegram module — bot integration via python-telegram-bot."""
+"""Telegram channel — bot integration via python-telegram-bot."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from telegram.ext import (
 
 from config.personality import personality
 from modules.base import BaseModule
-from modules.types import ModuleCapability, ModuleEvent, ModuleNotification
+from modules.types import ModuleCapability
 
 logger = logging.getLogger(__name__)
 
@@ -63,39 +63,15 @@ class TelegramModule(BaseModule):
             return
 
         person_id = f"tg_{update.message.from_user.id}"
-        user_name = update.message.from_user.first_name or str(update.message.from_user.id)
 
-        # Emit event for the Conscience to observe (async, non-blocking)
-        from modules.manager import module_manager
+        from communication.handler import handle_message
 
-        await module_manager.emit_event(
-            ModuleEvent(
-                event_type="telegram.message",
-                source_module=self.name,
-                data={
-                    "person_id": person_id,
-                    "user_name": user_name,
-                    "text": update.message.text,
-                },
-            )
+        response_text, _ = await handle_message(
+            update.message.text,
+            source="telegram",
+            person_id=person_id,
         )
-
-        # Direct response — Telegram needs a synchronous reply
-        if self._notify_ai:
-            decision = await self._notify_ai(
-                ModuleNotification(
-                    source_module=self.name,
-                    summary=f"Telegram message from {user_name}",
-                    details=update.message.text,
-                    urgency="normal",
-                    metadata={"person_id": person_id},
-                )
-            )
-            await update.message.reply_text(decision.response_text)
-        else:
-            await update.message.reply_text(
-                "Je ne suis pas encore connectée au cerveau !"
-            )
+        await update.message.reply_text(response_text)
 
     # ── Capabilities ──────────────────────────────────────────────
 

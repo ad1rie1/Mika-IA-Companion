@@ -35,7 +35,7 @@ class LifespanWrapper:
             await self.app(scope, receive, send)
 
     async def _startup(self):
-        from communication.consumers import handle_message
+        from communication.handler import handle_message
         from emotion.engine import emotion_engine
         from conscience.engine import conscience_engine
 

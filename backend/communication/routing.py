@@ -1,7 +1,7 @@
 from django.urls import path
 
-from communication.consumers import CommunicationConsumer
+from communication.channels.web_frontend import WebSocketConsumer
 
 websocket_urlpatterns = [
-    path("ws", CommunicationConsumer.as_asgi()),
+    path("ws", WebSocketConsumer.as_asgi()),
 ]
