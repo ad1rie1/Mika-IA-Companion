@@ -166,8 +166,8 @@ class ConscienceEngine:
         Uses person_id "conscience_mika" — the VTuber feeling something
         from her own observation, not from a conversation partner.
         """
-        from ai.emotion_engine import emotion_engine
-        from ai.emotion_types import Emotion, EmotionData
+        from conscience.emotion_engine import emotion_engine
+        from conscience.emotion_types import Emotion, EmotionData
 
         try:
             emotion = Emotion(signal.emotional_reaction)
@@ -329,7 +329,7 @@ class ConscienceEngine:
         """Gather all context needed for a decision."""
         from conscience.models import Observation
 
-        from ai.emotion_engine import emotion_engine
+        from conscience.emotion_engine import emotion_engine
 
         now = time.time()
 
@@ -617,8 +617,8 @@ class ConscienceEngine:
                 mcp_server, tool_names = None, []
 
             from ai.client import claude_client
-            from ai.emotion_engine import emotion_engine
-            from ai.emotion_types import EmotionData, Emotion
+            from conscience.emotion_engine import emotion_engine
+            from conscience.emotion_types import EmotionData, Emotion
             from memory.manager import memory_manager
 
             person_id = "conscience_mika"

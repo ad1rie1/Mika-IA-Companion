@@ -4,8 +4,8 @@ import logging
 import re
 
 from django.conf import settings
-from claude_agent_sdk import query, AssistantMessage, TextBlock
-from claude_agent_sdk.types import ClaudeAgentOptions
+
+from ai.router import AIRole, ai_router
 
 EXTRACTION_TIMEOUT = 45  # seconds — prevent hanging the consolidation loop
 
@@ -94,7 +94,6 @@ class MemoryExtractor:
     Connaissances are objective facts."""
 
     def __init__(self):
-        self.model = settings.CLAUDE_MODEL_LIGHT
         self._system_prompt: str | None = None
 
     def _get_system_prompt(self) -> str:
@@ -135,12 +134,12 @@ class MemoryExtractor:
             )
         except asyncio.TimeoutError:
             logger.warning(
-                "Extraction timed out after %ds (model=%s)",
-                EXTRACTION_TIMEOUT, self.model,
+                "Extraction timed out after %ds (role=%s)",
+                EXTRACTION_TIMEOUT, AIRole.MEMORY_EXTRACTION.value,
             )
             return []
         except Exception:
-            logger.exception("Extraction error (model=%s)", self.model)
+            logger.exception("Extraction error (role=%s)", AIRole.MEMORY_EXTRACTION.value)
             return []
 
     async def _call_extraction(self, conversation_text: str, msg_total: int) -> list[dict]:
@@ -174,7 +173,7 @@ class MemoryExtractor:
 
     async def _query_model_json(self, conversation_text: str) -> dict | None:
         """Query model and parse JSON response. Returns parsed dict or None."""
-        raw = await self._query_model(conversation_text)
+        raw = await self._query_model(conversation_text, AIRole.MEMORY_EXTRACTION)
         if raw is None:
             return None
 
@@ -184,37 +183,26 @@ class MemoryExtractor:
             return json.loads(text)
         except json.JSONDecodeError as exc:
             logger.warning(
-                "JSON parse failed (model=%s): %s | raw=%.300s",
-                self.model, exc, repr(raw),
+                "JSON parse failed (role=%s): %s | raw=%.300s",
+                AIRole.MEMORY_EXTRACTION.value, exc, repr(raw),
             )
             return None
 
-    async def _query_model(self, conversation_text: str) -> str | None:
-        """Send extraction prompt to the model. Returns raw text or None on failure."""
-        options = ClaudeAgentOptions(
-            system_prompt=self._get_system_prompt(),
-            model=self.model,
-            max_turns=1,
-        )
-        raw_text = ""
-        msg_count = 0
+    async def _query_model(self, user_prompt: str, role: AIRole) -> str | None:
+        """Send prompt to the configured provider via ai_router. Returns raw text or None."""
         try:
-            async for msg in query(prompt=conversation_text, options=options):
-                msg_count += 1
-                if isinstance(msg, AssistantMessage):
-                    for block in msg.content:
-                        if isinstance(block, TextBlock):
-                            raw_text += block.text
+            raw_text = await ai_router.complete(
+                role=role,
+                system_prompt=self._get_system_prompt(),
+                user_prompt=user_prompt,
+            )
         except Exception:
-            logger.exception("SDK query failed (model=%s)", self.model)
+            logger.exception("AI query failed (role=%s)", role.value)
             return None
 
         raw = raw_text.strip()
         if not raw:
-            logger.warning(
-                "Empty response from model=%s (%d SDK messages received)",
-                self.model, msg_count,
-            )
+            logger.warning("Empty response (role=%s)", role.value)
             return None
         return raw
 
@@ -232,7 +220,7 @@ class MemoryExtractor:
         )
 
         try:
-            raw = await self._query_model(prompt)
+            raw = await self._query_model(prompt, AIRole.VALIDITY_CHECK)
             if raw is None:
                 return True, 1.0
 

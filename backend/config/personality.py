@@ -3,8 +3,8 @@ from pathlib import Path
 import yaml
 from django.conf import settings
 
-from ai.emotion_types import Emotion
-from ai.emotion_state import Temperament
+from conscience.emotion_types import Emotion
+from conscience.emotion_state import Temperament
 
 
 class Personality:

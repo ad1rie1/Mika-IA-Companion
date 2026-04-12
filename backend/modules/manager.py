@@ -373,8 +373,8 @@ class ModuleManager:
         This callback is injected into every module via ``set_notify_ai()``.
         """
         from ai.client import claude_client
-        from ai.emotion_engine import emotion_engine
-        from ai.emotion_types import Emotion, EmotionData
+        from conscience.emotion_engine import emotion_engine
+        from conscience.emotion_types import Emotion, EmotionData
         from memory.manager import memory_manager
 
         # Build a structured prompt from the notification

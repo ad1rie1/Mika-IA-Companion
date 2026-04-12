@@ -84,6 +84,20 @@ TELEGRAM_TOKEN = env("TELEGRAM_TOKEN", default="")
 VTUBER_NAME = env("VTUBER_NAME", default="Mika")
 CLAUDE_MODEL = env("CLAUDE_MODEL", default="claude-opus-4-6")
 CLAUDE_MODEL_LIGHT = env("CLAUDE_MODEL_LIGHT", default="claude-sonnet-4-5")
+
+# --- Multi-provider AI ---
+OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
+OPENAI_BASE_URL = env("OPENAI_BASE_URL", default="")  # For Azure/custom endpoints
+OLLAMA_BASE_URL = env("OLLAMA_BASE_URL", default="http://localhost:11434")
+
+# Role → provider:model mapping (defaults to Claude if not set)
+AI_ROLE_CONVERSATION = env("AI_ROLE_CONVERSATION", default=f"claude:{CLAUDE_MODEL}")
+AI_ROLE_CONVERSATION_TOOLS = env("AI_ROLE_CONVERSATION_TOOLS", default=f"claude:{CLAUDE_MODEL}")
+AI_ROLE_EMAIL_TRIAGE = env("AI_ROLE_EMAIL_TRIAGE", default=f"claude:{CLAUDE_MODEL_LIGHT}")
+AI_ROLE_SIGNAL_INTERPRETATION = env("AI_ROLE_SIGNAL_INTERPRETATION", default=f"claude:{CLAUDE_MODEL_LIGHT}")
+AI_ROLE_MEMORY_EXTRACTION = env("AI_ROLE_MEMORY_EXTRACTION", default=f"claude:{CLAUDE_MODEL_LIGHT}")
+AI_ROLE_VALIDITY_CHECK = env("AI_ROLE_VALIDITY_CHECK", default=f"claude:{CLAUDE_MODEL_LIGHT}")
+
 MEMORY_SHORT_TERM_LIMIT = env.int("MEMORY_SHORT_TERM_LIMIT", default=20)
 API_PORT = env.int("API_PORT", default=8000)
 PERSONALITY_PATH = PROJECT_ROOT / "personality.yaml"

@@ -1,5 +1,5 @@
-"""Backward-compatibility shim. Real implementation is in ai.emotion_types."""
-from ai.emotion_types import (
+"""Backward-compatibility shim. Real implementation is in conscience.emotion_types."""
+from conscience.emotion_types import (
     Emotion,
     EmotionData,
     extract_emotion,

@@ -36,7 +36,7 @@ class LifespanWrapper:
 
     async def _startup(self):
         from chat.consumers import handle_chat
-        from ai.emotion_engine import emotion_engine
+        from conscience.emotion_engine import emotion_engine
         from conscience.engine import conscience_engine
 
         await memory_manager.initialize()
@@ -53,7 +53,7 @@ class LifespanWrapper:
         logger.info("All modules started")
 
     async def _shutdown(self):
-        from ai.emotion_engine import emotion_engine
+        from conscience.emotion_engine import emotion_engine
         from conscience.engine import conscience_engine
 
         await conscience_engine.shutdown()

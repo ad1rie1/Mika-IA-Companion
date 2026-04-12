@@ -6,8 +6,8 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.layers import get_channel_layer
 
 from ai.client import claude_client
-from ai.emotion_engine import emotion_engine
-from ai.emotion_types import Emotion, EmotionData
+from conscience.emotion_engine import emotion_engine
+from conscience.emotion_types import Emotion, EmotionData
 from config.personality import personality
 from memory.manager import memory_manager
 

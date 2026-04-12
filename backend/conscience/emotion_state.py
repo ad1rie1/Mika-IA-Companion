@@ -2,7 +2,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 
-from ai.emotion_types import Emotion, EmotionCategory, EMOTION_CATEGORIES
+from conscience.emotion_types import Emotion, EmotionCategory, EMOTION_CATEGORIES
 
 
 @dataclass(frozen=True)

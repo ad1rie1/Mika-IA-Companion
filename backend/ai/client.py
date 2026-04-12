@@ -11,7 +11,8 @@ from claude_agent_sdk import (
 from claude_agent_sdk.types import ClaudeAgentOptions
 from django.conf import settings
 
-from ai.emotion_types import EmotionData, extract_emotion
+from conscience.emotion_types import EmotionData, extract_emotion
+from ai.router import AIRole, ai_router
 from config.personality import personality
 
 logger = logging.getLogger(__name__)
@@ -20,14 +21,13 @@ logger = logging.getLogger(__name__)
 class ClaudeClient:
     def __init__(self):
         self.system_prompt = personality.to_system_prompt()
-        # Set the token from Django settings for claude_agent_sdk
-        # SDK looks for CLAUDE_CODE_OAUTH_TOKEN for OAuth, or ANTHROPIC_API_KEY for API key
+        # Ensure env vars are set for claude_agent_sdk (used by chat_with_tools)
+        # The ClaudeProvider in ai/providers/claude.py also does this,
+        # but chat_with_tools() uses claude_agent_sdk directly.
         if settings.CLAUDE_OAUTH_TOKEN:
             os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = settings.CLAUDE_OAUTH_TOKEN
         elif settings.ANTHROPIC_API_KEY:
             os.environ["ANTHROPIC_API_KEY"] = settings.ANTHROPIC_API_KEY
-        else:
-            raise ValueError("Either CLAUDE_OAUTH_TOKEN or ANTHROPIC_API_KEY must be set")
 
     # ── Shared helpers ────────────────────────────────────────────
 
@@ -80,25 +80,16 @@ class ClaudeClient:
         memory_context: str = "",
         emotion_context: str = "",
     ) -> tuple[str, EmotionData]:
-        """Send a message to Claude and return (clean_response, EmotionData).
+        """Send a message to the configured AI provider and return (clean_response, EmotionData).
         Single turn, no tools."""
         system = self._build_system_prompt(emotion_context, memory_context)
         full_prompt = self._build_prompt(message, conversation_history)
 
-        options = ClaudeAgentOptions(
+        raw_text = await ai_router.complete(
+            role=AIRole.CONVERSATION,
             system_prompt=system,
-            model=settings.CLAUDE_MODEL,
-            max_turns=1,
+            user_prompt=full_prompt,
         )
-
-        response_stream = query(prompt=full_prompt, options=options)
-
-        raw_text = ""
-        async for msg in response_stream:
-            if isinstance(msg, AssistantMessage):
-                for block in msg.content:
-                    if isinstance(block, TextBlock):
-                        raw_text += block.text
 
         clean_text, emotion_data = extract_emotion(raw_text)
         return clean_text, emotion_data
@@ -155,7 +146,7 @@ class ClaudeClient:
 
         options = ClaudeAgentOptions(
             system_prompt=system,
-            model=settings.CLAUDE_MODEL,
+            model=ai_router.get_model(AIRole.CONVERSATION_TOOLS),
             max_turns=10,
             mcp_servers=mcp_servers,
             allowed_tools=allowed_tools,

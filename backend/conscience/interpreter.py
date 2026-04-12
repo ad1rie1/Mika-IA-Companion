@@ -1,7 +1,7 @@
 """Signal interpreter — classifies and scores module events.
 
-Uses heuristic fast-path for known event types, and Claude Haiku
-for rich/unknown events (emails, RSS, etc.).
+Uses heuristic fast-path for known event types, and a configurable
+AI provider for rich/unknown events (emails, RSS, etc.).
 Follows the same pattern as memory/extractor.py.
 """
 
@@ -12,8 +12,7 @@ import json
 import logging
 import re
 
-from django.conf import settings
-
+from ai.router import AIRole, ai_router
 from conscience.types import InterpretedSignal
 from modules.types import ModuleEvent
 
@@ -155,7 +154,6 @@ class SignalInterpreter:
     """
 
     def __init__(self):
-        self.model = getattr(settings, "CLAUDE_MODEL_LIGHT", "claude-haiku-4-5-20251001")
         self._system_prompt: str | None = None
 
     async def interpret(self, event: ModuleEvent) -> InterpretedSignal:
@@ -191,23 +189,14 @@ class SignalInterpreter:
             return self._fallback_signal(event)
 
     async def _interpret_with_llm(self, event: ModuleEvent) -> InterpretedSignal:
-        """Use Claude Haiku to interpret an event."""
-        from claude_agent_sdk import AssistantMessage, TextBlock, query
-        from claude_agent_sdk.types import ClaudeAgentOptions
-
+        """Use configured AI provider to interpret an event."""
         prompt = self._build_prompt(event)
-        options = ClaudeAgentOptions(
-            system_prompt=self._get_system_prompt(),
-            model=self.model,
-            max_turns=1,
-        )
 
-        raw_text = ""
-        async for msg in query(prompt=prompt, options=options):
-            if isinstance(msg, AssistantMessage):
-                for block in msg.content:
-                    if isinstance(block, TextBlock):
-                        raw_text += block.text
+        raw_text = await ai_router.complete(
+            role=AIRole.SIGNAL_INTERPRETATION,
+            system_prompt=self._get_system_prompt(),
+            user_prompt=prompt,
+        )
 
         raw = raw_text.strip()
         if not raw:

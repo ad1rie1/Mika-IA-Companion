@@ -2,10 +2,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 
-from django.conf import settings
-from claude_agent_sdk import query, AssistantMessage, TextBlock
-from claude_agent_sdk.types import ClaudeAgentOptions
-
+from ai.router import AIRole, ai_router
 from modules.email.prompts import EMAIL_TRIAGE_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -23,10 +20,9 @@ class EmailAnalysis:
 
 
 class EmailAnalyzer:
-    """Uses Claude to analyze incoming emails and decide actions."""
+    """Uses AI to analyze incoming emails and decide actions."""
 
     def __init__(self):
-        self.model = settings.CLAUDE_MODEL_LIGHT
         self._system_prompt: str | None = None
 
     def _get_system_prompt(self) -> str:
@@ -51,17 +47,11 @@ class EmailAnalyzer:
         )
 
         try:
-            options = ClaudeAgentOptions(
+            raw_text = await ai_router.complete(
+                role=AIRole.EMAIL_TRIAGE,
                 system_prompt=self._get_system_prompt(),
-                model=self.model,
-                max_turns=1,
+                user_prompt=email_text,
             )
-            raw_text = ""
-            async for msg in query(prompt=email_text, options=options):
-                if isinstance(msg, AssistantMessage):
-                    for block in msg.content:
-                        if isinstance(block, TextBlock):
-                            raw_text += block.text
             raw = raw_text.strip()
             data = json.loads(raw)
             return EmailAnalysis(
