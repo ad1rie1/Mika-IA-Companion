@@ -18,7 +18,10 @@
       "Bash(python -m django makemigrations:*)",
       "Bash(python:*)",
       "Bash(del \"c:\\\\Users\\\\ad1ri\\\\OneDrive\\\\Bureau\\\\vtuber\\\\backend\\\\modules\\\\views.py\")",
-      "Bash(python3 -m py_compile:*)"
+      "Bash(python3 -m py_compile:*)",
+      "Bash(cp -r backend/chat backend/communication)",
+      "Bash(rm -rf backend/communication/__pycache__)",
+      "Bash(find \"/home/Qwartz/Bureau/PROJET IA/vtuber/backend/communication\" -type d -name __pycache__ -exec rm -rf {} +)"
     ]
   }
 }

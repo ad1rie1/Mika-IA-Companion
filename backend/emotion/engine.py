@@ -294,7 +294,7 @@ class EmotionEngine:
             else:
                 # Old emotion defeated, new one takes over
                 person.emotion = new_emotion
-                person.intensity = max(0.1, abs(remaining) + new_intensity * 0.3)
+                person.intensity = min(1.0, max(0.1, abs(remaining) + new_intensity * 0.3))
                 person.momentum = 0.0
                 source = "opposition_flip"
 
