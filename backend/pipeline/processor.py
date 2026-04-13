@@ -60,14 +60,19 @@ async def process_message(
     await emotion_engine.ensure_person_loaded(person_id)
 
     try:
-        # 1. Assemble context
-        if context is None:
-            context = await gather_context(message, person_id, attachments=attachments)
+        # 1. Sauvegarde des pièces jointes (disque + BDD + FilesModule)
+        if attachments:
+            from pipeline.media import save_attachments
+            await save_attachments(attachments, person_id=person_id)
 
-        # 2. Prompt -> AI call -> emotion extraction
+        # 2. Assemble context
+        if context is None:
+            context = await gather_context(message, person_id)
+
+        # 3. Prompt -> AI call -> emotion extraction
         response_text, emotion_data, tool_calls = await call_ai_and_parse(context, message)
 
-        # 3. Process emotion
+        # 4. Process emotion
         emotion_engine.process_emotion(emotion_data, person_id)
         await emotion_engine._maybe_save_snapshot(person_id)
 
@@ -77,15 +82,15 @@ async def process_message(
         emotion_data = EmotionData(emotion=Emotion.SAD, intensity=0.6)
         emotion_engine.process_emotion(emotion_data, person_id)
 
-    # 4. Persist to memory
+    # 5. Persist to memory
     if persist:
         await persist_to_memory(message, response_text, source, person_id)
 
-    # 5. Emit module event
+    # 6. Emit module event
     if emit_event:
         await emit_communication_event(source, person_id)
 
-    # 6. Compute final blended emotion
+    # 7. Compute final blended emotion
     msg_emotion = emotion_engine.compute_message_emotion(person_id)
 
     logger.info(
@@ -105,7 +110,7 @@ async def process_message(
         request_id=request_id,
     )
 
-    # 7. Broadcast to WebSocket
+    # 8. Broadcast to WebSocket
     if broadcast:
         await broadcast_to_websocket(output, source)
 

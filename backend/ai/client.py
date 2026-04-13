@@ -34,6 +34,7 @@ class AIClient:
     ) -> str:
         """Send a ready-made prompt to the configured AI provider.
 
+        attachments: list[MediaAttachment] optionnel — utilisé par files_analyze_image.
         Returns raw text response (caller handles emotion extraction etc.).
         """
         return await ai_router.complete(

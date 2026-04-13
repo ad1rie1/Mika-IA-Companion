@@ -1,18 +1,23 @@
-"""Media attachment processing — validation, transcription, text extraction.
+"""Media attachment processing — validation, sauvegarde disque + BDD.
 
-Supported categories:
-  - image  → passed as vision content blocks to Claude/OpenAI
-  - audio  → transcribed via OpenAI Whisper if OPENAI_API_KEY is set
-  - text   → decoded and injected as text in the user prompt
-  - unknown → filename only, mentioned in the prompt
+Flux :
+  1. validate_attachments(raw_list)  → list[MediaAttachment]   (parse + garde-fous)
+  2. save_attachments(validated, person_id)  → list[UploadedFile]  (disque + BDD + module)
+
+Catégories :
+  image   → vision IA via files_analyze_image
+  audio   → transcription Whisper via files_transcribe (TODO)
+  text    → lecture via files_read
+  unknown → fichier brut disponible
 """
 
 from __future__ import annotations
 
 import base64
-import io
 import logging
+import uuid
 from dataclasses import dataclass
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -26,18 +31,17 @@ ALLOWED_TEXT_TYPES = {
     "application/json", "application/xml",
 }
 
-MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB decoded
+MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024  # 5 Mo décodé
 MAX_ATTACHMENTS = 5
-MAX_TEXT_CHARS = 8_000  # injected text cap
 
 
 @dataclass
 class MediaAttachment:
-    """A single file attachment from the client."""
+    """Pièce jointe validée en mémoire (transitoire — avant sauvegarde disque)."""
     name: str
     media_type: str
-    data: str       # Base64-encoded, no data-URI prefix
-    category: str   # "image" | "audio" | "text" | "unknown"
+    data: str       # base64, sans préfixe data-URI
+    category: str   # image | audio | text | unknown
 
     @classmethod
     def from_ws_dict(cls, raw: dict) -> "MediaAttachment":
@@ -46,11 +50,11 @@ class MediaAttachment:
         data = str(raw.get("data", ""))
         if "," in data:
             data = data.split(",", 1)[1]
-        category = _categorize(media_type)
-        return cls(name=name, media_type=media_type, data=data, category=category)
+        return cls(name=name, media_type=media_type, data=data, category=_categorize(media_type))
 
     def decoded_bytes(self) -> bytes:
-        return base64.b64decode(self.data + "==")  # padding-safe
+        padding = 4 - len(self.data) % 4
+        return base64.b64decode(self.data + "=" * (padding % 4))
 
     def size_bytes(self) -> int:
         return len(self.data) * 3 // 4
@@ -66,8 +70,24 @@ def _categorize(media_type: str) -> str:
     return "unknown"
 
 
+def _ext_for(media_type: str, original_name: str) -> str:
+    """Déduit l'extension à partir du MIME type ou du nom de fichier original."""
+    ext_map = {
+        "image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif", "image/webp": ".webp",
+        "audio/mpeg": ".mp3", "audio/mp3": ".mp3", "audio/wav": ".wav", "audio/x-wav": ".wav",
+        "audio/ogg": ".ogg", "audio/webm": ".webm", "audio/mp4": ".m4a",
+        "text/plain": ".txt", "text/csv": ".csv", "text/markdown": ".md",
+        "application/json": ".json", "application/xml": ".xml",
+    }
+    if media_type in ext_map:
+        return ext_map[media_type]
+    # Fallback: use original extension
+    suffix = Path(original_name).suffix
+    return suffix if suffix else ".bin"
+
+
 def validate_attachments(raw_list: list) -> list[MediaAttachment]:
-    """Parse and validate attachments from the WebSocket message."""
+    """Parse et valide les pièces jointes du message WebSocket."""
     if not raw_list or not isinstance(raw_list, list):
         return []
     result = []
@@ -77,7 +97,7 @@ def validate_attachments(raw_list: list) -> list[MediaAttachment]:
         try:
             att = MediaAttachment.from_ws_dict(raw)
             if att.size_bytes() > MAX_FILE_SIZE_BYTES:
-                logger.warning("Pièce jointe trop grande ignorée: %s (%d bytes)", att.name, att.size_bytes())
+                logger.warning("Pièce jointe ignorée (trop grande) : %s (%d o)", att.name, att.size_bytes())
                 continue
             result.append(att)
         except Exception:
@@ -85,42 +105,93 @@ def validate_attachments(raw_list: list) -> list[MediaAttachment]:
     return result
 
 
-async def transcribe_audio(attachment: MediaAttachment) -> str | None:
-    """Transcribe audio via OpenAI Whisper API. Returns text or None."""
+async def save_attachments(
+    attachments: list[MediaAttachment],
+    person_id: str = "anonymous",
+) -> list:
+    """Sauvegarde les pièces jointes sur disque et en BDD.
+
+    Enregistre également chaque fichier dans le FilesModule (mémoire).
+    Retourne la liste des objets UploadedFile créés.
+    """
+    if not attachments:
+        return []
+
+    from django.conf import settings
+    from asgiref.sync import sync_to_async
+
+    uploads_root = Path(settings.PROJECT_ROOT) / "uploads"
+    uploads_root.mkdir(parents=True, exist_ok=True)
+
+    saved = []
+    for att in attachments:
+        try:
+            file_uuid = uuid.uuid4()
+            ext = _ext_for(att.media_type, att.name)
+            filename = f"{file_uuid}{ext}"
+            disk_path = uploads_root / filename
+
+            # Écriture sur disque
+            data_bytes = att.decoded_bytes()
+            disk_path.write_bytes(data_bytes)
+
+            # Création enregistrement BDD
+            db_record = await sync_to_async(_create_db_record)(
+                file_id=file_uuid,
+                original_name=att.name,
+                media_type=att.media_type,
+                category=att.category,
+                file_size=len(data_bytes),
+                disk_path=str(disk_path),
+                person_id=person_id,
+            )
+
+            # Enregistrement dans le module (mémoire → get_context())
+            _register_in_module(db_record)
+
+            saved.append(db_record)
+            logger.info(
+                "Fichier sauvegardé : %s → %s (id=%s)",
+                att.name, disk_path.name, file_uuid,
+            )
+        except Exception:
+            logger.exception("Erreur lors de la sauvegarde de %s", att.name)
+
+    return saved
+
+
+def _create_db_record(
+    file_id, original_name, media_type, category, file_size, disk_path, person_id
+):
+    from modules.files.models import UploadedFile
+    return UploadedFile.objects.create(
+        file_id=file_id,
+        original_name=original_name,
+        media_type=media_type,
+        category=category,
+        file_size=file_size,
+        disk_path=disk_path,
+        person_id=person_id,
+    )
+
+
+def _register_in_module(db_obj) -> None:
+    """Enregistre le fichier dans le FilesModule en mémoire."""
     try:
-        from django.conf import settings
-        api_key = getattr(settings, "OPENAI_API_KEY", "") or None
-        if not api_key:
-            return None
-        from openai import AsyncOpenAI
-        client = AsyncOpenAI(api_key=api_key)
-        audio_bytes = attachment.decoded_bytes()
-        ext = _audio_ext(attachment.media_type)
-        buf = io.BytesIO(audio_bytes)
-        buf.name = f"{attachment.name or 'audio'}{ext}"
-        transcript = await client.audio.transcriptions.create(model="whisper-1", file=buf)
-        return transcript.text
+        from modules.manager import module_manager
+        files_module = module_manager._modules.get("files")
+        if files_module is None:
+            return
+        files_module.register_file({
+            "id": str(db_obj.file_id),
+            "name": db_obj.original_name,
+            "type": db_obj.media_type,
+            "category": db_obj.category,
+            "size_label": db_obj.size_label,
+            "path": db_obj.disk_path,
+            "person_id": db_obj.person_id,
+            "uploaded_at": db_obj.uploaded_at.isoformat() if db_obj.uploaded_at else "",
+            "deleted": False,
+        })
     except Exception:
-        logger.warning("Transcription audio échouée: %s", attachment.name, exc_info=True)
-        return None
-
-
-def read_text_attachment(attachment: MediaAttachment) -> str | None:
-    """Decode a text attachment and return its content (capped at MAX_TEXT_CHARS)."""
-    try:
-        text = attachment.decoded_bytes().decode("utf-8", errors="replace")
-        if len(text) > MAX_TEXT_CHARS:
-            text = text[:MAX_TEXT_CHARS] + "\n[...tronqué]"
-        return text
-    except Exception:
-        logger.warning("Lecture fichier texte échouée: %s", attachment.name)
-        return None
-
-
-def _audio_ext(media_type: str) -> str:
-    return {
-        "audio/mpeg": ".mp3", "audio/mp3": ".mp3",
-        "audio/wav": ".wav", "audio/x-wav": ".wav",
-        "audio/ogg": ".ogg", "audio/webm": ".webm",
-        "audio/mp4": ".mp4",
-    }.get(media_type, ".bin")
+        logger.warning("Impossible d'enregistrer le fichier dans FilesModule", exc_info=True)

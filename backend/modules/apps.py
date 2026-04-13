@@ -7,6 +7,7 @@ class ModulesConfig(AppConfig):
 
     def ready(self):
         from modules.email import EmailModule
+        from modules.files import FilesModule
         from modules.manager import module_manager
         from modules.rss import RSSModule
         from communication.channels import TelegramModule
@@ -17,5 +18,6 @@ class ModulesConfig(AppConfig):
         module_manager.register(WakeModule())
         module_manager.register(EmailModule())
         module_manager.register(RSSModule())
+        module_manager.register(FilesModule())
 
         _populate_urls()
