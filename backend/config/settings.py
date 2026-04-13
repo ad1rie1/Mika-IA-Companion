@@ -151,3 +151,42 @@ if _rss_raw:
         elif entry:
             RSS_FEEDS.append({"name": entry, "url": entry})
 RSS_POLL_INTERVAL = env.int("RSS_POLL_INTERVAL", default=600)
+
+# --- Logging ---
+# Format: timestamp [request_id] level module: message
+# request_id is "-" for background tasks outside a pipeline call.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "filters": {
+        "request_id": {
+            "()": "pipeline.tracing.RequestIdFilter",
+        },
+    },
+    "formatters": {
+        "verbose": {
+            "format": "%(asctime)s [%(request_id)s] %(levelname)-8s %(name)s: %(message)s",
+            "datefmt": "%H:%M:%S",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "filters": ["request_id"],
+            "formatter": "verbose",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
+    },
+    "loggers": {
+        # Silence noisy Django internals
+        "django": {"level": "WARNING", "propagate": True},
+        "django.request": {"level": "WARNING", "propagate": True},
+        "uvicorn.access": {"level": "WARNING", "propagate": True},
+        # Pipeline + AI at DEBUG so request traces are fully visible when needed
+        "pipeline": {"level": "DEBUG", "propagate": True},
+        "ai": {"level": "DEBUG", "propagate": True},
+    },
+}

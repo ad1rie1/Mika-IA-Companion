@@ -12,6 +12,7 @@ from emotion.types import Emotion, EmotionData
 from pipeline.broadcast import broadcast_to_websocket, emit_communication_event, persist_to_memory
 from pipeline.context import ConversationContext, gather_context
 from pipeline.response import call_ai_and_parse
+from pipeline.tracing import set_new_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ class SpeechOutput:
     emotion_intensity: float
     emotion_state: dict
     tool_calls: list[str]
+    request_id: str = "-"
 
 
 # -- Main entry point ---------------------------------------------------------
@@ -50,6 +52,7 @@ async def process_message(
         persist: Whether to save messages to memory.
         emit_event: Whether to emit a module event after processing.
     """
+    request_id = set_new_request_id()
     tool_calls = []
 
     # Hydrate person mood from DB if evicted from RAM since last interaction
@@ -98,6 +101,7 @@ async def process_message(
         emotion_intensity=msg_emotion.intensity,
         emotion_state=emotion_engine.get_state_dict(person_id),
         tool_calls=tool_calls,
+        request_id=request_id,
     )
 
     # 7. Broadcast to WebSocket
