@@ -138,41 +138,59 @@ class EmotionEngine:
             logger.exception("Failed to save emotion state")
 
     async def _restore_state(self) -> bool:
-        """Restore emotional state from the most recent snapshot.
+        """Restore emotional state from the most recent snapshot per person.
 
-        Returns True if state was restored.
+        Loads the latest snapshot for each known person across all sessions,
+        applying a time-based decay so that older snapshots contribute less
+        intensity (decays to zero over 7 days).
+
+        Returns True if any state was restored.
         """
         from asgiref.sync import sync_to_async
+        from django.db.models import Max
         from memory.models import EmotionSnapshot
 
+        _MAX_AGE_SECONDS = 7 * 24 * 3600  # ignore snapshots older than 7 days
+
         try:
-            # Get the most recent snapshots (all from the same session)
-            latest = await sync_to_async(
-                lambda: EmotionSnapshot.objects.order_by("-created_at").first()
-            )()
+            now_ts = time.time()
 
-            if not latest:
-                return False
-
-            # Get all snapshots from that session (same conversation)
-            snapshots = await sync_to_async(
+            # One query: get the most recent snapshot ID per person_id
+            latest_ids = await sync_to_async(
                 lambda: list(
-                    EmotionSnapshot.objects.filter(
-                        conversation=latest.conversation
-                    )
+                    EmotionSnapshot.objects
+                    .values("person_id")
+                    .annotate(latest_id=Max("id"))
+                    .values_list("latest_id", flat=True)
                 )
             )()
 
+            if not latest_ids:
+                return False
+
+            snapshots = await sync_to_async(
+                lambda: list(EmotionSnapshot.objects.filter(id__in=latest_ids))
+            )()
+
+            restored_persons = 0
             for snap in snapshots:
+                elapsed = now_ts - snap.created_at.timestamp()
+                if elapsed > _MAX_AGE_SECONDS:
+                    continue  # too old, discard
+
+                # Linear decay: 100% fresh → 0% at 7 days
+                time_factor = max(0.0, 1.0 - elapsed / _MAX_AGE_SECONDS)
+                intensity = snap.primary_intensity * time_factor
+
                 if snap.person_id == "__global__":
-                    # Restore global mood
                     try:
                         self.global_mood.emotion = Emotion(snap.primary_emotion)
                     except ValueError:
                         self.global_mood.emotion = self.temperament.default_mood
-                    self.global_mood.intensity = snap.primary_intensity
+                    self.global_mood.intensity = intensity
                 else:
-                    # Restore person mood (with decayed intensity)
+                    if intensity < 0.05:
+                        continue  # decayed to nothing, not worth restoring
                     try:
                         emotion = Emotion(snap.primary_emotion)
                     except ValueError:
@@ -180,20 +198,82 @@ class EmotionEngine:
                     self.person_moods[snap.person_id] = PersonMood(
                         person_id=snap.person_id,
                         emotion=emotion,
-                        intensity=snap.primary_intensity * 0.7,  # Decay after restart
+                        intensity=intensity,
                     )
+                    restored_persons += 1
+
+            if restored_persons == 0 and self.global_mood.intensity < 0.05:
+                return False
 
             logger.info(
-                "Restored emotion state: global=%s(%.2f), %d person(s)",
+                "Restored emotion state: global=%s(%.2f), %d person(s) "
+                "[cross-session, max age 7d]",
                 self.global_mood.emotion.value,
                 self.global_mood.intensity,
-                len(self.person_moods),
+                restored_persons,
             )
             return True
 
         except Exception:
             logger.exception("Failed to restore emotion state")
             return False
+
+    async def ensure_person_loaded(self, person_id: str) -> None:
+        """Hydrate a person's mood from DB if they are not currently tracked in RAM.
+
+        Called at the start of each message so that persons evicted from the
+        in-memory dict (inactive for 1h) are seamlessly re-loaded from their
+        most recent snapshot.  No-op when the person is already present.
+        """
+        if person_id in self.person_moods or person_id in ("__global__", "anonymous"):
+            return
+
+        _MAX_AGE_SECONDS = 7 * 24 * 3600
+        now_ts = time.time()
+
+        try:
+            from asgiref.sync import sync_to_async
+            from memory.models import EmotionSnapshot
+
+            snap = await sync_to_async(
+                lambda: EmotionSnapshot.objects
+                .filter(person_id=person_id)
+                .order_by("-created_at")
+                .first()
+            )()
+
+            if not snap:
+                return
+
+            elapsed = now_ts - snap.created_at.timestamp()
+            if elapsed > _MAX_AGE_SECONDS:
+                return
+
+            time_factor = max(0.0, 1.0 - elapsed / _MAX_AGE_SECONDS)
+            intensity = snap.primary_intensity * time_factor
+
+            if intensity < 0.05:
+                return
+
+            try:
+                emotion = Emotion(snap.primary_emotion)
+            except ValueError:
+                return
+
+            self.person_moods[person_id] = PersonMood(
+                person_id=person_id,
+                emotion=emotion,
+                intensity=intensity,
+            )
+            logger.debug(
+                "Lazy-loaded mood for %s: %s(%.2f) from snapshot ~%dh ago",
+                person_id, emotion.value, intensity, int(elapsed / 3600),
+            )
+
+        except Exception:
+            logger.debug(
+                "Failed to lazy-load mood for %s", person_id, exc_info=True
+            )
 
     # ------------------------------------------------------------------
     # Periodic snapshots (for emotional memory)

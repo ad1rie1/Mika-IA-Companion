@@ -52,6 +52,9 @@ async def process_message(
     """
     tool_calls = []
 
+    # Hydrate person mood from DB if evicted from RAM since last interaction
+    await emotion_engine.ensure_person_loaded(person_id)
+
     try:
         # 1. Assemble context
         if context is None:
