@@ -125,35 +125,35 @@ async def save_attachments(
 
     saved = []
     for att in attachments:
-        try:
-            file_uuid = uuid.uuid4()
-            ext = _ext_for(att.media_type, att.name)
-            filename = f"{file_uuid}{ext}"
-            disk_path = uploads_root / filename
+        file_uuid = uuid.uuid4()
+        ext = _ext_for(att.media_type, att.name)
+        disk_path = uploads_root / f"{file_uuid}{ext}"
+        data_bytes = att.decoded_bytes()
 
-            # Écriture sur disque
-            data_bytes = att.decoded_bytes()
+        try:
+            # 1. Écriture disque
             disk_path.write_bytes(data_bytes)
 
-            # Création enregistrement BDD
-            db_record = await sync_to_async(_create_db_record)(
-                file_id=file_uuid,
-                original_name=att.name,
-                media_type=att.media_type,
-                category=att.category,
-                file_size=len(data_bytes),
-                disk_path=str(disk_path),
-                person_id=person_id,
-            )
+            # 2. Enregistrement BDD — si ça échoue, nettoyer le fichier
+            try:
+                db_record = await sync_to_async(_create_db_record)(
+                    file_id=file_uuid,
+                    original_name=att.name,
+                    media_type=att.media_type,
+                    category=att.category,
+                    file_size=len(data_bytes),
+                    disk_path=str(disk_path),
+                    person_id=person_id,
+                )
+            except Exception:
+                disk_path.unlink(missing_ok=True)  # évite les orphelins disque
+                raise
 
-            # Enregistrement dans le module (mémoire → get_context())
+            # 3. Mémoire module
             _register_in_module(db_record)
-
             saved.append(db_record)
-            logger.info(
-                "Fichier sauvegardé : %s → %s (id=%s)",
-                att.name, disk_path.name, file_uuid,
-            )
+            logger.info("Fichier sauvegardé : %s → %s (id=%s)", att.name, disk_path.name, file_uuid)
+
         except Exception:
             logger.exception("Erreur lors de la sauvegarde de %s", att.name)
 

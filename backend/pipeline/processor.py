@@ -59,12 +59,16 @@ async def process_message(
     # Hydrate person mood from DB if evicted from RAM since last interaction
     await emotion_engine.ensure_person_loaded(person_id)
 
-    try:
-        # 1. Sauvegarde des pièces jointes (disque + BDD + FilesModule)
-        if attachments:
+    # 1. Sauvegarde des pièces jointes (disque + BDD + FilesModule)
+    # Hors du try principal : un échec d'upload ne doit pas bloquer la réponse IA.
+    if attachments:
+        try:
             from pipeline.media import save_attachments
             await save_attachments(attachments, person_id=person_id)
+        except Exception:
+            logger.exception("Échec sauvegarde pièces jointes (pipeline continue)")
 
+    try:
         # 2. Assemble context
         if context is None:
             context = await gather_context(message, person_id)

@@ -7,9 +7,9 @@ Claude peut lire, analyser, déplacer et supprimer les fichiers via des outils M
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
-import os
 import shutil
 from pathlib import Path
 
@@ -51,15 +51,25 @@ class FilesModule(BaseModule):
     # ── Context injection ──────────────────────────────────────────
 
     def get_context(self) -> str:
-        active = [r for r in self._registry.values() if not r.get("deleted")]
-        if not active:
+        """Injecte uniquement les fichiers uploadés aujourd'hui.
+        Les fichiers plus anciens sont accessibles via l'outil files_list."""
+        from datetime import date
+        today = date.today().isoformat()  # "YYYY-MM-DD"
+
+        today_files = [
+            r for r in self._registry.values()
+            if not r.get("deleted") and r.get("uploaded_at", "").startswith(today)
+        ]
+        if not today_files:
             return ""
-        lines = [f"Fichiers disponibles sur le serveur ({len(active)}) :"]
-        for r in sorted(active, key=lambda x: x["uploaded_at"], reverse=True):
+
+        lines = [f"Fichiers uploadés aujourd'hui ({len(today_files)}) :"]
+        for r in sorted(today_files, key=lambda x: x["uploaded_at"], reverse=True):
             lines.append(
                 f"  - ID={r['id']}  nom={r['name']}  type={r['category']}  taille={r['size_label']}"
             )
         lines.append("Utilise les outils files_* pour lire, analyser, déplacer ou supprimer ces fichiers.")
+        lines.append("Pour les fichiers plus anciens, utilise files_list.")
         return "\n".join(lines)
 
     # ── Tools ──────────────────────────────────────────────────────
@@ -68,8 +78,15 @@ class FilesModule(BaseModule):
         return [
             ModuleTool(
                 name="files_list",
-                description="Liste tous les fichiers disponibles sur le serveur avec leurs métadonnées.",
-                parameters=[],
+                description=(
+                    "Liste les fichiers disponibles sur le serveur. "
+                    "Par défaut liste tous les fichiers. "
+                    "Filtre optionnel par date (ex: '2024-01-15') ou catégorie ('image', 'audio', 'text')."
+                ),
+                parameters=[
+                    ToolParameter("date", ToolParameterType.STRING, "Filtrer par date YYYY-MM-DD (optionnel)", required=False, default=""),
+                    ToolParameter("category", ToolParameterType.STRING, "Filtrer par catégorie: image|audio|text|unknown (optionnel)", required=False, default=""),
+                ],
                 handler=self._handle_list,
             ),
             ModuleTool(
@@ -117,6 +134,17 @@ class FilesModule(BaseModule):
                 handler=self._handle_move,
             ),
             ModuleTool(
+                name="files_transcribe",
+                description=(
+                    "Transcrit un fichier audio en texte via Whisper (nécessite OPENAI_API_KEY). "
+                    "Fonctionne avec mp3, wav, ogg, webm."
+                ),
+                parameters=[
+                    ToolParameter("file_id", ToolParameterType.STRING, "ID UUID du fichier audio"),
+                ],
+                handler=self._handle_transcribe,
+            ),
+            ModuleTool(
                 name="files_delete",
                 description="Supprime un fichier du disque et le marque comme supprimé en BDD.",
                 parameters=[
@@ -129,9 +157,17 @@ class FilesModule(BaseModule):
     # ── Tool handlers ──────────────────────────────────────────────
 
     async def _handle_list(self, params: dict) -> dict:
-        active = [r for r in self._registry.values() if not r.get("deleted")]
-        if not active:
-            return {"files": [], "message": "Aucun fichier disponible."}
+        date_filter = params.get("date", "").strip()
+        cat_filter = params.get("category", "").strip().lower()
+
+        files = [r for r in self._registry.values() if not r.get("deleted")]
+        if date_filter:
+            files = [r for r in files if r.get("uploaded_at", "").startswith(date_filter)]
+        if cat_filter:
+            files = [r for r in files if r.get("category") == cat_filter]
+
+        if not files:
+            return {"files": [], "message": "Aucun fichier correspondant."}
         return {
             "files": [
                 {
@@ -140,10 +176,11 @@ class FilesModule(BaseModule):
                     "type": r["type"],
                     "category": r["category"],
                     "size": r["size_label"],
-                    "path": r["path"],
+                    "uploaded_at": r["uploaded_at"],
                 }
-                for r in sorted(active, key=lambda x: x["uploaded_at"], reverse=True)
-            ]
+                for r in sorted(files, key=lambda x: x["uploaded_at"], reverse=True)
+            ],
+            "total": len(files),
         }
 
     async def _handle_read(self, params: dict) -> dict:
@@ -155,8 +192,9 @@ class FilesModule(BaseModule):
         if record["category"] not in ("text", "unknown"):
             return {"error": f"Ce fichier est de type '{record['category']}' — non lisible comme texte."}
         try:
-            with open(record["path"], "rb") as f:
-                content = f.read().decode("utf-8", errors="replace")
+            def _read():
+                return Path(record["path"]).read_bytes().decode("utf-8", errors="replace")
+            content = await asyncio.to_thread(_read)
             if len(content) > 10_000:
                 content = content[:10_000] + "\n[...tronqué]"
             return {"content": content, "name": record["name"]}
@@ -170,8 +208,9 @@ class FilesModule(BaseModule):
         if record["category"] != "image":
             return {"error": f"Ce fichier n'est pas une image (catégorie: {record['category']})."}
         try:
-            with open(record["path"], "rb") as f:
-                data = base64.b64encode(f.read()).decode()
+            def _read_img():
+                return base64.b64encode(Path(record["path"]).read_bytes()).decode()
+            data = await asyncio.to_thread(_read_img)
 
             from pipeline.media import MediaAttachment
             att = MediaAttachment(
@@ -192,6 +231,30 @@ class FilesModule(BaseModule):
         except Exception as e:
             logger.exception("analyze_image failed for %s", record["id"])
             return {"error": f"Analyse échouée : {e}"}
+
+    async def _handle_transcribe(self, params: dict) -> dict:
+        record = self._get_record(params.get("file_id", ""))
+        if not record:
+            return {"error": "Fichier introuvable."}
+        if record["category"] != "audio":
+            return {"error": f"Ce fichier n'est pas un audio (catégorie: {record['category']})."}
+        try:
+            from django.conf import settings
+            api_key = getattr(settings, "OPENAI_API_KEY", "") or None
+            if not api_key:
+                return {"error": "Transcription indisponible — configurez OPENAI_API_KEY pour activer Whisper."}
+
+            import io
+            from openai import AsyncOpenAI
+            audio_bytes = await asyncio.to_thread(Path(record["path"]).read_bytes)
+            buf = io.BytesIO(audio_bytes)
+            buf.name = record["name"]
+            client = AsyncOpenAI(api_key=api_key)
+            transcript = await client.audio.transcriptions.create(model="whisper-1", file=buf)
+            return {"transcription": transcript.text, "file_id": record["id"], "name": record["name"]}
+        except Exception as e:
+            logger.exception("Transcription échouée pour %s", record["id"])
+            return {"error": f"Transcription échouée : {e}"}
 
     async def _handle_move(self, params: dict) -> dict:
         record = self._get_record(params.get("file_id", ""))
@@ -217,7 +280,7 @@ class FilesModule(BaseModule):
         new_path = dest_dir / src_path.name
 
         try:
-            shutil.move(str(src_path), str(new_path))
+            await asyncio.to_thread(shutil.move, str(src_path), str(new_path))
             record["path"] = str(new_path)
 
             from asgiref.sync import sync_to_async
@@ -234,12 +297,12 @@ class FilesModule(BaseModule):
 
         try:
             path = Path(record["path"])
-            if path.exists():
-                path.unlink()
-            record["deleted"] = True
+            await asyncio.to_thread(lambda: path.unlink(missing_ok=True))
 
+            # Marquer supprimé en BDD avant de mettre à jour la mémoire
             from asgiref.sync import sync_to_async
             await sync_to_async(self._mark_deleted_in_db)(record["id"])
+            record["deleted"] = True  # cohérence mémoire après succès BDD
 
             return {"success": True, "file_id": record["id"], "name": record["name"]}
         except Exception as e:
