@@ -31,7 +31,19 @@ class EmotionEngine:
     1. Per-person mood (person_moods) - how the VTuber feels about each person
     2. Global mood (global_mood) - overall emotional state affecting all conversations
     3. Message emotion (computed) - blend of person + global for each response
+
+    Mood persistence strategy (two-tier):
+    - EmotionSnapshot  : raw snapshots, retained for EMOTION_SNAPSHOT_RETENTION_DAYS
+                         (default 2 days).  Used for short-term restore.
+    - EmotionalSummary : daily aggregates built by the consolidator, retained much
+                         longer.  Used as fallback when snapshots have been pruned.
     """
+
+    # How long to decay snapshot intensity over (aligns with consolidator retention).
+    # After this window the snapshot is gone anyway, so decay reaches 0 naturally.
+    _SNAPSHOT_DECAY_DAYS: int = 2          # matches EMOTION_SNAPSHOT_RETENTION_DAYS default
+    # How long to consider EmotionalSummary records useful as a mood seed.
+    _SUMMARY_DECAY_DAYS: int = 30          # full decay over 30 days
 
     def __init__(self):
         self.person_moods: dict[str, PersonMood] = {}
@@ -56,6 +68,10 @@ class EmotionEngine:
         )
         self._snapshot_interval = getattr(
             settings, "EMOTION_SNAPSHOT_INTERVAL", 30
+        )
+        # Align snapshot decay window with the consolidator's retention setting
+        self._SNAPSHOT_DECAY_DAYS = getattr(
+            settings, "EMOTION_SNAPSHOT_RETENTION_DAYS", self._SNAPSHOT_DECAY_DAYS
         )
 
         # Try to restore state from last session
@@ -138,11 +154,11 @@ class EmotionEngine:
             logger.exception("Failed to save emotion state")
 
     async def _restore_state(self) -> bool:
-        """Restore emotional state from the most recent snapshot per person.
+        """Restore emotional state at startup using a two-tier strategy:
 
-        Loads the latest snapshot for each known person across all sessions,
-        applying a time-based decay so that older snapshots contribute less
-        intensity (decays to zero over 7 days).
+        1. EmotionSnapshot (recent, 0–SNAPSHOT_DECAY_DAYS): loaded for all persons.
+        2. EmotionalSummary (older, up to SUMMARY_DECAY_DAYS): loaded as fallback for
+           persons whose snapshots have been pruned by the consolidator.
 
         Returns True if any state was restored.
         """
@@ -150,12 +166,12 @@ class EmotionEngine:
         from django.db.models import Max
         from memory.models import EmotionSnapshot
 
-        _MAX_AGE_SECONDS = 7 * 24 * 3600  # ignore snapshots older than 7 days
+        max_age_seconds = self._SNAPSHOT_DECAY_DAYS * 86400
 
         try:
             now_ts = time.time()
 
-            # One query: get the most recent snapshot ID per person_id
+            # One query: most recent snapshot ID per person_id
             latest_ids = await sync_to_async(
                 lambda: list(
                     EmotionSnapshot.objects
@@ -165,52 +181,57 @@ class EmotionEngine:
                 )
             )()
 
-            if not latest_ids:
-                return False
-
-            snapshots = await sync_to_async(
-                lambda: list(EmotionSnapshot.objects.filter(id__in=latest_ids))
-            )()
-
+            persons_from_snapshots: set[str] = set()
             restored_persons = 0
-            for snap in snapshots:
-                elapsed = now_ts - snap.created_at.timestamp()
-                if elapsed > _MAX_AGE_SECONDS:
-                    continue  # too old, discard
 
-                # Linear decay: 100% fresh → 0% at 7 days
-                time_factor = max(0.0, 1.0 - elapsed / _MAX_AGE_SECONDS)
-                intensity = snap.primary_intensity * time_factor
+            if latest_ids:
+                snapshots = await sync_to_async(
+                    lambda: list(EmotionSnapshot.objects.filter(id__in=latest_ids))
+                )()
 
-                if snap.person_id == "__global__":
-                    try:
-                        self.global_mood.emotion = Emotion(snap.primary_emotion)
-                    except ValueError:
-                        self.global_mood.emotion = self.temperament.default_mood
-                    self.global_mood.intensity = intensity
-                else:
-                    if intensity < 0.05:
-                        continue  # decayed to nothing, not worth restoring
-                    try:
-                        emotion = Emotion(snap.primary_emotion)
-                    except ValueError:
-                        emotion = self.temperament.default_mood
-                    self.person_moods[snap.person_id] = PersonMood(
-                        person_id=snap.person_id,
-                        emotion=emotion,
-                        intensity=intensity,
-                    )
-                    restored_persons += 1
+                for snap in snapshots:
+                    elapsed = now_ts - snap.created_at.timestamp()
+                    time_factor = max(0.0, 1.0 - elapsed / max_age_seconds)
+                    intensity = snap.primary_intensity * time_factor
+
+                    if snap.person_id == "__global__":
+                        try:
+                            self.global_mood.emotion = Emotion(snap.primary_emotion)
+                        except ValueError:
+                            self.global_mood.emotion = self.temperament.default_mood
+                        self.global_mood.intensity = intensity
+                    else:
+                        persons_from_snapshots.add(snap.person_id)
+                        if intensity < 0.05:
+                            continue  # decayed to nothing
+                        try:
+                            emotion = Emotion(snap.primary_emotion)
+                        except ValueError:
+                            emotion = self.temperament.default_mood
+                        self.person_moods[snap.person_id] = PersonMood(
+                            person_id=snap.person_id,
+                            emotion=emotion,
+                            intensity=intensity,
+                        )
+                        restored_persons += 1
+
+            # Fallback: seed from EmotionalSummary for persons not covered above
+            summary_restored = await self._restore_from_summaries(
+                exclude_persons=persons_from_snapshots
+            )
+            restored_persons += summary_restored
 
             if restored_persons == 0 and self.global_mood.intensity < 0.05:
                 return False
 
             logger.info(
                 "Restored emotion state: global=%s(%.2f), %d person(s) "
-                "[cross-session, max age 7d]",
+                "[snapshots: %d, summaries: %d]",
                 self.global_mood.emotion.value,
                 self.global_mood.intensity,
                 restored_persons,
+                restored_persons - summary_restored,
+                summary_restored,
             )
             return True
 
@@ -218,17 +239,118 @@ class EmotionEngine:
             logger.exception("Failed to restore emotion state")
             return False
 
+    async def _restore_from_summaries(self, exclude_persons: set[str]) -> int:
+        """Seed person moods from EmotionalSummary for persons not already loaded.
+
+        Returns the number of persons restored.
+        """
+        from asgiref.sync import sync_to_async
+        from datetime import date
+        from django.db.models import Max
+        from memory.models import EmotionalSummary
+
+        try:
+            # Most recent summary date per person_id
+            latest_rows = await sync_to_async(
+                lambda: list(
+                    EmotionalSummary.objects
+                    .filter(period_type="daily")
+                    .exclude(person_id__in=exclude_persons)
+                    .values("person_id")
+                    .annotate(latest_date=Max("period_start"))
+                )
+            )()
+
+            if not latest_rows:
+                return 0
+
+            today = date.today()
+            restored = 0
+            for row in latest_rows:
+                pid = row["person_id"]
+                age_days = (today - row["latest_date"]).days
+                if age_days >= self._SUMMARY_DECAY_DAYS:
+                    continue
+
+                # Fetch the actual summary to get dominant_emotion / intensity
+                result = await self._mood_from_summary(pid)
+                if result is None:
+                    continue
+
+                emotion, intensity = result
+                self.person_moods[pid] = PersonMood(
+                    person_id=pid,
+                    emotion=emotion,
+                    intensity=intensity,
+                )
+                restored += 1
+
+            return restored
+
+        except Exception:
+            logger.debug("Failed to restore from summaries", exc_info=True)
+            return 0
+
+    async def _mood_from_summary(self, person_id: str) -> tuple[Emotion, float] | None:
+        """Return (emotion, intensity) seeded from the most recent EmotionalSummary.
+
+        Used as a fallback when EmotionSnapshot records have been pruned (> 2 days old).
+        Applies a linear decay over _SUMMARY_DECAY_DAYS so that a summary from
+        last week contributes less than one from yesterday.
+
+        Returns None if no summary exists or the intensity decays below threshold.
+        """
+        from asgiref.sync import sync_to_async
+        from datetime import date
+        from memory.models import EmotionalSummary
+
+        try:
+            summary = await sync_to_async(
+                lambda: EmotionalSummary.objects
+                .filter(person_id=person_id, period_type="daily")
+                .order_by("-period_start")
+                .first()
+            )()
+
+            if not summary:
+                return None
+
+            age_days = (date.today() - summary.period_start).days
+            if age_days >= self._SUMMARY_DECAY_DAYS:
+                return None
+
+            time_factor = max(0.0, 1.0 - age_days / self._SUMMARY_DECAY_DAYS)
+            intensity = summary.dominant_intensity * time_factor
+
+            if intensity < 0.05:
+                return None
+
+            try:
+                emotion = Emotion(summary.dominant_emotion)
+            except ValueError:
+                return None
+
+            return emotion, intensity
+
+        except Exception:
+            logger.debug(
+                "Failed to load EmotionalSummary for %s", person_id, exc_info=True
+            )
+            return None
+
     async def ensure_person_loaded(self, person_id: str) -> None:
         """Hydrate a person's mood from DB if they are not currently tracked in RAM.
 
-        Called at the start of each message so that persons evicted from the
-        in-memory dict (inactive for 1h) are seamlessly re-loaded from their
-        most recent snapshot.  No-op when the person is already present.
+        Two-tier lookup (mirrors _restore_state):
+        1. Try the most recent EmotionSnapshot (fast, recent data).
+        2. Fall back to EmotionalSummary if no usable snapshot found.
+
+        No-op when the person is already present in memory.
         """
         if person_id in self.person_moods or person_id in ("__global__", "anonymous"):
             return
 
-        _MAX_AGE_SECONDS = 7 * 24 * 3600
+        max_age_seconds = self._SNAPSHOT_DECAY_DAYS * 86400
         now_ts = time.time()
 
         try:
@@ -242,33 +364,40 @@ class EmotionEngine:
                 .first()
             )()
 
-            if not snap:
-                return
+            if snap:
+                elapsed = now_ts - snap.created_at.timestamp()
+                time_factor = max(0.0, 1.0 - elapsed / max_age_seconds)
+                intensity = snap.primary_intensity * time_factor
 
-            elapsed = now_ts - snap.created_at.timestamp()
-            if elapsed > _MAX_AGE_SECONDS:
-                return
+                if intensity >= 0.05:
+                    try:
+                        emotion = Emotion(snap.primary_emotion)
+                        self.person_moods[person_id] = PersonMood(
+                            person_id=person_id,
+                            emotion=emotion,
+                            intensity=intensity,
+                        )
+                        logger.debug(
+                            "Lazy-loaded mood for %s: %s(%.2f) from snapshot ~%dh ago",
+                            person_id, emotion.value, intensity, int(elapsed / 3600),
+                        )
+                        return
+                    except ValueError:
+                        pass  # fall through to summary
 
-            time_factor = max(0.0, 1.0 - elapsed / _MAX_AGE_SECONDS)
-            intensity = snap.primary_intensity * time_factor
-
-            if intensity < 0.05:
-                return
-
-            try:
-                emotion = Emotion(snap.primary_emotion)
-            except ValueError:
-                return
-
-            self.person_moods[person_id] = PersonMood(
-                person_id=person_id,
-                emotion=emotion,
-                intensity=intensity,
-            )
-            logger.debug(
-                "Lazy-loaded mood for %s: %s(%.2f) from snapshot ~%dh ago",
-                person_id, emotion.value, intensity, int(elapsed / 3600),
-            )
+            # Snapshot missing or decayed — try EmotionalSummary
+            result = await self._mood_from_summary(person_id)
+            if result is not None:
+                emotion, intensity = result
+                self.person_moods[person_id] = PersonMood(
+                    person_id=person_id,
+                    emotion=emotion,
+                    intensity=intensity,
+                )
+                logger.debug(
+                    "Lazy-loaded mood for %s: %s(%.2f) from EmotionalSummary",
+                    person_id, emotion.value, intensity,
+                )
 
         except Exception:
             logger.debug(
