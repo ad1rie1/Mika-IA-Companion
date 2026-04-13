@@ -40,6 +40,7 @@ async def process_message(
     broadcast: bool = True,
     persist: bool = True,
     emit_event: bool = True,
+    attachments: list | None = None,
 ) -> SpeechOutput:
     """Full conversation pipeline: context -> AI -> emotion -> persist -> broadcast.
 
@@ -61,7 +62,7 @@ async def process_message(
     try:
         # 1. Assemble context
         if context is None:
-            context = await gather_context(message, person_id)
+            context = await gather_context(message, person_id, attachments=attachments)
 
         # 2. Prompt -> AI call -> emotion extraction
         response_text, emotion_data, tool_calls = await call_ai_and_parse(context, message)

@@ -30,6 +30,7 @@ class AIClient:
         system_prompt: str,
         user_prompt: str,
         role: AIRole = AIRole.CONVERSATION,
+        attachments: list | None = None,
     ) -> str:
         """Send a ready-made prompt to the configured AI provider.
 
@@ -39,6 +40,7 @@ class AIClient:
             role=role,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+            attachments=attachments,
         )
 
     # -- Completion with tools (MCP) -------------------------------------------

@@ -67,6 +67,13 @@ export class WebSocketClient {
     this.send({ type: "chat", message });
   }
 
+  sendChatWithAttachments(
+    message: string,
+    attachments: Array<{ name: string; type: string; data: string }>
+  ) {
+    this.send({ type: "chat", message, attachments });
+  }
+
   on(type: string, handler: MessageHandler) {
     if (!this.handlers.has(type)) {
       this.handlers.set(type, []);

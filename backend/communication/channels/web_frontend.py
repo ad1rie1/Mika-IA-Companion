@@ -9,6 +9,7 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from emotion.engine import emotion_engine
 from emotion.types import Emotion
 from config.personality import personality
+from pipeline.media import validate_attachments
 
 logger = logging.getLogger(__name__)
 
@@ -50,11 +51,19 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
 
         if data.get("type") == "chat":
             message = data.get("message", "")
-            if not isinstance(message, str) or not message.strip():
+            raw_attachments = data.get("attachments", [])
+
+            # Allow message-only (attachment without text) or text-only
+            if not isinstance(message, str):
+                message = ""
+            has_attachments = isinstance(raw_attachments, list) and len(raw_attachments) > 0
+            if not message.strip() and not has_attachments:
                 return
 
             # Allow client to provide a person_id, otherwise use connection-generated one
             person_id = data.get("person_id", getattr(self, "person_id", "anonymous"))
+
+            attachments = validate_attachments(raw_attachments) if has_attachments else None
 
             from communication.handler import handle_message
 
@@ -62,6 +71,7 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
                 message.strip()[:MAX_MESSAGE_LENGTH],
                 source="frontend",
                 person_id=person_id,
+                attachments=attachments,
             )
 
     # --- Group message handler ---

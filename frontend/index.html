@@ -104,6 +104,79 @@
       #chat-send:hover {
         background: rgba(99, 102, 241, 1);
       }
+      #chat-attach {
+        padding: 12px 14px;
+        border: none;
+        border-radius: 24px;
+        background: rgba(255, 255, 255, 0.1);
+        color: rgba(255,255,255,0.7);
+        font-size: 16px;
+        cursor: pointer;
+        backdrop-filter: blur(12px);
+        transition: background 0.2s;
+        flex-shrink: 0;
+      }
+      #chat-attach:hover {
+        background: rgba(255, 255, 255, 0.2);
+      }
+      #attachment-previews {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 0 16px 6px;
+        pointer-events: auto;
+      }
+      .attachment-chip {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px 4px 6px;
+        border-radius: 12px;
+        background: rgba(255,255,255,0.12);
+        font-size: 12px;
+        color: white;
+        backdrop-filter: blur(8px);
+        max-width: 160px;
+      }
+      .attachment-chip img {
+        width: 28px;
+        height: 28px;
+        object-fit: cover;
+        border-radius: 6px;
+        flex-shrink: 0;
+      }
+      .attachment-chip .chip-icon {
+        font-size: 18px;
+        flex-shrink: 0;
+      }
+      .attachment-chip .chip-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .attachment-chip .chip-remove {
+        cursor: pointer;
+        opacity: 0.6;
+        flex-shrink: 0;
+        padding: 0 2px;
+      }
+      .attachment-chip .chip-remove:hover {
+        opacity: 1;
+      }
+      #chat-container.drag-over::after {
+        content: "Déposer ici";
+        position: absolute;
+        inset: 0;
+        background: rgba(99,102,241,0.35);
+        border: 2px dashed rgba(99,102,241,0.8);
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-size: 18px;
+        pointer-events: none;
+      }
 
       /* Emotion indicator */
       #emotion-display {
@@ -150,7 +223,9 @@
       <div id="emotion-display">neutral</div>
       <div id="chat-container">
         <div id="chat-messages"></div>
+        <div id="attachment-previews"></div>
         <div id="chat-input-container">
+          <button id="chat-attach" title="Joindre un fichier">📎</button>
           <input id="chat-input" type="text" placeholder="Envoie un message..." autocomplete="off" />
           <button id="chat-send">Envoyer</button>
         </div>

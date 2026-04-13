@@ -51,14 +51,28 @@ class OpenAIProvider:
         model: str,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        attachments: list | None = None,
     ) -> str:
+        # Build user content with optional image blocks
+        if attachments:
+            user_content: list | str = []
+            for att in attachments:
+                if att.category == "image":
+                    user_content.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{att.media_type};base64,{att.data}"},
+                    })
+            user_content.append({"type": "text", "text": user_prompt})
+        else:
+            user_content = user_prompt
+
         response = await self._client.chat.completions.create(
             model=model,
             max_tokens=max_tokens,
             temperature=temperature,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+                {"role": "user", "content": user_content},
             ],
         )
 

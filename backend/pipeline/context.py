@@ -22,12 +22,14 @@ class ConversationContext:
     history: list[dict]
     mcp_server: object | None  # SdkMcpServer or None
     tool_names: list[str]
+    attachments: list = None  # list[MediaAttachment] | None
 
 
 async def gather_context(
     message: str,
     person_id: str,
     include_tools: bool = True,
+    attachments: list | None = None,
 ) -> ConversationContext:
     """Assemble all context needed for an AI conversation turn.
 
@@ -70,4 +72,5 @@ async def gather_context(
         history=history,
         mcp_server=mcp_server,
         tool_names=tool_names,
+        attachments=attachments or [],
     )

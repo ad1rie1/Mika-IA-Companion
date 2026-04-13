@@ -45,7 +45,10 @@ class OllamaProvider:
         model: str,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        attachments: list | None = None,
     ) -> str:
+        if attachments and any(a.category == "image" for a in attachments):
+            logger.warning("OllamaProvider: images reçues mais ignorées (modèle non-vision par défaut)")
         response = await self._client.chat(
             model=model,
             messages=[

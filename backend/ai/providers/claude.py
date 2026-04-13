@@ -50,18 +50,33 @@ class ClaudeProvider:
         model: str,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        attachments: list | None = None,
     ) -> str:
+        # Build content: image blocks first, then text
+        if attachments:
+            content: list | str = []
+            for att in attachments:
+                if att.category == "image":
+                    content.append({
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": att.media_type,
+                            "data": att.data,
+                        },
+                    })
+            content.append({"type": "text", "text": user_prompt})
+        else:
+            content = user_prompt
+
         response = await self._client.messages.create(
             model=model,
             max_tokens=max_tokens,
             temperature=temperature,
             system=system_prompt,
-            messages=[
-                {"role": "user", "content": user_prompt},
-            ],
+            messages=[{"role": "user", "content": content}],
         )
 
-        # Extract text from content blocks
         parts = []
         for block in response.content:
             if block.type == "text":
