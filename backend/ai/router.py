@@ -32,6 +32,10 @@ class AIRole(str, Enum):
     SIGNAL_INTERPRETATION = "signal_interpretation"
     MEMORY_EXTRACTION = "memory_extraction"
     VALIDITY_CHECK = "validity_check"
+    # Vision captioning — takes an image attachment and returns a
+    # textual description. Used by the vision preprocessor so non-text
+    # perceptions can flow through the text pipeline.
+    VISION_CAPTION = "vision_caption"
 
 
 # Maps provider name → class
@@ -91,6 +95,12 @@ class AIRouter:
             ),
             AIRole.VALIDITY_CHECK: getattr(
                 settings, "AI_ROLE_VALIDITY_CHECK",
+                f"claude:{settings.CLAUDE_MODEL_LIGHT}",
+            ),
+            # Vision defaults to Claude because other providers' multimodal
+            # support in this codebase is limited (see ai/providers/*).
+            AIRole.VISION_CAPTION: getattr(
+                settings, "AI_ROLE_VISION_CAPTION",
                 f"claude:{settings.CLAUDE_MODEL_LIGHT}",
             ),
         }

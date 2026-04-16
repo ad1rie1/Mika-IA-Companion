@@ -136,32 +136,41 @@ async def _route_observation(perception: Perception):
 # ── Media + preprocessing helpers ────────────────────────────────
 
 
+_PART_KIND_TO_CATEGORY: dict[str, str] = {
+    "image": "image",
+    "audio": "audio",
+    "video": "video",
+    "file": "unknown",
+}
+
+
 async def _save_raw_media(perception: Perception) -> None:
     """Persist binary attachments to disk + DB via the existing media helper.
 
-    This is the old `save_attachments` pipeline, kept internal to the
-    router. Only media parts (non-text) are processed.
+    Only non-text Parts are processed. Each one becomes a
+    ``MediaAttachment`` (disk + BDD + FilesModule registration).
     """
     media_parts = [p for p in perception.parts if p.kind != "text"]
     if not media_parts:
         return
     try:
-        from pipeline.media import save_attachments
-
-        # Translate Part objects back into the shape save_attachments expects.
-        payloads = [
-            {
-                "kind": p.kind,
-                "mime_type": p.mime_type,
-                "content": p.content,
-                **p.metadata,
-            }
-            for p in media_parts
-        ]
-        await save_attachments(payloads, person_id=perception.person_id)
+        from pipeline.media import MediaAttachment, save_attachments
     except ImportError:
-        # pipeline.media not present — legitimate in minimal deployments.
         logger.debug("pipeline.media not available, skipping raw media save")
+        return
+
+    attachments: list[MediaAttachment] = []
+    for p in media_parts:
+        data = p.content if isinstance(p.content, str) else ""
+        attachments.append(
+            MediaAttachment(
+                name=str(p.metadata.get("name", "fichier")),
+                media_type=p.mime_type or "application/octet-stream",
+                data=data,
+                category=_PART_KIND_TO_CATEGORY.get(p.kind, "unknown"),
+            )
+        )
+    await save_attachments(attachments, person_id=perception.person_id)
 
 
 async def _preprocess(perception: Perception) -> None:

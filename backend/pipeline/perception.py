@@ -170,7 +170,7 @@ class Perception:
         cls,
         *,
         text: str,
-        attachments: list[dict],
+        attachments: list,
         source: str,
         person_id: str,
         intent: Intent = Intent.REQUEST_RESPONSE,
@@ -178,29 +178,17 @@ class Perception:
     ) -> "Perception":
         """Build a MIXED perception from text + attachment descriptors.
 
-        `attachments` is the list as received from the websocket
-        (dicts with `kind`, `content_b64`, `mime_type`, `name`, etc.)
-        — we wrap each as a Part but don't decode binary here; that
-        happens in preprocessors.
+        `attachments` accepts three shapes, all normalized to ``Part``s:
+          - raw WebSocket dicts: ``{"name", "type" (mime), "data" (base64)}``
+          - pipeline-internal dicts: ``{"kind", "content"|"content_b64", "mime_type", ...}``
+          - ``MediaAttachment`` dataclass instances (from validate_attachments())
         """
         parts: list[Part] = []
         if text.strip():
             parts.append(Part(kind="text", content=text))
         for att in attachments:
-            kind = _normalize_attachment_kind(att)
-            parts.append(
-                Part(
-                    kind=kind,
-                    content=att.get("content") or att.get("content_b64") or "",
-                    mime_type=att.get("mime_type"),
-                    metadata={
-                        k: v for k, v in att.items()
-                        if k not in ("content", "content_b64")
-                    },
-                )
-            )
+            parts.append(_part_from_attachment(att))
 
-        # Modality reflects the "richest" component.
         modality = _dominant_modality(parts)
         return cls(
             modality=modality,
@@ -213,7 +201,7 @@ class Perception:
 
 
 def _normalize_attachment_kind(att: dict) -> str:
-    raw = (att.get("kind") or att.get("type") or "").lower()
+    raw = (att.get("kind") or "").lower()
     if raw in ("image", "img", "photo"):
         return "image"
     if raw in ("audio", "voice", "sound"):
@@ -222,7 +210,14 @@ def _normalize_attachment_kind(att: dict) -> str:
         return "video"
     if raw in ("file", "document", "pdf"):
         return "file"
-    mime = (att.get("mime_type") or "").lower()
+    # Fall back to MIME inference. "type" is also a MIME alias used by the
+    # browser WebSocket payload (File.type).
+    mime = (att.get("mime_type") or att.get("type") or "").lower()
+    return _mime_to_kind(mime)
+
+
+def _mime_to_kind(mime: str) -> str:
+    mime = (mime or "").lower()
     if mime.startswith("image/"):
         return "image"
     if mime.startswith("audio/"):
@@ -230,6 +225,47 @@ def _normalize_attachment_kind(att: dict) -> str:
     if mime.startswith("video/"):
         return "video"
     return "file"
+
+
+_CATEGORY_TO_KIND: dict[str, str] = {
+    "image": "image",
+    "audio": "audio",
+    "video": "video",
+    "text": "file",
+    "unknown": "file",
+}
+
+
+def _part_from_attachment(att) -> Part:
+    """Normalize an attachment (dict or MediaAttachment) into a Part."""
+    # MediaAttachment duck-typing: it has `data`, `media_type`, `name`, `category`.
+    if hasattr(att, "data") and hasattr(att, "media_type"):
+        kind = _CATEGORY_TO_KIND.get(getattr(att, "category", "unknown"), "file")
+        return Part(
+            kind=kind,
+            content=getattr(att, "data", ""),
+            mime_type=getattr(att, "media_type", None),
+            metadata={"name": getattr(att, "name", "")},
+        )
+
+    # Dict path — supports both the raw WebSocket shape and the
+    # pipeline-internal shape.
+    if not isinstance(att, dict):
+        return Part(kind="file", content="", metadata={"unknown_attachment": repr(att)[:80]})
+
+    kind = _normalize_attachment_kind(att)
+    content = (
+        att.get("content")
+        or att.get("content_b64")
+        or att.get("data")
+        or ""
+    )
+    mime_type = att.get("mime_type") or att.get("type")
+    metadata = {
+        k: v for k, v in att.items()
+        if k not in ("content", "content_b64", "data", "mime_type", "type", "kind")
+    }
+    return Part(kind=kind, content=content, mime_type=mime_type, metadata=metadata)
 
 
 def _dominant_modality(parts: list[Part]) -> Modality:

@@ -47,13 +47,30 @@ class OllamaProvider:
         temperature: float = 0.7,
         attachments: list | None = None,
     ) -> str:
-        if attachments and any(a.category == "image" for a in attachments):
-            logger.warning("OllamaProvider: images reçues mais ignorées (modèle non-vision par défaut)")
+        user_message: dict = {"role": "user", "content": user_prompt}
+
+        # Ollama supports vision when the selected model is multimodal
+        # (llava, bakllava, llama3.2-vision, qwen2-vl, ...). The SDK
+        # takes base64-encoded bytes via the `images` message field.
+        # If the model is not vision-capable, Ollama will simply ignore
+        # the images — we log it so it's visible but don't fail.
+        if attachments:
+            image_b64s = [
+                a.data for a in attachments
+                if getattr(a, "category", None) == "image" and a.data
+            ]
+            if image_b64s:
+                user_message["images"] = image_b64s
+                logger.debug(
+                    "OllamaProvider: sending %d image(s) to model=%s",
+                    len(image_b64s), model,
+                )
+
         response = await self._client.chat(
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+                user_message,
             ],
             options={
                 "num_predict": max_tokens,

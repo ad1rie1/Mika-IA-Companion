@@ -19,25 +19,129 @@ from pipeline.preprocessors import audio, files, vision
 @pytest.mark.asyncio
 class TestVisionPreprocessor:
 
-    async def test_replaces_image_with_text_part(self):
+    async def test_calls_llm_and_wraps_response(self):
+        """Vision should call ai_router with the image and return a text Part."""
         part = Part(
             kind="image",
-            content=b"\x89PNG\r\n\x1a\n",
+            content="aGVsbG8=",  # base64 of "hello" — shape only matters
             mime_type="image/png",
             metadata={"name": "cat.png"},
         )
-        result = await vision.process(part)
+        with patch("pipeline.preprocessors.vision.ai_router") as router:
+            router.complete = AsyncMock(
+                return_value="[image: un chat roux sur un canape gris.]"
+            )
+            result = await vision.process(part)
+
         assert result.kind == "text"
-        assert "cat.png" in result.content
+        assert "chat roux" in result.content
         assert result.metadata["original_kind"] == "image"
-        assert result.metadata["preprocessor"] == "vision-stub"
+        assert result.metadata["preprocessor"] == "vision"
+        # Router must have received an image attachment
+        kw = router.complete.call_args.kwargs
+        attachments = kw["attachments"]
+        assert len(attachments) == 1
+        att = attachments[0]
+        assert att.category == "image"
+        assert att.media_type == "image/png"
+        assert att.data == "aGVsbG8="
+        assert att.name == "cat.png"
+
+    async def test_accepts_raw_bytes_content(self):
+        """A Part whose content is raw bytes is base64-encoded before the call."""
+        import base64
+        raw = b"\x89PNG\r\n\x1a\nfake"
+        part = Part(
+            kind="image", content=raw, mime_type="image/png",
+            metadata={"name": "x.png"},
+        )
+        with patch("pipeline.preprocessors.vision.ai_router") as router:
+            router.complete = AsyncMock(return_value="[image: descr]")
+            await vision.process(part)
+
+        attachments = router.complete.call_args.kwargs["attachments"]
+        assert attachments[0].data == base64.b64encode(raw).decode("ascii")
+
+    async def test_llm_failure_returns_placeholder(self):
+        """On LLM error the preprocessor returns a safe placeholder Part."""
+        part = Part(
+            kind="image", content="b64", mime_type="image/png",
+            metadata={"name": "oops.png"},
+        )
+        with patch("pipeline.preprocessors.vision.ai_router") as router:
+            router.complete = AsyncMock(side_effect=RuntimeError("provider down"))
+            result = await vision.process(part)
+
+        assert result.kind == "text"
+        assert "oops.png" in result.content
+        assert "indisponible" in result.content.lower()
+
+    async def test_llm_timeout_returns_placeholder(self):
+        import asyncio
+        part = Part(
+            kind="image", content="b64", mime_type="image/png",
+            metadata={"name": "slow.png"},
+        )
+
+        async def hang(*a, **k):
+            await asyncio.sleep(10)
+
+        with patch("pipeline.preprocessors.vision.ai_router") as router, \
+             patch("pipeline.preprocessors.vision.VISION_TIMEOUT_SECONDS", 0.05):
+            router.complete = hang  # so wait_for times out
+            result = await vision.process(part)
+
+        assert result.kind == "text"
+        assert "indisponible" in result.content.lower()
+
+    async def test_empty_content_short_circuits(self):
+        """No base64 and no bytes → skip the LLM call."""
+        part = Part(kind="image", content="", mime_type="image/png",
+                    metadata={"name": "empty.png"})
+        with patch("pipeline.preprocessors.vision.ai_router") as router:
+            router.complete = AsyncMock()
+            result = await vision.process(part)
+
+        router.complete.assert_not_called()
+        assert "indisponible" in result.content.lower()
+
+    async def test_caption_length_capped(self):
+        """Runaway captions are truncated to MAX_CAPTION_CHARS."""
+        from pipeline.preprocessors.vision import MAX_CAPTION_CHARS
+        long_caption = "[image: " + ("très long " * 1000) + "]"
+        part = Part(
+            kind="image", content="b64", mime_type="image/png",
+            metadata={"name": "long.png"},
+        )
+        with patch("pipeline.preprocessors.vision.ai_router") as router:
+            router.complete = AsyncMock(return_value=long_caption)
+            result = await vision.process(part)
+
+        assert len(result.content) <= MAX_CAPTION_CHARS + 5
+
+    async def test_caption_missing_prefix_gets_wrapped(self):
+        """If the LLM forgets the '[image:' marker, we wrap it in."""
+        part = Part(
+            kind="image", content="b64", mime_type="image/png",
+            metadata={"name": "shy.png"},
+        )
+        with patch("pipeline.preprocessors.vision.ai_router") as router:
+            router.complete = AsyncMock(return_value="un tableau abstrait rouge")
+            result = await vision.process(part)
+
+        assert result.content.startswith("[image:")
+        assert "abstrait" in result.content
+        assert "shy.png" in result.content
 
     async def test_preserves_original_metadata(self):
         part = Part(
-            kind="image", content=b"x", mime_type="image/jpeg",
+            kind="image", content="b64", mime_type="image/jpeg",
             metadata={"name": "pic.jpg", "custom": 42},
         )
-        result = await vision.process(part)
+        with patch("pipeline.preprocessors.vision.ai_router") as router:
+            router.complete = AsyncMock(return_value="[image: scene]")
+            result = await vision.process(part)
+
         assert result.metadata["custom"] == 42
         assert result.metadata["original_mime_type"] == "image/jpeg"
 
@@ -95,6 +199,8 @@ class TestRunPreprocessors:
         assert p.parts[0].content == "hello"
 
     async def test_image_perception_becomes_all_text(self):
+        """Even when the LLM is unavailable, the preprocessor must leave the
+        perception in an all-text state (placeholder replaces the image)."""
         p = Perception.from_mixed(
             text="regarde",
             attachments=[
@@ -103,10 +209,11 @@ class TestRunPreprocessors:
             ],
             source="frontend", person_id="u",
         )
-        await run_preprocessors(p)
+        with patch("pipeline.preprocessors.vision.ai_router") as router:
+            router.complete = AsyncMock(side_effect=RuntimeError("no provider"))
+            await run_preprocessors(p)
+
         assert all(part.kind == "text" for part in p.parts)
-        # The descriptive text includes the file name
-        joined = " ".join(p.text for p in p.parts) if False else p.text
         assert "img.png" in p.text
 
     async def test_handler_failure_yields_error_placeholder(self):
@@ -123,6 +230,23 @@ class TestRunPreprocessors:
         error_parts = [x for x in p.parts if x.metadata.get("error")]
         assert error_parts
         assert "non disponible" in error_parts[0].content
+
+    async def test_image_perception_becomes_all_text_via_llm(self):
+        """Full path: image Part → vision LLM called → text Part inserted."""
+        p = Perception.from_mixed(
+            text="regarde",
+            attachments=[
+                {"kind": "image", "content": "b64data", "mime_type": "image/png",
+                 "name": "img.png"},
+            ],
+            source="frontend", person_id="u",
+        )
+        with patch("pipeline.preprocessors.vision.ai_router") as router:
+            router.complete = AsyncMock(return_value="[image: un ciel etoile]")
+            await run_preprocessors(p)
+
+        assert all(part.kind == "text" for part in p.parts)
+        assert "ciel etoile" in p.text
 
     async def test_unknown_kind_is_left_untouched(self):
         """Extensible: if a new modality ships without a preprocessor,
