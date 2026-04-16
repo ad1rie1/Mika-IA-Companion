@@ -80,6 +80,21 @@ def compute_decision_score(
         score -= penalty
         parts.append(f"ignored(-{penalty:.2f})")
 
+    # Factor 9: Intrinsic drives (curiosity / social / expression / rest).
+    # drive_bonus is signed: REST subtracts, others add. Clamp to [-0.4, +0.5].
+    if abs(ctx.drive_bonus) >= 0.02:
+        drive_contribution = max(-0.4, min(0.5, ctx.drive_bonus))
+        score += drive_contribution
+        parts.append(f"drives({ctx.drive_summary or 'mixed'}:{drive_contribution:+.2f})")
+
+    # Factor 10: Rumination pressure — persistent unresolved thoughts
+    # push Mika to speak. Caps at +0.3 so rumination alone cannot
+    # force action without other signals.
+    if ctx.rumination_pressure > 0.2:
+        rum_score = min(0.3, ctx.rumination_pressure * 0.35)
+        score += rum_score
+        parts.append(f"rumination({ctx.rumination_count}×:{rum_score:.2f})")
+
     # Hard cap: too many ignored acts today -> suppress
     if ctx.acts_today >= 5 and ctx.consecutive_ignored_acts >= 3:
         score = min(score, 0.1)

@@ -34,3 +34,9 @@ class DecisionContext:
     consecutive_waits: int = 0          # Consecutive "wait" decisions (accumulation pressure)
     acts_today: int = 0                  # How many "act" decisions today
     consecutive_ignored_acts: int = 0    # Recent acts with no user response
+    # Drives: intrinsic motivation. Signed — REST drive contributes negatively.
+    drive_bonus: float = 0.0
+    drive_summary: str = ""
+    # Rumination: unresolved thoughts that persist beyond observations.
+    rumination_pressure: float = 0.0   # 0..1, sum of active rumination intensities
+    rumination_count: int = 0

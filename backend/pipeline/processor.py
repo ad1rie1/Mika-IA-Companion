@@ -27,6 +27,9 @@ class SpeechOutput:
     emotion_state: dict
     tool_calls: list[str]
     request_id: str = "-"
+    # Top-K emotion components for ambivalence display on the frontend.
+    # List of {"emotion": str, "weight": float}.
+    emotion_blend: list | None = None
 
 
 # -- Main entry point ---------------------------------------------------------
@@ -112,6 +115,10 @@ async def process_message(
         emotion_state=emotion_engine.get_state_dict(person_id),
         tool_calls=tool_calls,
         request_id=request_id,
+        emotion_blend=[
+            {"emotion": e.value, "weight": round(w, 2)}
+            for e, w in msg_emotion.blend
+        ],
     )
 
     # 8. Broadcast to WebSocket

@@ -7,6 +7,7 @@ into a single structure ready for the AI call.
 import logging
 from dataclasses import dataclass
 
+from drives.engine import drive_engine
 from emotion.engine import emotion_engine
 from memory.manager import memory_manager
 
@@ -49,6 +50,18 @@ async def gather_context(
 
     # Emotion context for this person
     emotion_context = emotion_engine.get_emotion_context(person_id)
+
+    # Intrinsic drives — append to the emotional layer so Claude sees
+    # Mika's pulls (curiosity/social/expression/rest) alongside mood.
+    drive_context = drive_engine.get_context()
+    if drive_context:
+        emotion_context = (
+            f"{emotion_context}\n{drive_context}" if emotion_context else drive_context
+        )
+
+    # Also satisfy the social drive when a real person is about to be answered.
+    if person_id not in ("conscience_mika", "__global__", "anonymous"):
+        drive_engine.on_conversation(from_person=True)
 
     # Module context for system prompt
     module_context = module_manager.collect_context()

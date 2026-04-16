@@ -115,19 +115,50 @@ class GlobalMood:
 
 @dataclass(frozen=True)
 class MessageEmotion:
-    """Computed emotion for a specific message: blend of person + global."""
+    """Computed emotion for a specific message: blend of person + global.
+
+    `emotion` + `intensity` remain the dominant label (backward-compatible
+    with the frontend and existing prompts). `blend` exposes the top-K
+    emotion components so callers who want ambivalence can consume them.
+    """
     emotion: Emotion
     intensity: float
     person_emotion: Emotion
     person_intensity: float
     global_emotion: Emotion
     global_intensity: float
+    blend: tuple[tuple[Emotion, float], ...] = ()
 
     def to_dict(self) -> dict:
         return {
             "emotion": self.emotion.value,
             "intensity": round(self.intensity, 2),
+            "blend": [
+                {"emotion": e.value, "weight": round(w, 2)}
+                for e, w in self.blend
+            ],
         }
+
+    def is_ambivalent(self) -> bool:
+        """True if at least two anchors have non-trivial weight."""
+        if len(self.blend) < 2:
+            return False
+        # Secondary must be at least 40% of the primary to be meaningful.
+        return self.blend[1][1] >= 0.4 * self.blend[0][1]
+
+    def to_prompt_description(self) -> str:
+        """Natural-language description that expresses ambivalence if any."""
+        if not self.blend:
+            return f"{self.emotion.value} (intensite {self.intensity:.1f})"
+        if not self.is_ambivalent():
+            primary, weight = self.blend[0]
+            return f"{primary.value} (intensite {weight:.1f})"
+        primary, p_w = self.blend[0]
+        secondary, s_w = self.blend[1]
+        return (
+            f"principalement {primary.value} ({p_w:.1f}), "
+            f"mais aussi une nuance de {secondary.value} ({s_w:.1f})"
+        )
 
 
 def _intensity_label(intensity: float) -> str:

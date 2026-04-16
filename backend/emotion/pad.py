@@ -142,3 +142,57 @@ def pad_to_label(position: Vec3) -> tuple[Emotion, float]:
 
     intensity = min(1.0, mag / _MAX_ANCHOR_NORM)
     return best_emotion, intensity
+
+
+def pad_to_blend(
+    position: Vec3,
+    top_k: int = 2,
+    similarity_floor: float = 0.35,
+) -> list[tuple[Emotion, float]]:
+    """Project a PAD point onto the top-K *compatible* anchors.
+
+    This exposes emotional ambivalence: a position can be read as
+    "mostly grateful, a bit nostalgic" instead of forcing a single label.
+
+    Each returned weight is (cosine_similarity × normalized_magnitude),
+    clamped to [0, 1]. Returned list is length 0..top_k, sorted by weight
+    descending. Anchors below `similarity_floor` cosine similarity are
+    excluded — they'd be misleading (orthogonal emotions shouldn't
+    appear in a blend).
+
+    Behavior:
+      - zero vector  → empty list
+      - pure single-anchor direction → list of length 1 (others filtered out)
+      - mixed direction (e.g. 0.6*HAPPY + 0.4*NOSTALGIC) → two entries
+    """
+    if top_k <= 0:
+        return []
+
+    mag = norm(position)
+    if mag < 1e-6:
+        return []
+
+    intensity = min(1.0, mag / _MAX_ANCHOR_NORM)
+
+    similarities: list[tuple[Emotion, float]] = []
+    for emotion, anchor in EMOTION_ANCHORS.items():
+        anchor_mag = norm(anchor)
+        if anchor_mag < 1e-6:
+            continue
+        cos = dot(position, anchor) / (mag * anchor_mag)
+        if cos < similarity_floor:
+            continue
+        similarities.append((emotion, cos))
+
+    similarities.sort(key=lambda x: -x[1])
+    top = similarities[:top_k]
+    if not top:
+        return []
+
+    # Weight = similarity × intensity, rescaled so the top match always
+    # equals its full intensity (so "pure happy at 0.8" stays "happy 0.8").
+    max_cos = top[0][1]
+    return [
+        (emotion, round((cos / max_cos) * intensity, 3))
+        for emotion, cos in top
+    ]

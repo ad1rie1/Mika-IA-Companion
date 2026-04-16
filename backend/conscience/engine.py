@@ -26,6 +26,7 @@ from conscience.interpreter import SignalInterpreter
 from conscience.memory_bridge import MemoryBridge
 from conscience.scoring import compute_decision_score, urgency_from_context
 from conscience.types import DecisionContext, InterpretedSignal
+from drives.engine import drive_engine
 from modules.types import ModuleEvent, ModuleNotification
 
 logger = logging.getLogger(__name__)
@@ -145,6 +146,12 @@ class ConscienceEngine:
         # Track activity for idle detection
         if event.event_type in ("chat.message", "telegram.message"):
             self._last_activity = time.time()
+            # A person talking to Mika satisfies the social drive.
+            drive_engine.on_conversation(from_person=True)
+        else:
+            # External signal (email, RSS, schedule) — feeds curiosity
+            # proportionally to pertinence.
+            drive_engine.on_observation(signal.pertinence)
 
         logger.debug(
             "Observed: %s/%s → %s (p=%.1f)",
@@ -370,6 +377,12 @@ class ConscienceEngine:
         # Introspection: query own recent behavior
         acts_today, consecutive_ignored_acts = await self._introspect()
 
+        # Drives: intrinsic motivation pressure
+        drive_bonus, drive_summary = drive_engine.conscience_contribution()
+
+        # Rumination: persistent unresolved thoughts
+        rum_pressure, rum_count = await self._rumination_snapshot()
+
         return DecisionContext(
             pending_observations=pending,
             global_mood=glob.emotion.value,
@@ -382,7 +395,200 @@ class ConscienceEngine:
             consecutive_waits=self._consecutive_waits,
             acts_today=acts_today,
             consecutive_ignored_acts=consecutive_ignored_acts,
+            drive_bonus=drive_bonus,
+            drive_summary=drive_summary,
+            rumination_pressure=rum_pressure,
+            rumination_count=rum_count,
         )
+
+    async def _rumination_snapshot(self) -> tuple[float, int]:
+        """Aggregate pressure from active (non-resolved) ruminations.
+
+        Returns (total_pressure_clamped_01, count). Fault-tolerant — if
+        the Rumination model isn't migrated yet, returns (0.0, 0).
+        """
+        try:
+            from conscience.models import Rumination
+        except ImportError:
+            return 0.0, 0
+
+        try:
+            active = await sync_to_async(
+                lambda: list(
+                    Rumination.objects
+                    .filter(status="active")
+                    .values_list("intensity", flat=True)[:20]
+                )
+            )()
+        except Exception:
+            # Table may not exist yet (migration pending) — silent.
+            return 0.0, 0
+
+        if not active:
+            return 0.0, 0
+        total = sum(active)
+        return min(1.0, total), len(active)
+
+    async def _recent_ruminations_prompt(self) -> str:
+        """Return prompt text describing top active ruminations, or ''."""
+        try:
+            from conscience.models import Rumination
+        except ImportError:
+            return ""
+
+        try:
+            items = await sync_to_async(
+                lambda: list(
+                    Rumination.objects
+                    .filter(status="active")
+                    .order_by("-intensity")[:3]
+                )
+            )()
+        except Exception:
+            return ""
+
+        if not items:
+            return ""
+
+        lines = []
+        for r in items:
+            label = "fortement" if r.intensity > 0.7 else "encore"
+            lines.append(f"- Tu repenses {label} a: {r.summary[:120]}")
+        return "Ces pensees te trottent dans la tete:\n" + "\n".join(lines)
+
+    async def _resolve_ruminations_after_act(self, response_text: str) -> None:
+        """When Mika speaks, fade ruminations whose themes overlap the response.
+
+        Simple heuristic: any active rumination loses 50% intensity on an
+        act (she "got it off her chest"). If post-decay intensity falls
+        below 0.1, mark as resolved.
+        """
+        try:
+            from conscience.models import Rumination
+        except ImportError:
+            return
+
+        try:
+            active = await sync_to_async(
+                lambda: list(Rumination.objects.filter(status="active")[:20])
+            )()
+        except Exception:
+            return
+
+        for r in active:
+            r.intensity *= 0.5
+            if r.intensity < 0.1:
+                r.status = "resolved"
+            try:
+                await sync_to_async(r.save)(
+                    update_fields=["intensity", "status"]
+                )
+            except Exception:
+                pass
+
+    async def _decay_ruminations(self) -> None:
+        """Every cycle: active ruminations lose ~5% intensity and may
+        bleed their emotional charge into the global mood.
+
+        Models the fact that unresolved thoughts color humor over time:
+        a lingering frustration keeps you a bit frustrated. Bleed is
+        proportional to intensity so only strong ruminations tint mood.
+        """
+        try:
+            from conscience.models import Rumination
+        except ImportError:
+            return
+
+        try:
+            active = await sync_to_async(
+                lambda: list(Rumination.objects.filter(status="active")[:30])
+            )()
+        except Exception:
+            return
+
+        if not active:
+            return
+
+        # Import inside to avoid circulars
+        from emotion.engine import emotion_engine
+        from emotion.types import Emotion, EmotionData
+
+        for r in active:
+            # 5% intensity decay per cycle
+            r.intensity *= 0.95
+
+            # Emotional bleed: if rumination has an associated emotion,
+            # re-inject a small fraction into the global mood.
+            if r.emotion and r.intensity > 0.3:
+                try:
+                    emo = Emotion(r.emotion)
+                    data = EmotionData(emotion=emo, intensity=r.intensity * 0.15)
+                    emotion_engine.process_emotion(data, "conscience_mika")
+                except (ValueError, Exception):
+                    pass
+
+            if r.intensity < 0.1:
+                r.status = "faded"
+
+            try:
+                await sync_to_async(r.save)(
+                    update_fields=["intensity", "status"]
+                )
+            except Exception:
+                pass
+
+    async def _promote_stale_to_ruminations(self) -> None:
+        """Convert recent skipped/stale pertinent observations into ruminations.
+
+        Called from _mark_stale_observations when observations age out.
+        An observation with pertinence >= 0.5 that was never acted upon
+        becomes a Rumination — Mika keeps thinking about it.
+        """
+        try:
+            from conscience.models import Observation, Rumination
+        except ImportError:
+            return
+
+        from django.utils import timezone as tz
+        from datetime import timedelta
+
+        cutoff = tz.now() - timedelta(minutes=30)
+        window_start = tz.now() - timedelta(hours=2)
+
+        try:
+            pertinent_stale = await sync_to_async(
+                lambda: list(
+                    Observation.objects.filter(
+                        status="skipped",
+                        pertinence__gte=0.5,
+                        created_at__gte=window_start,
+                        created_at__lt=cutoff,
+                    ).exclude(
+                        id__in=Rumination.objects.filter(
+                            observation__isnull=False
+                        ).values_list("observation_id", flat=True)
+                    )[:5]
+                )
+            )()
+        except Exception:
+            return
+
+        for obs in pertinent_stale:
+            try:
+                await sync_to_async(Rumination.objects.create)(
+                    summary=obs.summary,
+                    themes=obs.raw_data.get("themes", []),
+                    intensity=min(1.0, obs.pertinence),
+                    emotion=obs.emotional_reaction or "",
+                    observation=obs,
+                    status="active",
+                )
+                logger.debug(
+                    "Promoted observation %d to rumination (p=%.2f)",
+                    obs.id, obs.pertinence,
+                )
+            except Exception:
+                logger.debug("Rumination creation failed", exc_info=True)
 
     async def _poll_scheduled_actions(self) -> list:
         """Query scheduled actions that are due (scheduled_at <= now)."""
@@ -461,7 +667,11 @@ class ConscienceEngine:
         return actions
 
     async def _mark_stale_observations(self) -> None:
-        """Mark pending observations older than 30 min as skipped."""
+        """Mark pending observations older than 30 min as skipped.
+
+        Pertinent stale observations are promoted to Ruminations — Mika
+        keeps thinking about them even after the short-term buffer empties.
+        """
         from conscience.models import Observation
         from django.utils import timezone as tz
         from datetime import timedelta
@@ -478,6 +688,11 @@ class ConscienceEngine:
                 logger.debug("Marked %d stale observations as skipped", count)
         except Exception:
             logger.debug("Failed to mark stale observations", exc_info=True)
+
+        # Promote pertinent skipped observations to ruminations.
+        await self._promote_stale_to_ruminations()
+        # Decay existing ruminations over each cycle.
+        await self._decay_ruminations()
 
     async def _cleanup_old_observations(self) -> None:
         """Delete observations older than 48h that are no longer pending.
@@ -587,6 +802,15 @@ class ConscienceEngine:
                     [str(tc)[:120] for tc in output.tool_calls],
                 )
 
+            # Satisfy drives now that Mika has spoken.
+            drive_engine.on_act(
+                had_tools=bool(output.tool_calls),
+                word_count=len(output.text.split()),
+            )
+
+            # Speaking resolves related ruminations (fades their intensity).
+            await self._resolve_ruminations_after_act(output.text)
+
             logger.info(
                 "Conscience acted [%s] (modules=%s, tools=%d): %s",
                 reason, relevant_modules, len(output.tool_calls),
@@ -660,6 +884,16 @@ class ConscienceEngine:
         parts.append(
             f"Tu te sens {ctx.global_mood} (intensite {ctx.global_intensity:.1f})."
         )
+
+        # Intrinsic drives (curiosity / social / expression / rest)
+        drive_ctx = drive_engine.get_context()
+        if drive_ctx:
+            parts.append(drive_ctx)
+
+        # Ruminations — unresolved thoughts still on Mika's mind
+        rumination_text = await self._recent_ruminations_prompt()
+        if rumination_text:
+            parts.append(rumination_text)
 
         # Idle time
         idle_minutes = int(ctx.idle_seconds / 60)

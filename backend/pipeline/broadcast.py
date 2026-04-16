@@ -28,6 +28,7 @@ async def broadcast_to_websocket(output: SpeechOutput, source: str) -> None:
                 "emotion": output.emotion_name,
                 "emotion_intensity": output.emotion_intensity,
                 "emotion_state": output.emotion_state,
+                "emotion_blend": output.emotion_blend or [],
                 "source": source,
             },
         },

@@ -27,6 +27,7 @@ INSTALLED_APPS = [
     "ai",
     "communication",
     "emotion",
+    "drives",
     "memory",
     "conscience",
     "modules",

@@ -503,7 +503,8 @@ class EmotionEngine:
 
         Weights: 60% person position + 40% global position in PAD space.
         The blend is a weighted mean of the two 3D vectors, then projected
-        back onto the nearest anchor.
+        back onto the top-2 nearest anchors so the output can express
+        ambivalence (e.g. "mostly grateful, a touch nostalgic").
         """
         person = self._get_person_mood(person_id)
         default = self.temperament.default_mood
@@ -516,12 +517,15 @@ class EmotionEngine:
             pad.scale(self.global_mood.dynamic.position, 0.4),
         )
         final_label, final_intensity = pad.pad_to_label(blended)
+        blend_components = pad.pad_to_blend(blended, top_k=2)
 
         # If the blended vector is essentially zero, expose the default mood
         # as a weak background so the frontend doesn't get stuck on neutral.
         if final_intensity < 0.05:
             final_label = default
             final_intensity = 0.1
+            if not blend_components:
+                blend_components = [(default, 0.1)]
 
         return MessageEmotion(
             emotion=final_label,
@@ -530,6 +534,7 @@ class EmotionEngine:
             person_intensity=round(p_intensity, 2),
             global_emotion=g_label if g_intensity > 0.05 else default,
             global_intensity=round(g_intensity, 2),
+            blend=tuple(blend_components),
         )
 
     # ------------------------------------------------------------------

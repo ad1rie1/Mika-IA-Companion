@@ -92,6 +92,52 @@ class ConscienceLog(models.Model):
         return f"[{self.decision}] {self.reason[:60]} ({self.created_at:%H:%M})"
 
 
+class Rumination(models.Model):
+    """A persistent thought — a signal that was perceived as pertinent
+    but never acted upon, that Mika keeps turning over in her head.
+
+    Lifecycle:
+      - created from an Observation that stayed pending > 30 min
+        while having pertinence >= 0.5
+      - decays ~5% intensity per decision cycle
+      - bleeds emotional charge into global mood each cycle
+      - status="resolved" when Mika speaks (intensity halved, may drop
+        below 0.1 threshold) and "faded" when it decays out on its own
+    """
+
+    class Status(models.TextChoices):
+        ACTIVE = "active"
+        RESOLVED = "resolved"    # Mika spoke about it / got it off her chest
+        FADED = "faded"          # Decayed naturally below threshold
+
+    summary = models.TextField()
+    themes = models.JSONField(default=list)
+    # Emotional label (uses the 29-emotion vocabulary) that tints mood
+    # while the rumination is active. Empty means no bleed.
+    emotion = models.CharField(max_length=30, blank=True, default="")
+    intensity = models.FloatField(default=0.5)
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.ACTIVE,
+    )
+    observation = models.ForeignKey(
+        "conscience.Observation",
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ruminations",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-intensity", "-created_at"]
+        indexes = [
+            models.Index(fields=["status", "-intensity"]),
+        ]
+
+    def __str__(self):
+        return f"[{self.status}:{self.intensity:.2f}] {self.summary[:60]}"
+
+
 class ScheduledAction(models.Model):
     """A deferred action scheduled by the conscience or Claude.
 
