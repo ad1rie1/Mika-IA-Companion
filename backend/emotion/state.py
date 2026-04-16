@@ -2,17 +2,26 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 
-from emotion.types import Emotion, EmotionCategory, EMOTION_CATEGORIES
+from emotion import pad
+from emotion.dynamics import OscillatorState
+from emotion.types import Emotion
 
 
 @dataclass(frozen=True)
 class Temperament:
-    """Personality-driven parameters that affect emotional behavior."""
-    volatility: float = 0.7       # 0.0=very stable, 1.0=very volatile
-    intensity_base: float = 0.6   # amplifies or dampens reactions
-    recovery_speed: float = 0.5   # how fast emotions decay back to default mood
+    """Personality-driven parameters mapped to oscillator physics.
+
+    - volatility       : how easily the state moves (inverse mass)
+    - intensity_base   : impulse gain scaling
+    - recovery_speed   : spring stiffness pulling back to default_mood
+    - global_bleed     : coupling from person moods into the global mood
+    - default_mood     : home position of the oscillator (set via its anchor)
+    """
+    volatility: float = 0.7
+    intensity_base: float = 0.6
+    recovery_speed: float = 0.5
     default_mood: Emotion = Emotion.HAPPY
-    global_bleed: float = 0.3     # how much individual interactions bleed into global mood
+    global_bleed: float = 0.3
 
 
 @dataclass
@@ -21,69 +30,92 @@ class EmotionHistoryEntry:
     timestamp: float
     emotion: Emotion
     intensity: float
-    source: str  # "claude", "decay", "opposition", "reinforcement"
+    source: str  # "impulse", "decay"
 
 
 @dataclass
 class PersonMood:
-    """Per-person emotional state. Tracks how the VTuber feels about one specific person."""
+    """Per-person emotional state. Tracks how the VTuber feels about one specific person.
+
+    The authoritative state is the oscillator (`dynamic`) in PAD space.
+    `emotion` / `intensity` are derived labels for display and I/O.
+    """
     person_id: str
-    emotion: Emotion = Emotion.NEUTRAL
-    intensity: float = 0.0
-    momentum: float = 0.0  # resistance to change, builds with reinforcement
+    dynamic: OscillatorState = field(default_factory=OscillatorState)
     last_interaction: float = field(default_factory=time.time)
     last_update: float = field(default_factory=time.time)
     history: deque[EmotionHistoryEntry] = field(
         default_factory=lambda: deque(maxlen=100)
     )
 
+    @property
+    def emotion(self) -> Emotion:
+        label, _ = pad.pad_to_label(self.dynamic.position)
+        return label
+
+    @property
+    def intensity(self) -> float:
+        _, value = pad.pad_to_label(self.dynamic.position)
+        return value
+
     def to_dict(self) -> dict:
+        label, intensity = pad.pad_to_label(self.dynamic.position)
         return {
-            "emotion": self.emotion.value,
-            "intensity": round(self.intensity, 2),
-            "momentum": round(self.momentum, 2),
+            "emotion": label.value,
+            "intensity": round(intensity, 2),
         }
 
     def to_prompt_description(self) -> str:
-        if self.intensity < 0.1:
+        label, intensity = pad.pad_to_label(self.dynamic.position)
+        if intensity < 0.1:
             return "Tu n'as pas de sentiment particulier envers cette personne."
 
-        intensity_word = _intensity_label(self.intensity)
+        intensity_word = _intensity_label(intensity)
         return (
             f"Envers cette personne, tu te sens {intensity_word} "
-            f"{self.emotion.value} (intensite: {self.intensity:.1f})."
+            f"{label.value} (intensite: {intensity:.1f})."
         )
 
 
 @dataclass
 class GlobalMood:
     """Global emotional state, independent of who is talking."""
-    emotion: Emotion = Emotion.NEUTRAL
-    intensity: float = 0.0
-    momentum: float = 0.0
+    dynamic: OscillatorState = field(default_factory=OscillatorState)
     last_update: float = field(default_factory=time.time)
 
+    @property
+    def emotion(self) -> Emotion:
+        label, _ = pad.pad_to_label(self.dynamic.position)
+        return label
+
+    @property
+    def intensity(self) -> float:
+        _, value = pad.pad_to_label(self.dynamic.position)
+        return value
+
     def to_dict(self) -> dict:
+        label, intensity = pad.pad_to_label(self.dynamic.position)
         return {
-            "emotion": self.emotion.value,
-            "intensity": round(self.intensity, 2),
+            "emotion": label.value,
+            "intensity": round(intensity, 2),
         }
 
     def to_prompt_description(self, default_mood: Emotion) -> str:
-        if self.intensity < 0.1 or self.emotion == default_mood:
+        label, intensity = pad.pad_to_label(self.dynamic.position)
+        if intensity < 0.1 or label == default_mood:
             return f"Ton humeur generale est {default_mood.value}, comme d'habitude."
 
-        intensity_word = _intensity_label(self.intensity)
+        intensity_word = _intensity_label(intensity)
         return (
             f"Ton humeur generale en ce moment est {intensity_word} "
-            f"{self.emotion.value} (intensite: {self.intensity:.1f}), "
+            f"{label.value} (intensite: {intensity:.1f}), "
             f"alors que normalement tu es plutot {default_mood.value}."
         )
 
 
 @dataclass(frozen=True)
 class MessageEmotion:
-    """Computed emotion for a specific message: blend of person + global + context."""
+    """Computed emotion for a specific message: blend of person + global."""
     emotion: Emotion
     intensity: float
     person_emotion: Emotion

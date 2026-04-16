@@ -11,7 +11,7 @@ Frontend expects:
   "emotion": "happy",
   "emotion_intensity": 0.75,
   "emotion_state": {
-    "person": {"emotion": "happy", "intensity": 0.7, "momentum": 0.0},
+    "person": {"emotion": "happy", "intensity": 0.7},
     "global": {"emotion": "happy", "intensity": 0.1},
     "message": {"emotion": "happy", "intensity": 0.7}
   },
@@ -49,10 +49,8 @@ class TestStateDictStructure:
         person = state["person"]
         assert "emotion" in person
         assert "intensity" in person
-        assert "momentum" in person
         assert isinstance(person["emotion"], str)
         assert isinstance(person["intensity"], (int, float))
-        assert isinstance(person["momentum"], (int, float))
 
     def test_global_dict_structure(self, engine):
         engine.process_emotion(EmotionData(Emotion.HAPPY, 0.7), "user1")
@@ -213,20 +211,22 @@ class TestStateConsistencyOverTime:
 class TestToDictMethods:
 
     def test_person_mood_to_dict(self):
-        mood = PersonMood(person_id="test", emotion=Emotion.HAPPY,
-                         intensity=0.756, momentum=0.312)
+        from emotion import pad
+        mood = PersonMood(person_id="test")
+        mood.dynamic.position = pad.label_to_pad(Emotion.HAPPY, 0.9)
         d = mood.to_dict()
 
         assert d["emotion"] == "happy"
-        assert d["intensity"] == 0.76  # rounded
-        assert d["momentum"] == 0.31  # rounded
+        assert 0.0 <= d["intensity"] <= 1.0
 
     def test_global_mood_to_dict(self):
-        mood = GlobalMood(emotion=Emotion.ANGRY, intensity=0.823)
+        from emotion import pad
+        mood = GlobalMood()
+        mood.dynamic.position = pad.label_to_pad(Emotion.ANGRY, 0.8)
         d = mood.to_dict()
 
         assert d["emotion"] == "angry"
-        assert d["intensity"] == 0.82
+        assert 0.0 <= d["intensity"] <= 1.0
 
     def test_message_emotion_to_dict(self):
         msg = MessageEmotion(

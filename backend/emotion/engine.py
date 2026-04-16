@@ -4,14 +4,10 @@ import time
 
 from django.conf import settings
 
-from emotion.types import (
-    Emotion,
-    EmotionCategory,
-    EmotionData,
-    EMOTION_CATEGORIES,
-    OPPOSITE_CATEGORIES,
-    TRANSITION_OVERRIDES,
-)
+from emotion import pad
+from emotion.dynamics import OscillatorParams
+from emotion.pad import Vec3
+from emotion.types import Emotion, EmotionData
 from emotion.state import (
     EmotionHistoryEntry,
     GlobalMood,
@@ -22,38 +18,51 @@ from emotion.state import (
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DECAY_RATE = 0.02  # intensity lost per second (before temperament scaling)
+# Physics tick period (seconds) used by the decay loop.
+_TICK_DT = 1.0
+# Maximum sub-step size for stable integration. Semi-implicit Euler is only
+# stable when dt · ω₀ < ~π; for our parameter range, 0.5s is always safe.
+_MAX_SUBSTEP_DT = 0.5
+# Upper bound on the total time advanced in a single _apply_decay call.
+# Larger gaps (e.g. after hibernation) are capped to prevent runaway steps.
+_MAX_ADVANCE_SECONDS = 30.0
 
 
 class EmotionEngine:
-    """Central emotion orchestrator with 3 layers:
+    """Central emotion orchestrator, PAD-dimensional + damped oscillator.
 
-    1. Per-person mood (person_moods) - how the VTuber feels about each person
-    2. Global mood (global_mood) - overall emotional state affecting all conversations
-    3. Message emotion (computed) - blend of person + global for each response
+    Three layers:
+    1. Per-person mood  (person_moods)  — one oscillator per person
+    2. Global mood       (global_mood)   — one oscillator for overall state
+    3. Message emotion   (computed)      — blend of person + global per message
 
-    Mood persistence strategy (two-tier):
-    - EmotionSnapshot  : raw snapshots, retained for EMOTION_SNAPSHOT_RETENTION_DAYS
-                         (default 2 days).  Used for short-term restore.
-    - EmotionalSummary : daily aggregates built by the consolidator, retained much
-                         longer.  Used as fallback when snapshots have been pruned.
+    Persistence strategy (two-tier, backwards-compatible schema):
+    - EmotionSnapshot  : (label, intensity) pairs, retained for
+                         EMOTION_SNAPSHOT_RETENTION_DAYS. Restored lossy
+                         via label_to_pad().
+    - EmotionalSummary : daily aggregates built by the consolidator, used
+                         as fallback when snapshots were pruned.
     """
 
-    # How long to decay snapshot intensity over (aligns with consolidator retention).
-    # After this window the snapshot is gone anyway, so decay reaches 0 naturally.
-    _SNAPSHOT_DECAY_DAYS: int = 2          # matches EMOTION_SNAPSHOT_RETENTION_DAYS default
-    # How long to consider EmotionalSummary records useful as a mood seed.
-    _SUMMARY_DECAY_DAYS: int = 30          # full decay over 30 days
+    _SNAPSHOT_DECAY_DAYS: int = 2
+    _SUMMARY_DECAY_DAYS: int = 30
+    # Idle cleanup: remove persons untouched for this long with no emotion.
+    _IDLE_EVICTION_SECONDS: int = 3600
 
     def __init__(self):
         self.person_moods: dict[str, PersonMood] = {}
         self.global_mood = GlobalMood()
         self.temperament = Temperament()
+        self._person_params = OscillatorParams()
+        self._global_params = OscillatorParams()
         self._decay_task: asyncio.Task | None = None
         self._initialized = False
-        self._decay_rate = DEFAULT_DECAY_RATE
         self._last_snapshot_time: dict[str, float] = {}
         self._snapshot_interval: int = 30
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
 
     async def initialize(self):
         """Load temperament from personality, restore state, start decay loop."""
@@ -62,25 +71,16 @@ class EmotionEngine:
 
         from config.personality import personality
         self.temperament = personality.temperament
+        self._recompute_params()
 
-        self._decay_rate = getattr(
-            settings, "EMOTION_DECAY_RATE", DEFAULT_DECAY_RATE
-        )
         self._snapshot_interval = getattr(
             settings, "EMOTION_SNAPSHOT_INTERVAL", 30
         )
-        # Align snapshot decay window with the consolidator's retention setting
         self._SNAPSHOT_DECAY_DAYS = getattr(
             settings, "EMOTION_SNAPSHOT_RETENTION_DAYS", self._SNAPSHOT_DECAY_DAYS
         )
 
-        # Try to restore state from last session
         restored = await self._restore_state()
-
-        if not restored:
-            # Set global mood to default
-            self.global_mood.emotion = self.temperament.default_mood
-            self.global_mood.intensity = 0.0
 
         self._decay_task = asyncio.create_task(self._decay_loop())
         self._initialized = True
@@ -108,12 +108,32 @@ class EmotionEngine:
                 pass
         logger.info("EmotionEngine shut down (state saved)")
 
+    def _recompute_params(self) -> None:
+        """Derive OscillatorParams from the current temperament."""
+        t = self.temperament
+        # volatility → inverse mass. Clamp mass to [0.25, 4.0] so the
+        # extremes (0.0 / 1.0) stay physically sane.
+        mass = max(0.25, min(4.0, 1.0 / max(0.05, t.volatility)))
+        self._person_params = OscillatorParams(
+            mass=mass,
+            stiffness=max(0.05, t.recovery_speed),
+            damping=0.7 + 0.3 * (1.0 - t.volatility),
+            impulse_gain=max(0.1, t.intensity_base),
+        )
+        # Global mood is lazier: softer spring, heavier mass.
+        self._global_params = OscillatorParams(
+            mass=mass * 1.5,
+            stiffness=max(0.03, t.recovery_speed * 0.5),
+            damping=0.85,
+            impulse_gain=max(0.05, t.global_bleed),
+        )
+
     # ------------------------------------------------------------------
-    # State persistence
+    # State persistence (lossy label-level snapshots, no DB migration)
     # ------------------------------------------------------------------
 
     async def _save_state(self):
-        """Save current emotional state to DB for restoration on next startup."""
+        """Persist current state as (label, intensity) snapshots per person + global."""
         from asgiref.sync import sync_to_async
         from memory.manager import memory_manager
         from memory.models import EmotionSnapshot
@@ -123,44 +143,39 @@ class EmotionEngine:
             return
 
         try:
-            # Save global mood
+            g_label, g_intensity = pad.pad_to_label(self.global_mood.dynamic.position)
             await sync_to_async(EmotionSnapshot.objects.create)(
                 conversation=conversation,
                 person_id="__global__",
-                primary_emotion=self.global_mood.emotion.value,
-                primary_intensity=self.global_mood.intensity,
-                global_emotion=self.global_mood.emotion.value,
-                global_intensity=self.global_mood.intensity,
+                primary_emotion=g_label.value,
+                primary_intensity=g_intensity,
+                global_emotion=g_label.value,
+                global_intensity=g_intensity,
             )
 
-            # Save each person's mood
             for pid, mood in self.person_moods.items():
+                p_label, p_intensity = pad.pad_to_label(mood.dynamic.position)
                 await sync_to_async(EmotionSnapshot.objects.create)(
                     conversation=conversation,
                     person_id=pid,
-                    primary_emotion=mood.emotion.value,
-                    primary_intensity=mood.intensity,
-                    global_emotion=self.global_mood.emotion.value,
-                    global_intensity=self.global_mood.intensity,
+                    primary_emotion=p_label.value,
+                    primary_intensity=p_intensity,
+                    global_emotion=g_label.value,
+                    global_intensity=g_intensity,
                 )
 
             logger.info(
                 "Saved emotion state: global=%s(%.2f), %d person mood(s)",
-                self.global_mood.emotion.value,
-                self.global_mood.intensity,
-                len(self.person_moods),
+                g_label.value, g_intensity, len(self.person_moods),
             )
         except Exception:
             logger.exception("Failed to save emotion state")
 
     async def _restore_state(self) -> bool:
-        """Restore emotional state at startup using a two-tier strategy:
+        """Restore state from snapshots (+summary fallback). Lossy reconstruction.
 
-        1. EmotionSnapshot (recent, 0–SNAPSHOT_DECAY_DAYS): loaded for all persons.
-        2. EmotionalSummary (older, up to SUMMARY_DECAY_DAYS): loaded as fallback for
-           persons whose snapshots have been pruned by the consolidator.
-
-        Returns True if any state was restored.
+        The oscillator starts at rest (velocity=0) at the reconstructed position,
+        and will settle toward home via the decay loop over a few seconds.
         """
         from asgiref.sync import sync_to_async
         from django.db.models import Max
@@ -171,7 +186,6 @@ class EmotionEngine:
         try:
             now_ts = time.time()
 
-            # One query: most recent snapshot ID per person_id
             latest_ids = await sync_to_async(
                 lambda: list(
                     EmotionSnapshot.objects
@@ -194,41 +208,38 @@ class EmotionEngine:
                     time_factor = max(0.0, 1.0 - elapsed / max_age_seconds)
                     intensity = snap.primary_intensity * time_factor
 
+                    try:
+                        label = Emotion(snap.primary_emotion)
+                    except ValueError:
+                        label = self.temperament.default_mood
+
+                    position = pad.label_to_pad(label, intensity)
+
                     if snap.person_id == "__global__":
-                        try:
-                            self.global_mood.emotion = Emotion(snap.primary_emotion)
-                        except ValueError:
-                            self.global_mood.emotion = self.temperament.default_mood
-                        self.global_mood.intensity = intensity
+                        self.global_mood.dynamic.position = position
+                        self.global_mood.dynamic.velocity = pad.zero()
                     else:
                         persons_from_snapshots.add(snap.person_id)
                         if intensity < 0.05:
-                            continue  # decayed to nothing
-                        try:
-                            emotion = Emotion(snap.primary_emotion)
-                        except ValueError:
-                            emotion = self.temperament.default_mood
-                        self.person_moods[snap.person_id] = PersonMood(
-                            person_id=snap.person_id,
-                            emotion=emotion,
-                            intensity=intensity,
-                        )
+                            continue
+                        mood = PersonMood(person_id=snap.person_id)
+                        mood.dynamic.position = position
+                        self.person_moods[snap.person_id] = mood
                         restored_persons += 1
 
-            # Fallback: seed from EmotionalSummary for persons not covered above
             summary_restored = await self._restore_from_summaries(
                 exclude_persons=persons_from_snapshots
             )
             restored_persons += summary_restored
 
-            if restored_persons == 0 and self.global_mood.intensity < 0.05:
+            if restored_persons == 0 and pad.norm(self.global_mood.dynamic.position) < 0.05:
                 return False
 
+            g_label, g_intensity = pad.pad_to_label(self.global_mood.dynamic.position)
             logger.info(
                 "Restored emotion state: global=%s(%.2f), %d person(s) "
                 "[snapshots: %d, summaries: %d]",
-                self.global_mood.emotion.value,
-                self.global_mood.intensity,
+                g_label.value, g_intensity,
                 restored_persons,
                 restored_persons - summary_restored,
                 summary_restored,
@@ -240,17 +251,13 @@ class EmotionEngine:
             return False
 
     async def _restore_from_summaries(self, exclude_persons: set[str]) -> int:
-        """Seed person moods from EmotionalSummary for persons not already loaded.
-
-        Returns the number of persons restored.
-        """
+        """Seed person moods from EmotionalSummary for persons not already loaded."""
         from asgiref.sync import sync_to_async
         from datetime import date
         from django.db.models import Max
         from memory.models import EmotionalSummary
 
         try:
-            # Most recent summary date per person_id
             latest_rows = await sync_to_async(
                 lambda: list(
                     EmotionalSummary.objects
@@ -272,17 +279,14 @@ class EmotionEngine:
                 if age_days >= self._SUMMARY_DECAY_DAYS:
                     continue
 
-                # Fetch the actual summary to get dominant_emotion / intensity
                 result = await self._mood_from_summary(pid)
                 if result is None:
                     continue
 
-                emotion, intensity = result
-                self.person_moods[pid] = PersonMood(
-                    person_id=pid,
-                    emotion=emotion,
-                    intensity=intensity,
-                )
+                label, intensity = result
+                mood = PersonMood(person_id=pid)
+                mood.dynamic.position = pad.label_to_pad(label, intensity)
+                self.person_moods[pid] = mood
                 restored += 1
 
             return restored
@@ -292,14 +296,7 @@ class EmotionEngine:
             return 0
 
     async def _mood_from_summary(self, person_id: str) -> tuple[Emotion, float] | None:
-        """Return (emotion, intensity) seeded from the most recent EmotionalSummary.
-
-        Used as a fallback when EmotionSnapshot records have been pruned (> 2 days old).
-        Applies a linear decay over _SUMMARY_DECAY_DAYS so that a summary from
-        last week contributes less than one from yesterday.
-
-        Returns None if no summary exists or the intensity decays below threshold.
-        """
+        """Return (emotion, intensity) seeded from the most recent EmotionalSummary."""
         from asgiref.sync import sync_to_async
         from datetime import date
         from memory.models import EmotionalSummary
@@ -339,14 +336,7 @@ class EmotionEngine:
             return None
 
     async def ensure_person_loaded(self, person_id: str) -> None:
-        """Hydrate a person's mood from DB if they are not currently tracked in RAM.
-
-        Two-tier lookup (mirrors _restore_state):
-        1. Try the most recent EmotionSnapshot (fast, recent data).
-        2. Fall back to EmotionalSummary if no usable snapshot found.
-
-        No-op when the person is already present in memory.
-        """
+        """Hydrate a person's mood from DB if they are not currently in RAM."""
         if person_id in self.person_moods or person_id in ("__global__", "anonymous"):
             return
 
@@ -371,32 +361,27 @@ class EmotionEngine:
 
                 if intensity >= 0.05:
                     try:
-                        emotion = Emotion(snap.primary_emotion)
-                        self.person_moods[person_id] = PersonMood(
-                            person_id=person_id,
-                            emotion=emotion,
-                            intensity=intensity,
-                        )
+                        label = Emotion(snap.primary_emotion)
+                        mood = PersonMood(person_id=person_id)
+                        mood.dynamic.position = pad.label_to_pad(label, intensity)
+                        self.person_moods[person_id] = mood
                         logger.debug(
                             "Lazy-loaded mood for %s: %s(%.2f) from snapshot ~%dh ago",
-                            person_id, emotion.value, intensity, int(elapsed / 3600),
+                            person_id, label.value, intensity, int(elapsed / 3600),
                         )
                         return
                     except ValueError:
-                        pass  # fall through to summary
+                        pass
 
-            # Snapshot missing or decayed — try EmotionalSummary
             result = await self._mood_from_summary(person_id)
             if result is not None:
-                emotion, intensity = result
-                self.person_moods[person_id] = PersonMood(
-                    person_id=person_id,
-                    emotion=emotion,
-                    intensity=intensity,
-                )
+                label, intensity = result
+                mood = PersonMood(person_id=person_id)
+                mood.dynamic.position = pad.label_to_pad(label, intensity)
+                self.person_moods[person_id] = mood
                 logger.debug(
                     "Lazy-loaded mood for %s: %s(%.2f) from EmotionalSummary",
-                    person_id, emotion.value, intensity,
+                    person_id, label.value, intensity,
                 )
 
         except Exception:
@@ -409,10 +394,7 @@ class EmotionEngine:
     # ------------------------------------------------------------------
 
     async def _maybe_save_snapshot(self, person_id: str) -> None:
-        """Save a snapshot if enough time has passed since the last one.
-
-        Throttled per person_id to avoid excessive DB writes.
-        """
+        """Save a snapshot if enough time has passed since the last one."""
         now = time.time()
         last = self._last_snapshot_time.get(person_id, 0)
         if now - last < self._snapshot_interval:
@@ -431,14 +413,17 @@ class EmotionEngine:
             return
 
         person = self._get_person_mood(person_id)
+        p_label, p_intensity = pad.pad_to_label(person.dynamic.position)
+        g_label, g_intensity = pad.pad_to_label(self.global_mood.dynamic.position)
+
         try:
             await sync_to_async(EmotionSnapshot.objects.create)(
                 conversation=conversation,
                 person_id=person_id,
-                primary_emotion=person.emotion.value,
-                primary_intensity=person.intensity,
-                global_emotion=self.global_mood.emotion.value,
-                global_intensity=self.global_mood.intensity,
+                primary_emotion=p_label.value,
+                primary_intensity=p_intensity,
+                global_emotion=g_label.value,
+                global_intensity=g_intensity,
             )
         except Exception:
             logger.debug("Failed to save snapshot for %s", person_id, exc_info=True)
@@ -448,14 +433,15 @@ class EmotionEngine:
     # ------------------------------------------------------------------
 
     def _get_person_mood(self, person_id: str) -> PersonMood:
-        """Get or create mood state for a person."""
+        """Get or create mood state for a person. New persons start at origin."""
         if person_id not in self.person_moods:
-            self.person_moods[person_id] = PersonMood(
-                person_id=person_id,
-                emotion=self.temperament.default_mood,
-                intensity=0.0,
-            )
+            self.person_moods[person_id] = PersonMood(person_id=person_id)
         return self.person_moods[person_id]
+
+    def _home_vector(self) -> Vec3:
+        """Home position for all oscillators: the default mood's anchor,
+        dimmed slightly so there's always some room to react."""
+        return pad.label_to_pad(self.temperament.default_mood, 0.3)
 
     # ------------------------------------------------------------------
     # Core: process a new emotion from Claude
@@ -464,177 +450,80 @@ class EmotionEngine:
     def process_emotion(
         self, emotion_data: EmotionData, person_id: str
     ) -> PersonMood:
-        """Process a new emotion from a Claude response.
+        """Apply a new emotion as an impulse toward its PAD anchor.
 
-        1. Update person mood (transitions, momentum, opposition)
-        2. Bleed into global mood
-        3. Return updated person mood
+        The physics handles reinforcement (successive impulses accumulate
+        velocity), opposition (impulses pointing against current position
+        decelerate it), and naturalness (far-away targets produce larger
+        impulses but are resisted by mass+damping).
         """
+        self._recompute_params()  # in case temperament changed at runtime
+
         now = time.time()
         person = self._get_person_mood(person_id)
-        new_emotion = emotion_data.emotion
-        # Scale intensity by temperament
-        new_intensity = emotion_data.intensity * self.temperament.intensity_base
 
-        old_emotion = person.emotion
-        old_intensity = person.intensity
-        old_cat = EMOTION_CATEGORIES.get(old_emotion, EmotionCategory.NEUTRAL_CAT)
-        new_cat = EMOTION_CATEGORIES.get(new_emotion, EmotionCategory.NEUTRAL_CAT)
+        target = pad.label_to_pad(emotion_data.emotion, emotion_data.intensity)
+        person.dynamic.impulse_toward(target, self._person_params)
 
-        source = "reinforcement"
-
-        if new_emotion == old_emotion:
-            # --- REINFORCEMENT: same emotion → build up ---
-            person.intensity = min(1.0, old_intensity * 0.5 + new_intensity * 0.5)
-            person.momentum = min(1.0, person.momentum + 0.15)
-            source = "reinforcement"
-
-        elif self._are_opposite(old_cat, new_cat) and old_intensity > 0.1:
-            # --- OPPOSITION: positive vs negative → counter the current emotion ---
-            # The new emotion fights the old one
-            opposition_force = new_intensity * self.temperament.volatility
-            remaining = old_intensity - opposition_force
-
-            if remaining > 0.05:
-                # Old emotion weakened but survives
-                person.intensity = remaining
-                person.momentum = max(0.0, person.momentum - 0.1)
-                source = "opposition_partial"
-            else:
-                # Old emotion defeated, new one takes over
-                person.emotion = new_emotion
-                person.intensity = min(1.0, max(0.1, abs(remaining) + new_intensity * 0.3))
-                person.momentum = 0.0
-                source = "opposition_flip"
-
-        elif new_emotion == Emotion.NEUTRAL and new_intensity >= 0.5:
-            # --- ANNULATION: strong neutral → reset to default mood ---
-            person.emotion = self.temperament.default_mood
-            person.intensity = max(0.0, old_intensity - new_intensity * 0.5)
-            person.momentum = max(0.0, person.momentum - 0.2)
-            source = "annulation"
-
-        else:
-            # --- TRANSITION: different emotion, same or complex category ---
-            naturalness = self._get_transition_naturalness(old_emotion, new_emotion)
-            momentum_resistance = person.momentum * 0.4
-            effective_intensity = (
-                new_intensity
-                * naturalness
-                * self.temperament.volatility
-                * (1.0 - momentum_resistance)
-            )
-
-            if effective_intensity > old_intensity * 0.3 or old_intensity < 0.15:
-                person.emotion = new_emotion
-                person.intensity = max(0.1, effective_intensity)
-                person.momentum = max(0.0, person.momentum - 0.1)
-                source = "transition"
-            else:
-                # Not strong enough to overcome current emotion
-                person.intensity = max(0.0, old_intensity - 0.05)
-                source = "transition_resisted"
+        # Propagate a fraction of the impulse into the global mood.
+        global_target = pad.scale(target, self.temperament.global_bleed)
+        self.global_mood.dynamic.impulse_toward(global_target, self._global_params)
 
         person.last_interaction = now
         person.last_update = now
+        self.global_mood.last_update = now
+
+        label, intensity = pad.pad_to_label(person.dynamic.position)
         person.history.append(EmotionHistoryEntry(
             timestamp=now,
-            emotion=new_emotion,
-            intensity=person.intensity,
-            source=source,
+            emotion=emotion_data.emotion,
+            intensity=intensity,
+            source="impulse",
         ))
 
-        # Bleed into global mood
-        self._bleed_to_global(new_emotion, emotion_data.intensity)
-
         logger.debug(
-            "Emotion [%s]: %s(%.2f) → %s(%.2f) [%s, momentum=%.2f]",
-            person_id, old_emotion.value, old_intensity,
-            person.emotion.value, person.intensity, source, person.momentum,
+            "Emotion [%s]: impulse toward %s(%.2f) → state %s(%.2f)",
+            person_id, emotion_data.emotion.value, emotion_data.intensity,
+            label.value, intensity,
         )
 
         return person
-
-    # ------------------------------------------------------------------
-    # Global mood bleed
-    # ------------------------------------------------------------------
-
-    def _bleed_to_global(self, emotion: Emotion, raw_intensity: float):
-        """Partially propagate a person's emotion to global mood."""
-        bleed_amount = raw_intensity * self.temperament.global_bleed
-
-        if bleed_amount < 0.05:
-            return
-
-        now = time.time()
-        glob = self.global_mood
-
-        if emotion == glob.emotion:
-            # Reinforce global
-            glob.intensity = min(1.0, glob.intensity + bleed_amount * 0.3)
-        else:
-            glob_cat = EMOTION_CATEGORIES.get(glob.emotion, EmotionCategory.NEUTRAL_CAT)
-            new_cat = EMOTION_CATEGORIES.get(emotion, EmotionCategory.NEUTRAL_CAT)
-
-            if self._are_opposite(glob_cat, new_cat) and glob.intensity > 0.1:
-                # Opposition at global level too
-                glob.intensity = max(0.0, glob.intensity - bleed_amount * 0.3)
-                if glob.intensity < 0.05:
-                    glob.emotion = emotion
-                    glob.intensity = bleed_amount * 0.2
-            elif bleed_amount > glob.intensity:
-                # New emotion takes over global
-                glob.emotion = emotion
-                glob.intensity = bleed_amount * 0.5
-            else:
-                # Mild influence, not enough to change
-                glob.intensity = max(0.0, glob.intensity - bleed_amount * 0.1)
-
-        glob.last_update = now
 
     # ------------------------------------------------------------------
     # Compute message emotion (blend of person + global)
     # ------------------------------------------------------------------
 
     def compute_message_emotion(self, person_id: str) -> MessageEmotion:
-        """Compute the final emotion for a message by blending person + global.
+        """Compute the final emotion for a message by blending PAD positions.
 
-        Weights: 60% person mood, 40% global mood.
+        Weights: 60% person position + 40% global position in PAD space.
+        The blend is a weighted mean of the two 3D vectors, then projected
+        back onto the nearest anchor.
         """
         person = self._get_person_mood(person_id)
-        glob = self.global_mood
         default = self.temperament.default_mood
 
-        p_emotion = person.emotion if person.intensity > 0.1 else default
-        p_intensity = person.intensity if person.intensity > 0.1 else 0.2
+        p_label, p_intensity = pad.pad_to_label(person.dynamic.position)
+        g_label, g_intensity = pad.pad_to_label(self.global_mood.dynamic.position)
 
-        g_emotion = glob.emotion if glob.intensity > 0.1 else default
-        g_intensity = glob.intensity if glob.intensity > 0.1 else 0.1
+        blended = pad.add(
+            pad.scale(person.dynamic.position, 0.6),
+            pad.scale(self.global_mood.dynamic.position, 0.4),
+        )
+        final_label, final_intensity = pad.pad_to_label(blended)
 
-        # Determine dominant emotion
-        person_weight = p_intensity * 0.6
-        global_weight = g_intensity * 0.4
-
-        if person_weight >= global_weight:
-            final_emotion = p_emotion
-        else:
-            final_emotion = g_emotion
-
-        # Blend intensity
-        final_intensity = min(1.0, person_weight + global_weight)
-
-        # If person and global are opposite categories, dampen the result
-        p_cat = EMOTION_CATEGORIES.get(p_emotion, EmotionCategory.NEUTRAL_CAT)
-        g_cat = EMOTION_CATEGORIES.get(g_emotion, EmotionCategory.NEUTRAL_CAT)
-        if self._are_opposite(p_cat, g_cat):
-            final_intensity *= 0.7  # internal conflict dampens expression
+        # If the blended vector is essentially zero, expose the default mood
+        # as a weak background so the frontend doesn't get stuck on neutral.
+        if final_intensity < 0.05:
+            final_label = default
+            final_intensity = 0.1
 
         return MessageEmotion(
-            emotion=final_emotion,
+            emotion=final_label,
             intensity=round(final_intensity, 2),
-            person_emotion=p_emotion,
+            person_emotion=p_label if p_intensity > 0.05 else default,
             person_intensity=round(p_intensity, 2),
-            global_emotion=g_emotion,
+            global_emotion=g_label if g_intensity > 0.05 else default,
             global_intensity=round(g_intensity, 2),
         )
 
@@ -647,11 +536,16 @@ class EmotionEngine:
         person = self._get_person_mood(person_id)
         default = self.temperament.default_mood
 
-        lines = []
-        lines.append(person.to_prompt_description())
-        lines.append(self.global_mood.to_prompt_description(default))
+        lines = [
+            person.to_prompt_description(),
+            self.global_mood.to_prompt_description(default),
+        ]
 
-        if person.momentum > 0.5:
+        # "Ancrage" = when the oscillator has high velocity AND high intensity
+        # it means the state is actively moving — Mika is emotionally engaged.
+        speed = pad.norm(person.dynamic.velocity)
+        intensity = pad.norm(person.dynamic.position)
+        if speed > 0.3 and intensity > 0.4:
             lines.append(
                 "Cette emotion est bien ancree en toi en ce moment, "
                 "tu ne vas pas changer d'humeur facilement."
@@ -675,14 +569,14 @@ class EmotionEngine:
         }
 
     # ------------------------------------------------------------------
-    # Decay loop
+    # Decay loop — pure physics integration
     # ------------------------------------------------------------------
 
     async def _decay_loop(self):
-        """Background loop: decay all emotions every second."""
+        """Background loop: advance all oscillators every second."""
         while True:
             try:
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(_TICK_DT)
                 self._apply_decay()
             except asyncio.CancelledError:
                 break
@@ -690,96 +584,35 @@ class EmotionEngine:
                 logger.exception("Emotion decay loop error")
 
     def _apply_decay(self):
-        """Apply time-based decay to all person moods and global mood."""
+        """Step the physics forward. Uses wall-clock dt per mood (capped)."""
         now = time.time()
-        decay_base = self._decay_rate * self.temperament.recovery_speed
-        default = self.temperament.default_mood
+        home = self._home_vector()
 
-        # Decay person moods
+        # Step person moods
         expired_persons = []
         for pid, person in self.person_moods.items():
-            elapsed = now - person.last_update
-            if elapsed < 0.5:
+            dt = min(5.0, max(0.0, now - person.last_update))
+            if dt <= 0.0:
                 continue
 
-            decay_amount = decay_base * elapsed
-
-            if person.emotion == default:
-                # Already at default mood, just decay intensity toward 0
-                person.intensity = max(0.0, person.intensity - decay_amount * 0.5)
-            else:
-                person.intensity -= decay_amount
-                if person.intensity <= 0.05:
-                    # Emotion fully decayed → revert to default
-                    person.emotion = default
-                    person.intensity = 0.0
-                    person.momentum = 0.0
-
-            # Decay momentum
-            person.momentum = max(0.0, person.momentum - decay_amount * 0.3)
+            person.dynamic.step(home, self._person_params, dt)
             person.last_update = now
 
-            # Clean up persons inactive for 1 hour with no emotion
+            # Clean up persons inactive for a long time with near-zero state
             if (
-                now - person.last_interaction > 3600
-                and person.intensity < 0.05
+                now - person.last_interaction > self._IDLE_EVICTION_SECONDS
+                and pad.norm(person.dynamic.position) < 0.05
             ):
                 expired_persons.append(pid)
 
         for pid in expired_persons:
             del self.person_moods[pid]
 
-        # Decay global mood
-        glob = self.global_mood
-        elapsed = now - glob.last_update
-        if elapsed >= 0.5:
-            g_decay = decay_base * elapsed * 0.5  # global decays slower
-            if glob.emotion == default:
-                glob.intensity = max(0.0, glob.intensity - g_decay * 0.3)
-            else:
-                glob.intensity -= g_decay
-                if glob.intensity <= 0.05:
-                    glob.emotion = default
-                    glob.intensity = 0.0
-                    glob.momentum = 0.0
-            glob.momentum = max(0.0, glob.momentum - g_decay * 0.2)
-            glob.last_update = now
-
-    # ------------------------------------------------------------------
-    # Transition helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _are_opposite(cat_a: EmotionCategory, cat_b: EmotionCategory) -> bool:
-        """Check if two emotion categories are opposite (positive vs negative)."""
-        return OPPOSITE_CATEGORIES.get(cat_a) == cat_b
-
-    @staticmethod
-    def _get_transition_naturalness(from_e: Emotion, to_e: Emotion) -> float:
-        """Get how natural a transition between two emotions is (0.0-1.0)."""
-        if from_e == to_e:
-            return 1.0
-        if to_e == Emotion.NEUTRAL:
-            return 0.9
-
-        # Check explicit overrides (both directions)
-        if (from_e, to_e) in TRANSITION_OVERRIDES:
-            return TRANSITION_OVERRIDES[(from_e, to_e)]
-        if (to_e, from_e) in TRANSITION_OVERRIDES:
-            return TRANSITION_OVERRIDES[(to_e, from_e)]
-
-        # Default based on category
-        from_cat = EMOTION_CATEGORIES.get(from_e, EmotionCategory.NEUTRAL_CAT)
-        to_cat = EMOTION_CATEGORIES.get(to_e, EmotionCategory.NEUTRAL_CAT)
-
-        if from_cat == to_cat:
-            return 0.75
-        if EmotionCategory.NEUTRAL_CAT in (from_cat, to_cat):
-            return 0.7
-        if EmotionCategory.COMPLEX in (from_cat, to_cat):
-            return 0.6
-        # Cross positive <-> negative
-        return 0.35
+        # Step global mood
+        dt = min(5.0, max(0.0, now - self.global_mood.last_update))
+        if dt > 0.0:
+            self.global_mood.dynamic.step(home, self._global_params, dt)
+            self.global_mood.last_update = now
 
     # ------------------------------------------------------------------
     # Analytics
@@ -799,7 +632,6 @@ class EmotionEngine:
                 "persons_tracked": 0,
             }
 
-        # Distribution weighted by intensity
         distribution: dict[str, float] = {}
         for entry in all_entries:
             key = entry.emotion.value

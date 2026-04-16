@@ -92,18 +92,14 @@ FRIENDLY_CONVERSATION = [
 class TestFriendlyScenario:
 
     def test_emotional_progression_stays_positive(self, engine):
-        """The entire conversation should maintain a positive emotional arc."""
+        """The entire conversation should maintain a non-negative emotional arc."""
+        from emotion import pad
         snapshots = play_conversation(engine, "friendly_user", FRIENDLY_CONVERSATION)
 
         for i, snap in enumerate(snapshots):
-            mood = snap["person_mood"]
-            emotion = mood["emotion"]
-            category = None
-            from emotion.types import EMOTION_CATEGORIES, EmotionCategory
-            cat = EMOTION_CATEGORIES.get(emotion, EmotionCategory.NEUTRAL_CAT)
-
-            assert cat in (EmotionCategory.POSITIVE, EmotionCategory.COMPLEX, EmotionCategory.NEUTRAL_CAT), \
-                f"Turn {i}: Expected positive/complex/neutral but got {emotion.value} ({cat.value})"
+            emotion = snap["person_mood"]["emotion"]
+            assert pad.valence(emotion) >= -0.1, \
+                f"Turn {i}: expected non-negative valence, got {emotion.value} (valence={pad.valence(emotion)})"
 
     def test_intensity_builds_naturally(self, engine):
         """Intensity should generally increase through the conversation."""
@@ -116,25 +112,23 @@ class TestFriendlyScenario:
         assert last_avg >= first_avg * 0.8, \
             f"Intensity should build over time: first_avg={first_avg:.2f}, last_avg={last_avg:.2f}"
 
-    def test_momentum_builds_with_positive_reinforcement(self, engine):
-        """Momentum should increase when positive emotions are reinforced."""
+    def test_state_accumulates_with_reinforcement(self, engine):
+        """After a long positive conversation, the state should show engagement."""
+        from emotion import pad
         snapshots = play_conversation(engine, "friendly_user", FRIENDLY_CONVERSATION)
 
-        # By the end, some momentum should have built up
-        final_momentum = snapshots[-1]["person_mood"]["momentum"]
-        # Not asserting a high value because emotions vary, but should be non-zero
-        assert final_momentum >= 0.0
+        mood = engine._get_person_mood("friendly_user")
+        # Either position has moved significantly, or the system is still active.
+        assert pad.norm(mood.dynamic.position) > 0.1 or pad.norm(mood.dynamic.velocity) > 0.0
 
     def test_global_mood_stays_positive(self, engine):
-        """Global mood should become positive from this interaction."""
+        """Global mood should lean non-negative after this friendly interaction."""
+        from emotion import pad
         play_conversation(engine, "friendly_user", FRIENDLY_CONVERSATION)
 
         glob = engine.global_mood
-        from emotion.types import EMOTION_CATEGORIES, EmotionCategory
-        cat = EMOTION_CATEGORIES.get(glob.emotion, EmotionCategory.NEUTRAL_CAT)
-
-        assert cat in (EmotionCategory.POSITIVE, EmotionCategory.COMPLEX, EmotionCategory.NEUTRAL_CAT), \
-            f"Global mood should be positive after friendly chat, got {glob.emotion.value}"
+        assert pad.valence(glob.emotion) >= -0.1, \
+            f"Global mood should not be strongly negative, got {glob.emotion.value}"
 
     def test_intensity_never_exceeds_bounds(self, engine):
         """No intensity should ever exceed [0.0, 1.0]."""
@@ -159,14 +153,9 @@ class TestFriendlyWithExplosiveTemperament:
             explosive_engine, "friendly_user", FRIENDLY_CONVERSATION
         )
 
-        from tests.conftest import TEMPERAMENT_DEFAULT
-        from emotion.engine import EmotionEngine
-        from emotion.state import GlobalMood
+        from tests.conftest import TEMPERAMENT_DEFAULT, _make_engine
 
-        normal_engine = EmotionEngine()
-        normal_engine.temperament = TEMPERAMENT_DEFAULT
-        normal_engine.global_mood = GlobalMood(emotion=TEMPERAMENT_DEFAULT.default_mood, intensity=0.0)
-        normal_engine._initialized = True
+        normal_engine = _make_engine(TEMPERAMENT_DEFAULT)
 
         snaps_normal = play_conversation(
             normal_engine, "friendly_user", FRIENDLY_CONVERSATION

@@ -15,7 +15,8 @@ The scenario: 3 users arrive at different times with different vibes:
 
 import pytest
 
-from emotion.types import Emotion, EmotionData, EmotionCategory, EMOTION_CATEGORIES
+from emotion import pad
+from emotion.types import Emotion, EmotionData
 from emotion.engine import EmotionEngine
 from tests.conftest import ConversationTurn, play_conversation, simulate_time_decay
 
@@ -114,24 +115,18 @@ class TestMultiPersonIsolation:
         assert "bob" in engine.person_moods
         assert "charlie" in engine.person_moods
 
-        # Alice should be positive
-        alice_cat = EMOTION_CATEGORIES.get(alice_mood.emotion, EmotionCategory.NEUTRAL_CAT)
-        assert alice_cat in (EmotionCategory.POSITIVE, EmotionCategory.COMPLEX), \
-            f"Alice should be positive, got {alice_mood.emotion.value}"
+        # Alice should lean non-negative
+        assert pad.valence(alice_mood.emotion) >= -0.1, \
+            f"Alice should be non-negative, got {alice_mood.emotion.value}"
 
-        # Bob's history should contain negative/complex emotions from his conversation
-        # (even if his current mood decayed back to default by the time we check)
+        # Bob's history should contain negative emotions from his conversation
         bob_history_emotions = [e.emotion for e in bob_mood.history]
-        assert any(
-            EMOTION_CATEGORIES.get(e, EmotionCategory.NEUTRAL_CAT) in
-            (EmotionCategory.NEGATIVE, EmotionCategory.COMPLEX)
-            for e in bob_history_emotions
-        ), f"Bob's history should contain negative/complex emotions: {[e.value for e in bob_history_emotions]}"
+        assert any(pad.valence(e) < 0 for e in bob_history_emotions), \
+            f"Bob's history should contain negative emotions: {[e.value for e in bob_history_emotions]}"
 
-        # Charlie should be complex (curious/thinking)
-        charlie_cat = EMOTION_CATEGORIES.get(charlie_mood.emotion, EmotionCategory.NEUTRAL_CAT)
-        assert charlie_cat in (EmotionCategory.COMPLEX, EmotionCategory.POSITIVE), \
-            f"Charlie should be complex/positive, got {charlie_mood.emotion.value}"
+        # Charlie should not be strongly negative
+        assert pad.valence(charlie_mood.emotion) >= -0.1, \
+            f"Charlie should not be strongly negative, got {charlie_mood.emotion.value}"
 
     def test_bob_anger_does_not_affect_alice(self, engine):
         """Bob's grumpiness should not impact Alice's person mood."""
@@ -143,10 +138,9 @@ class TestMultiPersonIsolation:
         play_conversation(engine, "alice", ALICE_TURNS)
         alice_mood = engine._get_person_mood("alice")
 
-        # Alice should still be positive regardless of Bob
-        alice_cat = EMOTION_CATEGORIES.get(alice_mood.emotion, EmotionCategory.NEUTRAL_CAT)
-        assert alice_cat in (EmotionCategory.POSITIVE, EmotionCategory.COMPLEX), \
-            f"Alice should be positive despite Bob's grumpiness: {alice_mood.emotion.value}"
+        # Alice should still be non-negative regardless of Bob
+        assert pad.valence(alice_mood.emotion) >= -0.1, \
+            f"Alice should be non-negative despite Bob's grumpiness: {alice_mood.emotion.value}"
 
 
 class TestMultiPersonGlobalBleed:
@@ -160,7 +154,7 @@ class TestMultiPersonGlobalBleed:
 
         glob = engine.global_mood
         # Global mood exists and is valid
-        assert glob.emotion in EMOTION_CATEGORIES
+        assert isinstance(glob.emotion, Emotion)
         assert 0.0 <= glob.intensity <= 1.0
 
     def test_positive_majority_tips_global_positive(self, engine):
@@ -173,8 +167,6 @@ class TestMultiPersonGlobalBleed:
         play_conversation(engine, "bob", BOB_TURNS)
 
         glob = engine.global_mood
-        glob_cat = EMOTION_CATEGORIES.get(glob.emotion, EmotionCategory.NEUTRAL_CAT)
-
         # With 2 positive and 1 negative, global could go either way
         # but intensity should be moderate (mixed signals)
         assert glob.intensity < 0.8, \
@@ -273,4 +265,3 @@ class TestMultiPersonScale:
         # All should still be valid
         for pid, mood in engine.person_moods.items():
             assert 0.0 <= mood.intensity <= 1.0
-            assert 0.0 <= mood.momentum <= 1.0

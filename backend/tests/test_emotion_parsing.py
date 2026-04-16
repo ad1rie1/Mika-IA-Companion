@@ -11,8 +11,6 @@ from emotion.types import (
     Emotion,
     EmotionData,
     extract_emotion,
-    EMOTION_CATEGORIES,
-    EmotionCategory,
 )
 
 
@@ -137,41 +135,25 @@ class TestEmotionData:
             data.intensity = 0.5
 
 
-class TestEmotionCategories:
+class TestPADAnchors:
+    """All emotions must have a PAD anchor; the vocabulary is the enum."""
 
-    def test_all_emotions_categorized(self):
-        """Every Emotion enum value should have a category."""
+    def test_every_emotion_has_anchor(self):
+        from emotion import pad
         for emotion in Emotion:
-            assert emotion in EMOTION_CATEGORIES, \
-                f"{emotion.value} missing from EMOTION_CATEGORIES"
+            assert emotion in pad.EMOTION_ANCHORS, \
+                f"{emotion.value} missing from EMOTION_ANCHORS"
 
-    def test_positive_emotions(self):
-        positives = [
-            Emotion.HAPPY, Emotion.EXCITED, Emotion.LOVE, Emotion.PROUD,
-            Emotion.GRATEFUL, Emotion.PLAYFUL, Emotion.AMUSED,
-            Emotion.HOPEFUL, Emotion.RELIEVED,
-        ]
-        for e in positives:
-            assert EMOTION_CATEGORIES[e] == EmotionCategory.POSITIVE, \
-                f"{e.value} should be POSITIVE"
+    def test_positive_emotions_have_positive_valence(self):
+        from emotion import pad
+        for e in [Emotion.HAPPY, Emotion.EXCITED, Emotion.LOVE, Emotion.PROUD,
+                  Emotion.GRATEFUL, Emotion.PLAYFUL, Emotion.AMUSED,
+                  Emotion.HOPEFUL, Emotion.RELIEVED]:
+            assert pad.valence(e) > 0.0, f"{e.value} should have positive valence"
 
-    def test_negative_emotions(self):
-        negatives = [
-            Emotion.SAD, Emotion.ANGRY, Emotion.SCARED, Emotion.DISGUSTED,
-            Emotion.FRUSTRATED, Emotion.LONELY, Emotion.ANXIOUS,
-            Emotion.BORED, Emotion.JEALOUS,
-        ]
-        for e in negatives:
-            assert EMOTION_CATEGORIES[e] == EmotionCategory.NEGATIVE, \
-                f"{e.value} should be NEGATIVE"
-
-    def test_complex_emotions(self):
-        complexes = [
-            Emotion.SURPRISED, Emotion.THINKING, Emotion.CONFUSED,
-            Emotion.EMBARRASSED, Emotion.NOSTALGIC, Emotion.DREAMY,
-            Emotion.DETERMINED, Emotion.MISCHIEVOUS, Emotion.CURIOUS,
-            Emotion.MELANCHOLIC,
-        ]
-        for e in complexes:
-            assert EMOTION_CATEGORIES[e] == EmotionCategory.COMPLEX, \
-                f"{e.value} should be COMPLEX"
+    def test_negative_emotions_have_negative_valence(self):
+        from emotion import pad
+        for e in [Emotion.SAD, Emotion.ANGRY, Emotion.SCARED, Emotion.DISGUSTED,
+                  Emotion.FRUSTRATED, Emotion.LONELY, Emotion.ANXIOUS,
+                  Emotion.BORED, Emotion.JEALOUS]:
+            assert pad.valence(e) < 0.0, f"{e.value} should have negative valence"

@@ -178,7 +178,7 @@ class TestProcessMessage:
             mock_engine.compute_message_emotion.return_value.emotion = Emotion.HAPPY
             mock_engine.compute_message_emotion.return_value.intensity = 0.7
             mock_engine.get_state_dict = MagicMock(return_value={
-                "person": {"emotion": "happy", "intensity": 0.7, "momentum": 0.0},
+                "person": {"emotion": "happy", "intensity": 0.7},
                 "global": {"emotion": "happy", "intensity": 0.1},
                 "message": {"emotion": "happy", "intensity": 0.7},
             })
@@ -213,7 +213,7 @@ class TestProcessMessage:
                 emotion=Emotion.SAD, intensity=0.6,
             ))
             mock_engine.get_state_dict = MagicMock(return_value={
-                "person": {"emotion": "sad", "intensity": 0.6, "momentum": 0.0},
+                "person": {"emotion": "sad", "intensity": 0.6},
                 "global": {"emotion": "happy", "intensity": 0.0},
                 "message": {"emotion": "sad", "intensity": 0.6},
             })

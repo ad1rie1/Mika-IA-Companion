@@ -130,8 +130,8 @@ EMOTION_SNAPSHOT_INTERVAL = env.int("EMOTION_SNAPSHOT_INTERVAL", default=30)
 EMOTION_SNAPSHOT_RETENTION_DAYS = env.int("EMOTION_SNAPSHOT_RETENTION_DAYS", default=2)
 
 # --- Emotion Engine ---
-EMOTION_DECAY_RATE = env.float("EMOTION_DECAY_RATE", default=0.02)  # intensity lost per second
-EMOTION_MOOD_SHIFT_RATE = env.float("EMOTION_MOOD_SHIFT_RATE", default=0.01)
+# Physics parameters (mass, stiffness, damping, impulse gain) are derived
+# at runtime from the `temperament` block in personality.yaml.
 
 # --- Conscience ---
 CONSCIENCE_DECISION_INTERVAL = env.int("CONSCIENCE_DECISION_INTERVAL", default=30)

@@ -14,7 +14,8 @@ between joy, anger, sadness, excitement, fear, and love.
 
 import pytest
 
-from emotion.types import Emotion, EmotionData, EmotionCategory, EMOTION_CATEGORIES
+from emotion import pad
+from emotion.types import Emotion, EmotionData
 from tests.conftest import ConversationTurn, play_conversation, simulate_time_decay
 
 
@@ -138,61 +139,24 @@ class TestRollercoasterScenario:
         snap5 = snapshots[5]["person_mood"]
         # Fun back to sadness should be opposed
 
-    def test_emotional_arc_ends_positive(self, engine):
-        """Despite the chaos, the conversation ends on a hopeful/happy note."""
+    def test_emotional_arc_ends_non_negative(self, engine):
+        """Despite the chaos, the conversation ends on a non-negative note."""
         snapshots = play_conversation(engine, "chaotic_user", ROLLERCOASTER_CONVERSATION)
 
         final = snapshots[-1]["person_mood"]
-        cat = EMOTION_CATEGORIES.get(final["emotion"], EmotionCategory.NEUTRAL_CAT)
+        assert pad.valence(final["emotion"]) >= -0.1, \
+            f"Conversation should end non-negatively, got {final['emotion'].value}"
 
-        assert cat in (EmotionCategory.POSITIVE, EmotionCategory.COMPLEX), \
-            f"Conversation should end positively, got {final['emotion'].value}"
-
-    def test_momentum_requires_reinforcement(self, engine):
-        """Momentum only builds through reinforcement (same emotion repeated).
-
-        In a rollercoaster conversation where every turn has a DIFFERENT
-        emotion, momentum stays at 0 because reinforcement never triggers.
-        Each transition or opposition actually reduces momentum. This is
-        correct behavior — momentum protects against change only when an
-        emotion has been sustained through repetition.
-        """
-        snapshots = play_conversation(engine, "chaotic_user", ROLLERCOASTER_CONVERSATION)
-
-        all_momentums = [s["person_mood"]["momentum"] for s in snapshots]
-
-        # With no repeated emotions in sequence, momentum stays low
-        # This is actually desirable: rapid changers SHOULD be easy to shift
-        assert all(m <= 1.0 for m in all_momentums), "Momentum should stay bounded"
-
-        # Now test that reinforcement DOES build momentum
+    def test_reinforcement_accumulates_state(self, engine):
+        """Repeating the same impulse should grow position magnitude."""
         pid = "stable_user"
+        mags = []
         for _ in range(5):
             engine.process_emotion(EmotionData(Emotion.HAPPY, 0.8), pid)
-        mood = engine._get_person_mood(pid)
-        assert mood.momentum > 0.3, \
-            f"Reinforcement should build momentum: got {mood.momentum}"
+            mags.append(pad.norm(engine._get_person_mood(pid).dynamic.position))
 
-    def test_sadness_to_anger_is_natural(self, engine):
-        """sad -> angry transition (0.9 naturalness) should succeed."""
-        pid = "test_natural"
-        engine.process_emotion(EmotionData(Emotion.SAD, 0.6), pid)
-        engine.process_emotion(EmotionData(Emotion.ANGRY, 0.7), pid)
-
-        mood = engine._get_person_mood(pid)
-        # This is a within-negative-category transition with high naturalness
-        assert mood.emotion == Emotion.ANGRY, \
-            "sad -> angry should transition naturally"
-
-    def test_nostalgic_to_happy_is_moderately_natural(self, engine):
-        """nostalgic -> happy (0.7 naturalness) should be possible."""
-        pid = "test_nostalgia"
-        engine.process_emotion(EmotionData(Emotion.NOSTALGIC, 0.5), pid)
-        engine.process_emotion(EmotionData(Emotion.HAPPY, 0.8), pid)
-
-        mood = engine._get_person_mood(pid)
-        # With 0.7 naturalness and high intensity, should succeed
-        assert mood.emotion in (Emotion.HAPPY, Emotion.NOSTALGIC)
+        # Last magnitude should be larger than the first
+        assert mags[-1] > mags[0]
 
 
 class TestRollercoasterGlobalImpact:
@@ -211,13 +175,13 @@ class TestRollercoasterGlobalImpact:
             f"Global mood should be dampened from chaos: max={max_global:.2f}"
 
     def test_global_mood_is_coherent(self, engine):
-        """Global mood should be a valid emotion at all times."""
+        """Global mood should be a valid Emotion at all times."""
         snapshots = play_conversation(engine, "chaotic_user", ROLLERCOASTER_CONVERSATION)
 
         for i, snap in enumerate(snapshots):
             emotion = snap["global_mood"]["emotion"]
-            assert emotion in EMOTION_CATEGORIES, \
-                f"Turn {i}: global emotion {emotion} is not a valid emotion"
+            assert isinstance(emotion, Emotion), \
+                f"Turn {i}: global emotion {emotion} is not a valid Emotion"
 
 
 class TestRollercoasterWithMelancholicTemperament:

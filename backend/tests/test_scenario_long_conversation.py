@@ -17,7 +17,7 @@ Tests:
 
 import pytest
 
-from emotion.types import Emotion, EmotionData, EmotionCategory, EMOTION_CATEGORIES
+from emotion.types import Emotion, EmotionData
 from tests.conftest import ConversationTurn, play_conversation, simulate_time_decay
 
 
@@ -259,7 +259,6 @@ class TestLongConversationStress:
 
         mood = engine._get_person_mood(pid)
         assert 0.0 <= mood.intensity <= 1.0
-        assert 0.0 <= mood.momentum <= 1.0
         assert len(mood.history) <= 100
 
     def test_hundred_turns_with_decay(self, engine):

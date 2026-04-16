@@ -131,14 +131,17 @@ class TestEmotionContext:
         ctx = engine.get_emotion_context("stranger")
         assert "pas de sentiment" in ctx
 
-    def test_high_momentum_adds_anchoring_text(self, engine):
-        """High momentum should add the 'bien ancree' text."""
-        pid = "momentum_user"
+    def test_active_state_adds_anchoring_text(self, engine):
+        """A strong active state (moving + intense) should add the 'bien ancree' text."""
+        from emotion import pad
+        pid = "anchored_user"
         for _ in range(6):
             engine.process_emotion(EmotionData(Emotion.HAPPY, 0.9), pid)
 
         mood = engine._get_person_mood(pid)
-        if mood.momentum > 0.5:
+        speed = pad.norm(mood.dynamic.velocity)
+        intensity = pad.norm(mood.dynamic.position)
+        if speed > 0.3 and intensity > 0.4:
             ctx = engine.get_emotion_context(pid)
             assert "ancree" in ctx or "changer" in ctx
 

@@ -11,6 +11,7 @@ import pytest
 from emotion.types import Emotion, EmotionData
 from emotion.state import Temperament, PersonMood, GlobalMood
 from emotion.engine import EmotionEngine
+from emotion import pad
 
 
 # ---------------------------------------------------------------------------
@@ -54,56 +55,37 @@ TEMPERAMENT_MELANCHOLIC = Temperament(
 # Engine factory
 # ---------------------------------------------------------------------------
 
+def _make_engine(temperament: Temperament) -> EmotionEngine:
+    e = EmotionEngine()
+    e.temperament = temperament
+    e.global_mood = GlobalMood()
+    e._recompute_params()
+    e._initialized = True
+    return e
+
+
 @pytest.fixture
 def engine() -> EmotionEngine:
     """Fresh EmotionEngine with default Mika temperament (no async init)."""
-    e = EmotionEngine()
-    e.temperament = TEMPERAMENT_DEFAULT
-    e.global_mood = GlobalMood(
-        emotion=TEMPERAMENT_DEFAULT.default_mood,
-        intensity=0.0,
-    )
-    e._initialized = True
-    return e
+    return _make_engine(TEMPERAMENT_DEFAULT)
 
 
 @pytest.fixture
 def stoic_engine() -> EmotionEngine:
     """EmotionEngine with stoic temperament — hard to move emotionally."""
-    e = EmotionEngine()
-    e.temperament = TEMPERAMENT_STOIC
-    e.global_mood = GlobalMood(
-        emotion=TEMPERAMENT_STOIC.default_mood,
-        intensity=0.0,
-    )
-    e._initialized = True
-    return e
+    return _make_engine(TEMPERAMENT_STOIC)
 
 
 @pytest.fixture
 def explosive_engine() -> EmotionEngine:
     """EmotionEngine with explosive temperament — reacts strongly to everything."""
-    e = EmotionEngine()
-    e.temperament = TEMPERAMENT_EXPLOSIVE
-    e.global_mood = GlobalMood(
-        emotion=TEMPERAMENT_EXPLOSIVE.default_mood,
-        intensity=0.0,
-    )
-    e._initialized = True
-    return e
+    return _make_engine(TEMPERAMENT_EXPLOSIVE)
 
 
 @pytest.fixture
 def melancholic_engine() -> EmotionEngine:
     """EmotionEngine with melancholic temperament — defaults to sadness."""
-    e = EmotionEngine()
-    e.temperament = TEMPERAMENT_MELANCHOLIC
-    e.global_mood = GlobalMood(
-        emotion=TEMPERAMENT_MELANCHOLIC.default_mood,
-        intensity=0.0,
-    )
-    e._initialized = True
-    return e
+    return _make_engine(TEMPERAMENT_MELANCHOLIC)
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +141,6 @@ def play_conversation(
             "person_mood": {
                 "emotion": person_mood.emotion,
                 "intensity": person_mood.intensity,
-                "momentum": person_mood.momentum,
             },
             "global_mood": {
                 "emotion": engine.global_mood.emotion,

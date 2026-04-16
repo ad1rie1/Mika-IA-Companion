@@ -6,7 +6,6 @@ then verifies that system invariants ALWAYS hold regardless of input.
 
 Invariants:
 - intensity is always in [0.0, 1.0]
-- momentum is always in [0.0, 1.0]
 - emotion is always a valid Enum member
 - global mood is always valid
 - message emotion is always valid
@@ -18,7 +17,7 @@ import random
 import time
 import pytest
 
-from emotion.types import Emotion, EmotionData, EmotionCategory, EMOTION_CATEGORIES
+from emotion.types import Emotion, EmotionData
 from emotion.state import PersonMood, GlobalMood, Temperament
 from emotion.engine import EmotionEngine
 from tests.conftest import simulate_time_decay
@@ -41,9 +40,8 @@ random.seed(42)
 def make_engine(temperament: Temperament) -> EmotionEngine:
     engine = EmotionEngine()
     engine.temperament = temperament
-    engine.global_mood = GlobalMood(
-        emotion=temperament.default_mood, intensity=0.0,
-    )
+    engine.global_mood = GlobalMood()
+    engine._recompute_params()
     engine._initialized = True
     return engine
 
@@ -57,8 +55,6 @@ def assert_invariants(engine: EmotionEngine, label: str = ""):
         f"{prefix}Global emotion is not a valid Emotion"
     assert 0.0 <= engine.global_mood.intensity <= 1.0, \
         f"{prefix}Global intensity out of bounds: {engine.global_mood.intensity}"
-    assert 0.0 <= engine.global_mood.momentum <= 1.0, \
-        f"{prefix}Global momentum out of bounds: {engine.global_mood.momentum}"
 
     # Person mood invariants
     for pid, mood in engine.person_moods.items():
@@ -66,8 +62,6 @@ def assert_invariants(engine: EmotionEngine, label: str = ""):
             f"{prefix}Person {pid} emotion is not valid"
         assert 0.0 <= mood.intensity <= 1.0, \
             f"{prefix}Person {pid} intensity: {mood.intensity}"
-        assert 0.0 <= mood.momentum <= 1.0, \
-            f"{prefix}Person {pid} momentum: {mood.momentum}"
         assert len(mood.history) <= 100, \
             f"{prefix}Person {pid} history too long: {len(mood.history)}"
 
@@ -158,14 +152,13 @@ class TestEdgeCaseSequences:
         assert_invariants(engine)
 
     def test_same_emotion_1000_times(self):
-        """Same emotion 1000 times should build momentum but stay bounded."""
+        """Same emotion 1000 times should accumulate but stay bounded."""
         engine = make_engine(TEMPERAMENTS[2])
         for _ in range(1000):
             engine.process_emotion(EmotionData(Emotion.ANGRY, 0.9), "user")
 
         mood = engine._get_person_mood("user")
         assert mood.intensity <= 1.0
-        assert mood.momentum <= 1.0
         assert_invariants(engine)
 
     def test_alternating_opposites(self):
@@ -248,9 +241,7 @@ class TestDecayInvariants:
 
             mood = engine._get_person_mood("user")
             assert mood.intensity >= 0.0
-            assert mood.momentum >= 0.0
             assert engine.global_mood.intensity >= 0.0
-            assert engine.global_mood.momentum >= 0.0
 
     def test_repeated_decay_converges(self):
         """Repeated decay should converge to default, not oscillate."""
