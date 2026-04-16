@@ -316,26 +316,6 @@ class MemoryManager:
             logger.debug("search_related_souvenirs failed", exc_info=True)
             return []
 
-    # ── Legacy ───────────────────────────────────────────────────
-
-    async def get_long_term_memories(self) -> list[str]:
-        """Legacy method for backward compatibility."""
-        if not self._initialized:
-            return []
-        from memory.models import Memory
-
-        return await sync_to_async(list)(
-            Memory.objects.values_list("summary", flat=True)[:5]
-        )
-
-    async def save_summary(self, summary: str, keywords: str = ""):
-        """Legacy method for backward compatibility."""
-        if not self._initialized:
-            return
-        from memory.models import Memory
-
-        await Memory.objects.acreate(summary=summary, keywords=keywords)
-
     def clear_short_term(self):
         self.short_term.clear()
 

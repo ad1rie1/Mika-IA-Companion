@@ -2,7 +2,7 @@ from django.contrib import admin
 
 from memory.models import (
     Connaissance, Conversation, EmotionalSummary, EmotionSnapshot,
-    Entity, Memory, Message, Souvenir, Theme,
+    Entity, Message, SelfNarrative, Souvenir, Theme,
 )
 
 
@@ -22,11 +22,6 @@ class ConversationAdmin(admin.ModelAdmin):
 class MessageAdmin(admin.ModelAdmin):
     list_display = ("pk", "conversation", "role", "source", "created_at")
     list_filter = ("role", "source")
-
-
-@admin.register(Memory)
-class MemoryAdmin(admin.ModelAdmin):
-    list_display = ("pk", "summary", "keywords", "created_at")
 
 
 @admin.register(Souvenir)
@@ -78,3 +73,14 @@ class EmotionalSummaryAdmin(admin.ModelAdmin):
     list_display = ("pk", "person_id", "period_type", "period_start", "dominant_emotion", "trend", "snapshot_count")
     list_filter = ("person_id", "period_type", "trend")
     readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(SelfNarrative)
+class SelfNarrativeAdmin(admin.ModelAdmin):
+    list_display = ("pk", "content_short", "dominant_mood", "confidence", "created_at")
+    list_filter = ("dominant_mood",)
+    readonly_fields = ("created_at",)
+
+    @admin.display(description="Narrative")
+    def content_short(self, obj):
+        return obj.content[:120] + "..." if len(obj.content) > 120 else obj.content

@@ -763,6 +763,7 @@ class ConscienceEngine:
                 history=base_context.history,
                 mcp_server=mcp_server,
                 tool_names=tool_names,
+                self_concept=base_context.self_concept,
             )
 
             output = await process_message(

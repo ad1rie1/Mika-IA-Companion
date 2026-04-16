@@ -294,6 +294,16 @@ class MemoryConsolidator:
         # 6. Aggregate emotion snapshots into summaries
         await self._aggregate_emotion_snapshots()
 
+        # 7. Regenerate self-concept narrative if due.
+        #    Gated by time + volume so it fires on the order of once/day,
+        #    not every consolidation tick. Failures are swallowed — the
+        #    narrative is best-effort, the memory pipeline is the priority.
+        try:
+            from memory.narrative import narrative_generator
+            await narrative_generator.run_if_due()
+        except Exception:
+            logger.exception("Self-narrative generation failed (non-fatal)")
+
     async def _apply_decay(self):
         """Reduce importance of old souvenirs and confidence of old connaissances.
         Remove those below threshold."""

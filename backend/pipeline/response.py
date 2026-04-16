@@ -15,7 +15,10 @@ async def call_ai_and_parse(
     Les fichiers uploadés sont accessibles via les outils files_* du FilesModule.
     """
     system = build_system_prompt(
-        context.emotion_context, context.memory_context, context.module_context
+        emotion_context=context.emotion_context,
+        memory_context=context.memory_context,
+        module_context=context.module_context,
+        self_concept=context.self_concept,
     )
     user_prompt = format_conversation(message, context.history)
 
