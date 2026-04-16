@@ -25,6 +25,10 @@ class TestWebSocketReceive:
         from communication.channels.web_frontend import WebSocketConsumer
         c = WebSocketConsumer.__new__(WebSocketConsumer)
         c.person_id = "test_pid"
+        c.display_name = None
+        # Mark as already greeted so `chat` tests don't fire the greeting
+        # perception (which would be an unrelated side-effect).
+        c._greeted = True
         c.channel_name = "test_ch"
         c.channel_layer = MagicMock()
         c.send = AsyncMock()

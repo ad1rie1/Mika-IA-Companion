@@ -215,12 +215,206 @@
         from { opacity: 0; transform: translateY(8px); }
         to { opacity: 1; transform: translateY(0); }
       }
+
+      /* Identity bar (top, centered) */
+      #identity-bar {
+        position: absolute;
+        top: 16px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        padding: 6px 12px;
+        border-radius: 14px;
+        background: rgba(0,0,0,0.35);
+        backdrop-filter: blur(8px);
+        font-size: 12px;
+        color: rgba(255,255,255,0.9);
+        pointer-events: auto;
+      }
+      #identity-name {
+        background: transparent;
+        border: none;
+        color: white;
+        font-size: 12px;
+        border-bottom: 1px dashed rgba(255,255,255,0.3);
+        width: 140px;
+        outline: none;
+      }
+      #identity-name::placeholder { color: rgba(255,255,255,0.45); }
+      #identity-reset {
+        background: rgba(239,68,68,0.25);
+        border: none;
+        color: #fca5a5;
+        border-radius: 8px;
+        padding: 3px 8px;
+        cursor: pointer;
+        font-size: 11px;
+      }
+      #identity-reset:hover { background: rgba(239,68,68,0.45); color: white; }
+
+      /* Inner life panel (right side, below emotion indicator) */
+      #inner-life-panel {
+        position: absolute;
+        top: 60px;
+        right: 16px;
+        width: 320px;
+        max-height: calc(100% - 80px);
+        display: flex;
+        flex-direction: column;
+        border-radius: 14px;
+        background: rgba(0,0,0,0.45);
+        backdrop-filter: blur(10px);
+        color: white;
+        font-size: 13px;
+        overflow: hidden;
+        pointer-events: auto;
+      }
+      .il-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 14px;
+        cursor: pointer;
+        font-weight: 600;
+        background: rgba(99,102,241,0.3);
+        font-size: 13px;
+        letter-spacing: 0.5px;
+        user-select: none;
+      }
+      .il-header:hover { background: rgba(99,102,241,0.45); }
+      .il-toggle { font-size: 12px; opacity: 0.8; }
+      .il-body {
+        overflow-y: auto;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(255,255,255,0.2) transparent;
+      }
+      .il-section {
+        padding: 10px 14px;
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+      }
+      .il-section:last-child { border-bottom: none; }
+      .il-section h4 {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: rgba(255,255,255,0.6);
+        margin-bottom: 6px;
+        font-weight: 500;
+      }
+      .il-blend-body { font-size: 14px; }
+      .il-emotion-primary { font-weight: 600; }
+      .il-emotion-secondary { font-weight: 500; opacity: 0.85; }
+      .il-ambivalence { opacity: 0.5; font-style: italic; }
+      .il-weight { opacity: 0.6; font-size: 12px; }
+
+      .il-drive {
+        display: grid;
+        grid-template-columns: 22px 1fr 90px 36px;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        margin-bottom: 4px;
+      }
+      .il-drive-icon { font-size: 14px; text-align: center; }
+      .il-drive-label { opacity: 0.85; }
+      .il-drive-bar {
+        position: relative;
+        height: 6px;
+        background: rgba(255,255,255,0.1);
+        border-radius: 3px;
+        overflow: hidden;
+      }
+      .il-drive-fill {
+        position: absolute;
+        inset: 0 auto 0 0;
+        border-radius: 3px;
+        transition: width 0.4s ease;
+      }
+      .il-drive-pct { text-align: right; opacity: 0.6; font-size: 11px; }
+
+      .il-narrative-body {
+        font-style: italic;
+        line-height: 1.5;
+        opacity: 0.9;
+        font-size: 12px;
+      }
+
+      .il-ruminations-body {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      .il-ruminations-body li {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        margin-bottom: 6px;
+        font-size: 12px;
+      }
+      .il-rumination-intensity {
+        flex-shrink: 0;
+        font-size: 10px;
+        width: 34px;
+        padding: 2px 4px;
+        border-radius: 6px;
+        background: rgba(245,158,11,0.25);
+        color: #fcd34d;
+        text-align: center;
+      }
+      .il-rumination-text { opacity: 0.85; line-height: 1.4; }
+
+      .il-profile-summary {
+        font-style: italic;
+        font-size: 12px;
+        opacity: 0.9;
+        margin-bottom: 6px;
+        line-height: 1.4;
+      }
+      .il-profile-tags {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        font-size: 11px;
+      }
+      .il-profile-tags li {
+        padding: 2px 0;
+        opacity: 0.8;
+      }
+      .il-profile-tags strong { color: #a5b4fc; font-weight: 600; }
+      .il-commitment-head {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: rgba(252,165,165,0.8);
+        margin: 8px 0 4px;
+      }
+      .il-commitments {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        font-size: 12px;
+      }
+      .il-commitments li {
+        padding: 3px 8px;
+        margin-bottom: 3px;
+        background: rgba(239,68,68,0.1);
+        border-left: 2px solid #fca5a5;
+        border-radius: 4px;
+      }
     </style>
   </head>
   <body>
     <div id="app">
       <div id="connection-status" class="disconnected">Disconnected</div>
       <div id="emotion-display">neutral</div>
+      <div id="identity-bar">
+        <span>Tu es</span>
+        <input id="identity-name" type="text" placeholder="ton prénom" autocomplete="off" />
+        <button id="identity-reset" title="Réinitialiser l'identité">reset</button>
+      </div>
+      <div id="inner-life-panel"></div>
       <div id="chat-container">
         <div id="chat-messages"></div>
         <div id="attachment-previews"></div>

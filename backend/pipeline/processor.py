@@ -154,9 +154,9 @@ async def process_message(
         ],
     )
 
-    # 7. Broadcast to WebSocket
+    # 7. Broadcast to WebSocket (inner state attached so UI panels refresh)
     if broadcast:
-        await broadcast_to_websocket(output, source)
+        await broadcast_to_websocket(output, source, person_id=person_id)
 
     return output
 

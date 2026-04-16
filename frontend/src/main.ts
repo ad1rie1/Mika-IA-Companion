@@ -11,41 +11,61 @@ import { AnimationMixer } from "./vtuber/AnimationMixer";
 import { LipSyncController } from "./audio/LipSyncController";
 import { TTSService } from "./audio/TTSService";
 import { WebSocketClient } from "./network/WebSocketClient";
+import { IdentityService } from "./network/IdentityService";
 import { ChatOverlay } from "./ui/ChatOverlay";
 import { EmotionDisplay } from "./ui/EmotionDisplay";
+import { InnerLifePanel } from "./ui/InnerLifePanel";
 
 // All valid backend emotion names for validation
 const VALID_EMOTIONS = new Set<string>([
   "neutral",
-  "happy",
-  "excited",
-  "love",
-  "proud",
-  "grateful",
-  "playful",
-  "amused",
-  "hopeful",
-  "relieved",
-  "sad",
-  "angry",
-  "scared",
-  "disgusted",
-  "frustrated",
-  "lonely",
-  "anxious",
-  "bored",
-  "jealous",
-  "surprised",
-  "thinking",
-  "confused",
-  "embarrassed",
-  "nostalgic",
-  "dreamy",
-  "determined",
-  "mischievous",
-  "curious",
-  "melancholic",
+  "happy", "excited", "love", "proud", "grateful",
+  "playful", "amused", "hopeful", "relieved",
+  "sad", "angry", "scared", "disgusted", "frustrated",
+  "lonely", "anxious", "bored", "jealous",
+  "surprised", "thinking", "confused", "embarrassed",
+  "nostalgic", "dreamy", "determined", "mischievous",
+  "curious", "melancholic",
 ]);
+
+function wireIdentityBar(identity: IdentityService, ws: WebSocketClient) {
+  const nameInput = document.getElementById("identity-name") as HTMLInputElement;
+  const resetBtn = document.getElementById("identity-reset") as HTMLButtonElement;
+  if (!nameInput || !resetBtn) return;
+
+  if (identity.displayName) {
+    nameInput.value = identity.displayName;
+  }
+
+  const commitName = () => {
+    const value = nameInput.value.trim();
+    if (value !== (identity.displayName ?? "")) {
+      identity.setDisplayName(value);
+      ws.setIdentity(identity.personId, identity.displayName);
+      // Re-send identify so the backend picks up the new display name.
+      ws.send({
+        type: "identify",
+        person_id: identity.personId,
+        display_name: identity.displayName,
+      });
+    }
+  };
+  nameInput.addEventListener("blur", commitName);
+  nameInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      nameInput.blur();
+    }
+  });
+
+  resetBtn.addEventListener("click", () => {
+    if (!confirm("Réinitialiser ton identité ? Mika ne te reconnaîtra plus.")) return;
+    identity.reset();
+    ws.setIdentity(identity.personId, null);
+    nameInput.value = "";
+    // A reload is the cleanest way to restart the greeting flow with the new ID.
+    window.location.reload();
+  });
+}
 
 async function init() {
   const container = document.getElementById("app")!;
@@ -65,6 +85,13 @@ async function init() {
   const animationMixer = new AnimationMixer();
   const lipSyncController = new LipSyncController();
   const emotionDisplay = new EmotionDisplay();
+  const innerLifePanel = new InnerLifePanel();
+
+  // Persistent identity — loaded from localStorage, survives reloads +
+  // WebSocket reconnects. This is what makes the theory-of-mind layer
+  // (PersonProfile / Commitment / per-person emotional memory) actually
+  // work across sessions on the web.
+  const identity = new IdentityService();
 
   // Try loading VRM model
   try {
@@ -95,9 +122,11 @@ async function init() {
     },
   });
 
-  // WebSocket connection
+  // WebSocket connection with identity handshake
   const ws = new WebSocketClient();
+  ws.setIdentity(identity.personId, identity.displayName);
   const chatOverlay = new ChatOverlay(ws);
+  wireIdentityBar(identity, ws);
 
   ws.on("connection", (data) => {
     if (data.status === "connected") {
@@ -120,12 +149,15 @@ async function init() {
         ? data.emotion_intensity
         : 0.7;
 
-    // Update facial expression with intensity
+    // Facial expression
     emotionController.setEmotion(emotion, intensity);
     emotionDisplay.setEmotion(emotion, intensity);
 
-    // Start TTS — lip-sync is triggered via TTS events
-    // Use text-driven lip-sync as fallback (Web Speech API doesn't expose audio stream)
+    // Ambivalence panel + rest of inner state
+    innerLifePanel.setEmotionBlend(data.emotion_blend || [], intensity);
+    innerLifePanel.applyInnerState(data.inner_state);
+
+    // Speak
     const estimatedDuration = Math.min(data.text.length * 60, 15000);
     lipSyncController.startTextDriven(data.text, estimatedDuration);
     tts.speak(data.text, emotion);
@@ -144,7 +176,6 @@ async function init() {
 }
 
 function createPlaceholder(sceneManager: SceneManager) {
-  // Body
   const body = new THREE.Mesh(
     new THREE.CapsuleGeometry(0.2, 0.6, 8, 16),
     new THREE.MeshStandardMaterial({ color: 0x6366f1 })
@@ -153,7 +184,6 @@ function createPlaceholder(sceneManager: SceneManager) {
   body.castShadow = true;
   sceneManager.scene.add(body);
 
-  // Head
   const head = new THREE.Mesh(
     new THREE.SphereGeometry(0.18, 16, 16),
     new THREE.MeshStandardMaterial({ color: 0xffd5b4 })
