@@ -6,6 +6,7 @@ class ModulesConfig(AppConfig):
     name = "modules"
 
     def ready(self):
+        from modules.camera import CameraModule
         from modules.email import EmailModule
         from modules.files import FilesModule
         from modules.manager import module_manager
@@ -19,5 +20,6 @@ class ModulesConfig(AppConfig):
         module_manager.register(EmailModule())
         module_manager.register(RSSModule())
         module_manager.register(FilesModule())
+        module_manager.register(CameraModule())
 
         _populate_urls()
