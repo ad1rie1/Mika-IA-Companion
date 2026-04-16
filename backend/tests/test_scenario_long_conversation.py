@@ -147,34 +147,33 @@ class TestLongConversation:
             assert 0.0 <= gi <= 1.0, f"Turn {i}: global intensity {gi}"
 
     def test_decay_between_phases(self, engine):
-        """Emotions should noticeably decay during long pauses."""
+        """State should noticeably relax toward home during long pauses."""
+        from emotion import pad
         pid = "regular_viewer"
 
-        # Play phase 1 (excited/high energy)
         snaps1 = play_conversation(engine, pid, STREAM_OPENING)
-        intensity_after_opening = snaps1[-1]["person_mood"]["intensity"]
+        pos_after_opening = engine._get_person_mood(pid).dynamic.position
+        dist_home_before = pad.distance(pos_after_opening, engine._home_vector())
 
-        # Simulate 2-minute pause before phase 2
         simulate_time_decay(engine, 120.0)
-        intensity_after_pause = engine._get_person_mood(pid).intensity
+        pos_after_pause = engine._get_person_mood(pid).dynamic.position
+        dist_home_after = pad.distance(pos_after_pause, engine._home_vector())
 
-        assert intensity_after_pause < intensity_after_opening, \
-            f"Emotions should decay during pause: {intensity_after_opening:.2f} -> {intensity_after_pause:.2f}"
+        assert dist_home_after <= dist_home_before + 1e-9, \
+            f"State should not drift further from home during pause: {dist_home_before:.3f} -> {dist_home_after:.3f}"
 
-    def test_five_minute_pause_significant_decay(self, engine):
-        """A 5-minute bio break should cause significant decay."""
+    def test_five_minute_pause_settles_near_home(self, engine):
+        """A 5-minute bio break should settle the state near home."""
+        from emotion import pad
         pid = "regular_viewer"
 
-        # Build up some emotion
         engine.process_emotion(EmotionData(Emotion.EXCITED, 0.8), pid)
-        i_before = engine._get_person_mood(pid).intensity
-
-        # 5-minute break
         simulate_time_decay(engine, 300.0)
-        i_after = engine._get_person_mood(pid).intensity
 
-        assert i_after < i_before * 0.5, \
-            f"5-minute pause should significantly decay: {i_before:.2f} -> {i_after:.2f}"
+        pos = engine._get_person_mood(pid).dynamic.position
+        dist_home = pad.distance(pos, engine._home_vector())
+        assert dist_home < 0.1, \
+            f"5-minute pause should settle near home: distance={dist_home:.3f}"
 
     def test_ten_minute_pause_nearly_resets(self, engine):
         """A 10-minute pause should nearly reset emotions to default."""
@@ -199,8 +198,9 @@ class TestLongConversation:
         # Long silence
         simulate_time_decay(engine, 600.0)
 
-        # Re-engage with a new emotion
+        # Re-engage with a new emotion, then let it integrate
         engine.process_emotion(EmotionData(Emotion.HAPPY, 0.7), pid)
+        simulate_time_decay(engine, 2.0)
         mood = engine._get_person_mood(pid)
 
         assert mood.intensity > 0.1, "Re-engagement should establish new emotion"

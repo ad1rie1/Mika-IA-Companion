@@ -227,18 +227,18 @@ class TestMultiPersonDecay:
             "Alice's emotions should decay while she's inactive"
 
     def test_expired_persons_cleaned_up(self, engine):
-        """Persons inactive for >1 hour with no emotion should be cleaned up."""
+        """Persons inactive for >1 hour with near-zero state should be cleaned up."""
         engine.process_emotion(EmotionData(Emotion.HAPPY, 0.1), "temp_user")
 
-        # Backdate their last_interaction to >1 hour ago
+        # Backdate their last_interaction to >1 hour ago, and zero the state
         import time
-        engine._get_person_mood("temp_user").last_interaction = time.time() - 4000
-        engine._get_person_mood("temp_user").intensity = 0.01
+        mood = engine._get_person_mood("temp_user")
+        mood.last_interaction = time.time() - 4000
+        mood.dynamic.position = pad.zero()
+        mood.dynamic.velocity = pad.zero()
 
-        # Run decay
         simulate_time_decay(engine, 60.0)
 
-        # Should be cleaned up
         assert "temp_user" not in engine.person_moods, \
             "Expired inactive persons should be cleaned up"
 

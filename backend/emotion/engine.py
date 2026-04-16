@@ -109,22 +109,28 @@ class EmotionEngine:
         logger.info("EmotionEngine shut down (state saved)")
 
     def _recompute_params(self) -> None:
-        """Derive OscillatorParams from the current temperament."""
+        """Derive OscillatorParams from the current temperament.
+
+        Scaling choices:
+        - mass = 1/volatility, clamped to [0.25, 4.0]
+        - stiffness scaled × 0.15 so impulses aren't immediately annulled by
+          the recovery spring — emotions persist for ~10s before fading.
+        - damping tuned to be underdamped (ζ≈0.5) for natural-feeling motion.
+        - impulse_gain = intensity_base so temperament directly scales reaction.
+        """
         t = self.temperament
-        # volatility → inverse mass. Clamp mass to [0.25, 4.0] so the
-        # extremes (0.0 / 1.0) stay physically sane.
         mass = max(0.25, min(4.0, 1.0 / max(0.05, t.volatility)))
         self._person_params = OscillatorParams(
             mass=mass,
-            stiffness=max(0.05, t.recovery_speed),
-            damping=0.7 + 0.3 * (1.0 - t.volatility),
+            stiffness=max(0.02, t.recovery_speed * 0.15),
+            damping=0.35 + 0.25 * (1.0 - t.volatility),
             impulse_gain=max(0.1, t.intensity_base),
         )
-        # Global mood is lazier: softer spring, heavier mass.
+        # Global mood is lazier: softer spring, heavier mass, slower to react.
         self._global_params = OscillatorParams(
             mass=mass * 1.5,
-            stiffness=max(0.03, t.recovery_speed * 0.5),
-            damping=0.85,
+            stiffness=max(0.015, t.recovery_speed * 0.08),
+            damping=0.5,
             impulse_gain=max(0.05, t.global_bleed),
         )
 
@@ -440,8 +446,9 @@ class EmotionEngine:
 
     def _home_vector(self) -> Vec3:
         """Home position for all oscillators: the default mood's anchor,
-        dimmed slightly so there's always some room to react."""
-        return pad.label_to_pad(self.temperament.default_mood, 0.3)
+        heavily dimmed so it provides a gentle baseline coloration rather
+        than overpowering impulses."""
+        return pad.label_to_pad(self.temperament.default_mood, 0.15)
 
     # ------------------------------------------------------------------
     # Core: process a new emotion from Claude
@@ -473,18 +480,16 @@ class EmotionEngine:
         person.last_update = now
         self.global_mood.last_update = now
 
-        label, intensity = pad.pad_to_label(person.dynamic.position)
         person.history.append(EmotionHistoryEntry(
             timestamp=now,
             emotion=emotion_data.emotion,
-            intensity=intensity,
+            intensity=emotion_data.intensity,
             source="impulse",
         ))
 
         logger.debug(
-            "Emotion [%s]: impulse toward %s(%.2f) → state %s(%.2f)",
+            "Emotion [%s]: impulse toward %s(%.2f)",
             person_id, emotion_data.emotion.value, emotion_data.intensity,
-            label.value, intensity,
         )
 
         return person
@@ -583,25 +588,33 @@ class EmotionEngine:
             except Exception:
                 logger.exception("Emotion decay loop error")
 
+    @staticmethod
+    def _advance(dynamic, home: Vec3, params: OscillatorParams, total_dt: float) -> None:
+        """Advance an oscillator by total_dt seconds in stable sub-steps."""
+        remaining = min(total_dt, _MAX_ADVANCE_SECONDS)
+        while remaining > 1e-6:
+            step_dt = min(_MAX_SUBSTEP_DT, remaining)
+            dynamic.step(home, params, step_dt)
+            remaining -= step_dt
+
     def _apply_decay(self):
-        """Step the physics forward. Uses wall-clock dt per mood (capped)."""
+        """Step the physics forward. Sub-divides into stable chunks."""
         now = time.time()
         home = self._home_vector()
 
         # Step person moods
         expired_persons = []
         for pid, person in self.person_moods.items():
-            dt = min(5.0, max(0.0, now - person.last_update))
+            dt = max(0.0, now - person.last_update)
             if dt <= 0.0:
                 continue
 
-            person.dynamic.step(home, self._person_params, dt)
+            self._advance(person.dynamic, home, self._person_params, dt)
             person.last_update = now
 
-            # Clean up persons inactive for a long time with near-zero state
             if (
                 now - person.last_interaction > self._IDLE_EVICTION_SECONDS
-                and pad.norm(person.dynamic.position) < 0.05
+                and pad.distance(person.dynamic.position, home) < 0.05
             ):
                 expired_persons.append(pid)
 
@@ -609,9 +622,9 @@ class EmotionEngine:
             del self.person_moods[pid]
 
         # Step global mood
-        dt = min(5.0, max(0.0, now - self.global_mood.last_update))
+        dt = max(0.0, now - self.global_mood.last_update)
         if dt > 0.0:
-            self.global_mood.dynamic.step(home, self._global_params, dt)
+            self._advance(self.global_mood.dynamic, home, self._global_params, dt)
             self.global_mood.last_update = now
 
     # ------------------------------------------------------------------

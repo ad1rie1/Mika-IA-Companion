@@ -192,6 +192,7 @@ class TestStateConsistencyOverTime:
         """State dicts for different persons should have independent states."""
         engine.process_emotion(EmotionData(Emotion.HAPPY, 0.9), "alice")
         engine.process_emotion(EmotionData(Emotion.SAD, 0.8), "bob")
+        simulate_time_decay(engine, 1.0)  # let impulses integrate into positions
 
         state_alice = engine.get_state_dict("alice")
         state_bob = engine.get_state_dict("bob")

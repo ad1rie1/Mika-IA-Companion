@@ -148,11 +148,12 @@ class TestRollercoasterScenario:
             f"Conversation should end non-negatively, got {final['emotion'].value}"
 
     def test_reinforcement_accumulates_state(self, engine):
-        """Repeating the same impulse should grow position magnitude."""
+        """Repeating the same impulse (with time between) should grow position magnitude."""
         pid = "stable_user"
         mags = []
         for _ in range(5):
             engine.process_emotion(EmotionData(Emotion.HAPPY, 0.8), pid)
+            simulate_time_decay(engine, 1.0)
             mags.append(pad.norm(engine._get_person_mood(pid).dynamic.position))
 
         # Last magnitude should be larger than the first

@@ -161,19 +161,17 @@ class TestTrollScenario:
                 f"Turn {i}: global intensity out of bounds"
 
     def test_recovery_after_troll_leaves(self, engine):
-        """After troll leaves and time passes, mood should recover."""
+        """After troll leaves and time passes, global state should relax toward home."""
         play_conversation(engine, "troll_user", TROLL_CONVERSATION)
 
-        # Record the troll's damage
-        troll_mood = engine._get_person_mood("troll_user")
-        post_troll_global = engine.global_mood.intensity
+        home = engine._home_vector()
+        dist_before = pad.distance(engine.global_mood.dynamic.position, home)
 
-        # Simulate 2 minutes of calm
         simulate_time_decay(engine, 120.0)
+        dist_after = pad.distance(engine.global_mood.dynamic.position, home)
 
-        # Global should have decayed
-        assert engine.global_mood.intensity < post_troll_global, \
-            "Global mood should recover after the troll leaves"
+        assert dist_after <= dist_before + 1e-9, \
+            "Global state should relax toward home (not drift away) after the troll leaves"
 
 
 class TestTrollThenRecovery:

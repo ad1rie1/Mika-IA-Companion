@@ -21,26 +21,31 @@ from tests.conftest import simulate_time_decay
 class TestImpulse:
 
     def test_first_impulse_moves_state_toward_anchor(self, engine):
-        """A single impulse should nudge position toward the target anchor."""
+        """A single impulse should push velocity toward the target anchor."""
         pid = "u1"
         engine.process_emotion(EmotionData(Emotion.EXCITED, 0.8), pid)
         mood = engine._get_person_mood(pid)
 
         anchor = pad.EMOTION_ANCHORS[Emotion.EXCITED]
-        # After one impulse, position should have moved from origin toward anchor,
-        # but not reached it (physics, not teleport).
+        # Velocity is set immediately; position needs integration to follow
+        assert pad.norm(mood.dynamic.velocity) > 0.05
+        assert pad.dot(mood.dynamic.velocity, anchor) > 0, \
+            "Velocity should point toward the target anchor"
+
+        # After time passes, position follows
+        simulate_time_decay(engine, 1.0)
         assert pad.norm(mood.dynamic.position) > 0.05
-        assert pad.dot(mood.dynamic.position, anchor) > 0, \
-            "Position should point in the same direction as the target anchor"
 
     def test_repeated_same_impulse_accumulates(self, engine):
-        """Repeated identical impulses should build up position magnitude."""
+        """Repeated identical impulses + integration should build position magnitude."""
         pid = "u2"
         engine.process_emotion(EmotionData(Emotion.HAPPY, 0.7), pid)
+        simulate_time_decay(engine, 1.0)
         mag1 = pad.norm(engine._get_person_mood(pid).dynamic.position)
 
         for _ in range(4):
             engine.process_emotion(EmotionData(Emotion.HAPPY, 0.7), pid)
+            simulate_time_decay(engine, 0.5)
         mag5 = pad.norm(engine._get_person_mood(pid).dynamic.position)
 
         assert mag5 > mag1, \
