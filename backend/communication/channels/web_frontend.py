@@ -1,4 +1,9 @@
-"""WebSocket channel — direct browser/frontend connection."""
+"""WebSocket channel — direct browser/frontend connection.
+
+Builds `Perception`s and routes them through `pipeline.router.perceive()`.
+No longer calls `process_message` directly.
+"""
+from __future__ import annotations
 
 import json
 import logging
@@ -6,10 +11,9 @@ import uuid
 
 from channels.generic.websocket import AsyncWebsocketConsumer
 
-from emotion.engine import emotion_engine
-from emotion.types import Emotion
-from config.personality import personality
 from pipeline.media import validate_attachments
+from pipeline.perception import Intent, Perception
+from pipeline.router import perceive
 
 logger = logging.getLogger(__name__)
 
@@ -24,21 +28,22 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
         await self.channel_layer.group_add(BROADCAST_GROUP, self.channel_name)
         await self.accept()
 
-        # Generate a unique person_id for this connection
+        # Per-connection anonymous ID. Clients that want persistent identity
+        # should pass their own `person_id` in every chat message.
         self.person_id = str(uuid.uuid4())[:8]
 
-        # Send greeting with current emotional state
-        msg_emotion = emotion_engine.compute_message_emotion(self.person_id)
-        await self.send(text_data=json.dumps(
-            {
-                "type": "speech",
-                "text": personality.greeting,
-                "emotion": Emotion.HAPPY.value,
-                "emotion_intensity": 0.7,
-                "emotion_state": emotion_engine.get_state_dict(self.person_id),
-            },
-            ensure_ascii=False,
-        ))
+        # Greeting routed through the pipeline as an INTERNAL_TRIGGER so
+        # the conscience, memory, and emotion state see it as a real turn.
+        from config.personality import personality
+
+        greeting_perception = Perception.from_internal_trigger(
+            prompt=f"Un nouveau visiteur vient de se connecter. "
+                   f"Accueille-le avec ta phrase habituelle: {personality.greeting}",
+            source="web_connect",
+            person_id=self.person_id,
+            metadata={"channel": self.channel_name},
+        )
+        await perceive(greeting_perception)
 
     async def disconnect(self, close_code):
         await self.channel_layer.group_discard(BROADCAST_GROUP, self.channel_name)
@@ -49,30 +54,48 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
         except (json.JSONDecodeError, TypeError):
             return
 
-        if data.get("type") == "chat":
-            message = data.get("message", "")
-            raw_attachments = data.get("attachments", [])
+        if data.get("type") != "chat":
+            return
 
-            # Allow message-only (attachment without text) or text-only
-            if not isinstance(message, str):
-                message = ""
-            has_attachments = isinstance(raw_attachments, list) and len(raw_attachments) > 0
-            if not message.strip() and not has_attachments:
-                return
+        message = data.get("message", "")
+        raw_attachments = data.get("attachments", [])
 
-            # Allow client to provide a person_id, otherwise use connection-generated one
-            person_id = data.get("person_id", getattr(self, "person_id", "anonymous"))
+        if not isinstance(message, str):
+            message = ""
+        has_attachments = (
+            isinstance(raw_attachments, list) and len(raw_attachments) > 0
+        )
+        if not message.strip() and not has_attachments:
+            return
 
-            attachments = validate_attachments(raw_attachments) if has_attachments else None
+        # Client-provided person_id (persistent identity) beats the
+        # per-connection UUID. Enables the theory-of-mind feature to
+        # recognize returning users across sessions.
+        person_id = data.get("person_id", getattr(self, "person_id", "anonymous"))
 
-            from communication.handler import handle_message
+        attachments = (
+            validate_attachments(raw_attachments) if has_attachments else None
+        )
 
-            await handle_message(
-                message.strip()[:MAX_MESSAGE_LENGTH],
+        clean_message = message.strip()[:MAX_MESSAGE_LENGTH]
+
+        if attachments:
+            perception = Perception.from_mixed(
+                text=clean_message,
+                attachments=attachments,
                 source="frontend",
                 person_id=person_id,
-                attachments=attachments,
+                intent=Intent.REQUEST_RESPONSE,
             )
+        else:
+            perception = Perception.from_text(
+                clean_message,
+                source="frontend",
+                person_id=person_id,
+                intent=Intent.REQUEST_RESPONSE,
+            )
+
+        await perceive(perception)
 
     # --- Group message handler ---
 

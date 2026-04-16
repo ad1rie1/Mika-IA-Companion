@@ -59,6 +59,11 @@ class EmotionEngine:
         self._initialized = False
         self._last_snapshot_time: dict[str, float] = {}
         self._snapshot_interval: int = 30
+        # Protects the snapshot-interval check. Without it, two concurrent
+        # process_message() calls for the same person_id could both read
+        # the old timestamp, both see "enough time has passed", and both
+        # insert a snapshot. Cheap lock, always contended briefly only.
+        self._snapshot_lock: asyncio.Lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -400,12 +405,18 @@ class EmotionEngine:
     # ------------------------------------------------------------------
 
     async def _maybe_save_snapshot(self, person_id: str) -> None:
-        """Save a snapshot if enough time has passed since the last one."""
-        now = time.time()
-        last = self._last_snapshot_time.get(person_id, 0)
-        if now - last < self._snapshot_interval:
-            return
-        self._last_snapshot_time[person_id] = now
+        """Save a snapshot if enough time has passed since the last one.
+
+        Protected against concurrent calls on the same person_id so we
+        never double-insert snapshots when a user sends several messages
+        in quick succession.
+        """
+        async with self._snapshot_lock:
+            now = time.time()
+            last = self._last_snapshot_time.get(person_id, 0)
+            if now - last < self._snapshot_interval:
+                return
+            self._last_snapshot_time[person_id] = now
         await self._save_person_snapshot(person_id)
 
     async def _save_person_snapshot(self, person_id: str) -> None:

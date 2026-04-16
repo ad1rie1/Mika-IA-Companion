@@ -62,9 +62,20 @@ class MemoryManager:
         self._initialized = True
 
     async def add_message(
-        self, role: str, content: str, source: str = "frontend", person_id: str = ""
+        self,
+        role: str,
+        content: str,
+        source: str = "frontend",
+        person_id: str = "",
+        attachments_meta: list[dict] | None = None,
     ):
-        """Add to short-term memory and persist via ORM."""
+        """Add to short-term memory and persist via ORM.
+
+        ``attachments_meta`` is stored alongside the Message so retrieval
+        and the consolidator can see what non-text parts came with the
+        conversation turn (images, audio, files — descriptors only, not
+        bytes; raw bytes live in the media store via pipeline.media).
+        """
         self.short_term.append({"role": role, "content": content})
         if len(self.short_term) > self.max_short_term:
             self.short_term = self.short_term[-self.max_short_term :]
@@ -84,6 +95,7 @@ class MemoryManager:
                     content=content,
                     source=source,
                     person_id=person_id,
+                    attachments_meta=attachments_meta or [],
                 )
             except Exception:
                 logger.exception("Failed to persist message to DB")

@@ -7,6 +7,10 @@ from typing import TYPE_CHECKING
 
 from channels.layers import get_channel_layer
 
+from memory.manager import memory_manager
+from modules.manager import module_manager
+from modules.types import ModuleEvent
+
 if TYPE_CHECKING:
     from pipeline.processor import SpeechOutput
 
@@ -37,9 +41,6 @@ async def broadcast_to_websocket(output: SpeechOutput, source: str) -> None:
 
 async def emit_communication_event(source: str, person_id: str) -> None:
     """Emit a module event for the conversation turn."""
-    from modules.manager import module_manager
-    from modules.types import ModuleEvent
-
     await module_manager.emit_event(
         ModuleEvent(
             event_type="chat.message",
@@ -50,14 +51,24 @@ async def emit_communication_event(source: str, person_id: str) -> None:
 
 
 async def persist_to_memory(
-    message: str, response: str, source: str, person_id: str
+    *,
+    message: str,
+    response: str,
+    source: str,
+    person_id: str,
+    attachments_meta: list[dict] | None = None,
 ) -> None:
-    """Save user message and assistant response to memory."""
-    from memory.manager import memory_manager
+    """Save the user message (with any attachment descriptors) and the
+    assistant response to memory.
 
+    ``attachments_meta`` is attached to the user Message only, so later
+    retrieval can see what was sent without keeping binary bytes in the
+    conversation store.
+    """
     await memory_manager.add_message(
-        "user", message, source=source, person_id=person_id
+        "user", message, source=source, person_id=person_id,
+        attachments_meta=attachments_meta or [],
     )
     await memory_manager.add_message(
-        "assistant", response, person_id=person_id
+        "assistant", response, person_id=person_id,
     )

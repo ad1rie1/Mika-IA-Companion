@@ -64,14 +64,17 @@ class TelegramModule(BaseModule):
 
         person_id = f"tg_{update.message.from_user.id}"
 
-        from communication.handler import handle_message
+        from pipeline.perception import Perception
+        from pipeline.router import perceive
 
-        response_text, _ = await handle_message(
+        perception = Perception.from_text(
             update.message.text,
             source="telegram",
             person_id=person_id,
         )
-        await update.message.reply_text(response_text)
+        output = await perceive(perception)
+        if output and output.text:
+            await update.message.reply_text(output.text)
 
     # ── Capabilities ──────────────────────────────────────────────
 

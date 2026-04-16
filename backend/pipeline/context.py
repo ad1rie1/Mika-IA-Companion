@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from drives.engine import drive_engine
 from emotion.engine import emotion_engine
 from memory.manager import memory_manager
+from modules.manager import module_manager
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +45,6 @@ async def gather_context(
         person_id: Who is talking (for emotion + memory boosting).
         include_tools: Whether to include MCP tools from modules.
     """
-    from modules.manager import module_manager
-
     # Memory context (graceful degradation)
     try:
         memory_context = await memory_manager.get_memory_context(
@@ -72,15 +71,14 @@ async def gather_context(
 
     # Intrinsic drives — still Mika-centric (curiosity / social need / rest),
     # so they attach to the global mood layer.
+    # NOTE: drive satisfaction is triggered by conscience.observe() when the
+    # chat.message event bubbles up, so we deliberately don't call
+    # drive_engine.on_conversation() here to avoid double-counting.
     drive_context = drive_engine.get_context()
     if drive_context:
         emotion_context = (
             f"{emotion_context}\n{drive_context}" if emotion_context else drive_context
         )
-
-    # Also satisfy the social drive when a real person is about to be answered.
-    if person_id not in ("conscience_mika", "__global__", "anonymous"):
-        drive_engine.on_conversation(from_person=True)
 
     # Module context for system prompt
     module_context = module_manager.collect_context()

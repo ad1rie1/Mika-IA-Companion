@@ -27,6 +27,7 @@ from conscience.memory_bridge import MemoryBridge
 from conscience.scoring import compute_decision_score, urgency_from_context
 from conscience.types import DecisionContext, InterpretedSignal
 from drives.engine import drive_engine
+from emotion.engine import emotion_engine
 from modules.types import ModuleEvent, ModuleNotification
 
 logger = logging.getLogger(__name__)
@@ -174,7 +175,6 @@ class ConscienceEngine:
         Uses person_id "conscience_mika" — the VTuber feeling something
         from her own observation, not from a conversation partner.
         """
-        from emotion.engine import emotion_engine
         from emotion.types import Emotion, EmotionData
 
         try:
@@ -682,7 +682,7 @@ class ConscienceEngine:
                 lambda: Observation.objects.filter(
                     status="pending",
                     created_at__lt=cutoff,
-                ).update(status="skipped", acted_upon=True)
+                ).update(status="skipped")
             )()
             if count:
                 logger.debug("Marked %d stale observations as skipped", count)
@@ -722,11 +722,13 @@ class ConscienceEngine:
     async def _act(self, ctx: DecisionContext, reason: str) -> None:
         """Generate a spontaneous response using accumulated context.
 
-        Only loads tools from modules relevant to the current observations,
-        not all 70+ tools. Uses the pipeline processor for the AI call.
-        """
+        Builds an INTERNAL_TRIGGER Perception and hands it to the pipeline
+        processor directly (context is pre-assembled with relevant-module
+        tools, so we bypass the router's dispatch logic here — the intent
+        is already "Mika acts, no event to loop back")."""
         from modules.manager import module_manager
         from pipeline.context import ConversationContext, gather_context
+        from pipeline.perception import Perception
         from pipeline.processor import process_message
 
         self._last_action_time = time.time()
@@ -767,10 +769,15 @@ class ConscienceEngine:
                 person_context=base_context.person_context,
             )
 
-            output = await process_message(
-                message=prompt,
+            perception = Perception.from_internal_trigger(
+                prompt,
                 source="conscience",
                 person_id=person_id,
+                metadata={"reason": reason, "relevant_modules": relevant_modules},
+            )
+
+            output = await process_message(
+                perception,
                 context=context,
                 emit_event=False,
             )
@@ -778,10 +785,9 @@ class ConscienceEngine:
             # Mark observations as acted
             for obs in ctx.pending_observations:
                 obs.status = "acted"
-                obs.acted_upon = True  # backward compat
                 obs.action_response = output.text[:200]
                 await sync_to_async(obs.save)(
-                    update_fields=["status", "acted_upon", "action_response"]
+                    update_fields=["status", "action_response"]
                 )
 
             # Mark scheduled actions as executed

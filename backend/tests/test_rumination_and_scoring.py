@@ -64,24 +64,36 @@ def make_context(
 # Drive scoring factor
 # ---------------------------------------------------------------------------
 
+
+
+# All greeting periods pre-marked to isolate scoring tests from wall-clock.
+_ALL_GREETED = frozenset({"morning", "evening", "night"})
+
+
+def _score(ctx, threshold: float = 0.5):
+    from datetime import date
+    greeted = set(_ALL_GREETED)
+    return compute_decision_score(ctx, threshold, greeted, date.today())
+
+
 class TestDriveScoring:
 
     def test_zero_drives_no_effect(self):
         ctx = make_context(drive_bonus=0.0)
-        score, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, reason, _, _ = _score(ctx)
         assert "drives" not in reason
 
     def test_small_drives_ignored_below_noise(self):
         """Tiny drive bonus (< 0.02) doesn't appear in the reason."""
         ctx = make_context(drive_bonus=0.01)
-        score, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, reason, _, _ = _score(ctx)
         assert "drives" not in reason
 
     def test_strong_positive_drives_increase_score(self):
         base = make_context()
         with_drives = make_context(drive_bonus=0.3, drive_summary="social:0.9")
-        s1, _, _, _ = compute_decision_score(base, 0.5, set(), None)
-        s2, r2, _, _ = compute_decision_score(with_drives, 0.5, set(), None)
+        s1, _, _, _ = _score(base, 0.5)
+        s2, r2, _, _ = _score(with_drives, 0.5)
         assert s2 > s1
         assert "drives" in r2
         assert "social" in r2
@@ -93,25 +105,25 @@ class TestDriveScoring:
             drive_summary="rest:0.9",
         )
         ctx_alert = make_context(max_pertinence=0.8)
-        s_tired, _, _, _ = compute_decision_score(ctx, 0.5, set(), None)
-        s_fresh, _, _, _ = compute_decision_score(ctx_alert, 0.5, set(), None)
+        s_tired, _, _, _ = _score(ctx)
+        s_fresh, _, _, _ = _score(ctx_alert, 0.5)
         assert s_tired < s_fresh
 
     def test_drive_contribution_clamped_positive(self):
         """Even absurd drive_bonus is capped at +0.5."""
         ctx = make_context(drive_bonus=10.0)
-        score, _, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, _, _, _ = _score(ctx)
         assert score <= 0.5 + 0.01  # small float margin
 
     def test_drive_contribution_clamped_negative(self):
         """Even absurd negative drive_bonus is floored at -0.4."""
         ctx = make_context(drive_bonus=-10.0)
-        score, _, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, _, _, _ = _score(ctx)
         assert score >= -0.4 - 0.01
 
     def test_cooldown_ignores_drives(self):
         ctx = make_context(drive_bonus=0.5, in_cooldown=True)
-        score, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, reason, _, _ = _score(ctx)
         assert score == 0.0
         assert reason == "cooldown"
 
@@ -124,38 +136,38 @@ class TestRuminationScoring:
 
     def test_no_rumination_no_contribution(self):
         ctx = make_context(rumination_pressure=0.0)
-        _, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        _, reason, _, _ = _score(ctx)
         assert "rumination" not in reason
 
     def test_low_pressure_below_threshold_ignored(self):
         ctx = make_context(rumination_pressure=0.1)
-        _, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        _, reason, _, _ = _score(ctx)
         assert "rumination" not in reason
 
     def test_moderate_rumination_adds_to_score(self):
         base = make_context()
         with_rum = make_context(rumination_pressure=0.5, rumination_count=2)
-        s1, _, _, _ = compute_decision_score(base, 0.5, set(), None)
-        s2, r2, _, _ = compute_decision_score(with_rum, 0.5, set(), None)
+        s1, _, _, _ = _score(base, 0.5)
+        s2, r2, _, _ = _score(with_rum, 0.5)
         assert s2 > s1
         assert "rumination" in r2
 
     def test_rumination_score_capped_at_03(self):
         """Even very high rumination pressure is capped at +0.3."""
         ctx = make_context(rumination_pressure=1.0, rumination_count=10)
-        score, _, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, _, _, _ = _score(ctx)
         # 0.3 cap is the rumination contribution
         assert score <= 0.3 + 0.01
 
     def test_rumination_reason_includes_count(self):
         ctx = make_context(rumination_pressure=0.5, rumination_count=3)
-        _, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        _, reason, _, _ = _score(ctx)
         assert "3" in reason
 
     def test_rumination_alone_cannot_force_action(self):
         """The threshold is 0.5; rumination max contribution is 0.3."""
         ctx = make_context(rumination_pressure=1.0, rumination_count=10)
-        score, _, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, _, _, _ = _score(ctx)
         assert score < 0.5
 
 
@@ -174,7 +186,7 @@ class TestCombined:
             rumination_count=2,
             pending_observations=[],  # no immediate signals
         )
-        score, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, reason, _, _ = _score(ctx)
         assert score >= 0.5
         assert "drives" in reason
         assert "rumination" in reason
@@ -192,8 +204,8 @@ class TestCombined:
             rumination_pressure=0.5,
             rumination_count=2,
         )
-        s_tired, _, _, _ = compute_decision_score(tired, 0.5, set(), None)
-        s_fresh, _, _, _ = compute_decision_score(fresh, 0.5, set(), None)
+        s_tired, _, _, _ = _score(tired, 0.5)
+        s_fresh, _, _, _ = _score(fresh, 0.5)
         assert s_tired < s_fresh
 
 

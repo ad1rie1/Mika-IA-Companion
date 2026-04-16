@@ -1,9 +1,4 @@
-"""Communication hub — central gateway for all user-facing channels.
-
-All channels (WebSocket, Telegram, Discord, mobile…) converge to
-``handle_message()`` which delegates to the pipeline processor.
+"""Communication hub — channels (WebSocket, Telegram, ...) that adapt
+external inputs into ``Perception`` objects routed through
+``pipeline.router.perceive()``.
 """
-
-from communication.handler import handle_message
-
-__all__ = ["handle_message"]

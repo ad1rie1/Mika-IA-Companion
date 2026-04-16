@@ -11,10 +11,10 @@ class ObservationAdmin(admin.ModelAdmin):
         "category",
         "pertinence",
         "emotional_reaction",
-        "acted_upon",
+        "status",
         "created_at",
     ]
-    list_filter = ["category", "acted_upon", "source"]
+    list_filter = ["category", "status", "source"]
     search_fields = ["summary", "event_type"]
     readonly_fields = ["raw_data", "created_at"]
 

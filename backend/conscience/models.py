@@ -43,14 +43,12 @@ class Observation(models.Model):
         related_name="observations",
     )
 
-    # Decision tracking — state machine replaces simple acted_upon boolean
     class Status(models.TextChoices):
         PENDING = "pending"    # Awaiting decision
         ACTED = "acted"        # Decision made, action taken
         SKIPPED = "skipped"    # Evaluated but below threshold
         FAILED = "failed"      # Action attempted but failed
 
-    acted_upon = models.BooleanField(default=False)  # kept for backward compat
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
@@ -61,9 +59,8 @@ class Observation(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ["-created_at"]
+        ordering = ["-created_at", "-pk"]
         indexes = [
-            models.Index(fields=["-created_at", "acted_upon"]),
             models.Index(fields=["status", "-created_at"]),
             models.Index(fields=["category", "-pertinence"]),
         ]

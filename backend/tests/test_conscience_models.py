@@ -13,7 +13,6 @@ class TestObservation:
         obs = Observation.objects.create(source="email", event_type="email.received", summary="Un email de Thomas")
         assert obs.pk is not None
         assert obs.status == Observation.Status.PENDING
-        assert obs.acted_upon is False
         assert obs.raw_data == {}
 
     def test_all_status_choices_valid(self):

@@ -35,7 +35,6 @@ class LifespanWrapper:
             await self.app(scope, receive, send)
 
     async def _startup(self):
-        from communication.handler import handle_message
         from emotion.engine import emotion_engine
         from conscience.engine import conscience_engine
 
@@ -49,7 +48,7 @@ class LifespanWrapper:
         module_manager.set_conscience(conscience_engine.observe)
         logger.info("Conscience initialized and wired to event bus")
 
-        await module_manager.start_all(handle_message)
+        await module_manager.start_all()
         logger.info("All modules started")
 
     async def _shutdown(self):

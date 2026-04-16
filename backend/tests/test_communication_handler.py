@@ -1,60 +1,22 @@
-"""Tests for communication layer — handler, WebSocket consumer, HTTP views."""
+"""Tests for communication layer — WebSocket consumer + HTTP views.
+
+The new entry point is ``pipeline.router.perceive(Perception)``. The
+WebSocket consumer builds a Perception from incoming chat messages and
+routes it; it no longer calls a legacy ``handle_message`` tuple-returning
+wrapper.
+"""
+from __future__ import annotations
 
 import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from emotion.types import Emotion, EmotionData
+import pytest
+
+from pipeline.perception import Intent, Modality
 
 
 # ===================================================================
-# handle_message
-# ===================================================================
-
-class TestHandleMessage:
-
-    @pytest.mark.asyncio
-    async def test_delegates_to_process_message(self):
-        mock_output = MagicMock()
-        mock_output.text = "Salut !"
-        mock_output.emotion_data = EmotionData(emotion=Emotion.HAPPY, intensity=0.7)
-
-        with patch("communication.handler.process_message", new_callable=AsyncMock, return_value=mock_output):
-            from communication.handler import handle_message
-            text, emotion_data = await handle_message("Bonjour", source="frontend", person_id="u1")
-
-        assert text == "Salut !"
-        assert emotion_data.emotion == Emotion.HAPPY
-
-    @pytest.mark.asyncio
-    async def test_passes_source_and_person_id(self):
-        mock_output = MagicMock()
-        mock_output.text = "ok"
-        mock_output.emotion_data = MagicMock()
-
-        with patch("communication.handler.process_message", new_callable=AsyncMock, return_value=mock_output) as mock_proc:
-            from communication.handler import handle_message
-            await handle_message("test", source="telegram", person_id="tg_123")
-
-        mock_proc.assert_called_once_with(message="test", source="telegram", person_id="tg_123")
-
-    @pytest.mark.asyncio
-    async def test_defaults(self):
-        mock_output = MagicMock()
-        mock_output.text = "ok"
-        mock_output.emotion_data = MagicMock()
-
-        with patch("communication.handler.process_message", new_callable=AsyncMock, return_value=mock_output) as mock_proc:
-            from communication.handler import handle_message
-            await handle_message("test")
-
-        kw = mock_proc.call_args[1]
-        assert kw["source"] == "frontend"
-        assert kw["person_id"] == "anonymous"
-
-
-# ===================================================================
-# WebSocketConsumer.receive
+# WebSocketConsumer.receive  →  builds Perception  →  calls perceive()
 # ===================================================================
 
 class TestWebSocketReceive:
@@ -69,52 +31,89 @@ class TestWebSocketReceive:
         return c
 
     @pytest.mark.asyncio
-    async def test_valid_chat_calls_handle_message(self):
+    async def test_valid_chat_calls_perceive(self):
         c = self._make_consumer()
         data = json.dumps({"type": "chat", "message": "Hello"})
-        with patch("communication.channels.web_frontend.handle_message", new_callable=AsyncMock) as mock_h:
+        with patch("communication.channels.web_frontend.perceive",
+                   new_callable=AsyncMock) as mock_perceive:
             await c.receive(text_data=data)
-        mock_h.assert_called_once_with("Hello", source="frontend", person_id="test_pid")
+        mock_perceive.assert_called_once()
+        perception = mock_perceive.call_args[0][0]
+        assert perception.text == "Hello"
+        assert perception.modality is Modality.TEXT
+        assert perception.intent is Intent.REQUEST_RESPONSE
+        assert perception.source == "frontend"
+        assert perception.person_id == "test_pid"
 
     @pytest.mark.asyncio
     async def test_invalid_json_ignored(self):
         c = self._make_consumer()
-        with patch("communication.channels.web_frontend.handle_message", new_callable=AsyncMock) as mock_h:
+        with patch("communication.channels.web_frontend.perceive",
+                   new_callable=AsyncMock) as mock_perceive:
             await c.receive(text_data="not{json")
-        mock_h.assert_not_called()
+        mock_perceive.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_non_chat_type_ignored(self):
         c = self._make_consumer()
         data = json.dumps({"type": "ping"})
-        with patch("communication.channels.web_frontend.handle_message", new_callable=AsyncMock) as mock_h:
+        with patch("communication.channels.web_frontend.perceive",
+                   new_callable=AsyncMock) as mock_perceive:
             await c.receive(text_data=data)
-        mock_h.assert_not_called()
+        mock_perceive.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_empty_message_ignored(self):
+    async def test_empty_message_no_attachments_ignored(self):
         c = self._make_consumer()
         data = json.dumps({"type": "chat", "message": "   "})
-        with patch("communication.channels.web_frontend.handle_message", new_callable=AsyncMock) as mock_h:
+        with patch("communication.channels.web_frontend.perceive",
+                   new_callable=AsyncMock) as mock_perceive:
             await c.receive(text_data=data)
-        mock_h.assert_not_called()
+        mock_perceive.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_message_truncated_to_max_length(self):
         from communication.channels.web_frontend import MAX_MESSAGE_LENGTH
         c = self._make_consumer()
         data = json.dumps({"type": "chat", "message": "a" * (MAX_MESSAGE_LENGTH + 500)})
-        with patch("communication.channels.web_frontend.handle_message", new_callable=AsyncMock) as mock_h:
+        with patch("communication.channels.web_frontend.perceive",
+                   new_callable=AsyncMock) as mock_perceive:
             await c.receive(text_data=data)
-        assert len(mock_h.call_args[0][0]) == MAX_MESSAGE_LENGTH
+        perception = mock_perceive.call_args[0][0]
+        assert len(perception.text) == MAX_MESSAGE_LENGTH
 
     @pytest.mark.asyncio
     async def test_client_provided_person_id_used(self):
         c = self._make_consumer()
-        data = json.dumps({"type": "chat", "message": "Hi", "person_id": "custom_pid"})
-        with patch("communication.channels.web_frontend.handle_message", new_callable=AsyncMock) as mock_h:
+        data = json.dumps({
+            "type": "chat", "message": "Hi", "person_id": "custom_pid",
+        })
+        with patch("communication.channels.web_frontend.perceive",
+                   new_callable=AsyncMock) as mock_perceive:
             await c.receive(text_data=data)
-        mock_h.assert_called_once_with("Hi", source="frontend", person_id="custom_pid")
+        perception = mock_perceive.call_args[0][0]
+        assert perception.person_id == "custom_pid"
+
+    @pytest.mark.asyncio
+    async def test_attachments_produce_mixed_perception(self):
+        c = self._make_consumer()
+        data = json.dumps({
+            "type": "chat",
+            "message": "regarde",
+            "attachments": [
+                {"kind": "image", "content": "b64data", "mime_type": "image/png"},
+            ],
+        })
+        with patch(
+            "communication.channels.web_frontend.perceive", new_callable=AsyncMock,
+        ) as mock_perceive, patch(
+            "communication.channels.web_frontend.validate_attachments",
+            side_effect=lambda x: x,
+        ):
+            await c.receive(text_data=data)
+        perception = mock_perceive.call_args[0][0]
+        assert perception.modality is Modality.MIXED
+        assert perception.has_non_text() is True
 
 
 # ===================================================================

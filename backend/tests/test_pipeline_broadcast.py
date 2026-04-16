@@ -80,7 +80,10 @@ class TestPersistToMemory:
 
         with patch("pipeline.broadcast.memory_manager", mock_mem):
             from pipeline.broadcast import persist_to_memory
-            await persist_to_memory("Salut", "Hey !", "frontend", "user1")
+            await persist_to_memory(
+                message="Salut", response="Hey !",
+                source="frontend", person_id="user1",
+            )
 
         assert mock_mem.add_message.call_count == 2
         user_call = mock_mem.add_message.call_args_list[0]
@@ -90,3 +93,22 @@ class TestPersistToMemory:
         asst_call = mock_mem.add_message.call_args_list[1]
         assert asst_call[0][0] == "assistant"
         assert asst_call[0][1] == "Hey !"
+
+    @pytest.mark.asyncio
+    async def test_attachments_meta_attached_to_user_message(self):
+        mock_mem = MagicMock()
+        mock_mem.add_message = AsyncMock()
+
+        with patch("pipeline.broadcast.memory_manager", mock_mem):
+            from pipeline.broadcast import persist_to_memory
+            await persist_to_memory(
+                message="regarde", response="chouette",
+                source="frontend", person_id="u1",
+                attachments_meta=[{"kind": "image", "name": "cat.png"}],
+            )
+
+        user_call = mock_mem.add_message.call_args_list[0]
+        assert user_call[1]["attachments_meta"] == [{"kind": "image", "name": "cat.png"}]
+        # Assistant message does not carry the attachments
+        asst_call = mock_mem.add_message.call_args_list[1]
+        assert "attachments_meta" not in asst_call[1] or not asst_call[1]["attachments_meta"]

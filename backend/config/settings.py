@@ -102,6 +102,7 @@ AI_ROLE_VALIDITY_CHECK = env("AI_ROLE_VALIDITY_CHECK", default=f"claude:{CLAUDE_
 
 MEMORY_SHORT_TERM_LIMIT = env.int("MEMORY_SHORT_TERM_LIMIT", default=20)
 API_PORT = env.int("API_PORT", default=8000)
+AI_CALL_TIMEOUT = env.int("AI_CALL_TIMEOUT", default=60)
 PERSONALITY_PATH = PROJECT_ROOT / "personality.yaml"
 
 # --- Scheduler ---

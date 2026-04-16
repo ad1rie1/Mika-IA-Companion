@@ -22,10 +22,16 @@ class Message(models.Model):
     person_id = models.CharField(max_length=100, blank=True, default="")
     emotion = models.CharField(max_length=30, blank=True, default="")
     emotion_intensity = models.FloatField(default=0.0)
+    # Structural metadata for non-text parts of the originating perception
+    # (images, audio, files). Binary content lives elsewhere (disk + media
+    # model); this list records kind/mime/name/etc. so retrieval knows what
+    # was attached without touching raw bytes.
+    attachments_meta = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ["created_at"]
+        # pk as secondary sort — auto_now_add collides for rapid inserts
+        ordering = ["created_at", "pk"]
         indexes = [
             models.Index(fields=["created_at"]),
             models.Index(fields=["conversation", "created_at"]),

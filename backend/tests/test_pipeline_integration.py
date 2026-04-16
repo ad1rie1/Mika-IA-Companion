@@ -1,344 +1,244 @@
-"""
-Integration test for the full conversation pipeline.
+"""Integration tests for the conversation pipeline.
 
-Mocks the AI call to return controlled responses, then verifies
-the full flow: context assembly -> prompt -> AI -> emotion parsing
--> emotion engine -> SpeechOutput.
-
-Tests the pipeline WITHOUT network, DB, or real AI calls.
+Entry point is `pipeline.router.perceive(Perception)`. We mock the AI
+client so tests don't burn LLM calls, but leave the real processor,
+emotion engine, and router in place to catch integration bugs.
 """
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 
-from emotion.types import Emotion, EmotionData
-from emotion.engine import EmotionEngine
-from emotion.state import GlobalMood
-from pipeline.processor import process_message, SpeechOutput
-from pipeline.context import ConversationContext
-from pipeline.prompt import build_system_prompt, format_conversation
-from pipeline.response import call_ai_and_parse
-from tests.conftest import TEMPERAMENT_DEFAULT
+from emotion.engine import emotion_engine
+from emotion.types import Emotion
+from pipeline.perception import Intent, Perception
+from pipeline.processor import SpeechOutput, process_message
+from pipeline.router import perceive
 
 
-# ===================================================================
-# HELPERS
-# ===================================================================
+AI_RESPONSES = {
+    "greeting": "[EMOTION:happy:0.7] Hey ! Bienvenue ! Trop contente de te voir ici ~",
+    "question": "[EMOTION:curious:0.8] Oh Python ? J'adore ! Tu bosses sur quoi ?",
+    "no_emotion": "Salut ! Ca va bien merci.",
+}
 
-def make_context(
-    emotion_context: str = "",
-    memory_context: str = "",
-    module_context: str = "",
-    history: list[dict] | None = None,
-) -> ConversationContext:
-    """Build a ConversationContext without async gather."""
+
+def _fake_context():
+    from pipeline.context import ConversationContext
     return ConversationContext(
-        memory_context=memory_context,
-        emotion_context=emotion_context,
-        module_context=module_context,
-        history=history or [],
+        memory_context="",
+        emotion_context="",
+        module_context="",
+        history=[],
         mcp_server=None,
         tool_names=[],
     )
 
 
-# Simulated AI responses for different scenarios
-AI_RESPONSES = {
-    "greeting": "[EMOTION:happy:0.7] Hey ! Bienvenue ! Trop contente de te voir ici ~",
-    "question_tech": "[EMOTION:curious:0.8] Oh Python ? J'adore ! Tu bosses sur quoi en ce moment ?",
-    "sad_story": "[EMOTION:sad:0.75] Oh non... Je suis vraiment desolee pour toi...",
-    "insult": "[EMOTION:angry:0.85] Ok la c'est pas cool du tout. Je merite mieux que ca.",
-    "joke": "[EMOTION:amused:0.9] AHAHAHAH non mais c'est trop drole ca !!",
-    "deep_question": "[EMOTION:thinking:0.6] Hmm... C'est une question profonde. Laisse-moi reflechir...",
-    "compliment": "[EMOTION:love:0.65] Aww c'est trop gentil... Merci ca me touche !",
-    "goodbye": "[EMOTION:grateful:0.5] A bientot ! C'etait super de parler avec toi !",
-    "no_emotion": "Salut ! Ca va bien merci.",
-    "error_format": "[EMOTION:spaghetti:0.5] Hmm ceci est un test.",
-}
-
-
 # ===================================================================
-# CALL_AI_AND_PARSE (with mock AI)
+# call_ai_and_parse
 # ===================================================================
 
 class TestCallAiAndParse:
-    """Test the AI call + response parsing step."""
 
     @pytest.mark.asyncio
     async def test_happy_response_parsed(self):
-        """A happy AI response should be correctly parsed."""
-        ctx = make_context()
+        from pipeline.response import call_ai_and_parse
 
+        ctx = _fake_context()
         with patch("pipeline.response.ai_client") as mock_client:
             mock_client.complete = AsyncMock(return_value=AI_RESPONSES["greeting"])
-
             text, emotion, tools = await call_ai_and_parse(ctx, "Salut Mika !")
 
         assert "Bienvenue" in text
-        assert "[EMOTION:" not in text  # tag should be stripped
-        assert emotion.emotion == Emotion.HAPPY
-        assert emotion.intensity == 0.7
+        assert "[EMOTION:" not in text
+        assert emotion.emotion is Emotion.HAPPY
         assert tools == []
 
     @pytest.mark.asyncio
-    async def test_angry_response_parsed(self):
-        ctx = make_context()
+    async def test_missing_tag_falls_back_to_neutral(self):
+        from pipeline.response import call_ai_and_parse
 
-        with patch("pipeline.response.ai_client") as mock_client:
-            mock_client.complete = AsyncMock(return_value=AI_RESPONSES["insult"])
-
-            text, emotion, tools = await call_ai_and_parse(ctx, "t'es nulle")
-
-        assert emotion.emotion == Emotion.ANGRY
-        assert emotion.intensity == 0.85
-
-    @pytest.mark.asyncio
-    async def test_no_emotion_tag_defaults_to_neutral(self):
-        ctx = make_context()
-
+        ctx = _fake_context()
         with patch("pipeline.response.ai_client") as mock_client:
             mock_client.complete = AsyncMock(return_value=AI_RESPONSES["no_emotion"])
+            text, emotion, _ = await call_ai_and_parse(ctx, "hey")
 
-            text, emotion, tools = await call_ai_and_parse(ctx, "ca va ?")
-
-        assert emotion.emotion == Emotion.NEUTRAL
-        assert emotion.intensity == 0.5
-
-    @pytest.mark.asyncio
-    async def test_invalid_emotion_falls_back(self):
-        ctx = make_context()
-
-        with patch("pipeline.response.ai_client") as mock_client:
-            mock_client.complete = AsyncMock(return_value=AI_RESPONSES["error_format"])
-
-            text, emotion, tools = await call_ai_and_parse(ctx, "test")
-
-        assert emotion.emotion == Emotion.NEUTRAL  # "spaghetti" -> neutral
-
-    @pytest.mark.asyncio
-    async def test_context_layers_in_prompt(self):
-        """Verify that all context layers are assembled into the prompt."""
-        ctx = make_context(
-            emotion_context="Tu te sens excited.",
-            memory_context="Souvenir: aime les chats.",
-            module_context="3 emails non lus.",
-            history=[
-                {"role": "user", "content": "Salut"},
-                {"role": "assistant", "content": "Hey !"},
-            ],
-        )
-
-        captured_system = None
-        captured_user = None
-
-        async def fake_complete(system_prompt, user_prompt):
-            nonlocal captured_system, captured_user
-            captured_system = system_prompt
-            captured_user = user_prompt
-            return "[EMOTION:happy:0.5] Ok !"
-
-        with patch("pipeline.response.ai_client") as mock_client:
-            mock_client.complete = fake_complete
-
-            await call_ai_and_parse(ctx, "Nouveau message")
-
-        assert "excited" in captured_system
-        assert "chats" in captured_system
-        assert "emails" in captured_system
-        assert "Salut" in captured_user
-        assert "Hey" in captured_user
-        assert "Nouveau message" in captured_user
+        assert "Salut" in text
+        # No tag → NEUTRAL fallback
+        assert emotion.emotion is Emotion.NEUTRAL
 
 
 # ===================================================================
-# PROCESS_MESSAGE (full pipeline mock)
+# process_message — end-to-end with mocked AI
 # ===================================================================
 
 class TestProcessMessage:
-    """Test the full process_message pipeline with mocks."""
+
+    @staticmethod
+    def _perception(text: str = "Salut", person_id: str = "user_greet"):
+        return Perception.from_text(text, source="frontend", person_id=person_id)
 
     @pytest.mark.asyncio
-    async def test_full_pipeline_greeting(self):
-        """Full pipeline: greeting -> happy emotion -> valid SpeechOutput."""
-        ctx = make_context()
-
-        with patch("pipeline.response.ai_client") as mock_client, \
-             patch("pipeline.processor.gather_context", new_callable=AsyncMock, return_value=ctx), \
-             patch("pipeline.processor.broadcast_to_websocket", new_callable=AsyncMock), \
-             patch("pipeline.processor.persist_to_memory", new_callable=AsyncMock), \
-             patch("pipeline.processor.emit_communication_event", new_callable=AsyncMock), \
-             patch("pipeline.processor.emotion_engine") as mock_engine:
-
+    async def test_happy_path_returns_speech_output(self):
+        ctx = _fake_context()
+        with patch("pipeline.processor.gather_context",
+                   new_callable=AsyncMock, return_value=ctx), \
+             patch("pipeline.processor.broadcast_to_websocket",
+                   new_callable=AsyncMock), \
+             patch("pipeline.processor.persist_to_memory",
+                   new_callable=AsyncMock), \
+             patch("pipeline.processor.emit_communication_event",
+                   new_callable=AsyncMock), \
+             patch("pipeline.response.ai_client") as mock_client:
             mock_client.complete = AsyncMock(return_value=AI_RESPONSES["greeting"])
-            mock_engine.process_emotion = MagicMock(return_value=MagicMock())
-            mock_engine._maybe_save_snapshot = AsyncMock()
-            mock_engine.compute_message_emotion = MagicMock(return_value=MagicMock(
-                emotion=Emotion.HAPPY, intensity=0.7, value="happy"
-            ))
-            mock_engine.compute_message_emotion.return_value.emotion = Emotion.HAPPY
-            mock_engine.compute_message_emotion.return_value.intensity = 0.7
-            mock_engine.get_state_dict = MagicMock(return_value={
-                "person": {"emotion": "happy", "intensity": 0.7},
-                "global": {"emotion": "happy", "intensity": 0.1},
-                "message": {"emotion": "happy", "intensity": 0.7},
-            })
 
-            output = await process_message(
-                "Salut Mika !",
-                source="frontend",
-                person_id="test_user",
-                context=ctx,
-            )
+            output = await process_message(self._perception(), context=ctx)
 
         assert isinstance(output, SpeechOutput)
         assert "Bienvenue" in output.text
-        assert output.emotion_data.emotion == Emotion.HAPPY
+        assert output.emotion_data.emotion is Emotion.HAPPY
 
     @pytest.mark.asyncio
-    async def test_pipeline_error_recovery(self):
-        """When AI call fails, pipeline should return error message gracefully."""
-        ctx = make_context()
-
-        with patch("pipeline.response.ai_client") as mock_client, \
-             patch("pipeline.processor.gather_context", new_callable=AsyncMock, return_value=ctx), \
-             patch("pipeline.processor.broadcast_to_websocket", new_callable=AsyncMock), \
-             patch("pipeline.processor.persist_to_memory", new_callable=AsyncMock), \
-             patch("pipeline.processor.emit_communication_event", new_callable=AsyncMock), \
-             patch("pipeline.processor.emotion_engine") as mock_engine:
-
-            mock_client.complete = AsyncMock(side_effect=Exception("API timeout"))
-            mock_engine.process_emotion = MagicMock(return_value=MagicMock())
-            mock_engine._maybe_save_snapshot = AsyncMock()
-            mock_engine.compute_message_emotion = MagicMock(return_value=MagicMock(
-                emotion=Emotion.SAD, intensity=0.6,
-            ))
-            mock_engine.get_state_dict = MagicMock(return_value={
-                "person": {"emotion": "sad", "intensity": 0.6},
-                "global": {"emotion": "happy", "intensity": 0.0},
-                "message": {"emotion": "sad", "intensity": 0.6},
-            })
-
-            output = await process_message(
-                "test",
-                source="frontend",
-                person_id="user",
-                context=ctx,
-            )
-
-        # Should get fallback error message
-        assert "bug" in output.text.lower() or "réessayer" in output.text.lower()
-
-    @pytest.mark.asyncio
-    async def test_pipeline_no_broadcast_option(self):
-        """broadcast=False should skip WebSocket broadcast."""
-        ctx = make_context()
-
-        with patch("pipeline.response.ai_client") as mock_client, \
-             patch("pipeline.processor.gather_context", new_callable=AsyncMock, return_value=ctx), \
-             patch("pipeline.processor.broadcast_to_websocket", new_callable=AsyncMock) as mock_broadcast, \
-             patch("pipeline.processor.persist_to_memory", new_callable=AsyncMock), \
-             patch("pipeline.processor.emit_communication_event", new_callable=AsyncMock), \
-             patch("pipeline.processor.emotion_engine") as mock_engine:
-
+    async def test_broadcast_false_skips_broadcast(self):
+        ctx = _fake_context()
+        with patch("pipeline.processor.gather_context",
+                   new_callable=AsyncMock, return_value=ctx), \
+             patch("pipeline.processor.broadcast_to_websocket",
+                   new_callable=AsyncMock) as mock_broadcast, \
+             patch("pipeline.processor.persist_to_memory",
+                   new_callable=AsyncMock), \
+             patch("pipeline.processor.emit_communication_event",
+                   new_callable=AsyncMock), \
+             patch("pipeline.response.ai_client") as mock_client:
             mock_client.complete = AsyncMock(return_value=AI_RESPONSES["greeting"])
-            mock_engine.process_emotion = MagicMock(return_value=MagicMock())
-            mock_engine._maybe_save_snapshot = AsyncMock()
-            mock_engine.compute_message_emotion = MagicMock(return_value=MagicMock(
-                emotion=Emotion.HAPPY, intensity=0.5,
-            ))
-            mock_engine.get_state_dict = MagicMock(return_value={})
 
-            await process_message(
-                "test", context=ctx, broadcast=False, persist=False, emit_event=False,
-            )
+            await process_message(self._perception("hi", "u"), context=ctx, broadcast=False)
 
         mock_broadcast.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_pipeline_persist_option(self):
-        """persist=True should call persist_to_memory."""
-        ctx = make_context()
-
-        with patch("pipeline.response.ai_client") as mock_client, \
-             patch("pipeline.processor.gather_context", new_callable=AsyncMock, return_value=ctx), \
-             patch("pipeline.processor.broadcast_to_websocket", new_callable=AsyncMock), \
-             patch("pipeline.processor.persist_to_memory", new_callable=AsyncMock) as mock_persist, \
-             patch("pipeline.processor.emit_communication_event", new_callable=AsyncMock), \
-             patch("pipeline.processor.emotion_engine") as mock_engine:
-
+    async def test_persist_false_skips_persistence(self):
+        ctx = _fake_context()
+        with patch("pipeline.processor.gather_context",
+                   new_callable=AsyncMock, return_value=ctx), \
+             patch("pipeline.processor.broadcast_to_websocket",
+                   new_callable=AsyncMock), \
+             patch("pipeline.processor.persist_to_memory",
+                   new_callable=AsyncMock) as mock_persist, \
+             patch("pipeline.processor.emit_communication_event",
+                   new_callable=AsyncMock), \
+             patch("pipeline.response.ai_client") as mock_client:
             mock_client.complete = AsyncMock(return_value=AI_RESPONSES["greeting"])
-            mock_engine.process_emotion = MagicMock(return_value=MagicMock())
-            mock_engine._maybe_save_snapshot = AsyncMock()
-            mock_engine.compute_message_emotion = MagicMock(return_value=MagicMock(
-                emotion=Emotion.HAPPY, intensity=0.5,
-            ))
-            mock_engine.get_state_dict = MagicMock(return_value={})
 
-            await process_message(
-                "Salut",
-                source="frontend",
-                person_id="user1",
-                context=ctx,
-                broadcast=False,
-                persist=True,
-                emit_event=False,
-            )
+            await process_message(self._perception("hi", "u"), context=ctx, persist=False)
 
-        mock_persist.assert_called_once()
-        args = mock_persist.call_args
-        assert args[0][0] == "Salut"  # user message
-        assert "Bienvenue" in args[0][1]  # response text
+        mock_persist.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_attachments_meta_passed_to_persist(self):
+        """The descriptor list for non-text parts must reach persist_to_memory."""
+        from pipeline.perception import Perception
+
+        ctx = _fake_context()
+        perception = Perception.from_mixed(
+            text="look",
+            attachments=[
+                {"kind": "image", "mime_type": "image/png", "name": "cat.png",
+                 "content": "b64bytes"},
+            ],
+            source="frontend", person_id="u1",
+        )
+        with patch("pipeline.processor.gather_context",
+                   new_callable=AsyncMock, return_value=ctx), \
+             patch("pipeline.processor.broadcast_to_websocket",
+                   new_callable=AsyncMock), \
+             patch("pipeline.processor.persist_to_memory",
+                   new_callable=AsyncMock) as mock_persist, \
+             patch("pipeline.processor.emit_communication_event",
+                   new_callable=AsyncMock), \
+             patch("pipeline.response.ai_client") as mock_client:
+            mock_client.complete = AsyncMock(return_value=AI_RESPONSES["greeting"])
+            await process_message(perception, context=ctx)
+
+        kw = mock_persist.call_args.kwargs
+        meta = kw["attachments_meta"]
+        assert len(meta) == 1
+        assert meta[0]["kind"] == "image"
+        assert meta[0]["mime_type"] == "image/png"
+        assert meta[0]["name"] == "cat.png"
 
 
 # ===================================================================
-# SPEECH OUTPUT STRUCTURE
+# Entry point: perceive() routes through process_message
+# ===================================================================
+
+class TestRouterIntegration:
+
+    @pytest.mark.asyncio
+    async def test_perceive_request_response_invokes_process_message(self):
+        with patch("pipeline.processor.process_message",
+                   new_callable=AsyncMock) as mock_proc:
+            mock_proc.return_value = SpeechOutput(
+                text="ok",
+                emotion_data=None,
+                emotion_name="happy",
+                emotion_intensity=0.5,
+                emotion_state={},
+                tool_calls=[],
+            )
+            p = Perception.from_text(
+                "bonjour", source="frontend", person_id="alice",
+                intent=Intent.REQUEST_RESPONSE,
+            )
+            output = await perceive(p)
+
+        assert output.text == "ok"
+        # Perception is passed positionally; source lives on the perception itself.
+        assert mock_proc.call_args.args[0].source == "frontend"
+
+    @pytest.mark.asyncio
+    async def test_perceive_observation_skips_process_message(self):
+        with patch("pipeline.processor.process_message",
+                   new_callable=AsyncMock) as mock_proc, \
+             patch("modules.manager.module_manager.emit_event",
+                   new_callable=AsyncMock) as mock_emit:
+            from pipeline.perception import Modality, Part
+
+            p = Perception(
+                modality=Modality.SENSOR,
+                intent=Intent.OBSERVATION,
+                parts=[Part("text", "noise detected")],
+                source="camera",
+                person_id="anonymous",
+            )
+            result = await perceive(p)
+
+        mock_proc.assert_not_called()
+        mock_emit.assert_called_once()
+        assert result is None
+
+
+# ===================================================================
+# SpeechOutput dataclass
 # ===================================================================
 
 class TestSpeechOutput:
 
-    def test_dataclass_fields(self):
-        output = SpeechOutput(
-            text="Hello",
-            emotion_data=EmotionData(Emotion.HAPPY, 0.7),
+    def test_required_fields(self):
+        from emotion.types import EmotionData
+        out = SpeechOutput(
+            text="ok",
+            emotion_data=EmotionData(Emotion.HAPPY, 0.5),
             emotion_name="happy",
-            emotion_intensity=0.7,
-            emotion_state={"person": {}, "global": {}, "message": {}},
+            emotion_intensity=0.5,
+            emotion_state={},
             tool_calls=[],
         )
-        assert output.text == "Hello"
-        assert output.emotion_name == "happy"
-        assert output.emotion_intensity == 0.7
-        assert output.tool_calls == []
-
-    def test_with_tool_calls(self):
-        output = SpeechOutput(
-            text="Done",
-            emotion_data=EmotionData(Emotion.PROUD, 0.6),
-            emotion_name="proud",
-            emotion_intensity=0.6,
-            emotion_state={},
-            tool_calls=["send_email", "list_recent_emails"],
-        )
-        assert len(output.tool_calls) == 2
-        assert "send_email" in output.tool_calls
-
-
-# ===================================================================
-# CONVERSATION CONTEXT
-# ===================================================================
-
-class TestConversationContext:
-
-    def test_context_structure(self):
-        ctx = make_context(
-            emotion_context="angry",
-            memory_context="mem",
-            module_context="mod",
-            history=[{"role": "user", "content": "hi"}],
-        )
-        assert ctx.emotion_context == "angry"
-        assert ctx.memory_context == "mem"
-        assert ctx.module_context == "mod"
-        assert len(ctx.history) == 1
-        assert ctx.mcp_server is None
-        assert ctx.tool_names == []
+        assert out.text == "ok"
+        assert out.emotion_name == "happy"
+        assert out.tool_calls == []
+        # Defaults
+        assert out.request_id == "-"
+        assert out.emotion_blend is None

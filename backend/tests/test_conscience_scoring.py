@@ -65,6 +65,19 @@ class FakeScheduledAction:
         self.priority = priority
 
 
+# All greeting periods pre-marked to isolate scoring tests from wall-clock:
+# otherwise tests run between 7-10h / 18-20h / 23-24h would get a +0.35
+# nudge from `check_time_trigger` that shifts all score assertions.
+_ALL_GREETED = frozenset({"morning", "evening", "night"})
+
+
+def _score(ctx, threshold: float = 0.5):
+    """Wrap compute_decision_score with time-of-day isolation."""
+    greeted = set(_ALL_GREETED)
+    today = date.today()
+    return compute_decision_score(ctx, threshold, greeted, today)
+
+
 # ===================================================================
 # COOLDOWN
 # ===================================================================
@@ -80,14 +93,14 @@ class TestCooldown:
             idle_seconds=3600,
             in_cooldown=True,
         )
-        score, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, reason, _, _ = _score(ctx)
 
         assert score == 0.0
         assert reason == "cooldown"
 
     def test_not_in_cooldown_allows_scoring(self):
         ctx = make_context(max_pertinence=0.8, in_cooldown=False)
-        score, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, reason, _, _ = _score(ctx)
 
         assert score > 0.0
         assert "cooldown" not in reason
@@ -102,7 +115,7 @@ class TestPertinence:
     def test_high_pertinence_contributes_to_score(self):
         """max_pertinence > 0.7 should add pertinence * 0.4 to score."""
         ctx = make_context(max_pertinence=0.9)
-        score, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, reason, _, _ = _score(ctx)
 
         expected_contribution = 0.9 * 0.4  # 0.36
         assert score >= expected_contribution - 0.01
@@ -111,14 +124,14 @@ class TestPertinence:
     def test_low_pertinence_no_contribution(self):
         """max_pertinence <= 0.7 should not contribute."""
         ctx = make_context(max_pertinence=0.5)
-        score, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, reason, _, _ = _score(ctx)
 
         assert "pertinence" not in reason
 
     def test_pertinence_exactly_at_threshold(self):
         """max_pertinence == 0.7 should not trigger (>0.7 required)."""
         ctx = make_context(max_pertinence=0.7)
-        score, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, reason, _, _ = _score(ctx)
 
         assert "pertinence" not in reason
 
@@ -131,7 +144,7 @@ class TestAccumulatedUrgency:
 
     def test_high_urgency_contributes(self):
         ctx = make_context(weighted_urgency=0.8)
-        score, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, reason, _, _ = _score(ctx)
 
         assert "accumulated" in reason
         assert score > 0.0
@@ -139,14 +152,14 @@ class TestAccumulatedUrgency:
     def test_urgency_capped_at_0_3(self):
         """Urgency contribution should never exceed 0.3."""
         ctx = make_context(weighted_urgency=10.0)  # absurdly high
-        score, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, reason, _, _ = _score(ctx)
 
         # Without other factors, score should be at most 0.3 from urgency
         assert score <= 0.31  # tiny float tolerance
 
     def test_low_urgency_no_contribution(self):
         ctx = make_context(weighted_urgency=0.3)
-        score, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, reason, _, _ = _score(ctx)
 
         assert "accumulated" not in reason
 
@@ -160,14 +173,14 @@ class TestMoodOverflow:
     def test_high_mood_intensity_triggers(self):
         """Global intensity > 0.7 should add 0.25."""
         ctx = make_context(global_mood="angry", global_intensity=0.85)
-        score, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, reason, _, _ = _score(ctx)
 
         assert "mood" in reason
         assert score >= 0.25
 
     def test_normal_mood_no_trigger(self):
         ctx = make_context(global_mood="happy", global_intensity=0.5)
-        score, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, reason, _, _ = _score(ctx)
 
         assert "mood" not in reason
 
@@ -181,7 +194,7 @@ class TestIdleTime:
     def test_long_idle_contributes(self):
         """Idle > 10 minutes should contribute to score."""
         ctx = make_context(idle_seconds=1200)  # 20 minutes
-        score, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, reason, _, _ = _score(ctx)
 
         assert "idle" in reason
         assert score > 0.0
@@ -189,14 +202,14 @@ class TestIdleTime:
     def test_short_idle_no_contribution(self):
         """Idle < 10 minutes should not contribute."""
         ctx = make_context(idle_seconds=300)  # 5 minutes
-        score, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, reason, _, _ = _score(ctx)
 
         assert "idle" not in reason
 
     def test_idle_capped_at_0_3(self):
         """Idle contribution should cap at 0.3."""
         ctx = make_context(idle_seconds=7200)  # 2 hours
-        score, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, reason, _, _ = _score(ctx)
 
         # Just idle should give max 0.3
         assert score <= 0.31
@@ -212,7 +225,7 @@ class TestScheduledActions:
         """Due scheduled actions should contribute priority * 0.5."""
         actions = [FakeScheduledAction(priority=0.8)]
         ctx = make_context(scheduled_actions=actions)
-        score, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, reason, _, _ = _score(ctx)
 
         assert "scheduled" in reason
         assert score >= 0.4 - 0.01  # 0.8 * 0.5
@@ -225,7 +238,7 @@ class TestScheduledActions:
             FakeScheduledAction(priority=0.5),
         ]
         ctx = make_context(scheduled_actions=actions)
-        score, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, reason, _, _ = _score(ctx)
 
         assert score >= 0.45 - 0.01  # 0.9 * 0.5
 
@@ -242,14 +255,14 @@ class TestAccumulationPressure:
             consecutive_waits=5,
             pending_observations=["obs1", "obs2"],
         )
-        score, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, reason, _, _ = _score(ctx)
 
         assert "pressure" in reason
 
     def test_no_pressure_without_pending_observations(self):
         """Pressure should not apply without pending observations."""
         ctx = make_context(consecutive_waits=10, pending_observations=[])
-        score, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, reason, _, _ = _score(ctx)
 
         assert "pressure" not in reason
 
@@ -258,7 +271,7 @@ class TestAccumulationPressure:
             consecutive_waits=2,
             pending_observations=["obs"],
         )
-        score, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, reason, _, _ = _score(ctx)
 
         assert "pressure" not in reason
 
@@ -290,7 +303,7 @@ class TestSelfRegulation:
             acts_today=5,
             consecutive_ignored_acts=3,
         )
-        score, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, reason, _, _ = _score(ctx)
 
         assert score <= 0.1, f"Hard cap should suppress to <=0.1, got {score}"
         assert "suppressed" in reason
@@ -314,7 +327,7 @@ class TestCombinedScenarios:
             consecutive_waits=5,
             pending_observations=["obs1"],
         )
-        score, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, reason, _, _ = _score(ctx)
 
         assert score > 0.5, f"All factors high should exceed threshold: {score}"
 
@@ -326,14 +339,14 @@ class TestCombinedScenarios:
             global_intensity=0.3,
             idle_seconds=60,
         )
-        score, reason, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, reason, _, _ = _score(ctx)
 
         assert score < 0.5, f"Minimal signals should not trigger: {score}"
 
     def test_only_pertinence_can_trigger_alone(self):
         """Very high pertinence alone should nearly trigger."""
         ctx = make_context(max_pertinence=0.95)
-        score, _, _, _ = compute_decision_score(ctx, 0.5, set(), None)
+        score, _, _, _ = _score(ctx)
 
         # 0.95 * 0.4 = 0.38 — close but not enough alone
         assert 0.3 < score < 0.5

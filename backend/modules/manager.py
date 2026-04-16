@@ -73,11 +73,12 @@ class ModuleManager:
 
     # ── Lifecycle ─────────────────────────────────────────────────
 
-    async def start_all(self, chat_handler: Callable | None = None) -> None:
+    async def start_all(self) -> None:
         """Start all registered modules and the cron scheduler.
 
-        ``chat_handler`` is accepted for backward-compatibility but new
-        modules should use ``self._notify_ai`` instead.
+        Modules that need to produce speech should emit events via the
+        event bus or call ``pipeline.router.perceive()`` directly with
+        an ``Intent.INTERNAL_TRIGGER`` Perception.
         """
         from django.conf import settings
 
@@ -86,9 +87,6 @@ class ModuleManager:
         )
 
         for module in self._modules.values():
-            # Legacy injection for modules still using set_chat_handler
-            if chat_handler and hasattr(module, "set_chat_handler"):
-                module.set_chat_handler(chat_handler)
             try:
                 await module._do_start()
             except Exception:
@@ -371,9 +369,11 @@ class ModuleManager:
         """Wake Claude with a module notification and all available tools.
 
         This callback is injected into every module via ``set_notify_ai()``.
-        Uses the pipeline processor to avoid duplicating the conversation flow.
+        Constructs an INTERNAL_TRIGGER Perception and routes it so the
+        notification flows through the same pipeline as any other input.
         """
-        from pipeline.processor import process_message
+        from pipeline.perception import Perception
+        from pipeline.router import perceive
 
         # Build a structured prompt from the notification
         prompt = (
@@ -395,12 +395,22 @@ class ModuleManager:
             notification.source_module, person_id, notification.summary,
         )
 
-        output = await process_message(
-            message=prompt,
+        perception = Perception.from_internal_trigger(
+            prompt,
             source=notification.source_module,
             person_id=person_id,
-            emit_event=False,  # avoid recursive event loop
+            metadata={
+                "urgency": notification.urgency,
+                "suggested_action": notification.suggested_action,
+                **notification.metadata,
+            },
         )
+
+        output = await perceive(perception)
+        if output is None:
+            # Router should always return a SpeechOutput for INTERNAL_TRIGGER,
+            # but be defensive for future routing changes.
+            return AIDecision(response_text="", emotion=None, tool_calls_made=[])
 
         return AIDecision(
             response_text=output.text,
