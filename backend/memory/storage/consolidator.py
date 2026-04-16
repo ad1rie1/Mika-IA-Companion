@@ -100,6 +100,7 @@ class MemoryConsolidator:
     async def _consolidate(self):
         """Process new messages since last checkpoint."""
         from memory.models import (
+            Commitment,
             Connaissance,
             ConsolidationLog,
             Entity,
@@ -147,6 +148,7 @@ class MemoryConsolidator:
 
         souvenirs_created = 0
         connaissances_created = 0
+        commitments_created = 0
         now = timezone.now()
 
         for extraction in extractions:
@@ -261,6 +263,28 @@ class MemoryConsolidator:
                             extraction["content"][:120],
                         )
 
+                elif extraction["type"] == "commitment":
+                    # Resolve target person if named (Entity type=person).
+                    # Extractor may omit for generic commitments.
+                    target_person = None
+                    person_name = (extraction.get("person") or "").strip()
+                    if person_name:
+                        target_person, _ = await sync_to_async(
+                            Entity.objects.get_or_create
+                        )(name=person_name, entity_type="person")
+
+                    await sync_to_async(Commitment.objects.create)(
+                        description=extraction["content"],
+                        person=target_person,
+                        status="pending",
+                    )
+                    commitments_created += 1
+                    logger.info(
+                        "Commitment created [to=%s]: %s",
+                        person_name or "—",
+                        extraction["content"][:120],
+                    )
+
             except Exception:
                 logger.exception("Failed to process extraction: %s", extraction)
 
@@ -282,9 +306,10 @@ class MemoryConsolidator:
         self._last_processed_id = max_id
 
         logger.info(
-            "Consolidation complete: %d souvenirs, %d connaissances from %d messages",
+            "Consolidation complete: %d souvenirs, %d connaissances, %d commitments from %d messages",
             souvenirs_created,
             connaissances_created,
+            commitments_created,
             len(messages),
         )
 
@@ -303,6 +328,14 @@ class MemoryConsolidator:
             await narrative_generator.run_if_due()
         except Exception:
             logger.exception("Self-narrative generation failed (non-fatal)")
+
+        # 8. Regenerate per-person profiles (theory of mind) for active
+        #    entities. Capped per-cycle so we don't burst LLM spend.
+        try:
+            from memory.person_profile import person_profile_generator
+            await person_profile_generator.run_cycle()
+        except Exception:
+            logger.exception("Person profile generation failed (non-fatal)")
 
     async def _apply_decay(self):
         """Reduce importance of old souvenirs and confidence of old connaissances.

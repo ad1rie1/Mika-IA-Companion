@@ -11,15 +11,21 @@ def build_system_prompt(
     memory_context: str = "",
     module_context: str = "",
     self_concept: str = "",
+    person_context: str = "",
 ) -> str:
     """Assemble the full system prompt from personality + contextual layers.
 
-    Order matters for the model's attention: personality (who she is from
-    the start) → self-concept (who she is becoming, an evolving paragraph
-    fed from her own memories) → modules → current emotional state → memory.
-    The self-concept sits between the static personality and the dynamic
-    layers so the model reads "this is your baseline, this is how you've
-    drifted, and here's what's happening now."
+    Order matters for the model's attention:
+      personality        (who she is from the start)
+      → self-concept      (who she is becoming, from her own memories)
+      → person-context    (who she's talking to, what she knows about them)
+      → modules           (available tools/context)
+      → emotion           (current affective state)
+      → memory            (retrieved relevant memories)
+
+    Self-concept + person-context sit right after personality because
+    they're stable over a session. Modules / emotion / memory are
+    recomputed every turn and appear last so recency biases recall.
     """
     system = personality.to_system_prompt()
 
@@ -27,6 +33,12 @@ def build_system_prompt(
         system += (
             "\n\n--- QUI TU ES DEVENUE ---\n"
             + self_concept
+            + "\n--- FIN ---"
+        )
+    if person_context:
+        system += (
+            "\n\n--- CE QUE TU SAIS DE CETTE PERSONNE ---\n"
+            + person_context
             + "\n--- FIN ---"
         )
     if module_context:

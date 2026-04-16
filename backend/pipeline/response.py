@@ -19,6 +19,7 @@ async def call_ai_and_parse(
         memory_context=context.memory_context,
         module_context=context.module_context,
         self_concept=context.self_concept,
+        person_context=context.person_context,
     )
     user_prompt = format_conversation(message, context.history)
 

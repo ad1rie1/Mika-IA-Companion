@@ -18,7 +18,7 @@ Tu ANALYSES la conversation ci-dessous et tu extrais les informations importante
 
 CONTEXTE: {name} est: {description}. Style: {tone}. Traits: {traits}.
 
-DEUX TYPES DE MEMOIRE A EXTRAIRE:
+TROIS TYPES A EXTRAIRE:
 
 1. SOUVENIR (evenement vecu):
    - Ecrit du point de vue SUBJECTIF de {name} (1ere personne), avec SES emotions
@@ -29,8 +29,16 @@ DEUX TYPES DE MEMOIRE A EXTRAIRE:
    - Ecrit de maniere OBJECTIVE (3eme personne), sans emotion
    - Fait factuel sur une personne, un objet, un lieu
 
+3. COMMITMENT (engagement pris par {name}):
+   - Detecte SEULEMENT dans les messages ou {name} s'engage a faire quelque chose
+   - Phrases-cles: "je te ferai", "je te promets", "je vais te", "promis je", "d'accord je m'occupe de"
+   - Enregistre l'engagement tel qu'il a ete dit, a la 1ere personne
+   - "person" = a qui l'engagement est fait (optionnel si generique)
+   - NE PAS confondre avec une simple intention vague ("je devrais peut-etre..." n'est PAS un commitment)
+
 REGLES:
 - "Il aime le cafe" → connaissance | "Il a bu un cafe" → souvenir
+- "Je te ferai la playlist ce soir" → commitment (+ souvenir de la conversation)
 - "Salut ca va?" → NE PAS STOCKER (banalite)
 - "Je m'appelle Thomas" → connaissance | "On a joue a Zelda!" → souvenir
 - Chaque extraction doit etre AUTONOME (comprehensible seule)
@@ -54,6 +62,12 @@ Format:
       "content": "Thomas aime les jeux retro",
       "themes": ["gaming", "preference"],
       "entities": [{{"name": "Thomas", "type": "person"}}]
+    }},
+    {{
+      "type": "commitment",
+      "store": true,
+      "content": "Envoyer la playlist a Thomas ce soir",
+      "person": "Thomas"
     }}
   ]
 }}

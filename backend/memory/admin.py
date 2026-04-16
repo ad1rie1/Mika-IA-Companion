@@ -1,8 +1,8 @@
 from django.contrib import admin
 
 from memory.models import (
-    Connaissance, Conversation, EmotionalSummary, EmotionSnapshot,
-    Entity, Message, SelfNarrative, Souvenir, Theme,
+    Commitment, Connaissance, Conversation, EmotionalSummary, EmotionSnapshot,
+    Entity, Message, PersonProfile, SelfNarrative, Souvenir, Theme,
 )
 
 
@@ -84,3 +84,26 @@ class SelfNarrativeAdmin(admin.ModelAdmin):
     @admin.display(description="Narrative")
     def content_short(self, obj):
         return obj.content[:120] + "..." if len(obj.content) > 120 else obj.content
+
+
+@admin.register(PersonProfile)
+class PersonProfileAdmin(admin.ModelAdmin):
+    list_display = (
+        "pk", "entity", "closeness", "preferred_tone",
+        "interaction_count", "last_interaction_at", "generated_at",
+    )
+    list_filter = ("closeness", "preferred_tone")
+    search_fields = ("entity__name", "summary")
+    readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(Commitment)
+class CommitmentAdmin(admin.ModelAdmin):
+    list_display = ("pk", "status", "person", "description_short", "due_at", "created_at")
+    list_filter = ("status",)
+    search_fields = ("description", "person__name")
+    readonly_fields = ("created_at", "resolved_at")
+
+    @admin.display(description="Description")
+    def description_short(self, obj):
+        return obj.description[:100] + "..." if len(obj.description) > 100 else obj.description
