@@ -64,11 +64,14 @@ async def gather_context(
     # Only meaningful when person_id names an actual Entity in memory.
     person_context = await _fetch_person_context(person_id)
 
-    # Emotion context for this person
-    emotion_context = emotion_engine.get_emotion_context(person_id)
+    # Emotion context = Mika's global mood only. The per-person affective
+    # stance is relational and belongs to person_context (see below), so
+    # the prompt cleanly separates "how Mika feels" from "how Mika feels
+    # about this person".
+    emotion_context = emotion_engine.get_global_mood_context()
 
-    # Intrinsic drives — append to the emotional layer so Claude sees
-    # Mika's pulls (curiosity/social/expression/rest) alongside mood.
+    # Intrinsic drives — still Mika-centric (curiosity / social need / rest),
+    # so they attach to the global mood layer.
     drive_context = drive_engine.get_context()
     if drive_context:
         emotion_context = (
@@ -126,29 +129,28 @@ _INTERNAL_PERSON_IDS = frozenset({"conscience_mika", "__global__", "anonymous", 
 
 
 async def _fetch_person_context(person_id: str) -> str:
-    """Return a prompt-ready block combining PersonProfile + pending commitments.
+    """Return a prompt-ready block combining everything Mika knows/feels
+    about this specific person:
+      - semantic profile (summary, closeness, preferred tone, topics)
+      - current affective stance (live PAD oscillator via EmotionEngine)
+      - weekly emotional trend (EmotionalSummary)
+      - pending commitments toward them
 
-    Resolution strategy: person_id is usually a UUID or "tg_{user_id}" —
-    not an Entity name. We try to match it to an Entity either by its
-    `name` field OR by looking at the most recent non-anonymous message
-    author. The profile table is small, so this stays cheap.
+    This block replaces the per-person half of what used to live in
+    `emotion_context`. It gives the LLM a unified relational picture.
 
-    Empty string when:
-      - person_id is internal/system
-      - no Entity matches (new person)
-      - no profile and no commitments found
+    Empty string when internal/system person_id, or no data to show.
     """
     if person_id in _INTERNAL_PERSON_IDS:
         return ""
 
+    affect = emotion_engine.get_person_affect_context(person_id)
+
     try:
         from asgiref.sync import sync_to_async
 
-        from memory.models import Commitment, Entity, PersonProfile
+        from memory.models import Commitment, EmotionalSummary, PersonProfile
 
-        # Look up Entity by direct name match (covers cases where the
-        # frontend passes a human-readable name as person_id, or the
-        # person_id happens to be the Entity.name — admin-curated cases).
         profile = await sync_to_async(
             lambda: PersonProfile.objects
             .select_related("entity")
@@ -158,7 +160,6 @@ async def _fetch_person_context(person_id: str) -> str:
 
         entity = profile.entity if profile else None
 
-        # Gather pending commitments addressed to this entity.
         commitments: list[str] = []
         if entity is not None:
             commitments = await sync_to_async(
@@ -170,18 +171,42 @@ async def _fetch_person_context(person_id: str) -> str:
                 )
             )()
 
-        if profile is None and not commitments:
+        weekly_trend = await sync_to_async(
+            lambda: _summarize_emotional_trend(
+                list(
+                    EmotionalSummary.objects
+                    .filter(person_id=person_id, period_type="daily")
+                    .order_by("-period_start")[:7]
+                )
+            )
+        )()
+
+        if (
+            not affect
+            and profile is None
+            and not commitments
+            and not weekly_trend
+        ):
             return ""
 
-        return _format_person_context(profile, commitments)
+        return _format_person_context(
+            profile=profile,
+            commitments=commitments,
+            affect=affect,
+            weekly_trend=weekly_trend,
+        )
 
     except Exception:
         logger.debug("Person-context fetch failed", exc_info=True)
-        return ""
+        # If DB failed but we at least have an affect string, return that —
+        # it's better than a silent blank about the person.
+        return affect
 
 
-def _format_person_context(profile, commitments: list[str]) -> str:
-    """Assemble a compact French block describing what Mika knows about them."""
+def _format_person_context(
+    *, profile, commitments: list[str], affect: str, weekly_trend: str,
+) -> str:
+    """Assemble a compact French block covering everything Mika knows+feels."""
     lines: list[str] = []
 
     if profile and profile.summary:
@@ -206,9 +231,45 @@ def _format_person_context(profile, commitments: list[str]) -> str:
         if extras:
             lines.append(" | ".join(extras))
 
+    if affect:
+        lines.append(affect)
+
+    if weekly_trend:
+        lines.append(weekly_trend)
+
     if commitments:
         lines.append(
             "Tu lui avais dit: " + "; ".join(c[:120] for c in commitments)
         )
 
     return "\n".join(lines)
+
+
+def _summarize_emotional_trend(summaries: list) -> str:
+    """Build a short French line from recent EmotionalSummary rows.
+
+    Empty when fewer than 2 days of data — a single-day snapshot isn't
+    really a "trend". Returns e.g. "Sur les 5 derniers jours avec elle/lui
+    tu as ete majoritairement happy (tendance warming)."
+    """
+    if not summaries or len(summaries) < 2:
+        return ""
+
+    from collections import Counter
+    dominant_per_day = [s.dominant_emotion for s in summaries if s.dominant_emotion]
+    if not dominant_per_day:
+        return ""
+
+    counter = Counter(dominant_per_day)
+    top, top_count = counter.most_common(1)[0]
+    most_recent = summaries[0]
+
+    if top_count >= len(summaries) * 0.6:
+        return (
+            f"Sur les {len(summaries)} derniers jours avec elle/lui tu as ete "
+            f"majoritairement {top} (tendance recente: {most_recent.trend})."
+        )
+    return (
+        f"Emotions variees avec elle/lui sur {len(summaries)} jours "
+        f"(tendance recente: {most_recent.dominant_emotion}, {most_recent.trend})."
+    )

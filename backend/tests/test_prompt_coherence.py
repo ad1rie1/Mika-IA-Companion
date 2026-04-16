@@ -132,24 +132,36 @@ class TestGlobalMoodDescription:
 # ===================================================================
 
 class TestEmotionContext:
+    """Global mood context covers Mika's standalone affective state only.
 
-    def test_context_contains_person_state(self, engine):
-        """Context should describe person's emotional state."""
+    Per-person affect was moved into `get_person_affect_context()` so the
+    two concerns — "how Mika feels" vs "how Mika feels about X" — don't
+    mix in the same prompt block.
+    """
+
+    def test_global_context_contains_humeur(self, engine):
         engine.process_emotion(EmotionData(Emotion.EXCITED, 0.8), "user1")
-        ctx = engine.get_emotion_context("user1")
+        ctx = engine.get_global_mood_context()
+        assert "humeur" in ctx.lower()
 
-        # Should contain something about the person's feeling
-        assert len(ctx) > 20
-        # Should be in French
-        assert any(w in ctx for w in ["tu", "cette", "envers", "humeur"])
+    def test_global_context_default_mood_without_interaction(self, engine):
+        """No interaction → description still says 'comme d'habitude'."""
+        ctx = engine.get_global_mood_context()
+        assert "habitude" in ctx.lower() or "humeur" in ctx.lower()
 
-    def test_context_for_unknown_person(self, engine):
-        """Context for a person with no interactions should mention no feeling."""
-        ctx = engine.get_emotion_context("stranger")
-        assert "pas de sentiment" in ctx
+    def test_person_affect_contains_person_state(self, engine):
+        engine.process_emotion(EmotionData(Emotion.EXCITED, 0.8), "user1")
+        ctx = engine.get_person_affect_context("user1")
+        assert len(ctx) > 0
+        assert any(w in ctx for w in ["tu", "cette", "envers"])
+
+    def test_person_affect_for_unknown_person_is_empty(self, engine):
+        """Unknown person → empty string (no boilerplate)."""
+        ctx = engine.get_person_affect_context("stranger")
+        assert ctx == ""
 
     def test_active_state_adds_anchoring_text(self, engine):
-        """A strong active state (moving + intense) should add the 'bien ancree' text."""
+        """Strong active person state adds the 'bien ancree' marker."""
         from emotion import pad
         pid = "anchored_user"
         for _ in range(6):
@@ -159,25 +171,23 @@ class TestEmotionContext:
         speed = pad.norm(mood.dynamic.velocity)
         intensity = pad.norm(mood.dynamic.position)
         if speed > 0.3 and intensity > 0.4:
-            ctx = engine.get_emotion_context(pid)
-            assert "ancree" in ctx or "changer" in ctx
+            ctx = engine.get_person_affect_context(pid)
+            assert "ancree" in ctx or "estomper" in ctx
 
-    def test_context_mentions_global_mood(self, engine):
-        """Context should include global mood description."""
-        engine.process_emotion(EmotionData(Emotion.ANGRY, 0.9), "user1")
-        ctx = engine.get_emotion_context("user1")
+    def test_person_affect_does_not_leak_into_global(self, engine):
+        """Regression guard: per-person impulse must not alter the global block."""
+        ctx_before = engine.get_global_mood_context()
+        engine.process_emotion(EmotionData(Emotion.ANGRY, 0.9), "someone")
+        # Global mood can shift via bleed, but the block should still be
+        # a *global* sentence — never mentioning "envers cette personne".
+        ctx_after = engine.get_global_mood_context()
+        for ctx in (ctx_before, ctx_after):
+            assert "envers cette personne" not in ctx.lower()
 
-        # Global mood section should be present
-        assert "humeur" in ctx.lower()
-
-    def test_context_coherent_after_troll_scenario(self, engine):
-        """After a troll interaction, context should reflect negative state."""
-        # Simulate troll
+    def test_troll_reflected_in_person_affect(self, engine):
         for _ in range(3):
             engine.process_emotion(EmotionData(Emotion.ANGRY, 0.8), "troll")
-
-        ctx = engine.get_emotion_context("troll")
-        # Should mention something about the person's state
+        ctx = engine.get_person_affect_context("troll")
         assert len(ctx) > 0
 
 
@@ -319,36 +329,48 @@ class TestFormatConversation:
 class TestEndToEndPromptCoherence:
     """Test that the full prompt pipeline produces coherent output."""
 
-    def test_angry_state_produces_angry_prompt(self, engine):
-        """When angry, the emotion context in the prompt should reflect anger."""
+    def test_angry_state_reflects_in_full_prompt(self, engine):
+        """Anger should surface somewhere in the prompt — either in the
+        global block (via bleed) or in the person-affect block."""
         engine.process_emotion(EmotionData(Emotion.ANGRY, 0.8), "user1")
-        emotion_ctx = engine.get_emotion_context("user1")
-        prompt = build_system_prompt(emotion_context=emotion_ctx)
+        emotion_ctx = engine.get_global_mood_context()
+        person_ctx = engine.get_person_affect_context("user1")
+        prompt = build_system_prompt(
+            emotion_context=emotion_ctx, person_context=person_ctx,
+        )
+        assert "angry" in prompt.lower()
 
-        assert "angry" in prompt.lower() or "ANGRY" in prompt
-
-    def test_happy_default_produces_neutral_prompt(self, engine):
-        """Default state should show 'comme d'habitude' type language."""
-        emotion_ctx = engine.get_emotion_context("new_user")
-        prompt = build_system_prompt(emotion_context=emotion_ctx)
-
-        assert "pas de sentiment" in prompt or "comme d'habitude" in prompt
+    def test_default_state_shows_baseline_language(self, engine):
+        """Default state → global block mentions 'comme d'habitude' language.
+        Affect block is empty for a new user (no filler)."""
+        emotion_ctx = engine.get_global_mood_context()
+        person_ctx = engine.get_person_affect_context("new_user")
+        assert person_ctx == ""
+        prompt = build_system_prompt(
+            emotion_context=emotion_ctx, person_context=person_ctx,
+        )
+        assert "habitude" in prompt or "humeur" in prompt
 
     def test_full_prompt_with_conversation(self, engine):
         """Full prompt assembly with all layers should be valid."""
         engine.process_emotion(EmotionData(Emotion.CURIOUS, 0.7), "user1")
 
-        emotion_ctx = engine.get_emotion_context("user1")
+        emotion_ctx = engine.get_global_mood_context()
+        person_ctx = engine.get_person_affect_context("user1")
         memory_ctx = "Souvenir: cette personne aime Python et les chats."
         module_ctx = "Tu as 2 emails non lus."
 
-        prompt = build_system_prompt(emotion_ctx, memory_ctx, module_ctx)
+        prompt = build_system_prompt(
+            emotion_context=emotion_ctx,
+            memory_context=memory_ctx,
+            module_context=module_ctx,
+            person_context=person_ctx,
+        )
         user_prompt = format_conversation(
             "Tu connais Python ?",
             [{"role": "user", "content": "Salut !"}, {"role": "assistant", "content": "Hey !"}],
         )
 
-        # Both should be non-empty and contain expected content
         assert len(prompt) > 100
         assert len(user_prompt) > 10
         assert "Python" in prompt  # from memory

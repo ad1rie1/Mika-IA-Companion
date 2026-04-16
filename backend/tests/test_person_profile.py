@@ -856,6 +856,95 @@ class TestFetchPersonContext:
         assert "Tu lui avais dit" in block
 
     @pytest.mark.asyncio
+    async def test_affect_block_included_when_person_mood_active(self):
+        """When Mika has a real stance toward the person, the person_context
+        block should include the affect line."""
+        from emotion.engine import emotion_engine
+        from emotion.types import Emotion, EmotionData
+        from memory.models import Entity, PersonProfile
+        from pipeline.context import _fetch_person_context
+
+        ent = await sync_to_async(Entity.objects.create)(
+            name="Anna", entity_type="person",
+        )
+        await sync_to_async(PersonProfile.objects.create)(
+            entity=ent, summary="Anna est cool.",
+        )
+
+        # Seed a strong person mood so the affect block is non-empty.
+        emotion_engine.person_moods.pop("Anna", None)
+        for _ in range(4):
+            emotion_engine.process_emotion(
+                EmotionData(Emotion.HAPPY, 0.8), "Anna",
+            )
+
+        block = await _fetch_person_context("Anna")
+        # Affect description uses "tu" or "envers"
+        assert any(word in block.lower() for word in ("envers", "tu te sens"))
+        # And the profile summary is still there
+        assert "Anna est cool" in block
+
+    @pytest.mark.asyncio
+    async def test_weekly_trend_added_when_two_plus_summaries(self):
+        """Two or more EmotionalSummary rows → trend sentence appears."""
+        from datetime import date, timedelta as td
+        from memory.models import EmotionalSummary, Entity, PersonProfile
+        from pipeline.context import _fetch_person_context
+
+        pid = "Marc"
+        ent = await sync_to_async(Entity.objects.create)(
+            name=pid, entity_type="person",
+        )
+        await sync_to_async(PersonProfile.objects.create)(
+            entity=ent, summary="Marc est sympa.",
+        )
+
+        today = date.today()
+        for offset in range(3):
+            await sync_to_async(EmotionalSummary.objects.create)(
+                person_id=pid,
+                period_type="daily",
+                period_start=today - td(days=offset),
+                dominant_emotion="happy",
+                dominant_intensity=0.7,
+                emotion_distribution={"happy": 0.7},
+                trend="warming",
+                snapshot_count=10,
+            )
+
+        block = await _fetch_person_context(pid)
+        assert "jours" in block
+        assert "happy" in block
+        assert "warming" in block
+
+    @pytest.mark.asyncio
+    async def test_no_trend_with_single_summary(self):
+        """A single day of data is not a trend — don't fabricate one."""
+        from datetime import date
+        from memory.models import EmotionalSummary, Entity, PersonProfile
+        from pipeline.context import _fetch_person_context
+
+        pid = "Lone"
+        ent = await sync_to_async(Entity.objects.create)(
+            name=pid, entity_type="person",
+        )
+        await sync_to_async(PersonProfile.objects.create)(
+            entity=ent, summary="Lone.",
+        )
+        await sync_to_async(EmotionalSummary.objects.create)(
+            person_id=pid,
+            period_type="daily",
+            period_start=date.today(),
+            dominant_emotion="sad",
+            dominant_intensity=0.5,
+            trend="stable",
+            snapshot_count=1,
+        )
+
+        block = await _fetch_person_context(pid)
+        assert "jours" not in block
+
+    @pytest.mark.asyncio
     async def test_honored_commitments_not_included(self):
         from memory.models import Commitment, Entity, PersonProfile
         from pipeline.context import _fetch_person_context

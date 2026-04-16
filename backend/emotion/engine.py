@@ -541,24 +541,44 @@ class EmotionEngine:
     # System prompt context
     # ------------------------------------------------------------------
 
-    def get_emotion_context(self, person_id: str) -> str:
-        """Generate French text describing current emotional state for system prompt."""
-        person = self._get_person_mood(person_id)
+    def get_global_mood_context(self) -> str:
+        """French description of Mika's *standalone* emotional state.
+
+        This is about Mika alone, independent of the interlocutor. The
+        per-person affective stance belongs to `get_person_affect_context()`
+        and is injected in the `person_context` block, not here.
+        """
         default = self.temperament.default_mood
+        return self.global_mood.to_prompt_description(default)
 
-        lines = [
-            person.to_prompt_description(),
-            self.global_mood.to_prompt_description(default),
-        ]
+    def get_person_affect_context(self, person_id: str) -> str:
+        """French description of how Mika feels *toward this specific person*.
 
-        # "Ancrage" = when the oscillator has high velocity AND high intensity
-        # it means the state is actively moving — Mika is emotionally engaged.
-        speed = pad.norm(person.dynamic.velocity)
+        Covers both the current PersonMood (live PAD oscillator) and the
+        "ancrage" marker when the state is actively engaged (high velocity
+        and intensity). Returned as a block ready to be concatenated into
+        the person_context section.
+
+        Returns "" when the state is effectively neutral — absence is
+        more useful than boilerplate ("pas de sentiment particulier")
+        for every unfamiliar person. The caller's context block stays
+        empty in that case, which keeps the prompt lean.
+        """
+        person = self._get_person_mood(person_id)
         intensity = pad.norm(person.dynamic.position)
+        speed = pad.norm(person.dynamic.velocity)
+        # Engagement = enough settled state (position) OR a fresh impulse
+        # (velocity). A just-applied impulse hasn't yet moved the position,
+        # but the energy is real and should surface in the prompt.
+        if intensity < 0.1 and speed < 0.15:
+            return ""
+
+        lines: list[str] = [person.to_prompt_description()]
+
         if speed > 0.3 and intensity > 0.4:
             lines.append(
-                "Cette emotion est bien ancree en toi en ce moment, "
-                "tu ne vas pas changer d'humeur facilement."
+                "Cette emotion envers cette personne est bien ancree, "
+                "elle ne va pas s'estomper facilement."
             )
 
         return "\n".join(lines)
