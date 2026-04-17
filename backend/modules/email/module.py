@@ -44,6 +44,10 @@ class EmailModule(BaseModule):
         from modules.email.config_schema import CONFIG_SCHEMA
         return CONFIG_SCHEMA
 
+    def get_models(self) -> list:
+        from modules.email.models import Contact, Email, EmailAccount
+        return [EmailAccount, Contact, Email]
+
     async def instantiate(self) -> None:
         from asgiref.sync import sync_to_async
 

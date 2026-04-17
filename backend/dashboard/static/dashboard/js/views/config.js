@@ -53,6 +53,99 @@ Dash.render(async (root) => {
     });
   }
 
+  // ── Module activation banner ─────────────────────────────────
+  // Sections whose key is "module_<name>" belong to a plugin module.
+  // We surface Activer / Désactiver / Désinstaller directly in the
+  // configuration page so the user can administer the module right
+  // next to its settings.
+  async function fetchModuleRow(moduleName) {
+    const d = await api("/dashboard/api/modules");
+    if (!d || !d.modules) return null;
+    return d.modules.find(m => m.name === moduleName) || null;
+  }
+
+  async function postModuleAction(moduleName, action, body) {
+    const r = await fetch(
+      `/dashboard/api/modules/${encodeURIComponent(moduleName)}/${action}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: body ? JSON.stringify(body) : "{}",
+      },
+    );
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { alert(j.error || `HTTP ${r.status}`); return false; }
+    return true;
+  }
+
+  function renderModuleBanner(section) {
+    if (!section.key || !section.key.startsWith("module_")) return "";
+    return `
+      <div class="card mb" id="module-banner" data-module="${escapeHTML(section.key.substring("module_".length))}">
+        <div class="muted">Chargement de l'état du module…</div>
+      </div>`;
+  }
+
+  async function wireModuleBanner(section) {
+    if (!section.key || !section.key.startsWith("module_")) return;
+    const moduleName = section.key.substring("module_".length);
+    const host = contentEl.querySelector("#module-banner");
+    if (!host) return;
+
+    async function paint() {
+      const row = await fetchModuleRow(moduleName);
+      if (!row) {
+        host.innerHTML = `<div class="muted">Ce module n'est pas enregistré (pas d'implémentation Python trouvée).</div>`;
+        return;
+      }
+      const statePill = !row.enabled
+        ? `<span class="pill">désactivé</span>`
+        : !row.available
+          ? `<span class="pill warn">indisponible</span>`
+          : row.running
+            ? `<span class="pill pos">en marche</span>`
+            : `<span class="pill">arrêté</span>`;
+      const toggleBtn = row.enabled
+        ? `<button class="btn" data-act="disable">Désactiver</button>`
+        : `<button class="btn primary" data-act="enable">Activer</button>`;
+      const uninstallBtn = row.has_models
+        ? `<button class="btn danger" data-act="uninstall">Désinstaller…</button>`
+        : "";
+      const tablesInfo = (row.installed_tables && row.installed_tables.length)
+        ? `<span class="muted mono">${row.installed_tables.length} table(s): ${escapeHTML(row.installed_tables.join(", "))}</span>`
+        : row.has_models
+          ? `<span class="muted">aucune table installée</span>`
+          : `<span class="muted">ce module n'a pas de données persistantes</span>`;
+
+      host.innerHTML = `
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <div style="flex:1;min-width:200px">
+            <div><b>${escapeHTML(moduleName)}</b> ${statePill}</div>
+            <div style="margin-top:4px">${tablesInfo}</div>
+          </div>
+          <div style="display:flex;gap:8px">${toggleBtn} ${uninstallBtn}</div>
+        </div>
+        <div class="muted" style="margin-top:8px;font-size:0.85em">
+          <b>Activer</b> crée les tables manquantes et démarre le module.
+          <b>Désactiver</b> stoppe le module, les données restent en base.
+          <b>Désinstaller</b> supprime toutes les tables du module (irréversible).
+        </div>`;
+
+      host.querySelectorAll("button[data-act]").forEach(btn => {
+        btn.onclick = async () => {
+          const act = btn.dataset.act;
+          if (act === "uninstall") {
+            if (!window.confirm(`Désinstaller "${moduleName}" ?\n\nCela supprimera TOUTES ses tables et données.\nCette action est irréversible.`)) return;
+            if (await postModuleAction(moduleName, "uninstall", { confirm: true })) paint();
+          } else {
+            if (await postModuleAction(moduleName, act)) paint();
+          }
+        };
+      });
+    }
+    paint();
+  }
+
   // ── Section content ───────────────────────────────────────────
   async function renderContent() {
     const section = sections.find(s => s.key === activeKey);
@@ -71,12 +164,15 @@ Dash.render(async (root) => {
         <h3>${escapeHTML(section.label)}<span class="tag">${section.items.length} paramètre(s)</span></h3>
         ${section.description ? `<div class="muted mb">${escapeHTML(section.description)}</div>` : ""}
       </div>
+      ${renderModuleBanner(section)}
       ${groupNames.map(g => `
         <div class="card mb">
           ${g ? `<h3>${escapeHTML(g)}</h3>` : ""}
           <div class="cfg-fields" data-group="${escapeHTML(g)}"></div>
         </div>`).join("")}
     `;
+
+    wireModuleBanner(section);
 
     // Render fields per group
     for (const g of groupNames) {

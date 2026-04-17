@@ -114,6 +114,27 @@ class BaseModule(ABC):
         """React to an event emitted by another module. Default: ignore."""
         pass
 
+    # ── Data models (owned by the module) ────────────────────────
+
+    def get_models(self) -> list:
+        """Return the Django model classes this module owns.
+
+        Used by ModuleManager to auto-create tables via schema_editor
+        when the module is enabled, and to drop them on uninstall.
+
+        New modules should declare their models with
+        ``class Meta: managed = False`` so Django's migration system
+        ignores them — the table lifecycle is handled per-module.
+
+        Existing modules whose tables were created through standard
+        Django migrations may still list their models here: the
+        installer detects already-present tables and does not
+        re-create them.
+
+        Default: no models.
+        """
+        return []
+
     # ── Configuration schema ──────────────────────────────────────
 
     def config_schema(self) -> list:

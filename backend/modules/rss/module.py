@@ -46,6 +46,10 @@ class RSSModule(BaseModule):
         from modules.rss.config_schema import CONFIG_SCHEMA
         return CONFIG_SCHEMA
 
+    def get_models(self) -> list:
+        from modules.rss.models import RSSEntry, RSSFeed
+        return [RSSFeed, RSSEntry]
+
     def is_available(self) -> bool:
         try:
             import feedparser  # noqa: F401

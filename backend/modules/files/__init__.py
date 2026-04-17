@@ -28,6 +28,10 @@ class FilesModule(BaseModule):
         # {str(file_id): {id, name, type, category, size, path, person_id}}
         self._registry: dict[str, dict] = {}
 
+    def get_models(self) -> list:
+        from modules.files.models import UploadedFile
+        return [UploadedFile]
+
     # ── Lifecycle ──────────────────────────────────────────────────
 
     async def instantiate(self) -> None:

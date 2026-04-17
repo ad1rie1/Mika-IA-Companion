@@ -43,6 +43,9 @@ class ModuleManager:
     """
 
     def __init__(self) -> None:
+        # All modules ever registered, including disabled ones.
+        self._registered: dict[str, BaseModule] = {}
+        # Active modules: those the manager currently considers runnable.
         self._modules: dict[str, BaseModule] = {}
         self._scheduler_task: asyncio.Task | None = None
         self._tick_interval: int = DEFAULT_TICK_INTERVAL
@@ -53,8 +56,10 @@ class ModuleManager:
     # ── Registration ──────────────────────────────────────────────
 
     def register(self, module: BaseModule) -> None:
-        if module.name in self._modules:
+        if module.name in self._registered:
             raise ValueError(f"Module '{module.name}' is already registered")
+
+        self._registered[module.name] = module
 
         # Absorb config schema REGARDLESS of availability — the whole
         # point of surfacing it in the UI is to let the user configure
@@ -79,6 +84,11 @@ class ModuleManager:
             )
             return
 
+        # Note: ModuleState is NOT consulted here. Querying the DB from
+        # AppConfig.ready() triggers Django's APPS_NOT_READY warning and
+        # breaks on a fresh install before the migration for ModuleState
+        # has been applied. The enabled/disabled filter is applied in
+        # start_all() instead, where the ORM is fully live.
         module.set_notify_ai(self._notify_ai)
         self._modules[module.name] = module
         self._tools_cache = None
@@ -86,6 +96,198 @@ class ModuleManager:
 
     def get_module(self, name: str) -> BaseModule | None:
         return self._modules.get(name)
+
+    def get_registered(self, name: str) -> BaseModule | None:
+        """Return a module whether or not it is currently enabled."""
+        return self._registered.get(name)
+
+    def list_all(self) -> list[dict[str, Any]]:
+        """List every registered module with its enable/running state."""
+        from modules.state_model import ModuleState
+
+        states: dict[str, ModuleState] = {
+            s.name: s for s in ModuleState.objects.all()
+        }
+        result = []
+        for name, module in self._registered.items():
+            state = states.get(name)
+            result.append({
+                "name": name,
+                "enabled": state.enabled if state else True,
+                "running": module.is_running,
+                "available": module.is_available(),
+                "installed_tables": state.installed_tables if state else [],
+                "has_models": bool(self._safe_models(module)),
+            })
+        return result
+
+    # ── ModuleState helpers ───────────────────────────────────────
+
+    def _is_enabled_in_state(self, name: str) -> bool:
+        """Return whether the module is marked enabled in ModuleState.
+
+        Defaults to True for modules that have never been toggled, so
+        existing deployments keep their current behavior.
+        """
+        try:
+            from modules.state_model import ModuleState
+            state = ModuleState.objects.filter(pk=name).first()
+        except Exception:
+            # DB not migrated yet during bootstrap — assume enabled.
+            return True
+        return True if state is None else state.enabled
+
+    @staticmethod
+    def _safe_models(module: BaseModule) -> list:
+        try:
+            return list(module.get_models() or [])
+        except Exception:
+            logger.exception("get_models() failed for module %s", module.name)
+            return []
+
+    def _upsert_state(
+        self,
+        name: str,
+        *,
+        enabled: bool | None = None,
+        installed_tables: list[str] | None = None,
+    ) -> None:
+        from modules.state_model import ModuleState
+
+        defaults: dict[str, Any] = {}
+        if enabled is not None:
+            defaults["enabled"] = enabled
+        if installed_tables is not None:
+            defaults["installed_tables"] = installed_tables
+        ModuleState.objects.update_or_create(name=name, defaults=defaults)
+
+    # ── Schema lifecycle (enable / disable / uninstall) ──────────
+
+    def install_tables(self, name: str) -> list[str]:
+        """Create any missing tables for the module's declared models.
+
+        Safe to call repeatedly; existing tables are left untouched.
+        Returns the list of newly created table names.
+        """
+        from modules.schema_ops import create_tables_for
+        module = self._registered.get(name)
+        if module is None:
+            raise KeyError(f"Module '{name}' is not registered")
+
+        models = self._safe_models(module)
+        created = create_tables_for(models) if models else []
+
+        # Merge newly created tables into the recorded list.
+        from modules.state_model import ModuleState
+        state, _ = ModuleState.objects.get_or_create(name=name)
+        known = set(state.installed_tables or [])
+        known.update(created)
+        state.installed_tables = sorted(known)
+        state.save(update_fields=["installed_tables", "updated_at"])
+
+        return created
+
+    def install_missing_at_boot(self) -> None:
+        """For every registered + enabled module, create tables that are
+        declared in code but not yet present in the database.
+
+        This is what makes adding a new model to an enabled module a
+        zero-ceremony operation: on next boot, the table appears.
+        """
+        for name, module in self._registered.items():
+            if not self._is_enabled_in_state(name):
+                continue
+            if not self._safe_models(module):
+                continue
+            try:
+                self.install_tables(name)
+            except Exception:
+                logger.exception("install_missing_at_boot failed for %s", name)
+
+    async def enable(self, name: str) -> None:
+        """Mark a module enabled, install its tables, and start it.
+
+        Idempotent: if already enabled and running, does nothing.
+        """
+        module = self._registered.get(name)
+        if module is None:
+            raise KeyError(f"Module '{name}' is not registered")
+
+        self._upsert_state(name, enabled=True)
+        self.install_tables(name)
+
+        if not module.is_available():
+            logger.info(
+                "Module '%s' enabled but not available yet (config missing)",
+                name,
+            )
+            return
+
+        if module.name not in self._modules:
+            module.set_notify_ai(self._notify_ai)
+            self._modules[module.name] = module
+
+        if not module.is_running:
+            try:
+                await module._do_start()
+            except Exception:
+                logger.exception("Failed to start module %s on enable()", name)
+                module._running = False
+                return
+
+        self.invalidate_tools_cache()
+        self._build_mcp_server()
+        logger.info("Module '%s' enabled", name)
+
+    async def disable(self, name: str) -> None:
+        """Mark a module disabled and stop it.
+
+        Tables are preserved; call ``uninstall()`` to drop them.
+        """
+        module = self._registered.get(name)
+        if module is None:
+            raise KeyError(f"Module '{name}' is not registered")
+
+        self._upsert_state(name, enabled=False)
+
+        if module.is_running:
+            try:
+                await module._do_stop()
+            except Exception:
+                logger.exception("Error stopping module %s on disable()", name)
+
+        self._modules.pop(name, None)
+        self.invalidate_tools_cache()
+        self._build_mcp_server()
+        logger.info("Module '%s' disabled (tables preserved)", name)
+
+    async def uninstall(self, name: str) -> None:
+        """Stop the module and drop every table it owns.
+
+        DESTRUCTIVE. All data in the module's tables is lost.
+        """
+        from modules.schema_ops import drop_tables_for
+        from modules.state_model import ModuleState
+
+        module = self._registered.get(name)
+        if module is None:
+            raise KeyError(f"Module '{name}' is not registered")
+
+        if module.is_running:
+            try:
+                await module._do_stop()
+            except Exception:
+                logger.exception("Error stopping module %s on uninstall()", name)
+
+        models = self._safe_models(module)
+        if models:
+            drop_tables_for(models)
+
+        ModuleState.objects.filter(pk=name).delete()
+        self._modules.pop(name, None)
+        self.invalidate_tools_cache()
+        self._build_mcp_server()
+        logger.warning("Module '%s' uninstalled (tables dropped)", name)
 
     # ── Lifecycle ─────────────────────────────────────────────────
 
@@ -101,6 +303,25 @@ class ModuleManager:
         self._tick_interval = config_service.get(
             "modules.cron_tick_interval", default=DEFAULT_TICK_INTERVAL,
         )
+
+        # Filter out modules that the user has explicitly disabled.
+        # Done here (not in register()) to avoid querying the ORM during
+        # AppConfig.ready().
+        disabled = [
+            name for name in list(self._modules)
+            if not self._is_enabled_in_state(name)
+        ]
+        for name in disabled:
+            logger.info("Module '%s' disabled via ModuleState, skipping", name)
+            self._modules.pop(name, None)
+
+        # Create any tables declared by enabled modules but not yet
+        # present in the database (e.g. a new model added since last boot,
+        # or a freshly imported third-party module).
+        try:
+            self.install_missing_at_boot()
+        except Exception:
+            logger.exception("install_missing_at_boot failed")
 
         for module in self._modules.values():
             try:
@@ -143,7 +364,9 @@ class ModuleManager:
             try:
                 await asyncio.sleep(1)
                 now = time.time()
-                for module in self._modules.values():
+                # Snapshot so a concurrent enable()/disable() that mutates
+                # self._modules cannot break iteration.
+                for module in list(self._modules.values()):
                     if not module.is_running:
                         continue
                     interval = module.CRON_INTERVAL or self._tick_interval

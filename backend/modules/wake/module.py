@@ -35,6 +35,10 @@ class WakeModule(BaseModule):
     def __init__(self):
         super().__init__("wake")
 
+    def get_models(self) -> list:
+        from modules.wake.models import WakeRequest
+        return [WakeRequest]
+
     # ── Lifecycle ─────────────────────────────────────────────────
 
     async def instantiate(self) -> None:
