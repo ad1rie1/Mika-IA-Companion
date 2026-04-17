@@ -163,7 +163,7 @@ async def save_attachments(
 def _create_db_record(
     file_id, original_name, media_type, category, file_size, disk_path, person_id
 ):
-    from modules.files.models import UploadedFile
+    from files.models import UploadedFile
     return UploadedFile.objects.create(
         file_id=file_id,
         original_name=original_name,
@@ -176,13 +176,10 @@ def _create_db_record(
 
 
 def _register_in_module(db_obj) -> None:
-    """Enregistre le fichier dans le FilesModule en mémoire."""
+    """Publish the new file to the core files service's in-memory index."""
     try:
-        from modules.manager import module_manager
-        files_module = module_manager._modules.get("files")
-        if files_module is None:
-            return
-        files_module.register_file({
+        from files.service import files_service
+        files_service.register_file({
             "id": str(db_obj.file_id),
             "name": db_obj.original_name,
             "type": db_obj.media_type,
@@ -194,4 +191,4 @@ def _register_in_module(db_obj) -> None:
             "deleted": False,
         })
     except Exception:
-        logger.warning("Impossible d'enregistrer le fichier dans FilesModule", exc_info=True)
+        logger.warning("Impossible d'enregistrer le fichier auprès du service files", exc_info=True)

@@ -4,7 +4,14 @@ from django.db import models
 
 
 class UploadedFile(models.Model):
-    """A file uploaded by a user — stored on disk, metadata in DB."""
+    """A file uploaded by a user — stored on disk, metadata in DB.
+
+    Historical note: the physical table name is kept as
+    ``modules_uploadedfile`` because the model used to live in the
+    ``modules`` Django app. The ownership has been transferred to the
+    ``files`` app via a state-only migration (no ALTER TABLE) so
+    existing data is preserved.
+    """
 
     file_id = models.UUIDField(default=uuid.uuid4, unique=True, db_index=True)
     original_name = models.CharField(max_length=255)
@@ -17,7 +24,8 @@ class UploadedFile(models.Model):
     is_deleted = models.BooleanField(default=False)
 
     class Meta:
-        app_label = "modules"
+        app_label = "files"
+        db_table = "modules_uploadedfile"
         ordering = ["-uploaded_at"]
 
     def __str__(self):

@@ -6,7 +6,6 @@ them so Django migrations stay under modules/migrations/.
 """
 
 from modules.email.models import Contact, Email, EmailAccount  # noqa: F401
-from modules.files.models import UploadedFile  # noqa: F401
 from modules.rss.models import RSSEntry, RSSFeed  # noqa: F401
 from modules.state_model import ModuleState  # noqa: F401
 from modules.wake.models import WakeRequest  # noqa: F401

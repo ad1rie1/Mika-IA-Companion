@@ -30,6 +30,7 @@ INSTALLED_APPS = [
     "drives",
     "memory",
     "conscience",
+    "files",
     "modules",
     "projects",
     "dashboard",
