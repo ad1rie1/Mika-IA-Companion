@@ -73,7 +73,7 @@ async function init() {
 
   // Scene setup
   const sceneManager = new SceneManager(container);
-  new Environment(sceneManager.scene);
+  const environment = new Environment(sceneManager.scene);
   const cameraController = new CameraController(
     sceneManager.camera,
     sceneManager.renderer.domElement
@@ -138,7 +138,22 @@ async function init() {
     }
   });
 
-  ws.on("speech", (data) => {
+  // Sleep phase plumbing. The InnerLifePanel extracts the phase from
+  // every inner_state payload; we fan it out to the animation mixer
+  // (avatar dozes) and the environment (lights dim). We also stamp
+  // `lastAsleepAt` every tick while asleep so the TTS can insert a
+  // wake-up pause on the first reply after waking — no matter whether
+  // the speech payload carries an already-awake phase or not.
+  let lastAsleepAt: number | null = null;
+  innerLifePanel.onSleepPhaseChange((phase) => {
+    animationMixer.setSleepPhase(phase);
+    environment.setSleepPhase(phase);
+    if (phase !== "awake") {
+      lastAsleepAt = performance.now();
+    }
+  });
+
+  const handleSpeech = (data: any) => {
     // Validate emotion from backend
     const rawEmotion = data.emotion as string;
     const emotion: EmotionName = VALID_EMOTIONS.has(rawEmotion)
@@ -157,10 +172,31 @@ async function init() {
     innerLifePanel.setEmotionBlend(data.emotion_blend || [], intensity);
     innerLifePanel.applyInnerState(data.inner_state);
 
+    // Wake-up pause: if Mika was asleep within the last 10s (either
+    // she's still marked asleep OR she just transitioned awake in the
+    // same payload), prefix the TTS with ~1.3s of silence so she
+    // sounds like she's surfacing from sleep. Fires once per wake.
+    if (
+      lastAsleepAt !== null &&
+      performance.now() - lastAsleepAt < 10000
+    ) {
+      tts.requestWakeUpDelay(1300);
+      lastAsleepAt = null;
+    }
+
     // Speak
     const estimatedDuration = Math.min(data.text.length * 60, 15000);
     lipSyncController.startTextDriven(data.text, estimatedDuration);
     tts.speak(data.text, emotion);
+  };
+
+  ws.on("speech", handleSpeech);
+
+  // Pure state refresh — no speech, no lip-sync, just inner_state.
+  // Emitted by the backend when Mika's sleep phase transitions during
+  // the night without any conversation turn happening.
+  ws.on("inner_state_update", (data: any) => {
+    innerLifePanel.applyInnerState(data.inner_state);
   });
 
   ws.connect();
@@ -172,6 +208,7 @@ async function init() {
     emotionController.update(delta);
     animationMixer.update(delta);
     lipSyncController.update(delta);
+    environment.update(delta);
   });
 }
 

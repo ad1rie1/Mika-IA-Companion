@@ -1,15 +1,83 @@
 import * as THREE from "three";
 
+export type SleepPhase = "awake" | "light_sleep" | "rem" | "deep_sleep";
+
+// Per-phase multipliers applied to all ambient / directional / accent
+// light intensities. Deep sleep = almost dark blue room.
+const PHASE_LIGHT_MULTIPLIER: Record<SleepPhase, number> = {
+  awake: 1.0,
+  light_sleep: 0.55,
+  rem: 0.40,
+  deep_sleep: 0.22,
+};
+
+// Night tint applied to the scene background when asleep. RGB in THREE.
+const PHASE_BG_COLOR: Record<SleepPhase, number> = {
+  awake: 0x1a1a2e,       // the scene's default
+  light_sleep: 0x131230,
+  rem: 0x0f0e28,
+  deep_sleep: 0x08081b,
+};
+
+const LIGHT_EASE_DURATION = 1.8; // seconds
+
+interface TrackedLight {
+  light: THREE.Light;
+  baseIntensity: number;
+}
+
 export class Environment {
   public group: THREE.Group;
+  private scene: THREE.Scene;
+  private trackedLights: TrackedLight[] = [];
+  private sleepPhase: SleepPhase = "awake";
+  private currentMultiplier = 1.0;
+  private targetMultiplier = 1.0;
+  private currentBgColor = new THREE.Color(PHASE_BG_COLOR.awake);
+  private targetBgColor = new THREE.Color(PHASE_BG_COLOR.awake);
 
   constructor(scene: THREE.Scene) {
+    this.scene = scene;
     this.group = new THREE.Group();
     scene.add(this.group);
 
     this.createRoom();
     this.createFurniture();
     this.createLighting(scene);
+  }
+
+  /** Drive scene lights + background color from Mika's sleep phase. */
+  setSleepPhase(phase: SleepPhase): void {
+    if (this.sleepPhase === phase) return;
+    this.sleepPhase = phase;
+    this.targetMultiplier = PHASE_LIGHT_MULTIPLIER[phase];
+    this.targetBgColor = new THREE.Color(PHASE_BG_COLOR[phase]);
+  }
+
+  /** Called by the main update loop. Eases lights + bg toward targets. */
+  update(delta: number): void {
+    const rate = Math.min(1, delta / LIGHT_EASE_DURATION * 4);
+    const diff = this.targetMultiplier - this.currentMultiplier;
+    if (Math.abs(diff) > 0.001) {
+      this.currentMultiplier += diff * rate;
+      for (const tl of this.trackedLights) {
+        tl.light.intensity = tl.baseIntensity * this.currentMultiplier;
+      }
+    }
+    // Ease background color toward target
+    if (!this.currentBgColor.equals(this.targetBgColor)) {
+      this.currentBgColor.lerp(this.targetBgColor, rate);
+      if (this.scene.background instanceof THREE.Color) {
+        this.scene.background.copy(this.currentBgColor);
+      }
+      if (this.scene.fog && this.scene.fog instanceof THREE.Fog) {
+        this.scene.fog.color.copy(this.currentBgColor);
+      }
+    }
+  }
+
+  private track(light: THREE.Light): void {
+    this.trackedLights.push({ light, baseIntensity: light.intensity });
   }
 
   private createRoom() {
@@ -221,6 +289,7 @@ export class Environment {
     // Ambient light - soft and warm
     const ambient = new THREE.AmbientLight(0xffeedd, 0.3);
     scene.add(ambient);
+    this.track(ambient);
 
     // Main directional light
     const dirLight = new THREE.DirectionalLight(0xfff5e6, 0.6);
@@ -231,21 +300,25 @@ export class Environment {
     dirLight.shadow.camera.near = 0.1;
     dirLight.shadow.camera.far = 10;
     scene.add(dirLight);
+    this.track(dirLight);
 
     // Purple accent light (from LED strip)
     const purpleLight = new THREE.PointLight(0x6366f1, 0.5, 6);
     purpleLight.position.set(0, 3.2, -2.5);
     scene.add(purpleLight);
+    this.track(purpleLight);
 
     // Warm desk lamp light
     const deskLight = new THREE.PointLight(0xffaa44, 0.4, 3);
     deskLight.position.set(-1.2, 1.5, -2.3);
     deskLight.castShadow = true;
     scene.add(deskLight);
+    this.track(deskLight);
 
     // Monitor glow
     const monitorGlow = new THREE.PointLight(0x6366f1, 0.2, 2);
     monitorGlow.position.set(-1.2, 1.25, -2.5);
     scene.add(monitorGlow);
+    this.track(monitorGlow);
   }
 }

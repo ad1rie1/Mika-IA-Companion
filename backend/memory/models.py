@@ -366,3 +366,103 @@ class ConsolidationLog(models.Model):
             f"Consolidation @ {self.ran_at:%H:%M}: "
             f"{self.souvenirs_created}S {self.connaissances_created}K"
         )
+
+
+class DailyJournal(models.Model):
+    """First-person recap of a single day.
+
+    Produced by the SleepCycle's light-sleep phase (between ~23h and midnight).
+    Gives Mika a causal, narrative thread through the day's events —
+    something the atomic Souvenirs cannot provide since they're disconnected.
+    One row per calendar date; re-running the phase on the same day refreshes
+    the narrative in place.
+    """
+
+    date = models.DateField(unique=True)
+    narrative = models.TextField(
+        help_text="First-person paragraph covering the day's arc.",
+    )
+    # Top souvenirs of the day, stored as ids (snapshot, not relational —
+    # if a souvenir is pruned later, the journal still makes sense).
+    key_moments = models.JSONField(default=list)
+    dominant_emotion = models.CharField(max_length=30, blank=True, default="")
+    persons_interacted = models.JSONField(default=list)
+    # Snapshots of active ruminations at day's end. Stored as
+    # [{"summary": "...", "emotion": "...", "intensity": 0.x}, ...].
+    # Dream phase reads these to decide if a nightmare theme is warranted.
+    unresolved_at_sleep = models.JSONField(default=list)
+    word_count = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-date"]
+        indexes = [
+            models.Index(fields=["-date"]),
+        ]
+
+    def __str__(self):
+        return f"[{self.date}] {self.narrative[:80]}"
+
+
+class Dream(models.Model):
+    """A dream Mika had during sleep — a creative association built during
+    the SleepCycle's REM phase.
+
+    Dreams stitch together 2-3 recent souvenirs (potentially from distant
+    themes) with optionally one active rumination, producing a short
+    oneiric narrative that the LLM generates. High-vividness dreams can
+    surface in the next morning's prompt so Mika can mention them.
+
+    We never delete dreams on decay — they're rare, cheap to store,
+    and form an auditable trace of the character's "inner life".
+    """
+
+    class DreamType(models.TextChoices):
+        ASSOCIATIVE = "associative", "Associative"
+        NIGHTMARE = "nightmare", "Nightmare"
+        PLEASANT = "pleasant", "Pleasant"
+        MUNDANE = "mundane", "Mundane"
+
+    # "Night of" the dream — the calendar date the sleep cycle started on
+    # (e.g. a dream at 03h on the 18th has night_of = 17). Used to group
+    # dreams per night and to decide eligibility for morning recall.
+    night_of = models.DateField()
+    content = models.TextField(
+        help_text="The dream narrative: 2-4 short sentences, first-person.",
+    )
+    dream_type = models.CharField(
+        max_length=20,
+        choices=DreamType.choices,
+        default=DreamType.ASSOCIATIVE,
+    )
+    # 0 = barely recall it, 1 = vivid. Gates whether the dream is eligible
+    # for morning prompt injection (threshold ~0.6).
+    vividness = models.FloatField(default=0.5)
+    source_souvenirs = models.ManyToManyField(
+        Souvenir, blank=True, related_name="dreams",
+    )
+    source_rumination = models.ForeignKey(
+        "conscience.Rumination",
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name="dreams",
+    )
+    emotion = models.CharField(
+        max_length=30, blank=True, default="",
+        help_text="Dominant emotion of the dream.",
+    )
+    # Set when the dream is first surfaced in a system prompt, so we
+    # don't re-mention the same dream across multiple turns.
+    recalled_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["-night_of"]),
+            models.Index(fields=["recalled_at", "-vividness"]),
+        ]
+
+    def __str__(self):
+        return f"[{self.night_of}|{self.dream_type}|{self.vividness:.1f}] {self.content[:60]}"

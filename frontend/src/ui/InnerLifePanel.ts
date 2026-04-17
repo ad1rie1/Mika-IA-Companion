@@ -15,6 +15,8 @@
 
 type EmotionBlend = Array<{ emotion: string; weight: number }>;
 
+export type SleepPhase = "awake" | "light_sleep" | "rem" | "deep_sleep";
+
 interface InnerState {
   drives?: Record<string, { tension: number; last_satisfied: number }>;
   energy?: number;
@@ -23,6 +25,21 @@ interface InnerState {
     hour: number;
     energy: number;
     bias_emotion: string;
+  };
+  sleep_phase?: SleepPhase;
+  today_journal?: {
+    date: string;
+    narrative: string;
+    dominant_emotion: string;
+    persons_interacted: string[];
+  };
+  last_dream?: {
+    content: string;
+    dream_type: "associative" | "nightmare" | "pleasant" | "mundane";
+    vividness: number;
+    emotion: string;
+    night_of: string;
+    recalled: boolean;
   };
   self_narrative?: {
     content: string;
@@ -80,6 +97,20 @@ const TONE_LABEL: Record<string, string> = {
   unknown: "—",
 };
 
+const SLEEP_PHASE_META: Record<SleepPhase, { label: string; icon: string }> = {
+  awake: { label: "éveillée", icon: "" },
+  light_sleep: { label: "endormie (journal)", icon: "📓" },
+  rem: { label: "endormie (rêve)", icon: "💫" },
+  deep_sleep: { label: "sommeil profond", icon: "💤" },
+};
+
+const DREAM_TYPE_LABEL: Record<string, { label: string; color: string }> = {
+  associative: { label: "rêve associatif", color: "#a78bfa" },
+  nightmare: { label: "cauchemar léger", color: "#ef4444" },
+  pleasant: { label: "rêve doux", color: "#fbbf24" },
+  mundane: { label: "rêve banal", color: "#9ca3af" },
+};
+
 export class InnerLifePanel {
   private root: HTMLElement;
   private blendEl: HTMLElement;
@@ -88,8 +119,14 @@ export class InnerLifePanel {
   private ruminationsEl: HTMLElement;
   private profileEl: HTMLElement;
   private phaseBadgeEl: HTMLElement;
+  private sleepBadgeEl: HTMLElement;
   private energyFillEl: HTMLElement;
   private energyValueEl: HTMLElement;
+  private dreamEl: HTMLElement;
+  private journalEl: HTMLElement;
+
+  private currentSleepPhase: SleepPhase = "awake";
+  private sleepPhaseListeners: Array<(phase: SleepPhase) => void> = [];
 
   constructor(containerId: string = "inner-life-panel") {
     this.root = document.getElementById(containerId)!;
@@ -100,6 +137,7 @@ export class InnerLifePanel {
     this.root.innerHTML = `
       <div class="il-header" role="button" aria-expanded="true">
         <span>Vie intérieure</span>
+        <span class="il-sleep-badge" title="État de sommeil" hidden></span>
         <span class="il-phase-badge" title="Phase circadienne">—</span>
         <span class="il-toggle">▾</span>
       </div>
@@ -112,6 +150,14 @@ export class InnerLifePanel {
             </span>
             <span class="il-energy-value">—</span>
           </div>
+        </section>
+        <section class="il-section" id="il-dream" hidden>
+          <h4>Rêve de cette nuit</h4>
+          <div class="il-dream-body"></div>
+        </section>
+        <section class="il-section" id="il-journal" hidden>
+          <h4>Journal d'aujourd'hui</h4>
+          <div class="il-journal-body"></div>
         </section>
         <section class="il-section" id="il-blend">
           <h4>Émotion</h4>
@@ -142,8 +188,11 @@ export class InnerLifePanel {
     this.ruminationsEl = this.root.querySelector(".il-ruminations-body")!;
     this.profileEl = this.root.querySelector(".il-profile-body")!;
     this.phaseBadgeEl = this.root.querySelector(".il-phase-badge")!;
+    this.sleepBadgeEl = this.root.querySelector(".il-sleep-badge")!;
     this.energyFillEl = this.root.querySelector(".il-energy-fill")!;
     this.energyValueEl = this.root.querySelector(".il-energy-value")!;
+    this.dreamEl = this.root.querySelector(".il-dream-body")!;
+    this.journalEl = this.root.querySelector(".il-journal-body")!;
 
     // Collapse/expand on header click
     const header = this.root.querySelector(".il-header") as HTMLElement;
@@ -189,10 +238,24 @@ export class InnerLifePanel {
   applyInnerState(state: InnerState | undefined) {
     if (!state) return;
     this.renderCircadian(state.circadian, state.energy);
+    this.renderSleepPhase(state.sleep_phase);
+    this.renderDream(state.last_dream);
+    this.renderJournal(state.today_journal);
     this.renderDrives(state.drives);
     this.renderNarrative(state.self_narrative);
     this.renderRuminations(state.ruminations);
     this.renderProfile(state.person_profile, state.pending_commitments);
+  }
+
+  /** Subscribe to sleep-phase transitions (drives avatar + scene visuals). */
+  onSleepPhaseChange(cb: (phase: SleepPhase) => void): void {
+    this.sleepPhaseListeners.push(cb);
+    // Fire immediately with current state so new subscribers are synced
+    cb(this.currentSleepPhase);
+  }
+
+  getSleepPhase(): SleepPhase {
+    return this.currentSleepPhase;
   }
 
   private renderCircadian(
@@ -223,6 +286,89 @@ export class InnerLifePanel {
   }
 
   // ── Renderers ───────────────────────────────────────────────
+
+  private renderSleepPhase(phase: SleepPhase | undefined) {
+    const resolved: SleepPhase = phase || "awake";
+    // Badge in the header (hidden when awake to avoid visual noise)
+    const meta = SLEEP_PHASE_META[resolved];
+    if (resolved === "awake") {
+      this.sleepBadgeEl.setAttribute("hidden", "");
+      this.sleepBadgeEl.textContent = "";
+    } else {
+      this.sleepBadgeEl.removeAttribute("hidden");
+      this.sleepBadgeEl.textContent = `${meta.icon} ${meta.label}`;
+    }
+
+    // Notify subscribers on change
+    if (resolved !== this.currentSleepPhase) {
+      this.currentSleepPhase = resolved;
+      for (const cb of this.sleepPhaseListeners) {
+        try {
+          cb(resolved);
+        } catch (e) {
+          console.warn("sleep phase listener error:", e);
+        }
+      }
+    }
+  }
+
+  private renderDream(dream: InnerState["last_dream"]) {
+    const section = document.getElementById("il-dream")!;
+    if (!dream || !dream.content) {
+      section.setAttribute("hidden", "");
+      this.dreamEl.innerHTML = "";
+      return;
+    }
+    section.removeAttribute("hidden");
+    const typeMeta = DREAM_TYPE_LABEL[dream.dream_type] || {
+      label: dream.dream_type,
+      color: "#9ca3af",
+    };
+    const vividnessPct = Math.round(dream.vividness * 100);
+    // Opacity scales with vividness — a faint dream looks washed out
+    const opacity = 0.4 + dream.vividness * 0.6;
+    const recalledMark = dream.recalled
+      ? `<span class="il-dream-recalled" title="Elle en a parlé">✓ évoqué</span>`
+      : "";
+    const emotionTag = dream.emotion
+      ? `<span class="il-dream-emotion">${escapeHtml(dream.emotion)}</span>`
+      : "";
+    this.dreamEl.innerHTML = `
+      <div class="il-dream-meta">
+        <span class="il-dream-type" style="color:${typeMeta.color}">${typeMeta.label}</span>
+        ${emotionTag}
+        <span class="il-dream-vividness" title="Intensité du souvenir du rêve">${vividnessPct}%</span>
+        ${recalledMark}
+      </div>
+      <p class="il-dream-text" style="opacity:${opacity}">${escapeHtml(dream.content)}</p>
+    `;
+  }
+
+  private renderJournal(journal: InnerState["today_journal"]) {
+    const section = document.getElementById("il-journal")!;
+    if (!journal || !journal.narrative) {
+      section.setAttribute("hidden", "");
+      this.journalEl.innerHTML = "";
+      return;
+    }
+    section.removeAttribute("hidden");
+    const emotionTag = journal.dominant_emotion
+      ? `<span class="il-journal-emotion">${escapeHtml(journal.dominant_emotion)}</span>`
+      : "";
+    const persons =
+      journal.persons_interacted && journal.persons_interacted.length > 0
+        ? `<span class="il-journal-persons">avec ${journal.persons_interacted
+            .map(escapeHtml)
+            .join(", ")}</span>`
+        : "";
+    this.journalEl.innerHTML = `
+      <div class="il-journal-meta">
+        ${emotionTag}
+        ${persons}
+      </div>
+      <p class="il-journal-text">${escapeHtml(journal.narrative)}</p>
+    `;
+  }
 
   private renderDrives(drives: InnerState["drives"]) {
     this.drivesEl.innerHTML = "";

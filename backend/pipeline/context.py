@@ -43,6 +43,10 @@ class ConversationContext:
     # Best-effort heuristic read of the user's emotional tone (caps, emojis,
     # length, keywords). Gives Mika something to react to, not just declare.
     user_mood_hint: str = ""
+    # The morning-after residue of a vivid dream from last night, if any.
+    # Only injected until early afternoon and only for non-internal persons,
+    # so Mika can spontaneously mention it in the first few conversations.
+    dream_context: str = ""
 
 
 async def gather_context(
@@ -115,6 +119,13 @@ async def gather_context(
     else:
         user_mood_hint = detect_user_mood_hint(message)
 
+    # Dream residue from last night. Only surfaces in the morning and
+    # only to real interlocutors (not to Mika's own conscience trigger).
+    if person_id in _INTERNAL_PERSON_IDS:
+        dream_context = ""
+    else:
+        dream_context = await _fetch_dream_context()
+
     # Tools
     mcp_server = None
     tool_names = []
@@ -135,6 +146,7 @@ async def gather_context(
         fatigue_fog=fatigue_fog,
         rumination_context=rumination_context,
         user_mood_hint=user_mood_hint,
+        dream_context=dream_context,
     )
 
 
@@ -173,6 +185,85 @@ def _fatigue_fog_context() -> str:
         "mots, tu peux demander de repeter. Tu n'as pas l'energie pour des "
         "reponses travaillees — va au plus simple, quitte a etre un peu "
         "a cote de la plaque. Un humain crame ne dissimule pas, il fatigue."
+    )
+
+
+# Dream-recall window: after waking, for how many hours is last night's
+# dream eligible to surface in the prompt. Keeps the residue morning-
+# bound — a dream from last night shouldn't pop up at 21h.
+_DREAM_RECALL_WINDOW_HOURS = 8
+# Only dreams above this vividness are mentionable at all — faint ones
+# stay purely internal (they still nudged the self-narrative elsewhere).
+_DREAM_VIVIDNESS_THRESHOLD = 0.6
+
+
+async def _fetch_dream_context() -> str:
+    """Return the morning residue of last night's dream, or ''.
+
+    Gating: current hour must be before NIGHT_END_HOUR + window, the
+    dream must not have been recalled yet, and vividness above threshold.
+    Marks the dream as recalled the moment it is surfaced — we don't
+    want the same dream popping up turn after turn.
+    """
+    try:
+        from asgiref.sync import sync_to_async
+        from memory.models import Dream
+        from memory.sleep import NIGHT_END_HOUR
+    except ImportError:
+        return ""
+
+    from datetime import datetime, timedelta
+
+    now = datetime.now()
+    # Only eligible in the morning window [NIGHT_END_HOUR, +WINDOW]
+    if not (NIGHT_END_HOUR <= now.hour < NIGHT_END_HOUR + _DREAM_RECALL_WINDOW_HOURS):
+        return ""
+
+    # "Last night" = the night that ended at NIGHT_END_HOUR today
+    last_night = (now - timedelta(days=1)).date()
+
+    try:
+        dream = await sync_to_async(
+            lambda: Dream.objects
+            .filter(
+                night_of=last_night,
+                recalled_at__isnull=True,
+                vividness__gte=_DREAM_VIVIDNESS_THRESHOLD,
+            )
+            .order_by("-vividness")
+            .first()
+        )()
+    except Exception:
+        logger.debug("Dream context fetch failed", exc_info=True)
+        return ""
+
+    if not dream:
+        return ""
+
+    # Mark as recalled atomically so subsequent turns don't re-surface
+    # the same dream. We accept losing the recall trace if the save
+    # fails — better than double-injection.
+    try:
+        from django.utils import timezone as tz
+        dream.recalled_at = tz.now()
+        await sync_to_async(dream.save)(update_fields=["recalled_at"])
+    except Exception:
+        logger.debug("Dream recalled_at save failed", exc_info=True)
+
+    # Build a human-readable residue hint.
+    type_label = {
+        "associative": "un reve un peu bizarre, des associations libres",
+        "nightmare": "un reve inconfortable, pas tragique mais derangeant",
+        "pleasant": "un reve plutot doux",
+        "mundane": "un reve banal mais tu t'en souviens quand meme",
+    }.get(dream.dream_type, "un reve")
+    emotion_hint = f" (teinte : {dream.emotion})" if dream.emotion else ""
+    return (
+        f"Tu as fait cette nuit {type_label}{emotion_hint}.\n"
+        f"Le souvenir du reve : \"{dream.content[:400]}\"\n"
+        "Tu peux le mentionner si la conversation s'y prete (ou au contraire "
+        "le garder pour toi). N'en parle pas tout de suite si l'autre commence "
+        "par quelque chose d'important — laisse la conversation couler naturellement."
     )
 
 

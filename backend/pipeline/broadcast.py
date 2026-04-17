@@ -57,6 +57,32 @@ async def broadcast_to_websocket(
     )
 
 
+async def broadcast_inner_state_update(person_id: str | None = None) -> None:
+    """Push a standalone ``inner_state_update`` event to the frontend.
+
+    Unlike ``broadcast_to_websocket``, this does NOT carry a speech
+    payload — it is a pure state refresh used when Mika's internal state
+    changes outside of a conversation turn (e.g. sleep phase transitions
+    during the night). The frontend merges this into its InnerLifePanel +
+    scene/animation state without invoking TTS.
+    """
+    channel_layer = get_channel_layer()
+    inner_state = await _collect_inner_state(person_id)
+    try:
+        await channel_layer.group_send(
+            BROADCAST_GROUP,
+            {
+                "type": "communication.broadcast",
+                "data": {
+                    "type": "inner_state_update",
+                    "inner_state": inner_state,
+                },
+            },
+        )
+    except Exception:
+        logger.debug("Inner state broadcast failed", exc_info=True)
+
+
 async def _collect_inner_state(person_id: str | None) -> dict:
     """Assemble a JSON-safe snapshot of Mika's inner life for the frontend.
 
@@ -76,6 +102,57 @@ async def _collect_inner_state(person_id: str | None) -> dict:
         state["energy"] = round(drive_engine.energy_level(), 3)
     except Exception:
         logger.debug("drives snapshot failed", exc_info=True)
+
+    # Sleep phase — whether Mika is currently asleep (journaling / dreaming
+    # / digesting) or awake. Drives avatar + scene visuals on the frontend.
+    try:
+        from memory.sleep import sleep_cycle
+        state["sleep_phase"] = sleep_cycle.phase
+    except Exception:
+        logger.debug("sleep phase snapshot failed", exc_info=True)
+
+    # Today's daily journal — recap written at the previous light-sleep
+    # phase. Exposed so the panel can show "aujourd'hui" narratively.
+    try:
+        from datetime import date
+        from memory.models import DailyJournal
+        journal = await sync_to_async(
+            lambda: DailyJournal.objects.filter(date=date.today()).first()
+        )()
+        if journal and journal.narrative:
+            state["today_journal"] = {
+                "date": journal.date.isoformat(),
+                "narrative": journal.narrative,
+                "dominant_emotion": journal.dominant_emotion,
+                "persons_interacted": list(journal.persons_interacted or []),
+            }
+    except Exception:
+        logger.debug("daily journal snapshot failed", exc_info=True)
+
+    # Last night's dream — if any, with vividness for UI opacity scaling.
+    # We surface it regardless of `recalled_at` so the panel can show it
+    # even after Mika has mentioned it in a conversation.
+    try:
+        from datetime import date, timedelta
+        from memory.models import Dream
+        last_night = date.today() - timedelta(days=1)
+        dream = await sync_to_async(
+            lambda: Dream.objects
+            .filter(night_of=last_night)
+            .order_by("-vividness")
+            .first()
+        )()
+        if dream and dream.content:
+            state["last_dream"] = {
+                "content": dream.content,
+                "dream_type": dream.dream_type,
+                "vividness": round(dream.vividness, 2),
+                "emotion": dream.emotion,
+                "night_of": dream.night_of.isoformat(),
+                "recalled": dream.recalled_at is not None,
+            }
+    except Exception:
+        logger.debug("dream snapshot failed", exc_info=True)
 
     # Circadian — pure function, no IO
     try:

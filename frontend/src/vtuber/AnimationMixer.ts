@@ -1,5 +1,44 @@
 import { VRM } from "@pixiv/three-vrm";
 
+export type SleepPhase = "awake" | "light_sleep" | "rem" | "deep_sleep";
+
+// How long (seconds) to smoothly ease in/out of the sleep pose when
+// phase transitions. A hard snap would make the avatar look glitchy.
+const SLEEP_TRANSITION_DURATION = 1.2;
+
+// Target eye-closure per phase — awake lets the regular blink cycle
+// drive the eyes; the sleep phases hold them near-closed continuously.
+const PHASE_EYE_CLOSURE: Record<SleepPhase, number> = {
+  awake: 0,
+  light_sleep: 0.85,
+  rem: 0.95,       // still closed but eyelids "flicker" (REM)
+  deep_sleep: 1.0,
+};
+
+// Breath frequency multiplier — slow, deep breathing while asleep.
+const PHASE_BREATH_FREQUENCY: Record<SleepPhase, number> = {
+  awake: 1.5,
+  light_sleep: 0.7,
+  rem: 0.8,
+  deep_sleep: 0.45,
+};
+
+// Breath amplitude multiplier — deeper chest motion in sleep.
+const PHASE_BREATH_AMPLITUDE: Record<SleepPhase, number> = {
+  awake: 1.0,
+  light_sleep: 1.4,
+  rem: 1.2,
+  deep_sleep: 1.8,
+};
+
+// Slight forward head tilt during sleep — avatar visibly "dozes".
+const PHASE_HEAD_TILT: Record<SleepPhase, number> = {
+  awake: 0,
+  light_sleep: 0.12,
+  rem: 0.18,
+  deep_sleep: 0.25,
+};
+
 export class AnimationMixer {
   private vrm: VRM | null = null;
   private blinkTimer = 0;
@@ -9,6 +48,16 @@ export class AnimationMixer {
 
   private breatheTimer = 0;
   private isSpeaking = false;
+
+  // Sleep state: target values come from `sleepPhase`; current values
+  // are eased toward the target so transitions look natural.
+  private sleepPhase: SleepPhase = "awake";
+  private eyeClosureCurrent = 0;
+  private breathFreqCurrent = 1.5;
+  private breathAmpCurrent = 1.0;
+  private headTiltCurrent = 0;
+  // REM flicker: during REM phase, eyelids oscillate slightly for realism.
+  private remFlickerTimer = 0;
 
   setVRM(vrm: VRM) {
     this.vrm = vrm;
@@ -22,16 +71,66 @@ export class AnimationMixer {
     return this.isSpeaking;
   }
 
+  setSleepPhase(phase: SleepPhase): void {
+    if (this.sleepPhase === phase) return;
+    this.sleepPhase = phase;
+  }
+
+  getSleepPhase(): SleepPhase {
+    return this.sleepPhase;
+  }
+
   update(delta: number) {
     if (!this.vrm) return;
 
-    this.updateBlink(delta);
+    // Ease toward the current phase's target values. Using a time-based
+    // linear ease keeps the code simple and the motion feels natural.
+    this.easeSleepTargets(delta);
+
+    if (this.sleepPhase === "awake") {
+      this.updateBlink(delta);
+    } else {
+      this.updateSleepEyes(delta);
+    }
     this.updateBreathe(delta);
+    this.updateHeadPose();
     // Lip sync is now handled by LipSyncController
+  }
+
+  private easeSleepTargets(delta: number) {
+    const rate = delta / SLEEP_TRANSITION_DURATION;
+    const stepToward = (cur: number, target: number) => {
+      const diff = target - cur;
+      if (Math.abs(diff) < 0.0005) return target;
+      return cur + diff * Math.min(1, rate * 4);
+    };
+    this.eyeClosureCurrent = stepToward(
+      this.eyeClosureCurrent,
+      PHASE_EYE_CLOSURE[this.sleepPhase]
+    );
+    this.breathFreqCurrent = stepToward(
+      this.breathFreqCurrent,
+      PHASE_BREATH_FREQUENCY[this.sleepPhase]
+    );
+    this.breathAmpCurrent = stepToward(
+      this.breathAmpCurrent,
+      PHASE_BREATH_AMPLITUDE[this.sleepPhase]
+    );
+    this.headTiltCurrent = stepToward(
+      this.headTiltCurrent,
+      PHASE_HEAD_TILT[this.sleepPhase]
+    );
   }
 
   private updateBlink(delta: number) {
     if (!this.vrm?.expressionManager) return;
+
+    // If we still have residual sleep eye-closure (just woke up), blend
+    // it down rather than firing the normal blink cycle immediately.
+    if (this.eyeClosureCurrent > 0.02) {
+      this.vrm.expressionManager.setValue("blink", this.eyeClosureCurrent);
+      return;
+    }
 
     this.blinkTimer += delta;
 
@@ -58,15 +157,40 @@ export class AnimationMixer {
     }
   }
 
+  private updateSleepEyes(delta: number) {
+    if (!this.vrm?.expressionManager) return;
+    let value = this.eyeClosureCurrent;
+    // REM flicker: small oscillation on top of the base closure
+    if (this.sleepPhase === "rem") {
+      this.remFlickerTimer += delta;
+      value += Math.sin(this.remFlickerTimer * 8) * 0.04;
+      value = Math.max(0.7, Math.min(1.0, value));
+    }
+    this.vrm.expressionManager.setValue("blink", value);
+  }
+
   private updateBreathe(delta: number) {
     if (!this.vrm?.humanoid) return;
 
-    this.breatheTimer += delta;
-    // Subtle breathing motion on the spine
+    this.breatheTimer += delta * this.breathFreqCurrent;
+    // Subtle breathing motion on the spine; amplitude scales with sleep depth
     const spine = this.vrm.humanoid.getNormalizedBoneNode("spine");
     if (spine) {
-      const breatheAmount = Math.sin(this.breatheTimer * 1.5) * 0.005;
+      const baseAmplitude = 0.005;
+      const breatheAmount =
+        Math.sin(this.breatheTimer) * baseAmplitude * this.breathAmpCurrent;
       spine.rotation.x = breatheAmount;
+    }
+  }
+
+  private updateHeadPose() {
+    if (!this.vrm?.humanoid) return;
+    if (this.headTiltCurrent < 0.005) return;
+    // Tilt the head forward as if dozing. Only touches the neck bone so
+    // it coexists cleanly with any other head-rotation logic.
+    const neck = this.vrm.humanoid.getNormalizedBoneNode("neck");
+    if (neck) {
+      neck.rotation.x = this.headTiltCurrent;
     }
   }
 }

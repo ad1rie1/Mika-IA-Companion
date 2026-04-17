@@ -826,6 +826,7 @@ class ConscienceEngine:
                 fatigue_fog=base_context.fatigue_fog,
                 rumination_context=base_context.rumination_context,
                 user_mood_hint=base_context.user_mood_hint,
+                dream_context=base_context.dream_context,
             )
 
             perception = Perception.from_internal_trigger(

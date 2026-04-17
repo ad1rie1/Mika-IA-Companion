@@ -136,6 +136,14 @@ class MemoryConsolidator:
                 self._last_processed_id = all_max_id
             logger.info("Consolidation: no new user messages (last_id=%d)", self._last_processed_id)
             await self._apply_decay()
+            # Even with no new messages, the sleep cycle should get its
+            # chance — nights are precisely the low-traffic window where
+            # journaling / dreaming / digestion need to happen.
+            try:
+                from memory.sleep import sleep_cycle
+                await sleep_cycle.run_if_due()
+            except Exception:
+                logger.exception("Sleep cycle failed in idle path (non-fatal)")
             return
 
         logger.info("Consolidating %d new messages (skipped internal)", len(messages))
@@ -336,6 +344,16 @@ class MemoryConsolidator:
             await person_profile_generator.run_cycle()
         except Exception:
             logger.exception("Person profile generation failed (non-fatal)")
+
+        # 9. Sleep cycle — night-time creative/narrative/healing work.
+        #    Self-gated: no-op outside the night phase or if Mika is
+        #    still active. Runs on the same cadence as consolidation
+        #    but skips quickly when not eligible, so negligible cost.
+        try:
+            from memory.sleep import sleep_cycle
+            await sleep_cycle.run_if_due()
+        except Exception:
+            logger.exception("Sleep cycle failed (non-fatal)")
 
     async def _apply_decay(self):
         """Reduce importance of old souvenirs and confidence of old connaissances.

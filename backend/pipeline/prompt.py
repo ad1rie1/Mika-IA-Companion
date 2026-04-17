@@ -16,6 +16,7 @@ def build_system_prompt(
     fatigue_fog: str = "",
     rumination_context: str = "",
     user_mood_hint: str = "",
+    dream_context: str = "",
 ) -> str:
     """Assemble the full system prompt from personality + contextual layers.
 
@@ -72,6 +73,12 @@ def build_system_prompt(
         system += (
             "\n\n--- CE QUI TE TROTTE DANS LA TETE ---\n"
             + rumination_context
+            + "\n--- FIN ---"
+        )
+    if dream_context:
+        system += (
+            "\n\n--- CE QUE TU AS REVE CETTE NUIT ---\n"
+            + dream_context
             + "\n--- FIN ---"
         )
     if module_context:

@@ -297,6 +297,57 @@
         color: #c7d2fe;
         white-space: nowrap;
       }
+      .il-sleep-badge {
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 11px;
+        font-weight: 500;
+        background: rgba(139, 92, 246, 0.25);
+        color: #ddd6fe;
+        white-space: nowrap;
+      }
+      .il-sleep-badge[hidden] { display: none; }
+
+      /* Dream section */
+      .il-dream-meta, .il-journal-meta {
+        display: flex;
+        gap: 8px;
+        font-size: 11px;
+        opacity: 0.8;
+        margin-bottom: 4px;
+        flex-wrap: wrap;
+      }
+      .il-dream-type { font-weight: 600; }
+      .il-dream-emotion, .il-journal-emotion {
+        background: rgba(255,255,255,0.08);
+        padding: 1px 6px;
+        border-radius: 6px;
+      }
+      .il-dream-vividness {
+        opacity: 0.6;
+      }
+      .il-dream-recalled {
+        color: #34d399;
+        opacity: 0.8;
+      }
+      .il-dream-text, .il-journal-text {
+        font-size: 13px;
+        line-height: 1.45;
+        font-style: italic;
+        margin: 0;
+        padding: 6px 8px;
+        border-left: 2px solid rgba(167, 139, 250, 0.5);
+        background: rgba(139, 92, 246, 0.08);
+        border-radius: 0 4px 4px 0;
+      }
+      .il-journal-text {
+        font-style: normal;
+        border-left-color: rgba(251, 191, 36, 0.5);
+        background: rgba(251, 191, 36, 0.06);
+      }
+      .il-journal-persons {
+        opacity: 0.7;
+      }
 
       .il-energy-row {
         display: flex;

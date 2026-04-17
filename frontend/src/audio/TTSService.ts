@@ -50,10 +50,20 @@ export class TTSService {
   private isSpeaking = false;
   private speechQueue: Array<{ text: string; emotion: EmotionName }> = [];
   private processing = false;
+  // Next speak() call will be prefixed with this many ms of silence.
+  // Used by the wake-up flow: if Mika was asleep and is now replying,
+  // pause briefly so she sounds like she's waking up, not answering
+  // instantly from a dead sleep.
+  private nextPreDelayMs = 0;
 
   constructor(events: TTSEvents) {
     this.events = events;
     this.initVoice();
+  }
+
+  /** Queue a one-shot delay before the next speech utterance. */
+  requestWakeUpDelay(ms: number): void {
+    this.nextPreDelayMs = Math.max(this.nextPreDelayMs, Math.floor(ms));
   }
 
   private initVoice() {
@@ -112,7 +122,15 @@ export class TTSService {
     this.processing = false;
   }
 
-  private speakImmediate(text: string, emotion: EmotionName): Promise<void> {
+  private async speakImmediate(text: string, emotion: EmotionName): Promise<void> {
+    // Consume any pending wake-up delay before the actual utterance.
+    // Drained here (not in processQueue) so back-to-back speeches within
+    // a single response don't keep re-delaying.
+    if (this.nextPreDelayMs > 0) {
+      const delay = this.nextPreDelayMs;
+      this.nextPreDelayMs = 0;
+      await new Promise((r) => setTimeout(r, delay));
+    }
     return new Promise((resolve) => {
       if (!text.trim()) {
         resolve();
