@@ -1,0 +1,68 @@
+Dash.render(async (root) => {
+  const { api, escapeHTML, emoChip, pct, fmtRel } = Dash;
+  const [s, dreams, journals] = await Promise.all([
+    api("/dashboard/api/sleep"),
+    api("/dashboard/api/sleep/dreams?limit=30"),
+    api("/dashboard/api/sleep/journals?limit=15"),
+  ]);
+  if (!s) return (root.innerHTML = `<div class="empty">Indisponible.</div>`);
+  const typeColor = t => ({nightmare:"neg",pleasant:"pos",associative:"mag",mundane:""}[t] || "");
+
+  root.innerHTML = `
+    <div class="grid cols-3 mb">
+      <div class="card">
+        <h3>Phase actuelle</h3>
+        <div class="stat-value" style="color:${s.phase==='awake'?'var(--cyan)':'var(--violet)'}">${s.phase}</div>
+      </div>
+      <div class="card">
+        <h3>Journal du jour</h3>
+        ${s.today_journal ? `
+          <div class="narr">${escapeHTML(s.today_journal.narrative)}</div>
+          <div class="mt muted" style="font-size:11px;">
+            Humeur: ${emoChip(s.today_journal.dominant_emotion || "neutral")} ·
+            ${s.today_journal.word_count} mots
+          </div>` : `<div class="muted">Pas encore écrit.</div>`}
+      </div>
+      <div class="card">
+        <h3>Dernier rêve</h3>
+        ${s.last_dream ? `
+          <div><span class="pill ${typeColor(s.last_dream.dream_type)}">${s.last_dream.dream_type}</span>
+               <span class="muted">· vivacité ${pct(s.last_dream.vividness)}</span></div>
+          <div class="narr mt">${escapeHTML(s.last_dream.content)}</div>
+          <div class="stat-sub mt">Nuit du ${s.last_dream.night_of} · ${fmtRel(s.last_dream.created_at)}</div>
+        ` : `<div class="muted">Pas de rêve récent.</div>`}
+      </div>
+    </div>
+
+    <div class="two-col">
+      <div class="card">
+        <h3>Rêves<span class="tag">${dreams?.total || 0}</span></h3>
+        <div class="scroll-box">
+          ${(dreams?.rows || []).map(d => `
+            <div style="padding:10px 0;border-bottom:1px dashed rgba(255,255,255,0.05)">
+              <div class="flex between center mb" style="font-size:11px;">
+                <span><span class="pill ${typeColor(d.dream_type)}">${d.dream_type}</span>
+                      <span class="muted" style="margin-left:6px">${d.night_of}</span></span>
+                <span class="muted">vividness ${pct(d.vividness)}</span>
+              </div>
+              <div class="narr">${escapeHTML(d.content)}</div>
+              ${d.emotion ? `<div class="mt">${emoChip(d.emotion)}</div>` : ""}
+            </div>`).join("") || `<div class="muted">Aucun rêve enregistré.</div>`}
+        </div>
+      </div>
+      <div class="card">
+        <h3>Journaux quotidiens<span class="tag">${journals?.total || 0}</span></h3>
+        <div class="scroll-box">
+          ${(journals?.rows || []).map(j => `
+            <div style="padding:10px 0;border-bottom:1px dashed rgba(255,255,255,0.05)">
+              <div class="flex between center mb" style="font-size:11px;">
+                <span class="muted">${j.date}</span>
+                <span>${emoChip(j.dominant_emotion || "neutral")}</span>
+              </div>
+              <div class="narr">${escapeHTML(j.narrative)}</div>
+              <div class="mt chips">${(j.persons_interacted || []).map(p => `<span class="chip mag">${escapeHTML(p)}</span>`).join("")}</div>
+            </div>`).join("") || `<div class="muted">Aucun journal.</div>`}
+        </div>
+      </div>
+    </div>`;
+});

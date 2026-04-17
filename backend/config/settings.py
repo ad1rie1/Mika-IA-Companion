@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     "conscience",
     "modules",
     "projects",
+    "dashboard",
 ]
 
 MIDDLEWARE = [

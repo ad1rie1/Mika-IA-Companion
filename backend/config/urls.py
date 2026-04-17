@@ -1,5 +1,4 @@
 from django.conf import settings
-from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
@@ -9,7 +8,12 @@ urlpatterns = [
     path("api/modules/", include("modules.urls")),
     path("", include("projects.urls")),
     path("", include("ai.urls")),
+    path("", include("dashboard.urls")),
 ]
 
 if settings.DEBUG:
-    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
+    # Serve static files from every app's ``static/`` directory in dev.
+    # Replaces the older ``static(STATIC_URL, document_root=STATIC_ROOT)``
+    # which only served the collectstatic output.
+    from django.contrib.staticfiles.urls import staticfiles_urlpatterns
+    urlpatterns += staticfiles_urlpatterns()
