@@ -20,6 +20,7 @@ async def call_ai_and_parse(
         module_context=context.module_context,
         self_concept=context.self_concept,
         person_context=context.person_context,
+        circadian_context=context.circadian_context,
     )
     user_prompt = format_conversation(message, context.history)
 

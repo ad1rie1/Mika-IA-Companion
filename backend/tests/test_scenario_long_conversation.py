@@ -184,12 +184,28 @@ class TestLongConversation:
         simulate_time_decay(engine, 600.0)
         mood = engine._get_person_mood(pid)
 
-        # After 10 minutes, should have reverted to default or very low intensity
-        assert mood.intensity < 0.15 or mood.emotion == engine.temperament.default_mood, \
-            f"10-minute pause should nearly reset: {mood.emotion.value}({mood.intensity:.2f})"
+        # After 10 minutes, anger should be gone. The oscillator now settles
+        # at the home vector (default_mood × 0.15 + circadian bias × 0.35)
+        # whose magnitude is ~0.4 max, and the emotion there is never angry.
+        # So: no anger residual + bounded intensity.
+        from emotion import pad
+        assert mood.intensity < 0.5, (
+            f"10-minute pause should drain to home magnitude: "
+            f"{mood.emotion.value}({mood.intensity:.2f})"
+        )
+        # Anger is negative valence — the settled home must be non-negative.
+        assert pad.valence(mood.emotion) >= 0.0, \
+            f"Residual negative emotion after 10 min: {mood.emotion.value}"
 
     def test_re_engagement_after_silence(self, engine):
-        """After a long pause, a new message should re-engage naturally."""
+        """After a long pause, a new message should re-engage naturally.
+
+        Post-circadian: the home vector is a blend of default_mood and the
+        current phase's bias. A fresh HAPPY impulse lands somewhere in the
+        positive-valence region, which may read as happy, hopeful, grateful,
+        etc. depending on the time of day. We check the valence is positive
+        rather than matching a specific label.
+        """
         pid = "regular_viewer"
 
         # Initial excitement
@@ -203,8 +219,12 @@ class TestLongConversation:
         simulate_time_decay(engine, 2.0)
         mood = engine._get_person_mood(pid)
 
+        from emotion import pad
         assert mood.intensity > 0.1, "Re-engagement should establish new emotion"
-        assert mood.emotion in (Emotion.HAPPY, engine.temperament.default_mood)
+        assert pad.valence(mood.emotion) > 0.0, (
+            f"Re-engagement with HAPPY should leave a positive-valence state, "
+            f"got {mood.emotion.value}"
+        )
 
 
 class TestLongConversationEmotionalArc:

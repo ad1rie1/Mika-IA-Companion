@@ -21,7 +21,15 @@
       "Bash(python3 -m py_compile:*)",
       "Bash(cp -r backend/chat backend/communication)",
       "Bash(rm -rf backend/communication/__pycache__)",
-      "Bash(find \"/home/Qwartz/Bureau/PROJET IA/vtuber/backend/communication\" -type d -name __pycache__ -exec rm -rf {} +)"
+      "Bash(find \"/home/Qwartz/Bureau/PROJET IA/vtuber/backend/communication\" -type d -name __pycache__ -exec rm -rf {} +)",
+      "Bash(find \"/d/Office365_data/afaveraux/Onedrive/OneDrive - Groupement les Mousquetaires/Bureau/vtuber/backend\" -name \"*.py\" -exec grep -l \"hardcoded\\\\|deprecated\\\\|legacy\\\\|backward\" {} \\\\;)",
+      "Bash(grep -r \"pass\\\\s*$\" \"/d/Office365_data/afaveraux/Onedrive/OneDrive - Groupement les Mousquetaires/Bureau/vtuber/backend\" --include=\"*.py\")",
+      "WebFetch(domain:github.com)",
+      "WebSearch",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(curl -s \"https://raw.githubusercontent.com/kyutai-labs/moshi/main/moshi/moshi/models/tts.py\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/kyutai-labs/delayed-streams-modeling/main/configs/config-tts.toml\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/kyutai-labs/delayed-streams-modeling/main/FAQ.md\")"
     ]
   }
 }

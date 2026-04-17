@@ -12,6 +12,7 @@ def build_system_prompt(
     module_context: str = "",
     self_concept: str = "",
     person_context: str = "",
+    circadian_context: str = "",
 ) -> str:
     """Assemble the full system prompt from personality + contextual layers.
 
@@ -19,13 +20,15 @@ def build_system_prompt(
       personality        (who she is from the start)
       → self-concept      (who she is becoming, from her own memories)
       → person-context    (who she's talking to, what she knows about them)
+      → circadian        (what time of day / how tired she is)
       → modules           (available tools/context)
       → emotion           (current affective state)
       → memory            (retrieved relevant memories)
 
     Self-concept + person-context sit right after personality because
-    they're stable over a session. Modules / emotion / memory are
-    recomputed every turn and appear last so recency biases recall.
+    they're stable over a session. Circadian is also a "slow" layer so
+    it sits alongside them. Modules / emotion / memory are recomputed
+    every turn and appear last so recency biases recall.
     """
     system = personality.to_system_prompt()
 
@@ -39,6 +42,12 @@ def build_system_prompt(
         system += (
             "\n\n--- CE QUE TU SAIS DE CETTE PERSONNE ---\n"
             + person_context
+            + "\n--- FIN ---"
+        )
+    if circadian_context:
+        system += (
+            "\n\n--- TON RYTHME ---\n"
+            + circadian_context
             + "\n--- FIN ---"
         )
     if module_context:

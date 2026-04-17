@@ -275,6 +275,7 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
+        gap: 8px;
         padding: 10px 14px;
         cursor: pointer;
         font-weight: 600;
@@ -283,8 +284,45 @@
         letter-spacing: 0.5px;
         user-select: none;
       }
+      .il-header > span:first-child { flex: 1; }
       .il-header:hover { background: rgba(99,102,241,0.45); }
       .il-toggle { font-size: 12px; opacity: 0.8; }
+      .il-phase-badge {
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 0;
+        background: rgba(99,102,241,0.2);
+        color: #c7d2fe;
+        white-space: nowrap;
+      }
+
+      .il-energy-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .il-energy-bar {
+        flex: 1;
+        position: relative;
+        height: 8px;
+        background: rgba(255,255,255,0.1);
+        border-radius: 4px;
+        overflow: hidden;
+      }
+      .il-energy-fill {
+        position: absolute;
+        inset: 0 auto 0 0;
+        border-radius: 4px;
+        transition: width 0.6s ease, background 0.6s ease;
+      }
+      .il-energy-value {
+        font-size: 11px;
+        opacity: 0.75;
+        min-width: 32px;
+        text-align: right;
+      }
       .il-body {
         overflow-y: auto;
         scrollbar-width: thin;

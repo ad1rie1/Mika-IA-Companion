@@ -211,6 +211,45 @@ class DriveEngine:
             for kind, state in self.states.items()
         }
 
+    # ── Energy ────────────────────────────────────────────────────
+
+    def energy_level(self) -> float:
+        """Aggregate "how energized is Mika right now" in [0, 1].
+
+        Combines two independent sources:
+          - **Circadian phase** (emotion/circadian.py): a cosine curve
+            over 24h that peaks early afternoon. Gives Mika "mornings,
+            afternoons, evenings, nights" without manual tuning.
+          - **REST drive tension**: accumulates with activity (each act,
+            each observation) and drains slowly during idle. Models short-
+            term fatigue on top of the daily baseline.
+
+        The result is used by:
+          - the conscience scoring (tired Mika has a higher effective
+            threshold, speaks less spontaneously)
+          - the system prompt (the LLM sees "energie basse" and adjusts tone)
+          - the frontend panel (visible energy gauge)
+
+        Formula: energy = 0.7 × circadian + 0.3 × (1 - rest_tension)
+        Both terms in [0, 1]; output clipped to [0, 1].
+        """
+        from emotion import circadian
+
+        try:
+            from config.personality import personality
+            profile = personality.circadian_profile
+        except Exception:
+            profile = None
+
+        circadian_energy = circadian.energy_level(profile=profile)
+
+        self.update()
+        rest_tension = self.states[DriveKind.REST].tension
+        rest_energy = max(0.0, 1.0 - rest_tension)
+
+        combined = 0.7 * circadian_energy + 0.3 * rest_energy
+        return max(0.0, min(1.0, combined))
+
     # ── Test / admin helpers ──────────────────────────────────────
 
     def reset(self) -> None:

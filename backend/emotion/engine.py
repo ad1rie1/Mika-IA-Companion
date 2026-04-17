@@ -456,10 +456,33 @@ class EmotionEngine:
         return self.person_moods[person_id]
 
     def _home_vector(self) -> Vec3:
-        """Home position for all oscillators: the default mood's anchor,
-        heavily dimmed so it provides a gentle baseline coloration rather
-        than overpowering impulses."""
-        return pad.label_to_pad(self.temperament.default_mood, 0.15)
+        """Home position for all oscillators.
+
+        Combines two contributions:
+          - `default_mood` heavily dimmed (magnitude 0.15) — the character's
+            stable baseline personality
+          - `circadian phase bias` (magnitude ~0.35 per circadian.py) — a
+            time-of-day tint that nudges the baseline toward hopeful/playful/
+            relieved/dreamy through the day
+
+        Both are small so that emotional impulses still dominate the
+        short-term dynamics — but the persistent pull gives Mika a felt
+        "daily rhythm" without the character losing its identity.
+        """
+        from emotion import circadian
+
+        base = pad.label_to_pad(self.temperament.default_mood, 0.15)
+
+        try:
+            from config.personality import personality
+            profile = personality.circadian_profile
+        except Exception:
+            profile = None
+
+        state = circadian.current_state(profile=profile)
+        bias = circadian.phase_bias(state.phase, profile=profile)
+
+        return pad.add(base, bias)
 
     # ------------------------------------------------------------------
     # Core: process a new emotion from Claude

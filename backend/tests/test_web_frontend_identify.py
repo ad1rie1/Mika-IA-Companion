@@ -76,7 +76,9 @@ class TestIdentifyHandshake:
         # First identify → greeting perception; second is a no-op on greeting.
         assert mock_perceive.call_count == 1
 
-    async def test_identify_ensures_entity_for_display_name(self):
+    async def test_identify_always_ensures_entity_by_person_id(self):
+        """Entity must be keyed by person_id (stable) regardless of display_name,
+        because _fetch_person_context looks up via entity__name=person_id."""
         c = _make_consumer()
         payload = json.dumps({
             "type": "identify", "person_id": "web_1", "display_name": "Bob",
@@ -85,7 +87,7 @@ class TestIdentifyHandshake:
                    new_callable=AsyncMock), \
              patch.object(c, "_ensure_entity", new=AsyncMock()) as mock_entity:
             await c.receive(text_data=payload)
-        mock_entity.assert_called_once_with("Bob")
+        mock_entity.assert_called_once_with("web_1")
 
     async def test_identify_ensures_entity_for_person_id_when_no_display(self):
         c = _make_consumer()

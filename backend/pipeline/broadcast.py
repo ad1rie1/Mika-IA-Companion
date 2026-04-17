@@ -73,8 +73,27 @@ async def _collect_inner_state(person_id: str | None) -> dict:
     # Drives — in-RAM, cheap, always available
     try:
         state["drives"] = drive_engine.to_dict()
+        state["energy"] = round(drive_engine.energy_level(), 3)
     except Exception:
         logger.debug("drives snapshot failed", exc_info=True)
+
+    # Circadian — pure function, no IO
+    try:
+        from emotion import circadian
+        try:
+            from config.personality import personality
+            profile = personality.circadian_profile
+        except Exception:
+            profile = None
+        cstate = circadian.current_state(profile=profile)
+        state["circadian"] = {
+            "phase": cstate.phase.value,
+            "hour": cstate.hour,
+            "energy": round(cstate.energy, 3),
+            "bias_emotion": cstate.bias_anchor.value,
+        }
+    except Exception:
+        logger.debug("circadian snapshot failed", exc_info=True)
 
     # Self-narrative — one row, most recent
     try:

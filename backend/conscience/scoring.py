@@ -95,6 +95,16 @@ def compute_decision_score(
         score += rum_score
         parts.append(f"rumination({ctx.rumination_count}×:{rum_score:.2f})")
 
+    # Factor 11: Energy modulation — tired Mika speaks less spontaneously.
+    # We DON'T scale the positive contributions above (pertinence, urgency,
+    # scheduled actions all need to fire even when tired); we subtract a
+    # penalty when energy is below mid-range. Capped at -0.25 so a very
+    # pertinent signal still gets through at 3am.
+    if ctx.energy < 0.5:
+        fatigue_penalty = min(0.25, (0.5 - ctx.energy) * 0.5)
+        score -= fatigue_penalty
+        parts.append(f"fatigue(-{fatigue_penalty:.2f})")
+
     # Hard cap: too many ignored acts today -> suppress
     if ctx.acts_today >= 5 and ctx.consecutive_ignored_acts >= 3:
         score = min(score, 0.1)

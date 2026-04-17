@@ -58,3 +58,25 @@ temperament:
   recovery_speed: 0.5    # vitesse de retour au calme (0.0=lent, 1.0=rapide)
   default_mood: "happy"  # humeur naturelle de base
   global_bleed: 0.3      # combien les interactions individuelles affectent l'humeur globale
+
+# Rythme circadien : Mika a des journees. L'humeur baseline et l'energie
+# bougent avec l'heure. Tout est optionnel — si absent, valeurs par defaut.
+# Modifie ces valeurs pour une persona nocturne ou "leve-tot".
+circadian_profile:
+  # Heure de debut de chaque phase (24h). Par defaut une repartition humaine classique.
+  phase_hours:
+    morning: 6
+    afternoon: 12
+    evening: 18
+    night: 23
+  # Emotion qui biaise le home_vector pendant cette phase. Petit nudge,
+  # le default_mood reste dominant.
+  phase_anchors:
+    morning: hopeful      # tonique, optimiste
+    afternoon: playful    # active, enjouee
+    evening: relieved     # posee, chaleureuse
+    night: dreamy         # introspection, reveuse
+  # Courbe d'energie (cosinus). Peak a 14h, trough a 2h du matin.
+  energy_peak_hour: 14.0  # heure du pic d'energie
+  energy_amplitude: 0.7   # amplitude du swing (0.7 = swing entre 0.2 et 0.9)
+  energy_baseline: 0.55   # midpoint du cosinus

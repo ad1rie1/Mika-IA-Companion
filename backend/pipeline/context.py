@@ -31,6 +31,9 @@ class ConversationContext:
     # plus her pending commitments toward them. Empty if no profile
     # exists yet for this person_id.
     person_context: str = ""
+    # Circadian state — current phase + energy level description, nudges
+    # Mika's tone to match the time of day.
+    circadian_context: str = ""
 
 
 async def gather_context(
@@ -62,6 +65,9 @@ async def gather_context(
     # Theory of mind: profile + pending commitments for the current person.
     # Only meaningful when person_id names an actual Entity in memory.
     person_context = await _fetch_person_context(person_id)
+
+    # Circadian: where Mika sits in her daily rhythm.
+    circadian_context = _fetch_circadian_context()
 
     # Emotion context = Mika's global mood only. The per-person affective
     # stance is relational and belongs to person_context (see below), so
@@ -102,7 +108,26 @@ async def gather_context(
         tool_names=tool_names,
         self_concept=self_concept,
         person_context=person_context,
+        circadian_context=circadian_context,
     )
+
+
+def _fetch_circadian_context() -> str:
+    """Return a short French description of Mika's current circadian state."""
+    try:
+        from emotion import circadian
+
+        try:
+            from config.personality import personality
+            profile = personality.circadian_profile
+        except Exception:
+            profile = None
+
+        state = circadian.current_state(profile=profile)
+        return circadian.phase_description_fr(state)
+    except Exception:
+        logger.debug("Circadian context fetch failed", exc_info=True)
+        return ""
 
 
 async def _fetch_self_concept() -> str:

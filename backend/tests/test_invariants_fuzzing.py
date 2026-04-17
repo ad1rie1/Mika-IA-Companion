@@ -244,7 +244,14 @@ class TestDecayInvariants:
             assert engine.global_mood.intensity >= 0.0
 
     def test_repeated_decay_converges(self):
-        """Repeated decay should converge to default, not oscillate."""
+        """Repeated decay should converge to the home vector, not oscillate.
+
+        Since circadian.py was introduced, home = default_mood × 0.15 +
+        phase_bias × 0.35, so the oscillator settles near the biased home,
+        not pure default. We only check that the *angry* impulse has fully
+        dissipated — velocity is near zero and intensity is bounded by the
+        home magnitude (~0.4 max).
+        """
         engine = make_engine(TEMPERAMENTS[2])
         engine.process_emotion(EmotionData(Emotion.ANGRY, 0.9), "user")
 
@@ -252,8 +259,13 @@ class TestDecayInvariants:
             simulate_time_decay(engine, 10.0)
 
         mood = engine._get_person_mood("user")
-        # After 500 seconds of decay, should be at default
-        assert mood.emotion == engine.temperament.default_mood or mood.intensity < 0.05
+        # Settled: velocity near zero (no residual anger impulse)
+        from emotion import pad
+        assert pad.norm(mood.dynamic.velocity) < 0.05
+        # Intensity bounded by home magnitude (default × 0.15 + bias × 0.35)
+        assert mood.intensity < 0.5
+        # And no longer anger-flavored (valence should be non-negative)
+        assert pad.valence(mood.emotion) >= 0.0
 
 
 # ===================================================================

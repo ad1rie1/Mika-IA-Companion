@@ -17,6 +17,13 @@ type EmotionBlend = Array<{ emotion: string; weight: number }>;
 
 interface InnerState {
   drives?: Record<string, { tension: number; last_satisfied: number }>;
+  energy?: number;
+  circadian?: {
+    phase: "morning" | "afternoon" | "evening" | "night";
+    hour: number;
+    energy: number;
+    bias_emotion: string;
+  };
   self_narrative?: {
     content: string;
     key_themes: string[];
@@ -40,6 +47,16 @@ interface InnerState {
   };
   pending_commitments?: string[];
 }
+
+const PHASE_META: Record<
+  "morning" | "afternoon" | "evening" | "night",
+  { label: string; icon: string; color: string }
+> = {
+  morning: { label: "Matin", icon: "🌅", color: "#f59e0b" },
+  afternoon: { label: "Aprem", icon: "☀️", color: "#fbbf24" },
+  evening: { label: "Soir", icon: "🌆", color: "#a78bfa" },
+  night: { label: "Nuit", icon: "🌙", color: "#6366f1" },
+};
 
 const DRIVE_LABELS: Record<string, { label: string; icon: string; color: string }> = {
   curiosity: { label: "Curiosité", icon: "❔", color: "#6366f1" },
@@ -70,6 +87,9 @@ export class InnerLifePanel {
   private narrativeEl: HTMLElement;
   private ruminationsEl: HTMLElement;
   private profileEl: HTMLElement;
+  private phaseBadgeEl: HTMLElement;
+  private energyFillEl: HTMLElement;
+  private energyValueEl: HTMLElement;
 
   constructor(containerId: string = "inner-life-panel") {
     this.root = document.getElementById(containerId)!;
@@ -80,9 +100,19 @@ export class InnerLifePanel {
     this.root.innerHTML = `
       <div class="il-header" role="button" aria-expanded="true">
         <span>Vie intérieure</span>
+        <span class="il-phase-badge" title="Phase circadienne">—</span>
         <span class="il-toggle">▾</span>
       </div>
       <div class="il-body">
+        <section class="il-section" id="il-energy">
+          <h4>Énergie</h4>
+          <div class="il-energy-row">
+            <span class="il-energy-bar">
+              <span class="il-energy-fill" style="width:50%"></span>
+            </span>
+            <span class="il-energy-value">—</span>
+          </div>
+        </section>
         <section class="il-section" id="il-blend">
           <h4>Émotion</h4>
           <div class="il-blend-body">—</div>
@@ -111,6 +141,9 @@ export class InnerLifePanel {
     this.narrativeEl = this.root.querySelector(".il-narrative-body")!;
     this.ruminationsEl = this.root.querySelector(".il-ruminations-body")!;
     this.profileEl = this.root.querySelector(".il-profile-body")!;
+    this.phaseBadgeEl = this.root.querySelector(".il-phase-badge")!;
+    this.energyFillEl = this.root.querySelector(".il-energy-fill")!;
+    this.energyValueEl = this.root.querySelector(".il-energy-value")!;
 
     // Collapse/expand on header click
     const header = this.root.querySelector(".il-header") as HTMLElement;
@@ -155,10 +188,38 @@ export class InnerLifePanel {
 
   applyInnerState(state: InnerState | undefined) {
     if (!state) return;
+    this.renderCircadian(state.circadian, state.energy);
     this.renderDrives(state.drives);
     this.renderNarrative(state.self_narrative);
     this.renderRuminations(state.ruminations);
     this.renderProfile(state.person_profile, state.pending_commitments);
+  }
+
+  private renderCircadian(
+    circadian: InnerState["circadian"],
+    energy: number | undefined,
+  ) {
+    // Phase badge in the header
+    if (circadian) {
+      const meta = PHASE_META[circadian.phase];
+      if (meta) {
+        const hour = circadian.hour.toString().padStart(2, "0");
+        this.phaseBadgeEl.textContent = `${meta.icon} ${meta.label} ${hour}h`;
+        this.phaseBadgeEl.style.background = `${meta.color}33`;
+        this.phaseBadgeEl.style.color = meta.color;
+      }
+    }
+
+    // Energy bar
+    const level = typeof energy === "number" ? energy : circadian?.energy;
+    if (typeof level === "number") {
+      const pct = Math.max(0, Math.min(100, Math.round(level * 100)));
+      this.energyFillEl.style.width = `${pct}%`;
+      // Color shifts from amber (low) to green (high) to help read at a glance
+      const hue = Math.round(level * 120); // 0 = red, 120 = green
+      this.energyFillEl.style.background = `hsl(${hue}, 70%, 50%)`;
+      this.energyValueEl.textContent = `${pct}%`;
+    }
   }
 
   // ── Renderers ───────────────────────────────────────────────

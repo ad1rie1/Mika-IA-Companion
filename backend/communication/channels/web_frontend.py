@@ -111,12 +111,14 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
             self.person_id = claimed_id.strip()[:100]
         if isinstance(display, str) and display.strip():
             self.display_name = display.strip()[:80]
-            # Ensure the corresponding Entity exists so PersonProfile lookups
-            # resolve. Uses the display name as the Entity.name if provided,
-            # otherwise the person_id itself so profiles still accumulate.
-            await self._ensure_entity(self.display_name)
-        else:
-            await self._ensure_entity(self.person_id)
+
+        # ALWAYS key the Entity by person_id (stable, collision-free).
+        # `_fetch_person_context()` looks up PersonProfile by
+        # entity__name=person_id, so the Entity MUST carry the person_id
+        # as its name or the theory-of-mind layer never matches.
+        # The display_name is a purely UI-level affordance injected in the
+        # greeting prompt so Mika addresses the visitor by name.
+        await self._ensure_entity(self.person_id)
 
         logger.info(
             "WS identify: person_id=%s display=%s channel=%s",

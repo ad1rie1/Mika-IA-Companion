@@ -3,6 +3,7 @@ from pathlib import Path
 import yaml
 from django.conf import settings
 
+from emotion.circadian import CircadianProfile, profile_from_yaml
 from emotion.types import Emotion
 from emotion.state import Temperament
 
@@ -72,6 +73,11 @@ class Personality:
     @property
     def greeting(self) -> str:
         return self._data.get("greeting", "Salut !")
+
+    @property
+    def circadian_profile(self) -> CircadianProfile:
+        """Parse the ``circadian_profile`` block. Defaults kick in for missing keys."""
+        return profile_from_yaml(self._data.get("circadian_profile", {}))
 
     @property
     def temperament(self) -> Temperament:

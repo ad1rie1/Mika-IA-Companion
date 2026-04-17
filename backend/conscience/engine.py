@@ -383,6 +383,10 @@ class ConscienceEngine:
         # Rumination: persistent unresolved thoughts
         rum_pressure, rum_count = await self._rumination_snapshot()
 
+        # Energy: combines circadian phase with REST drive. Tired Mika
+        # speaks less spontaneously (see scoring Factor 11).
+        energy = drive_engine.energy_level()
+
         return DecisionContext(
             pending_observations=pending,
             global_mood=glob.emotion.value,
@@ -399,6 +403,7 @@ class ConscienceEngine:
             drive_summary=drive_summary,
             rumination_pressure=rum_pressure,
             rumination_count=rum_count,
+            energy=energy,
         )
 
     async def _rumination_snapshot(self) -> tuple[float, int]:
@@ -767,6 +772,7 @@ class ConscienceEngine:
                 tool_names=tool_names,
                 self_concept=base_context.self_concept,
                 person_context=base_context.person_context,
+                circadian_context=base_context.circadian_context,
             )
 
             perception = Perception.from_internal_trigger(
