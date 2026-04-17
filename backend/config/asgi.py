@@ -35,8 +35,17 @@ class LifespanWrapper:
             await self.app(scope, receive, send)
 
     async def _startup(self):
-        from emotion.engine import emotion_engine
+        from ai.quota import quota_tracker
+        from asgiref.sync import sync_to_async
         from conscience.engine import conscience_engine
+        from emotion.engine import emotion_engine
+
+        # Hydrate the quota tracker from DB so counters survive restart.
+        try:
+            await sync_to_async(quota_tracker.hydrate, thread_sensitive=True)()
+            logger.info("AI quota tracker hydrated")
+        except Exception:
+            logger.warning("Quota hydration failed", exc_info=True)
 
         await memory_manager.initialize()
         logger.info("Memory system initialized")

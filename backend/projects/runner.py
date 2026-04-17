@@ -28,6 +28,7 @@ from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.utils import timezone
 
+from ai.quota import QuotaExceeded, current_project_id
 from ai.router import AIRole, ai_router
 from projects import context_builder, schedule
 from utils.parsing import strip_markdown_json
@@ -41,7 +42,9 @@ LLM_TIMEOUT_SECONDS = 90
 RUNS_SINCE_INPUT_CAP = 10         # beyond this, force a pause until user comes back
 
 
-# Regex to locate a JSON block at end of LLM response (fenced or bare)
+# Regex to locate a JSON block at end of LLM response (fenced or bare).
+# Anchored to the LAST `{` via rfind before use; the regex itself is
+# kept as a defensive fallback for responses with trailing whitespace.
 _JSON_TAIL_RE = re.compile(r"(\{[\s\S]*\})\s*$")
 
 
@@ -113,12 +116,15 @@ class ProjectRunner:
             except Exception:
                 logger.debug("is_due raised for project %s", p.id, exc_info=True)
 
-        # Priority ordering
+        # Priority ordering — build an id→priority map once to avoid an
+        # O(N) linear scan inside the sort key (was O(N² log N)).
         priority_order = {"urgent": 0, "high": 1, "normal": 2, "low": 3}
-        def _sort_key(pid: int) -> int:
-            matching = next((p for p in projects if p.id == pid), None)
-            return priority_order.get(matching.priority if matching else "normal", 2)
-        due_ids.sort(key=_sort_key)
+        priority_by_id = {p.id: p.priority for p in projects}
+        due_ids.sort(
+            key=lambda pid: priority_order.get(
+                priority_by_id.get(pid, "normal"), 2
+            )
+        )
         return due_ids
 
     # ── Single advance ───────────────────────────────────────────
@@ -141,6 +147,9 @@ class ProjectRunner:
         outcome = "ok"
         started = time.time()
 
+        # Attribute this LLM call to the project so the quota tracker
+        # charges `Project.monthly_token_budget`.
+        token = current_project_id.set(project_id)
         try:
             raw = await asyncio.wait_for(
                 ai_router.complete(
@@ -150,6 +159,23 @@ class ProjectRunner:
                 ),
                 timeout=LLM_TIMEOUT_SECONDS,
             )
+        except QuotaExceeded as qe:
+            logger.warning(
+                "Project %s: quota dépassé — %s. Pause du prochain run.",
+                project_id, qe,
+            )
+            await self._save_prompt_history(
+                project_id=project_id,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                raw_response="",
+                parsed_output=None,
+                outcome="quota_exceeded",
+                duration_ms=int((time.time() - started) * 1000),
+            )
+            await self._log_error(project_id, f"Quota atteint: {qe}")
+            await self._bump_next_run(project_id)
+            return False
         except asyncio.TimeoutError:
             logger.warning("Project %s: LLM timed out", project_id)
             outcome = "timeout"
@@ -180,6 +206,8 @@ class ProjectRunner:
             await self._log_error(project_id, "LLM call failed")
             await self._bump_next_run(project_id)
             return False
+        finally:
+            current_project_id.reset(token)
 
         duration_ms = int((time.time() - started) * 1000)
 
@@ -538,8 +566,20 @@ def _extract_json_tail(raw: str) -> Optional[dict]:
         return json.loads(candidate)
     except Exception:
         pass
-    # Fallback: find the LAST `{ ... }` in the raw text
-    m = _JSON_TAIL_RE.search(raw.strip())
+    # Anchor on the LAST opening brace — prose before the final JSON
+    # block (e.g. "Mes {reflexions}... voici: {real json}") would poison
+    # a greedy regex that spans from the first `{`.
+    stripped = raw.strip()
+    last_open = stripped.rfind("{")
+    if last_open != -1:
+        try:
+            return json.loads(stripped[last_open:])
+        except Exception:
+            pass
+    # Defensive fallback on the regex path (rarely useful now that rfind
+    # covers the common case, but harmless and keeps behavior if the
+    # trailing structure looks unusual).
+    m = _JSON_TAIL_RE.search(stripped)
     if not m:
         return None
     try:

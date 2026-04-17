@@ -20,6 +20,25 @@ logger = logging.getLogger(__name__)
 BROADCAST_GROUP = "vtuber_broadcast"
 MAX_MESSAGE_LENGTH = 2000
 
+# Server-internal identifiers that must never be set by a client — they
+# address Mika's self-directed emotional state, the global mood bucket,
+# or the anonymous fallback. A client spoofing one of these would pollute
+# internal state (e.g. route a user's anger into Mika's own self-mood).
+_RESERVED_PERSON_IDS = frozenset({
+    "conscience_mika", "__global__", "anonymous", "",
+})
+
+
+def _sanitize_client_person_id(raw, fallback: str) -> str:
+    """Accept a client-supplied person_id only if it's a non-reserved string.
+    Otherwise return the connection's server-assigned fallback."""
+    if not isinstance(raw, str):
+        return fallback
+    candidate = raw.strip()[:100]
+    if not candidate or candidate in _RESERVED_PERSON_IDS:
+        return fallback
+    return candidate
+
 
 class WebSocketConsumer(AsyncWebsocketConsumer):
     """WebSocket channel — handles browser/frontend connections to the VTuber."""
@@ -75,8 +94,13 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
 
         # Client-provided person_id (persistent identity) beats the
         # per-connection UUID. Enables the theory-of-mind feature to
-        # recognize returning users across sessions.
-        person_id = data.get("person_id", getattr(self, "person_id", "anonymous"))
+        # recognize returning users across sessions. Reserved internal
+        # IDs are rejected so a hostile client can't address Mika's own
+        # self-state or the global mood bucket.
+        person_id = _sanitize_client_person_id(
+            data.get("person_id"),
+            fallback=getattr(self, "person_id", "anonymous"),
+        )
 
         attachments = (
             validate_attachments(raw_attachments) if has_attachments else None
@@ -107,8 +131,9 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
         claimed_id = data.get("person_id")
         display = data.get("display_name")
 
-        if isinstance(claimed_id, str) and claimed_id.strip():
-            self.person_id = claimed_id.strip()[:100]
+        sanitized = _sanitize_client_person_id(claimed_id, fallback="")
+        if sanitized:
+            self.person_id = sanitized
         if isinstance(display, str) and display.strip():
             self.display_name = display.strip()[:80]
 

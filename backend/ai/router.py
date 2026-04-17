@@ -19,6 +19,12 @@ from ai.providers import AIProvider
 from ai.providers.claude import ClaudeProvider
 from ai.providers.ollama_provider import OllamaProvider
 from ai.providers.openai_provider import OpenAIProvider
+from ai.quota import (
+    current_project_id,
+    estimate_tokens_from_chars,
+    quota_tracker,
+    _take_usage,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -156,9 +162,22 @@ class AIRouter:
         prompt_chars = len(system_prompt) + len(user_prompt)
         t0 = time.monotonic()
 
+        # Project attribution (set by ProjectRunner via the context var).
+        project_id = current_project_id.get()
+
+        # Pre-call quota enforcement — refuse before we burn the API call.
+        # Estimate: prompt tokens + a conservative 512-token reply room.
+        expected_in = estimate_tokens_from_chars(prompt_chars)
+        expected_total = expected_in + 512
+        quota_tracker.check(
+            role=role.value,
+            project_id=project_id,
+            expected_tokens=expected_total,
+        )
+
         logger.debug(
-            "AI call START  role=%s provider=%s model=%s prompt_chars=%d",
-            role.value, provider_name, model, prompt_chars,
+            "AI call START  role=%s provider=%s model=%s prompt_chars=%d project=%s",
+            role.value, provider_name, model, prompt_chars, project_id,
         )
 
         try:
@@ -169,11 +188,31 @@ class AIRouter:
                 **kwargs,
             )
             elapsed_ms = (time.monotonic() - t0) * 1000
+
+            # Prefer provider-native token counts; fall back to char estimate.
+            usage = _take_usage()
+            if usage:
+                tokens_in = int(usage.get("in", 0))
+                tokens_out = int(usage.get("out", 0))
+            else:
+                tokens_in = expected_in
+                tokens_out = estimate_tokens_from_chars(len(result))
+
+            cost_usd = quota_tracker.record(
+                role=role.value,
+                provider=provider_name,
+                model=model,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                project_id=project_id,
+            )
+
             logger.info(
                 "AI call OK     role=%-22s provider=%-7s model=%-30s "
-                "prompt=%5d chars  response=%5d chars  %7.0f ms",
+                "prompt=%5d chars  response=%5d chars  tok=%d/%d  $%.5f  %7.0f ms",
                 role.value, provider_name, model,
-                prompt_chars, len(result), elapsed_ms,
+                prompt_chars, len(result),
+                tokens_in, tokens_out, cost_usd, elapsed_ms,
             )
             return result
 

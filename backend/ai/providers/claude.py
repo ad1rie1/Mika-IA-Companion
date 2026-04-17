@@ -77,6 +77,19 @@ class ClaudeProvider:
             messages=[{"role": "user", "content": content}],
         )
 
+        # Surface native token usage to the quota tracker. No-op when this
+        # call wasn't routed through AIRouter (e.g. ad-hoc provider use).
+        try:
+            from ai.quota import set_usage
+            usage = getattr(response, "usage", None)
+            if usage is not None:
+                set_usage(
+                    input_tokens=int(getattr(usage, "input_tokens", 0) or 0),
+                    output_tokens=int(getattr(usage, "output_tokens", 0) or 0),
+                )
+        except Exception:
+            pass
+
         parts = []
         for block in response.content:
             if block.type == "text":

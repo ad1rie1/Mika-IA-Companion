@@ -139,6 +139,14 @@ class Project(models.Model):
     # forces a cooldown if it grows too large.
     runs_since_user_input = models.IntegerField(default=0)
 
+    # ── Quota / budget ───────────────────────────────────────────
+    # Monthly token cap for this project's LLM calls (sum of prompt +
+    # completion tokens across all calls tagged with this project_id
+    # via ``ai.quota.current_project_id``). 0 = unlimited.
+    # When exceeded, ``ai.router`` raises ``QuotaExceeded`` and the
+    # runner logs a `quota_exceeded` outcome + defers next_run.
+    monthly_token_budget = models.IntegerField(default=0)
+
     # ── Meta ─────────────────────────────────────────────────────
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

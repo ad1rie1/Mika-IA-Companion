@@ -17,6 +17,7 @@ from dataclasses import dataclass
 
 from django.conf import settings
 
+from ai.quota import QuotaExceeded
 from emotion.engine import emotion_engine
 from emotion.types import Emotion, EmotionData
 from pipeline.broadcast import broadcast_to_websocket, emit_communication_event, persist_to_memory
@@ -143,6 +144,19 @@ async def process_message(
         )
         ai_failed = True
         response_text = "Hmm, je reflechis plus lentement que prevu... Laisse-moi un instant."
+        emotion_data = EmotionData(emotion=Emotion.NEUTRAL, intensity=0.0)
+    except QuotaExceeded as qe:
+        # Hit a daily/monthly LLM quota. Return a truthful short message
+        # instead of the generic "bug" fallback so the user knows why.
+        logger.warning(
+            "AI quota exceeded (person=%s, source=%s): %s",
+            person_id, source, qe,
+        )
+        ai_failed = True
+        response_text = (
+            "Desolee, j'ai atteint la limite d'usage IA pour le moment. "
+            "Reessaie un peu plus tard."
+        )
         emotion_data = EmotionData(emotion=Emotion.NEUTRAL, intensity=0.0)
     except Exception:
         logger.exception(

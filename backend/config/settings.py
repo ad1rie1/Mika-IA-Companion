@@ -106,6 +106,32 @@ API_PORT = env.int("API_PORT", default=8000)
 AI_CALL_TIMEOUT = env.int("AI_CALL_TIMEOUT", default=60)
 PERSONALITY_PATH = PROJECT_ROOT / "personality.yaml"
 
+# --- AI Quota / Limiter ---
+# Token budgets act as a circuit breaker: when a counter would be
+# pushed past its cap, ``ai.quota.QuotaTracker.check`` raises
+# ``QuotaExceeded`` *before* the LLM call. 0 = unlimited.
+# Global caps apply to every call; per-role caps apply on top for a
+# specific AIRole. Per-project caps live on ``Project.monthly_token_budget``.
+AI_QUOTA_DAILY_TOKENS = env.int("AI_QUOTA_DAILY_TOKENS", default=0)
+AI_QUOTA_MONTHLY_TOKENS = env.int("AI_QUOTA_MONTHLY_TOKENS", default=0)
+
+# Per-role overrides. Add as many as you need. Role names match
+# ``AIRole`` values uppercased (conversation → AI_QUOTA_ROLE_CONVERSATION_*).
+AI_QUOTA_ROLE_CONVERSATION_DAILY = env.int("AI_QUOTA_ROLE_CONVERSATION_DAILY", default=0)
+AI_QUOTA_ROLE_CONVERSATION_MONTHLY = env.int("AI_QUOTA_ROLE_CONVERSATION_MONTHLY", default=0)
+AI_QUOTA_ROLE_CONVERSATION_TOOLS_DAILY = env.int("AI_QUOTA_ROLE_CONVERSATION_TOOLS_DAILY", default=0)
+AI_QUOTA_ROLE_CONVERSATION_TOOLS_MONTHLY = env.int("AI_QUOTA_ROLE_CONVERSATION_TOOLS_MONTHLY", default=0)
+AI_QUOTA_ROLE_EMAIL_TRIAGE_DAILY = env.int("AI_QUOTA_ROLE_EMAIL_TRIAGE_DAILY", default=0)
+AI_QUOTA_ROLE_EMAIL_TRIAGE_MONTHLY = env.int("AI_QUOTA_ROLE_EMAIL_TRIAGE_MONTHLY", default=0)
+AI_QUOTA_ROLE_SIGNAL_INTERPRETATION_DAILY = env.int("AI_QUOTA_ROLE_SIGNAL_INTERPRETATION_DAILY", default=0)
+AI_QUOTA_ROLE_SIGNAL_INTERPRETATION_MONTHLY = env.int("AI_QUOTA_ROLE_SIGNAL_INTERPRETATION_MONTHLY", default=0)
+AI_QUOTA_ROLE_MEMORY_EXTRACTION_DAILY = env.int("AI_QUOTA_ROLE_MEMORY_EXTRACTION_DAILY", default=0)
+AI_QUOTA_ROLE_MEMORY_EXTRACTION_MONTHLY = env.int("AI_QUOTA_ROLE_MEMORY_EXTRACTION_MONTHLY", default=0)
+AI_QUOTA_ROLE_VALIDITY_CHECK_DAILY = env.int("AI_QUOTA_ROLE_VALIDITY_CHECK_DAILY", default=0)
+AI_QUOTA_ROLE_VALIDITY_CHECK_MONTHLY = env.int("AI_QUOTA_ROLE_VALIDITY_CHECK_MONTHLY", default=0)
+AI_QUOTA_ROLE_VISION_CAPTION_DAILY = env.int("AI_QUOTA_ROLE_VISION_CAPTION_DAILY", default=0)
+AI_QUOTA_ROLE_VISION_CAPTION_MONTHLY = env.int("AI_QUOTA_ROLE_VISION_CAPTION_MONTHLY", default=0)
+
 # --- Scheduler ---
 CRON_TICK_INTERVAL = env.int("CRON_TICK_INTERVAL", default=60)  # seconds
 

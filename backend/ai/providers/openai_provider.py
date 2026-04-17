@@ -76,4 +76,16 @@ class OpenAIProvider:
             ],
         )
 
+        # Surface native token usage to the quota tracker.
+        try:
+            from ai.quota import set_usage
+            usage = getattr(response, "usage", None)
+            if usage is not None:
+                set_usage(
+                    input_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
+                    output_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
+                )
+        except Exception:
+            pass
+
         return response.choices[0].message.content or ""

@@ -115,7 +115,11 @@ def _next_cron(expr: str, now: datetime) -> Optional[datetime]:
     try:
         from croniter import croniter  # type: ignore[import-not-found]
     except ImportError:
-        return _fallback_cron_next(expr, now)
+        try:
+            return _fallback_cron_next(expr, now)
+        except Exception:
+            logger.warning("Invalid cron expression %r (fallback parser)", expr)
+            return None
 
     try:
         base = now.replace(second=0, microsecond=0)
@@ -166,7 +170,11 @@ def _fallback_cron_next(expr: str, now: datetime) -> Optional[datetime]:
         for part in parts:
             part = part.strip().upper()
             if "-" in part:
-                lo, hi = part.split("-")
+                # split once: anything beyond a single hyphen is malformed
+                segs = part.split("-", 1)
+                if len(segs) != 2 or not segs[0] or not segs[1] or "-" in segs[1]:
+                    continue
+                lo, hi = segs[0], segs[1]
                 lo_i = _DOW_MAP.get(lo, _parse_int(lo))
                 hi_i = _DOW_MAP.get(hi, _parse_int(hi))
                 if lo_i is None or hi_i is None:

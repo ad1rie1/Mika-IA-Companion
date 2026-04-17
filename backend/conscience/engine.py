@@ -581,8 +581,14 @@ class ConscienceEngine:
                     emo = Emotion(r.emotion)
                     data = EmotionData(emotion=emo, intensity=r.intensity * 0.15)
                     emotion_engine.process_emotion(data, "conscience_mika")
-                except (ValueError, Exception):
+                except ValueError:
+                    # Unknown emotion label on a stale rumination — skip.
                     pass
+                except Exception:
+                    logger.debug(
+                        "Rumination emotional bleed failed for #%s",
+                        r.pk, exc_info=True,
+                    )
 
             if r.intensity < 0.1:
                 r.status = "faded"

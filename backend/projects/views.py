@@ -64,6 +64,7 @@ def _project_to_dict(p: Project, *, include_tasks: bool = False) -> dict:
         "next_run_at": p.next_run_at.isoformat() if p.next_run_at else None,
         "last_run_at": p.last_run_at.isoformat() if p.last_run_at else None,
         "runs_since_user_input": p.runs_since_user_input,
+        "monthly_token_budget": p.monthly_token_budget,
         "keywords": list(p.keywords or []),
         "owner": p.owner.name if p.owner_id else None,
         "created_at": p.created_at.isoformat(),
@@ -146,7 +147,7 @@ def create_project(request):
         "description", "keywords", "origin", "status", "priority",
         "tone_directive", "emotion_policy", "instructions", "out_of_scope",
         "requires_approval", "allowed_modules", "resource_paths", "contacts",
-        "schedule_rule",
+        "schedule_rule", "monthly_token_budget",
     }
     kwargs = {k: body[k] for k in body.keys() & allowed_fields if body[k] is not None}
     kwargs["title"] = title[:150]
@@ -204,7 +205,7 @@ def project_detail(request, project_id: int):
         "title", "description", "keywords", "status", "priority",
         "tone_directive", "emotion_policy", "instructions", "out_of_scope",
         "requires_approval", "allowed_modules", "resource_paths", "contacts",
-        "schedule_rule",
+        "schedule_rule", "monthly_token_budget",
     }
     for k, v in body.items():
         if k in updatable and v is not None:
