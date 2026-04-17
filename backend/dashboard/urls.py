@@ -11,6 +11,7 @@ from django.urls import path
 
 from dashboard.views import pages
 from dashboard.views.api import (
+    configuration,
     conscience,
     drives as drives_api,
     emotion as emotion_api,
@@ -79,4 +80,13 @@ urlpatterns = [
     path("dashboard/api/quota",               quota_api.quota),
     path("dashboard/api/system/consolidation",system.consolidation),
     path("dashboard/api/system/ai-config",    system.ai_config),
+
+    # Configuration system (schema-driven editor)
+    path("dashboard/api/config/schema",            configuration.schema),
+    path("dashboard/api/config/values",            configuration.value_write),  # PATCH/DELETE
+    path("dashboard/api/config/values/all",        configuration.values),        # GET
+    path("dashboard/api/config/rows",              configuration.rows),
+    path("dashboard/api/config/rows/create",       configuration.row_add),
+    path("dashboard/api/config/rows/<uuid:row_id>",configuration.row_detail),
+    path("dashboard/api/config/history",           configuration.history),
 ]

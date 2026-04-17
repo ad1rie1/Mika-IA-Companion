@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     "modules",
     "projects",
     "dashboard",
+    "configs",
 ]
 
 MIDDLEWARE = [

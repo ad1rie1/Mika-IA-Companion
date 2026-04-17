@@ -264,3 +264,79 @@ td small { color: var(--text-dim); display: block; margin-top: 2px; }
          color: var(--text-dim); font-size: 11px; }
 .pager .btn { padding: 4px 10px; }
 .pager .pager-info { margin: 0 8px; }
+
+/* Clickable card */
+.card.clickable { cursor: pointer; }
+.card.clickable:hover { border-color: var(--cyan); box-shadow: 0 0 32px rgba(94,225,255,0.15); }
+
+/* Button variants */
+.btn.primary {
+  background: linear-gradient(90deg, rgba(94,225,255,0.18), rgba(138,92,255,0.18));
+  color: var(--cyan); border-color: var(--border-strong);
+}
+.btn.primary:hover { background: linear-gradient(90deg, rgba(94,225,255,0.30), rgba(138,92,255,0.30)); }
+.btn.danger { color: var(--red); border-color: rgba(255,91,110,0.4); }
+.btn.danger:hover { background: rgba(255,91,110,0.1); }
+.btn.ghost { border-color: transparent; color: var(--text-dim); }
+.btn.ghost:hover { color: var(--cyan); border-color: var(--border); background: rgba(94,225,255,0.05); }
+
+/* Modal / drawer */
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(5,7,13,0.78);
+  backdrop-filter: blur(4px); z-index: 100;
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 40px 20px; overflow-y: auto;
+  animation: fadein 0.15s ease-out;
+}
+@keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+.modal {
+  width: min(820px, 100%);
+  background: var(--panel-solid);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: 0 8px 64px rgba(94,225,255,0.18), 0 0 80px rgba(138,92,255,0.12);
+  overflow: hidden;
+  animation: slide-in 0.2s ease-out;
+}
+@keyframes slide-in { from { transform: translateY(-12px); opacity: 0.6; } to { transform: none; opacity: 1; } }
+.modal-header {
+  padding: 14px 20px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 10px;
+  background: linear-gradient(180deg, rgba(94,225,255,0.05), transparent);
+}
+.modal-header h2 { margin: 0; font-size: 13px; letter-spacing: 0.18em;
+  color: var(--cyan); text-transform: uppercase; font-weight: 500; text-shadow: var(--glow); }
+.modal-close { margin-left: auto; background: none; border: none; color: var(--text-dim);
+  font-size: 20px; cursor: pointer; line-height: 1; padding: 4px 8px; }
+.modal-close:hover { color: var(--red); }
+.modal-body { padding: 20px; max-height: 70vh; overflow-y: auto; }
+.modal-footer { padding: 12px 20px; border-top: 1px solid var(--border);
+  display: flex; gap: 10px; justify-content: flex-end;
+  background: linear-gradient(0deg, rgba(0,0,0,0.2), transparent); }
+
+/* Form controls */
+.form-grid { display: grid; gap: 14px; grid-template-columns: 1fr 1fr; }
+.form-grid .full { grid-column: 1 / -1; }
+.form-field { display: flex; flex-direction: column; gap: 4px; }
+.form-field label { font-size: 10px; letter-spacing: 0.15em; color: var(--text-dim);
+  text-transform: uppercase; }
+.form-field .hint { font-size: 10px; color: var(--text-dim); margin-top: 2px; font-style: italic; }
+.form-field input[type=text],
+.form-field input[type=number],
+.form-field textarea,
+.form-field select {
+  background: rgba(10,16,32,0.6); color: var(--text);
+  border: 1px solid var(--border); padding: 8px 10px; border-radius: 6px;
+  font-family: inherit; font-size: 12px; outline: none; resize: vertical;
+}
+.form-field textarea { min-height: 72px; font-family: inherit; }
+.form-field input:focus, .form-field textarea:focus, .form-field select:focus {
+  border-color: var(--border-strong); box-shadow: 0 0 0 2px rgba(94,225,255,0.08);
+}
+.form-field.checkbox { flex-direction: row; align-items: center; gap: 8px; }
+.form-field.checkbox label { text-transform: none; letter-spacing: 0; font-size: 12px; color: var(--text); }
+
+@media (max-width: 760px) {
+  .form-grid { grid-template-columns: 1fr; }
+  .modal-backdrop { padding: 10px; }
+}
