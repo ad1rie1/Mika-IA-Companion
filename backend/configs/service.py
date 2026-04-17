@@ -220,99 +220,51 @@ class ConfigService:
         self._invalidate(key)
         self._notify(key, self.get(key, default=None))
 
-    # ── Record-list CRUD ────────────────────────────────────────
+    # ── Record-list CRUD (delegates to pluggable backend) ───────
 
     def list_rows(self, parent_key: str, *, decrypt_secrets: bool = False) -> list[dict]:
-        from configs.models import ConfigRecordItem
-        item = registry.get(parent_key)
-        if item is None or item.type != "record_list":
-            raise KeyError(f"{parent_key} is not a record_list")
-
-        rows = ConfigRecordItem.objects.filter(parent_key=parent_key).order_by("order", "id")
-        out = []
-        for r in rows:
-            payload = dict(r.payload or {})
-            for fname in r.encrypted_fields or []:
-                if decrypt_secrets and payload.get(fname):
-                    payload[fname] = secrets.decrypt(payload[fname])
-                elif not decrypt_secrets and payload.get(fname):
-                    payload[fname] = secrets.redact(secrets.decrypt(payload[fname]))
-            out.append({
-                "row_id": str(r.row_id),
-                "payload": payload,
-                "enabled": r.enabled,
-                "order": r.order,
-                "updated_at": r.updated_at.isoformat(),
-            })
-        return out
+        from configs import backends
+        item = self._require_record_list(parent_key)
+        return backends.resolve(parent_key).list_rows(item, decrypt_secrets=decrypt_secrets)
 
     def add_row(self, parent_key: str, payload: dict, *, actor: str = "") -> dict:
+        from configs import backends
+        from configs.models import ConfigChangeLog
         item = self._require_record_list(parent_key)
         if item.max_items is not None:
-            from configs.models import ConfigRecordItem
-            count = ConfigRecordItem.objects.filter(parent_key=parent_key).count()
-            if count >= item.max_items:
+            existing = backends.resolve(parent_key).list_rows(item)
+            if len(existing) >= item.max_items:
                 raise ValidationError(f"Limite atteinte ({item.max_items} éléments)")
-
-        cleaned, encrypted = _clean_record_payload(item.record, payload)
-        from configs.models import ConfigRecordItem, ConfigChangeLog
-        last = ConfigRecordItem.objects.filter(parent_key=parent_key).order_by("-order").first()
-        order = (last.order + 1) if last else 0
-        row = ConfigRecordItem.objects.create(
-            parent_key=parent_key, payload=cleaned,
-            encrypted_fields=encrypted, order=order,
-        )
+        result = backends.resolve(parent_key).add_row(item, payload)
         ConfigChangeLog.objects.create(
-            key=parent_key, row_id=row.row_id, action="row_add",
-            before=None, after=_scrub_record(item.record, cleaned),
+            key=parent_key, row_id=None, action="row_add",
+            before=None, after=_scrub_record(item.record, result.get("payload") or {}),
             actor=actor,
         )
         self._notify(parent_key, None)
-        return {"row_id": str(row.row_id), "payload": cleaned, "order": row.order}
+        return result
 
     def update_row(self, parent_key: str, row_id: str, payload: dict, *, actor: str = "") -> dict:
+        from configs import backends
+        from configs.models import ConfigChangeLog
         item = self._require_record_list(parent_key)
-        from configs.models import ConfigRecordItem, ConfigChangeLog
-        try:
-            row = ConfigRecordItem.objects.get(parent_key=parent_key, row_id=row_id)
-        except ConfigRecordItem.DoesNotExist:
-            raise KeyError(f"Row {row_id} not found in {parent_key}")
-
-        before = dict(row.payload or {})
-        # Secrets omitted (None/"") in the payload = keep existing
-        cleaned, encrypted = _clean_record_payload(
-            item.record, payload, existing=before,
-            existing_encrypted=row.encrypted_fields or [],
-        )
-        row.payload = cleaned
-        row.encrypted_fields = encrypted
-        if "enabled" in payload:
-            row.enabled = bool(payload["enabled"])
-        if "order" in payload and isinstance(payload["order"], int):
-            row.order = payload["order"]
-        row.save()
+        result = backends.resolve(parent_key).update_row(item, row_id, payload)
         ConfigChangeLog.objects.create(
-            key=parent_key, row_id=row.row_id, action="row_update",
-            before=_scrub_record(item.record, before),
-            after=_scrub_record(item.record, cleaned),
+            key=parent_key, row_id=None, action="row_update",
+            before=None, after=_scrub_record(item.record, result.get("payload") or {}),
             actor=actor,
         )
         self._notify(parent_key, None)
-        return {"row_id": str(row.row_id), "payload": cleaned, "order": row.order, "enabled": row.enabled}
+        return result
 
     def delete_row(self, parent_key: str, row_id: str, *, actor: str = "") -> None:
+        from configs import backends
+        from configs.models import ConfigChangeLog
         item = self._require_record_list(parent_key)
-        from configs.models import ConfigRecordItem, ConfigChangeLog
-        try:
-            row = ConfigRecordItem.objects.get(parent_key=parent_key, row_id=row_id)
-        except ConfigRecordItem.DoesNotExist:
-            return
-        before = dict(row.payload or {})
-        row.delete()
+        backends.resolve(parent_key).delete_row(item, row_id)
         ConfigChangeLog.objects.create(
-            key=parent_key, row_id=row_id, action="row_delete",
-            before=_scrub_record(item.record, before),
-            after=None, actor=actor,
+            key=parent_key, row_id=None, action="row_delete",
+            before=None, after=None, actor=actor,
         )
         self._notify(parent_key, None)
 
@@ -382,42 +334,6 @@ def _validate(item: ConfigItem, value) -> None:
         msg = v(value)
         if msg:
             raise ValidationError(msg)
-
-
-def _clean_record_payload(record, payload: dict, *, existing: dict | None = None,
-                          existing_encrypted: list[str] | None = None) -> tuple[dict, list[str]]:
-    """Validate + coerce a record_list row. Returns (stored_payload, encrypted_field_names)."""
-    if record is None:
-        return dict(payload or {}), []
-    existing = existing or {}
-    existing_encrypted = existing_encrypted or []
-    cleaned = {}
-    encrypted = []
-    for field in record.fields:
-        incoming = payload.get(field.key, _UNSET)
-        if field.sensitive:
-            # Secret handling: missing or empty → keep existing (already encrypted)
-            if incoming is _UNSET or incoming in (None, ""):
-                if field.key in existing_encrypted and field.key in existing:
-                    cleaned[field.key] = existing[field.key]
-                    encrypted.append(field.key)
-                continue
-            cleaned[field.key] = secrets.encrypt(str(incoming))
-            encrypted.append(field.key)
-            continue
-
-        if incoming is _UNSET:
-            # keep existing if present, else use default
-            if field.key in existing:
-                cleaned[field.key] = existing[field.key]
-            elif field.default is not None:
-                cleaned[field.key] = field.default
-            continue
-
-        coerced = _coerce(field, incoming)
-        _validate(field, coerced)
-        cleaned[field.key] = coerced
-    return cleaned, encrypted
 
 
 def _scrub_for_log(item: ConfigItem | None, value):

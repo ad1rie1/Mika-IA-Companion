@@ -88,7 +88,9 @@ urlpatterns = [
     path("dashboard/api/config/values/all",        configuration.values),        # GET
     path("dashboard/api/config/rows",              configuration.rows),
     path("dashboard/api/config/rows/create",       configuration.row_add),
-    path("dashboard/api/config/rows/<uuid:row_id>",configuration.row_detail),
+    # row_id is backend-defined (UUID for generic storage, stringified
+    # PK for adapters that wrap a module's own Django model)
+    path("dashboard/api/config/rows/<str:row_id>",configuration.row_detail),
     path("dashboard/api/config/history",           configuration.history),
 
     # Personality YAML editor
