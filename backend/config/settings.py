@@ -31,6 +31,7 @@ INSTALLED_APPS = [
     "memory",
     "conscience",
     "modules",
+    "projects",
 ]
 
 MIDDLEWARE = [
@@ -139,6 +140,12 @@ EMOTION_SNAPSHOT_RETENTION_DAYS = env.int("EMOTION_SNAPSHOT_RETENTION_DAYS", def
 CONSCIENCE_DECISION_INTERVAL = env.int("CONSCIENCE_DECISION_INTERVAL", default=30)
 CONSCIENCE_COOLDOWN_SECONDS = env.int("CONSCIENCE_COOLDOWN_SECONDS", default=300)
 CONSCIENCE_ACT_THRESHOLD = env.float("CONSCIENCE_ACT_THRESHOLD", default=0.5)
+
+# --- Projects ---
+# How many (system_prompt, user_prompt, response) triples to keep per
+# project as a rolling buffer. Used for audit / debugging the runner's
+# LLM calls. Setting this to 0 disables history capture entirely.
+PROJECT_PROMPT_HISTORY_SIZE = env.int("PROJECT_PROMPT_HISTORY_SIZE", default=30)
 
 # RSS Observer
 # Format: comma-separated "name|url" pairs, e.g. "Tech|https://example.com/rss,Gaming|https://other.com/feed"

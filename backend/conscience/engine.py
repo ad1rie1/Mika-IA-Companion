@@ -827,6 +827,9 @@ class ConscienceEngine:
                 rumination_context=base_context.rumination_context,
                 user_mood_hint=base_context.user_mood_hint,
                 dream_context=base_context.dream_context,
+                project_context=base_context.project_context,
+                project_suppresses_emotion=base_context.project_suppresses_emotion,
+                project_id=base_context.project_id,
             )
 
             perception = Perception.from_internal_trigger(

@@ -25,6 +25,8 @@ async def call_ai_and_parse(
         rumination_context=context.rumination_context,
         user_mood_hint=context.user_mood_hint,
         dream_context=context.dream_context,
+        project_context=context.project_context,
+        project_suppresses_emotion=context.project_suppresses_emotion,
     )
     user_prompt = format_conversation(message, context.history)
 

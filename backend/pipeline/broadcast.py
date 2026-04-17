@@ -210,6 +210,72 @@ async def _collect_inner_state(person_id: str | None) -> dict:
     except Exception:
         logger.debug("ruminations snapshot failed", exc_info=True)
 
+    # Active projects — a condensed view for the InnerLifePanel
+    try:
+        from projects.models import Project, ProjectTask
+        active = await sync_to_async(
+            lambda: list(
+                Project.objects.filter(status=Project.Status.ACTIVE)
+                .order_by("-priority", "-updated_at")[:10]
+            )
+        )()
+        if active:
+            projects_summary = []
+            for p in active:
+                counts = await sync_to_async(
+                    lambda pk=p.id: {
+                        "total": ProjectTask.objects.filter(project_id=pk).count(),
+                        "done": ProjectTask.objects.filter(
+                            project_id=pk, status=ProjectTask.Status.DONE,
+                        ).count(),
+                        "blocked": ProjectTask.objects.filter(
+                            project_id=pk, status=ProjectTask.Status.BLOCKED,
+                        ).count(),
+                    }
+                )()
+                projects_summary.append({
+                    "id": p.id,
+                    "title": p.title,
+                    "status": p.status,
+                    "priority": p.priority,
+                    "origin": p.origin,
+                    "emotion_policy": p.emotion_policy,
+                    "schedule_rule": p.schedule_rule,
+                    "next_run_at": p.next_run_at.isoformat() if p.next_run_at else None,
+                    "tasks_total": counts["total"],
+                    "tasks_done": counts["done"],
+                    "tasks_blocked": counts["blocked"],
+                })
+            state["projects"] = projects_summary
+    except Exception:
+        logger.debug("projects snapshot failed", exc_info=True)
+
+    # Pending actions — user-actionable queue
+    try:
+        from projects.models import ProjectPendingAction
+        pending = await sync_to_async(
+            lambda: list(
+                ProjectPendingAction.objects
+                .filter(status=ProjectPendingAction.Status.PENDING)
+                .select_related("project")
+                .order_by("-created_at")[:20]
+            )
+        )()
+        if pending:
+            state["pending_project_actions"] = [
+                {
+                    "id": a.id,
+                    "project_id": a.project_id,
+                    "project_title": a.project.title,
+                    "proposal": a.proposal,
+                    "payload_kind": (a.payload or {}).get("kind", ""),
+                    "created_at": a.created_at.isoformat(),
+                }
+                for a in pending
+            ]
+    except Exception:
+        logger.debug("pending actions snapshot failed", exc_info=True)
+
     # Person profile + commitments — only when a non-internal person_id
     if person_id and person_id not in (
         "", "anonymous", "conscience_mika", "__global__",

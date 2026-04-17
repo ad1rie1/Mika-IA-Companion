@@ -47,6 +47,17 @@ class ConversationContext:
     # Only injected until early afternoon and only for non-internal persons,
     # so Mika can spontaneously mention it in the first few conversations.
     dream_context: str = ""
+    # Project layer — set when an active Project matches the current turn
+    # (user talked about it, owner mentioned, keyword hit). The string is
+    # injected as `--- PROJET EN COURS ---`; the boolean forces the
+    # personality prompt into "professional mode" (no emotion tag, no
+    # variability block) when the matched project's emotion_policy=OFF.
+    project_context: str = ""
+    project_suppresses_emotion: bool = False
+    # ID of the matched project — not injected in the prompt, but passed
+    # through so the processor can tag outgoing side effects / skip the
+    # emotion impulse when the project is "off".
+    project_id: int | None = None
 
 
 async def gather_context(
@@ -126,6 +137,28 @@ async def gather_context(
     else:
         dream_context = await _fetch_dream_context()
 
+    # Project detection — is this turn about an active project?
+    # Skipped for internal triggers (conscience prompts don't reference
+    # user-confided projects by mistake).
+    project_context = ""
+    project_suppresses_emotion = False
+    project_id: int | None = None
+    if person_id not in _INTERNAL_PERSON_IDS:
+        try:
+            from projects.detection import (
+                detect_project_for_message,
+                load_project_for_prompt,
+            )
+            match = await detect_project_for_message(message, person_id=person_id)
+            if match:
+                data = await load_project_for_prompt(match.project_id)
+                if data:
+                    project_context = _format_project_block(data)
+                    project_suppresses_emotion = (data["emotion_policy"] == "off")
+                    project_id = data["id"]
+        except Exception:
+            logger.debug("Project detection failed", exc_info=True)
+
     # Tools
     mcp_server = None
     tool_names = []
@@ -147,7 +180,65 @@ async def gather_context(
         rumination_context=rumination_context,
         user_mood_hint=user_mood_hint,
         dream_context=dream_context,
+        project_context=project_context,
+        project_suppresses_emotion=project_suppresses_emotion,
+        project_id=project_id,
     )
+
+
+def _format_project_block(data: dict) -> str:
+    """Render a dict from ``detection.load_project_for_prompt`` as the
+    body of the ``--- PROJET EN COURS ---`` prompt section.
+
+    Conservative with wording — the LLM will read this as directive,
+    not descriptive. When emotion_policy is OFF the block explicitly
+    reminds the model to drop emoji / informal markers.
+    """
+    lines: list[str] = [f"Titre : {data['title']}"]
+    if data.get("description"):
+        lines.append(f"Cadre : {data['description']}")
+    if data.get("tone_directive"):
+        lines.append(f"Ton à utiliser : {data['tone_directive']}")
+    instr = data.get("instructions") or []
+    if instr:
+        lines.append("Consignes :")
+        for i in instr:
+            lines.append(f"  - {i}")
+    oos = data.get("out_of_scope") or []
+    if oos:
+        lines.append("Hors de portée :")
+        for o in oos:
+            lines.append(f"  - {o}")
+
+    policy = data.get("emotion_policy", "off")
+    if policy == "off":
+        lines.append(
+            "Politique émotionnelle : OFF. "
+            "N'inclus PAS de balise [EMOTION:...]. "
+            "Pas d'emojis, pas de langage familier, pas d'interjections "
+            "(pff, hehe, mdr). Ton factuel et posé uniquement."
+        )
+    elif policy == "muted":
+        lines.append(
+            "Politique émotionnelle : atténuée. "
+            "Tu peux inclure [EMOTION:...] mais avec une intensité modérée "
+            "(≤ 0.5). Pas d'exubérance."
+        )
+    # policy == "full" → default personality behavior, no extra line needed.
+
+    if data.get("requires_approval"):
+        lines.append(
+            "Actions à effet de bord : à soumettre à l'utilisateur avant "
+            "exécution (aucune envoi / écriture sans approbation)."
+        )
+
+    todo = data.get("todo_tasks") or []
+    if todo:
+        lines.append("Tâches en cours / à faire :")
+        for t in todo[:5]:
+            lines.append(f"  - {t}")
+
+    return "\n".join(lines)
 
 
 def _fatigue_fog_context() -> str:

@@ -208,6 +208,20 @@ async function init() {
     innerLifePanel.applyInnerState(data.inner_state);
   });
 
+  // Project reports — silent by default (no TTS). Show as a message
+  // in the chat overlay so the user sees what Mika wrapped up. Prefixed
+  // to distinguish from regular conversation.
+  ws.on("project_report", (data: any) => {
+    try {
+      chatOverlay.addMessage(
+        `[Projet · ${data.project_title}] ${data.text}`,
+        "vtuber",
+      );
+    } catch {
+      console.log(`[project_report ${data.project_title}] ${data.text}`);
+    }
+  });
+
   ws.connect();
 
   // Update loop

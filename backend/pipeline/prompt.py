@@ -17,6 +17,8 @@ def build_system_prompt(
     rumination_context: str = "",
     user_mood_hint: str = "",
     dream_context: str = "",
+    project_context: str = "",
+    project_suppresses_emotion: bool = False,
 ) -> str:
     """Assemble the full system prompt from personality + contextual layers.
 
@@ -37,7 +39,14 @@ def build_system_prompt(
     it sits alongside them. Modules / emotion / memory are recomputed
     every turn and appear last so recency biases recall.
     """
-    system = personality.to_system_prompt()
+    # Personality bases itself on whether a project is active + what its
+    # emotion policy says. When the project suppresses emotion (OFF), the
+    # personality prompt drops the variability block + the mandatory
+    # [EMOTION:...] tag instruction.
+    system = personality.to_system_prompt(
+        project_active=bool(project_context),
+        project_suppresses_emotion=project_suppresses_emotion,
+    )
 
     if self_concept:
         system += (
@@ -87,7 +96,20 @@ def build_system_prompt(
             + module_context
             + "\n--- FIN CONTEXTE MODULES ---"
         )
-    if emotion_context:
+    # Project context comes LAST in the "slow layer" zone but BEFORE the
+    # emotion state — because when a project is active, its tone directive
+    # must dominate the emotional expression, not the other way around.
+    if project_context:
+        system += (
+            "\n\n--- PROJET EN COURS ---\n"
+            + project_context
+            + "\n--- FIN PROJET ---"
+        )
+    # When the active project turns emotions off, suppress the global
+    # emotion_context bloc entirely to prevent contradicting signals
+    # (emotion layer saying "tu te sens excited" while project says
+    # "langage neutre"). Drives are kept silent too for the same reason.
+    if emotion_context and not project_suppresses_emotion:
         system += (
             "\n\n--- TON ETAT EMOTIONNEL ACTUEL ---\n"
             + emotion_context

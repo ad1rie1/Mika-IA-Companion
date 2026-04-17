@@ -17,6 +17,29 @@ type EmotionBlend = Array<{ emotion: string; weight: number }>;
 
 export type SleepPhase = "awake" | "light_sleep" | "rem" | "deep_sleep";
 
+export interface ProjectSummary {
+  id: number;
+  title: string;
+  status: string;
+  priority: string;
+  origin: string;
+  emotion_policy: string;
+  schedule_rule: string;
+  next_run_at: string | null;
+  tasks_total: number;
+  tasks_done: number;
+  tasks_blocked: number;
+}
+
+export interface PendingProjectAction {
+  id: number;
+  project_id: number;
+  project_title: string;
+  proposal: string;
+  payload_kind: string;
+  created_at: string;
+}
+
 interface InnerState {
   drives?: Record<string, { tension: number; last_satisfied: number }>;
   energy?: number;
@@ -41,6 +64,8 @@ interface InnerState {
     night_of: string;
     recalled: boolean;
   };
+  projects?: ProjectSummary[];
+  pending_project_actions?: PendingProjectAction[];
   self_narrative?: {
     content: string;
     key_themes: string[];
@@ -124,6 +149,8 @@ export class InnerLifePanel {
   private energyValueEl: HTMLElement;
   private dreamEl: HTMLElement;
   private journalEl: HTMLElement;
+  private projectsEl: HTMLElement;
+  private pendingEl: HTMLElement;
 
   private currentSleepPhase: SleepPhase = "awake";
   private sleepPhaseListeners: Array<(phase: SleepPhase) => void> = [];
@@ -159,6 +186,14 @@ export class InnerLifePanel {
           <h4>Journal d'aujourd'hui</h4>
           <div class="il-journal-body"></div>
         </section>
+        <section class="il-section" id="il-pending-actions" hidden>
+          <h4>⚠ Actions en attente de ton accord</h4>
+          <div class="il-pending-body"></div>
+        </section>
+        <section class="il-section" id="il-projects" hidden>
+          <h4>Projets en cours</h4>
+          <div class="il-projects-body"></div>
+        </section>
         <section class="il-section" id="il-blend">
           <h4>Émotion</h4>
           <div class="il-blend-body">—</div>
@@ -193,6 +228,8 @@ export class InnerLifePanel {
     this.energyValueEl = this.root.querySelector(".il-energy-value")!;
     this.dreamEl = this.root.querySelector(".il-dream-body")!;
     this.journalEl = this.root.querySelector(".il-journal-body")!;
+    this.projectsEl = this.root.querySelector(".il-projects-body")!;
+    this.pendingEl = this.root.querySelector(".il-pending-body")!;
 
     // Collapse/expand on header click
     const header = this.root.querySelector(".il-header") as HTMLElement;
@@ -241,6 +278,8 @@ export class InnerLifePanel {
     this.renderSleepPhase(state.sleep_phase);
     this.renderDream(state.last_dream);
     this.renderJournal(state.today_journal);
+    this.renderPendingActions(state.pending_project_actions);
+    this.renderProjects(state.projects);
     this.renderDrives(state.drives);
     this.renderNarrative(state.self_narrative);
     this.renderRuminations(state.ruminations);
@@ -310,6 +349,136 @@ export class InnerLifePanel {
         }
       }
     }
+  }
+
+  private renderProjects(projects: ProjectSummary[] | undefined) {
+    const section = document.getElementById("il-projects")!;
+    if (!projects || projects.length === 0) {
+      section.setAttribute("hidden", "");
+      this.projectsEl.innerHTML = "";
+      return;
+    }
+    section.removeAttribute("hidden");
+    this.projectsEl.innerHTML = projects
+      .map((p) => {
+        const pct =
+          p.tasks_total > 0
+            ? Math.round((p.tasks_done / p.tasks_total) * 100)
+            : 0;
+        const prio =
+          p.priority === "urgent"
+            ? "🔥"
+            : p.priority === "high"
+              ? "⚡"
+              : p.priority === "low"
+                ? "💤"
+                : "•";
+        const nextRun = p.next_run_at
+          ? new Date(p.next_run_at).toLocaleString("fr-FR", {
+              day: "2-digit",
+              month: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : "—";
+        const blockedTag =
+          p.tasks_blocked > 0
+            ? `<span class="il-project-blocked">⛔ ${p.tasks_blocked}</span>`
+            : "";
+        const emoPolicyTag =
+          p.emotion_policy !== "off"
+            ? `<span class="il-project-ep">${escapeHtml(p.emotion_policy)}</span>`
+            : "";
+        return `
+          <div class="il-project" data-project-id="${p.id}">
+            <div class="il-project-head">
+              <span class="il-project-prio">${prio}</span>
+              <span class="il-project-title">${escapeHtml(p.title)}</span>
+              ${emoPolicyTag}
+              ${blockedTag}
+            </div>
+            <div class="il-project-bar-wrap">
+              <span class="il-project-bar">
+                <span class="il-project-fill" style="width:${pct}%"></span>
+              </span>
+              <span class="il-project-pct">${p.tasks_done}/${p.tasks_total}</span>
+            </div>
+            <div class="il-project-sched">
+              ${escapeHtml(p.schedule_rule || "manuel")}
+              ${p.next_run_at ? `· prochain run ${nextRun}` : ""}
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+  }
+
+  private renderPendingActions(
+    pending: PendingProjectAction[] | undefined,
+  ) {
+    const section = document.getElementById("il-pending-actions")!;
+    if (!pending || pending.length === 0) {
+      section.setAttribute("hidden", "");
+      this.pendingEl.innerHTML = "";
+      return;
+    }
+    section.removeAttribute("hidden");
+    this.pendingEl.innerHTML = pending
+      .map(
+        (a) => `
+          <div class="il-pending" data-action-id="${a.id}">
+            <div class="il-pending-project">
+              ${escapeHtml(a.project_title)}
+              ${a.payload_kind ? `<span class="il-pending-kind">${escapeHtml(a.payload_kind)}</span>` : ""}
+            </div>
+            <div class="il-pending-proposal">${escapeHtml(a.proposal)}</div>
+            <div class="il-pending-actions">
+              <button class="il-btn il-btn-approve" data-action="approve" data-id="${a.id}">✓ Approuver</button>
+              <button class="il-btn il-btn-reject" data-action="reject" data-id="${a.id}">✗ Rejeter</button>
+            </div>
+          </div>
+        `,
+      )
+      .join("");
+
+    // Wire up buttons (lightweight — delegate via query)
+    this.pendingEl.querySelectorAll<HTMLButtonElement>(".il-btn").forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const action = btn.dataset.action;
+        const id = btn.dataset.id;
+        if (!action || !id) return;
+        btn.disabled = true;
+        try {
+          await this.resolvePending(Number(id), action as "approve" | "reject");
+        } catch (err) {
+          console.error("pending action error:", err);
+          btn.disabled = false;
+        }
+      });
+    });
+  }
+
+  private async resolvePending(
+    actionId: number,
+    decision: "approve" | "reject",
+  ): Promise<void> {
+    const note = decision === "reject"
+      ? prompt("Note optionnelle pour le refus :") || ""
+      : "";
+    const resp = await fetch(
+      `/api/projects/pending/${actionId}/${decision}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note }),
+      },
+    );
+    if (!resp.ok) {
+      const msg = await resp.text();
+      alert(`Échec : ${msg}`);
+    }
+    // Server pushes an inner_state_update on success, which will re-render
   }
 
   private renderDream(dream: InnerState["last_dream"]) {

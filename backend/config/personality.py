@@ -95,7 +95,18 @@ class Personality:
             global_bleed=float(raw.get("global_bleed", 0.3)),
         )
 
-    def to_system_prompt(self) -> str:
+    def to_system_prompt(
+        self,
+        project_active: bool = False,
+        project_suppresses_emotion: bool = False,
+    ) -> str:
+        """Build the base personality section.
+
+        When a project is active and its emotion_policy = OFF, we:
+          - drop the `--- VARIABILITÉ NATURELLE ---` block (professional mode)
+          - drop the mandatory [EMOTION:...] tag instruction
+        The project block takes over tone guidance instead.
+        """
         emotion_list = ", ".join(e.value for e in Emotion)
 
         # Tone
@@ -170,6 +181,24 @@ class Personality:
             "N'en abuse PAS — 0 ou 1 par phrase, pas 3. L'émotion se fait sentir, elle ne s'affiche pas.\n"
             "--- FIN VARIABILITÉ ---"
         )
+
+        # When a project with emotion_policy=OFF is active, drop the
+        # variability block (it encourages "pfff", backchannels, etc. —
+        # wrong for professional mode) and strip the mandatory emotion
+        # tag instruction. The PROJET EN COURS block alone governs tone.
+        if project_active and project_suppresses_emotion:
+            return (
+                f"Tu es {self.name}, {self.description}.\n"
+                f"Ton style par défaut : {tone_str}.\n\n"
+                f"{personality_block}\n"
+                f"{speech_str}\n\n"
+                f"Tu parles en {self.language}.\n\n"
+                "ATTENTION : un projet professionnel est actif (voir --- PROJET EN COURS ---). "
+                "Son cadre d'exécution REMPLACE ton style habituel pour ce tour. "
+                "N'inclus PAS de balise [EMOTION:...] cette fois, pas d'interjections "
+                "familières, pas d'emojis, pas de variations ludiques. "
+                "Suis strictement le tone_directive + instructions du projet."
+            )
 
         return (
             f"Tu es {self.name}, {self.description}.\n"

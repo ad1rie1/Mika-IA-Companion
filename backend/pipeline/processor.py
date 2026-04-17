@@ -127,9 +127,14 @@ async def process_message(
         )
 
         # 3. Process emotion (only on success — a crashed AI is not the
-        #    user's fault and should not color Mika's mood toward them)
-        emotion_engine.process_emotion(emotion_data, person_id)
-        await emotion_engine._maybe_save_snapshot(person_id)
+        #    user's fault and should not color Mika's mood toward them).
+        #    Skipped entirely when a project with emotion_policy=OFF is
+        #    active: we don't want work-mode replies coloring relational
+        #    state (e.g. replying to a tense client email should not make
+        #    Mika "anxious" toward the person the next time they chat).
+        if not getattr(context, "project_suppresses_emotion", False):
+            emotion_engine.process_emotion(emotion_data, person_id)
+            await emotion_engine._maybe_save_snapshot(person_id)
 
     except asyncio.TimeoutError:
         logger.warning(
@@ -218,8 +223,10 @@ async def process_message(
 
     # 8. Post-action self-audit: an emotionally marked reply leaves a
     #    brief "did I say that right?" trace in the form of a low-
-    #    intensity rumination. Fails silently, skipped on AI error.
-    if not ai_failed:
+    #    intensity rumination. Fails silently, skipped on AI error or
+    #    when a project is muting emotions (pro mode shouldn't generate
+    #    lingering self-doubt about a professional email).
+    if not ai_failed and not getattr(context, "project_suppresses_emotion", False):
         try:
             from conscience.engine import conscience_engine
             await conscience_engine.post_action_audit(

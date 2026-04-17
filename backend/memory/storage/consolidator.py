@@ -144,6 +144,13 @@ class MemoryConsolidator:
                 await sleep_cycle.run_if_due()
             except Exception:
                 logger.exception("Sleep cycle failed in idle path (non-fatal)")
+            # Project runner also runs in the idle path — that's where
+            # interval/cron/idle schedules most often fire.
+            try:
+                from projects.runner import project_runner
+                await project_runner.tick()
+            except Exception:
+                logger.exception("Project runner failed in idle path (non-fatal)")
             return
 
         logger.info("Consolidating %d new messages (skipped internal)", len(messages))
@@ -354,6 +361,15 @@ class MemoryConsolidator:
             await sleep_cycle.run_if_due()
         except Exception:
             logger.exception("Sleep cycle failed (non-fatal)")
+
+        # 10. Project runner — advance any projects whose schedule is due.
+        #     Cheap no-op when nothing is due. Max 3 advances per tick
+        #     to avoid LLM bursts.
+        try:
+            from projects.runner import project_runner
+            await project_runner.tick()
+        except Exception:
+            logger.exception("Project runner failed (non-fatal)")
 
     async def _apply_decay(self):
         """Reduce importance of old souvenirs and confidence of old connaissances.

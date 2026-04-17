@@ -349,6 +349,124 @@
         opacity: 0.7;
       }
 
+      /* Projects */
+      .il-project {
+        padding: 6px 8px;
+        margin-bottom: 6px;
+        background: rgba(255,255,255,0.04);
+        border-left: 2px solid rgba(99,102,241,0.6);
+        border-radius: 4px;
+      }
+      .il-project:last-child { margin-bottom: 0; }
+      .il-project-head {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        margin-bottom: 4px;
+      }
+      .il-project-prio { opacity: 0.8; }
+      .il-project-title { font-weight: 500; flex: 1; }
+      .il-project-ep {
+        background: rgba(139,92,246,0.25);
+        padding: 1px 6px;
+        border-radius: 6px;
+        font-size: 10px;
+        text-transform: uppercase;
+      }
+      .il-project-blocked {
+        color: #ef4444;
+        font-size: 11px;
+      }
+      .il-project-bar-wrap {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        margin-bottom: 4px;
+      }
+      .il-project-bar {
+        flex: 1;
+        position: relative;
+        height: 6px;
+        background: rgba(255,255,255,0.1);
+        border-radius: 3px;
+        overflow: hidden;
+      }
+      .il-project-fill {
+        position: absolute;
+        inset: 0 auto 0 0;
+        background: #10b981;
+        border-radius: 3px;
+        transition: width 0.6s ease;
+      }
+      .il-project-pct {
+        font-size: 11px;
+        opacity: 0.7;
+        min-width: 36px;
+        text-align: right;
+      }
+      .il-project-sched {
+        font-size: 11px;
+        opacity: 0.6;
+        font-style: italic;
+      }
+
+      /* Pending approvals */
+      #il-pending-actions { background: rgba(239,68,68,0.08); }
+      #il-pending-actions h4 { color: #fbbf24; }
+      .il-pending {
+        padding: 8px;
+        margin-bottom: 6px;
+        background: rgba(251,191,36,0.08);
+        border: 1px solid rgba(251,191,36,0.25);
+        border-radius: 4px;
+      }
+      .il-pending-project {
+        font-size: 11px;
+        font-weight: 500;
+        margin-bottom: 4px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .il-pending-kind {
+        background: rgba(99,102,241,0.2);
+        padding: 1px 6px;
+        border-radius: 6px;
+        font-size: 10px;
+        color: #c7d2fe;
+        text-transform: uppercase;
+      }
+      .il-pending-proposal {
+        font-size: 13px;
+        margin-bottom: 6px;
+        white-space: pre-wrap;
+        line-height: 1.4;
+      }
+      .il-pending-actions {
+        display: flex;
+        gap: 6px;
+      }
+      .il-btn {
+        flex: 1;
+        padding: 4px 10px;
+        border: none;
+        border-radius: 4px;
+        font-size: 12px;
+        cursor: pointer;
+        font-family: inherit;
+        transition: opacity 0.2s;
+      }
+      .il-btn:disabled { opacity: 0.5; cursor: default; }
+      .il-btn-approve {
+        background: #10b981;
+        color: white;
+      }
+      .il-btn-reject {
+        background: rgba(239,68,68,0.8);
+        color: white;
+      }
+
       .il-energy-row {
         display: flex;
         align-items: center;

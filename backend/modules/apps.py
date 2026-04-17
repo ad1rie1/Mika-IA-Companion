@@ -10,6 +10,7 @@ class ModulesConfig(AppConfig):
         from modules.email import EmailModule
         from modules.files import FilesModule
         from modules.manager import module_manager
+        from modules.project_tools import ProjectToolsModule
         from modules.rss import RSSModule
         from communication.channels import TelegramModule
         from modules.urls import _populate_urls
@@ -21,5 +22,6 @@ class ModulesConfig(AppConfig):
         module_manager.register(RSSModule())
         module_manager.register(FilesModule())
         module_manager.register(CameraModule())
+        module_manager.register(ProjectToolsModule())
 
         _populate_urls()

@@ -209,11 +209,71 @@ Counterpart to the Conscience. The consolidator runs all day doing maintenance; 
 
 **Metaphor recap**: Conscience = waking state (observe + act). Consolidator = maintenance bookkeeper. Sleep Cycle = dreaming state — creativity (dreams), narrative coherence (journal), emotional healing (digestion).
 
+### Projects ([projects/](backend/projects/))
+
+Standalone Django app. Mika as an **agent with explicit work engagements**: projects have a title, a frame of execution (tone, emotion policy, instructions, out-of-scope), allowed resources (modules, paths, contacts), a schedule, and a task list. User-confided or self-initiated.
+
+**Critical default** — projects have **`emotion_policy = OFF`** out of the box. When a project is active and matches the current turn (or runs on schedule), Mika drops her [EMOTION:] tag, variability block, and all affective reasoning. She's in professional mode. Turn this back on explicitly (`muted` or `full`) only if the user asks.
+
+**Models** ([projects/models.py](backend/projects/models.py)):
+- `Project` — title, description, origin (user/self), status, priority, `tone_directive`, `emotion_policy`, `instructions[]`, `out_of_scope[]`, `requires_approval`, `allowed_modules[]`, `resource_paths[]`, `contacts[]`, `schedule_rule`, `next_run_at`, `runs_since_user_input`, owner (FK Entity)
+- `ProjectTask` — per-project granular work (`todo` / `in_progress` / `done` / `blocked`) with `order`, `result`, `blocked_reason`
+- `ProjectLog` — audit trail, one row per advance/report/error
+- `ProjectPendingAction` — queue of side-effect actions awaiting user approval (payload dispatched on approve)
+- `ProjectPromptHistory` — rolling buffer of (system_prompt, user_prompt, raw_response, parsed_output, outcome, duration_ms) per project. Size controlled by `PROJECT_PROMPT_HISTORY_SIZE` (default 30, `0` disables). Pruned automatically after each insert by `_prune_history`. Admin-visible, read-only.
+
+**Schedule rules** ([projects/schedule.py](backend/projects/schedule.py)):
+- `""` / `"manual"` — advance only on explicit push
+- `"interval:5m"` / `"interval:30s"` / `"interval:2h"` — recurring interval (floor 5s)
+- `"cron:0 9 * * MON-FRI"` — cron expression (uses `croniter` if installed, falls back to a minimal 5-field parser supporting DOW names + ranges)
+- `"idle:30m"` — fires when conscience idle seconds >= window
+- `"event:email.new"` — tagged by module bus, `runner.notify_event()` sets `next_run_at = now`
+
+**Runner** ([projects/runner.py](backend/projects/runner.py)): `project_runner` singleton, hooked into the consolidator loop. Per tick: lists due projects, advances up to 3 in priority order, builds a scoped context (no emotion/ruminations/circadian — just project frame + tasks + recent logs + resources), calls the LLM (Haiku), parses a structured JSON output (`summary`, `task_updates`, `new_tasks`, `report_to_user`, `proposed_action`), writes DB changes, logs the tick, bumps `next_run_at`. Side-effect actions on `requires_approval=True` projects queue as `ProjectPendingAction` instead of executing.
+
+**Runner safeguards**: `runs_since_user_input` caps infinite auto-advance at 10 ticks without user feedback. `MAX_ADVANCES_PER_TICK = 3` prevents LLM bursts.
+
+**Detection in conversation** ([projects/detection.py](backend/projects/detection.py)): heuristic (no LLM) matching message tokens vs `title` + `keywords` + owner. When a match above threshold 0.4 is found:
+- `project_context` is injected as `--- PROJET EN COURS ---` in the system prompt
+- If `emotion_policy=OFF`: the variability block and mandatory [EMOTION:] instruction are removed from the personality prompt; the emotion context block is suppressed entirely; the per-person PAD impulse is skipped on reply; the post-action audit rumination is skipped.
+- `ConversationContext.project_id` is propagated so downstream hooks know what's active.
+
+**MCP tools** ([modules/project_tools/module.py](backend/modules/project_tools/module.py)) — registered as a module so Mika can call them during a normal conversation:
+- `create_project` — formalize a user-confided engagement, full field set (title, tone, emotion_policy, schedule_rule, requires_approval, ...)
+- `list_projects`, `get_project_details`, `add_project_task`, `update_project_task`
+- `propose_project_action` — queue a side-effect action for approval
+- `update_project` — pause / retune / reschedule
+
+**HTTP API** ([projects/urls.py](backend/projects/urls.py), [projects/views.py](backend/projects/views.py)):
+```
+GET    /api/projects/                          list
+POST   /api/projects/create                    create
+GET    /api/projects/<id>                      detail + tasks + recent logs + pending
+PATCH  /api/projects/<id>                      update fields
+DELETE /api/projects/<id>
+POST   /api/projects/<id>/tasks                add task
+PATCH  /api/projects/<id>/tasks/<tid>          update task
+DELETE /api/projects/<id>/tasks/<tid>
+GET    /api/projects/pending/                  list pending actions
+POST   /api/projects/pending/<id>/approve      approve + execute payload
+POST   /api/projects/pending/<id>/reject       reject with note (writes a ProjectLog)
+GET    /api/projects/<id>/history              last N prompt/response pairs
+                                               (query: limit=30 cap 100, full=1 for
+                                                the raw system_prompt + raw_response)
+```
+
+**Frontend** — [InnerLifePanel](frontend/src/ui/InnerLifePanel.ts) gains:
+- A `⚠ Actions en attente de ton accord` section at the top with Approve/Reject buttons (click → `POST /api/projects/pending/<id>/...`)
+- A `Projets en cours` section with progress bar, priority icon, schedule, next run time, blocked task count
+- New WS message type `project_report` — silent message pushed to chat overlay when the runner finishes a tick with user-facing text (no TTS, no emotion animation)
+
+**Metaphor**: Projects = Mika's **professional self**. Silent work that progresses during her idle time; activated on-demand with a strict frame when her attention is invoked. Kept orthogonal to the emotional/relational life by default.
+
 ### System prompt structure
 
 Assembled by `build_system_prompt()` ([pipeline/prompt.py](backend/pipeline/prompt.py)) in this order:
 
-1. **Personality** (static, from `personality.yaml`) — now includes a `--- VARIABILITÉ NATURELLE ---` sub-block encouraging variable response length, backchannels ("hmm", "attends"), hesitations, selective echo, non-mandatory relances
+1. **Personality** (static, from `personality.yaml`) — includes a `--- VARIABILITÉ NATURELLE ---` sub-block encouraging variable response length, backchannels ("hmm", "attends"), hesitations, selective echo, non-mandatory relances, and prosodic tokens (`[SIGH]`, `[LAUGH]`, `[PAUSE:ms]`, `[BREATH]`). *Stripped* when an active project has `emotion_policy=OFF` (professional mode).
 2. **`--- QUI TU ES DEVENUE ---`** (self-concept, evolving paragraph)
 3. **`--- CE QUE TU SAIS DE CETTE PERSONNE ---`** (person profile + affect + weekly trend + commitments)
 4. **`--- CE QUE TU PERCOIS DE SON ETAT ---`** (heuristic read of user's current emotional tone: caps, punctuation, lexique, emojis, length — `detect_user_mood_hint` in `pipeline/context.py`)
@@ -221,11 +281,12 @@ Assembled by `build_system_prompt()` ([pipeline/prompt.py](backend/pipeline/prom
 6. **`--- ETAT COGNITIF ---`** (fatigue fog: 4 tiers below energy 0.5 shaping the TONE, not just the act/wait threshold)
 7. **`--- CE QUI TE TROTTE DANS LA TETE ---`** (active ruminations — previously only visible during `_act()`, now every turn)
 8. **`--- CE QUE TU AS REVE CETTE NUIT ---`** (non-recalled dream with vividness ≥ 0.6, morning 6h-14h window only, auto-marked recalled on first injection)
-9. **`--- CONTEXTE MODULES ---`** (email backlog, RSS unread, etc.)
-10. **`--- TON ETAT EMOTIONNEL ACTUEL ---`** (global mood with ambivalent blend phrasing + drives)
-11. Memory context (semantic retrieval of relevant souvenirs/connaissances)
+9. **`--- PROJET EN COURS ---`** (current engagement that matches the turn — title, tone_directive, instructions, out_of_scope, emotion_policy, todo tasks). When `emotion_policy=OFF`, suppresses the emotion block below.
+10. **`--- CONTEXTE MODULES ---`** (email backlog, RSS unread, etc.)
+11. **`--- TON ETAT EMOTIONNEL ACTUEL ---`** (global mood with ambivalent blend phrasing + drives). *Suppressed* when active project is in professional mode.
+12. Memory context (semantic retrieval of relevant souvenirs/connaissances)
 
-Personality + self-concept + person-context + circadian are the "slow" layers (stable over a session or shifting by the hour); module/emotion/memory/user-mood/fatigue/ruminations/dream are recomputed every turn. Recency bias places the latter last.
+Personality + self-concept + person-context + circadian are the "slow" layers (stable over a session or shifting by the hour); module/emotion/memory/user-mood/fatigue/ruminations/dream/project are recomputed every turn. Recency bias places the latter last.
 
 ### Frontend (Vite + Three.js + VRM)
 
@@ -249,17 +310,18 @@ A `.vrm` file at [frontend/public/models/default.vrm](frontend/public/models/def
 - **WebSocket protocol**:
   - Client → server: `{"type":"chat","message":"...","person_id":"...","attachments":[...]}`
   - Server → client (reply): `{"type":"speech","text":"...","emotion":"...","emotion_intensity":0.75,"emotion_blend":[{"emotion":"...","weight":0.x}, ...],"emotion_state":{...},"source":"...","inner_state":{...}}`
-  - Server → client (state refresh, no TTS): `{"type":"inner_state_update","inner_state":{...}}` — pushed by `broadcast_inner_state_update()` when inner state changes outside of a conversation turn (e.g. sleep phase transitions during the night). Frontend merges it into the `InnerLifePanel` + scene/animation without invoking TTS.
-  - `inner_state` payload shape: `{drives, energy, circadian, sleep_phase, today_journal?, last_dream?, self_narrative?, ruminations, person_profile?, pending_commitments?}`
+  - Server → client (state refresh, no TTS): `{"type":"inner_state_update","inner_state":{...}}` — pushed by `broadcast_inner_state_update()` when inner state changes outside of a conversation turn (e.g. sleep phase transitions during the night, project pending action queued). Frontend merges it into the `InnerLifePanel` + scene/animation without invoking TTS.
+  - Server → client (project report, no TTS): `{"type":"project_report","project_id","project_title","text"}` — emitted when the project runner produces user-facing text from a tick. Shown as a prefixed message in the chat overlay.
+  - `inner_state` payload shape: `{drives, energy, circadian, sleep_phase, today_journal?, last_dream?, projects?, pending_project_actions?, self_narrative?, ruminations, person_profile?, pending_commitments?}`
 - **Perception Intent**:
   - `REQUEST_RESPONSE` — user/channel expects an answer (default)
   - `OBSERVATION` — passive stimulus (camera frame, ambient audio, file drop). No forced response; conscience observes.
   - `INTERNAL_TRIGGER` — Mika-driven (conscience `_act`, module `notify_ai`, drive overflow, rumination resurfacing). Broadcasts; `emit_event=False`.
 - **Person identification**: each WebSocket connection gets a per-connection UUID; clients can pass a persistent `person_id` in chat messages; Telegram uses `tg_{user_id}`. Internal IDs `conscience_mika`, `__global__`, `anonymous` are reserved and never matched to `PersonProfile`.
 - **Personality is config-driven**: edit [personality.yaml](personality.yaml) (name, language, tone, traits, quirks, values, temperament) — no code changes needed
-- **Singletons** (module-level, imported throughout): `ai_router` (`ai.router`), `ai_client` (`ai.client`), `memory_manager` (`memory.manager`), `emotion_engine` (`emotion.engine`), `drive_engine` (`drives.engine`), `personality` (`config.personality`), `module_manager` (`modules.manager`), `conscience_engine` (`conscience.engine`), `narrative_generator` (`memory.narrative`), `person_profile_generator` (`memory.person_profile`), `sleep_cycle` (`memory.sleep`). Circadian is pure-function only (no singleton) — any caller passes the current `datetime` + the personality's `CircadianProfile`.
+- **Singletons** (module-level, imported throughout): `ai_router` (`ai.router`), `ai_client` (`ai.client`), `memory_manager` (`memory.manager`), `emotion_engine` (`emotion.engine`), `drive_engine` (`drives.engine`), `personality` (`config.personality`), `module_manager` (`modules.manager`), `conscience_engine` (`conscience.engine`), `narrative_generator` (`memory.narrative`), `person_profile_generator` (`memory.person_profile`), `sleep_cycle` (`memory.sleep`), `project_runner` (`projects.runner`). Circadian is pure-function only (no singleton) — any caller passes the current `datetime` + the personality's `CircadianProfile`.
 - **Django settings** in [config/settings.py](backend/config/settings.py): `PROJECT_ROOT` = repo root (where `.env` and `personality.yaml` live), `BASE_DIR` = `backend/`
-- **INSTALLED_APPS**: `ai`, `communication`, `emotion`, `drives`, `memory`, `conscience`, `modules`
+- **INSTALLED_APPS**: `ai`, `communication`, `emotion`, `drives`, `memory`, `conscience`, `modules`, `projects`
 - **Adding a new input source** (e.g. Discord, webhook): write an adapter that builds a `Perception` and calls `pipeline.router.perceive()`. No pipeline changes needed.
 - **Adding a new modality** (e.g. ultrasound sensor): add a preprocessor in [pipeline/preprocessors/](backend/pipeline/preprocessors/) and register its dispatch entry. Router + processor pick it up automatically.
 
@@ -312,6 +374,7 @@ OAuth tried first, API key as fallback. OAuth tokens start with `sk-ant-oat01-`;
 | `RSS_POLL_INTERVAL` | No | `600` | RSS fetch period (s) |
 | `CHROMA_PERSIST_DIR` | No | `data/chromadb` | ChromaDB on-disk location |
 | `SLEEP_CYCLE_ENABLED` | No | `True` | Master switch for the nighttime sleep cycle (journal + dreams + digestion) |
+| `PROJECT_PROMPT_HISTORY_SIZE` | No | `30` | Rolling-buffer size of LLM prompt/response pairs kept per project (audit/debug). Set to `0` to disable capture entirely. |
 
 ## Testing notes
 
@@ -319,4 +382,5 @@ OAuth tried first, API key as fallback. OAuth tokens start with `sk-ant-oat01-`;
 - Scoring tests share a `_score(ctx)` helper that pre-marks all greeting periods as done, isolating them from wall-clock time (otherwise tests run at 7–10h, 18–20h, or 23h+ get an extra +0.35 from the time-greeting factor)
 - DB tests with `transaction=True` often need an autouse fixture to truncate leaked rows from prior non-transactional `django_db` tests — this pattern appears in `test_self_narrative.py`, `test_person_profile.py`, `test_sleep.py`
 - **Sleep cycle tests** (`test_sleep.py`, `test_sleep_debug_views.py`): cover phase gates, night detection, dream classification, rumination digestion, dream persistence, phase transition broadcasts, and the debug HTTP endpoints. LLM calls are mocked — the LLM prompts themselves are not unit-tested.
+- **Project tests** (`test_projects.py`): schedule parser (interval/cron/idle/event/manual), model defaults (critical: `emotion_policy` defaults to OFF), project detection heuristic, prompt injection + emotion suppression, runner JSON extraction, HTTP endpoints (create/list/detail/patch, task add/update, pending approve/reject, prompt history), MCP `create_project` handler, rolling-buffer prune (respects `PROJECT_PROMPT_HISTORY_SIZE=0` as disable).
 - Two tests are currently flaky due to wall-clock/circadian bias at run time (they assert positions that depend on the phase_bias home vector): `test_emotion_engine.py::TestTemperamentVariants::test_melancholic_returns_to_melancholic` and `test_scenario_troll.py::TestTrollWithStoicTemperament::test_stoic_global_barely_moves`. They pre-date the sleep work and are typically excluded in CI runs via `--deselect`.
