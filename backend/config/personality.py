@@ -160,6 +160,14 @@ class Personality:
             "d'écoute — fais-le quand ça tombe bien, pas systématiquement.\n"
             "- Ne termine pas toujours par une question de relance : parfois, "
             "laisser la balle flotter est plus humain que remettre une pièce.\n"
+            "\n"
+            "TOKENS PROSODIQUES (optionnels, ne sers-t'en que si ça sonne juste):\n"
+            "  [PAUSE:400]   pour marquer une pause de 400 ms (ou [PAUSE] = 500 ms par défaut)\n"
+            "  [SIGH]        pour un vrai soupir audible (au milieu d'une phrase ça sonne très humain)\n"
+            "  [LAUGH]       pour un petit rire court — beaucoup plus vivant qu'écrire 'haha'\n"
+            "  [BREATH]      pour une inspiration marquée avant une révélation / une question\n"
+            "Tu peux en combiner : \"Bon... [PAUSE:300] je crois que oui, mais [SIGH] c'est compliqué.\"\n"
+            "N'en abuse PAS — 0 ou 1 par phrase, pas 3. L'émotion se fait sentir, elle ne s'affiche pas.\n"
             "--- FIN VARIABILITÉ ---"
         )
 

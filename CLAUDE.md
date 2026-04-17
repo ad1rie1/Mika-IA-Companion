@@ -115,12 +115,13 @@ On AI error or timeout: fallback text returned, **no emotion impulse toward the 
 - **Personality**: [config/personality.py](backend/config/personality.py) — loads [personality.yaml](personality.yaml) (name, description, tone, traits, quirks, temperament block)
 - **Memory** ([memory/](backend/memory/)):
   - `memory/manager.py` — `MemoryManager` singleton: short-term (RAM deque, `MEMORY_SHORT_TERM_LIMIT` messages) + ORM persistence + consolidator lifecycle
-  - `memory/models.py` — `Conversation`, `Message` (with `attachments_meta` JSONField), `Theme`, `Entity`, `Souvenir`, `Connaissance`, `EmotionSnapshot`, `EmotionalSummary`, `ConsolidationLog`, `SelfNarrative`, `PersonProfile`, `Commitment`
-  - `memory/storage/` — `vector_store.py` (ChromaDB) + `consolidator.py` (background loop: extraction → indexing → decay → emotion aggregation → narrative regen → person profile regen)
+  - `memory/models.py` — `Conversation`, `Message` (with `attachments_meta` JSONField), `Theme`, `Entity`, `Souvenir`, `Connaissance`, `EmotionSnapshot`, `EmotionalSummary`, `ConsolidationLog`, `SelfNarrative`, `PersonProfile`, `Commitment`, `DailyJournal`, `Dream`
+  - `memory/storage/` — `vector_store.py` (ChromaDB) + `consolidator.py` (background loop: extraction → indexing → decay → emotion aggregation → narrative regen → person profile regen → sleep cycle)
   - `memory/extraction/extractor.py` — AI-powered extraction of 3 types: souvenirs (1st-person episodes), connaissances (3rd-person facts), commitments (promises Mika made)
   - `memory/retrieval/retriever.py` — semantic search + person_id boost + recency bias + confidence
   - `memory/narrative.py` — `NarrativeGenerator`: regenerates `SelfNarrative` (1st-person autobiographical paragraph) when ≥24h old AND ≥5 new souvenirs
   - `memory/person_profile.py` — `PersonProfileGenerator`: theory of mind. Per person-entity, synthesizes closeness, preferred tone, topics of interest, sensitive topics. Gated per-person (≥24h + ≥3 new souvenirs mentioning them); capped at 3 persons/cycle
+  - `memory/sleep.py` — `SleepCycle` singleton. Nighttime creative/narrative/healing work. See "Sleep Cycle" section below.
 - **Conscience** ([conscience/](backend/conscience/)): Mika's waking brain. See dedicated section below.
 - **Module plugin system**: [modules/base.py](backend/modules/base.py) (`BaseModule` ABC) + [modules/manager.py](backend/modules/manager.py) (`ModuleManager` singleton). Each module is a subfolder with its own `models.py`. `modules/models.py` re-exports for Django discovery.
 - **Module capabilities** (opt-in): `instantiate`/`shutdown`, `worker_cron`, `return_tools`, `notify_ai`, `get_routes`, `get_context`, `on_event`, `get_status`, `is_available`
@@ -166,30 +167,78 @@ Two layers built on top of the memory system regenerate periodically during cons
 
 Commitments are a 3rd type of extraction produced by the same consolidator LLM call that extracts souvenirs/connaissances.
 
+### Sleep Cycle ([memory/sleep.py](backend/memory/sleep.py))
+
+Counterpart to the Conscience. The consolidator runs all day doing maintenance; the Sleep Cycle runs **only at night** doing creative, narrative, and healing work the reactive pipeline cannot.
+
+**Triple gate** — all must pass for any sleep phase to run:
+1. Current hour ∈ [23h, 6h) (`_is_night()`)
+2. `conscience.get_idle_seconds() ≥ 900` (15 min without interaction)
+3. `drive_engine.states[REST].tension ≥ 0.5` (Mika earned her sleep)
+
+**Three phases** (invoked by `run_if_due()`, driven from the consolidator loop):
+
+1. **Light sleep** — `_write_journal_if_due()`. One LLM call produces a `DailyJournal` for the date just ended: 1st-person recap narrative (2-4 sentences), key moment ids, dominant emotion, persons interacted, unresolved-at-sleep rumination snapshots. One row per date; re-runs refresh in place.
+
+2. **REM** — `_maybe_dream()`. Picks 2-3 souvenirs of **distinct themes** (greedy anti-duplicate) + optionally one active rumination ≥ 0.3. Classifies the dream: `nightmare` (dominant negative or strong negative rumination), `pleasant` (dominant positive), `associative` (mixed), `mundane` (weak emotional signal). LLM generates a short oneiric narrative. `DREAM_PROBABILITY = 0.6`, `MAX_DREAMS_PER_NIGHT = 2`.
+
+3. **Deep sleep** — `_digest_ruminations()` (03h-06h, once per night). For active ruminations older than 120min:
+   - Decay ×3 (15% intensity lost per pass vs 5% normal)
+   - Forced emotion drift via `DIGESTION_DRIFT` (e.g. `frustrated → relieved`, `anxious → relieved`, `angry → thinking`)
+   - Intensity ≥ 0.4 → converted into a **reflective Souvenir** ("Après y avoir repensé cette nuit: …")
+   - Intensity < 0.15 post-decay → marked `faded`
+
+**Observable phase state** (`SleepPhase`): `awake | light_sleep | rem | deep_sleep`. Transitions call `_set_phase()` which pushes a `broadcast_inner_state_update` event so the frontend reacts immediately (dim lights, close eyes, slow breath). Singleton `sleep_cycle` at module level.
+
+**Prompt integration** — morning recall (6h-14h): a non-recalled `Dream` with `vividness ≥ 0.6` for last night gets injected as the `--- CE QUE TU AS REVE CETTE NUIT ---` block, then auto-marked `recalled_at` so it never repeats. Framed as "tu peux le mentionner si ça tombe" — Mika can spontaneously talk about it or not.
+
+**Frontend integration** (end-to-end, live):
+- `sleep_phase`, `today_journal`, `last_dream` included in every `inner_state` payload (both `speech` and the new standalone `inner_state_update` events)
+- `AnimationMixer.setSleepPhase()` — eyes close (0.85-1.0), breath × 0.45-0.7, REM flicker, head tilt 0.12-0.25 rad, 1.2s eased transitions
+- `Environment.setSleepPhase()` — lights × 0.22-0.55, background tint lerps toward dark blue, 1.8s eased
+- `TTSService.requestWakeUpDelay(ms)` — first reply after waking gets 1.3s of silence to sound like waking up, not a bot responding instantly
+- `InnerLifePanel` — "Rêve de cette nuit" + "Journal d'aujourd'hui" sections, sleep badge in header when not awake
+
+**Debug endpoints** ([communication/debug_views.py](backend/communication/debug_views.py)) — all gated by `settings.DEBUG`:
+- `POST /api/dev/sleep/phase {phase}` — force a phase, bypasses gates
+- `POST /api/dev/sleep/journal` — run light-sleep LLM call NOW
+- `POST /api/dev/sleep/dream` — run REM LLM call NOW (bypasses probability + cap)
+- `POST /api/dev/sleep/digest` — run deep-sleep digestion NOW
+- `POST /api/dev/sleep/wake` — reset to AWAKE
+- `GET  /api/dev/sleep/status` — current phase + today's journal + last dream
+
+**Metaphor recap**: Conscience = waking state (observe + act). Consolidator = maintenance bookkeeper. Sleep Cycle = dreaming state — creativity (dreams), narrative coherence (journal), emotional healing (digestion).
+
 ### System prompt structure
 
 Assembled by `build_system_prompt()` ([pipeline/prompt.py](backend/pipeline/prompt.py)) in this order:
 
-1. **Personality** (static, from `personality.yaml`)
+1. **Personality** (static, from `personality.yaml`) — now includes a `--- VARIABILITÉ NATURELLE ---` sub-block encouraging variable response length, backchannels ("hmm", "attends"), hesitations, selective echo, non-mandatory relances
 2. **`--- QUI TU ES DEVENUE ---`** (self-concept, evolving paragraph)
 3. **`--- CE QUE TU SAIS DE CETTE PERSONNE ---`** (person profile + affect + weekly trend + commitments)
-4. **`--- TON RYTHME ---`** (circadian phase + energy level, from `emotion/circadian.py`)
-5. **`--- CONTEXTE MODULES ---`** (email backlog, RSS unread, etc.)
-6. **`--- TON ETAT EMOTIONNEL ACTUEL ---`** (global mood only + drives)
-7. Memory context (semantic retrieval of relevant souvenirs/connaissances)
+4. **`--- CE QUE TU PERCOIS DE SON ETAT ---`** (heuristic read of user's current emotional tone: caps, punctuation, lexique, emojis, length — `detect_user_mood_hint` in `pipeline/context.py`)
+5. **`--- TON RYTHME ---`** (circadian phase + energy level, from `emotion/circadian.py`)
+6. **`--- ETAT COGNITIF ---`** (fatigue fog: 4 tiers below energy 0.5 shaping the TONE, not just the act/wait threshold)
+7. **`--- CE QUI TE TROTTE DANS LA TETE ---`** (active ruminations — previously only visible during `_act()`, now every turn)
+8. **`--- CE QUE TU AS REVE CETTE NUIT ---`** (non-recalled dream with vividness ≥ 0.6, morning 6h-14h window only, auto-marked recalled on first injection)
+9. **`--- CONTEXTE MODULES ---`** (email backlog, RSS unread, etc.)
+10. **`--- TON ETAT EMOTIONNEL ACTUEL ---`** (global mood with ambivalent blend phrasing + drives)
+11. Memory context (semantic retrieval of relevant souvenirs/connaissances)
 
-Personality + self-concept + person-context + circadian are the "slow" layers (stable over a session or shifting by the hour); module/emotion/memory are recomputed every turn. Recency bias places the latter last.
+Personality + self-concept + person-context + circadian are the "slow" layers (stable over a session or shifting by the hour); module/emotion/memory/user-mood/fatigue/ruminations/dream are recomputed every turn. Recency bias places the latter last.
 
 ### Frontend (Vite + Three.js + VRM)
 
-- **Entry**: [frontend/src/main.ts](frontend/src/main.ts) — initializes 3D scene, loads VRM, connects WebSocket, wires TTS + lip-sync + emotions
-- **3D**: `src/scene/` — `SceneManager`, `Environment`, `CameraController`
-- **VTuber**: `src/vtuber/` — `VTuberModel` (VRM via GLTFLoader + VRM plugin), `EmotionController` (29 emotions → blend shapes with intensity-based weighting), `AnimationMixer` (blink + breathing)
-- **Audio**: `src/audio/` — `TTSService` (Web Speech API, emotion-based pitch/rate), `LipSyncController` (French phoneme mapping)
-- **UI**: `src/ui/` — `ChatOverlay`, `EmotionDisplay` (29 emotion labels in French with intensity %)
-- **Network**: `src/network/WebSocketClient.ts` — event-driven client with exponential backoff
+- **Entry**: [frontend/src/main.ts](frontend/src/main.ts) — initializes 3D scene, loads VRM, connects WebSocket, wires TTS + lip-sync + emotions + sleep-phase fan-out
+- **3D**: `src/scene/` — `SceneManager`, `Environment` (exposes `setSleepPhase()` + `update(delta)` for light dimming + bg tint lerping), `CameraController`
+- **VTuber**: `src/vtuber/` — `VTuberModel` (VRM via GLTFLoader + VRM plugin), `EmotionController` (29 emotions → blend shapes with intensity-based weighting), `AnimationMixer` (blink + breathing + sleep pose: closed eyes, slow deep breath, head tilt, REM flicker)
+- **Audio**: `src/audio/` — `TTSService` (Web Speech API, emotion-based pitch/rate, `requestWakeUpDelay(ms)` for morning pause), `LipSyncController` (French phoneme mapping)
+- **UI**: `src/ui/` — `ChatOverlay`, `EmotionDisplay` (29 emotion labels in French with intensity %), `InnerLifePanel` (drives + emotion blend + self-narrative + ruminations + person profile + sleep badge + dream-of-the-night + today's journal, with `onSleepPhaseChange` pub-sub)
+- **Network**: `src/network/WebSocketClient.ts` — event-driven client with exponential backoff; two inbound message types: `speech` (carries text + emotion + inner_state) and `inner_state_update` (pure state refresh, no TTS)
 
-**Speech flow**: WebSocket `speech` event → emotion validation → `EmotionController.setEmotion(name, intensity)` → TTS + lip-sync → independent blink/breathing.
+**Speech flow**: WebSocket `speech` event → emotion validation → `EmotionController.setEmotion(name, intensity)` → TTS + lip-sync → independent blink/breathing. If Mika was asleep within 10s, TTS is prefixed by 1.3s of silence (wake-up pause).
+
+**Sleep visual flow**: backend `SleepCycle._set_phase()` triggers `broadcast_inner_state_update` → frontend `WebSocketClient` dispatches `inner_state_update` → `InnerLifePanel` applies state → `onSleepPhaseChange` listeners fan out to `AnimationMixer.setSleepPhase()` (avatar dozes) + `Environment.setSleepPhase()` (scene dims). Frontend also stamps `lastAsleepAt` to wire the TTS wake-up delay.
 
 A `.vrm` file at [frontend/public/models/default.vrm](frontend/public/models/default.vrm). Without it, a placeholder capsule+sphere is rendered.
 
@@ -199,14 +248,16 @@ A `.vrm` file at [frontend/public/models/default.vrm](frontend/public/models/def
 - **Emotion tag**: `[EMOTION:name:intensity]`. Legacy `[EMOTION:name]` = intensity 0.7
 - **WebSocket protocol**:
   - Client → server: `{"type":"chat","message":"...","person_id":"...","attachments":[...]}`
-  - Server → client: `{"type":"speech","text":"...","emotion":"...","emotion_intensity":0.75,"emotion_blend":[{"emotion":"...","weight":0.x}, ...],"emotion_state":{...},"source":"..."}`
+  - Server → client (reply): `{"type":"speech","text":"...","emotion":"...","emotion_intensity":0.75,"emotion_blend":[{"emotion":"...","weight":0.x}, ...],"emotion_state":{...},"source":"...","inner_state":{...}}`
+  - Server → client (state refresh, no TTS): `{"type":"inner_state_update","inner_state":{...}}` — pushed by `broadcast_inner_state_update()` when inner state changes outside of a conversation turn (e.g. sleep phase transitions during the night). Frontend merges it into the `InnerLifePanel` + scene/animation without invoking TTS.
+  - `inner_state` payload shape: `{drives, energy, circadian, sleep_phase, today_journal?, last_dream?, self_narrative?, ruminations, person_profile?, pending_commitments?}`
 - **Perception Intent**:
   - `REQUEST_RESPONSE` — user/channel expects an answer (default)
   - `OBSERVATION` — passive stimulus (camera frame, ambient audio, file drop). No forced response; conscience observes.
   - `INTERNAL_TRIGGER` — Mika-driven (conscience `_act`, module `notify_ai`, drive overflow, rumination resurfacing). Broadcasts; `emit_event=False`.
 - **Person identification**: each WebSocket connection gets a per-connection UUID; clients can pass a persistent `person_id` in chat messages; Telegram uses `tg_{user_id}`. Internal IDs `conscience_mika`, `__global__`, `anonymous` are reserved and never matched to `PersonProfile`.
 - **Personality is config-driven**: edit [personality.yaml](personality.yaml) (name, language, tone, traits, quirks, values, temperament) — no code changes needed
-- **Singletons** (module-level, imported throughout): `ai_router` (`ai.router`), `ai_client` (`ai.client`), `memory_manager` (`memory.manager`), `emotion_engine` (`emotion.engine`), `drive_engine` (`drives.engine`), `personality` (`config.personality`), `module_manager` (`modules.manager`), `conscience_engine` (`conscience.engine`), `narrative_generator` (`memory.narrative`), `person_profile_generator` (`memory.person_profile`). Circadian is pure-function only (no singleton) — any caller passes the current `datetime` + the personality's `CircadianProfile`.
+- **Singletons** (module-level, imported throughout): `ai_router` (`ai.router`), `ai_client` (`ai.client`), `memory_manager` (`memory.manager`), `emotion_engine` (`emotion.engine`), `drive_engine` (`drives.engine`), `personality` (`config.personality`), `module_manager` (`modules.manager`), `conscience_engine` (`conscience.engine`), `narrative_generator` (`memory.narrative`), `person_profile_generator` (`memory.person_profile`), `sleep_cycle` (`memory.sleep`). Circadian is pure-function only (no singleton) — any caller passes the current `datetime` + the personality's `CircadianProfile`.
 - **Django settings** in [config/settings.py](backend/config/settings.py): `PROJECT_ROOT` = repo root (where `.env` and `personality.yaml` live), `BASE_DIR` = `backend/`
 - **INSTALLED_APPS**: `ai`, `communication`, `emotion`, `drives`, `memory`, `conscience`, `modules`
 - **Adding a new input source** (e.g. Discord, webhook): write an adapter that builds a `Perception` and calls `pipeline.router.perceive()`. No pipeline changes needed.
@@ -260,9 +311,12 @@ OAuth tried first, API key as fallback. OAuth tokens start with `sk-ant-oat01-`;
 | `RSS_FEEDS` | No | `""` | Comma-separated `"name|url"` pairs |
 | `RSS_POLL_INTERVAL` | No | `600` | RSS fetch period (s) |
 | `CHROMA_PERSIST_DIR` | No | `data/chromadb` | ChromaDB on-disk location |
+| `SLEEP_CYCLE_ENABLED` | No | `True` | Master switch for the nighttime sleep cycle (journal + dreams + digestion) |
 
 ## Testing notes
 
 - `pytest.ini` uses `pytest-django` and `asyncio_mode=auto`
 - Scoring tests share a `_score(ctx)` helper that pre-marks all greeting periods as done, isolating them from wall-clock time (otherwise tests run at 7–10h, 18–20h, or 23h+ get an extra +0.35 from the time-greeting factor)
-- DB tests with `transaction=True` often need an autouse fixture to truncate leaked rows from prior non-transactional `django_db` tests — this pattern appears in `test_self_narrative.py`, `test_person_profile.py`
+- DB tests with `transaction=True` often need an autouse fixture to truncate leaked rows from prior non-transactional `django_db` tests — this pattern appears in `test_self_narrative.py`, `test_person_profile.py`, `test_sleep.py`
+- **Sleep cycle tests** (`test_sleep.py`, `test_sleep_debug_views.py`): cover phase gates, night detection, dream classification, rumination digestion, dream persistence, phase transition broadcasts, and the debug HTTP endpoints. LLM calls are mocked — the LLM prompts themselves are not unit-tested.
+- Two tests are currently flaky due to wall-clock/circadian bias at run time (they assert positions that depend on the phase_bias home vector): `test_emotion_engine.py::TestTemperamentVariants::test_melancholic_returns_to_melancholic` and `test_scenario_troll.py::TestTrollWithStoicTemperament::test_stoic_global_barely_moves`. They pre-date the sleep work and are typically excluded in CI runs via `--deselect`.

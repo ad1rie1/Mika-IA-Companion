@@ -8,6 +8,7 @@ import {
   type EmotionName,
 } from "./vtuber/EmotionController";
 import { AnimationMixer } from "./vtuber/AnimationMixer";
+import { GazeController } from "./vtuber/GazeController";
 import { LipSyncController } from "./audio/LipSyncController";
 import { TTSService } from "./audio/TTSService";
 import { WebSocketClient } from "./network/WebSocketClient";
@@ -83,6 +84,7 @@ async function init() {
   const vtuberModel = new VTuberModel(sceneManager.scene);
   const emotionController = new EmotionController();
   const animationMixer = new AnimationMixer();
+  const gazeController = new GazeController();
   const lipSyncController = new LipSyncController();
   const emotionDisplay = new EmotionDisplay();
   const innerLifePanel = new InnerLifePanel();
@@ -98,6 +100,7 @@ async function init() {
     const vrm = await vtuberModel.load("/models/default.vrm");
     emotionController.setVRM(vrm);
     animationMixer.setVRM(vrm);
+    gazeController.setVRM(vrm);
     lipSyncController.setVRM(vrm);
     console.log("VTuber model ready");
   } catch (e) {
@@ -148,6 +151,11 @@ async function init() {
   innerLifePanel.onSleepPhaseChange((phase) => {
     animationMixer.setSleepPhase(phase);
     environment.setSleepPhase(phase);
+    gazeController.setSleepPhase(phase);
+    // Sleep owns the neck bone. When asleep, stop applying emotion-
+    // driven head pose to avoid layered conflicts (curious tilt +
+    // sleep forward tilt = broken geometry).
+    emotionController.setSuppressHeadPose(phase !== "awake");
     if (phase !== "awake") {
       lastAsleepAt = performance.now();
     }
@@ -164,8 +172,9 @@ async function init() {
         ? data.emotion_intensity
         : 0.7;
 
-    // Facial expression
+    // Facial expression + gaze direction
     emotionController.setEmotion(emotion, intensity);
+    gazeController.setEmotion(emotion, intensity);
     emotionDisplay.setEmotion(emotion, intensity);
 
     // Ambivalence panel + rest of inner state
@@ -207,6 +216,9 @@ async function init() {
     vtuberModel.update(delta);
     emotionController.update(delta);
     animationMixer.update(delta);
+    // Gaze runs after the mixer so the eye bone rotations aren't
+    // overwritten by any higher-level pose logic further up.
+    gazeController.update(delta);
     lipSyncController.update(delta);
     environment.update(delta);
   });

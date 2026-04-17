@@ -66,6 +66,186 @@ export class TTSService {
     this.nextPreDelayMs = Math.max(this.nextPreDelayMs, Math.floor(ms));
   }
 
+  /**
+   * Parse non-verbal tokens embedded in the text into a sequence of
+   * playback segments. Supported tokens:
+   *   [PAUSE:300]   → 300ms silence (ms optional, default 500)
+   *   [PAUSE]       → 500ms silence
+   *   [SIGH]        → synthetic sigh (~600ms)
+   *   [LAUGH]       → synthetic short laugh (~500ms)
+   *   [BREATH]      → synthetic inhale (~350ms)
+   *
+   * The tokens let Mika embed prosodic cues directly in her response,
+   * so "Hmm... [SIGH] bon écoute, [PAUSE:400] je crois que oui."
+   * becomes actual audio beats, not just typed punctuation.
+   */
+  private parseSegments(
+    text: string
+  ): Array<
+    | { type: "speech"; text: string }
+    | { type: "pause"; ms: number }
+    | { type: "sfx"; kind: "sigh" | "laugh" | "breath" }
+  > {
+    const TOKEN_RE = /\[(PAUSE(?::(\d+))?|SIGH|LAUGH|BREATH)\]/gi;
+    const segments: Array<
+      | { type: "speech"; text: string }
+      | { type: "pause"; ms: number }
+      | { type: "sfx"; kind: "sigh" | "laugh" | "breath" }
+    > = [];
+
+    let cursor = 0;
+    let match: RegExpExecArray | null;
+    while ((match = TOKEN_RE.exec(text)) !== null) {
+      // Text before the token
+      if (match.index > cursor) {
+        const chunk = text.slice(cursor, match.index).trim();
+        if (chunk) segments.push({ type: "speech", text: chunk });
+      }
+      const kind = match[1].toUpperCase();
+      if (kind.startsWith("PAUSE")) {
+        const ms = match[2] ? parseInt(match[2], 10) : 500;
+        segments.push({ type: "pause", ms: Math.min(3000, Math.max(50, ms)) });
+      } else if (kind === "SIGH") {
+        segments.push({ type: "sfx", kind: "sigh" });
+      } else if (kind === "LAUGH") {
+        segments.push({ type: "sfx", kind: "laugh" });
+      } else if (kind === "BREATH") {
+        segments.push({ type: "sfx", kind: "breath" });
+      }
+      cursor = match.index + match[0].length;
+    }
+    // Trailing text
+    if (cursor < text.length) {
+      const chunk = text.slice(cursor).trim();
+      if (chunk) segments.push({ type: "speech", text: chunk });
+    }
+    return segments;
+  }
+
+  /**
+   * Play a synthetic non-verbal effect. Uses raw WebAudio so we don't
+   * need asset files. Quality is "good enough for a VTuber", not voice-
+   * actor studio grade — the point is prosodic presence, not realism.
+   */
+  private playSfx(kind: "sigh" | "laugh" | "breath"): Promise<void> {
+    const ctx = this.ensureAudioContext();
+    if (ctx.state === "suspended") {
+      void ctx.resume();
+    }
+    const now = ctx.currentTime;
+
+    switch (kind) {
+      case "sigh":
+        return this.renderSigh(ctx, now);
+      case "laugh":
+        return this.renderLaugh(ctx, now);
+      case "breath":
+        return this.renderBreath(ctx, now);
+    }
+  }
+
+  /** Synthetic sigh: filtered noise, descending pitch, 600ms envelope. */
+  private renderSigh(ctx: AudioContext, now: number): Promise<void> {
+    const duration = 0.6;
+    const buffer = ctx.createBuffer(1, ctx.sampleRate * duration, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      data[i] = (Math.random() * 2 - 1) * 0.6;
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.frequency.setValueAtTime(420, now);
+    filter.frequency.linearRampToValueAtTime(260, now + duration);
+    filter.Q.value = 4;
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.25, now + 0.08);
+    gain.gain.linearRampToValueAtTime(0, now + duration);
+
+    src.connect(filter).connect(gain).connect(ctx.destination);
+    src.start(now);
+    src.stop(now + duration);
+    return new Promise((r) => {
+      src.onended = () => r();
+    });
+  }
+
+  /** Synthetic laugh: 3-4 short voiced pulses, descending pitch. */
+  private renderLaugh(ctx: AudioContext, now: number): Promise<void> {
+    const pulses = 3 + Math.floor(Math.random() * 2); // 3 or 4
+    const pulseDur = 0.09;
+    const spacing = 0.11;
+    const basePitch = 280 + Math.random() * 40; // per-laugh variation
+    const totalDur = pulses * spacing + 0.05;
+
+    const gainMaster = ctx.createGain();
+    gainMaster.gain.value = 0.18;
+    gainMaster.connect(ctx.destination);
+
+    for (let i = 0; i < pulses; i++) {
+      const pulseStart = now + i * spacing;
+      const osc = ctx.createOscillator();
+      osc.type = "triangle";
+      osc.frequency.value = basePitch * (1 - i * 0.08);
+
+      // Add a noise component for raspiness
+      const noiseBuf = ctx.createBuffer(1, ctx.sampleRate * pulseDur, ctx.sampleRate);
+      const nd = noiseBuf.getChannelData(0);
+      for (let j = 0; j < nd.length; j++) nd[j] = (Math.random() * 2 - 1) * 0.35;
+      const noise = ctx.createBufferSource();
+      noise.buffer = noiseBuf;
+
+      const env = ctx.createGain();
+      env.gain.setValueAtTime(0, pulseStart);
+      env.gain.linearRampToValueAtTime(1.0, pulseStart + 0.015);
+      env.gain.linearRampToValueAtTime(0, pulseStart + pulseDur);
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.value = 1400;
+
+      osc.connect(env);
+      noise.connect(env);
+      env.connect(filter).connect(gainMaster);
+      osc.start(pulseStart);
+      osc.stop(pulseStart + pulseDur);
+      noise.start(pulseStart);
+      noise.stop(pulseStart + pulseDur);
+    }
+
+    return new Promise((r) => setTimeout(r, totalDur * 1000));
+  }
+
+  /** Synthetic inhale: brief high-passed hiss. */
+  private renderBreath(ctx: AudioContext, now: number): Promise<void> {
+    const duration = 0.35;
+    const buffer = ctx.createBuffer(1, ctx.sampleRate * duration, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * 0.5;
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = "highpass";
+    filter.frequency.value = 900;
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.12, now + 0.07);
+    gain.gain.linearRampToValueAtTime(0, now + duration);
+
+    src.connect(filter).connect(gain).connect(ctx.destination);
+    src.start(now);
+    src.stop(now + duration);
+    return new Promise((r) => {
+      src.onended = () => r();
+    });
+  }
+
   private initVoice() {
     const pickVoice = () => {
       const voices = speechSynthesis.getVoices();
@@ -131,6 +311,67 @@ export class TTSService {
       this.nextPreDelayMs = 0;
       await new Promise((r) => setTimeout(r, delay));
     }
+
+    // Parse non-verbal tokens and handle the segmented path if any are
+    // present. Fall through to the single-utterance path when the text
+    // is clean speech (common case — avoids adding latency to every reply).
+    const hasTokens = /\[(PAUSE(?::\d+)?|SIGH|LAUGH|BREATH)\]/i.test(text);
+    if (hasTokens) {
+      await this.speakSegmented(text, emotion);
+      return;
+    }
+    await this.speakTextChunk(text, emotion);
+  }
+
+  /**
+   * Speak the text after splitting it into segments around non-verbal
+   * tokens. Fires a single onSpeakStart at the beginning of the first
+   * audible segment and a single onSpeakEnd after the last one, so the
+   * lip-sync controller sees the whole reply as one coherent event.
+   */
+  private async speakSegmented(
+    text: string,
+    emotion: EmotionName
+  ): Promise<void> {
+    const segments = this.parseSegments(text);
+    if (segments.length === 0) return;
+
+    // Emit "start" on the first segment that actually makes sound.
+    let started = false;
+    const emitStart = () => {
+      if (started) return;
+      started = true;
+      this.events.onSpeakStart();
+    };
+
+    for (const seg of segments) {
+      if (seg.type === "speech") {
+        emitStart();
+        await this.speakTextChunk(seg.text, emotion, /*suppressEvents*/ true);
+      } else if (seg.type === "pause") {
+        await new Promise((r) => setTimeout(r, seg.ms));
+      } else if (seg.type === "sfx") {
+        emitStart();
+        await this.playSfx(seg.kind);
+      }
+    }
+
+    if (started) {
+      this.events.onSpeakEnd();
+    }
+  }
+
+  /**
+   * Speak a single chunk of plain text (no tokens). Returns a promise
+   * resolved when the utterance ends or errors. When `suppressEvents` is
+   * true, the start/end callbacks are NOT fired — used by the segmented
+   * path which manages these lifecycle events at a higher level.
+   */
+  private speakTextChunk(
+    text: string,
+    emotion: EmotionName,
+    suppressEvents = false
+  ): Promise<void> {
     return new Promise((resolve) => {
       if (!text.trim()) {
         resolve();
@@ -160,7 +401,9 @@ export class TTSService {
 
       utterance.onstart = () => {
         this.isSpeaking = true;
-        this.events.onSpeakStart();
+        if (!suppressEvents) {
+          this.events.onSpeakStart();
+        }
 
         // Try to capture audio for analysis via MediaStreamDestination
         // Web Speech API doesn't expose audio stream directly,
@@ -172,7 +415,9 @@ export class TTSService {
 
       utterance.onend = () => {
         this.isSpeaking = false;
-        this.events.onSpeakEnd();
+        if (!suppressEvents) {
+          this.events.onSpeakEnd();
+        }
         resolve();
       };
 
@@ -182,7 +427,9 @@ export class TTSService {
           console.warn("TTS error:", e.error);
         }
         this.isSpeaking = false;
-        this.events.onSpeakEnd();
+        if (!suppressEvents) {
+          this.events.onSpeakEnd();
+        }
         resolve();
       };
 

@@ -12,6 +12,7 @@ preserved in the persisted ``Message.attachments_meta``.
 
 import asyncio
 import logging
+import random
 from dataclasses import dataclass
 
 from django.conf import settings
@@ -25,6 +26,43 @@ from pipeline.response import call_ai_and_parse
 from pipeline.tracing import set_new_request_id
 
 logger = logging.getLogger(__name__)
+
+
+def _compute_thinking_delay(
+    response_text: str, energy: float, source: str
+) -> float:
+    """Return the seconds of simulated "thinking" to insert before broadcast.
+
+    Purely cosmetic — the LLM call latency is already the bulk of the
+    wait. This adds a human-sized floor so short responses ("ouais",
+    "mdr") don't pop back instantly, which feels bot-like.
+
+    Scaling:
+      - Base: 250-600ms random jitter (always)
+      - + ~8ms per word, capped at 1500ms
+      - × (1.6 if tired, energy < 0.3)
+      - × (0.7 if energetic, energy > 0.75)
+      - Skipped entirely for internal triggers (conscience acted
+        deliberately — shouldn't hesitate on top of her own decision)
+
+    Total cap: 2000ms. We never want to make the user wait on us.
+    """
+    if source == "conscience":
+        return 0.0
+    if not response_text.strip():
+        return 0.0
+
+    word_count = len(response_text.split())
+    jitter = 0.25 + random.random() * 0.35            # 250-600ms
+    per_word = min(1.5, 0.008 * word_count)           # max 1500ms
+    raw = jitter + per_word
+
+    if energy < 0.3:
+        raw *= 1.6
+    elif energy > 0.75:
+        raw *= 0.7
+
+    return min(2.0, raw)
 
 
 @dataclass
@@ -154,8 +192,28 @@ async def process_message(
         ],
     )
 
-    # 7. Broadcast to WebSocket (inner state attached so UI panels refresh)
+    # 7. Broadcast to WebSocket (inner state attached so UI panels refresh).
+    #    Before broadcasting, insert a short "thinking" delay so responses
+    #    don't pop back instantly — feels human, especially for short
+    #    replies. Skipped for internal triggers (Mika already decided
+    #    deliberately; adding hesitation on top would be doubled latency)
+    #    and for AI errors (fallback messages should come back fast).
     if broadcast:
+        if not ai_failed:
+            try:
+                from drives.engine import drive_engine
+                energy = drive_engine.energy_level()
+            except Exception:
+                energy = 0.5
+            thinking_delay = _compute_thinking_delay(
+                response_text=response_text, energy=energy, source=source,
+            )
+            if thinking_delay > 0:
+                logger.debug(
+                    "Thinking delay: %.2fs (words=%d, energy=%.2f)",
+                    thinking_delay, len(response_text.split()), energy,
+                )
+                await asyncio.sleep(thinking_delay)
         await broadcast_to_websocket(output, source, person_id=person_id)
 
     # 8. Post-action self-audit: an emotionally marked reply leaves a
