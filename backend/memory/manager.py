@@ -11,8 +11,13 @@ class MemoryManager:
     structured (Django ORM) memory systems."""
 
     def __init__(self):
+        from configs.service import config_service
         self.short_term: list[dict] = []
-        self.max_short_term = settings.MEMORY_SHORT_TERM_LIMIT
+        self.max_short_term = config_service.get("memory.short_term_limit")
+        config_service.on_change(
+            "memory.short_term_limit",
+            lambda k, v: setattr(self, "max_short_term", v),
+        )
         self.conversation = None
         self._initialized = False
 

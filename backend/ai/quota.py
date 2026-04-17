@@ -225,10 +225,12 @@ class QuotaTracker:
     # -- Limit lookups (read from settings each call so env changes bite) --
 
     def _global_daily_limit(self) -> int:
-        return int(getattr(settings, "AI_QUOTA_DAILY_TOKENS", 0) or 0)
+        from configs.service import config_service
+        return int(config_service.get("ai.quota.daily_tokens", default=0) or 0)
 
     def _global_monthly_limit(self) -> int:
-        return int(getattr(settings, "AI_QUOTA_MONTHLY_TOKENS", 0) or 0)
+        from configs.service import config_service
+        return int(config_service.get("ai.quota.monthly_tokens", default=0) or 0)
 
     def _role_daily_limit(self, role: str) -> int:
         # Env var form: AI_QUOTA_ROLE_<ROLE_UPPER>_DAILY

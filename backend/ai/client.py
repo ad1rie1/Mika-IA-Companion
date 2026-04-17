@@ -17,11 +17,14 @@ logger = logging.getLogger(__name__)
 
 class AIClient:
     def __init__(self):
+        from configs.service import config_service
         # Ensure env vars are set for claude_agent_sdk (used by tool_client)
-        if settings.CLAUDE_OAUTH_TOKEN:
-            os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = settings.CLAUDE_OAUTH_TOKEN
-        elif settings.ANTHROPIC_API_KEY:
-            os.environ["ANTHROPIC_API_KEY"] = settings.ANTHROPIC_API_KEY
+        oauth = config_service.get("ai.claude.oauth_token", default="")
+        api_key = config_service.get("ai.claude.api_key", default="")
+        if oauth:
+            os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = oauth
+        elif api_key:
+            os.environ["ANTHROPIC_API_KEY"] = api_key
 
     # -- Simple completion (no tools) ------------------------------------------
 

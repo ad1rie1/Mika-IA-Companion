@@ -29,12 +29,14 @@ class OpenAIProvider:
                 "Installez-le avec : pip install openai"
             )
 
-        api_key = getattr(settings, "OPENAI_API_KEY", "") or None
-        base_url = getattr(settings, "OPENAI_BASE_URL", "") or None
+        from configs.service import config_service
+        api_key = config_service.get("ai.openai.api_key", default="") or None
+        base_url = config_service.get("ai.openai.base_url", default="") or None
 
         if not api_key:
             raise ValueError(
-                "OpenAIProvider nécessite OPENAI_API_KEY dans .env"
+                "OpenAIProvider nécessite ai.openai.api_key "
+                "(éditeur Configuration > IA · Providers)."
             )
 
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)

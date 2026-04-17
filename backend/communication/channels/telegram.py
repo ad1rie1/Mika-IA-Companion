@@ -26,13 +26,20 @@ class TelegramModule(BaseModule):
         super().__init__("telegram")
         self._app: Application | None = None
 
+    def config_schema(self):
+        from communication.channels.telegram_config_schema import CONFIG_SCHEMA
+        return CONFIG_SCHEMA
+
     # ── Lifecycle ─────────────────────────────────────────────────
 
     def is_available(self) -> bool:
-        return bool(settings.TELEGRAM_TOKEN)
+        from configs.service import config_service
+        return bool(config_service.get("telegram.token", default=""))
 
     async def instantiate(self) -> None:
-        self._app = Application.builder().token(settings.TELEGRAM_TOKEN).build()
+        from configs.service import config_service
+        token = config_service.get("telegram.token", default="")
+        self._app = Application.builder().token(token).build()
         self._app.add_handler(CommandHandler("start", self._handle_start))
         self._app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message)

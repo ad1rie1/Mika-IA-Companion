@@ -56,6 +56,22 @@ class ModuleManager:
         if module.name in self._modules:
             raise ValueError(f"Module '{module.name}' is already registered")
 
+        # Absorb config schema REGARDLESS of availability — the whole
+        # point of surfacing it in the UI is to let the user configure
+        # a module that can't run yet because its settings are empty.
+        try:
+            entries = module.config_schema()
+        except Exception:
+            logger.exception("config_schema() failed for module %s", module.name)
+            entries = []
+        if entries:
+            from configs.registry import registry as config_registry
+            config_registry.register(entries)
+            logger.debug(
+                "Module '%s' registered %d config schema entries",
+                module.name, len(entries),
+            )
+
         if not module.is_available():
             logger.info(
                 "Module '%s' not available (preconditions unmet), skipping",
@@ -80,10 +96,10 @@ class ModuleManager:
         event bus or call ``pipeline.router.perceive()`` directly with
         an ``Intent.INTERNAL_TRIGGER`` Perception.
         """
-        from django.conf import settings
+        from configs.service import config_service
 
-        self._tick_interval = getattr(
-            settings, "CRON_TICK_INTERVAL", DEFAULT_TICK_INTERVAL
+        self._tick_interval = config_service.get(
+            "modules.cron_tick_interval", default=DEFAULT_TICK_INTERVAL,
         )
 
         for module in self._modules.values():

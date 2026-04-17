@@ -54,32 +54,34 @@ def ai_config(request):
             "model": ai_router.get_model(role),
         })
 
+    from configs.service import config_service
+
     providers = {
         "claude": {
-            "oauth_configured": bool(getattr(settings, "CLAUDE_OAUTH_TOKEN", "")),
-            "api_key_configured": bool(getattr(settings, "ANTHROPIC_API_KEY", "")),
-            "default_model": getattr(settings, "CLAUDE_MODEL", ""),
-            "light_model": getattr(settings, "CLAUDE_MODEL_LIGHT", ""),
+            "oauth_configured": bool(config_service.get("ai.claude.oauth_token", default="")),
+            "api_key_configured": bool(config_service.get("ai.claude.api_key", default="")),
+            "default_model": config_service.get("ai.claude.default_model", default=""),
+            "light_model": config_service.get("ai.claude.light_model", default=""),
         },
         "openai": {
-            "api_key_configured": bool(getattr(settings, "OPENAI_API_KEY", "")),
-            "base_url": getattr(settings, "OPENAI_BASE_URL", "") or "(default)",
+            "api_key_configured": bool(config_service.get("ai.openai.api_key", default="")),
+            "base_url": config_service.get("ai.openai.base_url", default="") or "(default)",
         },
         "ollama": {
-            "base_url": getattr(settings, "OLLAMA_BASE_URL", ""),
+            "base_url": config_service.get("ai.ollama.base_url", default=""),
         },
     }
 
     knobs = {
-        "AI_CALL_TIMEOUT": getattr(settings, "AI_CALL_TIMEOUT", None),
-        "CONSOLIDATION_INTERVAL": getattr(settings, "CONSOLIDATION_INTERVAL", None),
-        "CONSCIENCE_DECISION_INTERVAL": getattr(settings, "CONSCIENCE_DECISION_INTERVAL", None),
-        "CONSCIENCE_COOLDOWN_SECONDS": getattr(settings, "CONSCIENCE_COOLDOWN_SECONDS", None),
-        "CONSCIENCE_ACT_THRESHOLD": getattr(settings, "CONSCIENCE_ACT_THRESHOLD", None),
-        "MEMORY_SHORT_TERM_LIMIT": getattr(settings, "MEMORY_SHORT_TERM_LIMIT", None),
-        "MEMORY_DECAY_RATE": getattr(settings, "MEMORY_DECAY_RATE", None),
-        "EMOTION_DECAY_RATE": getattr(settings, "EMOTION_DECAY_RATE", None),
-        "CRON_TICK_INTERVAL": getattr(settings, "CRON_TICK_INTERVAL", None),
+        "ai.call_timeout_seconds": config_service.get("ai.call_timeout_seconds", default=None),
+        "memory.consolidation_interval": config_service.get("memory.consolidation_interval", default=None),
+        "conscience.decision_interval": config_service.get("conscience.decision_interval", default=None),
+        "conscience.cooldown_seconds": config_service.get("conscience.cooldown_seconds", default=None),
+        "conscience.act_threshold": config_service.get("conscience.act_threshold", default=None),
+        "memory.short_term_limit": config_service.get("memory.short_term_limit", default=None),
+        "memory.decay_rate": config_service.get("memory.decay_rate", default=None),
+        "emotion.decay_rate": config_service.get("emotion.decay_rate", default=None),
+        "modules.cron_tick_interval": config_service.get("modules.cron_tick_interval", default=None),
         "SLEEP_CYCLE_ENABLED": getattr(settings, "SLEEP_CYCLE_ENABLED", True),
     }
 

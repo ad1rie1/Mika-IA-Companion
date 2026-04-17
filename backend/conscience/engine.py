@@ -65,9 +65,18 @@ class ConscienceEngine:
         if self._initialized:
             return
 
-        self._decision_interval = getattr(settings, "CONSCIENCE_DECISION_INTERVAL", 30)
-        self._cooldown_seconds = getattr(settings, "CONSCIENCE_COOLDOWN_SECONDS", 300)
-        self._threshold = getattr(settings, "CONSCIENCE_ACT_THRESHOLD", 0.5)
+        from configs.service import config_service
+        self._decision_interval = config_service.get("conscience.decision_interval")
+        self._cooldown_seconds = config_service.get("conscience.cooldown_seconds")
+        self._threshold = config_service.get("conscience.act_threshold")
+
+        # Hot-reload: update live parameters when the user edits them in
+        # the dashboard. Decision interval requires a loop restart so we
+        # flag it; threshold + cooldown take effect on the next tick.
+        config_service.on_change("conscience.act_threshold",
+                                 lambda k, v: setattr(self, "_threshold", v))
+        config_service.on_change("conscience.cooldown_seconds",
+                                 lambda k, v: setattr(self, "_cooldown_seconds", v))
 
         # Restore cooldown from last "act" decision log (survives restarts)
         await self._restore_cooldown()

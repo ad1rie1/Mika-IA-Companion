@@ -239,10 +239,10 @@ class FilesModule(BaseModule):
         if record["category"] != "audio":
             return {"error": f"Ce fichier n'est pas un audio (catégorie: {record['category']})."}
         try:
-            from django.conf import settings
-            api_key = getattr(settings, "OPENAI_API_KEY", "") or None
+            from configs.service import config_service
+            api_key = config_service.get("ai.openai.api_key", default="") or None
             if not api_key:
-                return {"error": "Transcription indisponible — configurez OPENAI_API_KEY pour activer Whisper."}
+                return {"error": "Transcription indisponible — configurez ai.openai.api_key (Configuration > IA)."}
 
             import io
             from openai import AsyncOpenAI

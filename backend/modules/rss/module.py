@@ -42,6 +42,10 @@ class RSSModule(BaseModule):
 
     # ── Lifecycle ─────────────────────────────────────────────────
 
+    def config_schema(self):
+        from modules.rss.config_schema import CONFIG_SCHEMA
+        return CONFIG_SCHEMA
+
     def is_available(self) -> bool:
         try:
             import feedparser  # noqa: F401
@@ -53,7 +57,8 @@ class RSSModule(BaseModule):
         import feedparser
         self._feedparser = feedparser
 
-        self.CRON_INTERVAL = getattr(settings, "RSS_POLL_INTERVAL", 600)
+        from configs.service import config_service
+        self.CRON_INTERVAL = config_service.get("rss.poll_interval")
 
         # Migrate env-configured feeds to DB
         await self._migrate_env_feeds()

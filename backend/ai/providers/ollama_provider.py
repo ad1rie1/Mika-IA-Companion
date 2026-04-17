@@ -29,10 +29,10 @@ class OllamaProvider:
                 "Installez-le avec : pip install ollama"
             )
 
-        host = (
-            getattr(settings, "OLLAMA_BASE_URL", "http://localhost:11434")
-            or "http://localhost:11434"
-        )
+        from configs.service import config_service
+        host = config_service.get("ai.ollama.base_url", default="http://localhost:11434")
+        if not host:
+            host = "http://localhost:11434"
 
         self._client = AsyncClient(host=host)
 

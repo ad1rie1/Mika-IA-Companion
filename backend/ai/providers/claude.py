@@ -23,13 +23,15 @@ class ClaudeProvider:
 
     def __init__(self):
         from anthropic import AsyncAnthropic
+        from configs.service import config_service
 
-        api_key = settings.ANTHROPIC_API_KEY or None
-        auth_token = settings.CLAUDE_OAUTH_TOKEN or None
+        api_key = config_service.get("ai.claude.api_key", default="") or None
+        auth_token = config_service.get("ai.claude.oauth_token", default="") or None
 
         if not api_key and not auth_token:
             raise ValueError(
-                "ClaudeProvider nécessite ANTHROPIC_API_KEY ou CLAUDE_OAUTH_TOKEN dans .env"
+                "ClaudeProvider nécessite ai.claude.api_key ou ai.claude.oauth_token "
+                "(éditeur Configuration > IA · Providers)."
             )
 
         # The anthropic SDK supports both api_key and auth_token kwargs.

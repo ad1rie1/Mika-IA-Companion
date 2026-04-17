@@ -89,11 +89,12 @@ class EmotionEngine:
         self.temperament = personality.temperament
         self._recompute_params()
 
-        self._snapshot_interval = getattr(
-            settings, "EMOTION_SNAPSHOT_INTERVAL", 30
-        )
-        self._SNAPSHOT_DECAY_DAYS = getattr(
-            settings, "EMOTION_SNAPSHOT_RETENTION_DAYS", self._SNAPSHOT_DECAY_DAYS
+        from configs.service import config_service
+        self._snapshot_interval = config_service.get("emotion.snapshot_interval")
+        self._SNAPSHOT_DECAY_DAYS = config_service.get("emotion.snapshot_retention_days")
+        config_service.on_change(
+            "emotion.snapshot_interval",
+            lambda k, v: setattr(self, "_snapshot_interval", v),
         )
 
         restored = await self._restore_state()

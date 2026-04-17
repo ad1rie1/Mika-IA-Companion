@@ -33,7 +33,8 @@ class MemoryConsolidator:
     ):
         self.extractor = extractor
         self.vector_store = vector_store
-        self.interval = interval_seconds or settings.CONSOLIDATION_INTERVAL
+        from configs.service import config_service
+        self.interval = interval_seconds or config_service.get("memory.consolidation_interval")
         self._task: asyncio.Task | None = None
         self._last_processed_id: int = 0
         self._running = False
@@ -381,8 +382,9 @@ class MemoryConsolidator:
         """Reduce importance of old souvenirs. Remove those below threshold."""
         from memory.models import Souvenir
 
-        decay_rate = settings.MEMORY_DECAY_RATE
-        min_importance = settings.MEMORY_MIN_IMPORTANCE
+        from configs.service import config_service
+        decay_rate = config_service.get("memory.decay_rate")
+        min_importance = config_service.get("memory.min_importance")
         now = timezone.now()
 
         souvenirs = await sync_to_async(list)(
@@ -536,7 +538,8 @@ class MemoryConsolidator:
             )()
 
         # Prune old snapshots (keep last N days for aggregation overlap)
-        retention_days = getattr(settings, "EMOTION_SNAPSHOT_RETENTION_DAYS", 2)
+        from configs.service import config_service
+        retention_days = config_service.get("emotion.snapshot_retention_days")
         cutoff = now - timedelta(days=retention_days)
         deleted = await sync_to_async(
             lambda: EmotionSnapshot.objects.filter(created_at__lt=cutoff).delete()

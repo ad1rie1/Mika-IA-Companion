@@ -30,15 +30,16 @@ class MemoryRetriever:
         3. Apply person_id boosting + recency reranking
         4. Format as readable text block for system prompt
         """
-        n_souvenirs = settings.MEMORY_RETRIEVAL_SOUVENIRS
-        n_connaissances = settings.MEMORY_RETRIEVAL_CONNAISSANCES
+        from configs.service import config_service
+        n_souvenirs = config_service.get("memory.retrieval_souvenirs")
+        n_connaissances = config_service.get("memory.retrieval_connaissances")
 
         # Fetch more than needed so we can rerank
         fetch_multiplier = 2
         souvenirs_raw = self.vector_store.search_souvenirs(
             query,
             n=n_souvenirs * fetch_multiplier,
-            min_importance=settings.MEMORY_MIN_IMPORTANCE,
+            min_importance=config_service.get("memory.min_importance"),
         )
         connaissances_raw = self.vector_store.search_connaissances(
             query, n=n_connaissances

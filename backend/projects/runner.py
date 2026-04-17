@@ -279,7 +279,8 @@ class ProjectRunner:
 
         Never raises — a history write failure must not block the runner.
         """
-        size = int(getattr(settings, "PROJECT_PROMPT_HISTORY_SIZE", 30) or 0)
+        from configs.service import config_service
+        size = int(config_service.get("projects.prompt_history_size") or 0)
         if size <= 0:
             return
         try:

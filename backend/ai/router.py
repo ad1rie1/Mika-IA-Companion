@@ -77,43 +77,48 @@ class AIRouter:
         self._load_config()
 
     def _load_config(self):
-        """Read AI_ROLE_* settings and parse them."""
-        role_settings = {
-            AIRole.CONVERSATION: getattr(
-                settings, "AI_ROLE_CONVERSATION",
-                f"claude:{settings.CLAUDE_MODEL}",
-            ),
-            AIRole.CONVERSATION_TOOLS: getattr(
-                settings, "AI_ROLE_CONVERSATION_TOOLS",
-                f"claude:{settings.CLAUDE_MODEL}",
-            ),
-            AIRole.EMAIL_TRIAGE: getattr(
-                settings, "AI_ROLE_EMAIL_TRIAGE",
-                f"claude:{settings.CLAUDE_MODEL_LIGHT}",
-            ),
-            AIRole.SIGNAL_INTERPRETATION: getattr(
-                settings, "AI_ROLE_SIGNAL_INTERPRETATION",
-                f"claude:{settings.CLAUDE_MODEL_LIGHT}",
-            ),
-            AIRole.MEMORY_EXTRACTION: getattr(
-                settings, "AI_ROLE_MEMORY_EXTRACTION",
-                f"claude:{settings.CLAUDE_MODEL_LIGHT}",
-            ),
-            AIRole.VALIDITY_CHECK: getattr(
-                settings, "AI_ROLE_VALIDITY_CHECK",
-                f"claude:{settings.CLAUDE_MODEL_LIGHT}",
-            ),
+        """Read role → provider:model mappings from the config service."""
+        from configs.service import config_service
+
+        default_heavy = config_service.get("ai.claude.default_model", default="claude-opus-4-6")
+        default_light = config_service.get("ai.claude.light_model", default="claude-sonnet-4-5")
+
+        role_keys = {
+            AIRole.CONVERSATION:          ("ai.role.conversation",          f"claude:{default_heavy}"),
+            AIRole.CONVERSATION_TOOLS:    ("ai.role.conversation_tools",    f"claude:{default_heavy}"),
+            AIRole.EMAIL_TRIAGE:          ("ai.role.email_triage",          f"claude:{default_light}"),
+            AIRole.SIGNAL_INTERPRETATION: ("ai.role.signal_interpretation", f"claude:{default_light}"),
+            AIRole.MEMORY_EXTRACTION:     ("ai.role.memory_extraction",     f"claude:{default_light}"),
+            AIRole.VALIDITY_CHECK:        ("ai.role.validity_check",        f"claude:{default_light}"),
             # Vision defaults to Claude because other providers' multimodal
             # support in this codebase is limited (see ai/providers/*).
-            AIRole.VISION_CAPTION: getattr(
-                settings, "AI_ROLE_VISION_CAPTION",
-                f"claude:{settings.CLAUDE_MODEL_LIGHT}",
-            ),
+            AIRole.VISION_CAPTION:        ("ai.role.vision_caption",        f"claude:{default_light}"),
         }
 
-        for role, value in role_settings.items():
-            provider_name, model_name = _parse_role_setting(value)
+        for role, (cfg_key, fallback) in role_keys.items():
+            raw = config_service.get(cfg_key, default="") or fallback
+            provider_name, model_name = _parse_role_setting(raw)
             self._role_config[role] = (provider_name, model_name)
+
+        # Hot-reload on any ai.role.* change → rebuild role mapping
+        config_service.on_change("ai.role.", lambda k, v: self._reload_role(k, v))
+        config_service.on_change("ai.claude.default_model", lambda k, v: self._load_config())
+        config_service.on_change("ai.claude.light_model",   lambda k, v: self._load_config())
+
+    def _reload_role(self, key: str, value):
+        from configs.service import config_service
+        role_key = key.split("ai.role.", 1)[-1]
+        try:
+            role = AIRole(role_key)
+        except ValueError:
+            return
+        raw = config_service.get(key, default="") or ""
+        if not raw:
+            return
+        try:
+            self._role_config[role] = _parse_role_setting(raw)
+        except Exception:
+            logger.exception("Invalid role config %s=%r", key, raw)
 
         configured = {
             role.value: f"{p}:{m}" for role, (p, m) in self._role_config.items()

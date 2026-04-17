@@ -40,6 +40,10 @@ class EmailModule(BaseModule):
     def is_available(self) -> bool:
         return True
 
+    def config_schema(self):
+        from modules.email.config_schema import CONFIG_SCHEMA
+        return CONFIG_SCHEMA
+
     async def instantiate(self) -> None:
         from asgiref.sync import sync_to_async
 

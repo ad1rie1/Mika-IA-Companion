@@ -114,7 +114,8 @@ async def process_message(
     await emotion_engine.ensure_person_loaded(person_id)
 
     ai_failed = False
-    timeout_seconds = getattr(settings, "AI_CALL_TIMEOUT", 60)
+    from configs.service import config_service
+    timeout_seconds = config_service.get("ai.call_timeout_seconds")
 
     try:
         # 1. Assemble context (memory, emotion, modules, self-concept, ...)

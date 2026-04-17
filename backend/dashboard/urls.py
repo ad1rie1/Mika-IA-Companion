@@ -12,6 +12,7 @@ from django.urls import path
 from dashboard.views import pages
 from dashboard.views.api import (
     configuration,
+    personality_editor,
     conscience,
     drives as drives_api,
     emotion as emotion_api,
@@ -89,4 +90,8 @@ urlpatterns = [
     path("dashboard/api/config/rows/create",       configuration.row_add),
     path("dashboard/api/config/rows/<uuid:row_id>",configuration.row_detail),
     path("dashboard/api/config/history",           configuration.history),
+
+    # Personality YAML editor
+    path("dashboard/api/personality/yaml",          personality_editor.personality_read),
+    path("dashboard/api/personality/yaml/write",    personality_editor.personality_write),
 ]

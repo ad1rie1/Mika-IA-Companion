@@ -114,6 +114,20 @@ class BaseModule(ABC):
         """React to an event emitted by another module. Default: ignore."""
         pass
 
+    # ── Configuration schema ──────────────────────────────────────
+
+    def config_schema(self) -> list:
+        """Return this module's config schema (sections + items).
+
+        Collected by ModuleManager at registration time — *before* the
+        ``is_available()`` check — so the UI can surface the settings a
+        user needs to fill in to bring the module online.
+
+        Default: no schema. Override to ship ``ConfigSection`` / ``ConfigItem``
+        instances declared alongside the module.
+        """
+        return []
+
     # ── Monitoring ────────────────────────────────────────────────
 
     def get_status(self) -> ModuleStatus:
