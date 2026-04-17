@@ -13,6 +13,9 @@ def build_system_prompt(
     self_concept: str = "",
     person_context: str = "",
     circadian_context: str = "",
+    fatigue_fog: str = "",
+    rumination_context: str = "",
+    user_mood_hint: str = "",
 ) -> str:
     """Assemble the full system prompt from personality + contextual layers.
 
@@ -20,7 +23,10 @@ def build_system_prompt(
       personality        (who she is from the start)
       → self-concept      (who she is becoming, from her own memories)
       → person-context    (who she's talking to, what she knows about them)
+      → user-mood         (how the interlocutor seems to feel right now)
       → circadian        (what time of day / how tired she is)
+      → fatigue-fog       (cognitive blur when energy is low — shapes tone)
+      → ruminations       (unresolved thoughts still on Mika's mind)
       → modules           (available tools/context)
       → emotion           (current affective state)
       → memory            (retrieved relevant memories)
@@ -44,10 +50,28 @@ def build_system_prompt(
             + person_context
             + "\n--- FIN ---"
         )
+    if user_mood_hint:
+        system += (
+            "\n\n--- CE QUE TU PERCOIS DE SON ETAT ---\n"
+            + user_mood_hint
+            + "\n--- FIN ---"
+        )
     if circadian_context:
         system += (
             "\n\n--- TON RYTHME ---\n"
             + circadian_context
+            + "\n--- FIN ---"
+        )
+    if fatigue_fog:
+        system += (
+            "\n\n--- ETAT COGNITIF ---\n"
+            + fatigue_fog
+            + "\n--- FIN ---"
+        )
+    if rumination_context:
+        system += (
+            "\n\n--- CE QUI TE TROTTE DANS LA TETE ---\n"
+            + rumination_context
             + "\n--- FIN ---"
         )
     if module_context:

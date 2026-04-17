@@ -158,6 +158,21 @@ async def process_message(
     if broadcast:
         await broadcast_to_websocket(output, source, person_id=person_id)
 
+    # 8. Post-action self-audit: an emotionally marked reply leaves a
+    #    brief "did I say that right?" trace in the form of a low-
+    #    intensity rumination. Fails silently, skipped on AI error.
+    if not ai_failed:
+        try:
+            from conscience.engine import conscience_engine
+            await conscience_engine.post_action_audit(
+                response_text=response_text,
+                emotion_name=emotion_data.emotion.value,
+                intensity=emotion_data.intensity,
+                person_id=person_id,
+            )
+        except Exception:
+            logger.debug("Post-action audit hook failed", exc_info=True)
+
     return output
 
 

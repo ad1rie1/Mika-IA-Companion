@@ -7,6 +7,23 @@ from emotion.dynamics import OscillatorState
 from emotion.types import Emotion
 
 
+def _format_blend_phrase(blend: list[tuple[Emotion, float]]) -> str:
+    """Compact French phrase expressing an ambivalent PAD blend.
+
+    Returns '' if the blend is not meaningfully ambivalent.
+    """
+    if len(blend) < 2:
+        return ""
+    primary, p_w = blend[0]
+    secondary, s_w = blend[1]
+    if s_w < 0.4 * p_w:
+        return ""
+    return (
+        f" Mais il y a aussi une nuance de {secondary.value} ({s_w:.1f}) "
+        "en sous-texte — ton humeur n'est pas mono-couleur."
+    )
+
+
 @dataclass(frozen=True)
 class Temperament:
     """Personality-driven parameters mapped to oscillator physics.
@@ -71,10 +88,12 @@ class PersonMood:
             return "Tu n'as pas de sentiment particulier envers cette personne."
 
         intensity_word = _intensity_label(intensity)
-        return (
+        base = (
             f"Envers cette personne, tu te sens {intensity_word} "
             f"{label.value} (intensite: {intensity:.1f})."
         )
+        blend = pad.pad_to_blend(self.dynamic.position, top_k=2)
+        return base + _format_blend_phrase(blend)
 
 
 @dataclass
@@ -103,14 +122,16 @@ class GlobalMood:
     def to_prompt_description(self, default_mood: Emotion) -> str:
         label, intensity = pad.pad_to_label(self.dynamic.position)
         if intensity < 0.1 or label == default_mood:
-            return f"Ton humeur generale est {default_mood.value}, comme d'habitude."
-
-        intensity_word = _intensity_label(intensity)
-        return (
-            f"Ton humeur generale en ce moment est {intensity_word} "
-            f"{label.value} (intensite: {intensity:.1f}), "
-            f"alors que normalement tu es plutot {default_mood.value}."
-        )
+            base = f"Ton humeur generale est {default_mood.value}, comme d'habitude."
+        else:
+            intensity_word = _intensity_label(intensity)
+            base = (
+                f"Ton humeur generale en ce moment est {intensity_word} "
+                f"{label.value} (intensite: {intensity:.1f}), "
+                f"alors que normalement tu es plutot {default_mood.value}."
+            )
+        blend = pad.pad_to_blend(self.dynamic.position, top_k=2)
+        return base + _format_blend_phrase(blend)
 
 
 @dataclass(frozen=True)

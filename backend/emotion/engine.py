@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import random
 import time
 
 from django.conf import settings
@@ -26,6 +27,16 @@ _MAX_SUBSTEP_DT = 0.5
 # Upper bound on the total time advanced in a single _apply_decay call.
 # Larger gaps (e.g. after hibernation) are capped to prevent runaway steps.
 _MAX_ADVANCE_SECONDS = 30.0
+# Probability per tick that the global mood receives a tiny stochastic
+# nudge. Without this, a well-rested idle Mika sits exactly on her home
+# point — humans don't. Small nudges produce barely-perceptible drift
+# ("why am I a bit off today") that the oscillator then metabolizes
+# normally. Scoped to the global mood only; per-person moods are always
+# reactive, never spontaneous.
+_SPONTANEOUS_NUDGE_PROBABILITY: float = 0.04
+# Max magnitude of a spontaneous nudge (in PAD units). Tiny — should
+# decay back to home in a handful of seconds if nothing else happens.
+_SPONTANEOUS_NUDGE_MAX: float = 0.08
 
 
 class EmotionEngine:
@@ -685,6 +696,34 @@ class EmotionEngine:
         if dt > 0.0:
             self._advance(self.global_mood.dynamic, home, self._global_params, dt)
             self.global_mood.last_update = now
+
+        # Spontaneous mood drift: tiny random nudge so the global mood
+        # doesn't sit perfectly on its home point when nothing is happening.
+        # Scaled by:
+        #   - stillness  (only nudge when close to rest — real impulses
+        #                 still dominate when something is happening)
+        #   - volatility (stoic personas barely drift, explosive ones do
+        #                 — matches temperament personality)
+        volatility_scale = max(0.0, self.temperament.volatility)
+        if volatility_scale > 0.25 and random.random() < _SPONTANEOUS_NUDGE_PROBABILITY:
+            distance = pad.distance(self.global_mood.dynamic.position, home)
+            stillness = max(0.0, 1.0 - distance * 3.0)  # 0 when far, 1 when at home
+            if stillness > 0.2:
+                magnitude = (
+                    _SPONTANEOUS_NUDGE_MAX
+                    * stillness
+                    * volatility_scale
+                    * random.random()
+                )
+                nudge: Vec3 = (
+                    random.uniform(-1.0, 1.0) * magnitude,
+                    random.uniform(-1.0, 1.0) * magnitude,
+                    random.uniform(-1.0, 1.0) * magnitude,
+                )
+                self.global_mood.dynamic.position = pad.clamp_component(
+                    pad.add(self.global_mood.dynamic.position, nudge),
+                    limit=1.0,
+                )
 
     # ------------------------------------------------------------------
     # Analytics

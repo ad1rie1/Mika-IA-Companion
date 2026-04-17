@@ -491,6 +491,29 @@ class ConscienceEngine:
             except Exception:
                 pass
 
+    # Emotional drift map for aging ruminations. A thought doesn't stay
+    # the same shape forever — frustration that lingers becomes anxiety,
+    # an unresolved excitement fades into melancholy, etc. Keyed by the
+    # initial emotion, value is the label the rumination drifts toward
+    # once it's been "turning over" long enough (cycle count threshold).
+    _RUMINATION_DRIFT: dict[str, str] = {
+        "frustrated": "anxious",
+        "angry": "melancholic",
+        "excited": "nostalgic",
+        "happy": "nostalgic",
+        "grateful": "nostalgic",
+        "sad": "melancholic",
+        "scared": "anxious",
+        "jealous": "sad",
+        "hopeful": "anxious",
+        "curious": "confused",
+        "surprised": "thinking",
+        "embarrassed": "anxious",
+        "lonely": "melancholic",
+    }
+    # Cycles (~30s each by default) before emotional drift kicks in.
+    _RUMINATION_DRIFT_THRESHOLD: int = 4
+
     async def _decay_ruminations(self) -> None:
         """Every cycle: active ruminations lose ~5% intensity and may
         bleed their emotional charge into the global mood.
@@ -498,6 +521,12 @@ class ConscienceEngine:
         Models the fact that unresolved thoughts color humor over time:
         a lingering frustration keeps you a bit frustrated. Bleed is
         proportional to intensity so only strong ruminations tint mood.
+
+        Emotional drift: ruminations that have been "turning over" for
+        several cycles shift their emotional tint toward a drift target
+        (frustration → anxious, excitement → nostalgic, etc.). Thoughts
+        mutate; humans don't stay angry at the same thing indefinitely,
+        they start *worrying* about it instead.
         """
         try:
             from conscience.models import Rumination
@@ -515,12 +544,35 @@ class ConscienceEngine:
             return
 
         # Import inside to avoid circulars
+        from django.utils import timezone as tz
         from emotion.engine import emotion_engine
         from emotion.types import Emotion, EmotionData
 
+        now_tz = tz.now()
         for r in active:
             # 5% intensity decay per cycle
             r.intensity *= 0.95
+            update_fields = ["intensity", "status"]
+
+            # Emotional drift: after several cycles, shift the label
+            # toward a softer / more introspective neighbor.
+            if r.emotion:
+                age_cycles = int(
+                    (now_tz - r.updated_at).total_seconds()
+                    / max(1, self._decision_interval)
+                )
+                drift_target = self._RUMINATION_DRIFT.get(r.emotion)
+                if (
+                    drift_target
+                    and age_cycles >= self._RUMINATION_DRIFT_THRESHOLD
+                    and drift_target != r.emotion
+                ):
+                    logger.debug(
+                        "Rumination #%s drift: %s -> %s",
+                        r.pk, r.emotion, drift_target,
+                    )
+                    r.emotion = drift_target
+                    update_fields.append("emotion")
 
             # Emotional bleed: if rumination has an associated emotion,
             # re-inject a small fraction into the global mood.
@@ -536,9 +588,7 @@ class ConscienceEngine:
                 r.status = "faded"
 
             try:
-                await sync_to_async(r.save)(
-                    update_fields=["intensity", "status"]
-                )
+                await sync_to_async(r.save)(update_fields=update_fields)
             except Exception:
                 pass
 
@@ -773,6 +823,9 @@ class ConscienceEngine:
                 self_concept=base_context.self_concept,
                 person_context=base_context.person_context,
                 circadian_context=base_context.circadian_context,
+                fatigue_fog=base_context.fatigue_fog,
+                rumination_context=base_context.rumination_context,
+                user_mood_hint=base_context.user_mood_hint,
             )
 
             perception = Perception.from_internal_trigger(
@@ -1007,6 +1060,81 @@ class ConscienceEngine:
 
     def get_idle_seconds(self) -> float:
         return time.time() - self._last_activity
+
+    # ── Post-action self-audit ────────────────────────────────────
+
+    # Emotions that trigger a post-action micro-rumination. Strong
+    # expressions — positive or negative — are the ones that leave a
+    # trace: after saying something bold or anxious, a human replays it
+    # mentally. Neutral mid-range responses don't need an audit.
+    _AUDIT_EMOTIONS: dict[str, tuple[str, str]] = {
+        # emotion_name : (rumination_emotion, template)
+        "angry":        ("embarrassed", "Tu repenses a ta reponse un peu vive : \"{excerpt}\"."),
+        "frustrated":   ("anxious",     "Tu repenses a ta reponse tendue : \"{excerpt}\". Etait-ce trop ?"),
+        "proud":        ("proud",       "Tu te rejouis un peu de ta reponse : \"{excerpt}\"."),
+        "excited":      ("hopeful",     "Tu es restee sur ton elan apres avoir dit : \"{excerpt}\"."),
+        "embarrassed":  ("anxious",     "Tu repenses gene a ce que tu viens de dire : \"{excerpt}\"."),
+        "scared":       ("anxious",     "Tu n'es pas sure que ta reaction etait juste : \"{excerpt}\"."),
+        "disgusted":    ("embarrassed", "Tu t'es peut-etre emportee : \"{excerpt}\"."),
+        "love":         ("grateful",    "Tu gardes en tete la chaleur de l'echange autour de : \"{excerpt}\"."),
+        "jealous":      ("melancholic", "Ta reaction te reste un peu sur le coeur : \"{excerpt}\"."),
+    }
+
+    async def post_action_audit(
+        self,
+        response_text: str,
+        emotion_name: str,
+        intensity: float,
+        person_id: str,
+    ) -> None:
+        """After Mika speaks, maybe create a micro-rumination capturing
+        self-evaluation of what she just said.
+
+        Fires only for emotionally marked responses (in _AUDIT_EMOTIONS)
+        with intensity >= 0.55. Creates a low-intensity Rumination that
+        will decay over the next few cycles — a brief "did I say that
+        right?" beat. Cheap, heuristic, no LLM call.
+
+        Skipped for internal-trigger speech (conscience already acted,
+        would cause a feedback loop of self-ruminations).
+        """
+        if intensity < 0.55:
+            return
+        if person_id == "conscience_mika":
+            return
+        template_data = self._AUDIT_EMOTIONS.get(emotion_name)
+        if not template_data:
+            return
+
+        rumination_emotion, template = template_data
+        excerpt = response_text.strip()[:80].replace("\n", " ")
+        if not excerpt:
+            return
+        summary = template.format(excerpt=excerpt)
+        # Intensity starts modest — a normal person doesn't obsess, just
+        # replays once or twice. Scales with how emotional the reply was.
+        rumination_intensity = round(min(0.45, 0.2 + (intensity - 0.55) * 0.5), 3)
+
+        try:
+            from conscience.models import Rumination
+        except ImportError:
+            return
+
+        try:
+            await sync_to_async(Rumination.objects.create)(
+                summary=summary,
+                themes=[],
+                intensity=rumination_intensity,
+                emotion=rumination_emotion,
+                observation=None,
+                status="active",
+            )
+            logger.debug(
+                "Post-action audit created rumination (%s, %.2f): %s",
+                rumination_emotion, rumination_intensity, excerpt[:40],
+            )
+        except Exception:
+            logger.debug("Post-action audit failed", exc_info=True)
 
 
 # Singleton

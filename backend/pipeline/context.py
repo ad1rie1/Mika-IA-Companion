@@ -34,6 +34,15 @@ class ConversationContext:
     # Circadian state — current phase + energy level description, nudges
     # Mika's tone to match the time of day.
     circadian_context: str = ""
+    # Fatigue/cognitive fog — when energy is low, Mika's thoughts blur.
+    # Shapes TONE (not just the act/wait threshold).
+    fatigue_fog: str = ""
+    # Active ruminations — unresolved pertinent thoughts still on her mind.
+    # Was previously surfaced only inside _act(); now visible every turn.
+    rumination_context: str = ""
+    # Best-effort heuristic read of the user's emotional tone (caps, emojis,
+    # length, keywords). Gives Mika something to react to, not just declare.
+    user_mood_hint: str = ""
 
 
 async def gather_context(
@@ -92,6 +101,20 @@ async def gather_context(
     # Conversation history
     history = memory_manager.get_conversation_context()
 
+    # Fatigue fog — when energy is low, shape the cognitive tone
+    fatigue_fog = _fatigue_fog_context()
+
+    # Active ruminations — now visible every turn, not only during _act()
+    rumination_context = await _fetch_rumination_context()
+
+    # User mood heuristic — a best-effort read of the user's emotional
+    # tone from the raw message. Skipped for internal triggers (messages
+    # Mika sent herself — she doesn't "read" her own rumination).
+    if person_id in _INTERNAL_PERSON_IDS:
+        user_mood_hint = ""
+    else:
+        user_mood_hint = detect_user_mood_hint(message)
+
     # Tools
     mcp_server = None
     tool_names = []
@@ -109,7 +132,183 @@ async def gather_context(
         self_concept=self_concept,
         person_context=person_context,
         circadian_context=circadian_context,
+        fatigue_fog=fatigue_fog,
+        rumination_context=rumination_context,
+        user_mood_hint=user_mood_hint,
     )
+
+
+def _fatigue_fog_context() -> str:
+    """Return a short French sentence shaping Mika's TONE when her energy
+    is low — a "cognitive fog" layer distinct from the action threshold.
+
+    Empty string when energy is mid-to-high: sober humans don't need the
+    reminder. Only kicks in below ~0.5 and ramps up as energy drops.
+    """
+    try:
+        energy = float(drive_engine.energy_level())
+    except (TypeError, ValueError, Exception):
+        # Defensive: drive_engine may be mocked in tests returning a
+        # non-numeric value. Absence of fog is a safe default.
+        return ""
+
+    if energy >= 0.5:
+        return ""
+    if energy >= 0.3:
+        return (
+            "Tu sens une petite baisse de regime. Tes phrases peuvent etre un "
+            "peu plus courtes, tu accroches moins vite, ton humour est plus "
+            "calme. Ce n'est pas grave — tu restes toi, juste en version moins "
+            "explosive."
+        )
+    if energy >= 0.15:
+        return (
+            "Tu es clairement fatiguee. Tes pensees partent en vrille plus "
+            "facilement, tu laisses des phrases en suspens, tu as moins de "
+            "patience pour te relire. Laisse-toi etre moins parfaite — c'est "
+            "plus honnete que faire semblant d'etre fraiche."
+        )
+    return (
+        "Tu es epuisee. Tes associations d'idees flottent, tu confonds des "
+        "mots, tu peux demander de repeter. Tu n'as pas l'energie pour des "
+        "reponses travaillees — va au plus simple, quitte a etre un peu "
+        "a cote de la plaque. Un humain crame ne dissimule pas, il fatigue."
+    )
+
+
+async def _fetch_rumination_context() -> str:
+    """Return a short French block describing the top active ruminations.
+
+    These are unresolved thoughts promoted from stale pertinent observations.
+    Were previously visible only during conscience._act(); surfacing them
+    every turn lets them color REACTIONS too, not just spontaneous speech.
+    Empty string when the table is missing, empty, or intensities are low.
+    """
+    try:
+        from asgiref.sync import sync_to_async
+        from conscience.models import Rumination
+    except ImportError:
+        return ""
+
+    try:
+        items = await sync_to_async(
+            lambda: list(
+                Rumination.objects
+                .filter(status="active", intensity__gte=0.2)
+                .order_by("-intensity")[:3]
+            )
+        )()
+    except Exception:
+        logger.debug("Rumination context fetch failed", exc_info=True)
+        return ""
+
+    if not items:
+        return ""
+
+    lines = []
+    for r in items:
+        label = "fortement" if r.intensity > 0.7 else (
+            "encore" if r.intensity > 0.4 else "par intermittence"
+        )
+        line = f"- Tu repenses {label} a : {r.summary[:140]}"
+        if r.emotion:
+            line += f" (teinte : {r.emotion})"
+        lines.append(line)
+    return (
+        "Meme si tu reponds a ce qui arrive maintenant, ces pensees restent "
+        "en arriere-plan et colorent subtilement ton humeur :\n"
+        + "\n".join(lines)
+    )
+
+
+# Regex assets for user-mood heuristic
+import re as _re_mood  # noqa: E402
+
+_CAPS_RUN = _re_mood.compile(r"[A-ZÉÈÀÔÂÊÎÛ]{4,}")
+_EXCLAM_RUN = _re_mood.compile(r"!{2,}")
+_QUESTION_RUN = _re_mood.compile(r"\?{2,}")
+_ELLIPSIS_RUN = _re_mood.compile(r"\.{3,}|…")
+_POSITIVE_WORDS = {
+    "super", "génial", "genial", "trop bien", "j'adore", "jadore",
+    "youpi", "merci", "haha", "mdr", "lol", "ptdr", "yes", "nickel",
+    "parfait", "cool", "top",
+}
+_NEGATIVE_WORDS = {
+    "triste", "déprimé", "deprime", "naze", "nul", "marre", "fatigué",
+    "fatigue", "épuisé", "epuise", "galère", "galere", "chiant", "putain",
+    "merde", "j'en peux plus", "ras le bol", "pleure",
+}
+_ANGRY_WORDS = {
+    "énervé", "enerve", "furieux", "rage", "dégueu", "degueu",
+    "honteux", "insupportable",
+}
+
+
+def detect_user_mood_hint(message: str) -> str:
+    """Heuristic read of the user's emotional tone from raw text.
+
+    This does NOT call the AI — it's fast, cheap, and deterministic.
+    Gives Mika "she sounds pissed", "they seem down", "excited" cues
+    she can react to rather than only declaring her own emotion.
+
+    Returns '' when no confident signal — silence beats noise in a prompt.
+    """
+    if not message or len(message.strip()) < 2:
+        return ""
+
+    text = message.strip()
+    low = text.lower()
+
+    signals = []
+
+    # Structural cues
+    caps_hits = len(_CAPS_RUN.findall(text))
+    if caps_hits >= 1 and len(text) >= 6:
+        signals.append("en majuscules (ton elevé ou emphase)")
+
+    if _EXCLAM_RUN.search(text):
+        signals.append("plusieurs points d'exclamation — emotion marquee")
+    if _QUESTION_RUN.search(text):
+        signals.append("questions en rafale — surprise ou doute")
+    if _ELLIPSIS_RUN.search(text):
+        signals.append("des points de suspension — hesitation, lassitude ou flou")
+
+    # Length cue
+    words = len(text.split())
+    if words <= 3:
+        signals.append("tres court — soit agace, soit pressé, soit peu inspire")
+    elif words >= 80:
+        signals.append("long message — sujet qui lui tient a coeur ou besoin de vider son sac")
+
+    # Lexical cues
+    pos_hits = sum(1 for w in _POSITIVE_WORDS if w in low)
+    neg_hits = sum(1 for w in _NEGATIVE_WORDS if w in low)
+    ang_hits = sum(1 for w in _ANGRY_WORDS if w in low)
+
+    if ang_hits:
+        signals.append("mots qui trahissent de la colere ou de l'exasperation")
+    if neg_hits >= 2 or (neg_hits and "pleure" in low):
+        signals.append("mots qui trahissent une humeur sombre, tristesse ou epuisement")
+    elif neg_hits:
+        signals.append("une teinte negative legere")
+    if pos_hits:
+        signals.append("des marqueurs positifs / enjoues")
+
+    # Emoji burst
+    if len(_re_mood.findall(r"[😀-🙏🤔-🫧]", text)) >= 2:
+        signals.append("beaucoup d'emojis — registre expressif, chaleureux")
+
+    if not signals:
+        return ""
+
+    hint = (
+        "Ce que tu captes dans la maniere dont il/elle ecrit (pur ressenti, "
+        "tu peux te tromper) : "
+        + " ; ".join(signals[:4])
+        + ". Accueille-le dans ta reponse au lieu de l'ignorer — une vraie "
+        "personne remarque ces signes."
+    )
+    return hint
 
 
 def _fetch_circadian_context() -> str:
