@@ -60,9 +60,24 @@ class LifespanWrapper:
         await module_manager.start_all()
         logger.info("All modules started")
 
+        # Communication channels (not plugins) — started here on the
+        # same footing as the WebSocket consumer, which is wired via
+        # ``communication.routing``.
+        from communication.channels import telegram_channel
+        try:
+            await telegram_channel.start()
+        except Exception:
+            logger.exception("Telegram channel failed to start")
+
     async def _shutdown(self):
+        from communication.channels import telegram_channel
         from emotion.engine import emotion_engine
         from conscience.engine import conscience_engine
+
+        try:
+            await telegram_channel.stop()
+        except Exception:
+            logger.exception("Telegram channel failed to stop cleanly")
 
         await conscience_engine.shutdown()
         logger.info("Conscience shut down")

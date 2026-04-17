@@ -1,10 +1,19 @@
-"""Telegram channel — bot integration via python-telegram-bot."""
+"""Telegram channel — direct ``communication`` app citizen.
+
+Telegram is not a plugin. It is one of the ways Mika can be reached,
+on the same footing as the WebSocket frontend. The channel is started
+and stopped by the ASGI lifespan alongside memory, emotion, and the
+plugin bus.
+
+Incoming Telegram messages are lifted into a ``Perception`` and pushed
+through ``pipeline.router.perceive()`` — identical flow to the web
+frontend channel.
+"""
 
 from __future__ import annotations
 
 import logging
 
-from django.conf import settings
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -15,30 +24,40 @@ from telegram.ext import (
 )
 
 from config.personality import personality
-from modules.base import BaseModule
-from modules.types import ModuleCapability
 
 logger = logging.getLogger(__name__)
 
 
-class TelegramModule(BaseModule):
-    def __init__(self):
-        super().__init__("telegram")
+class TelegramChannel:
+    """Bot lifecycle + message-to-perception bridge."""
+
+    def __init__(self) -> None:
         self._app: Application | None = None
+        self._running: bool = False
 
-    def config_schema(self):
-        from communication.channels.telegram_config_schema import CONFIG_SCHEMA
-        return CONFIG_SCHEMA
+    # ── Availability ────────────────────────────────────────────
 
-    # ── Lifecycle ─────────────────────────────────────────────────
-
-    def is_available(self) -> bool:
+    @staticmethod
+    def is_available() -> bool:
         from configs.service import config_service
         return bool(config_service.get("telegram.token", default=""))
 
-    async def instantiate(self) -> None:
+    @property
+    def is_running(self) -> bool:
+        return self._running
+
+    # ── Lifecycle ───────────────────────────────────────────────
+
+    async def start(self) -> None:
+        if self._running:
+            return
+        if not self.is_available():
+            logger.info("Telegram channel skipped: no token configured")
+            return
+
         from configs.service import config_service
         token = config_service.get("telegram.token", default="")
+
         self._app = Application.builder().token(token).build()
         self._app.add_handler(CommandHandler("start", self._handle_start))
         self._app.add_handler(
@@ -48,15 +67,22 @@ class TelegramModule(BaseModule):
         await self._app.initialize()
         await self._app.start()
         await self._app.updater.start_polling()
-        self.logger.info("Telegram bot started")
+        self._running = True
+        logger.info("Telegram bot started")
 
-    async def shutdown(self) -> None:
-        if self._app:
+    async def stop(self) -> None:
+        if not self._app:
+            return
+        try:
             await self._app.updater.stop()
             await self._app.stop()
             await self._app.shutdown()
+        finally:
+            self._app = None
+            self._running = False
+            logger.info("Telegram bot stopped")
 
-    # ── Handlers ──────────────────────────────────────────────────
+    # ── Handlers ────────────────────────────────────────────────
 
     async def _handle_start(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -83,18 +109,5 @@ class TelegramModule(BaseModule):
         if output and output.text:
             await update.message.reply_text(output.text)
 
-    # ── Capabilities ──────────────────────────────────────────────
 
-    def get_capabilities(self) -> list[ModuleCapability]:
-        return [
-            ModuleCapability(
-                description="Recevoir et repondre aux messages Telegram",
-            ),
-        ]
-
-    # ── Context ───────────────────────────────────────────────────
-
-    def get_context(self) -> str:
-        if self._app and self.is_running:
-            return "Telegram bot is connected and receiving messages."
-        return ""
+telegram_channel = TelegramChannel()
