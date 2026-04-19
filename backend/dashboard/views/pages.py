@@ -7,7 +7,10 @@ cheap and cacheable.
 """
 from __future__ import annotations
 
+from django.http import Http404
 from django.shortcuts import render
+from django.template import TemplateDoesNotExist
+from django.template.loader import get_template
 
 
 # Menu spec — single source of truth for the sidebar (order + groups +
@@ -65,12 +68,90 @@ TITLES = {
 }
 
 
-def _render(request, key: str):
-    return render(
-        request,
-        f"dashboard/{key}.html",
-        {"menu": MENU, "active_view": key, "title": TITLES.get(key, key)},
-    )
+def _build_module_menu() -> list[dict]:
+    """Snapshot of module-contributed dashboard views, grouped by module.
+
+    Inserted into the sidebar under a "Modules · <name>" group for
+    every running module that declares at least one view. Rebuilt on
+    every page render so enabling/disabling a module is reflected
+    immediately without a server restart.
+    """
+    try:
+        from modules.manager import module_manager
+    except Exception:
+        return []
+
+    groups: list[dict] = []
+    try:
+        views_by_module = module_manager.collect_views()
+    except Exception:
+        views_by_module = {}
+    for module_name, views in views_by_module.items():
+        items = [
+            {
+                "key": f"mv:{module_name}:{v.key}",
+                "label": v.label,
+                "icon": v.icon,
+                "url": f"/dashboard/modules/{module_name}/{v.key}/",
+            }
+            for v in views
+        ]
+        groups.append({
+            "group": f"Module · {module_name}",
+            "items": items,
+        })
+    return groups
+
+
+def _render(request, key: str, *, extra: dict | None = None):
+    ctx = {
+        "menu": MENU + _build_module_menu(),
+        "active_view": key,
+        "title": TITLES.get(key, key),
+    }
+    if extra:
+        ctx.update(extra)
+    return render(request, f"dashboard/{key}.html", ctx)
+
+
+def module_view(request, module: str, view_key: str):
+    """Render a module-declared dashboard page.
+
+    Resolves the template from the module's own ``templates/``
+    directory (e.g. ``email/inbox.html``) when the view specifies one;
+    otherwise falls back to the generic shell
+    ``dashboard/module_view.html`` which loads the view's JS by key.
+    """
+    from modules.manager import module_manager
+
+    view = module_manager.get_view(module, view_key)
+    if view is None:
+        raise Http404(f"Module view '{module}/{view_key}' not found")
+
+    active_key = f"mv:{module}:{view_key}"
+    ctx = {
+        "menu": MENU + _build_module_menu(),
+        "active_view": active_key,
+        "title": view.label,
+        "module_name": module,
+        "view_key": view_key,
+        "view_label": view.label,
+        "view_js": view.js,
+        "view_has_detail": view.detail_handler is not None,
+        "view_id_field": view.id_field,
+        "view_actions": [
+            {"key": a.key, "label": a.label, "method": a.method,
+             "confirm": a.confirm}
+            for a in (view.actions or [])
+        ],
+    }
+
+    template_name = view.template or "dashboard/module_view.html"
+    try:
+        get_template(template_name)
+    except TemplateDoesNotExist:
+        template_name = "dashboard/module_view.html"
+    return render(request, template_name, ctx)
 
 
 def overview(request):     return _render(request, "overview")

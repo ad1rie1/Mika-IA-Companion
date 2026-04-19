@@ -64,10 +64,23 @@ CHANNEL_LAYERS = {
     }
 }
 
+# Auto-discover templates + static directories shipped by module plugins
+# (``modules/plugins/<name>/templates`` and ``modules/plugins/<name>/static``).
+# Plugins are sub-packages of the ``modules`` app, not installed apps
+# themselves, so Django's APP_DIRS / AppDirectoriesFinder won't pick
+# them up unless we register their paths explicitly.
+_MODULE_PLUGINS_DIR = BASE_DIR / "modules" / "plugins"
+_MODULE_TEMPLATE_DIRS = [
+    p for p in _MODULE_PLUGINS_DIR.glob("*/templates") if p.is_dir()
+] if _MODULE_PLUGINS_DIR.is_dir() else []
+_MODULE_STATIC_DIRS = [
+    p for p in _MODULE_PLUGINS_DIR.glob("*/static") if p.is_dir()
+] if _MODULE_PLUGINS_DIR.is_dir() else []
+
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": _MODULE_TEMPLATE_DIRS,
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -81,6 +94,7 @@ TEMPLATES = [
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+STATICFILES_DIRS = list(_MODULE_STATIC_DIRS)
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # --- VTuber settings ---

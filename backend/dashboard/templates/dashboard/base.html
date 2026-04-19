@@ -21,13 +21,22 @@
     {% for section in menu %}
       <div class="group-label">{{ section.group }}</div>
       {% for item in section.items %}
-        <a class="menu-item {% if active_view == item.key %}active{% endif %}"
-           href="{% url 'dash-'|add:item.key %}"
-           data-view="{{ item.key }}">
-          <span class="ico">{{ item.icon }}</span>
-          <span class="label">{{ item.label }}</span>
-          <span class="count" data-count="{{ item.key }}"></span>
-        </a>
+        {% if item.url %}
+          <a class="menu-item {% if active_view == item.key %}active{% endif %}"
+             href="{{ item.url }}"
+             data-view="{{ item.key }}">
+            <span class="ico">{{ item.icon }}</span>
+            <span class="label">{{ item.label }}</span>
+          </a>
+        {% else %}
+          <a class="menu-item {% if active_view == item.key %}active{% endif %}"
+             href="{% url 'dash-'|add:item.key %}"
+             data-view="{{ item.key }}">
+            <span class="ico">{{ item.icon }}</span>
+            <span class="label">{{ item.label }}</span>
+            <span class="count" data-count="{{ item.key }}"></span>
+          </a>
+        {% endif %}
       {% endfor %}
     {% endfor %}
   </nav>

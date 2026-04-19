@@ -72,6 +72,7 @@ Dash.render(async (root) => {
               <th>CRON</th>
               <th>Tables</th>
               <th>Capabilities</th>
+              <th>Vues</th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -80,6 +81,11 @@ Dash.render(async (root) => {
               const tables = (m.installed_tables && m.installed_tables.length)
                 ? `<span class="muted mono" title="${escapeHTML(m.installed_tables.join(", "))}">${m.installed_tables.length}</span>`
                 : (m.has_models ? `<span class="muted">—</span>` : `<span class="muted">·</span>`);
+              const views = (m.views && m.views.length)
+                ? m.views.map(v =>
+                    `<a class="chip" href="${escapeHTML(v.url)}" title="${escapeHTML(v.label)}">${escapeHTML(v.icon || "▦")} ${escapeHTML(v.label)}</a>`
+                  ).join(" ")
+                : `<span class="muted">—</span>`;
               const enableBtn = m.enabled
                 ? `<button class="btn" data-act="disable" data-name="${escapeHTML(m.name)}">Désactiver</button>`
                 : `<button class="btn primary" data-act="enable" data-name="${escapeHTML(m.name)}">Activer</button>`;
@@ -94,9 +100,10 @@ Dash.render(async (root) => {
                   <td class="muted mono">${m.cron_interval != null ? m.cron_interval + "s" : "—"}</td>
                   <td>${tables}</td>
                   <td><div class="chips">${m.capabilities.map(c => `<span class="chip">${escapeHTML(c)}</span>`).join("")}</div></td>
+                  <td><div class="chips">${views}</div></td>
                   <td>${enableBtn} ${uninstallBtn}</td>
                 </tr>`;
-            }).join("") || `<tr><td colspan="7" class="muted">Aucun module.</td></tr>`}
+            }).join("") || `<tr><td colspan="8" class="muted">Aucun module.</td></tr>`}
           </tbody>
         </table>
         <p class="muted" style="margin-top:10px;font-size:0.85em;">

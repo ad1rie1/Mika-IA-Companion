@@ -124,11 +124,39 @@ On AI error or timeout: fallback text returned, **no emotion impulse toward the 
   - `memory/sleep.py` — `SleepCycle` singleton. Nighttime creative/narrative/healing work. See "Sleep Cycle" section below.
 - **Conscience** ([conscience/](backend/conscience/)): Mika's waking brain. See dedicated section below.
 - **Module plugin system**: [modules/base.py](backend/modules/base.py) (`BaseModule` ABC) + [modules/manager.py](backend/modules/manager.py) (`ModuleManager` singleton). Each module is a subfolder with its own `models.py`. `modules/models.py` re-exports for Django discovery.
-- **Module capabilities** (opt-in): `instantiate`/`shutdown`, `worker_cron`, `return_tools`, `notify_ai`, `get_routes`, `get_context`, `on_event`, `get_status`, `is_available`
+- **Module capabilities** (opt-in): `instantiate`/`shutdown`, `worker_cron`, `return_tools`, `notify_ai`, `get_routes`, `get_views`, `get_context`, `on_event`, `get_status`, `is_available`
 - **AI tools**: `ModuleManager` collects tools from all modules, builds an MCP server via `create_sdk_mcp_server()`, injected into `ClaudeAgentOptions.mcp_servers` when `complete_with_tools` is used
 - **Cron scheduler**: built into `ModuleManager`, 1-second tick, per-module `CRON_INTERVAL` or global `CRON_TICK_INTERVAL`
 - **notify_ai**: modules call their injected callback which constructs an `INTERNAL_TRIGGER` Perception and routes it via `perceive()` — so module initiatives flow through the same pipeline as any other input
 - **Email module** ([modules/email/](backend/modules/email/)): IMAP/SMTP. Polls inbox (60s), triages with Haiku, stores `ProcessedEmail`, creates souvenirs/connaissances, notifies via `notify_ai`. Exposes `list_recent_emails`, `send_email` tools. Disabled gracefully if no config.
+
+### Module dashboard views
+
+Each module can surface one or more **visualization pages** in the dashboard (boîte de réception, historique RSS, comptes configurés, stats…) symmetrically to `config_schema()`. The core knows nothing module-specific — the shell discovers views at render-time and auto-mounts their URLs.
+
+**Contract** ([modules/types.py](backend/modules/types.py::ModuleView)) — a module returns a list of `ModuleView` from `get_views()`:
+
+- `key` — slug unique within the module (used in URLs)
+- `label` / `icon` / `order` — sidebar entry shape
+- `data_handler` — `async (request) -> dict` returning the JSON payload. Reads `request.GET` for `page`, `limit`, `q` and returns `{columns, rows, total, page, limit}` (pagination is the handler's responsibility). Anything else is pretty-printed as JSON by the default renderer
+- `template` — optional template name (e.g. `"email/inbox.html"`) resolved from the module's own `modules/plugins/<name>/templates/` directory; falls back to the generic shell `dashboard/module_view.html`
+- `js` — optional static path loaded via `<script>`. Default: `dashboard/js/views/module_default.js` (generic table + JSON renderer)
+- `actions` — optional list of `ModuleViewAction(key, label, handler, method, confirm)`. Each gets a button in the default renderer and a POST endpoint
+
+**Auto-mounting** — at render time, [pages._build_module_menu](backend/dashboard/views/pages.py) snapshots `module_manager.collect_views()` (running modules only). URLs wired once in [dashboard/urls.py](backend/dashboard/urls.py):
+
+```
+GET  /dashboard/modules/<module>/<view>/                         HTML shell
+GET  /dashboard/api/modules/<module>/views                       list of views
+GET  /dashboard/api/modules/<module>/views/<view>                data_handler
+POST /dashboard/api/modules/<module>/views/<view>/actions/<key>  action handler
+```
+
+A view is only visible in the sidebar when the module is **enabled AND running**. Disabling a module makes its pages vanish from the nav on the next render. The `/dashboard/api/modules` row also carries a `views: [{key,label,icon,url}]` field, surfaced as chips in the Modules admin page.
+
+**Template + static discovery** — `settings.py` scans `backend/modules/plugins/*/templates` and `backend/modules/plugins/*/static` at import time and adds them to `TEMPLATES[0]['DIRS']` + `STATICFILES_DIRS`. Plugins are sub-packages of the `modules` app, not installed apps themselves, so Django's `APP_DIRS` / `AppDirectoriesFinder` wouldn't find them otherwise. Drop a file in `modules/plugins/email/templates/email/inbox.html` and it resolves as `email/inbox.html` template name; same for static.
+
+**Example — email module** ([modules/plugins/email/views.py](backend/modules/plugins/email/views.py)): three views (`inbox`, `contacts`, `accounts`) all using the generic shell + table renderer. The `inbox` view carries a `mark_all_read` action that flips `is_read` on every inbound email. Adding a new visualization = one function + one `ModuleView` entry, no dashboard changes.
 
 ### Conscience Layer ([conscience/](backend/conscience/))
 

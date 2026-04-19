@@ -7,6 +7,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
+from asgiref.sync import sync_to_async
 from django.urls import path
 
 from modules.base import BaseModule
@@ -17,6 +18,7 @@ from modules.types import (
     ModuleNotification,
     ModuleStatus,
     ModuleTool,
+    ModuleView,
 )
 
 if TYPE_CHECKING:
@@ -213,8 +215,13 @@ class ModuleManager:
         if module is None:
             raise KeyError(f"Module '{name}' is not registered")
 
-        self._upsert_state(name, enabled=True)
-        self.install_tables(name)
+        # Sync ORM + schema_editor work must be dispatched to a thread
+        # because this coroutine is awaited from an HTTP handler running
+        # inside the event loop.
+        await sync_to_async(self._upsert_state, thread_sensitive=True)(
+            name, enabled=True,
+        )
+        await sync_to_async(self.install_tables, thread_sensitive=True)(name)
 
         if not module.is_available():
             logger.info(
@@ -248,7 +255,9 @@ class ModuleManager:
         if module is None:
             raise KeyError(f"Module '{name}' is not registered")
 
-        self._upsert_state(name, enabled=False)
+        await sync_to_async(self._upsert_state, thread_sensitive=True)(
+            name, enabled=False,
+        )
 
         if module.is_running:
             try:
@@ -281,9 +290,12 @@ class ModuleManager:
 
         models = self._safe_models(module)
         if models:
-            drop_tables_for(models)
+            await sync_to_async(drop_tables_for, thread_sensitive=True)(models)
 
-        ModuleState.objects.filter(pk=name).delete()
+        await sync_to_async(
+            lambda: ModuleState.objects.filter(pk=name).delete(),
+            thread_sensitive=True,
+        )()
         self._modules.pop(name, None)
         self.invalidate_tools_cache()
         self._build_mcp_server()
@@ -306,11 +318,14 @@ class ModuleManager:
 
         # Filter out modules that the user has explicitly disabled.
         # Done here (not in register()) to avoid querying the ORM during
-        # AppConfig.ready().
-        disabled = [
-            name for name in list(self._modules)
-            if not self._is_enabled_in_state(name)
-        ]
+        # AppConfig.ready(). Dispatch the sync ORM reads to a thread
+        # because we're running inside the ASGI event loop.
+        def _collect_disabled() -> list[str]:
+            return [
+                name for name in list(self._modules)
+                if not self._is_enabled_in_state(name)
+            ]
+        disabled = await sync_to_async(_collect_disabled, thread_sensitive=True)()
         for name in disabled:
             logger.info("Module '%s' disabled via ModuleState, skipping", name)
             self._modules.pop(name, None)
@@ -319,7 +334,7 @@ class ModuleManager:
         # present in the database (e.g. a new model added since last boot,
         # or a freshly imported third-party module).
         try:
-            self.install_missing_at_boot()
+            await sync_to_async(self.install_missing_at_boot, thread_sensitive=True)()
         except Exception:
             logger.exception("install_missing_at_boot failed")
 
@@ -572,6 +587,42 @@ class ModuleManager:
                 url_name = route.name or f"module_{module.name}_{route.path or 'index'}"
                 patterns.append(path(url_path, route.handler, name=url_name))
         return patterns
+
+    # ── Dashboard Views ──────────────────────────────────────────
+
+    def collect_views(self, *, only_running: bool = True) -> dict[str, list[ModuleView]]:
+        """Gather dashboard views declared by modules.
+
+        ``only_running`` filters to modules that are currently running
+        (the UI default). Pass ``False`` to introspect everything
+        registered, running or not.
+        Returned mapping is ``{module_name: [ModuleView, ...]}`` with
+        each list sorted by ``order``.
+        """
+        result: dict[str, list[ModuleView]] = {}
+        pool = self._modules if only_running else self._registered
+        for name, module in pool.items():
+            if only_running and not module.is_running:
+                continue
+            try:
+                views = list(module.get_views() or [])
+            except Exception:
+                logger.exception("get_views() failed for module %s", name)
+                continue
+            if views:
+                views.sort(key=lambda v: (v.order, v.label))
+                result[name] = views
+        return result
+
+    def get_view(self, module_name: str, view_key: str) -> ModuleView | None:
+        """Look up a single running module's view by key."""
+        module = self._modules.get(module_name)
+        if not module or not module.is_running:
+            return None
+        for view in module.get_views() or []:
+            if view.key == view_key:
+                return view
+        return None
 
     # ── Conscience Wiring ────────────────────────────────────────
 

@@ -44,6 +44,10 @@ class EmailModule(BaseModule):
         from modules.plugins.email.config_schema import CONFIG_SCHEMA
         return CONFIG_SCHEMA
 
+    def get_views(self):
+        from modules.plugins.email.views import email_views
+        return email_views()
+
     def get_models(self) -> list:
         from modules.plugins.email.models import Contact, Email, EmailAccount
         return [EmailAccount, Contact, Email]

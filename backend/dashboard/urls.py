@@ -17,6 +17,7 @@ from dashboard.views.api import (
     drives as drives_api,
     emotion as emotion_api,
     memory,
+    module_views,
     modules as modules_api,
     narrative as narrative_api,
     overview,
@@ -51,6 +52,12 @@ urlpatterns = [
     path("dashboard/scheduled/",    pages.scheduled,    name="dash-scheduled"),
     path("dashboard/projects/",     pages.projects,     name="dash-projects"),
     path("dashboard/modules/",      pages.modules,      name="dash-modules"),
+    # Module-contributed visualization pages (declared via get_views())
+    path(
+        "dashboard/modules/<str:module>/<str:view_key>/",
+        pages.module_view,
+        name="dash-module-view",
+    ),
     path("dashboard/quota/",        pages.quota,        name="dash-quota"),
     path("dashboard/system/",       pages.system,       name="dash-system"),
     path("dashboard/config/",       pages.config,       name="dash-config"),
@@ -81,6 +88,24 @@ urlpatterns = [
     path("dashboard/api/modules/<str:name>/enable",    modules_api.module_enable),
     path("dashboard/api/modules/<str:name>/disable",   modules_api.module_disable),
     path("dashboard/api/modules/<str:name>/uninstall", modules_api.module_uninstall),
+
+    # Module-declared visualization views (data + side-effect actions)
+    path(
+        "dashboard/api/modules/<str:module>/views",
+        module_views.list_views,
+    ),
+    path(
+        "dashboard/api/modules/<str:module>/views/<str:view_key>",
+        module_views.view_data,
+    ),
+    path(
+        "dashboard/api/modules/<str:module>/views/<str:view_key>/items/<str:item_id>",
+        module_views.view_item,
+    ),
+    path(
+        "dashboard/api/modules/<str:module>/views/<str:view_key>/actions/<str:action_key>",
+        module_views.view_action,
+    ),
     path("dashboard/api/quota",               quota_api.quota),
     path("dashboard/api/system/consolidation",system.consolidation),
     path("dashboard/api/system/ai-config",    system.ai_config),

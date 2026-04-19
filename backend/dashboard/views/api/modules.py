@@ -27,6 +27,10 @@ def _module_rows():
         caps = module_manager.collect_capabilities()
     except Exception:
         caps = {}
+    try:
+        views_by_module = module_manager.collect_views()
+    except Exception:
+        views_by_module = {}
 
     all_info = module_manager.list_all()
     statuses = {s.name: s for s in module_manager.get_all_status()}
@@ -37,6 +41,15 @@ def _module_rows():
         mod = module_manager.get_registered(name)
         status = statuses.get(name)
         interval = getattr(mod, "CRON_INTERVAL", None) if mod else None
+        views = [
+            {
+                "key": v.key,
+                "label": v.label,
+                "icon": v.icon,
+                "url": f"/dashboard/modules/{name}/{v.key}/",
+            }
+            for v in views_by_module.get(name, [])
+        ]
         rows.append({
             "name": name,
             "enabled": info["enabled"],
@@ -48,7 +61,8 @@ def _module_rows():
             "error": getattr(status, "error", None) if status else None,
             "details": getattr(status, "details", None) if status else None,
             "cron_interval": interval,
-            "capabilities": [c.value for c in caps.get(name, [])],
+            "capabilities": [c.description for c in caps.get(name, [])],
+            "views": views,
         })
     return rows
 

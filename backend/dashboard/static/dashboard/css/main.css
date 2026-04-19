@@ -310,6 +310,38 @@ td small { color: var(--text-dim); display: block; margin-top: 2px; }
   font-size: 20px; cursor: pointer; line-height: 1; padding: 4px 8px; }
 .modal-close:hover { color: var(--red); }
 .modal-body { padding: 20px; max-height: 70vh; overflow-y: auto; }
+.modal-body dl.kv { display: grid; grid-template-columns: minmax(120px, max-content) 1fr;
+  gap: 6px 16px; margin: 0; }
+.modal-body dl.kv dt { color: var(--text-dim); font-size: 11px; letter-spacing: 0.1em;
+  text-transform: uppercase; align-self: start; padding-top: 2px; }
+.modal-body dl.kv dd { margin: 0; word-break: break-word; white-space: pre-wrap;
+  font-family: inherit; font-size: 12px; }
+
+/* Mail master/detail (email module inbox view) */
+.mail-split { display: grid; grid-template-columns: minmax(280px, 360px) 1fr;
+  gap: 14px; min-height: 500px; }
+.mail-list { border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+  display: flex; flex-direction: column; max-height: 70vh; overflow-y: auto; }
+.mail-row { padding: 10px 12px; border-bottom: 1px solid var(--border); cursor: pointer;
+  transition: background 0.12s ease; }
+.mail-row:hover { background: rgba(94,225,255,0.04); }
+.mail-row.active { background: rgba(94,225,255,0.08); }
+.mail-row.unread b { color: var(--cyan); }
+.mail-row-top { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
+.mail-row-subject { margin-top: 4px; font-size: 12px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.mail-row-meta { margin-top: 4px; display: flex; gap: 8px; align-items: center;
+  font-size: 11px; }
+.mail-list .pager { padding: 8px 12px; border-top: 1px solid var(--border);
+  display: flex; gap: 8px; justify-content: center; align-items: center; }
+.mail-detail { border: 1px solid var(--border); border-radius: 8px; padding: 14px;
+  max-height: 70vh; overflow-y: auto; }
+.mail-head { border-bottom: 1px solid var(--border); padding-bottom: 10px;
+  margin-bottom: 12px; }
+.mail-subject { font-size: 14px; font-weight: 600; color: var(--cyan); margin-bottom: 8px; }
+.mail-meta { display: grid; gap: 4px; font-size: 12px; }
+.mail-body { font-family: inherit; font-size: 12px; white-space: pre-wrap;
+  word-break: break-word; margin: 0; background: transparent; padding: 0; }
 .modal-footer { padding: 12px 20px; border-top: 1px solid var(--border);
   display: flex; gap: 10px; justify-content: flex-end;
   background: linear-gradient(0deg, rgba(0,0,0,0.2), transparent); }

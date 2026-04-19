@@ -13,6 +13,7 @@ from modules.types import (
     ModuleRoute,
     ModuleStatus,
     ModuleTool,
+    ModuleView,
 )
 
 if TYPE_CHECKING:
@@ -99,6 +100,21 @@ class BaseModule(ABC):
     def get_routes(self) -> list[ModuleRoute]:
         """Return HTTP routes this module serves.
         Auto-mounted under /api/modules/{name}/. Default: none."""
+        return []
+
+    # ── Dashboard Views ───────────────────────────────────────────
+
+    def get_views(self) -> list[ModuleView]:
+        """Return visualization pages this module contributes to the dashboard.
+
+        Each ``ModuleView`` is auto-mounted under
+        ``/dashboard/modules/{module}/{view.key}/`` (HTML shell) and
+        ``/dashboard/api/modules/{module}/views/{view.key}`` (JSON).
+        Side-effect ``actions`` get ``.../actions/{action.key}``.
+
+        A view is only visible in the sidebar when the module is
+        both *enabled* and *running*. Default: no views.
+        """
         return []
 
     # ── Context Injection ─────────────────────────────────────────
