@@ -6,15 +6,14 @@
     "configurations": [
     
         {
-            "name": "Python Debugger: Django",
+            "name": "VTuber backend (Uvicorn + ASGI lifespan)",
             "type": "debugpy",
             "request": "launch",
-            "args": [
-                "runserver"
-            ],
-            "django": true,
-            "autoStartBrowser": false,
-            "program": "${workspaceFolder}\\backend\\manage.py"
+            "program": "${workspaceFolder}\\run.py",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "autoStartBrowser": false
         }
     ]
 }

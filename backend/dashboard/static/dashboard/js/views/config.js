@@ -134,11 +134,14 @@ Dash.render(async (root) => {
       host.querySelectorAll("button[data-act]").forEach(btn => {
         btn.onclick = async () => {
           const act = btn.dataset.act;
+          // Enable/disable/uninstall changes the sidebar + visible config
+          // sections (they're filtered server-side per module state),
+          // so reload the page to keep the UI coherent.
           if (act === "uninstall") {
             if (!window.confirm(`Désinstaller "${moduleName}" ?\n\nCela supprimera TOUTES ses tables et données.\nCette action est irréversible.`)) return;
-            if (await postModuleAction(moduleName, "uninstall", { confirm: true })) paint();
+            if (await postModuleAction(moduleName, "uninstall", { confirm: true })) location.reload();
           } else {
-            if (await postModuleAction(moduleName, act)) paint();
+            if (await postModuleAction(moduleName, act)) location.reload();
           }
         };
       });

@@ -72,14 +72,57 @@ def _module_rows():
     return rows
 
 
+def _tool_rows():
+    """Flatten every MCP tool exposed by running modules, with its source.
+
+    Iterates modules directly (vs. ``collect_tools()``) so we can attribute
+    each tool to the module that declared it — the aggregated list loses
+    that link.
+    """
+    from modules.manager import module_manager
+
+    rows = []
+    seen: set[str] = set()
+    for info in module_manager.list_all():
+        if not info.get("running"):
+            continue
+        module = module_manager.get_registered(info["name"])
+        if module is None:
+            continue
+        for tool in module.return_tools():
+            if tool.name in seen:
+                continue
+            seen.add(tool.name)
+            rows.append({
+                "name": tool.name,
+                "description": tool.description,
+                "module": module.name,
+                "parameters": [
+                    {
+                        "name": p.name,
+                        "type": p.type.value,
+                        "description": p.description,
+                        "required": p.required,
+                        "default": p.default,
+                        "enum": p.enum,
+                    }
+                    for p in tool.parameters
+                ],
+            })
+    rows.sort(key=lambda r: (r["module"], r["name"]))
+    return rows
+
+
 @require_http_methods(["GET"])
 def modules(request):
     from modules.manager import module_manager
 
+    tool_names = module_manager.get_tool_names()
     return JsonResponse({
         "modules": _module_rows(),
-        "tool_names": module_manager.get_tool_names(),
-        "total_tools": len(module_manager.get_tool_names()),
+        "tool_names": tool_names,
+        "total_tools": len(tool_names),
+        "tools": _tool_rows(),
     })
 
 

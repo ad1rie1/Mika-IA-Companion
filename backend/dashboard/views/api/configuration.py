@@ -43,8 +43,32 @@ def _error(msg: str, status: int = 400) -> JsonResponse:
 
 @require_http_methods(["GET"])
 def schema(request):
-    """Full declarative schema. The UI builds all forms from this."""
-    return JsonResponse({"sections": registry.render_schema()})
+    """Full declarative schema. The UI builds all forms from this.
+
+    Sections keyed ``module_<name>`` that belong to a user-disabled
+    module are filtered out so the config page stays focused on active
+    plugins. A disabled module is still re-enabled from the "Gestion
+    des modules" page.
+    """
+    sections = registry.render_schema()
+    try:
+        from modules.state_model import ModuleState
+        disabled = set(
+            ModuleState.objects.filter(enabled=False).values_list(
+                "name", flat=True,
+            )
+        )
+    except Exception:
+        disabled = set()
+    if disabled:
+        sections = [
+            s for s in sections
+            if not (
+                s.get("key", "").startswith("module_")
+                and s["key"][len("module_"):] in disabled
+            )
+        ]
+    return JsonResponse({"sections": sections})
 
 
 @require_http_methods(["GET"])

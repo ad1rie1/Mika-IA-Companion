@@ -19,8 +19,6 @@ from django.template.loader import get_template
 MENU: list[dict] = [
     {"group": "Overview", "items": [
         {"key": "overview",     "label": "Overview",     "icon": "◈"},
-        {"key": "personality",  "label": "Personnalité", "icon": "✦"},
-        {"key": "narrative",    "label": "Self-Concept", "icon": "☍"},
     ]},
     {"group": "Vie intérieure", "items": [
         {"key": "emotion",      "label": "Émotions",     "icon": "❋"},
@@ -40,16 +38,18 @@ MENU: list[dict] = [
         {"key": "commitments",  "label": "Engagements",  "icon": "✓"},
     ]},
     {"group": "Conscience", "items": [
+        {"key": "narrative",    "label": "Self-Concept", "icon": "☍"},
         {"key": "observations", "label": "Observations", "icon": "◉"},
         {"key": "logs",         "label": "Décisions",    "icon": "▤"},
         {"key": "scheduled",    "label": "Planification","icon": "⏱"},
     ]},
     {"group": "Agent", "items": [
         {"key": "projects",     "label": "Projets",      "icon": "◱"},
-        {"key": "quota",        "label": "Quota IA",     "icon": "⟠"},
     ]},
     {"group": "Système", "items": [
         {"key": "system",       "label": "Système",      "icon": "⚙"},
+        {"key": "quota",        "label": "Quota IA",     "icon": "⟠"},
+        {"key": "personality",  "label": "Personnalité", "icon": "✦"},
         {"key": "config",       "label": "Configuration","icon": "⚒"},
         {"key": "modules",      "label": "Gestion des modules", "icon": "▦"},
     ]},

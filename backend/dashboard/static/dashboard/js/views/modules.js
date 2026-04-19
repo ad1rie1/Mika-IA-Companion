@@ -5,7 +5,10 @@ Dash.render(async (root) => {
     if (!m.enabled) return `<span class="pill">désactivé</span>`;
     if (!m.available) return `<span class="pill warn">indisponible</span>`;
     if (m.running) return `<span class="pill pos">running</span>`;
-    return `<span class="pill">stopped</span>`;
+    const err = m.error
+      ? `<div class="muted mono" style="margin-top:4px;font-size:0.8em;color:#e08080;" title="${escapeHTML(m.error)}">${escapeHTML(m.error.slice(0, 80))}${m.error.length > 80 ? "…" : ""}</div>`
+      : "";
+    return `<span class="pill">stopped</span>${err}`;
   };
   const uptime = s => {
     if (!s) return "—";
@@ -32,35 +35,24 @@ Dash.render(async (root) => {
   async function act(name, action, { confirmText, body } = {}) {
     if (confirmText && !confirm(confirmText)) return;
     const res = await post(`/dashboard/api/modules/${encodeURIComponent(name)}/${action}`, body);
-    if (res) render();
+    if (!res) return;
+    // Full reload: the sidebar menu + any per-module config section are
+    // built server-side at request time, so enabling or disabling a
+    // module requires a fresh render to reflect the new state.
+    location.reload();
   }
 
-  async function render() {
-    const d = await api("/dashboard/api/modules");
-    if (!d) return (root.innerHTML = `<div class="empty">Indisponible.</div>`);
+  const TAB_KEY = "dash.modules.tab";
+  const getActiveTab = () => {
+    try { return localStorage.getItem(TAB_KEY) || "detail"; }
+    catch (_) { return "detail"; }
+  };
+  const setActiveTab = key => {
+    try { localStorage.setItem(TAB_KEY, key); } catch (_) {}
+  };
 
-    const enabledCount = d.modules.filter(m => m.enabled).length;
-    const runningCount = d.modules.filter(m => m.running).length;
-    const unavailableCount = d.modules.filter(m => m.enabled && !m.available).length;
-
-    root.innerHTML = `
-      <div class="grid cols-3 mb">
-        <div class="card">
-          <h3>Modules</h3>
-          <div class="stat-value">${d.modules.length}</div>
-          <div class="stat-sub">${enabledCount} activés · ${runningCount} en marche · ${unavailableCount} indisponibles</div>
-        </div>
-        <div class="card">
-          <h3>Outils MCP</h3>
-          <div class="stat-value">${d.total_tools}</div>
-          <div class="stat-sub">tools exposés à Mika</div>
-        </div>
-        <div class="card">
-          <h3>Inventaire tools</h3>
-          <div class="chips">${d.tool_names.map(t => `<span class="chip">${escapeHTML(t)}</span>`).join("") || `<span class="muted">—</span>`}</div>
-        </div>
-      </div>
-
+  function renderDetailTab(d) {
+    return `
       <div class="card">
         <h3>État détaillé</h3>
         <table>
@@ -86,12 +78,12 @@ Dash.render(async (root) => {
                     `<a class="chip" href="${escapeHTML(v.url)}" title="${escapeHTML(v.label)}">${escapeHTML(v.icon || "▦")} ${escapeHTML(v.label)}</a>`
                   ).join(" ")
                 : `<span class="muted">—</span>`;
+              const startBtn = (m.enabled && m.available && !m.running)
+                ? `<button class="btn primary" data-act="enable" data-name="${escapeHTML(m.name)}">Démarrer</button>`
+                : "";
               const enableBtn = m.enabled
                 ? `<button class="btn" data-act="disable" data-name="${escapeHTML(m.name)}">Désactiver</button>`
                 : `<button class="btn primary" data-act="enable" data-name="${escapeHTML(m.name)}">Activer</button>`;
-              const uninstallBtn = m.has_models
-                ? `<button class="btn danger" data-act="uninstall" data-name="${escapeHTML(m.name)}">Désinstaller</button>`
-                : "";
               return `
                 <tr>
                   <td><span class="chip mag">${escapeHTML(m.name)}</span></td>
@@ -101,7 +93,7 @@ Dash.render(async (root) => {
                   <td>${tables}</td>
                   <td><div class="chips">${m.capabilities.map(c => `<span class="chip">${escapeHTML(c)}</span>`).join("")}</div></td>
                   <td><div class="chips">${views}</div></td>
-                  <td>${enableBtn} ${uninstallBtn}</td>
+                  <td>${startBtn} ${enableBtn}</td>
                 </tr>`;
             }).join("") || `<tr><td colspan="8" class="muted">Aucun module.</td></tr>`}
           </tbody>
@@ -109,24 +101,122 @@ Dash.render(async (root) => {
         <p class="muted" style="margin-top:10px;font-size:0.85em;">
           <b>Activer</b> = marque le module actif et crée ses tables si nécessaires.
           <b>Désactiver</b> = stoppe le module mais conserve les données.
-          <b>Désinstaller</b> = stoppe le module <em>et supprime ses tables</em> (destructif).
         </p>
       </div>`;
+  }
 
+  function renderToolsTab(d) {
+    const tools = Array.isArray(d.tools) ? d.tools : [];
+    if (!tools.length) {
+      return `<div class="card"><div class="empty">Aucun outil MCP exposé par les modules en cours d'exécution.</div></div>`;
+    }
+    const grouped = {};
+    for (const t of tools) {
+      (grouped[t.module] ||= []).push(t);
+    }
+    const sections = Object.keys(grouped).sort().map(moduleName => {
+      const items = grouped[moduleName].map(t => {
+        const params = (t.parameters && t.parameters.length)
+          ? `<table style="margin-top:8px;font-size:11px;">
+               <thead>
+                 <tr>
+                   <th style="width:22%">Paramètre</th>
+                   <th style="width:12%">Type</th>
+                   <th style="width:8%">Requis</th>
+                   <th>Description</th>
+                 </tr>
+               </thead>
+               <tbody>
+                 ${t.parameters.map(p => {
+                   const typeLabel = p.enum
+                     ? `${escapeHTML(p.type)} <span class="muted" title="${escapeHTML(p.enum.join(", "))}">(enum)</span>`
+                     : escapeHTML(p.type);
+                   const reqPill = p.required
+                     ? `<span class="pill warn">oui</span>`
+                     : `<span class="pill">non</span>`;
+                   const dflt = p.default != null
+                     ? ` <span class="muted mono" style="font-size:10px;">défaut: ${escapeHTML(String(p.default))}</span>`
+                     : "";
+                   return `
+                     <tr>
+                       <td class="mono">${escapeHTML(p.name)}</td>
+                       <td class="mono">${typeLabel}</td>
+                       <td>${reqPill}</td>
+                       <td class="muted">${escapeHTML(p.description || "")}${dflt}</td>
+                     </tr>`;
+                 }).join("")}
+               </tbody>
+             </table>`
+          : `<div class="muted" style="margin-top:6px;font-size:11px;">Aucun paramètre.</div>`;
+        return `
+          <div style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px;background:rgba(255,255,255,0.015);">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <span class="chip mag mono">${escapeHTML(t.name)}</span>
+              <span class="muted" style="font-size:11px;">${t.parameters.length} param.</span>
+            </div>
+            <div style="margin-top:6px;font-size:12px;">${escapeHTML(t.description || "")}</div>
+            ${params}
+          </div>`;
+      }).join("");
+      return `
+        <div class="card" style="margin-bottom:14px;">
+          <h3>${escapeHTML(moduleName)} <span class="muted" style="font-size:11px;">· ${grouped[moduleName].length} outil(s)</span></h3>
+          ${items}
+        </div>`;
+    }).join("");
+    return sections;
+  }
+
+  const TABS = [
+    { key: "detail", label: "Modules Détail", render: renderDetailTab },
+    { key: "tools",  label: "Outils MCP",    render: renderToolsTab  },
+  ];
+
+  function wireDetailActions() {
     root.querySelectorAll("button[data-act]").forEach(btn => {
+      btn.onclick = () => act(btn.dataset.name, btn.dataset.act);
+    });
+  }
+
+  async function render() {
+    const d = await api("/dashboard/api/modules");
+    if (!d) return (root.innerHTML = `<div class="empty">Indisponible.</div>`);
+
+    const activeKey = TABS.some(t => t.key === getActiveTab()) ? getActiveTab() : "detail";
+
+    const tabBar = `
+      <div class="card" style="margin-bottom:14px;padding:8px 10px;display:flex;gap:8px;flex-wrap:wrap;">
+        ${TABS.map(t => `
+          <button class="btn ${t.key === activeKey ? "primary" : "ghost"}"
+                  data-tab="${t.key}">${escapeHTML(t.label)}</button>
+        `).join("")}
+      </div>`;
+
+    root.innerHTML = `
+      ${tabBar}
+      <div id="tab-body"></div>`;
+
+    const body = root.querySelector("#tab-body");
+
+    function paint(key) {
+      const tab = TABS.find(t => t.key === key) || TABS[0];
+      body.innerHTML = tab.render(d);
+      if (tab.key === "detail") wireDetailActions();
+      root.querySelectorAll("button[data-tab]").forEach(b => {
+        const isActive = b.dataset.tab === tab.key;
+        b.classList.toggle("primary", isActive);
+        b.classList.toggle("ghost", !isActive);
+      });
+    }
+
+    root.querySelectorAll("button[data-tab]").forEach(btn => {
       btn.onclick = () => {
-        const name = btn.dataset.name;
-        const action = btn.dataset.act;
-        if (action === "uninstall") {
-          act(name, "uninstall", {
-            confirmText: `Désinstaller le module "${name}" ?\n\nCela va SUPPRIMER toutes ses tables et données.\nCette action est irréversible.`,
-            body: { confirm: true },
-          });
-        } else {
-          act(name, action);
-        }
+        setActiveTab(btn.dataset.tab);
+        paint(btn.dataset.tab);
       };
     });
+
+    paint(activeKey);
   }
 
   render();

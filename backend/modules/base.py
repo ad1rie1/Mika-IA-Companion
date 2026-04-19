@@ -56,6 +56,7 @@ class BaseModule(ABC):
         self.name = name
         self._running = False
         self._started_at: float | None = None
+        self._last_error: str | None = None
         self.logger = logging.getLogger(f"module.{name}")
         self._notify_ai: Callable[
             [ModuleNotification], Awaitable[AIDecision]
@@ -182,6 +183,7 @@ class BaseModule(ABC):
             running=self._running,
             available=self.is_available(),
             uptime_seconds=uptime,
+            error=self._last_error,
         )
 
     # ── Internal (called by ModuleManager — do NOT override) ─────
@@ -198,7 +200,12 @@ class BaseModule(ABC):
         self.logger.info("Starting module: %s", self.name)
         self._running = True
         self._started_at = time.time()
-        await self.instantiate()
+        self._last_error = None
+        try:
+            await self.instantiate()
+        except Exception as exc:
+            self._last_error = f"{type(exc).__name__}: {exc}"
+            raise
 
     async def _do_stop(self) -> None:
         """Called by ModuleManager to stop the module."""
