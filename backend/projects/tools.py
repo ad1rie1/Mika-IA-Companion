@@ -1,12 +1,15 @@
 """MCP adapter — exposes project management to Claude as tools.
 
 So Mika, during a normal conversation, can say "OK je vais gérer ça
-comme un projet" and actually create one via `create_project`, then
-add tasks with `add_project_task`, check where she's at with
-`list_projects` / `get_project_details`, etc.
+comme un projet" and actually create one via ``create_project``, then
+add tasks with ``add_project_task``, check where she's at with
+``list_projects`` / ``get_project_details``, etc.
 
-The actual data lives in the ``projects`` Django app; this module is
-a thin MCP layer on top.
+This is not a plugin: the projects subsystem lives in
+``backend/projects/`` (models, runner, scheduler, HTTP views). This
+file is the thin MCP layer that plugs its tools into the module bus
+so Mika can invoke them during a chat turn. The tools are registered
+by ``ProjectsConfig.ready()``, not by ``modules.apps``.
 """
 from __future__ import annotations
 

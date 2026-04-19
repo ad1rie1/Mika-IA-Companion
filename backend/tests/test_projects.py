@@ -598,7 +598,7 @@ class TestMCPTool:
 
     @pytest.mark.asyncio
     async def test_create_project_handler(self):
-        from modules.project_tools.module import ProjectToolsModule
+        from projects.tools import ProjectToolsModule
         from projects.models import Project
 
         mod = ProjectToolsModule()
