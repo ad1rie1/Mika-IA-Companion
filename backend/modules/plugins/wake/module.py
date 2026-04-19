@@ -36,7 +36,7 @@ class WakeModule(BaseModule):
         super().__init__("wake")
 
     def get_models(self) -> list:
-        from modules.wake.models import WakeRequest
+        from modules.plugins.wake.models import WakeRequest
         return [WakeRequest]
 
     # ── Lifecycle ─────────────────────────────────────────────────
@@ -55,7 +55,7 @@ class WakeModule(BaseModule):
     async def _process_pending(self) -> None:
         from django.utils import timezone
 
-        from modules.wake.models import WakeRequest
+        from modules.plugins.wake.models import WakeRequest
 
         pending = WakeRequest.objects.filter(
             status=WakeRequest.Status.PENDING
@@ -89,7 +89,7 @@ class WakeModule(BaseModule):
         self, source: str = "api", prompt: str | None = None
     ) -> int:
         """Create a new wake request. Returns the request PK."""
-        from modules.wake.models import WakeRequest
+        from modules.plugins.wake.models import WakeRequest
 
         req = await WakeRequest.objects.acreate(source=source, prompt=prompt)
         self.logger.info("Wake request #%d created from %s", req.pk, source)

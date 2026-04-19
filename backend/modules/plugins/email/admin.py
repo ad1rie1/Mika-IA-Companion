@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from modules.email.models import Contact, Email, EmailAccount
+from modules.plugins.email.models import Contact, Email, EmailAccount
 
 
 @admin.register(EmailAccount)

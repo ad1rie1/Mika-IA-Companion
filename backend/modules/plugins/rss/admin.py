@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from modules.rss.models import RSSEntry, RSSFeed
+from modules.plugins.rss.models import RSSEntry, RSSFeed
 
 
 @admin.register(RSSFeed)

@@ -25,15 +25,15 @@ _SECRETS = {"imap_password", "smtp_password"}
 
 
 class EmailAccountBackend:
-    """CRUD over ``modules.email.models.EmailAccount``."""
+    """CRUD over ``modules.plugins.email.models.EmailAccount``."""
 
     def _all(self):
-        from modules.email.models import EmailAccount
+        from modules.plugins.email.models import EmailAccount
         return EmailAccount.objects.all().order_by("id")
 
     def _get(self, row_id):
         """Lookup by stringified PK. Missing row → KeyError (→ 404 at the view)."""
-        from modules.email.models import EmailAccount
+        from modules.plugins.email.models import EmailAccount
         try:
             pk = int(row_id)
         except (TypeError, ValueError):
@@ -95,7 +95,7 @@ class EmailAccountBackend:
         return [self._serialize(o, decrypt_secrets=decrypt_secrets) for o in self._all()]
 
     def add_row(self, item, payload):
-        from modules.email.models import EmailAccount
+        from modules.plugins.email.models import EmailAccount
         obj = EmailAccount()
         self._apply(obj, item, payload)
         # Required columns — make sure email_address is set

@@ -41,20 +41,20 @@ class EmailModule(BaseModule):
         return True
 
     def config_schema(self):
-        from modules.email.config_schema import CONFIG_SCHEMA
+        from modules.plugins.email.config_schema import CONFIG_SCHEMA
         return CONFIG_SCHEMA
 
     def get_models(self) -> list:
-        from modules.email.models import Contact, Email, EmailAccount
+        from modules.plugins.email.models import Contact, Email, EmailAccount
         return [EmailAccount, Contact, Email]
 
     async def instantiate(self) -> None:
         from asgiref.sync import sync_to_async
 
-        from modules.email.analyzer import EmailAnalyzer
-        from modules.email.imap_client import IMAPClient
-        from modules.email.models import EmailAccount
-        from modules.email.smtp_client import SMTPClient
+        from modules.plugins.email.analyzer import EmailAnalyzer
+        from modules.plugins.email.imap_client import IMAPClient
+        from modules.plugins.email.models import EmailAccount
+        from modules.plugins.email.smtp_client import SMTPClient
 
         self._analyzer = EmailAnalyzer()
 
@@ -97,7 +97,7 @@ class EmailModule(BaseModule):
         """If no accounts in DB and env vars are set, create one automatically."""
         from asgiref.sync import sync_to_async
 
-        from modules.email.models import EmailAccount
+        from modules.plugins.email.models import EmailAccount
 
         count = await sync_to_async(EmailAccount.objects.count)()
         if count > 0:
@@ -170,7 +170,7 @@ class EmailModule(BaseModule):
 
         from asgiref.sync import sync_to_async
         from django.utils import timezone
-        from modules.email.models import EmailAccount
+        from modules.plugins.email.models import EmailAccount
 
         now = timezone.now()
         update_fields = {"last_fetch": now}
@@ -204,7 +204,7 @@ class EmailModule(BaseModule):
         """
         from asgiref.sync import sync_to_async
 
-        from modules.email.models import Email
+        from modules.plugins.email.models import Email
 
         exists = await sync_to_async(
             Email.objects.filter(account=account, message_id=email_msg.message_id).exists
@@ -312,7 +312,7 @@ class EmailModule(BaseModule):
         """Create or update a contact from email traffic."""
         from asgiref.sync import sync_to_async
 
-        from modules.email.models import Contact
+        from modules.plugins.email.models import Contact
 
         email_address = email_address.lower().strip()
         if not email_address or "@" not in email_address:
@@ -341,7 +341,7 @@ class EmailModule(BaseModule):
         """Keep only the most recent emails per account."""
         from asgiref.sync import sync_to_async
 
-        from modules.email.models import Email
+        from modules.plugins.email.models import Email
 
         total = await sync_to_async(Email.objects.filter(account=account).count)()
         if total <= keep:
@@ -431,7 +431,7 @@ class EmailModule(BaseModule):
             # Store outbound email
             from asgiref.sync import sync_to_async
 
-            from modules.email.models import Email
+            from modules.plugins.email.models import Email
 
             await sync_to_async(Email.objects.create)(
                 account=account,
@@ -577,7 +577,7 @@ class EmailModule(BaseModule):
     async def _tool_list_emails(self, args: dict) -> dict:
         from asgiref.sync import sync_to_async
 
-        from modules.email.models import Email
+        from modules.plugins.email.models import Email
 
         limit = args.get("limit", 10)
         account_id = args.get("account_id")
@@ -609,7 +609,7 @@ class EmailModule(BaseModule):
     async def _tool_read_email(self, args: dict) -> dict:
         from asgiref.sync import sync_to_async
 
-        from modules.email.models import Email
+        from modules.plugins.email.models import Email
 
         email_id = args["email_id"]
         try:
@@ -639,7 +639,7 @@ class EmailModule(BaseModule):
     async def _tool_search_emails(self, args: dict) -> dict:
         from asgiref.sync import sync_to_async
 
-        from modules.email.models import Email
+        from modules.plugins.email.models import Email
 
         query = args["query"]
         limit = args.get("limit", 10)
@@ -670,7 +670,7 @@ class EmailModule(BaseModule):
     async def _tool_list_contacts(self, args: dict) -> dict:
         from asgiref.sync import sync_to_async
 
-        from modules.email.models import Contact
+        from modules.plugins.email.models import Contact
 
         limit = args.get("limit", 20)
         search = args.get("search", "")
@@ -705,7 +705,7 @@ class EmailModule(BaseModule):
     async def _tool_list_accounts(self, args: dict) -> dict:
         from asgiref.sync import sync_to_async
 
-        from modules.email.models import EmailAccount
+        from modules.plugins.email.models import EmailAccount
 
         accounts = await sync_to_async(
             lambda: list(
@@ -768,7 +768,7 @@ class EmailModule(BaseModule):
             # Store outbound email
             from asgiref.sync import sync_to_async
 
-            from modules.email.models import Email
+            from modules.plugins.email.models import Email
 
             await sync_to_async(Email.objects.create)(
                 account=account,

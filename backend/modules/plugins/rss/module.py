@@ -43,11 +43,11 @@ class RSSModule(BaseModule):
     # ── Lifecycle ─────────────────────────────────────────────────
 
     def config_schema(self):
-        from modules.rss.config_schema import CONFIG_SCHEMA
+        from modules.plugins.rss.config_schema import CONFIG_SCHEMA
         return CONFIG_SCHEMA
 
     def get_models(self) -> list:
-        from modules.rss.models import RSSEntry, RSSFeed
+        from modules.plugins.rss.models import RSSEntry, RSSFeed
         return [RSSFeed, RSSEntry]
 
     def is_available(self) -> bool:
@@ -68,7 +68,7 @@ class RSSModule(BaseModule):
         await self._migrate_env_feeds()
 
         from asgiref.sync import sync_to_async
-        from modules.rss.models import RSSFeed
+        from modules.plugins.rss.models import RSSFeed
         count = await sync_to_async(RSSFeed.objects.filter(is_active=True).count)()
         self.logger.info("RSS module started (%d active feed(s), poll every %ds)", count, self.CRON_INTERVAL)
 
@@ -80,7 +80,7 @@ class RSSModule(BaseModule):
     async def _migrate_env_feeds(self) -> None:
         """If RSS_FEEDS env var is set and feeds don't exist in DB, create them."""
         from asgiref.sync import sync_to_async
-        from modules.rss.models import RSSFeed
+        from modules.plugins.rss.models import RSSFeed
 
         feeds_config = getattr(settings, "RSS_FEEDS", [])
         if not feeds_config:
@@ -104,7 +104,7 @@ class RSSModule(BaseModule):
         from asgiref.sync import sync_to_async
         from django.utils import timezone
         from modules.manager import module_manager
-        from modules.rss.models import RSSEntry, RSSFeed
+        from modules.plugins.rss.models import RSSEntry, RSSFeed
 
         feeds = await sync_to_async(
             lambda: list(RSSFeed.objects.filter(is_active=True))
@@ -194,7 +194,7 @@ class RSSModule(BaseModule):
     async def _prune_entries(self, keep_per_feed: int = 200) -> None:
         """Keep only recent entries per feed to prevent unbounded growth."""
         from asgiref.sync import sync_to_async
-        from modules.rss.models import RSSEntry, RSSFeed
+        from modules.plugins.rss.models import RSSEntry, RSSFeed
 
         feeds = await sync_to_async(
             lambda: list(RSSFeed.objects.filter(is_active=True))
@@ -263,7 +263,7 @@ class RSSModule(BaseModule):
 
     async def _tool_list_entries(self, args: dict) -> dict:
         from asgiref.sync import sync_to_async
-        from modules.rss.models import RSSEntry
+        from modules.plugins.rss.models import RSSEntry
 
         limit = args.get("limit", 10)
         feed_name = args.get("feed_name")
@@ -293,7 +293,7 @@ class RSSModule(BaseModule):
 
     async def _tool_list_feeds(self, args: dict) -> dict:
         from asgiref.sync import sync_to_async
-        from modules.rss.models import RSSFeed
+        from modules.plugins.rss.models import RSSFeed
 
         feeds = await sync_to_async(
             lambda: list(

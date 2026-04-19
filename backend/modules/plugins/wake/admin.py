@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from modules.wake.models import WakeRequest
+from modules.plugins.wake.models import WakeRequest
 
 
 @admin.register(WakeRequest)

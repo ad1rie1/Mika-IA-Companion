@@ -1,6 +1,6 @@
 """Config schema for the RSS module.
 
-Feed storage is owned by ``modules.rss.models.RSSFeed`` (dedicated
+Feed storage is owned by ``modules.plugins.rss.models.RSSFeed`` (dedicated
 page in the module dashboard). The config system exposes only the
 scalar polling knob.
 """

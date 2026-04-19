@@ -2,7 +2,7 @@
 
 from django.core.management.base import BaseCommand
 
-from modules.email.models import Contact, Email, EmailAccount
+from modules.plugins.email.models import Contact, Email, EmailAccount
 
 
 class Command(BaseCommand):

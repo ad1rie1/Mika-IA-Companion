@@ -13,6 +13,7 @@ class RSSFeed(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        app_label = "modules"
         ordering = ["name"]
 
     def __str__(self):
@@ -32,6 +33,7 @@ class RSSEntry(models.Model):
     seen_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        app_label = "modules"
         ordering = ["-seen_at"]
         unique_together = [("feed", "entry_hash")]
 

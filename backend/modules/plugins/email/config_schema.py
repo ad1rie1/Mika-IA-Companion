@@ -1,6 +1,6 @@
 """Config schema for the email module.
 
-Accounts are stored in ``modules.email.models.EmailAccount`` — the
+Accounts are stored in ``modules.plugins.email.models.EmailAccount`` — the
 config UI edits them via the ``EmailAccountBackend`` adapter so the
 generic ``ConfigRecordItem`` table is never used for email. The
 config editor and the module's own storage stay in lockstep without
@@ -9,7 +9,7 @@ duplication.
 from __future__ import annotations
 
 # Importing the backend registers it — side-effect intentional.
-from modules.email import config_backend  # noqa: F401
+from modules.plugins.email import config_backend  # noqa: F401
 
 from configs.types import ConfigItem, ConfigRecord, ConfigSection, record_item
 

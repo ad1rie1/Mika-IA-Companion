@@ -3,7 +3,7 @@ import logging
 from dataclasses import dataclass, field
 
 from ai.router import AIRole, ai_router
-from modules.email.prompts import EMAIL_TRIAGE_SYSTEM_PROMPT
+from modules.plugins.email.prompts import EMAIL_TRIAGE_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 

@@ -6,12 +6,12 @@ class ModulesConfig(AppConfig):
     name = "modules"
 
     def ready(self):
-        from modules.camera import CameraModule
-        from modules.email import EmailModule
+        from modules.plugins.camera import CameraModule
+        from modules.plugins.email import EmailModule
         from modules.manager import module_manager
-        from modules.rss import RSSModule
+        from modules.plugins.rss import RSSModule
         from modules.urls import _populate_urls
-        from modules.wake import WakeModule
+        from modules.plugins.wake import WakeModule
 
         # Core apps register their own MCP facades (not plugins):
         # - FilesModule       → files.apps.FilesConfig.ready()
