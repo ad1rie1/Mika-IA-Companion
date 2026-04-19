@@ -45,6 +45,13 @@ class BaseModule(ABC):
     # None = use the global CRON_TICK_INTERVAL from settings.
     CRON_INTERVAL: int | None = None
 
+    # Infrastructure modules (files, project_tools) piggyback on the
+    # module bus only to expose MCP tools to Claude. They are not
+    # user-configurable plugins and are hidden from the dashboard's
+    # "Gestion des modules" page. Real plugins under modules/plugins/
+    # leave this as False.
+    SYSTEM: bool = False
+
     def __init__(self, name: str):
         self.name = name
         self._running = False

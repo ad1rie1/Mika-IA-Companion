@@ -46,12 +46,12 @@ MENU: list[dict] = [
     ]},
     {"group": "Agent", "items": [
         {"key": "projects",     "label": "Projets",      "icon": "◱"},
-        {"key": "modules",      "label": "Modules",      "icon": "▦"},
         {"key": "quota",        "label": "Quota IA",     "icon": "⟠"},
     ]},
     {"group": "Système", "items": [
         {"key": "system",       "label": "Système",      "icon": "⚙"},
         {"key": "config",       "label": "Configuration","icon": "⚒"},
+        {"key": "modules",      "label": "Gestion des modules", "icon": "▦"},
     ]},
 ]
 
@@ -63,7 +63,7 @@ TITLES = {
     "themes": "Thèmes", "entities": "Entités", "messages": "Messages",
     "persons": "Personnes", "commitments": "Engagements", "observations": "Observations",
     "logs": "Journal conscience", "scheduled": "Actions planifiées",
-    "projects": "Projets", "modules": "Modules", "quota": "Quota IA",
+    "projects": "Projets", "modules": "Gestion des modules", "quota": "Quota IA",
     "system": "Système", "config": "Configuration",
 }
 

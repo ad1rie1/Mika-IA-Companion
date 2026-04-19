@@ -1,7 +1,7 @@
 """ProjectRunner — advance active projects on schedule or on idle.
 
-Integration: the consolidator loop calls ``project_runner.tick()`` every
-consolidation cycle. The runner:
+Integration: the runner owns its own background loop (started from ASGI
+lifespan, cadence ``projects.runner_interval``). Each tick:
   1. Lists projects whose schedule is due
   2. For each, assembles a ProjectRunContext and calls the LLM
   3. Parses the structured output, applies task updates, creates
@@ -53,6 +53,50 @@ class ProjectRunner:
 
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
+        # Dedicated background loop (since 2026-04): previously piggy-backed
+        # on the consolidator's 60s tick, now independent so `interval:30s`
+        # schedules actually fire at 30s and a blocked 90s LLM call here
+        # never starves memory consolidation.
+        self._task: asyncio.Task | None = None
+        self._running: bool = False
+        self._interval: int = 30
+
+    # ── Lifecycle ─────────────────────────────────────────────────
+
+    async def start(self) -> None:
+        """Start the dedicated runner loop. Idempotent."""
+        if self._running:
+            return
+        from configs.service import config_service
+        self._interval = int(
+            config_service.get("projects.runner_interval", default=30)
+        )
+        self._running = True
+        self._task = asyncio.create_task(self._loop())
+        logger.info("Project runner loop started (interval=%ds)", self._interval)
+
+    async def stop(self) -> None:
+        """Stop the loop gracefully."""
+        self._running = False
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+            self._task = None
+        logger.info("Project runner loop stopped")
+
+    async def _loop(self) -> None:
+        while self._running:
+            try:
+                await asyncio.sleep(self._interval)
+                if self._running:
+                    await self.tick()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("Project runner loop error")
 
     async def tick(self) -> int:
         """One pass of the scheduler. Returns number of projects advanced.

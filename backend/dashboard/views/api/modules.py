@@ -37,6 +37,11 @@ def _module_rows():
 
     rows = []
     for info in all_info:
+        # Hide infrastructure modules (files, project_tools) that only
+        # use the bus to expose MCP tools — they are not user-configurable
+        # plugins and should not show up in "Gestion des modules".
+        if info.get("system"):
+            continue
         name = info["name"]
         mod = module_manager.get_registered(name)
         status = statuses.get(name)

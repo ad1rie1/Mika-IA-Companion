@@ -137,21 +137,9 @@ class MemoryConsolidator:
                 self._last_processed_id = all_max_id
             logger.info("Consolidation: no new user messages (last_id=%d)", self._last_processed_id)
             await self._apply_decay()
-            # Even with no new messages, the sleep cycle should get its
-            # chance — nights are precisely the low-traffic window where
-            # journaling / dreaming / digestion need to happen.
-            try:
-                from memory.sleep import sleep_cycle
-                await sleep_cycle.run_if_due()
-            except Exception:
-                logger.exception("Sleep cycle failed in idle path (non-fatal)")
-            # Project runner also runs in the idle path — that's where
-            # interval/cron/idle schedules most often fire.
-            try:
-                from projects.runner import project_runner
-                await project_runner.tick()
-            except Exception:
-                logger.exception("Project runner failed in idle path (non-fatal)")
+            # Sleep cycle and project runner now run on their own dedicated
+            # loops (wired at lifespan startup) — no longer invoked here so
+            # a long LLM call in either never delays consolidation.
             return
 
         logger.info("Consolidating %d new messages (skipped internal)", len(messages))
@@ -353,24 +341,8 @@ class MemoryConsolidator:
         except Exception:
             logger.exception("Person profile generation failed (non-fatal)")
 
-        # 9. Sleep cycle — night-time creative/narrative/healing work.
-        #    Self-gated: no-op outside the night phase or if Mika is
-        #    still active. Runs on the same cadence as consolidation
-        #    but skips quickly when not eligible, so negligible cost.
-        try:
-            from memory.sleep import sleep_cycle
-            await sleep_cycle.run_if_due()
-        except Exception:
-            logger.exception("Sleep cycle failed (non-fatal)")
-
-        # 10. Project runner — advance any projects whose schedule is due.
-        #     Cheap no-op when nothing is due. Max 3 advances per tick
-        #     to avoid LLM bursts.
-        try:
-            from projects.runner import project_runner
-            await project_runner.tick()
-        except Exception:
-            logger.exception("Project runner failed (non-fatal)")
+        # Sleep cycle and project runner now run on their own dedicated
+        # loops (wired at lifespan startup) — no longer invoked here.
 
     async def _apply_decay(self):
         """Reduce importance of old souvenirs and confidence of old connaissances.

@@ -18,8 +18,10 @@ night phase (when Mika has earned her rest) and does *creative*,
      "insight" you wake up with after a night's worry.
 
 Design choices:
-  - Pure async, invoked by the consolidator loop via ``run_if_due()``.
-    No background task of its own.
+  - Owns a dedicated background loop (started from ASGI lifespan,
+    cadence ``memory.sleep_check_interval``) that calls ``run_if_due()``.
+    Decoupled from the consolidator since 2026-04 so a 45s LLM call here
+    never delays memory consolidation.
   - Triple-gated: night phase AND idle AND REST drive above threshold.
     Sleep only happens when Mika has actually been living that day.
   - Budget-capped: at most 4 LLM calls per night (1 journal + up to
@@ -181,6 +183,48 @@ class SleepCycle:
         # broadcast. Transitions trigger an inner_state push so the UI
         # can dim the scene, close the VTuber's eyes, etc.
         self._phase: str = SleepPhase.AWAKE
+        # Dedicated background loop (since 2026-04): previously piggy-backed
+        # on the consolidator's tick budget, now independent so a 45s LLM
+        # call here never delays memory consolidation.
+        self._task: asyncio.Task | None = None
+        self._running: bool = False
+
+    # ── Lifecycle ─────────────────────────────────────────────────
+
+    async def start(self) -> None:
+        """Start the dedicated sleep-check loop. Idempotent."""
+        if self._running:
+            return
+        from configs.service import config_service
+        self._interval = int(
+            config_service.get("memory.sleep_check_interval", default=60)
+        )
+        self._running = True
+        self._task = asyncio.create_task(self._loop())
+        logger.info("Sleep cycle loop started (interval=%ds)", self._interval)
+
+    async def stop(self) -> None:
+        """Stop the loop gracefully."""
+        self._running = False
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+            self._task = None
+        logger.info("Sleep cycle loop stopped")
+
+    async def _loop(self) -> None:
+        while self._running:
+            try:
+                await asyncio.sleep(self._interval)
+                if self._running:
+                    await self.run_if_due()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("Sleep cycle loop error")
 
     # ── Public entry point ────────────────────────────────────────
 

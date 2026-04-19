@@ -37,6 +37,8 @@ VALID_TASK_STATUSES = {"todo", "in_progress", "done", "blocked"}
 class ProjectToolsModule(BaseModule):
     """Exposes create_project / add_project_task / ... to the LLM."""
 
+    SYSTEM = True
+
     def __init__(self):
         super().__init__("project_tools")
 

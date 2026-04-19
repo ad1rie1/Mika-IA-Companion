@@ -14,4 +14,11 @@ CONFIG_SCHEMA = [
         default=30, min=0, max=500,
         hint="0 = désactive la capture prompt/response.",
     ),
+    ConfigItem(
+        key="projects.runner_interval", type="int", section="projects",
+        label="Période runner (s)", env_fallback="PROJECT_RUNNER_INTERVAL",
+        default=30, min=5, max=600, restart_required=True,
+        hint="Cadence de la boucle dédiée qui fait avancer les projets dus. "
+             "Découplée du consolidator — un interval:30s tient vraiment 30s.",
+    ),
 ]

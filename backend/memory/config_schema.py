@@ -39,4 +39,11 @@ CONFIG_SCHEMA = [
         label="Connaissances retournées", env_fallback="MEMORY_RETRIEVAL_CONNAISSANCES",
         default=10, min=1, max=50, hot_reload=True,
     ),
+    ConfigItem(
+        key="memory.sleep_check_interval", type="int", section="memory", group="Consolidation",
+        label="Période check sleep cycle (s)", env_fallback="SLEEP_CHECK_INTERVAL",
+        default=60, min=10, max=600, restart_required=True,
+        hint="Cadence de la boucle dédiée qui appelle sleep_cycle.run_if_due() "
+             "(journal/rêves/digestion). Découplée du consolidator.",
+    ),
 ]

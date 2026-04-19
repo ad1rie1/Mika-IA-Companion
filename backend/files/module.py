@@ -19,6 +19,8 @@ from modules.types import ModuleTool, ToolParameter, ToolParameterType
 class FilesModule(BaseModule):
     """MCP + prompt-context adapter around ``files_service``."""
 
+    SYSTEM = True
+
     def __init__(self) -> None:
         super().__init__("files")
 

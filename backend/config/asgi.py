@@ -39,6 +39,8 @@ class LifespanWrapper:
         from asgiref.sync import sync_to_async
         from conscience.engine import conscience_engine
         from emotion.engine import emotion_engine
+        from memory.sleep import sleep_cycle
+        from projects.runner import project_runner
 
         # Hydrate the quota tracker from DB so counters survive restart.
         try:
@@ -60,6 +62,12 @@ class LifespanWrapper:
         await module_manager.start_all()
         logger.info("All modules started")
 
+        # Dedicated background loops (decoupled from the consolidator since
+        # 2026-04) — one ticks sleep_cycle.run_if_due(), the other ticks
+        # project_runner.tick(). Each has its own configurable cadence.
+        await sleep_cycle.start()
+        await project_runner.start()
+
         # Communication channels (not plugins) — started here on the
         # same footing as the WebSocket consumer, which is wired via
         # ``communication.routing``.
@@ -73,11 +81,26 @@ class LifespanWrapper:
         from communication.channels import telegram_channel
         from emotion.engine import emotion_engine
         from conscience.engine import conscience_engine
+        from memory.sleep import sleep_cycle
+        from projects.runner import project_runner
 
         try:
             await telegram_channel.stop()
         except Exception:
             logger.exception("Telegram channel failed to stop cleanly")
+
+        # Stop dedicated loops first — they only call into sleep_cycle /
+        # project_runner state and don't own DB connections, so they shut
+        # down quickly and cannot starve the managers below.
+        try:
+            await project_runner.stop()
+        except Exception:
+            logger.exception("Project runner loop failed to stop cleanly")
+
+        try:
+            await sleep_cycle.stop()
+        except Exception:
+            logger.exception("Sleep cycle loop failed to stop cleanly")
 
         await conscience_engine.shutdown()
         logger.info("Conscience shut down")

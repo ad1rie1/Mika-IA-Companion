@@ -134,29 +134,38 @@ On AI error or timeout: fallback text returned, **no emotion impulse toward the 
 
 Each module can surface one or more **visualization pages** in the dashboard (boîte de réception, historique RSS, comptes configurés, stats…) symmetrically to `config_schema()`. The core knows nothing module-specific — the shell discovers views at render-time and auto-mounts their URLs.
 
+**Module-author guide**: [backend/modules/plugins/README.md](backend/modules/plugins/README.md) documents the full contract + both rendering approaches with worked examples. Below is a quick reference.
+
 **Contract** ([modules/types.py](backend/modules/types.py::ModuleView)) — a module returns a list of `ModuleView` from `get_views()`:
 
-- `key` — slug unique within the module (used in URLs)
-- `label` / `icon` / `order` — sidebar entry shape
-- `data_handler` — `async (request) -> dict` returning the JSON payload. Reads `request.GET` for `page`, `limit`, `q` and returns `{columns, rows, total, page, limit}` (pagination is the handler's responsibility). Anything else is pretty-printed as JSON by the default renderer
-- `template` — optional template name (e.g. `"email/inbox.html"`) resolved from the module's own `modules/plugins/<name>/templates/` directory; falls back to the generic shell `dashboard/module_view.html`
-- `js` — optional static path loaded via `<script>`. Default: `dashboard/js/views/module_default.js` (generic table + JSON renderer)
-- `actions` — optional list of `ModuleViewAction(key, label, handler, method, confirm)`. Each gets a button in the default renderer and a POST endpoint
+- `key` / `label` / `icon` / `order` — sidebar shape (slug unique within the module)
+- `data_handler` — `async (request) -> dict`. For the generic renderer return `{columns, rows, total, page, limit}`; reads `request.GET` for `page`, `limit`, `q` (pagination is the handler's responsibility). Anything else is pretty-printed as JSON
+- `detail_handler` — `async (request, item_id) -> dict | None`. When set, the generic renderer auto-appends a "Voir" column to rows whose `row[id_field]` is non-null; clicking opens a modal rendering either `{fields: [{label,value}]}` or any flat dict as key/value
+- `id_field` — per-row key holding the identifier passed to `detail_handler` (default `"id"`)
+- `template` — optional template name (e.g. `"email/inbox.html"`) resolved from the module's own `modules/plugins/<name>/templates/` directory. Falls back to `dashboard/module_view.html` (generic shell)
+- `js` — optional static path loaded via `<script>`. When unset, `dashboard/js/views/module_default.js` is used (generic table + detail-modal renderer)
+- `actions` — optional list of `ModuleViewAction(key, label, handler, method, confirm)`. Each gets a button above the content and a POST endpoint
+
+**Two rendering approaches**, freely mixable within a module:
+
+- **Option A (generic shell)** — return `{columns, rows}` + declare `detail_handler`, zero files shipped by the module. Table + "Voir" button + modale auto-rendered.
+- **Option B (custom template + JS)** — ship `modules/plugins/<m>/templates/<m>/<view>.html` + `modules/plugins/<m>/static/<m>/views/<view>.js`, set `template=` / `js=` on the view. Full control over the layout, same data/detail/action endpoints.
+
+Example: [modules/plugins/email/views.py](backend/modules/plugins/email/views.py) uses B for `inbox` (split master/detail mail renderer) and A for `contacts` (auto key/value modal).
 
 **Auto-mounting** — at render time, [pages._build_module_menu](backend/dashboard/views/pages.py) snapshots `module_manager.collect_views()` (running modules only). URLs wired once in [dashboard/urls.py](backend/dashboard/urls.py):
 
 ```
-GET  /dashboard/modules/<module>/<view>/                         HTML shell
-GET  /dashboard/api/modules/<module>/views                       list of views
-GET  /dashboard/api/modules/<module>/views/<view>                data_handler
-POST /dashboard/api/modules/<module>/views/<view>/actions/<key>  action handler
+GET  /dashboard/modules/<module>/<view>/                          HTML shell
+GET  /dashboard/api/modules/<module>/views                        list of views
+GET  /dashboard/api/modules/<module>/views/<view>                 data_handler
+GET  /dashboard/api/modules/<module>/views/<view>/items/<id>      detail_handler
+POST /dashboard/api/modules/<module>/views/<view>/actions/<key>   action handler
 ```
 
 A view is only visible in the sidebar when the module is **enabled AND running**. Disabling a module makes its pages vanish from the nav on the next render. The `/dashboard/api/modules` row also carries a `views: [{key,label,icon,url}]` field, surfaced as chips in the Modules admin page.
 
 **Template + static discovery** — `settings.py` scans `backend/modules/plugins/*/templates` and `backend/modules/plugins/*/static` at import time and adds them to `TEMPLATES[0]['DIRS']` + `STATICFILES_DIRS`. Plugins are sub-packages of the `modules` app, not installed apps themselves, so Django's `APP_DIRS` / `AppDirectoriesFinder` wouldn't find them otherwise. Drop a file in `modules/plugins/email/templates/email/inbox.html` and it resolves as `email/inbox.html` template name; same for static.
-
-**Example — email module** ([modules/plugins/email/views.py](backend/modules/plugins/email/views.py)): three views (`inbox`, `contacts`, `accounts`) all using the generic shell + table renderer. The `inbox` view carries a `mark_all_read` action that flips `is_read` on every inbound email. Adding a new visualization = one function + one `ModuleView` entry, no dashboard changes.
 
 ### Conscience Layer ([conscience/](backend/conscience/))
 
@@ -204,7 +213,7 @@ Counterpart to the Conscience. The consolidator runs all day doing maintenance; 
 2. `conscience.get_idle_seconds() ≥ 900` (15 min without interaction)
 3. `drive_engine.states[REST].tension ≥ 0.5` (Mika earned her sleep)
 
-**Three phases** (invoked by `run_if_due()`, driven from the consolidator loop):
+**Three phases** (invoked by `run_if_due()`, driven from its **own dedicated background loop** started at ASGI lifespan — cadence `memory.sleep_check_interval`, default 60s; decoupled from the consolidator since 2026-04 so a 45s sleep LLM call never delays memory consolidation):
 
 1. **Light sleep** — `_write_journal_if_due()`. One LLM call produces a `DailyJournal` for the date just ended: 1st-person recap narrative (2-4 sentences), key moment ids, dominant emotion, persons interacted, unresolved-at-sleep rumination snapshots. One row per date; re-runs refresh in place.
 
@@ -257,7 +266,7 @@ Standalone Django app. Mika as an **agent with explicit work engagements**: proj
 - `"idle:30m"` — fires when conscience idle seconds >= window
 - `"event:email.new"` — tagged by module bus, `runner.notify_event()` sets `next_run_at = now`
 
-**Runner** ([projects/runner.py](backend/projects/runner.py)): `project_runner` singleton, hooked into the consolidator loop. Per tick: lists due projects, advances up to 3 in priority order, builds a scoped context (no emotion/ruminations/circadian — just project frame + tasks + recent logs + resources), calls the LLM (Haiku), parses a structured JSON output (`summary`, `task_updates`, `new_tasks`, `report_to_user`, `proposed_action`), writes DB changes, logs the tick, bumps `next_run_at`. Side-effect actions on `requires_approval=True` projects queue as `ProjectPendingAction` instead of executing.
+**Runner** ([projects/runner.py](backend/projects/runner.py)): `project_runner` singleton with its **own dedicated background loop** started at ASGI lifespan — cadence `projects.runner_interval`, default 30s; decoupled from the consolidator since 2026-04 so `interval:30s` actually fires at 30s and a blocked 90s LLM advance never starves memory consolidation. Per tick: lists due projects, advances up to 3 in priority order, builds a scoped context (no emotion/ruminations/circadian — just project frame + tasks + recent logs + resources), calls the LLM (Haiku), parses a structured JSON output (`summary`, `task_updates`, `new_tasks`, `report_to_user`, `proposed_action`), writes DB changes, logs the tick, bumps `next_run_at`. Side-effect actions on `requires_approval=True` projects queue as `ProjectPendingAction` instead of executing.
 
 **Runner safeguards**: `runs_since_user_input` caps infinite auto-advance at 10 ticks without user feedback. `MAX_ADVANCES_PER_TICK = 3` prevents LLM bursts.
 
@@ -402,7 +411,9 @@ OAuth tried first, API key as fallback. OAuth tokens start with `sk-ant-oat01-`;
 | `RSS_POLL_INTERVAL` | No | `600` | RSS fetch period (s) |
 | `CHROMA_PERSIST_DIR` | No | `data/chromadb` | ChromaDB on-disk location |
 | `SLEEP_CYCLE_ENABLED` | No | `True` | Master switch for the nighttime sleep cycle (journal + dreams + digestion) |
+| `SLEEP_CHECK_INTERVAL` | No | `60` | Cadence of the dedicated sleep-cycle loop (s). Restart required on change. |
 | `PROJECT_PROMPT_HISTORY_SIZE` | No | `30` | Rolling-buffer size of LLM prompt/response pairs kept per project (audit/debug). Set to `0` to disable capture entirely. |
+| `PROJECT_RUNNER_INTERVAL` | No | `30` | Cadence of the dedicated project runner loop (s). Restart required on change. |
 
 ## Testing notes
 

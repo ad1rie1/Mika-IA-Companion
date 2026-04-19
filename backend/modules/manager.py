@@ -120,6 +120,7 @@ class ModuleManager:
                 "available": module.is_available(),
                 "installed_tables": state.installed_tables if state else [],
                 "has_models": bool(self._safe_models(module)),
+                "system": bool(getattr(module, "SYSTEM", False)),
             })
         return result
 
