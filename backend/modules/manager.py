@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import time
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
 from asgiref.sync import sync_to_async
 from django.urls import path
@@ -21,9 +22,6 @@ from modules.types import (
     ModuleView,
 )
 
-if TYPE_CHECKING:
-    from claude_agent_sdk import McpSdkServerConfig
-
 logger = logging.getLogger(__name__)
 
 DEFAULT_TICK_INTERVAL = 60  # seconds
@@ -33,12 +31,13 @@ class ModuleManager:
     """Central plugin registry, scheduler, tool aggregator, and event bus.
 
     The core never imports specific modules — they register themselves
-    via ``ModulesConfig.ready()``.  This manager handles:
+    via ``ModulesConfig.ready()``. The manager handles:
 
     - Module lifecycle (start / stop)
     - Per-module cron scheduling
-    - AI tool collection via MCP server
-    - Context aggregation for Claude system prompt
+    - Generic ``ModuleTool`` aggregation (no provider-specific knowledge;
+      the AI provider translates the list to its native tool format)
+    - Context aggregation for the system prompt
     - Auto-mounted HTTP routes
     - Inter-module event bus
     - ``notify_ai`` callback injected into every module
@@ -52,7 +51,6 @@ class ModuleManager:
         self._scheduler_task: asyncio.Task | None = None
         self._tick_interval: int = DEFAULT_TICK_INTERVAL
         self._tools_cache: list[ModuleTool] | None = None
-        self._mcp_server: McpSdkServerConfig | None = None
         self._conscience_callback: Callable[[ModuleEvent], Awaitable[None]] | None = None
 
     # ── Registration ──────────────────────────────────────────────
@@ -244,7 +242,6 @@ class ModuleManager:
                 return
 
         self.invalidate_tools_cache()
-        self._build_mcp_server()
         logger.info("Module '%s' enabled", name)
 
     async def disable(self, name: str) -> None:
@@ -268,7 +265,6 @@ class ModuleManager:
 
         self._modules.pop(name, None)
         self.invalidate_tools_cache()
-        self._build_mcp_server()
         logger.info("Module '%s' disabled (tables preserved)", name)
 
     async def uninstall(self, name: str) -> None:
@@ -299,7 +295,6 @@ class ModuleManager:
         )()
         self._modules.pop(name, None)
         self.invalidate_tools_cache()
-        self._build_mcp_server()
         logger.warning("Module '%s' uninstalled (tables dropped)", name)
 
     # ── Lifecycle ─────────────────────────────────────────────────
@@ -345,9 +340,6 @@ class ModuleManager:
             except Exception:
                 logger.exception("Failed to start module %s", module.name)
                 module._running = False
-
-        # Build MCP server from all module tools
-        self._build_mcp_server()
 
         # Start the cron scheduler
         self._scheduler_task = asyncio.create_task(self._scheduler_loop())
@@ -404,7 +396,13 @@ class ModuleManager:
     # ── Tool Aggregation ──────────────────────────────────────────
 
     def collect_tools(self) -> list[ModuleTool]:
-        """Aggregate ``return_tools()`` from all running modules."""
+        """Aggregate ``return_tools()`` from all running modules.
+
+        Handlers are transparently wrapped with logging before being
+        exposed, so every consumer (ClaudeProvider's MCP server, future
+        OpenAI/Gemini function-calling back-ends, the admin UI) gets
+        the same observability for free.
+        """
         if self._tools_cache is not None:
             return self._tools_cache
         tools: list[ModuleTool] = []
@@ -416,70 +414,48 @@ class ModuleManager:
                 if tool.name in seen_names:
                     logger.warning(
                         "Duplicate tool name '%s' from module '%s', skipping",
-                        tool.name,
-                        module.name,
+                        tool.name, module.name,
                     )
                     continue
                 seen_names.add(tool.name)
-                tools.append(tool)
+                tools.append(dataclasses.replace(
+                    tool, handler=self._wrap_handler(tool.name, tool.handler),
+                ))
         self._tools_cache = tools
         return tools
 
+    def get_tools_for_modules(self, module_names: list[str]) -> list[ModuleTool]:
+        """Subset of ``collect_tools()`` scoped to a module allow-list."""
+        wanted = set(module_names)
+        by_name = {}
+        for module_name in wanted:
+            module = self._modules.get(module_name)
+            if module is None or not module.is_running:
+                continue
+            by_name.update({t.name: module_name for t in module.return_tools()})
+        return [t for t in self.collect_tools() if by_name.get(t.name) in wanted]
+
     @staticmethod
     def _wrap_handler(name: str, handler):
-        """Wrap a tool handler with logging."""
+        """Wrap a tool handler with call/return/error logging."""
         async def logged_handler(params):
-            logger.info("MCP tool called: %s (params=%s)", name, params)
+            logger.info("tool called: %s (params=%s)", name, params)
             try:
                 result = await handler(params)
-                logger.info("MCP tool %s returned: %s", name, str(result)[:200])
+                logger.info("tool %s returned: %s", name, str(result)[:200])
                 return result
             except Exception:
-                logger.exception("MCP tool %s failed", name)
+                logger.exception("tool %s failed", name)
                 raise
         return logged_handler
-
-    def _build_mcp_server(self) -> None:
-        """Build an in-process MCP server from all module tools."""
-        from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server
-
-        tools = self.collect_tools()
-        if not tools:
-            self._mcp_server = None
-            return
-
-        sdk_tools = []
-        for t in tools:
-            sdk_tools.append(
-                SdkMcpTool(
-                    name=t.name,
-                    description=t.description,
-                    input_schema=t.to_json_schema(),
-                    handler=self._wrap_handler(t.name, t.handler),
-                )
-            )
-
-        self._mcp_server = create_sdk_mcp_server(
-            name="vtuber_modules",
-            version="1.0.0",
-            tools=sdk_tools,
-        )
-        logger.info(
-            "MCP server built with %d tool(s) from modules", len(sdk_tools)
-        )
-
-    def get_mcp_server(self) -> McpSdkServerConfig | None:
-        """Return the MCP server config for ClaudeAgentOptions."""
-        return self._mcp_server
 
     def get_tool_names(self) -> list[str]:
         """Return all registered tool names for ``allowed_tools``."""
         return [t.name for t in self.collect_tools()]
 
     def invalidate_tools_cache(self) -> None:
-        """Force rebuild of tool cache and MCP server on next use."""
+        """Force rebuild of the tool cache on next access."""
         self._tools_cache = None
-        self._mcp_server = None
 
     # ── Capabilities ─────────────────────────────────────────────
 
@@ -511,53 +487,6 @@ class ModuleManager:
             for cap in caps:
                 lines.append(f"[{module_name}] {cap.description}")
         return "\n".join(lines)
-
-    def get_tools_for_modules(self, module_names: list[str]) -> list[ModuleTool]:
-        """Collect tools only from specific modules (selective loading)."""
-        tools: list[ModuleTool] = []
-        seen: set[str] = set()
-        for name in module_names:
-            module = self._modules.get(name)
-            if not module or not module.is_running:
-                continue
-            for tool in module.return_tools():
-                if tool.name not in seen:
-                    seen.add(tool.name)
-                    tools.append(tool)
-        return tools
-
-    def build_mcp_server_for(self, module_names: list[str]):
-        """Build an MCP server with tools from specific modules only.
-
-        Returns (server_config, tool_names) or (None, []).
-        """
-        from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server
-
-        tools = self.get_tools_for_modules(module_names)
-        if not tools:
-            return None, []
-
-        sdk_tools = [
-            SdkMcpTool(
-                name=t.name,
-                description=t.description,
-                input_schema=t.to_json_schema(),
-                handler=self._wrap_handler(t.name, t.handler),
-            )
-            for t in tools
-        ]
-
-        server = create_sdk_mcp_server(
-            name="vtuber_modules_filtered",
-            version="1.0.0",
-            tools=sdk_tools,
-        )
-        tool_names = [t.name for t in tools]
-        logger.info(
-            "Built filtered MCP server: %d tool(s) from %s",
-            len(sdk_tools), module_names,
-        )
-        return server, tool_names
 
     # ── Context Aggregation ───────────────────────────────────────
 

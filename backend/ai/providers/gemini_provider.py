@@ -113,3 +113,7 @@ class GeminiProvider:
     async def test(self) -> dict:
         from ai.providers import default_test
         return await default_test(self)
+
+    async def complete_with_tools(self, *args, **kwargs):
+        from ai.providers import tools_unsupported
+        return await tools_unsupported("GeminiProvider")

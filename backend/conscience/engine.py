@@ -822,18 +822,17 @@ class ConscienceEngine:
 
             # Override with relevant-only tools
             if relevant_modules:
-                mcp_server, tool_names = module_manager.build_mcp_server_for(
-                    relevant_modules
-                )
+                tools = module_manager.get_tools_for_modules(relevant_modules)
             else:
-                mcp_server, tool_names = None, []
+                tools = []
+            tool_names = [t.name for t in tools]
 
             context = ConversationContext(
                 memory_context=memory_context if memory_context else base_context.memory_context,
                 emotion_context=base_context.emotion_context,
                 module_context=base_context.module_context,
                 history=base_context.history,
-                mcp_server=mcp_server,
+                tools=tools,
                 tool_names=tool_names,
                 self_concept=base_context.self_concept,
                 person_context=base_context.person_context,

@@ -22,7 +22,7 @@ class TestConversationContext:
             emotion_context="happy",
             module_context="3 emails",
             history=[{"role": "user", "content": "hi"}],
-            mcp_server=None,
+            tools=[],
             tool_names=["send_email"],
             self_concept="Je suis",
             person_context="C'est Alice",
@@ -31,7 +31,7 @@ class TestConversationContext:
         assert ctx.emotion_context == "happy"
         assert ctx.module_context == "3 emails"
         assert len(ctx.history) == 1
-        assert ctx.mcp_server is None
+        assert ctx.tools == []
         assert ctx.tool_names == ["send_email"]
         assert ctx.self_concept == "Je suis"
         assert ctx.person_context == "C'est Alice"
@@ -39,7 +39,7 @@ class TestConversationContext:
     def test_self_concept_and_person_context_default_empty(self):
         ctx = ConversationContext(
             memory_context="", emotion_context="", module_context="",
-            history=[], mcp_server=None, tool_names=[],
+            history=[], tools=[], tool_names=[],
         )
         assert ctx.self_concept == ""
         assert ctx.person_context == ""
@@ -68,8 +68,7 @@ class TestGatherContext:
 
         mock_mod = MagicMock()
         mock_mod.collect_context = MagicMock(return_value=module_ctx)
-        mock_mod.get_mcp_server = MagicMock(return_value=None)
-        mock_mod.get_tool_names = MagicMock(return_value=[])
+        mock_mod.collect_tools = MagicMock(return_value=[])
 
         return mock_mem, mock_emo, mock_drive, mock_mod
 
@@ -126,11 +125,10 @@ class TestGatherContext:
         assert ctx.memory_context == ""
 
     @pytest.mark.asyncio
-    async def test_include_tools_false_skips_mcp(self):
+    async def test_include_tools_false_skips_tool_collection(self):
         mocks = self._patch_deps()
         mock_mod = mocks[3]
-        mock_mod.get_mcp_server = MagicMock(return_value=MagicMock())
-        mock_mod.get_tool_names = MagicMock(return_value=["tool"])
+        mock_mod.collect_tools = MagicMock(return_value=[MagicMock(name="tool")])
 
         patches = self._apply_patches(*mocks)
         for p in patches:
@@ -141,17 +139,17 @@ class TestGatherContext:
             for p in reversed(patches):
                 p.stop()
 
-        assert ctx.mcp_server is None
+        assert ctx.tools == []
         assert ctx.tool_names == []
-        mock_mod.get_mcp_server.assert_not_called()
+        mock_mod.collect_tools.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_include_tools_true_calls_mcp(self):
+    async def test_include_tools_true_collects_tools(self):
         mocks = self._patch_deps()
         mock_mod = mocks[3]
-        fake_mcp = MagicMock()
-        mock_mod.get_mcp_server = MagicMock(return_value=fake_mcp)
-        mock_mod.get_tool_names = MagicMock(return_value=["send_email"])
+        fake_tool = MagicMock()
+        fake_tool.name = "send_email"
+        mock_mod.collect_tools = MagicMock(return_value=[fake_tool])
 
         patches = self._apply_patches(*mocks)
         for p in patches:
@@ -162,5 +160,5 @@ class TestGatherContext:
             for p in reversed(patches):
                 p.stop()
 
-        assert ctx.mcp_server is fake_mcp
-        assert "send_email" in ctx.tool_names
+        assert ctx.tools == [fake_tool]
+        assert ctx.tool_names == ["send_email"]

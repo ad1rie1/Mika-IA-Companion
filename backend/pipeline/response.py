@@ -30,12 +30,11 @@ async def call_ai_and_parse(
     )
     user_prompt = format_conversation(message, context.history)
 
-    if context.mcp_server and context.tool_names:
+    if context.tools:
         raw_text, tool_calls = await ai_client.complete_with_tools(
             system_prompt=system,
             user_prompt=user_prompt,
-            mcp_server=context.mcp_server,
-            tool_names=context.tool_names,
+            tools=context.tools,
         )
     else:
         raw_text = await ai_client.complete(

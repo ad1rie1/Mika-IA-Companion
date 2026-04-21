@@ -14,11 +14,15 @@ from typing import Protocol, runtime_checkable
 class AIProvider(Protocol):
     """Minimal interface for AI text completion providers.
 
-    Each provider owns three responsibilities:
-      - ``complete()``    — single-turn generation (no streaming, no tools).
-      - ``list_models()`` — discover the models available with the current
+    Each provider owns four responsibilities:
+      - ``complete()``           — single-turn generation (no streaming, no tools).
+      - ``complete_with_tools()``— tool-enabled generation: caller passes a list of
+        generic ``ModuleTool`` objects, the provider translates to its native tool
+        protocol (MCP for Claude, function-calling for OpenAI/Gemini/GLM, etc.)
+        and runs the tool loop. Callers never see a provider-specific tool format.
+      - ``list_models()``        — discover the models available with the current
         credentials. Drives the "Charger les modèles" button in the UI.
-      - ``test()``        — lightweight liveness check. Default impl just
+      - ``test()``               — lightweight liveness check. Default impl just
         calls ``list_models()`` and counts the result, but providers may
         override if they have a cheaper ping.
     """
@@ -32,6 +36,23 @@ class AIProvider(Protocol):
         temperature: float = 0.7,
     ) -> str: ...
 
+    async def complete_with_tools(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        model: str,
+        tools: list,              # list[ModuleTool] — quoted to avoid import cycle
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ) -> tuple[str, list[str]]:
+        """Run a completion with tool-calling support.
+
+        Returns ``(assistant_text, names_of_tools_called_in_order)``.
+        Providers that don't (yet) support tool calling raise
+        ``NotImplementedError`` — see ``tools_unsupported``.
+        """
+        ...
+
     async def list_models(self) -> list[dict]:
         """Return a list of ``{"id": str, "label": str}`` usable models."""
         ...
@@ -39,6 +60,19 @@ class AIProvider(Protocol):
     async def test(self) -> dict:
         """Return ``{"ok": bool, "model_count": int, "error"?: str}``."""
         ...
+
+
+async def tools_unsupported(provider_name: str) -> "tuple[str, list[str]]":
+    """Baseline ``complete_with_tools`` for providers that don't implement it yet.
+
+    Raises ``NotImplementedError`` with a message suggesting the user
+    map ``AI_ROLE_CONVERSATION_TOOLS`` to a provider that does.
+    """
+    raise NotImplementedError(
+        f"{provider_name} ne supporte pas encore le tool-calling via l'abstraction. "
+        "Associe le rôle 'conversation_tools' à un modèle Claude dans "
+        "Configuration > Fournisseur IA > IA · Rôles."
+    )
 
 
 async def default_test(provider: "AIProvider") -> dict:

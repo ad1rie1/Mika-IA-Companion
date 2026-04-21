@@ -36,11 +36,13 @@ class ClaudeProvider:
 
         # The anthropic SDK supports both api_key and auth_token kwargs.
         # auth_token is used for OAuth-based access (Claude.ai sessions).
+        # claude_agent_sdk (used by complete_with_tools) only reads
+        # credentials from env, so we mirror whichever path we took.
         if auth_token:
-            # claude_agent_sdk also needs this env var for chat_with_tools()
             os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = auth_token
             self._client = AsyncAnthropic(auth_token=auth_token)
         else:
+            os.environ["ANTHROPIC_API_KEY"] = api_key
             self._client = AsyncAnthropic(api_key=api_key)
 
         logger.info("ClaudeProvider initialisé (auth=%s)", "oauth" if auth_token else "api_key")
@@ -114,28 +116,73 @@ class ClaudeProvider:
         from ai.providers import default_test
         return await default_test(self)
 
-    # ── MCP tool loop (Claude-only capability) ────────────────────
+    # ── Tool-enabled completion (via MCP, Claude-specific) ───────
     async def complete_with_tools(
         self,
         system_prompt: str,
         user_prompt: str,
         model: str,
+        tools: list,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
         *,
-        mcp_server=None,
-        tool_names: list[str] | None = None,
         max_turns: int = 10,
     ) -> tuple[str, list[str]]:
-        """MCP-based completion with tool support.
+        """Tool-enabled completion.
 
-        Uses ``claude_agent_sdk.query`` (not the plain anthropic SDK)
-        because the tool loop needs the Agent SDK's streaming
-        bidirectional control-protocol wire. Only Claude exposes this —
-        other providers (OpenAI, Gemini, GLM, Ollama) don't have an
-        equivalent MCP-native integration, which is why this method
-        lives on ``ClaudeProvider`` rather than on the generic protocol.
+        Accepts a list of provider-agnostic ``ModuleTool`` objects —
+        each exposing ``name``, ``description``, ``to_json_schema()``
+        and an async ``handler``. The Claude-specific MCP plumbing
+        (server construction, tool loop, stream parsing) is an internal
+        implementation detail and never leaks out.
 
-        Returns ``(raw_text, list_of_tool_names_called)``.
+        Returns ``(assistant_text, tool_names_called_in_order)``.
         """
+        mcp_server = self._build_mcp_server(tools)
+        return await self._run_tool_loop(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=model,
+            mcp_server=mcp_server,
+            tool_names=[t.name for t in tools],
+            max_turns=max_turns,
+        )
+
+    @staticmethod
+    def _build_mcp_server(tools: list):
+        """Wrap ``tools`` into an in-process Claude-MCP server.
+
+        Encapsulated here so ``claude_agent_sdk`` never escapes the
+        provider boundary. Returns ``None`` when ``tools`` is empty so
+        the tool loop falls back to a plain text completion.
+        """
+        from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server
+
+        if not tools:
+            return None
+        sdk_tools = [
+            SdkMcpTool(
+                name=t.name,
+                description=t.description,
+                input_schema=t.to_json_schema(),
+                handler=t.handler,
+            )
+            for t in tools
+        ]
+        return create_sdk_mcp_server(
+            name="vtuber_modules", version="1.0.0", tools=sdk_tools,
+        )
+
+    @staticmethod
+    async def _run_tool_loop(
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        model: str,
+        mcp_server,
+        tool_names: list[str],
+        max_turns: int,
+    ) -> tuple[str, list[str]]:
         from claude_agent_sdk import (
             AssistantMessage,
             TextBlock,
@@ -148,9 +195,7 @@ class ClaudeProvider:
         allowed_tools: list[str] = []
         if mcp_server is not None:
             mcp_servers["vtuber_modules"] = mcp_server
-            allowed_tools = [
-                f"mcp__vtuber_modules__{name}" for name in (tool_names or [])
-            ]
+            allowed_tools = [f"mcp__vtuber_modules__{n}" for n in tool_names]
 
         options = ClaudeAgentOptions(
             system_prompt=system_prompt,
@@ -172,7 +217,7 @@ class ClaudeProvider:
         response_stream = query(prompt=_prompt_stream(), options=options)
 
         raw_text = ""
-        tool_calls: list[str] = []
+        calls: list[str] = []
         async for msg in response_stream:
             if isinstance(msg, AssistantMessage):
                 for block in msg.content:
@@ -183,7 +228,7 @@ class ClaudeProvider:
                             "Claude called tool: %s (input=%s)",
                             block.name, str(block.input)[:200],
                         )
-                        tool_calls.append(block.name)
-        if tool_calls:
-            logger.info("Tools used in this turn: %s", tool_calls)
-        return raw_text, tool_calls
+                        calls.append(block.name)
+        if calls:
+            logger.info("Tools used in this turn: %s", calls)
+        return raw_text, calls

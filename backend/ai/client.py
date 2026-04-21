@@ -2,12 +2,14 @@
 
 Simple completion via the router (any provider).
 Tool-enabled completion is delegated to ai.tool_client (Claude-only, MCP).
+
+This module carries **no** SDK-specific setup — every credential /
+environment concern (including the ``CLAUDE_CODE_OAUTH_TOKEN`` env var
+that the Claude Agent SDK picks up) is handled inside
+``ClaudeProvider.__init__``. The client is a thin facade.
 """
 
 import logging
-import os
-
-from django.conf import settings
 
 from ai.router import AIRole, ai_router
 from ai.tool_client import complete_with_tools as _complete_with_tools
@@ -16,16 +18,6 @@ logger = logging.getLogger(__name__)
 
 
 class AIClient:
-    def __init__(self):
-        from configs.service import config_service
-        # Ensure env vars are set for claude_agent_sdk (used by tool_client)
-        oauth = config_service.get("ai.claude.oauth_token", default="")
-        api_key = config_service.get("ai.claude.api_key", default="")
-        if oauth:
-            os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = oauth
-        elif api_key:
-            os.environ["ANTHROPIC_API_KEY"] = api_key
-
     # -- Simple completion (no tools) ------------------------------------------
 
     async def complete(
@@ -53,19 +45,21 @@ class AIClient:
         self,
         system_prompt: str,
         user_prompt: str,
-        mcp_server=None,
-        tool_names: list[str] | None = None,
+        tools: list,
     ) -> tuple[str, list[str]]:
-        """Completion with tool support via MCP server.
+        """Tool-enabled completion.
 
-        Delegates to ai.tool_client which handles the full MCP flow.
-        Returns (raw_text, list_of_tool_names_called).
+        ``tools`` is a list of generic ``ModuleTool`` objects. The
+        provider (resolved via the CONVERSATION_TOOLS role) converts
+        them to its native tool format — MCP for Claude, function
+        calling for others.
+
+        Returns ``(raw_text, tool_names_called)``.
         """
         return await _complete_with_tools(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            mcp_server=mcp_server,
-            tool_names=tool_names,
+            tools=tools,
         )
 
 

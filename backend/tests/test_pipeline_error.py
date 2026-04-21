@@ -106,6 +106,6 @@ def _fake_context():
         emotion_context="",
         module_context="",
         history=[],
-        mcp_server=None,
+        tools=[],
         tool_names=[],
     )
