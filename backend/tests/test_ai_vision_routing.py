@@ -7,7 +7,7 @@ capable. This suite checks each provider builds the right payload.
 """
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -21,6 +21,48 @@ def _image_attachment() -> MediaAttachment:
         data="aGVsbG8=",  # base64 shape only
         category="image",
     )
+
+
+class _patched_router:
+    """Context manager giving a fresh ``AIRouter`` with VISION_CAPTION wired.
+
+    The singleton router's config comes from a user-editable config store;
+    tests must not depend on it being populated on disk.
+    """
+
+    def __init__(self, role_map):
+        self.role_map = role_map
+
+    def __enter__(self):
+        from ai.router import AIRouter
+        from configs.service import config_service
+
+        declared: dict[str, dict] = {}
+        role_config: dict[str, str] = {}
+        for role, (provider, model) in self.role_map.items():
+            internal = f"{role.value}-test"
+            declared[internal] = {
+                "provider": provider, "model_id": model, "temperature": 0.7,
+            }
+            role_config[f"ai.role.{role.value}"] = internal
+
+        real_get = config_service.get
+
+        def _fake_get(key, default=""):
+            if key in role_config:
+                return role_config[key]
+            return real_get(key, default=default)
+
+        self._declared_patch = patch("ai.router._load_declared_models", return_value=declared)
+        self._config_patch = patch.object(config_service, "get", side_effect=_fake_get)
+        self._declared_patch.start()
+        self._config_patch.start()
+        self.router = AIRouter()
+        return self.router
+
+    def __exit__(self, *a):
+        self._config_patch.stop()
+        self._declared_patch.stop()
 
 
 @pytest.mark.asyncio
@@ -129,29 +171,29 @@ class TestOllamaProviderImage:
 class TestRouterVisionRole:
 
     async def test_vision_caption_role_configured(self):
-        from ai.router import AIRole, ai_router
-        # Role must exist and map to some provider:model pair
-        provider = ai_router.get_provider_name(AIRole.VISION_CAPTION)
-        model = ai_router.get_model(AIRole.VISION_CAPTION)
+        from ai.router import AIRole
+        with _patched_router({AIRole.VISION_CAPTION: ("claude", "claude-haiku-4-5")}) as router:
+            provider = router.get_provider_name(AIRole.VISION_CAPTION)
+            model = router.get_model(AIRole.VISION_CAPTION)
         assert provider in ("claude", "openai", "ollama")
         assert model  # non-empty
 
     async def test_attachments_passed_through_to_provider(self):
         """ai_router.complete forwards `attachments` kwarg to the provider."""
-        from ai.router import AIRole, AIRouter
+        from ai.router import AIRole
 
-        router = AIRouter()
-        fake_provider = MagicMock()
-        fake_provider.complete = AsyncMock(return_value="caption")
-        router._providers[router.get_provider_name(AIRole.VISION_CAPTION)] = fake_provider
+        with _patched_router({AIRole.VISION_CAPTION: ("claude", "claude-haiku-4-5")}) as router:
+            fake_provider = MagicMock()
+            fake_provider.complete = AsyncMock(return_value="caption")
+            router._providers[router.get_provider_name(AIRole.VISION_CAPTION)] = fake_provider
 
-        attachments = [_image_attachment()]
-        result = await router.complete(
-            role=AIRole.VISION_CAPTION,
-            system_prompt="sys",
-            user_prompt="decris",
-            attachments=attachments,
-        )
+            attachments = [_image_attachment()]
+            result = await router.complete(
+                role=AIRole.VISION_CAPTION,
+                system_prompt="sys",
+                user_prompt="decris",
+                attachments=attachments,
+            )
         assert result == "caption"
         passed = fake_provider.complete.call_args.kwargs["attachments"]
         assert passed is attachments

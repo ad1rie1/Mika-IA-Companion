@@ -46,6 +46,7 @@ class TestErrorDoesNotColorPersonMood:
         from emotion.engine import emotion_engine
         from pipeline import processor
         from pipeline.perception import Perception
+        from configs.service import config_service
 
         pid = "person_under_test_timeout"
         emotion_engine.person_moods.pop(pid, None)
@@ -53,9 +54,17 @@ class TestErrorDoesNotColorPersonMood:
         async def hang(*a, **kw):
             await asyncio.sleep(10)
 
+        # Timeout now comes from config_service, not settings.AI_CALL_TIMEOUT.
+        real_get = config_service.get
+
+        def _fake_get(key, default=None):
+            if key == "ai.call_timeout_seconds":
+                return 0.05
+            return real_get(key, default=default)
+
         with patch.object(processor, "call_ai_and_parse", new=hang), \
              patch.object(processor, "gather_context", new=AsyncMock(return_value=_fake_context())), \
-             patch.object(processor.settings, "AI_CALL_TIMEOUT", 0.05), \
+             patch.object(config_service, "get", side_effect=_fake_get), \
              patch.object(processor, "persist_to_memory", new=AsyncMock()) as persist, \
              patch.object(processor, "emit_communication_event", new=AsyncMock()) as emit, \
              patch.object(processor, "broadcast_to_websocket", new=AsyncMock()):

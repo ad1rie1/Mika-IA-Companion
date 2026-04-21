@@ -215,15 +215,26 @@ class TestTemperamentVariants:
         assert exp_speed > 0.3
 
     def test_melancholic_returns_to_melancholic(self, melancholic_engine):
-        """Melancholic temperament should decay back to the melancholic anchor."""
-        pid = "m"
-        melancholic_engine.process_emotion(EmotionData(Emotion.HAPPY, 0.6), pid)
-        simulate_time_decay(melancholic_engine, 300.0)
+        """Melancholic temperament should decay back to the melancholic anchor.
 
-        mood = melancholic_engine._get_person_mood(pid)
-        mel_anchor = pad.EMOTION_ANCHORS[Emotion.MELANCHOLIC]
-        assert pad.dot(mood.dynamic.position, mel_anchor) > 0, \
-            f"Should drift toward melancholic home, got {mood.emotion.value}"
+        Neutralizes the circadian phase_bias: it adds a time-of-day tint to
+        the oscillator's home vector (magnitude ~0.35) that at some hours
+        pushes the rest-state away from the melancholic anchor, flipping the
+        sign of this assertion. The character's own default_mood pull is
+        what this test is exercising — circadian is a separate concern.
+        """
+        from unittest.mock import patch
+        from emotion import circadian
+
+        pid = "m"
+        with patch.object(circadian, "phase_bias", return_value=(0.0, 0.0, 0.0)):
+            melancholic_engine.process_emotion(EmotionData(Emotion.HAPPY, 0.6), pid)
+            simulate_time_decay(melancholic_engine, 300.0)
+
+            mood = melancholic_engine._get_person_mood(pid)
+            mel_anchor = pad.EMOTION_ANCHORS[Emotion.MELANCHOLIC]
+            assert pad.dot(mood.dynamic.position, mel_anchor) > 0, \
+                f"Should drift toward melancholic home, got {mood.emotion.value}"
 
 
 # ===================================================================

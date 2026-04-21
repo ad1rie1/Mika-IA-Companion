@@ -221,7 +221,15 @@ class TestTrollWithStoicTemperament:
             f"Stoic should barely react to troll: max={max_intensity:.2f}"
 
     def test_stoic_global_barely_moves(self, stoic_engine):
-        play_conversation(stoic_engine, "troll_user", TROLL_CONVERSATION)
+        # Neutralize the circadian phase_bias: it adds ~0.35 magnitude to
+        # the home vector at some hours, which inflates the baseline mood
+        # intensity past the 0.15 stoic threshold. This test is about
+        # emotional-impulse propagation, not time-of-day bias.
+        from unittest.mock import patch
+        from emotion import circadian
+
+        with patch.object(circadian, "phase_bias", return_value=(0.0, 0.0, 0.0)):
+            play_conversation(stoic_engine, "troll_user", TROLL_CONVERSATION)
 
         # global_bleed=0.1, so very little global impact
         assert stoic_engine.global_mood.intensity < 0.15, \

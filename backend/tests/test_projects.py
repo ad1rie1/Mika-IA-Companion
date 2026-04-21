@@ -21,6 +21,23 @@ from django.test import Client
 from django.utils import timezone
 
 
+def _patched_history_size(size: int):
+    """Force the runner's rolling-buffer size via ``config_service``.
+
+    The runner reads ``projects.prompt_history_size`` from the config store,
+    not from Django settings, so overriding the setting is a no-op.
+    """
+    from configs.service import config_service
+    real_get = config_service.get
+
+    def _fake_get(key, default=None):
+        if key == "projects.prompt_history_size":
+            return size
+        return real_get(key, default=default)
+
+    return patch.object(config_service, "get", side_effect=_fake_get)
+
+
 # ---------------------------------------------------------------------------
 # 1. Schedule parser — pure functions
 # ---------------------------------------------------------------------------
@@ -469,70 +486,70 @@ class TestPromptHistory:
         assert ProjectPromptHistory.objects.filter(project=p).count() == 2
 
     @pytest.mark.asyncio
-    async def test_save_prompt_history_writes_row(self, settings):
+    async def test_save_prompt_history_writes_row(self):
         from projects.models import Project, ProjectPromptHistory
         from projects.runner import ProjectRunner
 
         p = await sync_to_async(Project.objects.create)(title="X")
-        settings.PROJECT_PROMPT_HISTORY_SIZE = 30
 
         r = ProjectRunner()
-        await r._save_prompt_history(
-            project_id=p.id,
-            system_prompt="the system",
-            user_prompt="advance",
-            raw_response='ok {"summary": "done"}',
-            parsed_output={"summary": "done"},
-            outcome="ok",
-            duration_ms=120,
-        )
+        with _patched_history_size(30):
+            await r._save_prompt_history(
+                project_id=p.id,
+                system_prompt="the system",
+                user_prompt="advance",
+                raw_response='ok {"summary": "done"}',
+                parsed_output={"summary": "done"},
+                outcome="ok",
+                duration_ms=120,
+            )
         count = await sync_to_async(
             lambda: ProjectPromptHistory.objects.filter(project=p).count()
         )()
         assert count == 1
 
     @pytest.mark.asyncio
-    async def test_save_prompt_history_disabled_when_zero(self, settings):
+    async def test_save_prompt_history_disabled_when_zero(self):
         from projects.models import Project, ProjectPromptHistory
         from projects.runner import ProjectRunner
 
         p = await sync_to_async(Project.objects.create)(title="X")
-        settings.PROJECT_PROMPT_HISTORY_SIZE = 0
 
         r = ProjectRunner()
-        await r._save_prompt_history(
-            project_id=p.id,
-            system_prompt="the system",
-            user_prompt="advance",
-            raw_response="ok",
-            parsed_output=None,
-            outcome="ok",
-            duration_ms=1,
-        )
+        with _patched_history_size(0):
+            await r._save_prompt_history(
+                project_id=p.id,
+                system_prompt="the system",
+                user_prompt="advance",
+                raw_response="ok",
+                parsed_output=None,
+                outcome="ok",
+                duration_ms=1,
+            )
         count = await sync_to_async(
             lambda: ProjectPromptHistory.objects.filter(project=p).count()
         )()
         assert count == 0
 
     @pytest.mark.asyncio
-    async def test_save_prompt_history_enforces_size(self, settings):
+    async def test_save_prompt_history_enforces_size(self):
         from projects.models import Project, ProjectPromptHistory
         from projects.runner import ProjectRunner
 
         p = await sync_to_async(Project.objects.create)(title="X")
-        settings.PROJECT_PROMPT_HISTORY_SIZE = 3
 
         r = ProjectRunner()
-        for i in range(5):
-            await r._save_prompt_history(
-                project_id=p.id,
-                system_prompt=f"s{i}",
-                user_prompt="u",
-                raw_response=f"r{i}",
-                parsed_output=None,
-                outcome="ok",
-                duration_ms=i,
-            )
+        with _patched_history_size(3):
+            for i in range(5):
+                await r._save_prompt_history(
+                    project_id=p.id,
+                    system_prompt=f"s{i}",
+                    user_prompt="u",
+                    raw_response=f"r{i}",
+                    parsed_output=None,
+                    outcome="ok",
+                    duration_ms=i,
+                )
         count = await sync_to_async(
             lambda: ProjectPromptHistory.objects.filter(project=p).count()
         )()

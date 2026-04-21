@@ -4,6 +4,20 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
+def _mock_config(values: dict):
+    """Patch ``config_service.get`` so providers read the given values.
+
+    The providers migrated off ``django.conf.settings`` — all credentials
+    now come from ``configs.service.config_service``.
+    """
+    from configs.service import config_service
+
+    def _fake_get(key, default=""):
+        return values.get(key, default)
+
+    return patch.object(config_service, "get", side_effect=_fake_get)
+
+
 # ===================================================================
 # ClaudeProvider
 # ===================================================================
@@ -12,37 +26,35 @@ class TestClaudeProvider:
 
     def _make_provider(self, api_key="sk-ant-test", oauth_token="", mock_client=None):
         mock_client = mock_client or MagicMock()
-        with patch("ai.providers.claude.settings") as ms, \
-             patch("anthropic.AsyncAnthropic", return_value=mock_client):
-            ms.ANTHROPIC_API_KEY = api_key
-            ms.CLAUDE_OAUTH_TOKEN = oauth_token
+        with _mock_config({
+            "ai.claude.api_key": api_key,
+            "ai.claude.oauth_token": oauth_token,
+        }), patch("anthropic.AsyncAnthropic", return_value=mock_client):
             from ai.providers.claude import ClaudeProvider
             p = ClaudeProvider()
             p._client = mock_client
         return p
 
     def test_init_requires_credentials(self):
-        with patch("ai.providers.claude.settings") as ms:
-            ms.ANTHROPIC_API_KEY = ""
-            ms.CLAUDE_OAUTH_TOKEN = ""
+        with _mock_config({"ai.claude.api_key": "", "ai.claude.oauth_token": ""}):
             from ai.providers.claude import ClaudeProvider
             with pytest.raises(ValueError, match="nécessite"):
                 ClaudeProvider()
 
     def test_init_with_api_key(self):
-        with patch("ai.providers.claude.settings") as ms, \
-             patch("anthropic.AsyncAnthropic") as mock_cls:
-            ms.ANTHROPIC_API_KEY = "sk-ant-api-test"
-            ms.CLAUDE_OAUTH_TOKEN = ""
+        with _mock_config({
+            "ai.claude.api_key": "sk-ant-api-test",
+            "ai.claude.oauth_token": "",
+        }), patch("anthropic.AsyncAnthropic") as mock_cls:
             from ai.providers.claude import ClaudeProvider
             ClaudeProvider()
         mock_cls.assert_called_once_with(api_key="sk-ant-api-test")
 
     def test_init_with_oauth_prefers_token(self):
-        with patch("ai.providers.claude.settings") as ms, \
-             patch("anthropic.AsyncAnthropic") as mock_cls:
-            ms.ANTHROPIC_API_KEY = ""
-            ms.CLAUDE_OAUTH_TOKEN = "sk-ant-oat01-xxx"
+        with _mock_config({
+            "ai.claude.api_key": "",
+            "ai.claude.oauth_token": "sk-ant-oat01-xxx",
+        }), patch("anthropic.AsyncAnthropic") as mock_cls:
             from ai.providers.claude import ClaudeProvider
             ClaudeProvider()
         call_kw = mock_cls.call_args[1]
@@ -107,29 +119,27 @@ class TestOpenAIProvider:
 
     def _make_provider(self, api_key="sk-test", base_url="", mock_client=None):
         mock_client = mock_client or MagicMock()
-        with patch("ai.providers.openai_provider.settings") as ms, \
-             patch("openai.AsyncOpenAI", return_value=mock_client):
-            ms.OPENAI_API_KEY = api_key
-            ms.OPENAI_BASE_URL = base_url
+        with _mock_config({
+            "ai.openai.api_key": api_key,
+            "ai.openai.base_url": base_url,
+        }), patch("openai.AsyncOpenAI", return_value=mock_client):
             from ai.providers.openai_provider import OpenAIProvider
             p = OpenAIProvider()
             p._client = mock_client
         return p
 
     def test_init_missing_api_key_raises(self):
-        with patch("ai.providers.openai_provider.settings") as ms, \
+        with _mock_config({"ai.openai.api_key": "", "ai.openai.base_url": ""}), \
              patch("openai.AsyncOpenAI"):
-            ms.OPENAI_API_KEY = ""
-            ms.OPENAI_BASE_URL = ""
             from ai.providers.openai_provider import OpenAIProvider
-            with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+            with pytest.raises(ValueError, match="ai\\.openai\\.api_key"):
                 OpenAIProvider()
 
     def test_init_passes_custom_base_url(self):
-        with patch("ai.providers.openai_provider.settings") as ms, \
-             patch("openai.AsyncOpenAI") as mock_cls:
-            ms.OPENAI_API_KEY = "sk-test"
-            ms.OPENAI_BASE_URL = "https://api.groq.com"
+        with _mock_config({
+            "ai.openai.api_key": "sk-test",
+            "ai.openai.base_url": "https://api.groq.com",
+        }), patch("openai.AsyncOpenAI") as mock_cls:
             from ai.providers.openai_provider import OpenAIProvider
             OpenAIProvider()
         assert mock_cls.call_args[1]["base_url"] == "https://api.groq.com"
@@ -169,26 +179,23 @@ class TestOllamaProvider:
 
     def _make_provider(self, host="", mock_client=None):
         mock_client = mock_client or MagicMock()
-        with patch("ai.providers.ollama_provider.settings") as ms, \
+        with _mock_config({"ai.ollama.base_url": host}), \
              patch("ollama.AsyncClient", return_value=mock_client):
-            ms.OLLAMA_BASE_URL = host
             from ai.providers.ollama_provider import OllamaProvider
             p = OllamaProvider()
             p._client = mock_client
         return p
 
     def test_init_default_host(self):
-        with patch("ai.providers.ollama_provider.settings") as ms, \
+        with _mock_config({"ai.ollama.base_url": ""}), \
              patch("ollama.AsyncClient") as mock_cls:
-            ms.OLLAMA_BASE_URL = ""
             from ai.providers.ollama_provider import OllamaProvider
             OllamaProvider()
         assert mock_cls.call_args[1]["host"] == "http://localhost:11434"
 
     def test_init_custom_host(self):
-        with patch("ai.providers.ollama_provider.settings") as ms, \
+        with _mock_config({"ai.ollama.base_url": "http://192.168.1.10:11434"}), \
              patch("ollama.AsyncClient") as mock_cls:
-            ms.OLLAMA_BASE_URL = "http://192.168.1.10:11434"
             from ai.providers.ollama_provider import OllamaProvider
             OllamaProvider()
         assert mock_cls.call_args[1]["host"] == "http://192.168.1.10:11434"
