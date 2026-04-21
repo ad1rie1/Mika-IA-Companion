@@ -368,6 +368,31 @@ td small { color: var(--text-dim); display: block; margin-top: 2px; }
 .form-field.checkbox { flex-direction: row; align-items: center; gap: 8px; }
 .form-field.checkbox label { text-transform: none; letter-spacing: 0; font-size: 12px; color: var(--text); }
 
+/* Config editor scalar fields — the renderInput() output places inputs
+   inside .cfg-fields (outside .form-field), so reapply the same themed
+   look so a <select> doesn't show up as a raw browser white box. */
+.cfg-fields input[type=text],
+.cfg-fields input[type=number],
+.cfg-fields input[type=password],
+.cfg-fields textarea,
+.cfg-fields select {
+  background: rgba(10,16,32,0.6); color: var(--text);
+  border: 1px solid var(--border); padding: 8px 10px; border-radius: 6px;
+  font-family: inherit; font-size: 12px; outline: none; min-width: 220px;
+}
+.cfg-fields select { appearance: none; -webkit-appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
+                    linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
+  background-position: calc(100% - 16px) 50%, calc(100% - 11px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat; padding-right: 28px; }
+.cfg-fields input:focus,
+.cfg-fields textarea:focus,
+.cfg-fields select:focus {
+  border-color: var(--border-strong); box-shadow: 0 0 0 2px rgba(94,225,255,0.08);
+}
+.cfg-fields select option { background: #0a1020; color: var(--text); }
+
 @media (max-width: 760px) {
   .form-grid { grid-template-columns: 1fr; }
   .modal-backdrop { padding: 10px; }

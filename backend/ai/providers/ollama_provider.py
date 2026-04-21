@@ -34,6 +34,7 @@ class OllamaProvider:
         if not host:
             host = "http://localhost:11434"
 
+        self._host = host
         self._client = AsyncClient(host=host)
 
         logger.info("OllamaProvider initialisé (host=%s)", host)
@@ -79,3 +80,27 @@ class OllamaProvider:
         )
 
         return response.message.content or ""
+
+    async def list_models(self) -> list[dict]:
+        """List models available on the configured Ollama server.
+
+        The ollama SDK exposes this, but some releases disagree on the
+        return shape; we go through plain HTTP to stay version-agnostic
+        and keep a single representation.
+        """
+        import httpx
+        url = f"{self._host.rstrip('/')}/api/tags"
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            data = resp.json()
+        out = []
+        for m in data.get("models", []):
+            mid = m.get("name") or m.get("model") or ""
+            if mid:
+                out.append({"id": mid, "label": mid})
+        return out
+
+    async def test(self) -> dict:
+        from ai.providers import default_test
+        return await default_test(self)

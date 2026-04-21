@@ -13,10 +13,40 @@ Dash.render(async (root) => {
   ]);
   const sections = (schemaRes && schemaRes.sections) || [];
   let values = (valuesRes && valuesRes.values) || {};
-  let activeKey = sections[0] ? sections[0].key : null;
 
   // Rows cache per record_list key → { key: rows[] }
   const rowsCache = {};
+
+  // ── Tabs ──────────────────────────────────────────────────────
+  // Group every section into 4 top-level tabs based on its key.
+  // The left sidebar is filtered to the active tab; sections keep
+  // their own order within.
+  function tabOf(section) {
+    const k = section.key || "";
+    // Fournisseur IA : auth des providers + catalogue de modèles +
+    // mapping rôle → modèle déclaré. Tout ce qui relie un provider à
+    // une utilisation est groupé ici.
+    if (k === "ai_providers" || k === "ai_models" || k === "ai_roles") return "provider";
+    if (k.startsWith("comm_")) return "comm";
+    if (k === "modules_runtime" || k.startsWith("module_")) return "modules";
+    return "ia";
+  }
+  const TABS = [
+    { key: "provider", label: "Configuration Fournisseur IA" },
+    { key: "ia",       label: "Configuration IA" },
+    { key: "comm",     label: "Configuration Communication" },
+    { key: "modules",  label: "Configuration Modules" },
+  ];
+  const TAB_STORE = "dash.config.tab";
+  const readStoredTab = () => {
+    try { return localStorage.getItem(TAB_STORE); } catch (_) { return null; }
+  };
+  const writeStoredTab = k => {
+    try { localStorage.setItem(TAB_STORE, k); } catch (_) {}
+  };
+  let activeTab = TABS.some(t => t.key === readStoredTab()) ? readStoredTab() : "provider";
+  const sectionsForTab = t => sections.filter(s => tabOf(s) === t);
+  let activeKey = (sectionsForTab(activeTab)[0] || {}).key || null;
 
   async function sendJSON(url, method, body) {
     const r = await fetch(url, {
@@ -31,15 +61,45 @@ Dash.render(async (root) => {
 
   // ── Layout ────────────────────────────────────────────────────
   root.innerHTML = `
+    <div class="card mb" id="cfg-tabs" style="padding:8px 10px;display:flex;gap:8px;flex-wrap:wrap"></div>
     <div class="cfg-wrap" style="display:grid;grid-template-columns:240px 1fr;gap:14px;align-items:start">
       <aside class="card cfg-nav" style="padding:8px;position:sticky;top:8px;max-height:calc(100vh - 130px);overflow-y:auto"></aside>
       <section id="cfg-content"></section>
     </div>`;
+  const tabsEl = root.querySelector("#cfg-tabs");
   const navEl = root.querySelector(".cfg-nav");
   const contentEl = root.querySelector("#cfg-content");
 
+  function renderTabs() {
+    tabsEl.innerHTML = TABS.map(t => {
+      const count = sectionsForTab(t.key).length;
+      return `
+        <button class="btn ${t.key === activeTab ? "primary" : "ghost"}"
+                data-tab="${t.key}">
+          ${escapeHTML(t.label)}
+          <span class="muted" style="margin-left:6px;font-size:0.85em">${count}</span>
+        </button>`;
+    }).join("");
+    tabsEl.querySelectorAll("button[data-tab]").forEach(btn => {
+      btn.onclick = () => {
+        activeTab = btn.dataset.tab;
+        writeStoredTab(activeTab);
+        const first = sectionsForTab(activeTab)[0];
+        activeKey = first ? first.key : null;
+        renderTabs();
+        renderNav();
+        renderContent();
+      };
+    });
+  }
+
   function renderNav() {
-    navEl.innerHTML = sections.map(s => `
+    const visible = sectionsForTab(activeTab);
+    if (!visible.length) {
+      navEl.innerHTML = `<div class="muted" style="padding:8px">Aucune section dans cet onglet.</div>`;
+      return;
+    }
+    navEl.innerHTML = visible.map(s => `
       <div class="menu-item ${s.key === activeKey ? "active" : ""}" data-sec="${s.key}">
         <span class="ico">${s.icon || "⚙"}</span>
         <span class="label">${escapeHTML(s.label)}</span>
@@ -151,6 +211,10 @@ Dash.render(async (root) => {
 
   // ── Section content ───────────────────────────────────────────
   async function renderContent() {
+    if (!activeKey) {
+      contentEl.innerHTML = `<div class="empty">Aucune section à afficher dans cet onglet.</div>`;
+      return;
+    }
     const section = sections.find(s => s.key === activeKey);
     if (!section) { contentEl.innerHTML = `<div class="empty">Section inconnue.</div>`; return; }
 
@@ -162,6 +226,22 @@ Dash.render(async (root) => {
     }
 
     const groupNames = Object.keys(groups);
+    // A group's label (e.g. "Claude", "OpenAI") maps 1:1 to a provider
+    // inside the ai_providers section — we use it to wire the Tester
+    // button below.
+    const PROVIDER_BY_GROUP = {
+      claude: "claude", openai: "openai", gemini: "gemini", glm: "glm", ollama: "ollama",
+    };
+    const providerTestSlot = g => {
+      if (section.key !== "ai_providers") return "";
+      const provider = PROVIDER_BY_GROUP[(g || "").toLowerCase()];
+      if (!provider) return "";
+      return `
+        <div class="cfg-provider-test" data-provider="${provider}" style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="btn" data-act="test">Tester la communication</button>
+          <span class="muted cfg-test-out" data-for="${provider}"></span>
+        </div>`;
+    };
     contentEl.innerHTML = `
       <div class="card mb">
         <h3>${escapeHTML(section.label)}<span class="tag">${section.items.length} paramètre(s)</span></h3>
@@ -172,10 +252,12 @@ Dash.render(async (root) => {
         <div class="card mb">
           ${g ? `<h3>${escapeHTML(g)}</h3>` : ""}
           <div class="cfg-fields" data-group="${escapeHTML(g)}"></div>
+          ${providerTestSlot(g)}
         </div>`).join("")}
     `;
 
     wireModuleBanner(section);
+    wireProviderTesters();
 
     // Render fields per group
     for (const g of groupNames) {
@@ -328,6 +410,195 @@ Dash.render(async (root) => {
     setTimeout(() => { btn.textContent = orig; btn.style.color = ""; }, 1200);
   }
 
+  // ── Provider test button ──────────────────────────────────────
+  // Hits /dashboard/api/providers/<name>/test which pings the SDK
+  // with currently-stored credentials and reports model count back.
+  function wireProviderTesters() {
+    contentEl.querySelectorAll(".cfg-provider-test").forEach(host => {
+      const provider = host.dataset.provider;
+      const btn = host.querySelector("button[data-act=test]");
+      const out = host.querySelector(".cfg-test-out");
+      if (!btn || !provider) return;
+      btn.onclick = async () => {
+        out.textContent = "Test en cours…";
+        out.style.color = "";
+        btn.disabled = true;
+        try {
+          const r = await fetch(`/dashboard/api/providers/${encodeURIComponent(provider)}/test`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+          });
+          const j = await r.json().catch(() => ({}));
+          if (j.ok) {
+            out.textContent = `OK — ${j.model_count} modèle(s) disponibles.`;
+            out.style.color = "var(--green)";
+          } else {
+            out.textContent = `Échec : ${j.error || ("HTTP " + r.status)}`;
+            out.style.color = "var(--red)";
+          }
+        } catch (e) {
+          out.textContent = `Erreur réseau : ${e.message}`;
+          out.style.color = "var(--red)";
+        } finally {
+          btn.disabled = false;
+        }
+      };
+    });
+  }
+
+  // ── Custom row editor for ai.models ───────────────────────────
+  // The generic openRowEditor lets the user type any model name, which
+  // violates the requirement that model ids must come from the provider
+  // itself. This editor enforces: pick provider → load list → pick one.
+  async function openModelRowEditor(item, row) {
+    const isNew = !row;
+    const payload = row ? (row.payload || {}) : {};
+    const initialProvider = payload.provider || "claude";
+    const initialModel = payload.model_id || "";
+    const providers = ["claude", "openai", "gemini", "glm", "ollama"];
+
+    const body = `
+      <form id="rl-form" class="form-grid">
+        <div class="form-field">
+          <label>Nom interne</label>
+          <input name="internal_name" type="text" value="${escapeHTML(payload.internal_name || "")}" required
+                 placeholder="ex. fast-chat, smart-vision" />
+          <div class="hint">Identifiant libre utilisé par les rôles IA.</div>
+        </div>
+        <div class="form-field">
+          <label>Fournisseur</label>
+          <select name="provider">
+            ${providers.map(p => `<option value="${p}" ${p === initialProvider ? "selected" : ""}>${p}</option>`).join("")}
+          </select>
+        </div>
+        <div class="form-field full">
+          <label>Modèle</label>
+          <button type="button" class="btn primary" id="rl-load"
+                  style="align-self:flex-start;margin-bottom:6px">
+            ⟲ Charger les modèles depuis le provider
+          </button>
+          <select name="model_id" disabled>
+            ${initialModel
+              ? `<option value="${escapeHTML(initialModel)}" selected>${escapeHTML(initialModel)}</option>`
+              : `<option value="">(cliquez sur « Charger les modèles »)</option>`}
+          </select>
+          <div class="hint" id="rl-load-status">
+            Les modèles sont fournis par le SDK du provider — aucune saisie libre.
+          </div>
+        </div>
+        <div class="form-field">
+          <label>Température</label>
+          <input name="temperature" type="number" step="any" min="0" max="2"
+                 value="${payload.temperature != null ? payload.temperature : 0.7}" />
+        </div>
+        <div class="form-field checkbox full">
+          <input type="checkbox" id="rl-enabled" ${(row?.enabled ?? true) ? "checked" : ""} />
+          <label for="rl-enabled">Activé</label>
+        </div>
+      </form>`;
+
+    const footer = [
+      { label: "Annuler", ghost: true, onClick: m => m.close() },
+    ];
+    if (!isNew) {
+      footer.push({
+        label: "Supprimer", danger: true,
+        onClick: async m => {
+          if (!(await confirm("Supprimer ce modèle déclaré ?", { danger: true }))) return;
+          try {
+            await sendJSON(`/dashboard/api/config/rows/${row.row_id}?parent_key=${encodeURIComponent(item.key)}`, "DELETE");
+            m.close();
+            await loadAndRenderRows(item);
+          } catch (e) { alert("Erreur: " + e.message); }
+        },
+      });
+    }
+    footer.push({
+      label: isNew ? "Créer" : "Enregistrer", primary: true,
+      onClick: async m => {
+        const form = m.body.querySelector("#rl-form");
+        const internalName = (form.querySelector("[name=internal_name]").value || "").trim();
+        const provider = form.querySelector("[name=provider]").value;
+        const modelId = form.querySelector("[name=model_id]").value;
+        const temperature = parseFloat(form.querySelector("[name=temperature]").value);
+        if (!internalName) { alert("Le nom interne est obligatoire."); return; }
+        if (!modelId) { alert("Sélectionne un modèle (bouton 'Charger les modèles')."); return; }
+        const payload = {
+          internal_name: internalName,
+          provider,
+          model_id: modelId,
+          temperature: isNaN(temperature) ? 0.7 : temperature,
+          enabled: form.querySelector("#rl-enabled").checked,
+        };
+        try {
+          if (isNew) {
+            await sendJSON(`/dashboard/api/config/rows/create`, "POST", { parent_key: item.key, payload });
+          } else {
+            await sendJSON(`/dashboard/api/config/rows/${row.row_id}`, "PATCH", { parent_key: item.key, payload });
+          }
+          m.close();
+          await loadAndRenderRows(item);
+        } catch (e) { alert("Erreur: " + e.message); }
+      },
+    });
+
+    const modal = openModal({
+      title: isNew ? "Déclarer un modèle" : `Éditer — ${payload.internal_name || ""}`,
+      body, footer,
+    });
+
+    const form = modal.body.querySelector("#rl-form");
+    const loadBtn = form.querySelector("#rl-load");
+    const statusEl = form.querySelector("#rl-load-status");
+    const modelSel = form.querySelector("[name=model_id]");
+    const providerSel = form.querySelector("[name=provider]");
+
+    async function loadModels() {
+      const prov = providerSel.value;
+      statusEl.textContent = `Requête ${prov}…`;
+      statusEl.style.color = "";
+      loadBtn.disabled = true;
+      try {
+        const r = await fetch(`/dashboard/api/providers/${encodeURIComponent(prov)}/models`);
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || !Array.isArray(j.models)) {
+          throw new Error(j.error || ("HTTP " + r.status));
+        }
+        if (!j.models.length) {
+          statusEl.textContent = `Aucun modèle retourné par ${prov}.`;
+          statusEl.style.color = "var(--amber)";
+          modelSel.innerHTML = `<option value="">(aucun)</option>`;
+          modelSel.disabled = true;
+          return;
+        }
+        const selected = initialModel && j.models.some(m => m.id === initialModel) ? initialModel : j.models[0].id;
+        modelSel.innerHTML = j.models.map(m =>
+          `<option value="${escapeHTML(m.id)}" ${m.id === selected ? "selected" : ""}>${escapeHTML(m.label || m.id)}</option>`
+        ).join("");
+        modelSel.disabled = false;
+        statusEl.textContent = `${j.models.length} modèle(s) chargés depuis ${prov}.`;
+        statusEl.style.color = "var(--green)";
+      } catch (e) {
+        statusEl.textContent = `Erreur : ${e.message}`;
+        statusEl.style.color = "var(--red)";
+      } finally {
+        loadBtn.disabled = false;
+      }
+    }
+
+    loadBtn.onclick = loadModels;
+    // Changing provider invalidates the current list → auto-reload so
+    // the user never stares at an empty select.
+    providerSel.onchange = () => {
+      modelSel.innerHTML = `<option value="">(chargement…)</option>`;
+      modelSel.disabled = true;
+      loadModels();
+    };
+    // Kick off a load on open so the select is populated immediately
+    // for the selected provider.
+    loadModels();
+  }
+
   // ── record_list rendering ─────────────────────────────────────
   async function loadAndRenderRows(item) {
     const host = contentEl.querySelector(`.cfg-rl[data-parent="${item.key}"]`);
@@ -370,11 +641,12 @@ Dash.render(async (root) => {
         </table>` : `<div class="muted">Aucun élément — clique <b>+ Ajouter</b>.</div>`}
     `;
 
-    host.querySelector(".cfg-rl-add").onclick = () => openRowEditor(item, null);
+    const editor = item.key === "ai.models" ? openModelRowEditor : openRowEditor;
+    host.querySelector(".cfg-rl-add").onclick = () => editor(item, null);
     host.querySelectorAll("tr[data-rid]").forEach(tr => {
       const rid = tr.dataset.rid;
       const row = rows.find(r => r.row_id === rid);
-      tr.querySelector(".cfg-rl-edit").onclick = () => openRowEditor(item, row);
+      tr.querySelector(".cfg-rl-edit").onclick = () => editor(item, row);
       tr.querySelector(".cfg-rl-del").onclick = async () => {
         if (!(await confirm(`Supprimer cet élément ?`, { danger: true }))) return;
         try {
@@ -479,6 +751,7 @@ Dash.render(async (root) => {
     return `<input type="${inputType}" ${step ? `step="${step}"` : ""} name="${f.key}" value="${val != null ? escapeHTML(String(val)) : ""}" />`;
   }
 
+  renderTabs();
   renderNav();
   renderContent();
 });

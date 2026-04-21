@@ -1,10 +1,12 @@
-"""AI Router — maps function roles to provider+model pairs.
+"""AI Router — maps function roles to *declared models*.
 
-Each function in the system (conversation, email triage, memory extraction, etc.)
-can be independently assigned to a different AI provider and model via settings.
+Each function in the system (conversation, email triage, memory extraction,
+etc.) is assigned to a role. A role points to a **declared model** by its
+internal name. A declared model is a row of ``ai.models`` config carrying
+(internal_name, provider, model_id, temperature).
 
-All AI calls pass through the router, which provides unified logging:
-timing, role, provider, model, and response length for every call.
+The UI prevents free-text editing: declared models come from the provider
+SDKs, and roles pick only among declared internal names.
 """
 
 from __future__ import annotations
@@ -13,10 +15,10 @@ import logging
 import time
 from enum import Enum
 
-from django.conf import settings
-
 from ai.providers import AIProvider
 from ai.providers.claude import ClaudeProvider
+from ai.providers.gemini_provider import GeminiProvider
+from ai.providers.glm_provider import GLMProvider
 from ai.providers.ollama_provider import OllamaProvider
 from ai.providers.openai_provider import OpenAIProvider
 from ai.quota import (
@@ -48,23 +50,53 @@ class AIRole(str, Enum):
 _PROVIDER_CLASSES: dict[str, type] = {
     "claude": ClaudeProvider,
     "openai": OpenAIProvider,
+    "gemini": GeminiProvider,
+    "glm": GLMProvider,
     "ollama": OllamaProvider,
 }
 
 
-def _parse_role_setting(value: str) -> tuple[str, str]:
-    """Parse a 'provider:model' string. Returns (provider_name, model_name)."""
-    if ":" not in value:
-        raise ValueError(
-            f"Format invalide '{value}'. Attendu 'provider:model' "
-            f"(ex: 'claude:claude-opus-4-6', 'openai:gpt-4o-mini')"
-        )
-    provider, model = value.split(":", 1)
-    return provider.strip().lower(), model.strip()
+def _load_declared_models() -> dict[str, dict]:
+    """Return {internal_name: {provider, model_id, temperature}} from ai.models rows.
+
+    Disabled rows are excluded — useful to park a model temporarily
+    without losing its config.
+    """
+    from configs.service import config_service
+    try:
+        rows = config_service.list_rows("ai.models", decrypt_secrets=False)
+    except KeyError:
+        return {}
+    out: dict[str, dict] = {}
+    for row in rows:
+        if not row.get("enabled", True):
+            continue
+        payload = row.get("payload") or {}
+        name = (payload.get("internal_name") or "").strip()
+        if not name:
+            continue
+        provider = (payload.get("provider") or "").strip().lower()
+        model_id = (payload.get("model_id") or "").strip()
+        if not provider or not model_id:
+            continue
+        try:
+            temperature = float(payload.get("temperature", 0.7))
+        except (TypeError, ValueError):
+            temperature = 0.7
+        out[name] = {
+            "provider": provider,
+            "model_id": model_id,
+            "temperature": temperature,
+        }
+    return out
+
+
+class UnconfiguredRoleError(RuntimeError):
+    """Raised when a role is requested but has no valid declared model."""
 
 
 class AIRouter:
-    """Routes AI completion requests to the appropriate provider+model.
+    """Routes AI completion requests to the provider+model of a declared model.
 
     Providers are instantiated lazily on first use. If a provider's
     dependencies are missing (e.g. openai package not installed),
@@ -73,57 +105,66 @@ class AIRouter:
 
     def __init__(self):
         self._providers: dict[str, AIProvider] = {}
-        self._role_config: dict[AIRole, tuple[str, str]] = {}
+        self._role_to_internal: dict[AIRole, str] = {}
         self._load_config()
 
-    def _load_config(self):
-        """Read role → provider:model mappings from the config service."""
-        from configs.service import config_service
+    # ── Configuration loading ───────────────────────────────────
 
-        default_heavy = config_service.get("ai.claude.default_model", default="claude-opus-4-6")
-        default_light = config_service.get("ai.claude.light_model", default="claude-sonnet-4-5")
+    def _load_config(self):
+        """Read role → internal_name mappings from the config service."""
+        from configs.service import config_service
 
         role_keys = {
-            AIRole.CONVERSATION:          ("ai.role.conversation",          f"claude:{default_heavy}"),
-            AIRole.CONVERSATION_TOOLS:    ("ai.role.conversation_tools",    f"claude:{default_heavy}"),
-            AIRole.EMAIL_TRIAGE:          ("ai.role.email_triage",          f"claude:{default_light}"),
-            AIRole.SIGNAL_INTERPRETATION: ("ai.role.signal_interpretation", f"claude:{default_light}"),
-            AIRole.MEMORY_EXTRACTION:     ("ai.role.memory_extraction",     f"claude:{default_light}"),
-            AIRole.VALIDITY_CHECK:        ("ai.role.validity_check",        f"claude:{default_light}"),
-            # Vision defaults to Claude because other providers' multimodal
-            # support in this codebase is limited (see ai/providers/*).
-            AIRole.VISION_CAPTION:        ("ai.role.vision_caption",        f"claude:{default_light}"),
+            AIRole.CONVERSATION:          "ai.role.conversation",
+            AIRole.CONVERSATION_TOOLS:    "ai.role.conversation_tools",
+            AIRole.EMAIL_TRIAGE:          "ai.role.email_triage",
+            AIRole.SIGNAL_INTERPRETATION: "ai.role.signal_interpretation",
+            AIRole.MEMORY_EXTRACTION:     "ai.role.memory_extraction",
+            AIRole.VALIDITY_CHECK:        "ai.role.validity_check",
+            AIRole.VISION_CAPTION:        "ai.role.vision_caption",
         }
+        for role, cfg_key in role_keys.items():
+            name = (config_service.get(cfg_key, default="") or "").strip()
+            if name:
+                self._role_to_internal[role] = name
 
-        for role, (cfg_key, fallback) in role_keys.items():
-            raw = config_service.get(cfg_key, default="") or fallback
-            provider_name, model_name = _parse_role_setting(raw)
-            self._role_config[role] = (provider_name, model_name)
-
-        # Hot-reload on any ai.role.* change → rebuild role mapping
         config_service.on_change("ai.role.", lambda k, v: self._reload_role(k, v))
-        config_service.on_change("ai.claude.default_model", lambda k, v: self._load_config())
-        config_service.on_change("ai.claude.light_model",   lambda k, v: self._load_config())
 
     def _reload_role(self, key: str, value):
-        from configs.service import config_service
         role_key = key.split("ai.role.", 1)[-1]
         try:
             role = AIRole(role_key)
         except ValueError:
             return
-        raw = config_service.get(key, default="") or ""
-        if not raw:
-            return
-        try:
-            self._role_config[role] = _parse_role_setting(raw)
-        except Exception:
-            logger.exception("Invalid role config %s=%r", key, raw)
+        self._role_to_internal[role] = (value or "").strip()
+        logger.info(
+            "AI Router role reloaded: %s → %s",
+            role.value, self._role_to_internal[role] or "(vide)",
+        )
 
-        configured = {
-            role.value: f"{p}:{m}" for role, (p, m) in self._role_config.items()
-        }
-        logger.info("AI Router configured: %s", configured)
+    # ── Resolution ───────────────────────────────────────────────
+
+    def _resolve(self, role: AIRole) -> tuple[str, str, float, str]:
+        """Role → (provider, model_id, temperature, internal_name).
+
+        Raises UnconfiguredRoleError if the role is missing or points to
+        an unknown / disabled declared model.
+        """
+        internal_name = self._role_to_internal.get(role, "").strip()
+        if not internal_name:
+            raise UnconfiguredRoleError(
+                f"Aucun modèle déclaré n'est associé au rôle '{role.value}'. "
+                "Déclare un modèle dans Configuration > Déclaration des modèles "
+                "puis mappe-le dans IA · Rôles."
+            )
+        declared = _load_declared_models()
+        entry = declared.get(internal_name)
+        if entry is None:
+            raise UnconfiguredRoleError(
+                f"Le rôle '{role.value}' pointe sur '{internal_name}' "
+                "qui n'est pas (ou plus) déclaré."
+            )
+        return entry["provider"], entry["model_id"], entry["temperature"], internal_name
 
     def _get_provider(self, provider_name: str) -> AIProvider:
         """Get or lazily create a provider instance."""
@@ -139,15 +180,21 @@ class AIRouter:
             logger.info("Provider '%s' initialisé", provider_name)
         return self._providers[provider_name]
 
+    def reset_provider(self, provider_name: str) -> None:
+        """Drop a cached provider so the next call re-reads its credentials."""
+        self._providers.pop(provider_name, None)
+
     def get_model(self, role: AIRole) -> str:
-        """Return the model name configured for a role."""
-        _, model = self._role_config[role]
+        """Return the model_id configured for a role."""
+        _, model, _, _ = self._resolve(role)
         return model
 
     def get_provider_name(self, role: AIRole) -> str:
         """Return the provider name configured for a role."""
-        provider_name, _ = self._role_config[role]
-        return provider_name
+        provider, _, _, _ = self._resolve(role)
+        return provider
+
+    # ── Completion ───────────────────────────────────────────────
 
     async def complete(
         self,
@@ -161,17 +208,17 @@ class AIRouter:
         Wraps every call with unified logging: timing, role, provider,
         model, prompt size, and response size.
         """
-        provider_name, model = self._role_config[role]
+        provider_name, model, temperature, internal_name = self._resolve(role)
         provider = self._get_provider(provider_name)
+
+        # Role-configured temperature wins unless the caller overrides it.
+        kwargs.setdefault("temperature", temperature)
 
         prompt_chars = len(system_prompt) + len(user_prompt)
         t0 = time.monotonic()
 
-        # Project attribution (set by ProjectRunner via the context var).
         project_id = current_project_id.get()
 
-        # Pre-call quota enforcement — refuse before we burn the API call.
-        # Estimate: prompt tokens + a conservative 512-token reply room.
         expected_in = estimate_tokens_from_chars(prompt_chars)
         expected_total = expected_in + 512
         quota_tracker.check(
@@ -181,8 +228,8 @@ class AIRouter:
         )
 
         logger.debug(
-            "AI call START  role=%s provider=%s model=%s prompt_chars=%d project=%s",
-            role.value, provider_name, model, prompt_chars, project_id,
+            "AI call START  role=%s internal=%s provider=%s model=%s prompt_chars=%d project=%s",
+            role.value, internal_name, provider_name, model, prompt_chars, project_id,
         )
 
         try:
@@ -194,7 +241,6 @@ class AIRouter:
             )
             elapsed_ms = (time.monotonic() - t0) * 1000
 
-            # Prefer provider-native token counts; fall back to char estimate.
             usage = _take_usage()
             if usage:
                 tokens_in = int(usage.get("in", 0))
@@ -213,9 +259,9 @@ class AIRouter:
             )
 
             logger.info(
-                "AI call OK     role=%-22s provider=%-7s model=%-30s "
+                "AI call OK     role=%-22s internal=%-18s provider=%-7s model=%-30s "
                 "prompt=%5d chars  response=%5d chars  tok=%d/%d  $%.5f  %7.0f ms",
-                role.value, provider_name, model,
+                role.value, internal_name, provider_name, model,
                 prompt_chars, len(result),
                 tokens_in, tokens_out, cost_usd, elapsed_ms,
             )
@@ -224,9 +270,9 @@ class AIRouter:
         except Exception:
             elapsed_ms = (time.monotonic() - t0) * 1000
             logger.error(
-                "AI call FAILED role=%-22s provider=%-7s model=%-30s "
+                "AI call FAILED role=%-22s internal=%-18s provider=%-7s model=%-30s "
                 "prompt=%5d chars  %7.0f ms",
-                role.value, provider_name, model,
+                role.value, internal_name, provider_name, model,
                 prompt_chars, elapsed_ms,
             )
             raise

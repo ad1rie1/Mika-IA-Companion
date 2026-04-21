@@ -24,6 +24,7 @@ from dashboard.views.api import (
     personality as personality_api,
     persons,
     projects as projects_api,
+    providers as providers_api,
     quota as quota_api,
     sleep as sleep_api,
     system,
@@ -124,4 +125,8 @@ urlpatterns = [
     # Personality YAML editor
     path("dashboard/api/personality/yaml",          personality_editor.personality_read),
     path("dashboard/api/personality/yaml/write",    personality_editor.personality_write),
+
+    # Provider introspection (list models / test connection)
+    path("dashboard/api/providers/<str:provider>/models", providers_api.list_models),
+    path("dashboard/api/providers/<str:provider>/test",   providers_api.test_provider),
 ]

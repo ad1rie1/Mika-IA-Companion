@@ -98,3 +98,18 @@ class ClaudeProvider:
                 parts.append(block.text)
 
         return "".join(parts)
+
+    async def list_models(self) -> list[dict]:
+        """List Claude models reachable with the configured credentials."""
+        page = await self._client.models.list(limit=100)
+        out = []
+        for m in page.data:
+            out.append({
+                "id": m.id,
+                "label": getattr(m, "display_name", None) or m.id,
+            })
+        return out
+
+    async def test(self) -> dict:
+        from ai.providers import default_test
+        return await default_test(self)

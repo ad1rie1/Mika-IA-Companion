@@ -1,50 +1,44 @@
-"""OpenAI provider — uses the official ``openai`` Python SDK.
+"""GLM provider — Zhipu AI / ChatGLM models.
 
-Supports OpenAI, Azure OpenAI, and any OpenAI-compatible API
-(Groq, Together, vLLM, LM Studio, etc.) via base_url override.
+Zhipu ships an OpenAI-compatible endpoint at
+``https://open.bigmodel.cn/api/paas/v4/``. We reuse the ``openai`` async
+SDK so this provider inherits all the quality-of-life of OpenAIProvider
+(streaming hooks, usage accounting, image support) for free — no
+additional dependency.
 """
 
 from __future__ import annotations
 
 import logging
 
-from django.conf import settings
-
 logger = logging.getLogger(__name__)
 
+DEFAULT_BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
 
-class OpenAIProvider:
-    """OpenAI-compatible provider via the official ``openai.AsyncOpenAI`` client.
 
-    Set ``OPENAI_BASE_URL`` in .env to point to a custom endpoint
-    (Azure, Groq, Together, local vLLM, etc.).
-    """
+class GLMProvider:
+    """ChatGLM via Zhipu's OpenAI-compatible endpoint."""
 
     def __init__(self):
         try:
             from openai import AsyncOpenAI
-        except ImportError:
+        except ImportError as exc:
             raise ImportError(
-                "Le provider OpenAI nécessite le package 'openai'. "
+                "Le provider GLM utilise le SDK 'openai' (endpoint compatible). "
                 "Installez-le avec : pip install openai"
-            )
+            ) from exc
 
         from configs.service import config_service
-        api_key = config_service.get("ai.openai.api_key", default="") or None
-        base_url = config_service.get("ai.openai.base_url", default="") or None
 
+        api_key = config_service.get("ai.glm.api_key", default="") or None
         if not api_key:
             raise ValueError(
-                "OpenAIProvider nécessite ai.openai.api_key "
-                "(éditeur Configuration > IA · Providers)."
+                "GLMProvider nécessite ai.glm.api_key "
+                "(éditeur Configuration > Fournisseur IA)."
             )
 
-        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-
-        logger.info(
-            "OpenAIProvider initialisé (base_url=%s)",
-            base_url or "https://api.openai.com",
-        )
+        self._client = AsyncOpenAI(api_key=api_key, base_url=DEFAULT_BASE_URL)
+        logger.info("GLMProvider initialisé (base_url=%s)", DEFAULT_BASE_URL)
 
     async def complete(
         self,
@@ -55,7 +49,6 @@ class OpenAIProvider:
         temperature: float = 0.7,
         attachments: list | None = None,
     ) -> str:
-        # Build user content with optional image blocks
         if attachments:
             user_content: list | str = []
             for att in attachments:
@@ -78,7 +71,6 @@ class OpenAIProvider:
             ],
         )
 
-        # Surface native token usage to the quota tracker.
         try:
             from ai.quota import set_usage
             usage = getattr(response, "usage", None)
@@ -90,20 +82,15 @@ class OpenAIProvider:
         except Exception:
             pass
 
-        return response.choices[0].message.content or ""
+        return (response.choices[0].message.content or "").strip()
 
     async def list_models(self) -> list[dict]:
-        """List chat-capable OpenAI models.
-
-        The raw /models endpoint returns everything (embeddings, TTS, …).
-        Filter to chat-capable families by naming convention — conservative
-        but good enough for a model picker.
-        """
+        """List GLM models via the Zhipu OpenAI-compatible endpoint."""
         page = await self._client.models.list()
         out = []
         for m in page.data:
-            mid = m.id
-            if any(prefix in mid for prefix in ("gpt", "o1", "o3", "o4", "chatgpt")):
+            mid = getattr(m, "id", None) or ""
+            if mid:
                 out.append({"id": mid, "label": mid})
         return sorted(out, key=lambda x: x["id"])
 

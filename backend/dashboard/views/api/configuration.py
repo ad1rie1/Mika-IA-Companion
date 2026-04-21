@@ -41,6 +41,27 @@ def _error(msg: str, status: int = 400) -> JsonResponse:
 
 # ── Schema + values ─────────────────────────────────────────────
 
+def _declared_model_names() -> list[str]:
+    """Current set of internal_name values from the ai.models record_list.
+
+    Used to populate the choices of every ``ai.role.*`` select at schema
+    render time — the registry can't carry dynamic choices, so we inject
+    them here just before the frontend reads the schema.
+    """
+    try:
+        rows = config_service.list_rows("ai.models", decrypt_secrets=False)
+    except KeyError:
+        return []
+    out: list[str] = []
+    for row in rows:
+        if not row.get("enabled", True):
+            continue
+        name = ((row.get("payload") or {}).get("internal_name") or "").strip()
+        if name and name not in out:
+            out.append(name)
+    return out
+
+
 @require_http_methods(["GET"])
 def schema(request):
     """Full declarative schema. The UI builds all forms from this.
@@ -49,6 +70,10 @@ def schema(request):
     module are filtered out so the config page stays focused on active
     plugins. A disabled module is still re-enabled from the "Gestion
     des modules" page.
+
+    Also injects the current set of declared-model internal names into
+    every ``ai.role.*`` select, so roles can only be mapped to a model
+    that actually exists.
     """
     sections = registry.render_schema()
     try:
@@ -68,6 +93,15 @@ def schema(request):
                 and s["key"][len("module_"):] in disabled
             )
         ]
+
+    model_names = _declared_model_names()
+    for section in sections:
+        if section.get("key") != "ai_roles":
+            continue
+        for item in section.get("items", []):
+            if item.get("type") == "select" and item.get("key", "").startswith("ai.role."):
+                item["choices"] = model_names
+
     return JsonResponse({"sections": sections})
 
 
@@ -136,6 +170,25 @@ def row_add(request):
     return JsonResponse({"ok": True, "row": created})
 
 
+def _declared_model_references(internal_name: str) -> list[str]:
+    """Locations that reference a declared model by its internal name.
+
+    Currently checks every ``ai.role.*`` scalar. Modules may later
+    reference models too — extend here when they do.
+    """
+    refs: list[str] = []
+    from ai.router import AIRole
+    for role in AIRole:
+        cfg_key = f"ai.role.{role.value}"
+        try:
+            val = (config_service.get(cfg_key, default="") or "").strip()
+        except KeyError:
+            continue
+        if val == internal_name:
+            refs.append(f"rôle IA · {role.value}")
+    return refs
+
+
 @csrf_exempt
 @require_http_methods(["PATCH", "DELETE"])
 def row_detail(request, row_id: str):
@@ -143,6 +196,25 @@ def row_detail(request, row_id: str):
     if not parent_key:
         return _error("parent_key required")
     if request.method == "DELETE":
+        # Ref-check: refuse deletion of a declared model that's still
+        # wired into a role (or, later, a module). The user must unmap
+        # it first.
+        if parent_key == "ai.models":
+            try:
+                rows = config_service.list_rows(parent_key, decrypt_secrets=False)
+            except KeyError:
+                rows = []
+            target = next((r for r in rows if str(r.get("row_id")) == str(row_id)), None)
+            if target is not None:
+                name = ((target.get("payload") or {}).get("internal_name") or "").strip()
+                if name:
+                    refs = _declared_model_references(name)
+                    if refs:
+                        return _error(
+                            "Modèle utilisé par : " + ", ".join(refs)
+                            + ". Retire ces associations avant de supprimer.",
+                            status=409,
+                        )
         try:
             config_service.delete_row(parent_key, row_id, actor=_actor(request))
         except KeyError as e:
