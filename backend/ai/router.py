@@ -184,6 +184,15 @@ class AIRouter:
         """Drop a cached provider so the next call re-reads its credentials."""
         self._providers.pop(provider_name, None)
 
+    def resolve(self, role: AIRole) -> tuple[str, str, float, str]:
+        """Public alias of ``_resolve`` for callers that need provider/model/temp."""
+        return self._resolve(role)
+
+    def get_provider(self, role: AIRole) -> AIProvider:
+        """Return a (cached, lazily-instantiated) provider instance for ``role``."""
+        provider_name, _, _, _ = self._resolve(role)
+        return self._get_provider(provider_name)
+
     def get_model(self, role: AIRole) -> str:
         """Return the model_id configured for a role."""
         _, model, _, _ = self._resolve(role)

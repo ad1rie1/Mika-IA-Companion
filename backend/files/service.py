@@ -171,20 +171,14 @@ class FilesService:
         if record["category"] != "audio":
             return {"error": f"Ce fichier n'est pas un audio (catégorie: {record['category']})."}
         try:
-            from configs.service import config_service
-            api_key = config_service.get("ai.openai.api_key", default="") or None
-            if not api_key:
-                return {
-                    "error": "Transcription indisponible — configurez ai.openai.api_key (Configuration > IA).",
-                }
-            import io
-            from openai import AsyncOpenAI
+            from ai.providers.openai_provider import OpenAIProvider
+            try:
+                provider = OpenAIProvider()
+            except ValueError as e:
+                return {"error": f"Transcription indisponible — {e}"}
             audio_bytes = await asyncio.to_thread(Path(record["path"]).read_bytes)
-            buf = io.BytesIO(audio_bytes)
-            buf.name = record["name"]
-            client = AsyncOpenAI(api_key=api_key)
-            transcript = await client.audio.transcriptions.create(model="whisper-1", file=buf)
-            return {"transcription": transcript.text, "file_id": record["id"], "name": record["name"]}
+            text = await provider.transcribe_audio(audio_bytes, record["name"])
+            return {"transcription": text, "file_id": record["id"], "name": record["name"]}
         except Exception as e:
             logger.exception("Transcription échouée pour %s", record["id"])
             return {"error": f"Transcription échouée : {e}"}

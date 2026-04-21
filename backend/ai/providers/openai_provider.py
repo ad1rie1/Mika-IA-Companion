@@ -110,3 +110,28 @@ class OpenAIProvider:
     async def test(self) -> dict:
         from ai.providers import default_test
         return await default_test(self)
+
+    # ── Audio transcription (OpenAI-specific capability) ─────────
+    async def transcribe_audio(
+        self,
+        audio_bytes: bytes,
+        filename: str,
+        *,
+        model: str = "whisper-1",
+    ) -> str:
+        """Run a Whisper transcription on an audio buffer.
+
+        Audio transcription is not part of the generic AIProvider
+        protocol (only OpenAI exposes a mature Whisper endpoint), so
+        callers import this method directly. Keeping it here — rather
+        than re-instantiating ``AsyncOpenAI`` from ``files/service.py``
+        — is what guarantees the SDK stays confined to the provider
+        layer.
+        """
+        import io
+        buf = io.BytesIO(audio_bytes)
+        buf.name = filename
+        transcript = await self._client.audio.transcriptions.create(
+            model=model, file=buf,
+        )
+        return transcript.text
