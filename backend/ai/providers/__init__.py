@@ -34,6 +34,7 @@ class AIProvider(Protocol):
         model: str,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        attachments: list | None = None,
     ) -> str: ...
 
     async def complete_with_tools(
@@ -44,11 +45,13 @@ class AIProvider(Protocol):
         tools: list,              # list[ModuleTool] — quoted to avoid import cycle
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        *,
+        max_turns: int = 10,
     ) -> tuple[str, list[str]]:
         """Run a completion with tool-calling support.
 
         Returns ``(assistant_text, names_of_tools_called_in_order)``.
-        Providers that don't (yet) support tool calling raise
+        Providers that don't support tool calling raise
         ``NotImplementedError`` — see ``tools_unsupported``.
         """
         ...

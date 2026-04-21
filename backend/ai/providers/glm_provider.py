@@ -98,6 +98,27 @@ class GLMProvider:
         from ai.providers import default_test
         return await default_test(self)
 
-    async def complete_with_tools(self, *args, **kwargs):
-        from ai.providers import tools_unsupported
-        return await tools_unsupported("GLMProvider")
+    async def complete_with_tools(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        model: str,
+        tools: list,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        *,
+        max_turns: int = 10,
+    ) -> tuple[str, list[str]]:
+        """Zhipu exposes OpenAI-compatible function-calling — reuse the loop."""
+        from ai.providers._openai_tools import run_openai_tool_loop
+        return await run_openai_tool_loop(
+            client=self._client,
+            provider_label="GLM",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=model,
+            tools=tools,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            max_turns=max_turns,
+        )

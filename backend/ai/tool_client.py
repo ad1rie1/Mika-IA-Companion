@@ -1,8 +1,11 @@
 """AI tool client — thin dispatcher for tool-enabled completions.
 
 Every provider implements ``complete_with_tools(tools=[ModuleTool])`` on
-itself (Claude converts to MCP internally; the others currently raise
-``NotImplementedError`` until their native function-calling is wired).
+itself:
+  - Claude → MCP loop via claude_agent_sdk
+  - OpenAI / GLM → OpenAI-compat ``tools=[...]`` ping/pong loop
+  - Ollama → native ``tools=[...]`` loop (SDK ≥ 0.3, tool-capable model)
+  - Gemini → ``types.Tool(function_declarations=[...])`` loop
 
 This module only resolves the role and forwards — no SDK-specific code.
 """

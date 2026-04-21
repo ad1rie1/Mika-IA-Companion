@@ -93,27 +93,60 @@ class OpenAIProvider:
         return response.choices[0].message.content or ""
 
     async def list_models(self) -> list[dict]:
-        """List chat-capable OpenAI models.
+        """List chat-capable models from the configured endpoint.
 
-        The raw /models endpoint returns everything (embeddings, TTS, …).
-        Filter to chat-capable families by naming convention — conservative
-        but good enough for a model picker.
+        The raw /models endpoint returns everything (embeddings, TTS, moderation…).
+        We exclude known non-chat families and keep the rest — this is what
+        makes the provider usable against OpenAI-compat backends (Groq,
+        Together, LM Studio, vLLM) where model names don't follow OpenAI's
+        ``gpt-*`` convention.
         """
+        _EXCLUDE = (
+            "embedding", "embed-",
+            "whisper", "tts-", "audio",
+            "dall-e", "image",
+            "moderation",
+            "babbage", "davinci-002", "davinci-003",
+            "search-", "similarity-",
+        )
         page = await self._client.models.list()
         out = []
         for m in page.data:
-            mid = m.id
-            if any(prefix in mid for prefix in ("gpt", "o1", "o3", "o4", "chatgpt")):
-                out.append({"id": mid, "label": mid})
+            mid = m.id or ""
+            low = mid.lower()
+            if not mid or any(tok in low for tok in _EXCLUDE):
+                continue
+            out.append({"id": mid, "label": mid})
         return sorted(out, key=lambda x: x["id"])
 
     async def test(self) -> dict:
         from ai.providers import default_test
         return await default_test(self)
 
-    async def complete_with_tools(self, *args, **kwargs):
-        from ai.providers import tools_unsupported
-        return await tools_unsupported("OpenAIProvider")
+    async def complete_with_tools(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        model: str,
+        tools: list,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        *,
+        max_turns: int = 10,
+    ) -> tuple[str, list[str]]:
+        """OpenAI function-calling via ``tools=[...]`` + ping/pong loop."""
+        from ai.providers._openai_tools import run_openai_tool_loop
+        return await run_openai_tool_loop(
+            client=self._client,
+            provider_label="OpenAI",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=model,
+            tools=tools,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            max_turns=max_turns,
+        )
 
     # ── Audio transcription (OpenAI-specific capability) ─────────
     async def transcribe_audio(
