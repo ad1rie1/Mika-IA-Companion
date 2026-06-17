@@ -27,6 +27,22 @@ logger = logging.getLogger(__name__)
 DEFAULT_TICK_INTERVAL = 60  # seconds
 
 
+def _is_owner(person_id: str) -> bool:
+    """Is this person allowed to see owner-scoped (private) module context?
+
+    Trusted: configured owners, authenticated users (``user_*``), and Mika's own
+    internal channels (``conscience*``, ``module_*``). Anonymous web guests
+    (``anon_*``) and external contacts are not.
+    """
+    if not person_id:
+        return False
+    from django.conf import settings
+
+    if person_id in getattr(settings, "OWNER_PERSON_IDS", []):
+        return True
+    return person_id.startswith(("user_", "conscience", "module_"))
+
+
 class ModuleManager:
     """Central plugin registry, scheduler, tool aggregator, and event bus.
 
@@ -306,14 +322,23 @@ class ModuleManager:
 
     # ── Context Aggregation ───────────────────────────────────────
 
-    def collect_context(self) -> str:
-        """Collect context strings from all running modules."""
+    def collect_context(self, person_id: str = "") -> str:
+        """Collect per-person context strings from all running modules.
+
+        Modules with ``CONTEXT_VISIBILITY == "owner"`` (the default) are only
+        injected for trusted/owner persons, so private info (unread emails,
+        pending wakes) never leaks into an anonymous guest's prompt.
+        """
+        owner = _is_owner(person_id)
         parts: list[str] = []
         for module in self._modules.values():
-            if module.is_running:
-                ctx = module.get_context()
-                if ctx:
-                    parts.append(f"[{module.name}] {ctx}")
+            if not module.is_running:
+                continue
+            if getattr(module, "CONTEXT_VISIBILITY", "owner") == "owner" and not owner:
+                continue
+            ctx = module.get_context(person_id)
+            if ctx:
+                parts.append(f"[{module.name}] {ctx}")
         return "\n".join(parts)
 
     # ── Route Collection ──────────────────────────────────────────

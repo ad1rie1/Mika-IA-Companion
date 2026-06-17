@@ -50,7 +50,7 @@ class FilesModule(BaseModule):
 
     # ── Context injection ──────────────────────────────────────────
 
-    def get_context(self) -> str:
+    def get_context(self, person_id: str = "") -> str:
         """Injecte uniquement les fichiers uploadés aujourd'hui.
         Les fichiers plus anciens sont accessibles via l'outil files_list."""
         from datetime import date

@@ -22,7 +22,7 @@ BROADCAST_GROUP = "vtuber_broadcast"
 async def broadcast_to_websocket(
     output: SpeechOutput, source: str, person_id: str | None = None,
 ) -> None:
-    """Broadcast the response + a snapshot of Mika's inner life.
+    """Deliver the response (per-recipient) + a snapshot of Mika's inner life.
 
     The ``inner_state`` payload gives the frontend a compact view of:
       - current drives (tension per kind)
@@ -31,30 +31,81 @@ async def broadcast_to_websocket(
       - person profile for the current interlocutor (if any)
       - pending commitments toward that person
 
-    This is broadcast alongside each ``speech`` event so UI panels can
-    refresh without polling HTTP endpoints.
+    Routing, by recipient reachability (presence registry):
+    - **consumer** target  → the person's own WebSocket group (no cross-client leak)
+    - **module** target    → the module's ``deliver()`` (external API push), but
+      only when the message did NOT originate from that same module — a reactive
+      reply is already echoed by the channel itself, so we avoid double-sending.
+    - **unresolved** (proactive with no recipient yet, anonymous, ``conscience_*``)
+      → fall back to the legacy global broadcast so existing clients still hear it.
     """
     channel_layer = get_channel_layer()
 
     inner_state = await _collect_inner_state(person_id)
 
-    await channel_layer.group_send(
-        BROADCAST_GROUP,
-        {
-            "type": "communication.broadcast",
-            "data": {
-                "type": "speech",
-                "text": output.text,
-                "emotion": output.emotion_name,
-                "emotion_intensity": output.emotion_intensity,
-                "emotion_state": output.emotion_state,
-                "emotion_blend": output.emotion_blend or [],
-                "source": source,
-                "person_id": person_id,
-                "inner_state": inner_state,
-            },
+    payload = {
+        "type": "communication.broadcast",
+        "data": {
+            "type": "speech",
+            "text": output.text,
+            "emotion": output.emotion_name,
+            "emotion_intensity": output.emotion_intensity,
+            "emotion_state": output.emotion_state,
+            "emotion_blend": output.emotion_blend or [],
+            "source": source,
+            "person_id": person_id,
+            "inner_state": inner_state,
         },
-    )
+    }
+
+    targets = []
+    if person_id:
+        from communication.presence import presence_registry
+
+        targets = presence_registry.resolve(person_id)
+
+    if not targets:
+        # No known recipient → legacy broadcast to all connected clients.
+        await channel_layer.group_send(BROADCAST_GROUP, payload)
+        return
+
+    delivered = False
+    for target in targets:
+        if target.is_consumer:
+            group = target.delivery_ref or _person_group(person_id)
+            await channel_layer.group_send(group, payload)
+            delivered = True
+        elif target.is_module:
+            # Skip the originating module on a reactive turn (it echoes itself).
+            if target.channel == source:
+                delivered = True
+                continue
+            delivered = await _deliver_via_module(target, output) or delivered
+
+    if not delivered:
+        await channel_layer.group_send(BROADCAST_GROUP, payload)
+
+
+def _person_group(person_id: str | None) -> str:
+    from communication.presence import person_group
+
+    return person_group(person_id or "")
+
+
+async def _deliver_via_module(target, output) -> bool:
+    """Route an outbound message to a module's external-API delivery."""
+    module = module_manager.get_module(target.channel)
+    if not module or not module.is_running:
+        logger.warning(
+            "Cannot deliver to %s: module '%s' unavailable",
+            target.person_id, target.channel,
+        )
+        return False
+    try:
+        return await module.deliver(output, target)
+    except Exception:
+        logger.exception("Module '%s' deliver() failed", target.channel)
+        return False
 
 
 async def broadcast_inner_state_update(person_id: str | None = None) -> None:

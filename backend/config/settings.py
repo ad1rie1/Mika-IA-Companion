@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     "conscience",
     "modules",
     "projects",
+    "identity",
 ]
 
 MIDDLEWARE = [
@@ -43,7 +44,17 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
 ]
 
-CORS_ALLOW_ALL_ORIGINS = True  # dev only
+# CORS. Note: credentialed requests (session cookies for the frontend login)
+# cannot be combined with the wildcard origin — to use auth from a separate
+# frontend origin, set CORS_ALLOW_ALL_ORIGINS=False + list CORS_ALLOWED_ORIGINS
+# (e.g. http://localhost:3000) and CORS_ALLOW_CREDENTIALS=True.
+CORS_ALLOW_ALL_ORIGINS = env.bool("CORS_ALLOW_ALL_ORIGINS", default=DEBUG)
+CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
+CORS_ALLOW_CREDENTIALS = env.bool("CORS_ALLOW_CREDENTIALS", default=False)
+
+# Allow the session cookie to ride cross-site requests in dev (frontend on a
+# different port). Tighten/secure in production.
+SESSION_COOKIE_SAMESITE = env("SESSION_COOKIE_SAMESITE", default="Lax")
 
 ROOT_URLCONF = "config.urls"
 ASGI_APPLICATION = "config.asgi.application"
@@ -104,6 +115,16 @@ AI_ROLE_VALIDITY_CHECK = env("AI_ROLE_VALIDITY_CHECK", default=f"claude:{CLAUDE_
 MEMORY_SHORT_TERM_LIMIT = env.int("MEMORY_SHORT_TERM_LIMIT", default=20)
 API_PORT = env.int("API_PORT", default=8000)
 AI_CALL_TIMEOUT = env.int("AI_CALL_TIMEOUT", default=60)
+
+# When True, owned WebSocket consumers must be authenticated (else connection
+# is refused). External modules (Telegram, ...) authenticate via their own API.
+CONSUMER_REQUIRE_AUTH = env.bool("CONSUMER_REQUIRE_AUTH", default=False)
+
+# Person ids treated as the operator/owner — they see private module context
+# (unread emails, pending wakes). Authenticated users (user_*) and Mika's own
+# internal channels are always trusted; this adds extras (e.g. your tg_<id>).
+OWNER_PERSON_IDS = env.list("OWNER_PERSON_IDS", default=[])
+
 PERSONALITY_PATH = PROJECT_ROOT / "personality.yaml"
 
 # --- Scheduler ---

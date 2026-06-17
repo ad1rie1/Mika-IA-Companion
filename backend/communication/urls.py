@@ -1,6 +1,12 @@
 from django.urls import path
 
-from communication.views import get_personality, health
+from communication.views import (
+    get_personality,
+    health,
+    login_view,
+    logout_view,
+    whoami,
+)
 from communication.debug_views import (
     force_dream,
     force_digest,
@@ -13,6 +19,10 @@ from communication.debug_views import (
 urlpatterns = [
     path("health", health),
     path("personality", get_personality),
+    # Session auth for the frontend (owned consumers).
+    path("auth/login", login_view),
+    path("auth/logout", logout_view),
+    path("auth/whoami", whoami),
     # Developer sleep-cycle controls. Gated by settings.DEBUG at the
     # view level — no-op in production even if the routes remain mounted.
     path("api/dev/sleep/phase", force_phase),

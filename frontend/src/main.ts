@@ -16,6 +16,8 @@ import { IdentityService } from "./network/IdentityService";
 import { ChatOverlay } from "./ui/ChatOverlay";
 import { EmotionDisplay } from "./ui/EmotionDisplay";
 import { InnerLifePanel } from "./ui/InnerLifePanel";
+import { LoginOverlay } from "./ui/LoginOverlay";
+import { WS_URL, whoami } from "./network/api";
 
 // All valid backend emotion names for validation
 const VALID_EMOTIONS = new Set<string>([
@@ -125,9 +127,24 @@ async function init() {
     },
   });
 
+  // Auth: the WebSocket authenticates via the Django session cookie. Check for
+  // an existing session; when authenticated the backend derives a trusted
+  // user_{pk} and ignores the client id. Optionally force a login gate (set
+  // VITE_REQUIRE_LOGIN=true to mirror the backend CONSUMER_REQUIRE_AUTH policy);
+  // otherwise the app connects anonymously with the persistent IdentityService.
+  const requireLogin =
+    (import.meta as any).env?.VITE_REQUIRE_LOGIN === "true";
+  let auth = await whoami();
+  if (!auth.authenticated && requireLogin) {
+    auth = await new LoginOverlay().ensureAuthenticated();
+  }
+
   // WebSocket connection with identity handshake
-  const ws = new WebSocketClient();
-  ws.setIdentity(identity.personId, identity.displayName);
+  const ws = new WebSocketClient(WS_URL);
+  ws.setIdentity(
+    identity.personId,
+    auth.authenticated ? auth.username ?? identity.displayName : identity.displayName
+  );
   const chatOverlay = new ChatOverlay(ws);
   wireIdentityBar(identity, ws);
 
