@@ -50,6 +50,86 @@ class MemoryBridge:
         from memory.manager import memory_manager
         return await memory_manager.search_related_souvenirs(text, n=n)
 
+    async def who_is_concerned(self, signal_text: str, n: int = 5) -> list[dict]:
+        """Who does this signal concern, ranked, with reachable handles.
+
+        Concern-based routing grounded in what conversation has taught:
+        1. semantic search souvenirs + connaissances for the signal's topic
+        2. collect the *person* entities those memories reference (relevance-weighted)
+        3. resolve each name → identity → handles (durable identity layer)
+        4. keep only the reachable ones (consumers connected now; modules are
+           reachable whenever a durable handle exists — external API is push-capable)
+
+        Returns ``[{"name", "score", "handles": [...]}]`` sorted by score, or [].
+        The inclusive (interest) vs exclusive (attribution) decision is left to the
+        caller — this returns the candidate field, not the final pick.
+        """
+        from asgiref.sync import sync_to_async
+
+        from communication.presence import presence_registry
+        from identity.resolver import identity_resolver
+        from memory.manager import memory_manager
+
+        if not signal_text.strip():
+            return []
+
+        souvenirs = await memory_manager.search_related_souvenirs(signal_text, n=n)
+        connaissances = await memory_manager.search_related_connaissances(signal_text, n=n)
+
+        names_scores = await sync_to_async(self._person_entities_from_matches)(
+            souvenirs, connaissances
+        )
+        if not names_scores:
+            return []
+
+        handle_map = await identity_resolver.handles_for_entity_names(
+            list(names_scores)
+        )
+
+        results = []
+        for name, score in names_scores.items():
+            reachable = [
+                h for h in handle_map.get(name, [])
+                if h["kind"] == "module"  # external API: reachable any time
+                or presence_registry.resolve_on(h["person_id"], h["channel"])
+            ]
+            if reachable:
+                results.append(
+                    {"name": name, "score": round(score, 3), "handles": reachable}
+                )
+
+        results.sort(key=lambda r: r["score"], reverse=True)
+        return results
+
+    @staticmethod
+    def _person_entities_from_matches(
+        souvenirs: list[dict], connaissances: list[dict]
+    ) -> dict[str, float]:
+        """Aggregate person-entity names from matched memories, relevance-weighted."""
+        from memory.models import Connaissance, Souvenir
+
+        scores: dict[str, float] = {}
+
+        def accumulate(matches, model):
+            for r in matches:
+                try:
+                    pk = int(r["id"])
+                except (KeyError, ValueError, TypeError):
+                    continue
+                distance = r.get("distance")
+                relevance = max(0.0, 1.0 - distance) if distance is not None else 0.5
+                try:
+                    obj = model.objects.prefetch_related("entities").get(pk=pk)
+                except model.DoesNotExist:
+                    continue
+                for entity in obj.entities.all():
+                    if entity.entity_type == "person":
+                        scores[entity.name] = scores.get(entity.name, 0.0) + relevance
+
+        accumulate(souvenirs, Souvenir)
+        accumulate(connaissances, Connaissance)
+        return scores
+
     # ── Write: Create ────────────────────────────────────────────
 
     async def create_souvenir_from_signal(self, signal: InterpretedSignal):

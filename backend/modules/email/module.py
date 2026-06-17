@@ -785,7 +785,7 @@ class EmailModule(BaseModule):
 
     # ── Context ───────────────────────────────────────────────────
 
-    def get_context(self) -> str:
+    def get_context(self, person_id: str = "") -> str:
         parts = []
         for account_name, count in self._unread_counts.items():
             if count > 0:

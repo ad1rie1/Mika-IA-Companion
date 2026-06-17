@@ -15,6 +15,7 @@ from claude_agent_sdk import (
     query,
 )
 from claude_agent_sdk.types import ClaudeAgentOptions
+from django.conf import settings
 
 from ai.router import AIRole, ai_router
 
@@ -57,9 +58,24 @@ async def complete_with_tools(
             f"mcp__vtuber_modules__{name}" for name in (tool_names or [])
         ]
 
+    # Tool support is Claude-only: it runs through the agent SDK regardless of
+    # configuration. If CONVERSATION_TOOLS is pointed at a non-Claude provider,
+    # the configured model name would be invalid here — fall back to the default
+    # Claude model and warn instead of sending a bogus model to the SDK.
+    provider = ai_router.get_provider_name(AIRole.CONVERSATION_TOOLS)
+    if provider == "claude":
+        model = ai_router.get_model(AIRole.CONVERSATION_TOOLS)
+    else:
+        model = settings.CLAUDE_MODEL
+        logger.warning(
+            "AI_ROLE_CONVERSATION_TOOLS provider=%r is not 'claude'; tool-based "
+            "completion is Claude-only. Falling back to CLAUDE_MODEL=%s.",
+            provider, model,
+        )
+
     options = ClaudeAgentOptions(
         system_prompt=system_prompt,
-        model=ai_router.get_model(AIRole.CONVERSATION_TOOLS),
+        model=model,
         max_turns=10,
         mcp_servers=mcp_servers,
         allowed_tools=allowed_tools,

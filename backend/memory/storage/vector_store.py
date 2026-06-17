@@ -1,14 +1,10 @@
 import logging
-from concurrent.futures import ThreadPoolExecutor
-from functools import partial
 
 import chromadb
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
-
-_executor = ThreadPoolExecutor(max_workers=2)
 
 
 class VectorStore:

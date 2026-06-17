@@ -314,7 +314,7 @@ class WakeModule(BaseModule):
 
     # ── Context ───────────────────────────────────────────────────
 
-    def get_context(self) -> str:
+    def get_context(self, person_id: str = "") -> str:
         from conscience.models import ScheduledAction
 
         try:
@@ -322,7 +322,7 @@ class WakeModule(BaseModule):
             if count:
                 return f"Tu as {count} action(s) programmee(s) en attente."
         except Exception:
-            pass
+            logger.debug("wake get_context query failed", exc_info=True)
         return ""
 
     # ── Status ────────────────────────────────────────────────────

@@ -305,7 +305,7 @@ class RSSModule(BaseModule):
 
     # ── Context ───────────────────────────────────────────────────
 
-    def get_context(self) -> str:
+    def get_context(self, person_id: str = "") -> str:
         if self._new_count > 0:
             return f"{self._new_count} nouvel(les) article(s) RSS depuis le dernier cycle"
         return ""
