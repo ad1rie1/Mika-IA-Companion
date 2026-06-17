@@ -34,14 +34,17 @@ class MemoryRetriever:
         n_souvenirs = config_service.get("memory.retrieval_souvenirs")
         n_connaissances = config_service.get("memory.retrieval_connaissances")
 
-        # Fetch more than needed so we can rerank
+        # Fetch more than needed so we can rerank.
+        # ChromaDB search runs a CPU-heavy embedding encode — offload it to a
+        # thread so it never blocks the ASGI event loop (this runs on the hot
+        # path of every conversation turn).
         fetch_multiplier = 2
-        souvenirs_raw = self.vector_store.search_souvenirs(
+        souvenirs_raw = await sync_to_async(self.vector_store.search_souvenirs)(
             query,
             n=n_souvenirs * fetch_multiplier,
             min_importance=config_service.get("memory.min_importance"),
         )
-        connaissances_raw = self.vector_store.search_connaissances(
+        connaissances_raw = await sync_to_async(self.vector_store.search_connaissances)(
             query, n=n_connaissances
         )
 

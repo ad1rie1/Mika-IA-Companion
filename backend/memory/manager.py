@@ -172,7 +172,7 @@ class MemoryManager:
             souvenir.importance = min(1.0, souvenir.importance + boost)
             await sync_to_async(souvenir.save)(update_fields=["importance"])
         except Exception:
-            logger.debug("boost_souvenir failed for #%d", souvenir_id, exc_info=True)
+            logger.warning("boost_souvenir failed for #%d", souvenir_id, exc_info=True)
 
     async def reduce_souvenir(self, souvenir_id: int, reduction: float) -> None:
         """Decrease a souvenir's importance. Floored at 0.0."""
@@ -183,7 +183,7 @@ class MemoryManager:
             souvenir.importance = max(0.0, souvenir.importance - reduction)
             await sync_to_async(souvenir.save)(update_fields=["importance"])
         except Exception:
-            logger.debug("reduce_souvenir failed for #%d", souvenir_id, exc_info=True)
+            logger.warning("reduce_souvenir failed for #%d", souvenir_id, exc_info=True)
 
     async def boost_souvenirs_by_themes(
         self, themes: list[str], boost: float = 0.1
@@ -220,7 +220,7 @@ class MemoryManager:
                 )
             return count
         except Exception:
-            logger.debug("boost_souvenirs_by_themes failed", exc_info=True)
+            logger.warning("boost_souvenirs_by_themes failed", exc_info=True)
             return 0
 
     async def get_important_souvenirs(
@@ -257,7 +257,7 @@ class MemoryManager:
                 connaissance_id, conn.content[:60], reason,
             )
         except Exception:
-            logger.debug(
+            logger.warning(
                 "invalidate_connaissance failed for #%d",
                 connaissance_id, exc_info=True,
             )
@@ -273,7 +273,7 @@ class MemoryManager:
             conn.confidence = min(1.0, conn.confidence + boost)
             await sync_to_async(conn.save)(update_fields=["confidence"])
         except Exception:
-            logger.debug(
+            logger.warning(
                 "reinforce_connaissance failed for #%d",
                 connaissance_id, exc_info=True,
             )
@@ -289,7 +289,7 @@ class MemoryManager:
             conn.confidence = max(0.0, min(1.0, confidence))
             await sync_to_async(conn.save)(update_fields=["confidence"])
         except Exception:
-            logger.debug(
+            logger.warning(
                 "update_connaissance_confidence failed for #%d",
                 connaissance_id, exc_info=True,
             )

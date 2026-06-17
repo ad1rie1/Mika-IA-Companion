@@ -614,7 +614,10 @@ class MemoryConsolidator:
                             },
                         )
                     except Exception:
-                        pass
+                        logger.warning(
+                            "Failed to update ChromaDB for invalidated connaissance #%d",
+                            conn.pk, exc_info=True,
+                        )
                     logger.info(
                         "Consolidator invalidated connaissance #%d: %s (contradicted by: %s)",
                         conn.pk, conn.content[:80], new_content[:80],

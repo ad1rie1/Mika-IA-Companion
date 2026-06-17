@@ -36,7 +36,7 @@ class FilesModule(BaseModule):
         from files.service import files_service
         files_service.shutdown()
 
-    def get_context(self) -> str:
+    def get_context(self, person_id: str = "") -> str:
         from files.service import files_service
         return files_service.list_today_context()
 

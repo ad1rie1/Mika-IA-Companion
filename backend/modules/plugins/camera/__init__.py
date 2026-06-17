@@ -268,7 +268,7 @@ class CameraModule(BaseModule):
 
     # ── Context injection ──────────────────────────────────────────
 
-    def get_context(self) -> str:
+    def get_context(self, person_id: str = "") -> str:
         now = time.time()
         lines = []
         for state in self._devices.values():

@@ -814,7 +814,11 @@ class ConscienceEngine:
         capabilities_summary = module_manager.collect_capabilities_summary()
         prompt = await self._build_action_prompt(ctx, reason, memory_context, capabilities_summary)
 
-        person_id = "conscience_mika"
+        # Decide WHOM to address (pass 1). If a concerned, reachable person is
+        # chosen, the response is composed with THEIR context and delivered to
+        # them; otherwise it stays Mika's internal/broadcast voice.
+        target = await self._select_recipient(ctx)
+        person_id = target or "conscience_mika"
 
         try:
             # Build filtered context with only relevant modules' tools
@@ -910,7 +914,73 @@ class ConscienceEngine:
                     obs.status = "failed"
                     await sync_to_async(obs.save)(update_fields=["status"])
                 except Exception:
-                    pass
+                    logger.warning(
+                        "Could not mark observation #%s as failed",
+                        getattr(obs, "pk", "?"), exc_info=True,
+                    )
+
+    async def _select_recipient(self, ctx: DecisionContext) -> str | None:
+        """Pass 1 of proactive speech: pick whom to address, or no one.
+
+        Routing is memory-grounded (``who_is_concerned``) then confirmed by Mika
+        via a ``[TO:person_id]`` tag. The candidate prompt is privacy-safe — only
+        names + channels, never another person's private memory content.
+        Returns a reachable ``person_id`` or None (keep it internal/broadcast).
+        """
+        from conscience.recipients import parse_to_tag
+
+        signal = " ".join(
+            o.summary for o in ctx.pending_observations if o.pertinence > 0.3
+        ).strip()
+        if not signal:
+            return None
+
+        candidates = await self.memory.who_is_concerned(signal, n=5)
+        if not candidates:
+            return None
+
+        lines: list[str] = []
+        allowed: list[str] = []
+        for c in candidates[:5]:
+            handles = c.get("handles") or []
+            if not handles:
+                continue
+            pid = handles[0]["person_id"]
+            channel = handles[0]["channel"]
+            allowed.append(pid)
+            lines.append(f"  [{pid}] {c['name']} ({channel})")
+
+        if not allowed:
+            return None
+
+        prompt = (
+            "Un evenement te concerne. Voici les personnes joignables qu'il "
+            "pourrait interesser :\n"
+            + "\n".join(lines)
+            + "\n\nVeux-tu en parler a quelqu'un ? Reponds UNIQUEMENT par "
+            "[TO:person_id] avec un id de la liste, ou [TO:none] si tu preferes "
+            "ne rien dire a personne pour l'instant."
+        )
+
+        try:
+            from ai.client import ai_client
+            from ai.router import AIRole
+
+            raw = await ai_client.complete(
+                system_prompt="Tu choisis a qui t'adresser. Reponds uniquement avec un tag [TO:...].",
+                user_prompt=prompt,
+                role=AIRole.SIGNAL_INTERPRETATION,
+            )
+        except Exception:
+            logger.exception("Recipient selection failed; staying internal")
+            return None
+
+        target = parse_to_tag(raw, allowed)
+        logger.info(
+            "Conscience recipient selection: target=%s (candidates=%s)",
+            target, allowed,
+        )
+        return target
 
     def _pick_relevant_modules(self, ctx: DecisionContext) -> list[str]:
         """Determine which modules are relevant based on pending observations."""

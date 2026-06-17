@@ -52,6 +52,12 @@ class BaseModule(ABC):
     # leave this as False.
     SYSTEM: bool = False
 
+    # Who may see this module's get_context() in their conversation prompt:
+    #   "owner"  — only Mika's operator / authenticated users (DEFAULT; private
+    #              info like unread emails must not leak to anonymous guests)
+    #   "public" — anyone Mika talks to
+    CONTEXT_VISIBILITY: str = "owner"
+
     def __init__(self, name: str):
         self.name = name
         self._running = False
@@ -127,10 +133,28 @@ class BaseModule(ABC):
 
     # ── Context Injection ─────────────────────────────────────────
 
-    def get_context(self) -> str:
-        """Return text to inject into Claude's system prompt.
-        E.g. 'Tu as 3 emails non lus.' Default: empty."""
+    def get_context(self, person_id: str = "") -> str:
+        """Return text to inject into Claude's system prompt for THIS person.
+
+        E.g. 'Tu as 3 emails non lus.' Default: empty. ``person_id`` lets a
+        module scope its context to the current interlocutor; combined with
+        ``CONTEXT_VISIBILITY`` it prevents private info leaking to guests."""
         return ""
+
+    # ── Outbound delivery ─────────────────────────────────────────
+
+    async def deliver(self, output, interlocutor) -> bool:
+        """Push an outbound message to a person via this module's external API.
+
+        Implemented by modules that can *initiate* contact (Telegram, Discord:
+        ``send_message(chat_id, ...)``). This is what lets Mika be proactive
+        toward an external transport instead of only replying to it.
+
+        ``output`` is the pipeline ``SpeechOutput``; ``interlocutor`` is the
+        ``Interlocutor`` from the presence registry (holds ``delivery_ref``).
+        Return ``True`` if delivered. Default: not deliverable.
+        """
+        return False
 
     # ── Inter-module Events ───────────────────────────────────────
 

@@ -112,8 +112,8 @@ async def gather_context(
             f"{emotion_context}\n{drive_context}" if emotion_context else drive_context
         )
 
-    # Module context for system prompt
-    module_context = module_manager.collect_context()
+    # Module context for system prompt (scoped to this person)
+    module_context = module_manager.collect_context(person_id)
 
     # Conversation history
     history = memory_manager.get_conversation_context()
