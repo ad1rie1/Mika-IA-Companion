@@ -1,9 +1,12 @@
 /* Generic renderer for module views that don't ship their own JS.
  *
  * Reads `window.ModuleView` (module, key, dataUrl, actions) and paints
- * whatever the data_handler returns. Two lightweight conventions:
+ * whatever the data_handler returns. Three lightweight conventions:
  *   - { columns: [...], rows: [...], total?, page?, limit? }
- *       → renders a table with pagination
+ *       → renders a single table with server-side pagination
+ *   - { tabs: [ {key, label, columns, rows} | {key, label, html}
+ *               | {key, label, ...flatJson} ] }
+ *       → renders a tab bar (Dash.tabs); table tabs paginate client-side
  *   - anything else
  *       → pretty-prints the JSON payload
  *
@@ -11,7 +14,7 @@
  * to the declared endpoint, then re-renders on success.
  */
 Dash.render(async (root) => {
-  const { api, escapeHTML, pager } = Dash;
+  const { api, escapeHTML, pager, clientPager, tabs } = Dash;
   const view = window.ModuleView;
   if (!view) {
     root.innerHTML = `<div class="empty">Vue non configurée.</div>`;
@@ -116,10 +119,76 @@ Dash.render(async (root) => {
       </div>`;
   }
 
+  // A single tab's body: a paginated table (client-side, since the whole
+  // dataset arrived in one payload), raw HTML, or pretty-printed JSON.
+  function paintTab(t, body) {
+    if (Array.isArray(t.columns) && Array.isArray(t.rows)) {
+      const cols = t.columns;
+      const idField = view.idField || "id";
+      const showDetail = !!view.hasDetail;
+      const head =
+        cols.map(c => `<th>${escapeHTML(c.label || c.key)}</th>`).join("") +
+        (showDetail ? `<th></th>` : "");
+      const colspan = cols.length + (showDetail ? 1 : 0) || 1;
+      body.innerHTML = `
+        <div class="card">
+          <h3>${escapeHTML(t.label || view.label)}</h3>
+          <table>
+            <thead><tr>${head}</tr></thead>
+            <tbody class="mv-tab-body"></tbody>
+          </table>
+        </div>`;
+      const card = body.querySelector(".card");
+      const tbody = body.querySelector(".mv-tab-body");
+      clientPager({
+        rows: t.rows, limit, mount: card,
+        render: page => {
+          tbody.innerHTML = page.map(r => {
+            const cells = cols.map(c => {
+              const v = r[c.key];
+              return `<td>${v == null ? '<span class="muted">—</span>' : escapeHTML(String(v))}</td>`;
+            }).join("");
+            const detailBtn = (showDetail && r[idField] != null)
+              ? `<td><button class="btn" data-detail-id="${escapeHTML(String(r[idField]))}">Voir</button></td>`
+              : (showDetail ? `<td></td>` : "");
+            return `<tr>${cells}${detailBtn}</tr>`;
+          }).join("") || `<tr><td colspan="${colspan}" class="muted">Aucune donnée.</td></tr>`;
+          tbody.querySelectorAll("button[data-detail-id]").forEach(btn => {
+            btn.onclick = () => openDetail(btn.dataset.detailId);
+          });
+        },
+      });
+    } else if (typeof t.html === "string") {
+      body.innerHTML = `<div class="card"><h3>${escapeHTML(t.label || view.label)}</h3>${t.html}</div>`;
+    } else {
+      body.innerHTML = renderDetail(t);
+    }
+  }
+
+  function renderTabs(d) {
+    root.innerHTML = `${actionsBar()}<div id="mv-tabs"></div>`;
+    root.querySelectorAll("button[data-action-idx]").forEach(btn => {
+      btn.onclick = () => runAction(view.actions[parseInt(btn.dataset.actionIdx, 10)]);
+    });
+    tabs({
+      mount: root.querySelector("#mv-tabs"),
+      storeKey: `dash.mv.${view.module}.${view.key}`,
+      tabs: d.tabs.map(t => ({
+        key: t.key, label: t.label || t.key,
+        render: body => paintTab(t, body),
+      })),
+    });
+  }
+
   async function draw() {
     const url = `${view.dataUrl}?page=${page}&limit=${limit}`;
     const d = await api(url);
     if (!d) { root.innerHTML = `<div class="empty">Indisponible.</div>`; return; }
+
+    if (Array.isArray(d.tabs)) {
+      renderTabs(d);
+      return;
+    }
 
     if (Array.isArray(d.columns) && Array.isArray(d.rows)) {
       root.innerHTML = renderTable(d);

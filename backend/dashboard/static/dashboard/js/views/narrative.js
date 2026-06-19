@@ -1,10 +1,12 @@
 Dash.render(async (root) => {
-  const { api, escapeHTML, emoChip, pct, fmtDate, clip } = Dash;
-  const d = await api("/dashboard/api/narrative?limit=20");
-  if (!d || !d.rows.length)
+  const { api, escapeHTML, emoChip, pct, fmtDate, clip, pager } = Dash;
+  const head = await api("/dashboard/api/narrative?limit=1");
+  if (!head || !head.rows.length)
     return (root.innerHTML = `<div class="empty">Pas encore de self-narrative.</div>`);
 
-  const [current, ...history] = d.rows;
+  const current = head.rows[0];
+  const histTotal = Math.max(0, (head.total || 1) - 1);  // history = tout sauf la plus récente
+
   root.innerHTML = `
     <div class="card mb">
       <h3>Narrative actuelle<span class="tag">${fmtDate(current.created_at)}</span></h3>
@@ -25,14 +27,39 @@ Dash.render(async (root) => {
     </div>
 
     <div class="card">
-      <h3>Historique</h3>
-      ${history.length ? history.map(n => `
-        <div style="padding:12px 0;border-bottom:1px dashed rgba(255,255,255,0.06)">
-          <div class="flex between center mb" style="font-size:11px;">
-            <span class="muted">${fmtDate(n.created_at)}</span>
-            <span>${emoChip(n.dominant_mood || "neutral")}</span>
-          </div>
-          <div class="narr">${escapeHTML(clip(n.content, 600))}</div>
-        </div>`).join("") : `<div class="muted">Aucun historique.</div>`}
+      <h3>Historique<span class="tag">${histTotal}</span></h3>
+      <div id="narr-hist"></div>
+      <div class="pager-slot"></div>
     </div>`;
+
+  const wrap = root.querySelector("#narr-hist");
+  const slot = root.querySelector(".pager-slot");
+  const limit = 10;
+  let offset = 0;
+
+  async function drawHist() {
+    let rows = [];
+    if (histTotal) {
+      const d = await api(`/dashboard/api/narrative?limit=${limit}&offset=${1 + offset}`);
+      rows = (d && d.rows) || [];
+    }
+    wrap.innerHTML = rows.length ? rows.map(n => `
+      <div style="padding:12px 0;border-bottom:1px dashed rgba(255,255,255,0.06)">
+        <div class="flex between center mb" style="font-size:11px;">
+          <span class="muted">${fmtDate(n.created_at)}</span>
+          <span>${emoChip(n.dominant_mood || "neutral")}</span>
+        </div>
+        <div class="narr">${escapeHTML(clip(n.content, 600))}</div>
+      </div>`).join("") : `<div class="muted">Aucun historique.</div>`;
+
+    slot.innerHTML = "";
+    if (histTotal > limit) {
+      slot.appendChild(pager({
+        total: histTotal, limit, offset,
+        onPrev: o => { offset = o; drawHist(); },
+        onNext: o => { offset = o; drawHist(); },
+      }));
+    }
+  }
+  drawHist();
 });

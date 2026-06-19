@@ -1,10 +1,6 @@
 Dash.render(async (root) => {
-  const { api, escapeHTML, emoChip, pct, fmtRel } = Dash;
-  const [s, dreams, journals] = await Promise.all([
-    api("/dashboard/api/sleep"),
-    api("/dashboard/api/sleep/dreams?limit=30"),
-    api("/dashboard/api/sleep/journals?limit=15"),
-  ]);
+  const { api, escapeHTML, emoChip, pct, fmtRel, pager, tabs } = Dash;
+  const s = await api("/dashboard/api/sleep");
   if (!s) return (root.innerHTML = `<div class="empty">Indisponible.</div>`);
   const typeColor = t => ({nightmare:"neg",pleasant:"pos",associative:"mag",mundane:""}[t] || "");
 
@@ -34,35 +30,83 @@ Dash.render(async (root) => {
       </div>
     </div>
 
-    <div class="two-col">
-      <div class="card">
-        <h3>Rêves<span class="tag">${dreams?.total || 0}</span></h3>
-        <div class="scroll-box">
-          ${(dreams?.rows || []).map(d => `
-            <div style="padding:10px 0;border-bottom:1px dashed rgba(255,255,255,0.05)">
-              <div class="flex between center mb" style="font-size:11px;">
-                <span><span class="pill ${typeColor(d.dream_type)}">${d.dream_type}</span>
-                      <span class="muted" style="margin-left:6px">${d.night_of}</span></span>
-                <span class="muted">vividness ${pct(d.vividness)}</span>
-              </div>
-              <div class="narr">${escapeHTML(d.content)}</div>
-              ${d.emotion ? `<div class="mt">${emoChip(d.emotion)}</div>` : ""}
-            </div>`).join("") || `<div class="muted">Aucun rêve enregistré.</div>`}
-        </div>
-      </div>
-      <div class="card">
-        <h3>Journaux quotidiens<span class="tag">${journals?.total || 0}</span></h3>
-        <div class="scroll-box">
-          ${(journals?.rows || []).map(j => `
-            <div style="padding:10px 0;border-bottom:1px dashed rgba(255,255,255,0.05)">
-              <div class="flex between center mb" style="font-size:11px;">
-                <span class="muted">${j.date}</span>
-                <span>${emoChip(j.dominant_emotion || "neutral")}</span>
-              </div>
-              <div class="narr">${escapeHTML(j.narrative)}</div>
-              <div class="mt chips">${(j.persons_interacted || []).map(p => `<span class="chip mag">${escapeHTML(p)}</span>`).join("")}</div>
-            </div>`).join("") || `<div class="muted">Aucun journal.</div>`}
-        </div>
-      </div>
-    </div>`;
+    <div id="sleep-tabs"></div>`;
+
+  // ── Rêves : liste paginée serveur ──────────────────────────────
+  function makeDreamsTab() {
+    const st = { offset: 0, limit: 20 };
+    return async (body) => {
+      async function draw() {
+        const d = await api(`/dashboard/api/sleep/dreams?limit=${st.limit}&offset=${st.offset}`);
+        const rows = (d && d.rows) || [];
+        const total = (d && d.total) || 0;
+        body.innerHTML = `
+          <div class="card">
+            <h3>Rêves<span class="tag">${total}</span></h3>
+            ${rows.map(dr => `
+              <div style="padding:10px 0;border-bottom:1px dashed rgba(255,255,255,0.05)">
+                <div class="flex between center mb" style="font-size:11px;">
+                  <span><span class="pill ${typeColor(dr.dream_type)}">${dr.dream_type}</span>
+                        <span class="muted" style="margin-left:6px">${dr.night_of}</span></span>
+                  <span class="muted">vividness ${pct(dr.vividness)}</span>
+                </div>
+                <div class="narr">${escapeHTML(dr.content)}</div>
+                ${dr.emotion ? `<div class="mt">${emoChip(dr.emotion)}</div>` : ""}
+              </div>`).join("") || `<div class="muted">Aucun rêve enregistré.</div>`}
+            <div class="pager-slot"></div>
+          </div>`;
+        if (total > st.limit) {
+          body.querySelector(".pager-slot").appendChild(pager({
+            total, limit: st.limit, offset: st.offset,
+            onPrev: o => { st.offset = o; draw(); },
+            onNext: o => { st.offset = o; draw(); },
+          }));
+        }
+      }
+      await draw();
+    };
+  }
+
+  // ── Journaux : liste paginée serveur ───────────────────────────
+  function makeJournalsTab() {
+    const st = { offset: 0, limit: 15 };
+    return async (body) => {
+      async function draw() {
+        const d = await api(`/dashboard/api/sleep/journals?limit=${st.limit}&offset=${st.offset}`);
+        const rows = (d && d.rows) || [];
+        const total = (d && d.total) || 0;
+        body.innerHTML = `
+          <div class="card">
+            <h3>Journaux quotidiens<span class="tag">${total}</span></h3>
+            ${rows.map(j => `
+              <div style="padding:10px 0;border-bottom:1px dashed rgba(255,255,255,0.05)">
+                <div class="flex between center mb" style="font-size:11px;">
+                  <span class="muted">${j.date}</span>
+                  <span>${emoChip(j.dominant_emotion || "neutral")}</span>
+                </div>
+                <div class="narr">${escapeHTML(j.narrative)}</div>
+                <div class="mt chips">${(j.persons_interacted || []).map(p => `<span class="chip mag">${escapeHTML(p)}</span>`).join("")}</div>
+              </div>`).join("") || `<div class="muted">Aucun journal.</div>`}
+            <div class="pager-slot"></div>
+          </div>`;
+        if (total > st.limit) {
+          body.querySelector(".pager-slot").appendChild(pager({
+            total, limit: st.limit, offset: st.offset,
+            onPrev: o => { st.offset = o; draw(); },
+            onNext: o => { st.offset = o; draw(); },
+          }));
+        }
+      }
+      await draw();
+    };
+  }
+
+  tabs({
+    mount: root.querySelector("#sleep-tabs"),
+    storeKey: "dash.sleep.tab",
+    tabs: [
+      { key: "dreams",   label: "Rêves",    render: makeDreamsTab() },
+      { key: "journals", label: "Journaux", render: makeJournalsTab() },
+    ],
+  });
 });

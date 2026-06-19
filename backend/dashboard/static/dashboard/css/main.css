@@ -265,6 +265,10 @@ td small { color: var(--text-dim); display: block; margin-top: 2px; }
 .pager .btn { padding: 4px 10px; }
 .pager .pager-info { margin: 0 8px; }
 
+/* Tab bar (shared, see Dash.tabs) */
+.tabbar { margin-bottom: 14px; padding: 8px 10px;
+          display: flex; gap: 8px; flex-wrap: wrap; }
+
 /* Clickable card */
 .card.clickable { cursor: pointer; }
 .card.clickable:hover { border-color: var(--cyan); box-shadow: 0 0 32px rgba(94,225,255,0.15); }

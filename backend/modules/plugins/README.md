@@ -116,6 +116,20 @@ Si `detail_handler` est déclaré, le renderer ajoute automatiquement une colonn
 
 **Action** (retourné par `ModuleViewAction.handler`) : n'importe quel dict JSON-sérialisable. Un bouton par action est placé en tête de la vue.
 
+**Vue à onglets** (retourné par `data_handler`) — quand une page porte **plusieurs tables**, renvoie une clé `tabs` au lieu de `columns`/`rows`. Le shell rend une barre d'onglets (`Dash.tabs`, onglet actif mémorisé en `localStorage`) ; chaque onglet-table est **paginé côté client** automatiquement :
+```json
+{
+  "tabs": [
+    {"key": "unread", "label": "Non lus",
+     "columns": [{"key":"subject","label":"Sujet"}], "rows": [ ... ]},
+    {"key": "all",    "label": "Tous",
+     "columns": [{"key":"subject","label":"Sujet"}], "rows": [ ... ]},
+    {"key": "raw",    "label": "Brut", "html": "<p>markup maison</p>"}
+  ]
+}
+```
+Chaque onglet est soit une **table** (`columns` + `rows` → table paginée + bouton "Voir" si `detail_handler` est déclaré), soit du **HTML brut** (`html`), soit un **dict plat** rendu en grille clé/valeur. Comme tout le jeu de données arrive en un seul payload, la pagination des onglets est cliente — réserve ce format aux volumes raisonnables (sinon reste sur la liste paginée serveur ci-dessus, ou passe en Option B).
+
 Exemple (simplifié) :
 ```python
 # modules/plugins/todo/views.py
@@ -203,9 +217,42 @@ Nomenclature conventionnelle : préfixer les dossiers par le nom du module (`tem
 - `Dash.fmtDate(iso)`, `Dash.fmtRel(iso)`, `Dash.pct(v)`, `Dash.clip(s, n)`
 - `Dash.openModal({title, body, footer})` — modale, clic backdrop/échap ferme
 - `Dash.confirm(msg)` — promesse qui résout bool
-- `Dash.pager({total, limit, offset, onPrev, onNext})` — élément de pagination
+- `Dash.pager({total, limit, offset, onPrev, onNext})` — élément de pagination (pagination **serveur** : tu rappelles ton `data_handler` avec le nouvel offset)
+- `Dash.clientPager({rows, limit, mount, render})` — pagination **côté client** d'un tableau déjà en mémoire ; `render(pageRows)` peint la tranche courante, le pager est (re)monté dans `mount` après chaque rendu
+- `Dash.tabs({mount, storeKey, tabs})` — barre d'onglets réutilisable ; `tabs = [{key, label, render(body)}]` (`render` peut être async et reçoit l'élément body à peupler), onglet actif persisté dans `localStorage[storeKey]`
 - `Dash.emoChip(emotion, weight)` — puce d'émotion colorée
 - `Dash.render(async fn)` — wrapper recommandé pour ton renderer principal
+
+Patron typique pour une vue custom multi-tables paginées :
+```js
+Dash.render(async (root) => {
+  const { api, tabs, pager } = Dash;
+  tabs({
+    mount: root,
+    storeKey: `dash.mv.${ModuleView.module}.${ModuleView.key}`,
+    tabs: [
+      { key: "a", label: "Onglet A", render: makeServerTab("a") },
+      { key: "b", label: "Onglet B", render: makeServerTab("b") },
+    ],
+  });
+
+  function makeServerTab(kind) {
+    const st = { offset: 0, limit: 25 };
+    return async (body) => {
+      async function draw() {
+        const d = await api(`${ModuleView.dataUrl}?kind=${kind}&limit=${st.limit}&offset=${st.offset}`);
+        body.innerHTML = `<div class="card"><table>…${d.rows}…</table><div class="pager-slot"></div></div>`;
+        if (d.total > st.limit) body.querySelector(".pager-slot").appendChild(pager({
+          total: d.total, limit: st.limit, offset: st.offset,
+          onPrev: o => { st.offset = o; draw(); }, onNext: o => { st.offset = o; draw(); },
+        }));
+      }
+      await draw();
+    };
+  }
+});
+```
+> Astuce : pour un rendu **zéro-JS**, tu n'as souvent pas besoin de tout ça — renvoie simplement la forme `{tabs: [...]}` depuis ton `data_handler` (voir Option A) et le shell générique fait les onglets + pagination pour toi.
 
 Exemple complet : [modules/plugins/email/static/email/views/inbox.js](email/static/email/views/inbox.js).
 

@@ -84,7 +84,8 @@ def connaissances(request):
 def themes(request):
     from memory.models import Theme
 
-    rows = list(
+    limit, offset = paginate(request, default=100)
+    qs = (
         Theme.objects
         .annotate(
             souvenir_count=Count("souvenirs", distinct=True),
@@ -93,13 +94,16 @@ def themes(request):
         .order_by("-souvenir_count", "name")
         .values("id", "name", "souvenir_count", "connaissance_count")
     )
-    return JsonResponse({"total": len(rows), "rows": rows})
+    total = qs.count()
+    rows = list(qs[offset:offset + limit])
+    return JsonResponse({"total": total, "limit": limit, "offset": offset, "rows": rows})
 
 
 @require_http_methods(["GET"])
 def entities(request):
     from memory.models import Entity
 
+    limit, offset = paginate(request, default=100)
     entity_type = pick(request, "type")
     qs = Entity.objects.annotate(
         souvenir_count=Count("souvenirs", distinct=True),
@@ -107,11 +111,12 @@ def entities(request):
     )
     if entity_type:
         qs = qs.filter(entity_type=entity_type)
-    qs = qs.order_by("-souvenir_count", "name")
-    rows = list(qs.values(
+    qs = qs.order_by("-souvenir_count", "name").values(
         "id", "name", "entity_type", "souvenir_count", "connaissance_count",
-    ))
-    return JsonResponse({"total": len(rows), "rows": rows})
+    )
+    total = qs.count()
+    rows = list(qs[offset:offset + limit])
+    return JsonResponse({"total": total, "limit": limit, "offset": offset, "rows": rows})
 
 
 @require_http_methods(["GET"])

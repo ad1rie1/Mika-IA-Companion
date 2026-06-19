@@ -61,6 +61,14 @@ def emotion_history(request):
         for s in qs[offset:offset + limit]
     ]
 
+    # Summaries paginate independently so the "Résumés" tab can be
+    # navigated without disturbing the snapshots offset.
+    summary_limit, summary_offset = paginate(
+        request, default=30, cap=200,
+        limit_key="summary_limit", offset_key="summary_offset",
+    )
+    sum_qs = EmotionalSummary.objects.order_by("-period_start")
+    summaries_total = sum_qs.count()
     summaries = [
         {
             "person_id": s.person_id,
@@ -71,10 +79,13 @@ def emotion_history(request):
             "trend": s.trend,
             "snapshot_count": s.snapshot_count,
         }
-        for s in EmotionalSummary.objects.order_by("-period_start")[:30]
+        for s in sum_qs[summary_offset:summary_offset + summary_limit]
     ]
 
     return JsonResponse({
         "total": total, "limit": limit, "offset": offset,
-        "snapshots": snaps, "summaries": summaries,
+        "snapshots": snaps,
+        "summaries": summaries,
+        "summaries_total": summaries_total,
+        "summary_limit": summary_limit, "summary_offset": summary_offset,
     })

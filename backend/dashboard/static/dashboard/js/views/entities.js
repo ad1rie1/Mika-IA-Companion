@@ -1,9 +1,9 @@
 Dash.render(async (root) => {
-  const { api, escapeHTML } = Dash;
-  const state = { type: "" };
+  const { api, escapeHTML, pager } = Dash;
+  const state = { type: "", offset: 0, limit: 100 };
 
   async function reload() {
-    const u = new URLSearchParams();
+    const u = new URLSearchParams({ limit: state.limit, offset: state.offset });
     if (state.type) u.set("type", state.type);
     const d = await api("/dashboard/api/entities?" + u);
     if (!d) return (root.innerHTML = `<div class="empty">Indisponible.</div>`);
@@ -35,8 +35,17 @@ Dash.render(async (root) => {
             </tr>`).join("") || `<tr><td colspan="5" class="muted">Aucune entité.</td></tr>`}
           </tbody>
         </table>
+        <div class="pager-slot"></div>
       </div>`;
-    Dash.$("#f-type").onchange = e => { state.type = e.target.value; reload(); };
+
+    if (d.total > state.limit) {
+      root.querySelector(".pager-slot").appendChild(pager({
+        total: d.total, limit: state.limit, offset: state.offset,
+        onPrev: o => { state.offset = o; reload(); },
+        onNext: o => { state.offset = o; reload(); },
+      }));
+    }
+    Dash.$("#f-type").onchange = e => { state.type = e.target.value; state.offset = 0; reload(); };
   }
   reload();
 });

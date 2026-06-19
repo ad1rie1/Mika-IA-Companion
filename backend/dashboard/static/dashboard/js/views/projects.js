@@ -42,6 +42,25 @@ Dash.render(async (root) => {
     const stp = s => ({active:"pos",paused:"warn",completed:"",abandoned:"neg"}[s] || "");
     const pp  = s => ({urgent:"neg",high:"warn",normal:"",low:""}[s] || "");
 
+    const projectCard = p => `
+      <div class="card clickable" data-id="${p.id}">
+        <h3>${escapeHTML(p.title)}<span class="tag">${escapeHTML(p.emotion_policy)}</span></h3>
+        <div class="flex gap mb">
+          <span class="pill ${stp(p.status)}">${p.status}</span>
+          <span class="pill ${pp(p.priority)}">${p.priority}</span>
+          <span class="pill">${p.origin}</span>
+        </div>
+        <div class="muted mb">${escapeHTML(clip(p.description, 220))}</div>
+        <div class="metric-row mt"><span class="k">Owner</span><span class="v">${escapeHTML(p.owner || "—")}</span></div>
+        <div class="metric-row"><span class="k">Planification</span><span class="v mono">${escapeHTML(p.schedule_rule || "manuel")}</span></div>
+        <div class="metric-row"><span class="k">Prochaine exécution</span><span class="v">${p.next_run_at ? fmtDate(p.next_run_at) : "—"}</span></div>
+        <div class="metric-row"><span class="k">Dernière exécution</span><span class="v">${p.last_run_at ? fmtRel(p.last_run_at) : "—"}</span></div>
+        <div class="metric-row"><span class="k">Approbation requise</span><span class="v">${p.requires_approval ? "oui" : "non"}</span></div>
+        <div class="chips mt">
+          ${(p.keywords || []).slice(0, 6).map(k => `<span class="chip">${escapeHTML(k)}</span>`).join("")}
+        </div>
+      </div>`;
+
     root.innerHTML = `
       <div class="toolbar">
         <button class="btn primary" id="btn-new">+ Nouveau projet</button>
@@ -49,43 +68,49 @@ Dash.render(async (root) => {
       </div>
 
       ${pending.length ? `
-        <div class="card mb" style="border-color:rgba(255,200,87,0.4);">
+        <div class="card mb" id="p-pending" style="border-color:rgba(255,200,87,0.4);">
           <h3 style="color:var(--amber)">⚠ Actions en attente d'approbation<span class="tag">${pending.length}</span></h3>
-          ${pending.map(a => `
-            <div class="metric-row">
-              <span class="k">${escapeHTML(clip(a.proposal, 200))}</span>
-              <span class="v muted">projet <b>${escapeHTML(a.project_title)}</b> · ${fmtRel(a.created_at)}</span>
-            </div>`).join("")}
+          <div id="p-pending-list"></div>
         </div>` : ""}
 
-      <div class="grid cols-2" id="p-list">
-        ${projects.map(p => {
-          // task counts aren't in the list endpoint — we render summary from fields.
-          return `
-            <div class="card clickable" data-id="${p.id}">
-              <h3>${escapeHTML(p.title)}<span class="tag">${escapeHTML(p.emotion_policy)}</span></h3>
-              <div class="flex gap mb">
-                <span class="pill ${stp(p.status)}">${p.status}</span>
-                <span class="pill ${pp(p.priority)}">${p.priority}</span>
-                <span class="pill">${p.origin}</span>
-              </div>
-              <div class="muted mb">${escapeHTML(clip(p.description, 220))}</div>
-              <div class="metric-row mt"><span class="k">Owner</span><span class="v">${escapeHTML(p.owner || "—")}</span></div>
-              <div class="metric-row"><span class="k">Planification</span><span class="v mono">${escapeHTML(p.schedule_rule || "manuel")}</span></div>
-              <div class="metric-row"><span class="k">Prochaine exécution</span><span class="v">${p.next_run_at ? fmtDate(p.next_run_at) : "—"}</span></div>
-              <div class="metric-row"><span class="k">Dernière exécution</span><span class="v">${p.last_run_at ? fmtRel(p.last_run_at) : "—"}</span></div>
-              <div class="metric-row"><span class="k">Approbation requise</span><span class="v">${p.requires_approval ? "oui" : "non"}</span></div>
-              <div class="chips mt">
-                ${(p.keywords || []).slice(0, 6).map(k => `<span class="chip">${escapeHTML(k)}</span>`).join("")}
-              </div>
-            </div>`;
-        }).join("") || `<div class="empty">Aucun projet — clique <b>+ Nouveau projet</b> pour démarrer.</div>`}
+      <div id="p-list-wrap">
+        <div class="grid cols-2" id="p-list"></div>
       </div>`;
 
     Dash.$("#btn-new").onclick = () => openEditor(null);
-    Dash.$$("#p-list .card.clickable").forEach(card => {
-      card.onclick = () => openEditor(parseInt(card.dataset.id, 10));
-    });
+
+    // Pending actions — pagination côté client
+    if (pending.length) {
+      const pendCard = Dash.$("#p-pending");
+      const pendList = Dash.$("#p-pending-list");
+      Dash.clientPager({
+        rows: pending, limit: 10, mount: pendCard,
+        render: page => {
+          pendList.innerHTML = page.map(a => `
+            <div class="metric-row">
+              <span class="k">${escapeHTML(clip(a.proposal, 200))}</span>
+              <span class="v muted">projet <b>${escapeHTML(a.project_title)}</b> · ${fmtRel(a.created_at)}</span>
+            </div>`).join("");
+        },
+      });
+    }
+
+    // Projets (grille) — pagination côté client
+    const listWrap = Dash.$("#p-list-wrap");
+    const list = Dash.$("#p-list");
+    if (projects.length) {
+      Dash.clientPager({
+        rows: projects, limit: 12, mount: listWrap,
+        render: page => {
+          list.innerHTML = page.map(projectCard).join("");
+          list.querySelectorAll(".card.clickable").forEach(card => {
+            card.onclick = () => openEditor(parseInt(card.dataset.id, 10));
+          });
+        },
+      });
+    } else {
+      list.innerHTML = `<div class="empty">Aucun projet — clique <b>+ Nouveau projet</b> pour démarrer.</div>`;
+    }
   }
 
   // ── Editor (create + edit) ────────────────────────────────────

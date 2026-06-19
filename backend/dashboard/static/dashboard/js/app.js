@@ -86,6 +86,70 @@
     return wrap;
   }
 
+  // ── Client-side pagination ──────────────────────────────────
+  // For in-memory / bounded lists (live affect, modules, MCP tools,
+  // pending actions). `render(pageRows)` paints the current slice;
+  // the pager is (re)mounted into `mount` after each draw. Reuses
+  // `pager()` so the markup stays identical to server-side paging.
+  function clientPager({ rows, limit = 25, mount, render }) {
+    rows = rows || [];
+    let offset = 0;
+    function draw() {
+      render(rows.slice(offset, offset + limit));
+      mount.querySelectorAll(":scope > .pager").forEach(p => p.remove());
+      if (rows.length > limit) {
+        mount.appendChild(pager({
+          total: rows.length, limit, offset,
+          onPrev: o => { offset = o; draw(); },
+          onNext: o => { offset = o; draw(); },
+        }));
+      }
+    }
+    draw();
+  }
+
+  // ── Tab bar ─────────────────────────────────────────────────
+  // Generalizes the per-view tab pattern (active tab persisted in
+  // localStorage, .btn.primary/.ghost toggle). `tabs` is a list of
+  // {key, label, render(body)} — render may be async and receives the
+  // body element to populate. Returns {body, paint}.
+  function tabs({ mount, storeKey, tabs: defs }) {
+    const read = () => { try { return localStorage.getItem(storeKey); } catch (_) { return null; } };
+    const write = k => { try { localStorage.setItem(storeKey, k); } catch (_) {} };
+    let activeKey = defs.some(t => t.key === read()) ? read() : defs[0].key;
+
+    const bar = document.createElement("div");
+    bar.className = "card tabbar";
+    bar.innerHTML = defs.map(t =>
+      `<button class="btn ${t.key === activeKey ? "primary" : "ghost"}" data-tab="${t.key}">${escapeHTML(t.label)}</button>`
+    ).join("");
+
+    const body = document.createElement("div");
+
+    mount.innerHTML = "";
+    mount.appendChild(bar);
+    mount.appendChild(body);
+
+    async function paint(key) {
+      const tab = defs.find(t => t.key === key) || defs[0];
+      activeKey = tab.key;
+      bar.querySelectorAll("button[data-tab]").forEach(b => {
+        const on = b.dataset.tab === tab.key;
+        b.classList.toggle("primary", on);
+        b.classList.toggle("ghost", !on);
+      });
+      body.innerHTML = `<div class="empty"><span class="loader"></span></div>`;
+      await tab.render(body);
+    }
+
+    bar.querySelectorAll("button[data-tab]").forEach(btn => {
+      btn.onclick = () => { write(btn.dataset.tab); paint(btn.dataset.tab); };
+    });
+
+    paint(activeKey);
+    return { body, paint };
+  }
+
   // ── Top-bar refresh + sidebar counters ──────────────────────
   async function refreshTop() {
     const d = await api("/dashboard/api/overview");
@@ -156,7 +220,7 @@
       return e;
     },
     api, fmtDate, fmtRel, pct, clip, escapeHTML,
-    emoColor, emoChip, pager, render,
+    emoColor, emoChip, pager, clientPager, tabs, render,
   };
 
   refreshTop();
