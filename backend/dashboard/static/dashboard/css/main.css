@@ -50,13 +50,17 @@ body::after {
 nav.sidebar {
   border-right: 1px solid var(--border);
   background: linear-gradient(180deg, rgba(6,10,22,0.9), rgba(6,10,22,0.6));
-  padding: 18px 14px; overflow-y: auto; position: relative;
+  padding: 18px 14px; overflow-x: hidden; overflow-y: auto; position: relative;
 }
 nav.sidebar::before {
   content: ""; position: absolute; top: 0; right: -1px; width: 2px; height: 100%;
   background: linear-gradient(180deg, transparent, var(--cyan), transparent);
   opacity: 0.35;
 }
+nav.sidebar::-webkit-scrollbar { width: 10px; height: 10px; }
+nav.sidebar::-webkit-scrollbar-track { background: transparent; }
+nav.sidebar::-webkit-scrollbar-thumb { background: rgba(94,225,255,0.18); border-radius: 6px; }
+nav.sidebar::-webkit-scrollbar-thumb:hover { background: rgba(94,225,255,0.35); }
 .logo { display: flex; align-items: center; gap: 10px; margin-bottom: 18px;
   text-decoration: none; color: inherit; }
 .logo-badge {
@@ -102,14 +106,15 @@ nav.sidebar::before {
 main.content { display: flex; flex-direction: column; overflow: hidden; }
 header.top {
   padding: 14px 22px; border-bottom: 1px solid var(--border);
-  display: flex; align-items: center; gap: 14px;
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap; row-gap: 8px;
   background: linear-gradient(180deg, rgba(6,10,22,0.9), rgba(6,10,22,0.35));
 }
 header.top h1 {
   margin: 0; font-size: 14px; letter-spacing: 0.18em; text-transform: uppercase;
   color: var(--cyan); text-shadow: var(--glow); font-weight: 500;
 }
-.top-meta { margin-left: auto; display: flex; gap: 22px; color: var(--text-dim); font-size: 11px; }
+.top-meta { margin-left: auto; display: flex; gap: 22px; row-gap: 6px;
+  flex-wrap: wrap; color: var(--text-dim); font-size: 11px; }
 .meta-block b { color: var(--cyan); font-weight: 500; }
 .meta-dot {
   display: inline-block; width: 8px; height: 8px; border-radius: 50%;
@@ -118,6 +123,20 @@ header.top h1 {
 }
 .meta-dot.offline { background: var(--red); box-shadow: 0 0 8px var(--red); }
 @keyframes pulse { 0%,100% { opacity: 0.65; } 50% { opacity: 1; } }
+
+/* Mobile top-menu toggle — hidden on desktop, shown ≤760px (see media query).
+   The sidebar then becomes a drop-down panel from the top. */
+.nav-toggle {
+  display: none; background: transparent; border: 1px solid var(--border);
+  color: var(--cyan); width: 34px; height: 34px; border-radius: 6px;
+  font-size: 16px; line-height: 1; cursor: pointer; padding: 0;
+  align-items: center; justify-content: center; flex: 0 0 auto;
+}
+.nav-toggle:hover { background: rgba(94,225,255,0.08); border-color: var(--border-strong); }
+.nav-backdrop {
+  display: none; position: fixed; inset: 0; z-index: 150;
+  background: rgba(5,7,13,0.6); backdrop-filter: blur(2px);
+}
 
 section.view { flex: 1; overflow-y: auto; padding: 18px 22px 64px; }
 section.view::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -189,6 +208,12 @@ section.view::-webkit-scrollbar-thumb:hover { background: rgba(94,225,255,0.35);
 .pill.mag  { color: var(--magenta); border-color: rgba(255,75,216,0.4); background: rgba(255,75,216,0.08); }
 
 /* Tables */
+/* Horizontal-scroll wrapper auto-applied to every table inside #view-root
+   (see app.js wrapTables) so a genuinely wide table stays reachable on a
+   narrow screen instead of being clipped — without forcing a scrollbar on
+   small/empty tables (the table keeps width:100% and only overflows when
+   its own content can't fit). */
+.table-wrap { width: 100%; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 table { width: 100%; border-collapse: collapse; font-size: 12px; }
 th, td {
   text-align: left; padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,0.04);
@@ -249,10 +274,13 @@ td small { color: var(--text-dim); display: block; margin-top: 2px; }
 }
 
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-@media (max-width: 1100px) { .two-col, .grid.cols-3, .grid.cols-4 { grid-template-columns: 1fr 1fr; } }
-@media (max-width: 760px) { .app { grid-template-columns: 64px 1fr; }
-  nav.sidebar .label, .logo-title, .logo-sub, .group-label { display: none; }
-  .grid.cols-2, .grid.cols-3, .grid.cols-4, .two-col { grid-template-columns: 1fr; } }
+
+/* Responsive overrides live at the very end of this file — see the
+   "Responsive overrides" section. They MUST come after every base
+   component rule: media queries add no specificity, so at equal
+   specificity the last declaration in source order wins. A mobile
+   override placed before a base rule (e.g. .cfg-wrap / .mail-split,
+   whose base defs sit lower down) would silently lose the cascade. */
 
 /* Utility */
 .flex { display: flex; } .between { justify-content: space-between; }
@@ -397,7 +425,54 @@ td small { color: var(--text-dim); display: block; margin-top: 2px; }
 }
 .cfg-fields select option { background: #0a1020; color: var(--text); }
 
+/* Config page layout (nav + content) — class so media queries can
+   collapse it; the inline style version couldn't be overridden. */
+.cfg-wrap { display: grid; grid-template-columns: 240px 1fr; gap: 14px; align-items: start; }
+
+/* ── Responsive overrides ───────────────────────────────────────────
+   Kept at the end of the file so they reliably win the cascade over the
+   base component rules declared above (cfg-wrap, mail-split, mail-list,
+   form-grid… all defined later than the old media block, which made
+   their mobile collapse dead). Breakpoints: 1100 / 760 / 480. */
+@media (max-width: 1100px) {
+  .two-col, .grid.cols-3, .grid.cols-4 { grid-template-columns: 1fr 1fr; }
+  .grid.cols-6 { grid-template-columns: repeat(3, minmax(0,1fr)); }
+}
 @media (max-width: 760px) {
+  /* Single column; the sidebar lifts out of the grid into a top drop-down
+     menu toggled by the hamburger button in the header. */
+  .app { grid-template-columns: 1fr; }
+  .nav-toggle { display: inline-flex; }
+  nav.sidebar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+    max-height: 88vh; overflow-y: auto;
+    padding: 14px 16px;
+    border-right: none; border-bottom: 1px solid var(--border-strong);
+    box-shadow: 0 12px 48px rgba(0,0,0,0.6);
+    transform: translateY(-100%);
+    transition: transform 0.22s ease;
+  }
+  nav.sidebar::before { display: none; }
+  body.nav-open nav.sidebar { transform: translateY(0); }
+  body.nav-open .nav-backdrop { display: block; }
+
+  .grid.cols-2, .grid.cols-3, .grid.cols-4, .two-col { grid-template-columns: 1fr; }
+  .grid.cols-6 { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .cfg-wrap { grid-template-columns: 1fr; }
+  .cfg-nav { position: static !important; max-height: none !important; }
+  .mail-split { grid-template-columns: 1fr; }
+  .mail-list { max-height: 40vh; }
   .form-grid { grid-template-columns: 1fr; }
   .modal-backdrop { padding: 10px; }
+  section.view { padding: 14px 12px 48px; }
+  header.top { padding: 12px 14px; }
+  .top-meta { gap: 14px; }
+}
+@media (max-width: 480px) {
+  .grid.cols-6 { grid-template-columns: 1fr; }
+  .cfg-fields input[type=text], .cfg-fields input[type=number],
+  .cfg-fields input[type=password], .cfg-fields textarea, .cfg-fields select {
+    min-width: 0; width: 100%;
+  }
+  .top-meta { gap: 10px; font-size: 10px; }
 }

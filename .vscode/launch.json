@@ -9,11 +9,14 @@
             "name": "VTuber backend (Uvicorn + ASGI lifespan)",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}\\run.py",
+            "program": "${workspaceFolder}/run.py",
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "justMyCode": false,
-            "autoStartBrowser": false
+            "autoStartBrowser": false,
+            "env": {
+                "API_PORT": "8001"
+            }
         }
     ]
 }

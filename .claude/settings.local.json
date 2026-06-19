@@ -29,7 +29,13 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(curl -s \"https://raw.githubusercontent.com/kyutai-labs/moshi/main/moshi/moshi/models/tts.py\")",
       "Bash(curl -s \"https://raw.githubusercontent.com/kyutai-labs/delayed-streams-modeling/main/configs/config-tts.toml\")",
-      "Bash(curl -s \"https://raw.githubusercontent.com/kyutai-labs/delayed-streams-modeling/main/FAQ.md\")"
+      "Bash(curl -s \"https://raw.githubusercontent.com/kyutai-labs/delayed-streams-modeling/main/FAQ.md\")",
+      "Bash(curl -s http://127.0.0.1:8001/dashboard/)",
+      "Bash(grep -iE \"^DEBUG\" .env)",
+      "Bash(curl -s http://127.0.0.1:8001/api/dev/sleep/status -o /dev/null -w \"sleep debug endpoint \\(DEBUG-gated\\) HTTP: %{http_code}\\\\n\")",
+      "Bash(pkill -f \"PROJET IA/vtuber/run.py\")",
+      "Bash(API_PORT=8001 nohup python run.py)",
+      "Bash(echo \"launched, pid $!\")"
     ]
   }
 }

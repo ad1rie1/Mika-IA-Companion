@@ -150,6 +150,24 @@
     return { body, paint };
   }
 
+  // ── Mobile top-menu toggle ──────────────────────────────────
+  // Hamburger in the header drops the sidebar down as a top menu on
+  // narrow screens. Backdrop click or Escape closes it; navigating to a
+  // menu item reloads the page, which resets the state on its own.
+  function wireNav() {
+    const toggle = $("#nav-toggle");
+    const backdrop = $("#nav-backdrop");
+    if (!toggle) return;
+    const set = open => {
+      document.body.classList.toggle("nav-open", open);
+      toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    };
+    toggle.addEventListener("click", () =>
+      set(!document.body.classList.contains("nav-open")));
+    if (backdrop) backdrop.addEventListener("click", () => set(false));
+    document.addEventListener("keydown", e => { if (e.key === "Escape") set(false); });
+  }
+
   // ── Top-bar refresh + sidebar counters ──────────────────────
   async function refreshTop() {
     const d = await api("/dashboard/api/overview");
@@ -186,8 +204,45 @@
     };
     $$("[data-count]").forEach(el => {
       const key = el.dataset.count;
-      if (counts[key] != null) el.textContent = counts[key];
+      // Only badge non-zero counts — a "0" pill is noise (and clutters the
+      // collapsed icon-only sidebar on mobile).
+      if (counts[key] != null) el.textContent = counts[key] ? counts[key] : "";
     });
+  }
+
+  // ── Responsive tables ───────────────────────────────────────
+  // Wrap every <table> in a horizontally-scrollable container so wide
+  // data tables stay reachable on narrow screens instead of being
+  // clipped. Idempotent (skips already-wrapped tables) and driven by a
+  // MutationObserver so it also catches dynamic re-renders (pagination,
+  // tab switches) inside any view.
+  function wrapTables(rootEl) {
+    if (!rootEl) return;
+    rootEl.querySelectorAll("table").forEach(t => {
+      const p = t.parentElement;
+      if (!p || p.classList.contains("table-wrap")) return;
+      const w = document.createElement("div");
+      w.className = "table-wrap";
+      t.replaceWith(w);
+      w.appendChild(t);
+    });
+  }
+  function watchTables() {
+    const root = $("#view-root");
+    if (!root || typeof MutationObserver === "undefined") return;
+    wrapTables(root);
+    const mo = new MutationObserver(muts => {
+      for (const m of muts) {
+        for (const n of m.addedNodes) {
+          if (n.nodeType === 1 && (n.tagName === "TABLE" ||
+              (n.querySelector && n.querySelector("table")))) {
+            wrapTables(root);
+            return;
+          }
+        }
+      }
+    });
+    mo.observe(root, { childList: true, subtree: true });
   }
 
   // ── View helper ─────────────────────────────────────────────
@@ -201,6 +256,7 @@
       console.error(e);
       root.innerHTML = `<div class="empty">Erreur : ${escapeHTML(String(e))}</div>`;
     }
+    wrapTables(root);
   }
 
   // ── Expose + bootstrap ──────────────────────────────────────
@@ -225,4 +281,6 @@
 
   refreshTop();
   setInterval(refreshTop, 8000);
+  watchTables();
+  wireNav();
 })();

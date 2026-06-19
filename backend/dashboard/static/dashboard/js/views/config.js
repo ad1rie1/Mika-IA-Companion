@@ -62,7 +62,7 @@ Dash.render(async (root) => {
   // ── Layout ────────────────────────────────────────────────────
   root.innerHTML = `
     <div class="card mb" id="cfg-tabs" style="padding:8px 10px;display:flex;gap:8px;flex-wrap:wrap"></div>
-    <div class="cfg-wrap" style="display:grid;grid-template-columns:240px 1fr;gap:14px;align-items:start">
+    <div class="cfg-wrap">
       <aside class="card cfg-nav" style="padding:8px;position:sticky;top:8px;max-height:calc(100vh - 130px);overflow-y:auto"></aside>
       <section id="cfg-content"></section>
     </div>`;
