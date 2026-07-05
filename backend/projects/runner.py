@@ -110,6 +110,24 @@ class ProjectRunner:
         async with self._lock:
             return await self._tick_inner()
 
+    async def advance_now(self, project_id: int) -> bool:
+        """Force a single advance tick for one project, bypassing the
+        schedule and the due-list. Used by the dashboard 'advance now'
+        button. Returns True if the advance succeeded.
+
+        Returns False (without raising) if another tick is in flight, so
+        the caller can surface a 'busy, retry' message instead of an error.
+        """
+        if self._lock.locked():
+            return False
+        async with self._lock:
+            try:
+                return await self._advance(project_id)
+            except Exception:
+                logger.exception("Manual advance failed for id=%s", project_id)
+                await self._log_error(project_id, "Exception during manual advance")
+                return False
+
     async def _tick_inner(self) -> int:
         due = await self._list_due()
         if not due:

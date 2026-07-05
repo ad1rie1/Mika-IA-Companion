@@ -40,11 +40,16 @@ from projects.models import (
 
 logger = logging.getLogger(__name__)
 
+try:
+    from projects.runner import RUNS_SINCE_INPUT_CAP
+except Exception:  # pragma: no cover - defensive fallback
+    RUNS_SINCE_INPUT_CAP = 10
+
 
 # ── Helpers ──────────────────────────────────────────────────────
 
 
-def _project_to_dict(p: Project, *, include_tasks: bool = False) -> dict:
+def _project_to_dict(p: Project, *, include_tasks: bool = False, quota: dict | None = None) -> dict:
     data = {
         "id": p.id,
         "title": p.title,
@@ -64,11 +69,14 @@ def _project_to_dict(p: Project, *, include_tasks: bool = False) -> dict:
         "next_run_at": p.next_run_at.isoformat() if p.next_run_at else None,
         "last_run_at": p.last_run_at.isoformat() if p.last_run_at else None,
         "runs_since_user_input": p.runs_since_user_input,
+        "max_runs_without_input": RUNS_SINCE_INPUT_CAP,
         "monthly_token_budget": p.monthly_token_budget,
         "keywords": list(p.keywords or []),
         "owner": p.owner.name if p.owner_id else None,
+        "owner_id": p.owner_id,
         "created_at": p.created_at.isoformat(),
         "updated_at": p.updated_at.isoformat(),
+        "quota": quota if quota is not None else _project_quota(p),
     }
     if include_tasks:
         data["tasks"] = [
@@ -76,6 +84,30 @@ def _project_to_dict(p: Project, *, include_tasks: bool = False) -> dict:
             for t in ProjectTask.objects.filter(project=p).order_by("order", "created_at")
         ]
     return data
+
+
+def _project_quota(p: Project, snap=None) -> dict:
+    """Per-project monthly token/cost consumption vs. its budget.
+
+    Reads the in-RAM quota tracker (resets monthly). ``limit_monthly`` is
+    the project's configured budget (0 = unlimited). Pass a pre-computed
+    ``snap`` to avoid re-snapshotting in list views.
+    """
+    try:
+        from ai.quota import quota_tracker
+        if snap is None:
+            snap = quota_tracker.snapshot()
+        pq = (snap.projects or {}).get(str(p.id)) or {}
+        month = snap.month
+    except Exception:
+        pq, month = {}, ""
+    return {
+        "tokens_month": pq.get("tokens_month", 0),
+        "cost_usd_month": pq.get("cost_usd_month", 0.0),
+        "calls_month": pq.get("calls_month", 0),
+        "limit_monthly": p.monthly_token_budget,
+        "month": month,
+    }
 
 
 def _task_to_dict(t: ProjectTask) -> dict:
@@ -126,10 +158,16 @@ def list_projects(request):
     qs = Project.objects.all()
     if status_filter:
         qs = qs.filter(status=status_filter)
+    try:
+        from ai.quota import quota_tracker
+        snap = quota_tracker.snapshot()
+    except Exception:
+        snap = None
     return JsonResponse({
-        "projects": [_project_to_dict(p) for p in qs.order_by(
-            "-priority", "-updated_at",
-        )],
+        "projects": [
+            _project_to_dict(p, quota=_project_quota(p, snap))
+            for p in qs.order_by("-priority", "-updated_at")
+        ],
     })
 
 
@@ -147,7 +185,7 @@ def create_project(request):
         "description", "keywords", "origin", "status", "priority",
         "tone_directive", "emotion_policy", "instructions", "out_of_scope",
         "requires_approval", "allowed_modules", "resource_paths", "contacts",
-        "schedule_rule", "monthly_token_budget",
+        "schedule_rule", "monthly_token_budget", "owner_id",
     }
     kwargs = {k: body[k] for k in body.keys() & allowed_fields if body[k] is not None}
     kwargs["title"] = title[:150]
@@ -210,6 +248,9 @@ def project_detail(request, project_id: int):
     for k, v in body.items():
         if k in updatable and v is not None:
             setattr(p, k, v)
+    # Owner is settable AND clearable (explicit null detaches the owner).
+    if "owner_id" in body:
+        p.owner_id = body["owner_id"] or None
     # Recompute next_run_at if schedule_rule changed
     if "schedule_rule" in body:
         try:
@@ -220,6 +261,44 @@ def project_detail(request, project_id: int):
             p.next_run_at = None
     p.save()
     return JsonResponse({"ok": True, "project": _project_to_dict(p)})
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def advance_project(request, project_id: int):
+    """Force a single runner advance tick for this project, bypassing its
+    schedule. Returns the refreshed project (with tasks) on success.
+
+    Responds 409 if the runner is busy with another tick (caller may retry).
+    """
+    try:
+        p = Project.objects.get(pk=project_id)
+    except Project.DoesNotExist:
+        return _error("not found", status=404)
+    if p.status != Project.Status.ACTIVE:
+        return _error("project is not active", status=400)
+
+    from projects.runner import project_runner
+    try:
+        ok = async_to_sync(project_runner.advance_now)(project_id)
+    except Exception as e:
+        logger.exception("Manual advance failed for project %s", project_id)
+        return _error(f"advance failed: {e}", status=500)
+
+    if not ok:
+        return _error("runner busy — retry in a moment", status=409)
+
+    p.refresh_from_db()
+    data = _project_to_dict(p, include_tasks=True)
+    data["recent_logs"] = [
+        {
+            "action": log.action,
+            "summary": log.summary,
+            "created_at": log.created_at.isoformat(),
+        }
+        for log in ProjectLog.objects.filter(project=p).order_by("-created_at")[:20]
+    ]
+    return JsonResponse({"ok": True, "project": data})
 
 
 # ── Task endpoints ──────────────────────────────────────────────
