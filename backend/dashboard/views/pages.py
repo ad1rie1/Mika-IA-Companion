@@ -167,6 +167,24 @@ def themes(request):       return _render(request, "themes")
 def entities(request):     return _render(request, "entities")
 def messages(request):     return _render(request, "messages")
 def persons(request):      return _render(request, "persons")
+
+
+def person_detail(request, entity_id):
+    """Full-page detail view for one person (profile header + memory tabs)."""
+    from memory.models import Entity
+
+    entity = Entity.objects.filter(entity_type="person", id=entity_id).first()
+    if entity is None:
+        raise Http404("Person not found")
+    ctx = {
+        "menu": MENU + _build_module_menu(),
+        "active_view": "persons",
+        "title": f"Personne · {entity.name}",
+        "entity_id": entity.id,
+    }
+    return render(request, "dashboard/person_detail.html", ctx)
+
+
 def commitments(request):  return _render(request, "commitments")
 def observations(request): return _render(request, "observations")
 def logs(request):         return _render(request, "logs")

@@ -1,0 +1,6 @@
+{% extends "dashboard/base.html" %}
+{% load static %}
+{% block scripts %}
+<script>window.PERSON_ID = {{ entity_id }};</script>
+<script src="{% static 'dashboard/js/views/person_detail.js' %}"></script>
+{% endblock %}

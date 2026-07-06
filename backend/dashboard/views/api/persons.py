@@ -9,57 +9,112 @@ from dashboard.serializers import iso, paginate, pick
 
 @require_http_methods(["GET"])
 def persons(request):
-    from memory.models import Entity, PersonProfile, Commitment
+    """Paginated list of known persons (server-side {total, limit, offset, rows})."""
+    from memory.models import Entity, Commitment
+
+    limit, offset = paginate(request, default=25)
+    q = pick(request, "q")
+
+    qs = (
+        Entity.objects.filter(entity_type="person")
+        .select_related("profile")
+        .order_by("-profile__last_interaction_at", "name")
+    )
+    if q:
+        qs = qs.filter(name__icontains=q)
+    total = qs.count()
+
+    # Pending commitments per person, in one aggregation (avoids N+1).
+    pending = {
+        c["person_id"]: c["n"]
+        for c in Commitment.objects.filter(status="pending")
+        .values("person_id")
+        .annotate(n=Count("id"))
+    }
+
+    rows = []
+    for e in qs[offset:offset + limit]:
+        p = getattr(e, "profile", None)
+        rows.append({
+            "entity_id": e.id,
+            "name": e.name,
+            "has_profile": p is not None,
+            "closeness": p.closeness if p else None,
+            "preferred_tone": p.preferred_tone if p else None,
+            "interaction_count": p.interaction_count if p else 0,
+            "confidence": round(p.confidence, 3) if p else None,
+            "last_interaction_at": iso(p.last_interaction_at) if p else None,
+            "commitments_pending": pending.get(e.id, 0),
+        })
+
+    return JsonResponse({"total": total, "limit": limit, "offset": offset, "rows": rows})
+
+
+@require_http_methods(["GET"])
+def person_detail(request, entity_id):
+    """Full detail for one person: profile + pending commitments + live affect (RAM)."""
+    from memory.models import Entity, Commitment
     from emotion.engine import emotion_engine
     from emotion import pad
 
-    persons = {}
-    for entity in Entity.objects.filter(entity_type="person"):
-        persons[entity.name] = {
-            "name": entity.name,
-            "entity_id": entity.id,
-            "profile": None,
-            "affect": None,
-            "commitments_pending": 0,
+    e = (
+        Entity.objects.filter(entity_type="person", id=entity_id)
+        .select_related("profile")
+        .first()
+    )
+    if e is None:
+        return JsonResponse({"error": "not found"}, status=404)
+
+    p = getattr(e, "profile", None)
+    profile = None
+    if p is not None:
+        profile = {
+            "summary": p.summary,
+            "closeness": p.closeness,
+            "preferred_tone": p.preferred_tone,
+            "topics_of_interest": list(p.topics_of_interest or []),
+            "sensitive_topics": list(p.sensitive_topics or []),
+            "interaction_count": p.interaction_count,
+            "confidence": round(p.confidence, 3),
+            "last_interaction_at": iso(p.last_interaction_at),
+            "generated_at": iso(p.generated_at),
         }
 
-    for p in PersonProfile.objects.select_related("entity"):
-        if p.entity.name in persons:
-            persons[p.entity.name]["profile"] = {
-                "summary": p.summary,
-                "closeness": p.closeness,
-                "preferred_tone": p.preferred_tone,
-                "topics_of_interest": list(p.topics_of_interest or []),
-                "sensitive_topics": list(p.sensitive_topics or []),
-                "interaction_count": p.interaction_count,
-                "confidence": round(p.confidence, 3),
-                "last_interaction_at": iso(p.last_interaction_at),
-                "generated_at": iso(p.generated_at),
-            }
+    commitments = [
+        {
+            "id": c.id,
+            "description": c.description,
+            "due_at": iso(c.due_at),
+            "created_at": iso(c.created_at),
+        }
+        for c in Commitment.objects.filter(person_id=entity_id, status="pending").order_by(
+            "-created_at"
+        )
+    ]
 
-    for c in Commitment.objects.filter(status="pending").values(
-        "person__name"
-    ).annotate(n=Count("id")):
-        name = c["person__name"]
-        if name and name in persons:
-            persons[name]["commitments_pending"] = c["n"]
-
-    affect = []
+    # Live affect (RAM): person_id ↔ entity has no FK in the schema. Match
+    # only on a stable id-based key (never the display name). None if no match.
+    affect = None
+    key = str(entity_id)
     for pid, mood in emotion_engine.person_moods.items():
-        label, intensity = pad.pad_to_label(mood.dynamic.position)
-        speed = pad.norm(mood.dynamic.velocity)
-        affect.append({
-            "person_id": pid,
-            "emotion": label.value,
-            "intensity": round(intensity, 3),
-            "velocity": round(speed, 3),
-            "last_interaction": mood.last_interaction,
-            "history_size": len(mood.history),
-        })
+        if pid == key:
+            label, intensity = pad.pad_to_label(mood.dynamic.position)
+            affect = {
+                "person_id": pid,
+                "emotion": label.value,
+                "intensity": round(intensity, 3),
+                "velocity": round(pad.norm(mood.dynamic.velocity), 3),
+                "last_interaction": mood.last_interaction,
+                "history_size": len(mood.history),
+            }
+            break
 
     return JsonResponse({
-        "profiles": list(persons.values()),
-        "live_affect": affect,
+        "entity_id": e.id,
+        "name": e.name,
+        "profile": profile,
+        "commitments": commitments,
+        "affect": affect,
     })
 
 
