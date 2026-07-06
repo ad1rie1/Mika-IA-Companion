@@ -52,6 +52,9 @@ urlpatterns = [
     path("dashboard/logs/",         pages.logs,         name="dash-logs"),
     path("dashboard/scheduled/",    pages.scheduled,    name="dash-scheduled"),
     path("dashboard/projects/",     pages.projects,     name="dash-projects"),
+    path("dashboard/projects/new/",              pages.project_new,    name="dash-project-new"),
+    path("dashboard/projects/<int:project_id>/",      pages.project_detail, name="dash-project-detail"),
+    path("dashboard/projects/<int:project_id>/edit/", pages.project_edit,   name="dash-project-edit"),
     path("dashboard/modules/",      pages.modules,      name="dash-modules"),
     # Module-contributed visualization pages (declared via get_views())
     path(

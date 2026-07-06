@@ -185,6 +185,49 @@ def person_detail(request, entity_id):
     return render(request, "dashboard/person_detail.html", ctx)
 
 
+def project_detail(request, project_id):
+    """Full-page detail view for one project (header + info/tasks/logs/prompts tabs)."""
+    from projects.models import Project
+
+    project = Project.objects.filter(id=project_id).first()
+    if project is None:
+        raise Http404("Project not found")
+    ctx = {
+        "menu": MENU + _build_module_menu(),
+        "active_view": "projects",
+        "title": f"Projet · {project.title}",
+        "project_id": project.id,
+    }
+    return render(request, "dashboard/project_detail.html", ctx)
+
+
+def project_edit(request, project_id):
+    """Full-page edit form for one project (all fields + task management)."""
+    from projects.models import Project
+
+    project = Project.objects.filter(id=project_id).first()
+    if project is None:
+        raise Http404("Project not found")
+    ctx = {
+        "menu": MENU + _build_module_menu(),
+        "active_view": "projects",
+        "title": f"Éditer · {project.title}",
+        "project_id": project.id,
+    }
+    return render(request, "dashboard/project_edit.html", ctx)
+
+
+def project_new(request):
+    """Full-page creation form (same template as edit, no project id)."""
+    ctx = {
+        "menu": MENU + _build_module_menu(),
+        "active_view": "projects",
+        "title": "Nouveau projet",
+        "project_id": None,
+    }
+    return render(request, "dashboard/project_edit.html", ctx)
+
+
 def commitments(request):  return _render(request, "commitments")
 def observations(request): return _render(request, "observations")
 def logs(request):         return _render(request, "logs")
