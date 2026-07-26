@@ -27,6 +27,12 @@ class Message(models.Model):
     # model); this list records kind/mime/name/etc. so retrieval knows what
     # was attached without touching raw bytes.
     attachments_meta = models.JSONField(default=list, blank=True)
+    # True for the scaffolding prompt of an INTERNAL_TRIGGER perception
+    # ("Un visiteur vient de se connecter, accueille-le...", module
+    # notify_ai briefs). Mika never heard those words from anyone, so the
+    # consolidator must not mine them for souvenirs or connaissances — her
+    # *reply* (role=assistant) is a real memory and stays included.
+    is_internal = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -99,6 +105,15 @@ class Souvenir(models.Model):
         related_name="souvenirs",
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    decayed_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text=(
+            "Anchor for time-based decay. Decay multiplies the CURRENT "
+            "importance by rate^(days since this stamp), so conscience boosts "
+            "and hand-set importances survive instead of being recomputed "
+            "from age alone."
+        ),
+    )
 
     class Meta:
         ordering = ["-occurred_at"]

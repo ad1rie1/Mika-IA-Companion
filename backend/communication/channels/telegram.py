@@ -24,12 +24,18 @@ from telegram.ext import (
 )
 
 from config.personality import personality
+from pipeline.voice import VoiceSink
 
 logger = logging.getLogger(__name__)
 
 
 class TelegramChannel:
     """Bot lifecycle + message-to-perception bridge."""
+
+    # Telegram voice notes are played on the recipient's terms, so the time
+    # of day doesn't gate them (see pipeline/voice.py). Delivery still falls
+    # back to text whenever no synthesizer is installed.
+    VOICE_SINK = VoiceSink.MESSAGE
 
     def __init__(self) -> None:
         self._app: Application | None = None
@@ -68,6 +74,11 @@ class TelegramChannel:
         await self._app.start()
         await self._app.updater.start_polling()
         self._running = True
+        # Declare ourselves as the deliverer for presence targets tagged
+        # "telegram" — we are a channel, not a module, so module_manager
+        # cannot resolve us.
+        from communication.delivery import register_channel
+        register_channel("telegram", self)
         logger.info("Telegram bot started")
 
     async def stop(self) -> None:
@@ -80,6 +91,8 @@ class TelegramChannel:
         finally:
             self._app = None
             self._running = False
+            from communication.delivery import unregister_channel
+            unregister_channel("telegram")
             logger.info("Telegram bot stopped")
 
     # ── Handlers ────────────────────────────────────────────────
@@ -138,6 +151,36 @@ class TelegramChannel:
             await update.message.reply_text(output.text)
 
     # ── Outbound delivery (proactive push) ────────────────────────
+
+    async def deliver_voice(self, clip, output, interlocutor) -> bool:
+        """Send the reply as a Telegram voice note, captioned with the text.
+
+        Telegram wants OGG/Opus for a true voice bubble; anything else is
+        sent as an audio document. Falling back to ``False`` puts the caller
+        back on the text path.
+        """
+        if not self._app or not self.is_running:
+            return False
+        chat_id = interlocutor.delivery_ref
+        if not chat_id:
+            return False
+        try:
+            if clip.mime_type in ("audio/ogg", "audio/opus"):
+                await self._app.bot.send_voice(
+                    chat_id=int(chat_id), voice=clip.data,
+                    caption=output.text[:1024],
+                )
+            else:
+                await self._app.bot.send_audio(
+                    chat_id=int(chat_id), audio=clip.data,
+                    caption=output.text[:1024],
+                )
+            return True
+        except Exception:
+            logger.exception(
+                "Telegram voice delivery failed for %s", interlocutor.person_id
+            )
+            return False
 
     async def deliver(self, output, interlocutor) -> bool:
         """Send a message to a Telegram user via the bot API (chat_id)."""

@@ -202,7 +202,10 @@ export class EmotionController {
 
   private updateHeadPose(delta: number): void {
     if (!this.vrm?.humanoid) return;
-    if (this.suppressHeadPose) return;
+    // While suppressed the target is (0,0,0) and we keep easing toward it:
+    // bailing out here froze the head at whatever tilt the last emotion left,
+    // which then stacked on top of the sleep neck tilt all night — exactly
+    // the layered conflict the suppression exists to prevent.
 
     const ease = Math.min(1, delta * 2.0); // slower than expressions — natural
     this.currentHeadPose = {

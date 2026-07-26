@@ -130,6 +130,10 @@ class ForgeModule(BaseModule):
         """
         self._loaded.pop(name, None)
         self._load_errors.pop(name, None)
+        # register_replace() ne sait qu'ajouter/remplacer : sans ce retrait,
+        # un champ de config supprimé du manifest resterait affiché dans le
+        # dashboard jusqu'au prochain redémarrage.
+        self._unregister_config(name)
         try:
             data = await sync_to_async(store.read_module,
                                        thread_sensitive=False)(name)

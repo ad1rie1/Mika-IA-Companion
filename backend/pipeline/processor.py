@@ -22,7 +22,7 @@ from emotion.engine import emotion_engine
 from emotion.types import Emotion, EmotionData
 from pipeline.broadcast import broadcast_to_websocket, emit_communication_event, persist_to_memory
 from pipeline.context import ConversationContext, gather_context
-from pipeline.perception import Perception
+from pipeline.perception import Intent, Perception
 from pipeline.response import call_ai_and_parse
 from pipeline.tracing import set_new_request_id
 
@@ -128,16 +128,6 @@ async def process_message(
             timeout=timeout_seconds,
         )
 
-        # 3. Process emotion (only on success — a crashed AI is not the
-        #    user's fault and should not color Mika's mood toward them).
-        #    Skipped entirely when a project with emotion_policy=OFF is
-        #    active: we don't want work-mode replies coloring relational
-        #    state (e.g. replying to a tense client email should not make
-        #    Mika "anxious" toward the person the next time they chat).
-        if not getattr(context, "project_suppresses_emotion", False):
-            emotion_engine.process_emotion(emotion_data, person_id)
-            await emotion_engine._maybe_save_snapshot(person_id)
-
     except asyncio.TimeoutError:
         logger.warning(
             "AI call timed out after %ds (person=%s, source=%s)",
@@ -173,6 +163,25 @@ async def process_message(
             EmotionData(Emotion.ANXIOUS, 0.1), "conscience_mika",
         )
 
+    # 3. Process emotion (only on success — a crashed AI is not the user's
+    #    fault and should not color Mika's mood toward them).
+    #    Skipped entirely when a project with emotion_policy=OFF is active:
+    #    we don't want work-mode replies coloring relational state (e.g.
+    #    replying to a tense client email should not make Mika "anxious"
+    #    toward the person the next time they chat).
+    #    Deliberately OUTSIDE the AI try-block and non-fatal: a bookkeeping
+    #    error here must not turn a real, already-received answer into the
+    #    "j'ai eu un petit bug" fallback and drop it from memory.
+    if not ai_failed and not getattr(context, "project_suppresses_emotion", False):
+        try:
+            emotion_engine.process_emotion(emotion_data, person_id)
+            await emotion_engine._maybe_save_snapshot(person_id)
+        except Exception:
+            logger.exception(
+                "Emotion post-processing failed (person=%s) — the reply itself "
+                "is unaffected", person_id,
+            )
+
     # 4. Persist to memory — skip on failure to avoid pollution.
     if persist and not ai_failed:
         attachments_meta = _serialize_attachments_meta(perception)
@@ -182,6 +191,9 @@ async def process_message(
             source=source,
             person_id=person_id,
             attachments_meta=attachments_meta,
+            # The "user" side of an internal trigger is scaffolding Mika
+            # wrote to herself, not something anyone said to her.
+            user_is_internal=perception.intent is Intent.INTERNAL_TRIGGER,
         )
 
     # 5. Emit module event — also skipped on failure.

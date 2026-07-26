@@ -45,14 +45,28 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    # Must sit after AuthenticationMiddleware — it reads request.user.
+    "dashboard.middleware.DashboardAuthMiddleware",
 ]
+
+# Django's admin login doubles as the dashboard login when the gate is on:
+# both want a staff account, so there is no second credential to manage.
+LOGIN_URL = env("LOGIN_URL", default="/admin/login/")
 
 # CORS. Note: credentialed requests (session cookies for the frontend login)
 # cannot be combined with the wildcard origin — to use auth from a separate
-# frontend origin, set CORS_ALLOW_ALL_ORIGINS=False + list CORS_ALLOWED_ORIGINS
-# (e.g. http://localhost:3000) and CORS_ALLOW_CREDENTIALS=True.
-CORS_ALLOW_ALL_ORIGINS = env.bool("CORS_ALLOW_ALL_ORIGINS", default=DEBUG)
-CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
+# frontend origin, keep CORS_ALLOW_ALL_ORIGINS=False + list CORS_ALLOWED_ORIGINS
+# and set CORS_ALLOW_CREDENTIALS=True.
+#
+# The wildcard is NOT the dev default: the dashboard API is unauthenticated,
+# so `*` let any page the user happened to visit read the whole conversation
+# history and rewrite the config (e.g. repoint ai.openai.base_url) from the
+# browser. The dev frontend origins are allow-listed explicitly instead.
+CORS_ALLOW_ALL_ORIGINS = env.bool("CORS_ALLOW_ALL_ORIGINS", default=False)
+CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[
+    "http://localhost:3000", "http://127.0.0.1:3000",
+    "http://localhost:4173", "http://127.0.0.1:4173",
+])
 CORS_ALLOW_CREDENTIALS = env.bool("CORS_ALLOW_CREDENTIALS", default=False)
 
 # Allow the session cookie to ride cross-site requests in dev (frontend on a
@@ -108,6 +122,12 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = list(_MODULE_STATIC_DIRS)
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# Align ORM __date bucketing with the wall clock used by the circadian /
+# sleep / journal logic (which reasons in naive local time). Without this,
+# Django's default TIME_ZONE ("America/Chicago") shifts day boundaries ~7h.
+TIME_ZONE = env("TIME_ZONE", default="Europe/Paris")
+USE_TZ = True
+
 # --- VTuber settings ---
 CLAUDE_OAUTH_TOKEN = env("CLAUDE_OAUTH_TOKEN", default="")
 ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", default="")
@@ -131,6 +151,15 @@ AI_ROLE_VALIDITY_CHECK = env("AI_ROLE_VALIDITY_CHECK", default=f"claude:{CLAUDE_
 
 MEMORY_SHORT_TERM_LIMIT = env.int("MEMORY_SHORT_TERM_LIMIT", default=20)
 API_PORT = env.int("API_PORT", default=8000)
+# Loopback by default: the dashboard exposes the conversation history and the
+# config editor (with provider API keys) and is unauthenticated unless
+# DASHBOARD_REQUIRE_AUTH is on. Set API_HOST=0.0.0.0 to serve the LAN — run.py
+# warns when that is combined with no auth gate.
+API_HOST = env("API_HOST", default="127.0.0.1")
+# When True, /dashboard/ (pages + API) requires an authenticated staff user.
+# Off by default so a fresh single-user install isn't locked out of its own
+# admin before a superuser exists.
+DASHBOARD_REQUIRE_AUTH = env.bool("DASHBOARD_REQUIRE_AUTH", default=False)
 AI_CALL_TIMEOUT = env.int("AI_CALL_TIMEOUT", default=60)
 
 # When True, owned WebSocket consumers must be authenticated (else connection

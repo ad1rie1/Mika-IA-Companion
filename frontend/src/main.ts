@@ -210,10 +210,15 @@ async function init() {
       lastAsleepAt = null;
     }
 
-    // Speak
+    // Speak — the backend decides whether this turn is voiced at all, and
+    // in which voice (see backend/pipeline/voice.py). `speak: false` still
+    // shows the text and animates the avatar; it just stays silent.
+    if (data.speak === false) {
+      return;
+    }
     const estimatedDuration = Math.min(data.text.length * 60, 15000);
     lipSyncController.startTextDriven(data.text, estimatedDuration);
-    tts.speak(data.text, emotion);
+    tts.speak(data.text, emotion, data.voice_profile);
   };
 
   ws.on("speech", handleSpeech);
@@ -244,7 +249,6 @@ async function init() {
   // Update loop
   sceneManager.onUpdate((delta) => {
     cameraController.update();
-    vtuberModel.update(delta);
     emotionController.update(delta);
     animationMixer.update(delta);
     // Gaze runs after the mixer so the eye bone rotations aren't
@@ -252,6 +256,11 @@ async function init() {
     gazeController.update(delta);
     lipSyncController.update(delta);
     environment.update(delta);
+    // vrm.update() applies expression weights and copies normalized bones to
+    // raw ones — it must run AFTER every controller has written this frame's
+    // pose. Calling it first made every expression and rotation land one
+    // frame late, which is a ~25% timing error on a 4-frame blink at 30fps.
+    vtuberModel.update(delta);
   });
 }
 

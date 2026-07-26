@@ -53,8 +53,10 @@ _SAFE_BUILTIN_NAMES = [
     "staticmethod", "classmethod", "property", "super",
 ]
 
+# ``BaseException`` est volontairement absent : ``ForgeTimeout`` en hérite,
+# donc l'exposer permettrait à un handler d'avaler sa propre deadline.
 _SAFE_EXCEPTIONS = [
-    "BaseException", "Exception", "ArithmeticError", "AttributeError",
+    "Exception", "ArithmeticError", "AttributeError",
     "IndexError", "KeyError", "LookupError", "NotImplementedError",
     "OverflowError", "RuntimeError", "StopIteration", "TypeError",
     "ValueError", "ZeroDivisionError", "UnicodeError",
@@ -69,7 +71,17 @@ FORBIDDEN_NAMES = frozenset({
     "copyright", "credits", "license", "__import__", "__builtins__",
     "__build_class__", "__name__", "__loader__", "__spec__", "__package__",
     "__debug__", "__doc__",
+    # Attraper ForgeTimeout annulerait la deadline (cf. run_with_deadline).
+    "BaseException", "ForgeTimeout", "SystemExit", "KeyboardInterrupt",
+    "GeneratorExit",
 })
+
+# Introspection de frames : ces attributs NE SONT PAS préfixés par '_' et
+# ouvrent donc un trou dans la règle ci-dessus. ``gen.gi_frame.f_back`` remonte
+# la pile jusqu'aux frames de l'hôte, dont ``f_builtins`` contient les vrais
+# builtins (donc ``__import__`` → évasion complète). Tout préfixe de frame /
+# générateur / coroutine / traceback est refusé.
+FORBIDDEN_ATTR_PREFIXES = ("f_", "gi_", "cr_", "ag_", "tb_", "func_", "im_")
 
 # ``.format``/``.format_map`` sur str permettent la traversée d'attributs
 # ("{0.__class__}") sans apparaître comme Attribute dans l'AST → interdits
@@ -96,8 +108,14 @@ class SandboxViolation(Exception):
     """Le code soumis viole les règles du bac à sable."""
 
 
-class ForgeTimeout(Exception):
-    """Le handler a dépassé son budget temps."""
+class ForgeTimeout(BaseException):
+    """Le handler a dépassé son budget temps.
+
+    Hérite de ``BaseException`` (et non ``Exception``) pour qu'un
+    ``except Exception`` dans le code forgé — le cas courant — ne puisse pas
+    l'avaler et relancer sa boucle, ce qui immobiliserait un worker du pool
+    partagé jusqu'au redémarrage du processus.
+    """
 
 
 # ── Validation AST ────────────────────────────────────────────────
@@ -161,6 +179,10 @@ def validate_source(source: str) -> list[str]:
             if node.attr.startswith("_"):
                 err(node, f"accès attribut préfixé '_' interdit: .{node.attr} "
                           "(nomme tes attributs sans underscore initial)")
+            elif node.attr.startswith(FORBIDDEN_ATTR_PREFIXES):
+                err(node, f"attribut d'introspection interdit: .{node.attr} "
+                          "(les préfixes f_/gi_/cr_/ag_/tb_ exposent la pile "
+                          "d'exécution — renomme ton attribut)")
             elif node.attr in FORBIDDEN_ATTRIBUTES:
                 err(node, f"attribut interdit: .{node.attr} "
                           "(utilise les f-strings pour formater)")
@@ -184,6 +206,10 @@ def validate_source(source: str) -> list[str]:
         elif isinstance(node, ast.ExceptHandler):
             if _is_dunder(node.name):
                 err(node, f"nom interdit: {node.name}")
+            if node.type is None:
+                err(node, "'except:' nu interdit — attrape une exception "
+                          "précise (except Exception: au plus large), sinon "
+                          "tu avalerais aussi ta propre deadline")
 
     return errors
 

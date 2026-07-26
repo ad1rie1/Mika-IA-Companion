@@ -31,34 +31,40 @@ CONFIG_SCHEMA = [
     ConfigItem(
         key="ai.claude.oauth_token", type="secret", section="ai_providers", group="Claude",
         label="OAuth token", env_fallback="CLAUDE_OAUTH_TOKEN", sensitive=True,
+        hot_reload=True,
         hint="Jeton Claude.ai (commence par sk-ant-oat01-).",
     ),
     ConfigItem(
         key="ai.claude.api_key", type="secret", section="ai_providers", group="Claude",
         label="API key (fallback)", env_fallback="ANTHROPIC_API_KEY", sensitive=True,
+        hot_reload=True,
         hint="Requis uniquement si pas d'OAuth token.",
     ),
     # OpenAI
     ConfigItem(
         key="ai.openai.api_key", type="secret", section="ai_providers", group="OpenAI",
         label="API key", env_fallback="OPENAI_API_KEY", sensitive=True,
+        hot_reload=True,
     ),
     # Gemini (Google)
     ConfigItem(
         key="ai.gemini.api_key", type="secret", section="ai_providers", group="Gemini",
         label="API key", env_fallback="GEMINI_API_KEY", sensitive=True,
+        hot_reload=True,
         hint="Obtenable depuis Google AI Studio.",
     ),
     # GLM (Zhipu AI)
     ConfigItem(
         key="ai.glm.api_key", type="secret", section="ai_providers", group="GLM",
         label="API key", env_fallback="GLM_API_KEY", sensitive=True,
+        hot_reload=True,
         hint="Obtenable depuis open.bigmodel.cn. Endpoint OpenAI-compatible.",
     ),
     # Ollama (seul provider qui a besoin d'une URL côté app)
     ConfigItem(
         key="ai.ollama.base_url", type="str", section="ai_providers", group="Ollama",
         label="Base URL", env_fallback="OLLAMA_BASE_URL", default="http://localhost:11434",
+        hot_reload=True,
         hint="URL du serveur Ollama (le SDK ne la découvre pas tout seul).",
     ),
 
@@ -140,6 +146,11 @@ CONFIG_SCHEMA = [
         key="ai.role.vision_caption", type="select", section="ai_roles",
         label="Caption vision", env_fallback="AI_ROLE_VISION_CAPTION",
         hint="Modèle multimodal requis.",
+    ),
+    ConfigItem(
+        key="ai.role.inner_voice", type="select", section="ai_roles",
+        label="Voix intérieure", env_fallback="AI_ROLE_INNER_VOICE",
+        hint="Pensées murmurées. Appelé souvent — garde un petit modèle.",
     ),
 
     ConfigSection(

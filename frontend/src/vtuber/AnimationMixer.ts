@@ -185,9 +185,10 @@ export class AnimationMixer {
 
   private updateHeadPose() {
     if (!this.vrm?.humanoid) return;
-    if (this.headTiltCurrent < 0.005) return;
     // Tilt the head forward as if dozing. Only touches the neck bone so
-    // it coexists cleanly with any other head-rotation logic.
+    // it coexists cleanly with any other head-rotation logic. Written
+    // unconditionally: skipping the write near zero left a small permanent
+    // residual tilt after waking, since nothing else resets the bone.
     const neck = this.vrm.humanoid.getNormalizedBoneNode("neck");
     if (neck) {
       neck.rotation.x = this.headTiltCurrent;

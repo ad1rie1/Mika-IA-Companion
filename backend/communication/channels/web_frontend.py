@@ -64,6 +64,15 @@ def _sanitize_person_id(raw, fallback: str) -> str:
 class WebSocketConsumer(AsyncWebsocketConsumer):
     """WebSocket channel — handles browser/frontend connections to the VTuber."""
 
+    # Safe defaults so the consumer stays coherent even if a frame is handled
+    # before connect() finished initializing the instance.
+    authenticated = False
+    display_name: str | None = None
+    _greeted = False
+    # Immutable default: _is_rate_limited() rebinds it to a fresh instance list.
+    _msg_timestamps: tuple[float, ...] | list[float] = ()
+    _group: str = ""
+
     async def connect(self):
         # Identity: a backend-authenticated user is trusted and CANNOT be
         # overridden by the client. Otherwise fall back to a connection-scoped
@@ -245,7 +254,8 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
         self.person_id = new_id
         self._group = person_group(new_id)
         if self._group != old_group:
-            await self.channel_layer.group_discard(old_group, self.channel_name)
+            if old_group:
+                await self.channel_layer.group_discard(old_group, self.channel_name)
             await self.channel_layer.group_add(self._group, self.channel_name)
         presence_registry.unregister(old_id, "web")
         await self._register_presence()

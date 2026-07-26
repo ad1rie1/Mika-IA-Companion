@@ -17,6 +17,14 @@ import logging
 from typing import Protocol
 
 from configs import secrets
+# Record rows go through the SAME coercion + validation as scalar config
+# items. The local copy this replaced handled only int/float/bool, silently
+# returned the raw string on a ValueError, and checked neither `select`
+# choices nor min/max/validators — so `ai.models` accepted
+# `temperature: "hot"` or `provider: "anthropicc"` verbatim, and the error
+# surfaced much later as a ValueError mid-conversation in the AI router.
+# (service imports backends lazily, so this direction is safe.)
+from configs.service import _coerce, _validate
 from configs.types import ConfigItem, ConfigRecord
 
 logger = logging.getLogger(__name__)
@@ -155,18 +163,9 @@ def _clean_payload(record: ConfigRecord | None, payload: dict, *,
                 cleaned[field.key] = field.default
             continue
 
-        cleaned[field.key] = _coerce(field, incoming)
+        value = _coerce(field, incoming)
+        _validate(field, value)
+        cleaned[field.key] = value
     return cleaned, encrypted
 
 
-def _coerce(item: ConfigItem, value):
-    t = item.type
-    if value is None or value == "":
-        return None if t not in ("str", "text", "secret") else value
-    try:
-        if t == "int":   return int(value)
-        if t == "float": return float(value)
-        if t == "bool":  return bool(value) if not isinstance(value, str) else value.lower() in ("1","true","yes","on")
-    except (TypeError, ValueError):
-        return value
-    return value

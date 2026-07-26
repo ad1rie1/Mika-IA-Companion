@@ -19,28 +19,18 @@ from asgiref.sync import sync_to_async
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
+from dashboard.sanitize import STRIPPED_KEYS, sanitize_payload
 from modules.types import ModuleRoute, ModuleView, ModuleViewAction
 
 logger = logging.getLogger("module.forge")
 
 MAX_VIEW_PAYLOAD_BYTES = 512 * 1024
-_STRIPPED_KEYS = {"html", "js", "template"}
 
-
-def sanitize_view_payload(value, *, _depth: int = 0):
-    """Supprime récursivement les clés qui déclencheraient un rendu HTML
-    brut côté shell générique (XSS via module forgé / injection)."""
-    if _depth > 12:
-        return None
-    if isinstance(value, dict):
-        return {
-            k: sanitize_view_payload(v, _depth=_depth + 1)
-            for k, v in value.items()
-            if str(k).lower() not in _STRIPPED_KEYS
-        }
-    if isinstance(value, (list, tuple)):
-        return [sanitize_view_payload(v, _depth=_depth + 1) for v in value]
-    return value
+# Le même garde-fou s'applique désormais à TOUS les modules (le dashboard le
+# pose lui-même) — on réexporte l'implémentation partagée plutôt que d'en
+# maintenir deux versions qui peuvent diverger.
+_STRIPPED_KEYS = STRIPPED_KEYS
+sanitize_view_payload = sanitize_payload
 
 
 # ── Vues des modules forgés ───────────────────────────────────────

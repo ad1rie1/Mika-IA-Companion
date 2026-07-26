@@ -183,7 +183,11 @@ class ConfigService:
             # Do not re-encrypt if the UI omitted the value (caller should
             # use a sentinel; we interpret "" / None as "unchanged" here).
             if stored in (None, ""):
-                return before
+                # Return a redacted marker, not `before`: this is a no-op, and
+                # handing the *decrypted* current secret back to a caller that
+                # merely submitted a blank field is a leak waiting for the one
+                # caller that doesn't redact its own response.
+                return secrets.redact(before) if before else before
             stored = secrets.encrypt(str(stored))
             encrypted = True
 
@@ -241,6 +245,9 @@ class ConfigService:
             before=None, after=_scrub_record(item.record, result.get("payload") or {}),
             actor=actor,
         )
+        # Invalidate BEFORE notifying: a subscriber that reacts by calling
+        # get() must not read the pre-change cached value.
+        self._invalidate(parent_key)
         self._notify(parent_key, None)
         return result
 
@@ -254,6 +261,9 @@ class ConfigService:
             before=None, after=_scrub_record(item.record, result.get("payload") or {}),
             actor=actor,
         )
+        # Invalidate BEFORE notifying: a subscriber that reacts by calling
+        # get() must not read the pre-change cached value.
+        self._invalidate(parent_key)
         self._notify(parent_key, None)
         return result
 
@@ -266,6 +276,9 @@ class ConfigService:
             key=parent_key, row_id=None, action="row_delete",
             before=None, after=None, actor=actor,
         )
+        # Invalidate BEFORE notifying: a subscriber that reacts by calling
+        # get() must not read the pre-change cached value.
+        self._invalidate(parent_key)
         self._notify(parent_key, None)
 
     def _require_record_list(self, parent_key: str) -> ConfigItem:

@@ -29,14 +29,32 @@ def main():
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logger = logging.getLogger("vtuber")
 
+    host = settings.API_HOST
+
     logger.info("Starting VTuber Engine for %s", settings.VTUBER_NAME)
     logger.info("API: http://localhost:%d", settings.API_PORT)
     logger.info("WebSocket: ws://localhost:%d/ws", settings.API_PORT)
     logger.info("Admin: http://localhost:%d/admin/", settings.API_PORT)
+    logger.info("Dashboard: http://localhost:%d/dashboard/", settings.API_PORT)
+
+    # The dashboard can read the whole conversation history and rewrite the
+    # config (including provider API keys). Binding it to every interface
+    # without an auth gate exposes all of that to the local network.
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        if settings.DASHBOARD_REQUIRE_AUTH:
+            logger.info("Bound to %s with dashboard auth required", host)
+        else:
+            logger.warning(
+                "SECURITY: bound to %s with DASHBOARD_REQUIRE_AUTH=False — "
+                "anyone on this network can read your conversations and edit "
+                "your API keys. Set DASHBOARD_REQUIRE_AUTH=1 (and create a "
+                "superuser with `python backend/manage.py createsuperuser`), "
+                "or leave API_HOST=127.0.0.1.", host,
+            )
 
     uvicorn.run(
         "config.asgi:application",
-        host="0.0.0.0",
+        host=host,
         port=settings.API_PORT,
         lifespan="on",
         app_dir=str(backend_dir),

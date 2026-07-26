@@ -188,3 +188,35 @@ class TestComputeScore:
         mock_score.assert_called_once()
         assert score == pytest.approx(0.3)
         assert reason == "idle"
+
+    def test_greeting_not_committed_when_deciding_to_wait(self):
+        # Scoring marks the period greeted, but a "wait" decision must not
+        # spend it — otherwise the day's greeting is consumed silently.
+        e = _make_engine()
+        ctx = _make_ctx()
+        with patch("conscience.engine.compute_decision_score",
+                   return_value=(0.35, "time(morning)", {"morning"}, "2026-07-26")):
+            e._compute_score(ctx)
+        assert e._greeted_periods == set()
+        assert e._greeted_date is None
+
+    def test_greeting_committed_on_act(self):
+        e = _make_engine()
+        ctx = _make_ctx()
+        with patch("conscience.engine.compute_decision_score",
+                   return_value=(0.8, "time(morning)", {"morning"}, "2026-07-26")):
+            e._compute_score(ctx)
+        e._commit_greeting()
+        assert e._greeted_periods == {"morning"}
+        assert e._greeted_date == "2026-07-26"
+
+    def test_commit_is_idempotent(self):
+        e = _make_engine()
+        ctx = _make_ctx()
+        with patch("conscience.engine.compute_decision_score",
+                   return_value=(0.8, "time(morning)", {"morning"}, "2026-07-26")):
+            e._compute_score(ctx)
+        e._commit_greeting()
+        e._greeted_periods = {"morning", "evening"}
+        e._commit_greeting()  # nothing pending → must not roll back
+        assert e._greeted_periods == {"morning", "evening"}

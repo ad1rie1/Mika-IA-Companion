@@ -1,5 +1,23 @@
 import type { EmotionName } from "../vtuber/EmotionController";
 
+/**
+ * Voice identity multipliers sent by the backend (pipeline/voice.py).
+ * The INNER persona — Mika thinking out loud rather than talking to you —
+ * arrives quieter, slower and slightly lower.
+ */
+export interface VoiceProfile {
+  pitch: number;
+  rate: number;
+  gain: number;
+}
+
+const NEUTRAL_PROFILE: VoiceProfile = { pitch: 1.0, rate: 1.0, gain: 1.0 };
+
+// Web Speech API accepts pitch in [0,2] and rate in [0.1,10]; the product of
+// an emotion multiplier and a persona multiplier can leave that window.
+const clampPitch = (v: number) => Math.max(0.1, Math.min(2, v));
+const clampRate = (v: number) => Math.max(0.5, Math.min(2, v));
+
 export interface TTSEvents {
   onSpeakStart: () => void;
   onSpeakEnd: () => void;
@@ -48,13 +66,21 @@ export class TTSService {
   private events: TTSEvents;
   private preferredVoice: SpeechSynthesisVoice | null = null;
   private isSpeaking = false;
-  private speechQueue: Array<{ text: string; emotion: EmotionName }> = [];
+  private speechQueue: Array<{
+    text: string;
+    emotion: EmotionName;
+    profile: VoiceProfile;
+  }> = [];
   private processing = false;
   // Next speak() call will be prefixed with this many ms of silence.
   // Used by the wake-up flow: if Mika was asleep and is now replying,
   // pause briefly so she sounds like she's waking up, not answering
   // instantly from a dead sleep.
   private nextPreDelayMs = 0;
+  // Voice identity of the utterance currently being built. Set by
+  // speakImmediate so the deeper utterance construction can read it
+  // without threading the profile through every segment helper.
+  private activeProfile: VoiceProfile = NEUTRAL_PROFILE;
 
   constructor(events: TTSEvents) {
     this.events = events;
@@ -127,21 +153,45 @@ export class TTSService {
    * need asset files. Quality is "good enough for a VTuber", not voice-
    * actor studio grade — the point is prosodic presence, not realism.
    */
-  private playSfx(kind: "sigh" | "laugh" | "breath"): Promise<void> {
+  private async playSfx(kind: "sigh" | "laugh" | "breath"): Promise<void> {
     const ctx = this.ensureAudioContext();
     if (ctx.state === "suspended") {
-      void ctx.resume();
+      // Awaited: a suspended context never fires `onended`, and the queue
+      // awaits this promise — a silent resume() left Mika mute for the rest
+      // of the session if her first reply contained a prosodic token before
+      // the user had interacted with the page.
+      try {
+        await ctx.resume();
+      } catch {
+        // Autoplay policy still blocking (no user gesture yet): skip the
+        // effect rather than hanging the speech queue on it.
+        return;
+      }
     }
     const now = ctx.currentTime;
 
+    let rendered: Promise<void>;
+    let budgetMs: number;
     switch (kind) {
       case "sigh":
-        return this.renderSigh(ctx, now);
+        rendered = this.renderSigh(ctx, now);
+        budgetMs = 600;
+        break;
       case "laugh":
-        return this.renderLaugh(ctx, now);
+        rendered = this.renderLaugh(ctx, now);
+        budgetMs = 900;
+        break;
       case "breath":
-        return this.renderBreath(ctx, now);
+        rendered = this.renderBreath(ctx, now);
+        budgetMs = 350;
+        break;
     }
+    // Belt and braces: a context suspended mid-render (tab backgrounded)
+    // would otherwise never resolve.
+    await Promise.race([
+      rendered,
+      new Promise<void>((r) => setTimeout(r, budgetMs + 250)),
+    ]);
   }
 
   /** Synthetic sigh: filtered noise, descending pitch, 600ms envelope. */
@@ -284,8 +334,12 @@ export class TTSService {
     return this.analyser;
   }
 
-  async speak(text: string, emotion: EmotionName = "neutral") {
-    this.speechQueue.push({ text, emotion });
+  async speak(
+    text: string,
+    emotion: EmotionName = "neutral",
+    profile: VoiceProfile = NEUTRAL_PROFILE
+  ) {
+    this.speechQueue.push({ text, emotion, profile });
     if (!this.processing) {
       this.processQueue();
     }
@@ -296,13 +350,18 @@ export class TTSService {
 
     while (this.speechQueue.length > 0) {
       const item = this.speechQueue.shift()!;
-      await this.speakImmediate(item.text, item.emotion);
+      await this.speakImmediate(item.text, item.emotion, item.profile);
     }
 
     this.processing = false;
   }
 
-  private async speakImmediate(text: string, emotion: EmotionName): Promise<void> {
+  private async speakImmediate(
+    text: string,
+    emotion: EmotionName,
+    profile: VoiceProfile = NEUTRAL_PROFILE
+  ): Promise<void> {
+    this.activeProfile = profile;
     // Consume any pending wake-up delay before the actual utterance.
     // Drained here (not in processQueue) so back-to-back speeches within
     // a single response don't keep re-delaying.
@@ -388,10 +447,13 @@ export class TTSService {
       }
 
       // Apply emotion modulation
+      // Emotion modulation first, then the voice identity on top of it:
+      // an excited *thought* is still quieter than an excited sentence.
       const voiceMod = EMOTION_VOICE[emotion] || EMOTION_VOICE.neutral;
-      utterance.pitch = voiceMod.pitch;
-      utterance.rate = voiceMod.rate;
-      utterance.volume = 1.0;
+      const profile = this.activeProfile;
+      utterance.pitch = clampPitch(voiceMod.pitch * profile.pitch);
+      utterance.rate = clampRate(voiceMod.rate * profile.rate);
+      utterance.volume = Math.max(0, Math.min(1, profile.gain));
 
       // Connect to Web Audio API for analysis
       const ctx = this.ensureAudioContext();
@@ -405,12 +467,13 @@ export class TTSService {
           this.events.onSpeakStart();
         }
 
-        // Try to capture audio for analysis via MediaStreamDestination
-        // Web Speech API doesn't expose audio stream directly,
-        // so we use a periodic amplitude check on the analyser
-        if (this.analyser) {
-          this.events.onAudioData(this.analyser);
-        }
+        // NOTE: do NOT emit onAudioData here. The Web Speech API gives no
+        // access to its audio stream, so nothing is ever connected into
+        // `this.analyser` — handing it out switched the LipSyncController to
+        // its audio-driven branch, where getByteFrequencyData() returns
+        // silence and the mouth never moved at all. The text-driven
+        // estimation started by the caller is the working path; onAudioData
+        // is reserved for a future TTS that returns real audio buffers.
       };
 
       utterance.onend = () => {

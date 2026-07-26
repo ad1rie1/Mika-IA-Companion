@@ -20,6 +20,10 @@ class MemoryManager:
         )
         self.conversation = None
         self._initialized = False
+        # A restart within this window reattaches to the conversation in
+        # progress instead of opening a new one, so an exchange interrupted
+        # by a restart stays one exchange.
+        self.resume_window_minutes = 120
 
         # Contextual memory components (initialized async)
         self.vector_store = None
@@ -32,10 +36,8 @@ class MemoryManager:
         if self._initialized:
             return
 
-        from memory.models import Conversation
-
-        self.conversation = await Conversation.objects.acreate()
-        logger.info("Memory initialized, conversation_id=%d", self.conversation.pk)
+        await self._resume_or_open_conversation()
+        await self._rehydrate_short_term()
 
         # Initialize contextual memory (requires chromadb, not yet compatible with Python 3.14+)
         try:
@@ -66,6 +68,78 @@ class MemoryManager:
 
         self._initialized = True
 
+    # ── Startup: continuity across restarts ──────────────────────
+
+    async def _resume_or_open_conversation(self) -> None:
+        """Reattach to the conversation in progress, or start a new one.
+
+        Always creating a fresh Conversation split one continuous exchange
+        across a row per boot, so nothing downstream could tell "we were in
+        the middle of talking" from "this is a new session".
+        """
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from memory.models import Conversation, Message
+
+        cutoff = timezone.now() - timedelta(minutes=self.resume_window_minutes)
+
+        def _find_recent():
+            last = Message.objects.order_by("-pk").first()
+            if last is None or last.created_at < cutoff:
+                return None
+            return Conversation.objects.filter(pk=last.conversation_id).first()
+
+        existing = await sync_to_async(_find_recent)()
+        if existing is not None:
+            self.conversation = existing
+            logger.info(
+                "Memory resumed conversation_id=%d (activity within %dmin)",
+                existing.pk, self.resume_window_minutes,
+            )
+            return
+
+        self.conversation = await Conversation.objects.acreate()
+        logger.info("Memory initialized, conversation_id=%d", self.conversation.pk)
+
+    async def _rehydrate_short_term(self) -> None:
+        """Reload the tail of the conversation into the RAM buffer.
+
+        ``get_conversation_context()`` is the only history the LLM sees. It
+        was never populated from the DB, so a restart mid-chat was total
+        conversational amnesia — "et le deuxième alors ?" landed on nothing —
+        even though the rows were sitting right there, and even though her
+        *mood* toward the person was correctly restored from snapshots.
+        Internal scaffolding is skipped: it was never part of the dialogue.
+        """
+        from memory.models import Message
+
+        if not self.conversation:
+            return
+
+        def _tail():
+            rows = list(
+                Message.objects.filter(conversation=self.conversation)
+                .exclude(role="user", is_internal=True)
+                .order_by("-pk")
+                .values("role", "content")[: self.max_short_term]
+            )
+            rows.reverse()
+            return rows
+
+        try:
+            self.short_term = await sync_to_async(_tail)()
+        except Exception:
+            logger.exception("Short-term rehydration failed — starting empty")
+            self.short_term = []
+            return
+
+        if self.short_term:
+            logger.info(
+                "Short-term memory rehydrated: %d messages", len(self.short_term)
+            )
+
     async def add_message(
         self,
         role: str,
@@ -73,6 +147,7 @@ class MemoryManager:
         source: str = "frontend",
         person_id: str = "",
         attachments_meta: list[dict] | None = None,
+        is_internal: bool = False,
     ):
         """Add to short-term memory and persist via ORM.
 
@@ -101,6 +176,7 @@ class MemoryManager:
                     source=source,
                     person_id=person_id,
                     attachments_meta=attachments_meta or [],
+                    is_internal=is_internal,
                 )
             except Exception:
                 logger.exception("Failed to persist message to DB")

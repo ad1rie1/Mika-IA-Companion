@@ -44,7 +44,17 @@ class AIRole(str, Enum):
     # textual description. Used by the vision preprocessor so non-text
     # perceptions can flow through the text pipeline.
     VISION_CAPTION = "vision_caption"
+    # Inner monologue — turns "what she's about to do" + "what just came
+    # back" into the short murmured reaction she thinks out loud. Small and
+    # cheap by design: it fires far more often than a conversation turn.
+    INNER_VOICE = "inner_voice"
 
+
+# Config-key prefixes that carry a provider's credentials. A change under one
+# of these evicts that provider's cached instance (see _invalidate_provider).
+_PROVIDER_CONFIG_PREFIXES = (
+    "ai.claude.", "ai.openai.", "ai.gemini.", "ai.glm.", "ai.ollama.",
+)
 
 # Maps provider name → class
 _PROVIDER_CLASSES: dict[str, type] = {
@@ -122,6 +132,7 @@ class AIRouter:
             AIRole.MEMORY_EXTRACTION:     "ai.role.memory_extraction",
             AIRole.VALIDITY_CHECK:        "ai.role.validity_check",
             AIRole.VISION_CAPTION:        "ai.role.vision_caption",
+            AIRole.INNER_VOICE:           "ai.role.inner_voice",
         }
         for role, cfg_key in role_keys.items():
             name = (config_service.get(cfg_key, default="") or "").strip()
@@ -129,6 +140,23 @@ class AIRouter:
                 self._role_to_internal[role] = name
 
         config_service.on_change("ai.role.", lambda k, v: self._reload_role(k, v))
+        # Providers read their credentials once, in __init__, and were cached
+        # forever: rotating a leaked API key in the dashboard returned
+        # {"ok": true} while the process kept authenticating with the old one.
+        # Evict on any provider-credential change so the next call re-reads.
+        for prefix in _PROVIDER_CONFIG_PREFIXES:
+            config_service.on_change(
+                prefix, lambda k, v, p=prefix: self._invalidate_provider(p, k)
+            )
+
+    def _invalidate_provider(self, prefix: str, key: str) -> None:
+        """Drop the cached instance whose credentials just changed."""
+        provider_name = prefix.removeprefix("ai.").rstrip(".")
+        if self._providers.pop(provider_name, None) is not None:
+            logger.info(
+                "Provider '%s' evicted after %s changed — credentials will be "
+                "re-read on the next call", provider_name, key,
+            )
 
     def _reload_role(self, key: str, value):
         role_key = key.split("ai.role.", 1)[-1]

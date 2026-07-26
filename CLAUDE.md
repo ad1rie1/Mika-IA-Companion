@@ -95,11 +95,12 @@ On AI error or timeout: fallback text returned, **no emotion impulse toward the 
   - [pipeline/response.py](backend/pipeline/response.py) — `call_ai_and_parse()` builds prompt, calls AI, extracts emotion
   - [pipeline/broadcast.py](backend/pipeline/broadcast.py) — `broadcast_to_websocket()`, `emit_communication_event()`, `persist_to_memory(..., attachments_meta)`
   - [pipeline/preprocessors/](backend/pipeline/preprocessors/) — modality-specific Part transformers. `vision.py` is wired to a real LLM via `AIRole.VISION_CAPTION` (any provider with multimodal support); `audio.py` and `files.py` are still stubs. Failures + timeouts produce a safe text placeholder so the pipeline keeps flowing
-  - [pipeline/media.py](backend/pipeline/media.py) — attachment validation + raw media persistence
+  - [pipeline/media.py](backend/pipeline/media.py) — attachment validation + raw media persistence. Disk writes go through `asyncio.to_thread`: up to 5 MB × 5 attachments written synchronously would freeze all WebSocket traffic and every background loop for the duration of an upload
   - [pipeline/tracing.py](backend/pipeline/tracing.py) — `request_id` ContextVar + logging filter
 - **AI (multi-provider)** ([ai/](backend/ai/)):
   - `ai/providers/` — `ClaudeProvider`, `OpenAIProvider` (OpenAI-compatible via `base_url`), `OllamaProvider`. Lazy-instantiated. All three accept an `attachments=[MediaAttachment]` kwarg with image support: Claude uses `{"type": "image", "source": {...}}` blocks, OpenAI uses `image_url` data-URIs, Ollama passes base64 via the `images` message field (silently ignored if the model isn't vision-capable).
-  - `ai/router.py` — `AIRole` enum (7 roles incl. `VISION_CAPTION`) + `AIRouter` singleton. Each role maps to `provider:model` via `AI_ROLE_*` env vars. Unified logging. `attachments=[MediaAttachment]` kwarg is forwarded to the provider for multimodal calls.
+  - `ai/router.py` — `AIRole` enum (8 roles incl. `VISION_CAPTION` and `INNER_VOICE`) + `AIRouter` singleton. Each role maps to `provider:model` via `AI_ROLE_*` env vars. Unified logging. `attachments=[MediaAttachment]` kwarg is forwarded to the provider for multimodal calls.
+  - Provider instances are cached, but **evicted when their credentials change**: `_PROVIDER_CONFIG_PREFIXES` subscribes to `ai.<provider>.*`, so rotating a leaked key in the dashboard actually takes effect (it previously returned `{"ok": true}` while the process kept authenticating with the old one). Those config items are marked `hot_reload=True` so the UI says so.
   - `ai/client.py` — `complete()` simple text completion
   - `ai/tool_client.py` — `complete_with_tools()` (Claude-only, MCP tool loops)
 - **Emotion system** ([emotion/](backend/emotion/) — standalone Django app):
@@ -114,15 +115,19 @@ On AI error or timeout: fallback text returned, **no emotion impulse toward the 
   - `drives/engine.py` — `DriveEngine` singleton: tension grows over time, satisfied by actions, contributes signed to conscience scoring. REST pressure rises with activity, falls during idle. Exposes `energy_level()` that combines circadian energy (70%) with REST drive (30%) → used by conscience Factor 11 (fatigue penalty) and by the system prompt / frontend. All in-RAM (ephemeral across restarts — matches human intuition).
 - **Personality**: [config/personality.py](backend/config/personality.py) — loads [personality.yaml](personality.yaml) (name, description, tone, traits, quirks, temperament block)
 - **Memory** ([memory/](backend/memory/)):
-  - `memory/manager.py` — `MemoryManager` singleton: short-term (RAM deque, `MEMORY_SHORT_TERM_LIMIT` messages) + ORM persistence + consolidator lifecycle
+  - `memory/manager.py` — `MemoryManager` singleton: short-term (RAM deque, `MEMORY_SHORT_TERM_LIMIT` messages) + ORM persistence + consolidator lifecycle. **Survives restarts**: `initialize()` reattaches to the conversation in progress when the last message is under `resume_window_minutes` (120) old, then `_rehydrate_short_term()` reloads the tail of that conversation into the RAM buffer. `get_conversation_context()` is the *only* history the LLM sees and was never populated from the DB, so a restart mid-chat used to be total conversational amnesia — "et le deuxième alors ?" landed on nothing — even though her mood toward the person was correctly restored from `EmotionSnapshot`. Internal scaffolding (`is_internal`) is skipped: it was never part of the dialogue
   - `memory/models.py` — `Conversation`, `Message` (with `attachments_meta` JSONField), `Theme`, `Entity`, `Souvenir`, `Connaissance`, `EmotionSnapshot`, `EmotionalSummary`, `ConsolidationLog`, `SelfNarrative`, `PersonProfile`, `Commitment`, `DailyJournal`, `Dream`
   - `memory/storage/` — `vector_store.py` (ChromaDB) + `consolidator.py` (background loop: extraction → indexing → decay → emotion aggregation → narrative regen → person profile regen → sleep cycle)
+    - **Decay is relative, not absolute**: `importance *= decay_rate ** days_since(Souvenir.decayed_at)`. The old `decay_rate ** age` recomputed an absolute value each tick, which wiped every conscience boost and inflated a freshly-created importance-0.3 souvenir to ~1.0. `decayed_at` only advances when a write actually happens, so sub-threshold elapsed time accumulates instead of being dropped (migration `memory/0012`).
+    - **Checkpoint reads the ceiling first**, then messages `id__lte` it. Reading messages first and taking `max(id)` afterwards let a turn persisted between the two queries be counted by the checkpoint but never extracted — that exchange was skipped forever.
+    - **Internal scaffolding is excluded by a flag, not a source denylist**: `Message.is_internal` (migration `memory/0013`) marks the "user" prompt of an `INTERNAL_TRIGGER` perception (greeting brief, module `notify_ai` text). Those instructions used to reach the extractor and become bogus souvenirs. Her *reply* (`role=assistant`) stays included.
   - `memory/extraction/extractor.py` — AI-powered extraction of 3 types: souvenirs (1st-person episodes), connaissances (3rd-person facts), commitments (promises Mika made)
   - `memory/retrieval/retriever.py` — semantic search + person_id boost + recency bias + confidence
   - `memory/narrative.py` — `NarrativeGenerator`: regenerates `SelfNarrative` (1st-person autobiographical paragraph) when ≥24h old AND ≥5 new souvenirs
   - `memory/person_profile.py` — `PersonProfileGenerator`: theory of mind. Per person-entity, synthesizes closeness, preferred tone, topics of interest, sensitive topics. Gated per-person (≥24h + ≥3 new souvenirs mentioning them); capped at 3 persons/cycle
   - `memory/sleep.py` — `SleepCycle` singleton. Nighttime creative/narrative/healing work. See "Sleep Cycle" section below.
 - **Conscience** ([conscience/](backend/conscience/)): Mika's waking brain. See dedicated section below.
+- **Retention sweep** ([memory/retention.py](backend/memory/retention.py)): declarative ceilings on append-only tables, applied hourly from the consolidator tick (both paths — with and without new messages). `POLICIES` is a tuple of `Policy(app_label, model_name, date_field, keep_days, keep_rows, protect)`. Motivation: `ConscienceLog` gets a row on **every** decision cycle regardless of outcome, so at a 30s interval it grows ~2 880 rows/day — over a million a year on an install nobody talks to. Also covers `ConsolidationLog` (only the newest row is ever read), faded `Rumination`s (active/resolved are protected — journals and digestion still reference them), and `ProjectLog`. A broken policy is logged and skipped, never fatal. A test asserts every policy names a real model + field and has at least one ceiling.
 - **Module plugin system**: [modules/base.py](backend/modules/base.py) (`BaseModule` ABC) + [modules/manager.py](backend/modules/manager.py) (`ModuleManager` singleton). Each module is a subfolder with its own `models.py`. `modules/models.py` re-exports for Django discovery.
 - **Module capabilities** (opt-in): `instantiate`/`shutdown`, `worker_cron`, `return_tools`, `notify_ai`, `get_routes`, `get_views`, `get_context`, `on_event`, `get_status`, `is_available`
 - **AI tools**: `ModuleManager` collects tools from all modules, builds an MCP server via `create_sdk_mcp_server()`, injected into `ClaudeAgentOptions.mcp_servers` when `complete_with_tools` is used
@@ -130,6 +135,20 @@ On AI error or timeout: fallback text returned, **no emotion impulse toward the 
 - **notify_ai**: modules call their injected callback which constructs an `INTERNAL_TRIGGER` Perception and routes it via `perceive()` — so module initiatives flow through the same pipeline as any other input
 - **Email module** ([modules/email/](backend/modules/email/)): IMAP/SMTP. Polls inbox (60s), triages with Haiku, stores `ProcessedEmail`, creates souvenirs/connaissances, notifies via `notify_ai`. Exposes `list_recent_emails`, `send_email` tools. Disabled gracefully if no config.
 - **Forge** ([modules/plugins/forge/](backend/modules/plugins/forge/)): AI-self-managed modules. One host plugin (`forge`) loads N sandboxed mini-modules that **Mika writes herself** into the confined dir `data/forge_modules/` (`FORGE_DIR`). See dedicated section below.
+
+### Admin interface — access control and payload safety
+
+The dashboard reads the entire conversation history and writes the config, including provider API keys. Three layers now stand between that and the network:
+
+- **Loopback by default** — `API_HOST` defaults to `127.0.0.1` (was a hardcoded `0.0.0.0`). Set `API_HOST=0.0.0.0` to serve the LAN; [run.py](run.py) then logs a `SECURITY:` warning if `DASHBOARD_REQUIRE_AUTH` is off.
+- **Optional auth gate** — [dashboard/middleware.py](backend/dashboard/middleware.py) `DashboardAuthMiddleware` covers the whole `/dashboard/` prefix when `DASHBOARD_REQUIRE_AUTH=1`: HTML requests redirect to `LOGIN_URL` (default `/admin/login/`, so the Django admin account doubles as the dashboard account) with `?next=`, API requests get a 401 JSON body. Staff-only, so an account created for the chat frontend doesn't inherit the config editor. **Off by default** — a fresh install has no superuser, and locking the owner out of their own admin before they can run `createsuperuser` is worse than loopback exposure. One middleware rather than 66 decorators: the next route added can't forget it.
+- **CORS is not wildcarded** — `CORS_ALLOW_ALL_ORIGINS` defaults to `False` with the dev frontend origins allow-listed. It previously followed `DEBUG`, so any page the user visited could read `/dashboard/api/messages` and `PATCH` the config cross-origin without needing credentials (nothing was authenticated).
+
+**Payload sanitization** ([dashboard/sanitize.py](backend/dashboard/sanitize.py)) — the generic renderer injects `html` keys via `innerHTML`, so `view_data` / `view_item` strip `html`/`js`/`template` recursively from **every** module's payload, not just forged ones. `ModuleView.allow_raw_html=True` is the explicit opt-in for a module that owns and escapes its own markup. The Forge re-exports the shared implementation instead of keeping a second copy.
+
+**Config write path** — record-list rows go through the same `_coerce` + `_validate` as scalar items (the local copy they used handled only int/float/bool, silently kept the raw string on failure, and checked neither `select` choices nor min/max), row CRUD invalidates the cache before notifying subscribers, `registry.register_replace()` invalidates each replaced key (a forged module's hot reload could change a `default` behind a memoized value), and `config_service.set()` on a blank sensitive field returns a **redacted** marker rather than handing the decrypted current secret back to the caller.
+
+**Known remaining gap**: `CsrfViewMiddleware` is still absent, so the many `@csrf_exempt` decorators are redundant and mutating endpoints have no CSRF token check. With a loopback bind and non-wildcard CORS the drive-by vector is closed, but adding the middleware (plus `{% csrf_token %}` in the templates and the token in `app.js`) is the proper fix.
 
 ### Module dashboard views
 
@@ -174,6 +193,10 @@ Confined space where **Mika creates/edits/tests/deletes her own mini-modules** a
 
 - **Layout**: each forged module lives in `data/forge_modules/<slug>/` — `manifest.yaml` (declarative: title, `schedule`, `events` patterns, `views`, `config` fields, `allowed_domains`, `context`) + `module.py` (sandboxed code) + `state.json` (host-managed: enabled, disabled_reason) + `_versions/` (auto-snapshots, rollback) ; erased modules go to `_trash/`.
 - **Sandbox** ([sandbox.py](backend/modules/plugins/forge/sandbox.py)): AST validation at write time (no `import`, no async, no `_`-prefixed attribute access, no `eval/exec/open/getattr/type/...`, no `.format`), curated builtins + read-only safe modules (`math json re datetime random statistics collections itertools functools hashlib base64 uuid copy string`) at exec time, per-handler deadline via `sys.settrace` in a dedicated 2-worker thread pool. Handlers are sync; the host wraps them async — a slow forged module never blocks the shared scheduler (ticks run in a background task).
+  - **Two escapes closed (2026-07)**, both verified exploitable before the fix:
+    - *Frame walk*: `f_* / gi_* / cr_* / ag_* / tb_*` attributes are **not** `_`-prefixed, so `gen.gi_frame.f_back` climbed into host frames whose `f_builtins` holds the real `__import__` → arbitrary RCE. Those prefixes are now an explicit denylist (`FORBIDDEN_ATTR_PREFIXES`).
+    - *Catchable deadline*: `ForgeTimeout` derived from `Exception`, so `while True: try: ... except Exception: pass` swallowed its own timeout and pinned a worker thread forever — two such modules exhausted the 2-worker pool and hung all Forge operations, without ever tripping the breaker. It now derives from `BaseException`, and the validator rejects bare `except:` plus any reference to `BaseException`/`ForgeTimeout`/`SystemExit`/`KeyboardInterrupt`/`GeneratorExit`.
+  - Hot reload calls `_unregister_config()` before re-registering (`register_replace` can only add/replace, so a config field dropped from a manifest lingered in the dashboard until restart). `_trash/` is capped at `MAX_TRASH_KEPT = 20`. `ForgeLog` pruning is amortized every 50 inserts per module instead of sampling the wall clock (which only fired ~5% of the time and could never fire for a module logging on fixed seconds).
 - **Capability API** ([api.py](backend/modules/plugins/forge/api.py)): `api.storage` (per-module JSON KV by collections in shared `ForgeRecord` table, quotas — forged modules never get DDL), `api.config` (reads `forge.<module>.<key>` from the standard config service, dashboard-edited, secrets decrypted, `record_list` supported), `api.log/warn/error` + `print` → `ForgeLog`, `api.notify_ai` (rate-limited by `forge.notify_cooldown_s`), `api.emit` → `forge.<module>.<type>` on the bus (Conscience observes; sibling forged modules subscribed via `events` receive it, never the emitter), `api.http_get` (manifest `allowed_domains` only, redirects off, private/loopback IPs blocked, size-capped), `api.state` (RAM dict).
 - **Circuit breaker**: `forge.max_consecutive_failures` (5) tick/event failures → module auto-disabled (persisted in `state.json`), unloaded, and Mika notified once with the error so she can `forge_read_module` → fix → `forge_command(enable)`.
 - **Dynamic config**: at load, the host registers a `ConfigSection` "Forge · <title>" + items via `registry.register_replace()` (new registry method; `registry.unregister()` on erase). Values persist in `ConfigValue` across reload/disable.
@@ -189,7 +212,7 @@ The Conscience is Mika's **waking brain** — a layer above modules that observe
 
 **Metaphor**: Conscience = waking state, Consolidator = dreaming state.
 
-- **Engine** [conscience/engine.py](backend/conscience/engine.py) — `ConscienceEngine` singleton: decision loop (every `CONSCIENCE_DECISION_INTERVAL`s), memory maintenance, action execution. `_act()` builds an `INTERNAL_TRIGGER` Perception and routes it through the processor (never calls `process_message` directly).
+- **Engine** [conscience/engine.py](backend/conscience/engine.py) — `ConscienceEngine` singleton: decision loop (every `CONSCIENCE_DECISION_INTERVAL`s), memory maintenance, action execution. `_act()` builds an `INTERNAL_TRIGGER` Perception and routes it through the processor (never calls `process_message` directly). The high-pertinence fast-path (`p > 0.85`) is **scheduled**, not awaited (`_spawn_decision()`): `observe()` runs inside `ModuleManager.emit_event`, which the email/RSS pollers await, so an inline decision blocked the emitting module's loop for two LLM calls. Tasks are held in a set so they aren't GC'd mid-flight, and failures are logged rather than vanishing.
 - **Scoring** [conscience/scoring.py](backend/conscience/scoring.py) — pure functions. **11 weighted factors**: pertinence, accumulated urgency, mood overflow, idle time, time greeting, scheduled actions, pressure (consecutive waits), ignored-acts penalty, **drives** (signed: REST subtracts), **rumination pressure**, **fatigue penalty** (energy < 0.5 subtracts up to 0.25 — tired Mika is less spontaneous). Threshold: `CONSCIENCE_ACT_THRESHOLD` (0.5).
 - **Interpreter** [conscience/interpreter.py](backend/conscience/interpreter.py) — `SignalInterpreter` classifies events. Heuristic fast-path for `chat.message`/`chat.connect`; Claude Haiku for rich events (emails, RSS).
 - **MemoryBridge** [conscience/memory_bridge.py](backend/conscience/memory_bridge.py) — R/W interface to long-term memory: create souvenirs, boost importance, check/invalidate connaissances, recall for context.
@@ -198,6 +221,8 @@ The Conscience is Mika's **waking brain** — a layer above modules that observe
   - `ConscienceLog` — decision audit trail
   - `ScheduledAction` — deferred actions (`schedule_action` tool)
   - `Rumination` — persistent unresolved thoughts (promoted from stale pertinent Observations). Each cycle: decays 5%, bleeds emotional charge into global mood, halved when Mika acts. States: `active`/`resolved`/`faded`.
+
+**Greeting state is committed only on "act"** — `check_time_trigger` marks a period greeted inside the scoring pass, but the greeting factor is worth 0.35 against a 0.5 threshold. Committing immediately spent the day's greeting on a cycle that decided to stay silent, so Mika almost never greeted anyone. `_compute_score()` now stashes the tentative state and `_commit_greeting()` persists it from the `act` branch only.
 
 **Memory powers**: the Conscience reshapes memory without speaking — boost souvenir importance for pertinent signals, invalidate contradicted connaissances, promote stale pertinent observations to Ruminations, decay ruminations over time.
 
@@ -243,6 +268,8 @@ Counterpart to the Conscience. The consolidator runs all day doing maintenance; 
 
 **Observable phase state** (`SleepPhase`): `awake | light_sleep | rem | deep_sleep`. Transitions call `_set_phase()` which pushes a `broadcast_inner_state_update` event so the frontend reacts immediately (dim lights, close eyes, slow breath). Singleton `sleep_cycle` at module level.
 
+A phase is entered **only when it has work to do**, and the tick ends by settling into `DEEP_SLEEP`. Announcing `LIGHT_SLEEP` then `REM` unconditionally every tick made the frontend replay its 1.2–1.8s eye/lighting eases twice a minute all night. REM attempts are additionally spaced by `DREAM_ATTEMPT_INTERVAL_S` (45 min) — closer to real REM cycles, and it stops the loop re-entering REM on every 60s tick.
+
 **Prompt integration** — morning recall (6h-14h): a non-recalled `Dream` with `vividness ≥ 0.6` for last night gets injected as the `--- CE QUE TU AS REVE CETTE NUIT ---` block, then auto-marked `recalled_at` so it never repeats. Framed as "tu peux le mentionner si ça tombe" — Mika can spontaneously talk about it or not.
 
 **Frontend integration** (end-to-end, live):
@@ -279,7 +306,7 @@ Standalone Django app. Mika as an **agent with explicit work engagements**: proj
 - `""` / `"manual"` — advance only on explicit push
 - `"interval:5m"` / `"interval:30s"` / `"interval:2h"` — recurring interval (floor 5s)
 - `"cron:0 9 * * MON-FRI"` — cron expression (uses `croniter` if installed, falls back to a minimal 5-field parser supporting DOW names + ranges)
-- `"idle:30m"` — fires when conscience idle seconds >= window
+- `"idle:30m"` — fires when conscience idle seconds >= window **and** `next_run_at` has passed. Without the second condition an `idle:` project advanced on *every* runner tick once the window was reached, burning 10 back-to-back LLM calls in ~5 min until `runs_since_user_input` capped it
 - `"event:email.new"` — tagged by module bus, `runner.notify_event()` sets `next_run_at = now`
 
 **Runner** ([projects/runner.py](backend/projects/runner.py)): `project_runner` singleton with its **own dedicated background loop** started at ASGI lifespan — cadence `projects.runner_interval`, default 30s; decoupled from the consolidator since 2026-04 so `interval:30s` actually fires at 30s and a blocked 90s LLM advance never starves memory consolidation. Per tick: lists due projects, advances up to 3 in priority order, builds a scoped context (no emotion/ruminations/circadian — just project frame + tasks + recent logs + resources), calls the LLM (Haiku), parses a structured JSON output (`summary`, `task_updates`, `new_tasks`, `report_to_user`, `proposed_action`), writes DB changes, logs the tick, bumps `next_run_at`. Side-effect actions on `requires_approval=True` projects queue as `ProjectPendingAction` instead of executing.
@@ -322,6 +349,30 @@ GET    /api/projects/<id>/history              last N prompt/response pairs
 
 **Metaphor**: Projects = Mika's **professional self**. Silent work that progresses during her idle time; activated on-demand with a strict frame when her attention is invoked. Kept orthogonal to the emotional/relational life by default.
 
+### Voice output — a routed modality ([pipeline/voice.py](backend/pipeline/voice.py))
+
+Speech is **not** a frontend detail: text and audio leave Mika through the *same* channels, and whether she speaks is a routing decision made backend-side.
+
+**Delivery registry** ([communication/delivery.py](backend/communication/delivery.py)) — `presence_registry` says *where* a person is reachable; this registry says *who can send* there. Needed because a communication channel isn't necessarily a module: `TelegramChannel` lives in `communication/channels/` and is never registered with `module_manager`, so `get_module("telegram")` always returned `None` and the caller fell back to a global broadcast (leaking a message composed for one person to every connected browser). `get_channel(name)` resolves registered channels first, then modules. Targeted messages that cannot be delivered are now **logged and dropped**, never broadcast.
+
+**Three sinks**, with genuinely different context rules:
+
+| Sink | Where | Policy |
+|------|-------|--------|
+| `SCREEN` | frontend app (browser TTS) | speaks by default; silent with no client connected |
+| `MESSAGE` | async voice note (Telegram voice, SMS) | time of day is irrelevant — the recipient plays it when they choose. Only an explicit mute suppresses it |
+| `SPEAKER` | open-air speaker in a shared room | strictest: silent during quiet hours (22h–8h), while Mika sleeps, and (for addressed speech) when nobody's in the room |
+
+`decide_voice(sink, *, hour, sleep_phase, person_present, muted, persona) -> VoiceDecision(speak, reason)` is a **pure function** — the whole policy is unit-testable without a running system. The reason string is logged and shipped to the frontend so silence is never mysterious.
+
+**Two voice personas** — `VoicePersona.SPEAKING` (addressed to a person) and `VoicePersona.INNER` (thinking out loud). Her inner monologue gets its own vocal identity via `VOICE_PROFILES`: quieter (gain 0.45), slower (rate ×0.9), slightly lower (pitch ×0.94) — it reads as thought overheard, not a sentence said to you. Two policy consequences: an inner thought is **never** sent as a voice note (you don't mail your stray musings to someone's phone), and it **may** be spoken to an empty room (nobody is disturbed, and that is exactly how a mind at work sounds). `persona_for_source(source, addressed=)` classifies a turn: `INNER_SOURCES = {conscience, drive, rumination}` unless the turn deliberately targets a person.
+
+**Audible inner monologue** ([pipeline/inner_voice.py](backend/pipeline/inner_voice.py)) — when Mika acts on her own, she murmurs *"oh tiens, si j'envoyais un message à Alice..."*, *"mmm... oh mais c'est génial ça, je continue !"*. That murmur is **generated, not reused**: `generate_inner_thought(action, result, *, mood)` makes a dedicated small-model call (`AIRole.INNER_VOICE`, 12s timeout) from *what she's about to do* + *what just came back*. Never the raw action summary, which reads like a report. Output is cleaned (quotes/prefixes stripped) and capped at 160 chars — a long thought stops sounding like a thought. Every failure path (quota, timeout, blank output) returns `None`: **silence is a valid outcome**, an error is never surfaced as a thought. Wired into `project_runner._murmur()` after each advance tick; broadcast with `source="conscience"` so the INNER persona applies.
+
+**Pluggable synthesis** — `register_synthesizer(synth)` installs a `SpeechSynthesizer` (Piper, edge-tts, an API). **None is registered by default**: the frontend does its own TTS, so `MESSAGE`/`SPEAKER` delivery falls back to text until one is installed. `synthesize()` never raises — a broken TTS degrades to text delivery, it does not drop the message. Telegram declares `VOICE_SINK = MESSAGE` and implements `deliver_voice()` (OGG/Opus → `send_voice`, anything else → `send_audio`, captioned with the text).
+
+**Frontend contract** — the `speech` payload carries `speak` (bool), `voice_reason` (str), `voice_persona`, and `voice_profile` ({pitch, rate, gain}). [main.ts](frontend/src/main.ts) honours `speak: false` by showing the text and animating the avatar without speaking; `TTSService.speak(text, emotion, profile)` applies the persona multipliers **on top of** the emotion modulation (an excited *thought* is still quieter than an excited sentence), clamped to the Web Speech API's accepted pitch/rate ranges.
+
 ### System prompt structure
 
 Assembled by `build_system_prompt()` ([pipeline/prompt.py](backend/pipeline/prompt.py)) in this order:
@@ -362,7 +413,8 @@ A `.vrm` file at [frontend/public/models/default.vrm](frontend/public/models/def
 - **Emotion tag**: `[EMOTION:name:intensity]`. Legacy `[EMOTION:name]` = intensity 0.7
 - **WebSocket protocol**:
   - Client → server: `{"type":"chat","message":"...","person_id":"...","attachments":[...]}`
-  - Server → client (reply): `{"type":"speech","text":"...","emotion":"...","emotion_intensity":0.75,"emotion_blend":[{"emotion":"...","weight":0.x}, ...],"emotion_state":{...},"source":"...","inner_state":{...}}`
+  - Server → client (reply): `{"type":"speech","text":"...","emotion":"...","emotion_intensity":0.75,"emotion_blend":[{"emotion":"...","weight":0.x}, ...],"emotion_state":{...},"source":"...","inner_state":{...},"speak":true,"voice_reason":"screen_ok","voice_persona":"speaking|inner","voice_profile":{"pitch":1.0,"rate":1.0,"gain":1.0}}` — the voice fields come from [pipeline/voice.py](backend/pipeline/voice.py); `speak:false` means show the text but stay silent
+  - Client → server (identity handshake, first frame): `{"type":"identify","person_id":"...","display_name":"..."}`. A `person_id` smuggled in a later `chat` frame is **ignored** — identity is bound at connect/identify time only
   - Server → client (state refresh, no TTS): `{"type":"inner_state_update","inner_state":{...}}` — pushed by `broadcast_inner_state_update()` when inner state changes outside of a conversation turn (e.g. sleep phase transitions during the night, project pending action queued). Frontend merges it into the `InnerLifePanel` + scene/animation without invoking TTS.
   - Server → client (project report, no TTS): `{"type":"project_report","project_id","project_title","text"}` — emitted when the project runner produces user-facing text from a tick. Shown as a prefixed message in the chat overlay.
   - `inner_state` payload shape: `{drives, energy, circadian, sleep_phase, today_journal?, last_dream?, projects?, pending_project_actions?, self_narrative?, ruminations, person_profile?, pending_commitments?}`
@@ -405,8 +457,15 @@ OAuth tried first, API key as fallback. OAuth tokens start with `sk-ant-oat01-`;
 | `AI_ROLE_MEMORY_EXTRACTION` | No | `claude:CLAUDE_MODEL_LIGHT` | Memory extraction + narrative + person profile |
 | `AI_ROLE_VALIDITY_CHECK` | No | `claude:CLAUDE_MODEL_LIGHT` | Connaissance validity checks |
 | `AI_ROLE_VISION_CAPTION` | No | `claude:CLAUDE_MODEL_LIGHT` | Image → text description (vision preprocessor) |
+| `AI_ROLE_INNER_VOICE` | No | `claude:CLAUDE_MODEL_LIGHT` | Murmured inner monologue. Fires far more often than a chat turn — keep a small model |
+| `TIME_ZONE` | No | `Europe/Paris` | Aligns ORM `__date` bucketing with the naive local wall clock used by circadian/sleep/journal logic. Django's own default (`America/Chicago`) shifted day boundaries ~7h |
+| `CORS_ALLOW_ALL_ORIGINS` | No | `False` | **Not** wildcarded in DEBUG: the dashboard API is unauthenticated, so `*` let any visited page read the conversation history and rewrite the config |
+| `CORS_ALLOWED_ORIGINS` | No | `localhost:3000,127.0.0.1:3000,localhost:4173,127.0.0.1:4173` | Dev frontend origins, allow-listed explicitly |
 | `AI_CALL_TIMEOUT` | No | `60` | Seconds before `process_message` gives up waiting on the AI |
 | `API_PORT` | No | `8000` | Backend port |
+| `API_HOST` | No | `127.0.0.1` | Bind address. Loopback by default because the dashboard is unauthenticated unless gated |
+| `DASHBOARD_REQUIRE_AUTH` | No | `False` | Require an authenticated **staff** user for `/dashboard/*`. Needs a superuser (`python backend/manage.py createsuperuser`) |
+| `LOGIN_URL` | No | `/admin/login/` | Where the dashboard gate redirects unauthenticated HTML requests |
 | `MEMORY_SHORT_TERM_LIMIT` | No | `20` | Messages kept in RAM context |
 | `CONSOLIDATION_INTERVAL` | No | `60` | Consolidator loop period (s) |
 | `MEMORY_DECAY_RATE` | No | `0.95` | Per-day souvenir importance decay |
@@ -440,4 +499,13 @@ OAuth tried first, API key as fallback. OAuth tokens start with `sk-ant-oat01-`;
 - **Sleep cycle tests** (`test_sleep.py`, `test_sleep_debug_views.py`): cover phase gates, night detection, dream classification, rumination digestion, dream persistence, phase transition broadcasts, and the debug HTTP endpoints. LLM calls are mocked — the LLM prompts themselves are not unit-tested.
 - **Project tests** (`test_projects.py`): schedule parser (interval/cron/idle/event/manual), model defaults (critical: `emotion_policy` defaults to OFF), project detection heuristic, prompt injection + emotion suppression, runner JSON extraction, HTTP endpoints (create/list/detail/patch, task add/update, pending approve/reject, prompt history), MCP `create_project` handler, rolling-buffer prune (respects `PROJECT_PROMPT_HISTORY_SIZE=0` as disable).
 - **Forge tests** (`test_forge_sandbox.py`, `test_forge_store.py`, `test_forge_api.py`, `test_forge_host.py`): AST validator (rejects imports/dunders/`_`-attrs/`.format`/async, accepts legit code), frozen exec env, deadline tracer, manifest validation, version archive/rollback/trash, storage quotas + module isolation, HTTP allowlist + private-IP block, notify cooldown / emit rate limit, and the full host lifecycle (write→load→tick→events→breaker→commands→views sanitization→dynamic config→MCP tools). `test_forge_host.py` uses `django_db(transaction=True)` because forged handlers run in worker threads (committed rows must be visible cross-connection).
+- **Dashboard auth tests** (`test_dashboard_auth.py`): gate off = pass-through, HTML redirect vs API 401, staff-only, non-`/dashboard/` paths never gated, and the three secure defaults (`DASHBOARD_REQUIRE_AUTH=False`, `API_HOST=127.0.0.1`, CORS not wildcarded).
+- **Sanitization tests** (`test_dashboard_sanitize.py`): `html`/`js`/`template` stripped at every nesting level including inside `rows` and `tabs`, depth cap, the `allow_raw_html` opt-in, and that the Forge re-exports the shared implementation.
+- **Config record tests** (`test_config_record_validation.py`): a row with `temperature: "hot"`, an out-of-range value, or an unknown `provider` is rejected at write time rather than blowing up later in the AI router.
+- **Retention tests** (`test_retention.py`): both policy shapes (age, row ceiling), the `protect` filter, throttling to once per hour, and a consistency test asserting every policy targets a real model/field with at least one ceiling — it caught `ConsolidationLog` using `ran_at` rather than `created_at`.
+- **Restart-continuity tests** (`test_memory_restart_continuity.py`): conversation resume window, chronological rehydration, scaffolding excluded, short-term limit respected.
+- **Provider-cache tests** (`test_ai_router_provider_cache.py`): credential change evicts only that provider, and every entry in `_PROVIDER_CLASSES` has a credential prefix (a new provider added without one would silently keep stale keys).
+- **Voice routing tests** (`test_voice_routing.py`): the per-sink context policy (quiet hours, sleep phase, presence, mute), the two voice personas, the voice→text delivery fallback chain, and the inner-thought generator (mocked LLM — asserts action *and* result both reach the prompt, that failures yield silence rather than an error string, and that output is de-quoted and length-capped).
+- **Memory decay tests** (`test_memory_decay.py`): decay is relative to `Souvenir.decayed_at`, so conscience boosts survive, fresh low-importance souvenirs are not inflated, and a second immediate pass is a no-op.
+- **Consolidator selection tests** (`test_consolidator_selection.py`): internal scaffolding excluded / reply kept, and a message inserted mid-pass is picked up on the next pass instead of being skipped forever.
 - Two tests are currently flaky due to wall-clock/circadian bias at run time (they assert positions that depend on the phase_bias home vector): `test_emotion_engine.py::TestTemperamentVariants::test_melancholic_returns_to_melancholic` and `test_scenario_troll.py::TestTrollWithStoicTemperament::test_stoic_global_barely_moves`. They pre-date the sleep work and are typically excluded in CI runs via `--deselect`.

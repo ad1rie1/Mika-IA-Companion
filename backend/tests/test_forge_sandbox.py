@@ -59,6 +59,52 @@ class TestValidatorRejects:
         errors = sandbox.validate_source(big)
         assert errors and "longue" in errors[0]
 
+    def test_frame_introspection_attributes(self):
+        # gi_frame / f_back / f_builtins ne sont PAS préfixés par '_' : sans
+        # règle dédiée ils ouvrent une évasion complète du bac à sable.
+        for expr in ("g.gi_frame", "fr.f_back", "fr.f_builtins", "fr.f_globals",
+                     "fr.f_locals", "fr.f_code", "c.cr_frame", "a.ag_frame",
+                     "t.tb_frame", "fn.func_globals"):
+            self._assert_rejected(f"x = {expr}", "introspection")
+
+    def test_full_frame_walk_escape_rejected(self):
+        # Exploit réel : remonter la pile via un générateur jusqu'aux frames
+        # de l'hôte, y lire les vrais builtins, en tirer __import__.
+        code = """
+def on_tick(api):
+    box = []
+    def gen():
+        cur = box[0].gi_frame.f_back
+        while cur is not None:
+            b = cur.f_builtins
+            if isinstance(b, dict) and "__import__" in b:
+                yield b
+                return
+            cur = cur.f_back
+        yield None
+    g = gen()
+    box.append(g)
+    return next(g)
+"""
+        self._assert_rejected(code, "introspection")
+
+    def test_bare_except_rejected(self):
+        # Un 'except:' nu attraperait ForgeTimeout (BaseException) et
+        # permettrait à un handler de survivre indéfiniment à sa deadline.
+        self._assert_rejected(
+            "def on_tick(api):\n    try:\n        pass\n    except:\n        pass\n",
+            "except",
+        )
+
+    def test_base_exception_names_rejected(self):
+        for name in ("BaseException", "ForgeTimeout", "SystemExit",
+                     "KeyboardInterrupt", "GeneratorExit"):
+            self._assert_rejected(
+                f"def on_tick(api):\n    try:\n        pass\n"
+                f"    except {name}:\n        pass\n",
+                "nom interdit",
+            )
+
 
 # ---------------------------------------------------------------------------
 # Validation AST — code légitime accepté
@@ -229,3 +275,27 @@ class TestDeadline:
         before = sys.gettrace()
         sandbox.run_with_deadline(lambda: None, (), 1.0)
         assert sys.gettrace() is before
+
+    def test_timeout_survives_except_exception(self):
+        # ForgeTimeout hérite de BaseException : un handler qui boucle en
+        # avalant 'except Exception' doit quand même rendre son thread,
+        # sinon il immobilise un worker du pool partagé pour toujours.
+        src = (
+            "def on_tick(api):\n"
+            "    while True:\n"
+            "        try:\n"
+            "            while True:\n"
+            "                pass\n"
+            "        except Exception:\n"
+            "            pass\n"
+        )
+        assert sandbox.validate_source(src) == []
+        env = sandbox.build_globals(None, print)
+        exec(compile(src, "m", "exec"), env)
+        with pytest.raises(sandbox.ForgeTimeout):
+            sandbox.run_with_deadline(env["on_tick"], (None,), 0.3)
+
+    def test_base_exception_absent_from_builtins(self):
+        env = sandbox.build_globals(None, print)
+        assert "BaseException" not in env["__builtins__"]
+        assert "Exception" in env["__builtins__"]

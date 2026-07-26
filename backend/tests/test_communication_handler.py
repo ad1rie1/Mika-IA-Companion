@@ -87,7 +87,9 @@ class TestWebSocketReceive:
         assert len(perception.text) == MAX_MESSAGE_LENGTH
 
     @pytest.mark.asyncio
-    async def test_client_provided_person_id_used(self):
+    async def test_chat_person_id_claim_is_ignored(self):
+        # Identity is bound at connect/identify time; a person_id smuggled in a
+        # chat frame must NOT override the connection's bound identity.
         c = self._make_consumer()
         data = json.dumps({
             "type": "chat", "message": "Hi", "person_id": "custom_pid",
@@ -96,7 +98,8 @@ class TestWebSocketReceive:
                    new_callable=AsyncMock) as mock_perceive:
             await c.receive(text_data=data)
         perception = mock_perceive.call_args[0][0]
-        assert perception.person_id == "custom_pid"
+        assert perception.person_id == c.person_id
+        assert perception.person_id != "custom_pid"
 
     @pytest.mark.asyncio
     async def test_attachments_produce_mixed_perception(self):

@@ -12,6 +12,10 @@ from memory.storage.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
 
+# The retention sweep is bookkeeping on tables measured in days, so once an
+# hour is plenty — running it on every 60s tick would be pure query load.
+RETENTION_SWEEP_INTERVAL_S = 3600
+
 
 class MemoryConsolidator:
     """Background task that periodically processes raw messages into
@@ -110,26 +114,35 @@ class MemoryConsolidator:
             Theme,
         )
 
-        # 1. Fetch unprocessed messages
-        #    Exclude module notifications (not user-facing exchanges).
-        #    For conscience: exclude internal prompts (role=user) but keep
-        #    speech output (role=assistant) so Mika remembers her own initiatives.
-        INTERNAL_SOURCES = ("module_email", "module_wake")
-        messages = await sync_to_async(list)(
-            Message.objects.filter(id__gt=self._last_processed_id)
-            .exclude(source__in=INTERNAL_SOURCES)
-            .exclude(source="conscience", role="user")
-            .order_by("created_at")
-            .values("id", "role", "content", "created_at", "source")
-        )
-
-        # Also get the absolute max message ID (including internal) to advance checkpoint
+        # 1. Pick the ceiling FIRST, then read below it. Reading the messages
+        #    first and taking the max id afterwards would let a turn persisted
+        #    between the two queries be counted by the checkpoint but never
+        #    extracted — that exchange would be skipped forever.
         all_max_id = await sync_to_async(
             lambda: Message.objects.filter(id__gt=self._last_processed_id)
             .order_by("-id")
             .values_list("id", flat=True)
             .first()
         )()
+
+        # 2. Fetch unprocessed messages up to that ceiling.
+        #    Exclude module notifications (not user-facing exchanges) and the
+        #    scaffolding prompts of internal triggers (role=user), while
+        #    keeping Mika's own replies (role=assistant) so she remembers her
+        #    initiatives.
+        INTERNAL_SOURCES = ("module_email", "module_wake")
+        messages = []
+        if all_max_id:
+            messages = await sync_to_async(list)(
+                Message.objects.filter(
+                    id__gt=self._last_processed_id, id__lte=all_max_id,
+                )
+                .exclude(source__in=INTERNAL_SOURCES)
+                .exclude(role="user", is_internal=True)
+                .exclude(source="conscience", role="user")
+                .order_by("created_at")
+                .values("id", "role", "content", "created_at", "source")
+            )
 
         if not messages:
             # Advance checkpoint past internal-only messages
@@ -144,10 +157,10 @@ class MemoryConsolidator:
 
         logger.info("Consolidating %d new messages (skipped internal)", len(messages))
 
-        # 2. Format for Claude
+        # 3. Format for Claude
         msg_dicts = [{"role": m["role"], "content": m["content"]} for m in messages]
 
-        # 3. Extract via Claude
+        # 4. Extract via Claude
         extractions = await self.extractor.analyze_messages(msg_dicts)
 
         souvenirs_created = 0
@@ -292,7 +305,7 @@ class MemoryConsolidator:
             except Exception:
                 logger.exception("Failed to process extraction: %s", extraction)
 
-        # 4. Update checkpoint atomically (transaction protects against crash
+        # 5. Update checkpoint atomically (transaction protects against crash
         #    between in-memory update and DB write)
         max_id = all_max_id or messages[-1]["id"]
 
@@ -349,6 +362,27 @@ class MemoryConsolidator:
         Remove those below threshold."""
         await self._decay_souvenirs()
         await self._decay_connaissances()
+        await self._sweep_retention()
+
+    async def _sweep_retention(self):
+        """Cap the append-only audit tables. Hourly, not every tick.
+
+        Reached from both consolidation paths (with and without new
+        messages), so it keeps running on an install nobody talks to — which
+        is precisely when ConscienceLog grows fastest relative to content.
+        """
+        import time as _time
+
+        now = _time.monotonic()
+        last = getattr(self, "_last_retention_sweep", 0.0)
+        if last and (now - last) < RETENTION_SWEEP_INTERVAL_S:
+            return
+        self._last_retention_sweep = now
+        try:
+            from memory.retention import run_sweep
+            await run_sweep()
+        except Exception:
+            logger.exception("Retention sweep failed (non-fatal)")
 
     async def _decay_souvenirs(self):
         """Reduce importance of old souvenirs. Remove those below threshold."""
@@ -366,8 +400,12 @@ class MemoryConsolidator:
         for souvenir in souvenirs:
             # Use occurred_at (when it happened) not created_at (when it was stored)
             ref_date = souvenir.occurred_at or souvenir.created_at
-            days_old = (now - ref_date).total_seconds() / 86400
-            new_importance = decay_rate ** days_old
+            # Decay multiplicatively from the CURRENT value since the last pass.
+            # Recomputing an absolute rate**age would wipe every conscience
+            # boost and inflate freshly-created low-importance souvenirs to ~1.0.
+            anchor = souvenir.decayed_at or ref_date
+            days_since = max(0.0, (now - anchor).total_seconds() / 86400)
+            new_importance = souvenir.importance * (decay_rate ** days_since)
             if new_importance < min_importance:
                 try:
                     await sync_to_async(self.vector_store.remove_souvenir)(souvenir.pk)
@@ -376,8 +414,12 @@ class MemoryConsolidator:
                 await sync_to_async(souvenir.delete)()
                 logger.debug("Pruned souvenir #%d (too old)", souvenir.pk)
             elif abs(new_importance - souvenir.importance) > 0.01:
+                # Below that delta we leave the anchor alone so the elapsed
+                # time keeps accumulating instead of being silently dropped.
                 souvenir.importance = round(new_importance, 3)
-                await sync_to_async(souvenir.save)(update_fields=["importance"])
+                souvenir.decayed_at = now
+                await sync_to_async(souvenir.save)(
+                    update_fields=["importance", "decayed_at"])
                 try:
                     await sync_to_async(self.vector_store.add_souvenir)(
                         souvenir_id=souvenir.pk,

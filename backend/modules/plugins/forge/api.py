@@ -55,6 +55,13 @@ def prune_logs(module_name: str) -> None:
         ForgeLog.objects.filter(id__in=ids).delete()
 
 
+# Prune amorti : un DELETE toutes les N insertions par module, au lieu d'un
+# tirage sur l'horloge (qui ne se déclenchait que ~5% du temps et pouvait ne
+# jamais tomber pour un module loggant toujours aux mêmes secondes).
+_LOG_PRUNE_EVERY = 50
+_log_insert_counts: dict[str, int] = {}
+
+
 def write_log(module_name: str, level: str, source: str, message: str) -> None:
     """Insertion synchrone d'une ligne de journal (thread worker ou
     ``sync_to_async`` depuis la boucle)."""
@@ -65,12 +72,15 @@ def write_log(module_name: str, level: str, source: str, message: str) -> None:
         source=source,
         message=str(message)[:4000],
     )
-    # Prune paresseux — pas à chaque insert.
-    if int(time.monotonic()) % 20 == 0:
+    count = _log_insert_counts.get(module_name, 0) + 1
+    if count >= _LOG_PRUNE_EVERY:
+        _log_insert_counts[module_name] = 0
         try:
             prune_logs(module_name)
         except Exception:
             pass
+    else:
+        _log_insert_counts[module_name] = count
 
 
 class ForgeStorage:

@@ -37,6 +37,8 @@ import logging
 import random
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
+# `time` above is datetime.time (a class) — import the clock explicitly.
+from time import monotonic
 
 from asgiref.sync import sync_to_async
 from django.conf import settings
@@ -60,6 +62,10 @@ REST_DRIVE_THRESHOLD = 0.5    # Mika must have earned her rest
 DREAM_PROBABILITY = 0.6              # per-check chance of producing a dream
 MAX_DREAMS_PER_NIGHT = 2
 DREAM_MIN_SOUVENIRS = 2              # need at least this many souvenirs to dream
+# Real REM episodes are ~90 min apart. Beyond realism, this keeps the sleep
+# loop from re-entering REM on every 60s tick, which would make the avatar
+# flicker between phases all night.
+DREAM_ATTEMPT_INTERVAL_S = 45 * 60
 
 # Deep sleep
 DIGESTION_MIN_AGE_MINUTES = 120      # ruminations older than this get digested
@@ -178,6 +184,7 @@ class SleepCycle:
         self._last_journal_date: date | None = None
         self._dreams_this_night: int = 0
         self._last_dream_night: date | None = None
+        self._last_dream_attempt: float = 0.0  # monotonic()
         self._last_digestion_night: date | None = None
         # Current phase — observable by the frontend via the inner_state
         # broadcast. Transitions trigger an inner_state push so the UI
@@ -273,10 +280,16 @@ class SleepCycle:
 
         current_night = self._night_of(now_dt)
 
+        # A phase is entered only when it has real work to do. Announcing
+        # LIGHT_SLEEP then REM on every tick regardless would make the
+        # frontend replay its 1.2-1.8s eye/lighting transitions twice a
+        # minute all night long.
+
         # Phase 1: light sleep — write the day's journal (once per date)
         try:
-            await self._set_phase(SleepPhase.LIGHT_SLEEP)
-            await self._write_journal_if_due(current_night)
+            if self._last_journal_date != current_night:
+                await self._set_phase(SleepPhase.LIGHT_SLEEP)
+                await self._write_journal_if_due(current_night)
         except Exception:
             logger.exception("Sleep: journal phase failed (non-fatal)")
 
@@ -285,7 +298,9 @@ class SleepCycle:
             if self._last_dream_night != current_night:
                 self._dreams_this_night = 0
                 self._last_dream_night = current_night
-            if self._dreams_this_night < MAX_DREAMS_PER_NIGHT:
+                self._last_dream_attempt = 0.0
+            if self._dreams_this_night < MAX_DREAMS_PER_NIGHT and self._rem_is_due():
+                self._last_dream_attempt = monotonic()
                 await self._set_phase(SleepPhase.REM)
                 await self._maybe_dream(current_night)
         except Exception:
@@ -301,17 +316,23 @@ class SleepCycle:
         except Exception:
             logger.exception("Sleep: digestion phase failed (non-fatal)")
 
-        # Cycle finished for this tick — between active phases, Mika is
-        # technically "asleep but idle". We keep her in DEEP_SLEEP (the
-        # most dormant state) for visual continuity until waking hours.
-        # AWAKE will be restored by the next tick when the night gate
-        # re-evaluates to false.
+        # Cycle finished for this tick — between active phases Mika is
+        # "asleep but idle", so she settles into DEEP_SLEEP (the most dormant
+        # state) and stays there. AWAKE is restored by the next tick when the
+        # night gate re-evaluates to false.
+        await self._set_phase(SleepPhase.DEEP_SLEEP)
 
     # ── Gates ────────────────────────────────────────────────────
 
     @staticmethod
     def _is_enabled() -> bool:
         return bool(getattr(settings, "SLEEP_CYCLE_ENABLED", True))
+
+    def _rem_is_due(self) -> bool:
+        """Space REM episodes out instead of retrying on every tick."""
+        if not self._last_dream_attempt:
+            return True
+        return (monotonic() - self._last_dream_attempt) >= DREAM_ATTEMPT_INTERVAL_S
 
     @staticmethod
     def _is_night(now: datetime) -> bool:

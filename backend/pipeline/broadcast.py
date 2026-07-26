@@ -10,6 +10,7 @@ from channels.layers import get_channel_layer
 from memory.manager import memory_manager
 from modules.manager import module_manager
 from modules.types import ModuleEvent
+from pipeline import voice
 
 if TYPE_CHECKING:
     from pipeline.processor import SpeechOutput
@@ -64,6 +65,22 @@ async def broadcast_to_websocket(
 
         targets = presence_registry.resolve(person_id)
 
+    # The frontend is the SCREEN voice sink: it runs its own TTS, so instead
+    # of a clip it gets the policy decision + the voice identity, and honours
+    # both. This keeps "speak" a routing choice rather than a hardcoded
+    # frontend habit, and gives Mika's thinking-aloud its own murmured voice.
+    persona = voice.persona_for_source(source, addressed=bool(targets))
+    screen = await _voice_decision(
+        voice.VoiceSink.SCREEN, _first_consumer(targets), persona,
+    )
+    profile = voice.profile_for(persona)
+    payload["data"]["speak"] = screen.speak
+    payload["data"]["voice_reason"] = screen.reason
+    payload["data"]["voice_persona"] = persona
+    payload["data"]["voice_profile"] = {
+        "pitch": profile.pitch, "rate": profile.rate, "gain": profile.gain,
+    }
+
     if not targets:
         # No known recipient → legacy broadcast to all connected clients.
         await channel_layer.group_send(BROADCAST_GROUP, payload)
@@ -80,10 +97,38 @@ async def broadcast_to_websocket(
             if target.channel == source:
                 delivered = True
                 continue
-            delivered = await _deliver_via_module(target, output) or delivered
+            delivered = (
+                await _deliver_via_module(target, output, source) or delivered
+            )
 
     if not delivered:
-        await channel_layer.group_send(BROADCAST_GROUP, payload)
+        # A message composed for a specific person must never be dumped on the
+        # global group as a consolation prize: it carries that person's context.
+        # Failing to deliver is the correct outcome — it is logged and dropped.
+        logger.warning(
+            "Undeliverable message for %s (targets: %s) — dropped rather than "
+            "broadcast to everyone",
+            person_id, ", ".join(t.channel for t in targets),
+        )
+
+
+def _first_consumer(targets):
+    """The WebSocket target a SCREEN decision applies to, if any.
+
+    Without one we still answer the question (for the legacy global
+    broadcast) using a permissive stand-in: a client is listening, it just
+    isn't bound to this person yet.
+    """
+    for target in targets:
+        if target.is_consumer:
+            return target
+    return _AnyClient()
+
+
+class _AnyClient:
+    """Stand-in target: reachable, no voice mute, no delivery handle."""
+    reachable = True
+    meta: dict = {}
 
 
 def _person_group(person_id: str | None) -> str:
@@ -92,20 +137,77 @@ def _person_group(person_id: str | None) -> str:
     return person_group(person_id or "")
 
 
-async def _deliver_via_module(target, output) -> bool:
-    """Route an outbound message to a module's external-API delivery."""
-    module = module_manager.get_module(target.channel)
-    if not module or not module.is_running:
+async def _deliver_via_module(target, output, source: str = "") -> bool:
+    """Route an outbound message to a channel's external-API delivery.
+
+    The deliverer may be a module OR a communication channel (Telegram) —
+    ``get_channel`` covers both. When the channel speaks (declares a
+    ``VOICE_SINK``) and the context allows it, the reply goes out as audio;
+    text delivery is always the fallback so nothing is ever dropped for
+    want of a synthesizer.
+    """
+    from communication.delivery import (
+        deliver_voice, get_channel, voice_sink_of,
+    )
+
+    channel = get_channel(target.channel)
+    if not channel or not channel.is_running:
         logger.warning(
-            "Cannot deliver to %s: module '%s' unavailable",
+            "Cannot deliver to %s: channel '%s' unavailable",
             target.person_id, target.channel,
         )
         return False
+
+    sink = voice_sink_of(channel)
+    if sink:
+        # A module target means Mika picked this person deliberately, so this
+        # is addressed speech even when the turn came from her own initiative.
+        persona = voice.persona_for_source(source, addressed=True)
+        decision = await _voice_decision(sink, target, persona)
+        if decision.speak:
+            clip = await voice.synthesize(
+                output.text,
+                emotion=output.emotion_name,
+                intensity=output.emotion_intensity,
+                persona=persona,
+            )
+            if clip and await deliver_voice(channel, clip, output, target):
+                return True
+            # No synthesizer, or the channel refused the clip → text.
+        else:
+            logger.debug(
+                "Voice suppressed on %s for %s: %s",
+                sink, target.person_id, decision.reason,
+            )
+
     try:
-        return await module.deliver(output, target)
+        return await channel.deliver(output, target)
     except Exception:
-        logger.exception("Module '%s' deliver() failed", target.channel)
+        logger.exception("Channel '%s' deliver() failed", target.channel)
         return False
+
+
+async def _voice_decision(
+    sink: str, target, persona: str = voice.VoicePersona.SPEAKING,
+) -> "voice.VoiceDecision":
+    """Gather the live context the voice policy needs, then decide."""
+    from datetime import datetime
+
+    sleep_phase = "awake"
+    try:
+        from memory.sleep import sleep_cycle
+        sleep_phase = sleep_cycle.phase
+    except Exception:
+        logger.debug("sleep phase unavailable for voice decision", exc_info=True)
+
+    return voice.decide_voice(
+        sink,
+        hour=datetime.now().hour,
+        sleep_phase=sleep_phase,
+        person_present=bool(getattr(target, "reachable", True)),
+        muted=bool(getattr(target, "meta", {}).get("voice_muted", False)),
+        persona=persona,
+    )
 
 
 async def broadcast_inner_state_update(person_id: str | None = None) -> None:
@@ -382,6 +484,7 @@ async def persist_to_memory(
     source: str,
     person_id: str,
     attachments_meta: list[dict] | None = None,
+    user_is_internal: bool = False,
 ) -> None:
     """Save the user message (with any attachment descriptors) and the
     assistant response to memory.
@@ -389,10 +492,16 @@ async def persist_to_memory(
     ``attachments_meta`` is attached to the user Message only, so later
     retrieval can see what was sent without keeping binary bytes in the
     conversation store.
+
+    ``user_is_internal`` marks the "user" message as scaffolding Mika wrote
+    to herself (greeting brief, module notify_ai prompt) rather than
+    something a person said. The consolidator skips those so instructions
+    never become souvenirs; her reply stays a real memory.
     """
     await memory_manager.add_message(
         "user", message, source=source, person_id=person_id,
         attachments_meta=attachments_meta or [],
+        is_internal=user_is_internal,
     )
     await memory_manager.add_message(
         "assistant", response, person_id=person_id,

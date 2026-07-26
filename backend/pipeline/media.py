@@ -13,6 +13,7 @@ Catégories :
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import uuid
@@ -121,7 +122,7 @@ async def save_attachments(
     from asgiref.sync import sync_to_async
 
     uploads_root = Path(settings.PROJECT_ROOT) / "uploads"
-    uploads_root.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(uploads_root.mkdir, parents=True, exist_ok=True)
 
     saved = []
     for att in attachments:
@@ -131,8 +132,10 @@ async def save_attachments(
         data_bytes = att.decoded_bytes()
 
         try:
-            # 1. Écriture disque
-            disk_path.write_bytes(data_bytes)
+            # 1. Écriture disque — hors de la boucle: jusqu'à 5 Mo × 5 pièces
+            # jointes, et une écriture synchrone ici gèlerait tout le trafic
+            # WebSocket ainsi que chaque boucle de fond pendant l'upload.
+            await asyncio.to_thread(disk_path.write_bytes, data_bytes)
 
             # 2. Enregistrement BDD — si ça échoue, nettoyer le fichier
             try:

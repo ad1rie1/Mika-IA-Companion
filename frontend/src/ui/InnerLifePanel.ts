@@ -259,16 +259,16 @@ export class InnerLifePanel {
     const primary = blend[0];
     if (blend.length === 1 || (blend[1] && blend[1].weight < primary.weight * 0.4)) {
       this.blendEl.innerHTML =
-        `<span class="il-emotion-primary">${primary.emotion}</span> ` +
+        `<span class="il-emotion-primary">${escapeHtml(primary.emotion)}</span> ` +
         `<span class="il-weight">(${Math.round(primary.weight * 100)}%)</span>`;
       return;
     }
     const secondary = blend[1];
     this.blendEl.innerHTML =
-      `<span class="il-emotion-primary">${primary.emotion}</span> ` +
+      `<span class="il-emotion-primary">${escapeHtml(primary.emotion)}</span> ` +
       `<span class="il-weight">(${Math.round(primary.weight * 100)}%)</span>` +
       `<span class="il-ambivalence"> mais aussi </span>` +
-      `<span class="il-emotion-secondary">${secondary.emotion}</span> ` +
+      `<span class="il-emotion-secondary">${escapeHtml(secondary.emotion)}</span> ` +
       `<span class="il-weight">(${Math.round(secondary.weight * 100)}%)</span>`;
   }
 
@@ -489,8 +489,10 @@ export class InnerLifePanel {
       return;
     }
     section.removeAttribute("hidden");
+    // The fallback branch exists for values the whitelist doesn't cover —
+    // i.e. raw LLM output — so it has to be escaped like any other.
     const typeMeta = DREAM_TYPE_LABEL[dream.dream_type] || {
-      label: dream.dream_type,
+      label: escapeHtml(dream.dream_type ?? ""),
       color: "#9ca3af",
     };
     const vividnessPct = Math.round(dream.vividness * 100);
@@ -543,7 +545,10 @@ export class InnerLifePanel {
     this.drivesEl.innerHTML = "";
     if (!drives) return;
     for (const [kind, state] of Object.entries(drives)) {
-      const meta = DRIVE_LABELS[kind] || { label: kind, icon: "•", color: "#888" };
+      // Unknown drive kinds fall back to the raw server key — escape it.
+      const meta =
+        DRIVE_LABELS[kind] ||
+        { label: escapeHtml(kind), icon: "•", color: "#888" };
       const pct = Math.max(0, Math.min(100, Math.round(state.tension * 100)));
       const row = document.createElement("div");
       row.className = "il-drive";
@@ -600,8 +605,11 @@ export class InnerLifePanel {
       return;
     }
     section.removeAttribute("hidden");
-    const closeness = CLOSENESS_LABEL[profile.closeness] || profile.closeness;
-    const tone = TONE_LABEL[profile.preferred_tone] || profile.preferred_tone;
+    const closeness =
+      CLOSENESS_LABEL[profile.closeness] || escapeHtml(profile.closeness ?? "");
+    const tone =
+      TONE_LABEL[profile.preferred_tone] ||
+      escapeHtml(profile.preferred_tone ?? "");
     const topics = profile.topics_of_interest.slice(0, 4).join(", ") || "—";
     const avoid = profile.sensitive_topics.slice(0, 3).join(", ");
 
@@ -637,5 +645,6 @@ function escapeHtml(s: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }

@@ -474,6 +474,51 @@ class ProjectRunner:
             summary=summary,
         )
 
+        # 6. Think out loud about it. Generated from the intended action +
+        #    what came back, by a small dedicated call — never the raw
+        #    summary, which reads like a report, not a thought.
+        await self._murmur(ctx, summary, data)
+
+    async def _murmur(self, ctx, summary: str, data: dict) -> None:
+        """Voice a short inner thought about this tick. Silence is fine."""
+        from pipeline.inner_voice import generate_inner_thought
+
+        try:
+            intended = str(
+                (data.get("proposed_action") or {}).get("proposal")
+                or (data.get("new_tasks") or [""])[0]
+                or f"avancer sur « {ctx.title} »"
+            )
+            thought = await generate_inner_thought(intended, summary)
+            if not thought:
+                return
+            await self._broadcast_inner_thought(ctx, thought)
+        except Exception:
+            logger.debug("Inner thought failed (non-fatal)", exc_info=True)
+
+    async def _broadcast_inner_thought(self, ctx, thought: str) -> None:
+        """Push the murmur out through the normal speech routing.
+
+        ``source="conscience"`` is what makes ``pipeline.voice`` treat it as
+        the INNER persona: murmured profile, allowed on the room speaker,
+        never mailed to anyone as a voice note.
+        """
+        from emotion.types import Emotion, EmotionData
+        from pipeline.broadcast import broadcast_to_websocket
+        from pipeline.processor import SpeechOutput
+
+        await broadcast_to_websocket(
+            SpeechOutput(
+                text=thought,
+                emotion_data=EmotionData(Emotion.THINKING, 0.3),
+                emotion_name="thinking",
+                emotion_intensity=0.3,
+                emotion_state={},
+                tool_calls=[],
+            ),
+            source="conscience",
+        )
+
     # ── Persistence helpers ──────────────────────────────────────
 
     async def _record_log(

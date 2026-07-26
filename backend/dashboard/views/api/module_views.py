@@ -23,6 +23,8 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
+from dashboard.sanitize import sanitize_view_result
+
 logger = logging.getLogger(__name__)
 
 
@@ -82,7 +84,7 @@ def view_data(request, module: str, view_key: str):
 
     if isinstance(result, JsonResponse):
         return result
-    return JsonResponse(result if result is not None else {})
+    return JsonResponse(sanitize_view_result(result or {}, view))
 
 
 @require_http_methods(["GET"])
@@ -115,7 +117,7 @@ def view_item(request, module: str, view_key: str, item_id: str):
         return result
     if result is None:
         return JsonResponse({"error": "not found"}, status=404)
-    return JsonResponse(result)
+    return JsonResponse(sanitize_view_result(result, view))
 
 
 @csrf_exempt

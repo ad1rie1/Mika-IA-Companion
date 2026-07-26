@@ -675,6 +675,50 @@ class TestRunIfDue:
             await s.run_if_due()
         assert s.phase == SleepPhase.AWAKE
 
+    @pytest.mark.asyncio
+    async def test_settles_in_deep_sleep_without_flickering(self):
+        """Once the night's work is done, repeated ticks must be silent.
+
+        Each phase change pushes an inner_state broadcast that the frontend
+        replays as a 1.2-1.8s eye/lighting transition; re-announcing
+        LIGHT_SLEEP then REM every 60s would flicker the avatar all night.
+        """
+        from drives.state import DriveKind
+        from memory.sleep import SleepCycle, SleepPhase
+
+        s = SleepCycle()
+        night = date(2026, 4, 17)
+        # Pretend the journal, the dreams and the digestion are all done.
+        s._last_journal_date = night
+        s._last_dream_night = night
+        s._dreams_this_night = 2
+        s._last_digestion_night = night
+
+        with (
+            patch("memory.sleep.datetime", wraps=datetime) as mock_dt,
+            patch(
+                "pipeline.broadcast.broadcast_inner_state_update",
+                new_callable=AsyncMock,
+            ) as mock_broadcast,
+            patch("conscience.engine.conscience_engine") as mock_cons,
+            patch("drives.engine.drive_engine") as mock_drives,
+        ):
+            mock_dt.now.return_value = datetime(2026, 4, 18, 4, 0)
+            mock_cons.get_idle_seconds.return_value = 3600.0
+            rest = MagicMock()
+            rest.tension = 0.9
+            mock_drives.states = {DriveKind.REST: rest}
+
+            await s.run_if_due()          # settles into deep sleep
+            assert s.phase == SleepPhase.DEEP_SLEEP
+            calls_after_first = mock_broadcast.await_count
+
+            await s.run_if_due()          # subsequent ticks: nothing to say
+            await s.run_if_due()
+
+        assert s.phase == SleepPhase.DEEP_SLEEP
+        assert mock_broadcast.await_count == calls_after_first
+
 
 # ---------------------------------------------------------------------------
 # 9. Regression: singleton exposes the right interface

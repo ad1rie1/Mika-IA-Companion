@@ -149,6 +149,13 @@ class ModuleView:
     template: str | None = None
     js: str | None = None
     actions: list = field(default_factory=list)  # list[ModuleViewAction]
+    allow_raw_html: bool = False
+    # Opt-in escape hatch. By default the dashboard strips ``html``/``js``/
+    # ``template`` keys from every payload a data/detail handler returns,
+    # because the generic renderer injects them via innerHTML — a module
+    # piping an email body, an RSS item or a scraped page through
+    # ``{html: ...}`` would be stored XSS on the admin interface. Set this
+    # only when the module fully controls and escapes the markup itself.
 
 
 @dataclass

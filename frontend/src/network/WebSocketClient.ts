@@ -9,6 +9,12 @@ export class WebSocketClient {
   private currentDelay: number;
   private personId: string | null = null;
   private displayName: string | null = null;
+  // Frames typed while the socket is down. The chat UI paints the user's
+  // bubble before send() is called, so dropping them made messages look
+  // delivered when they never left the browser. Bounded so a long outage
+  // can't grow unbounded with 5MB attachment payloads.
+  private outbox: object[] = [];
+  private static readonly MAX_OUTBOX = 20;
 
   constructor(url: string = "ws://localhost:8000/ws") {
     this.url = url;
@@ -41,6 +47,9 @@ export class WebSocketClient {
             display_name: this.displayName,
           });
         }
+
+        // After identify, so queued chat frames carry the bound identity.
+        this.flushOutbox();
 
         this.emit("connection", { status: "connected" });
       };
@@ -79,9 +88,31 @@ export class WebSocketClient {
     }, this.currentDelay);
   }
 
-  send(data: object) {
+  /** Returns false when the frame was queued instead of sent. */
+  send(data: object): boolean {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(data));
+      return true;
+    }
+    if (this.outbox.length >= WebSocketClient.MAX_OUTBOX) {
+      this.outbox.shift();
+    }
+    this.outbox.push(data);
+    return false;
+  }
+
+  /** Flush queued frames after the identify handshake. */
+  private flushOutbox() {
+    if (!this.outbox.length) return;
+    const pending = this.outbox;
+    this.outbox = [];
+    for (const frame of pending) {
+      if (this.ws?.readyState !== WebSocket.OPEN) {
+        // Socket died again mid-flush — keep what's left for the next open.
+        this.outbox.push(frame);
+        continue;
+      }
+      this.ws.send(JSON.stringify(frame));
     }
   }
 

@@ -50,16 +50,23 @@ uuid, copy, string` (sous-ensemble constantes).
 Trois couches (voir [sandbox.py](sandbox.py)) :
 
 1. **Validation AST à l'écriture** — rejette : `import`, code async, tout
-   attribut préfixé `_` (donc tous les dunders), `eval/exec/open/getattr/
-   setattr/type/globals/...`, `.format`/`.format_map` (traversée
-   d'attributs), source > `forge.max_source_kb`. Messages d'erreur en
+   attribut préfixé `_` (donc tous les dunders), les attributs
+   d'introspection de pile `f_* / gi_* / cr_* / ag_* / tb_*` (non préfixés
+   par `_`, ils permettaient de remonter aux frames de l'hôte et d'y lire
+   les vrais builtins), `eval/exec/open/getattr/setattr/type/globals/...`,
+   `.format`/`.format_map` (traversée d'attributs), `except:` nu et toute
+   référence à `BaseException`/`ForgeTimeout` (qui annuleraient la
+   deadline), source > `forge.max_source_kb`. Messages d'erreur en
    français, renvoyés tels quels à Mika pour correction.
-2. **Builtins filtrés à l'exécution** — pas d'`__import__`, pas d'`open` ;
-   modules sûrs injectés en lecture seule (`FrozenModule`).
+2. **Builtins filtrés à l'exécution** — pas d'`__import__`, pas d'`open`,
+   pas de `BaseException` ; modules sûrs injectés en lecture seule
+   (`FrozenModule`).
 3. **Deadline par handler** — chaque appel tourne dans un thread pool dédié
    (2 workers) avec un tracer qui interrompt les boucles infinies au-delà de
-   `forge.handler_timeout_s` (défaut 10 s). Un module forgé lent ne bloque
-   jamais le scheduler partagé (les ticks partent en tâche de fond).
+   `forge.handler_timeout_s` (défaut 10 s). `ForgeTimeout` hérite de
+   `BaseException` : un `except Exception` dans le code forgé ne peut pas
+   l'avaler et garder le worker. Un module forgé lent ne bloque jamais le
+   scheduler partagé (les ticks partent en tâche de fond).
 
 **Disjoncteur** : `forge.max_consecutive_failures` (défaut 5) échecs
 consécutifs de tick/événement → le module est auto-désactivé

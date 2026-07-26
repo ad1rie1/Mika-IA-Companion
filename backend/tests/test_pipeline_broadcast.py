@@ -53,6 +53,75 @@ class TestBroadcastToWebSocket:
         assert data["source"] == "conscience"
 
 
+class TestTargetedDeliveryNeverLeaks:
+    """A message composed for one person must not fall back to everyone."""
+
+    def _register_module_target(self, person_id, channel="telegram"):
+        from communication.presence import presence_registry
+
+        presence_registry.register(
+            person_id=person_id, channel=channel, kind="module",
+            delivery_ref="12345",
+        )
+        return lambda: presence_registry.unregister(person_id, channel)
+
+    @pytest.mark.asyncio
+    async def test_undeliverable_module_target_is_dropped_not_broadcast(self):
+        mock_layer = MagicMock()
+        mock_layer.group_send = AsyncMock()
+        cleanup = self._register_module_target("tg_777")
+        try:
+            with patch("pipeline.broadcast.get_channel_layer",
+                       return_value=mock_layer), \
+                 patch("communication.delivery.get_channel", return_value=None):
+                from pipeline.broadcast import broadcast_to_websocket
+                await broadcast_to_websocket(
+                    _output(text="secret pour toi"), source="conscience",
+                    person_id="tg_777",
+                )
+        finally:
+            cleanup()
+
+        mock_layer.group_send.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_module_target_delivered_through_registered_channel(self):
+        mock_layer = MagicMock()
+        mock_layer.group_send = AsyncMock()
+        deliverer = MagicMock()
+        deliverer.is_running = True
+        deliverer.deliver = AsyncMock(return_value=True)
+        cleanup = self._register_module_target("tg_888")
+        try:
+            with patch("pipeline.broadcast.get_channel_layer",
+                       return_value=mock_layer), \
+                 patch("communication.delivery.get_channel",
+                       return_value=deliverer):
+                from pipeline.broadcast import broadcast_to_websocket
+                await broadcast_to_websocket(
+                    _output(text="coucou telegram"), source="conscience",
+                    person_id="tg_888",
+                )
+        finally:
+            cleanup()
+
+        deliverer.deliver.assert_awaited_once()
+        mock_layer.group_send.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_unknown_person_still_broadcasts(self):
+        # No presence entry at all → nothing was composed for a specific
+        # reachable person, so the legacy broadcast stays valid.
+        mock_layer = MagicMock()
+        mock_layer.group_send = AsyncMock()
+        with patch("pipeline.broadcast.get_channel_layer", return_value=mock_layer):
+            from pipeline.broadcast import broadcast_to_websocket
+            await broadcast_to_websocket(
+                _output(), source="conscience", person_id="nobody_here",
+            )
+        mock_layer.group_send.assert_called_once()
+
+
 class TestEmitCommunicationEvent:
 
     @pytest.mark.asyncio

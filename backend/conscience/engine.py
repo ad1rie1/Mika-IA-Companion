@@ -47,10 +47,15 @@ class ConscienceEngine:
         # State
         self._decision_task: asyncio.Task | None = None
         self._decision_lock = asyncio.Lock()
+        # Detached high-pertinence decision cycles, held so they aren't GC'd.
+        self._fastpath_tasks: set[asyncio.Task] = set()
         self._last_activity: float = time.time()
         self._last_action_time: float = 0.0
         self._greeted_periods: set[str] = set()
         self._greeted_date: object = None  # date of last greeting reset
+        # Tentative greeting state from the last scoring pass, committed by
+        # _commit_greeting() only when the decision is "act".
+        self._pending_greeted: tuple[set[str], object] | None = None
         self._initialized = False
         self._consecutive_waits: int = 0
 
@@ -169,13 +174,18 @@ class ConscienceEngine:
             signal.category, signal.pertinence,
         )
 
-        # Fast-path: critical signals trigger an immediate decision cycle
+        # Fast-path: critical signals trigger an immediate decision cycle.
+        # Scheduled, not awaited: observe() is called from inside
+        # ModuleManager.emit_event, which the email/RSS pollers await. Running
+        # the decision inline blocked the emitting module's loop for the two
+        # LLM calls (_act's recipient selection + the full pipeline) that a
+        # pertinent signal triggers.
         if signal.pertinence > 0.85:
             logger.info(
                 "High-pertinence signal (%.2f), triggering immediate decision",
                 signal.pertinence,
             )
-            await self._decide()
+            self._spawn_decision()
 
     @staticmethod
     def _feed_emotion(signal: InterpretedSignal) -> None:
@@ -251,6 +261,26 @@ class ConscienceEngine:
         async with self._decision_lock:
             await self._decide_inner()
 
+    def _spawn_decision(self) -> None:
+        """Run a decision cycle detached from the caller's await chain.
+
+        A strong reference is kept until completion: a bare create_task can be
+        garbage-collected mid-flight, and exceptions in a dropped task vanish
+        silently.
+        """
+        task = asyncio.create_task(self._decide())
+        self._fastpath_tasks.add(task)
+        task.add_done_callback(self._fastpath_tasks.discard)
+        task.add_done_callback(self._log_fastpath_result)
+
+    @staticmethod
+    def _log_fastpath_result(task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error("Fast-path decision failed: %r", exc, exc_info=exc)
+
     async def _decide_inner(self) -> None:
         """Inner decision logic (caller must hold _decision_lock)."""
         ctx = await self._build_context()
@@ -279,6 +309,8 @@ class ConscienceEngine:
         await self._log_decision(ctx, decision, reason, score, memory_actions)
 
         if decision == "act":
+            # The greeting is spent only now that Mika really speaks.
+            self._commit_greeting()
             await self._act(ctx, reason)
         elif decision == "skip" or decision == "wait":
             # Mark old pending observations as skipped (older than 30 min
@@ -698,13 +730,26 @@ class ConscienceEngine:
             return []
 
     def _compute_score(self, ctx: DecisionContext) -> tuple[float, str]:
-        """Unified scoring. Delegates to conscience.scoring for testability."""
-        score, reason, self._greeted_periods, self._greeted_date = (
-            compute_decision_score(
-                ctx, self._threshold, self._greeted_periods, self._greeted_date
-            )
+        """Unified scoring. Delegates to conscience.scoring for testability.
+
+        The greeting state computed here is only *tentative*: scoring marks a
+        period as greeted, but the greeting is worth 0.35 against a 0.5
+        threshold, so committing it right away would burn the day's greeting
+        on a cycle that decided to stay silent. ``_commit_greeting()`` is
+        called by the caller once the decision is actually "act".
+        """
+        score, reason, periods, date = compute_decision_score(
+            ctx, self._threshold, self._greeted_periods, self._greeted_date
         )
+        self._pending_greeted = (periods, date)
         return score, reason
+
+    def _commit_greeting(self) -> None:
+        """Persist the tentative greeting state produced by the last scoring."""
+        pending = getattr(self, "_pending_greeted", None)
+        if pending is not None:
+            self._greeted_periods, self._greeted_date = pending
+            self._pending_greeted = None
 
     # ── 3. MEMORY MAINTENANCE ─────────────────────────────────────
 

@@ -38,6 +38,9 @@ EVENT_PATTERN_RE = re.compile(r"^[\w.\-]+(\.\*)?$")
 
 MAX_MANIFEST_BYTES = 16 * 1024
 MAX_VERSIONS_KEPT = 10
+# La corbeille est un filet de sécurité, pas une archive : sans plafond, une
+# boucle write→erase la ferait grossir indéfiniment sur le disque.
+MAX_TRASH_KEPT = 20
 
 _CONFIG_TYPES = {"str", "text", "int", "float", "bool", "secret",
                  "select", "list", "record_list"}
@@ -417,4 +420,20 @@ def erase(name: str) -> str:
     trash.mkdir(parents=True, exist_ok=True)
     dest = trash / f"{name}-{_ts()}"
     shutil.move(str(mdir), str(dest))
+    _prune_trash()
     return str(dest)
+
+
+def _prune_trash() -> None:
+    """Ne garde que les MAX_TRASH_KEPT suppressions les plus récentes."""
+    trash = forge_dir() / "_trash"
+    if not trash.is_dir():
+        return
+    # Les noms sont "<slug>-<timestamp>" : trier par mtime évite de dépendre
+    # de l'ordre alphabétique des slugs.
+    entries = sorted(
+        (p for p in trash.iterdir() if p.is_dir()),
+        key=lambda p: p.stat().st_mtime,
+    )
+    for old in entries[:-MAX_TRASH_KEPT]:
+        shutil.rmtree(old, ignore_errors=True)

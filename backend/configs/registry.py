@@ -48,13 +48,29 @@ class ConfigRegistry:
         change légitimement en cours d'exécution — le hot reload d'un
         module doit pouvoir mettre à jour libellés et défauts.
         """
+        replaced: list[str] = []
         for e in entries or ():
             if isinstance(e, ConfigSection):
                 self._sections[e.key] = e
             elif isinstance(e, ConfigItem):
                 self._items[e.key] = e
+                replaced.append(e.key)
             else:
                 logger.warning("Unknown schema entry %r", e)
+
+        # A replaced item can carry a different `default`, so any value the
+        # service already memoized for that key is stale.
+        if replaced:
+            self._invalidate_service_cache(replaced)
+
+    @staticmethod
+    def _invalidate_service_cache(keys: list[str]) -> None:
+        try:
+            from configs.service import config_service
+            for key in keys:
+                config_service._invalidate(key)
+        except Exception:  # pragma: no cover — service optional at import time
+            logger.debug("config cache invalidation skipped", exc_info=True)
 
     def unregister(self, *, key_prefix: str = "", section_key: str = "") -> int:
         """Retire des entrées déclarées dynamiquement.

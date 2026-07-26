@@ -231,6 +231,11 @@ def is_due(project, now: Optional[datetime] = None) -> bool:
         return bool(project.next_run_at and project.next_run_at <= now)
 
     if parsed.kind == "idle":
+        # Respect next_run_at (bumped after each advance): once the idle
+        # window is reached, fire at most once per window instead of on
+        # every runner tick for as long as Mika stays idle.
+        if project.next_run_at and project.next_run_at > now:
+            return False
         try:
             from conscience.engine import conscience_engine
             idle = conscience_engine.get_idle_seconds()

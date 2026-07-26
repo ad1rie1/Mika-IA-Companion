@@ -22,7 +22,7 @@ def _make_consumer():
     c.display_name = None
     c._greeted = False
     c.channel_name = "test_ch"
-    c.channel_layer = MagicMock()
+    c.channel_layer = AsyncMock()
     c.send = AsyncMock()
     return c
 
