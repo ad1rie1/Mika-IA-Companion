@@ -183,6 +183,9 @@ SMTP_PORT = env.int("SMTP_PORT", default=587)
 SMTP_USER = env("SMTP_USER", default="")
 SMTP_PASSWORD = env("SMTP_PASSWORD", default="")
 
+# --- Forge (modules auto-gérés par l'IA, espace confiné) ---
+FORGE_DIR = env("FORGE_DIR", default=str(PROJECT_ROOT / "data" / "forge_modules"))
+
 # --- Contextual Memory ---
 CHROMA_PERSIST_DIR = env("CHROMA_PERSIST_DIR", default=str(PROJECT_ROOT / "data" / "chromadb"))
 CONSOLIDATION_INTERVAL = env.int("CONSOLIDATION_INTERVAL", default=60)  # seconds

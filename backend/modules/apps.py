@@ -8,6 +8,7 @@ class ModulesConfig(AppConfig):
     def ready(self):
         from modules.plugins.camera import CameraModule
         from modules.plugins.email import EmailModule
+        from modules.plugins.forge import ForgeModule
         from modules.manager import module_manager
         from modules.plugins.rss import RSSModule
         from modules.urls import _populate_urls
@@ -22,5 +23,6 @@ class ModulesConfig(AppConfig):
         module_manager.register(EmailModule())
         module_manager.register(RSSModule())
         module_manager.register(CameraModule())
+        module_manager.register(ForgeModule())
 
         _populate_urls()

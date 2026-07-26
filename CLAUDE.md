@@ -129,6 +129,7 @@ On AI error or timeout: fallback text returned, **no emotion impulse toward the 
 - **Cron scheduler**: built into `ModuleManager`, 1-second tick, per-module `CRON_INTERVAL` or global `CRON_TICK_INTERVAL`
 - **notify_ai**: modules call their injected callback which constructs an `INTERNAL_TRIGGER` Perception and routes it via `perceive()` — so module initiatives flow through the same pipeline as any other input
 - **Email module** ([modules/email/](backend/modules/email/)): IMAP/SMTP. Polls inbox (60s), triages with Haiku, stores `ProcessedEmail`, creates souvenirs/connaissances, notifies via `notify_ai`. Exposes `list_recent_emails`, `send_email` tools. Disabled gracefully if no config.
+- **Forge** ([modules/plugins/forge/](backend/modules/plugins/forge/)): AI-self-managed modules. One host plugin (`forge`) loads N sandboxed mini-modules that **Mika writes herself** into the confined dir `data/forge_modules/` (`FORGE_DIR`). See dedicated section below.
 
 ### Module dashboard views
 
@@ -166,6 +167,21 @@ POST /dashboard/api/modules/<module>/views/<view>/actions/<key>   action handler
 A view is only visible in the sidebar when the module is **enabled AND running**. Disabling a module makes its pages vanish from the nav on the next render. The `/dashboard/api/modules` row also carries a `views: [{key,label,icon,url}]` field, surfaced as chips in the Modules admin page.
 
 **Template + static discovery** — `settings.py` scans `backend/modules/plugins/*/templates` and `backend/modules/plugins/*/static` at import time and adds them to `TEMPLATES[0]['DIRS']` + `STATICFILES_DIRS`. Plugins are sub-packages of the `modules` app, not installed apps themselves, so Django's `APP_DIRS` / `AppDirectoriesFinder` wouldn't find them otherwise. Drop a file in `modules/plugins/email/templates/email/inbox.html` and it resolves as `email/inbox.html` template name; same for static.
+
+### Forge — AI-self-managed modules ([modules/plugins/forge/](backend/modules/plugins/forge/))
+
+Confined space where **Mika creates/edits/tests/deletes her own mini-modules** at runtime (hot reload, no restart). Full doc: [modules/plugins/forge/README.md](backend/modules/plugins/forge/README.md).
+
+- **Layout**: each forged module lives in `data/forge_modules/<slug>/` — `manifest.yaml` (declarative: title, `schedule`, `events` patterns, `views`, `config` fields, `allowed_domains`, `context`) + `module.py` (sandboxed code) + `state.json` (host-managed: enabled, disabled_reason) + `_versions/` (auto-snapshots, rollback) ; erased modules go to `_trash/`.
+- **Sandbox** ([sandbox.py](backend/modules/plugins/forge/sandbox.py)): AST validation at write time (no `import`, no async, no `_`-prefixed attribute access, no `eval/exec/open/getattr/type/...`, no `.format`), curated builtins + read-only safe modules (`math json re datetime random statistics collections itertools functools hashlib base64 uuid copy string`) at exec time, per-handler deadline via `sys.settrace` in a dedicated 2-worker thread pool. Handlers are sync; the host wraps them async — a slow forged module never blocks the shared scheduler (ticks run in a background task).
+- **Capability API** ([api.py](backend/modules/plugins/forge/api.py)): `api.storage` (per-module JSON KV by collections in shared `ForgeRecord` table, quotas — forged modules never get DDL), `api.config` (reads `forge.<module>.<key>` from the standard config service, dashboard-edited, secrets decrypted, `record_list` supported), `api.log/warn/error` + `print` → `ForgeLog`, `api.notify_ai` (rate-limited by `forge.notify_cooldown_s`), `api.emit` → `forge.<module>.<type>` on the bus (Conscience observes; sibling forged modules subscribed via `events` receive it, never the emitter), `api.http_get` (manifest `allowed_domains` only, redirects off, private/loopback IPs blocked, size-capped), `api.state` (RAM dict).
+- **Circuit breaker**: `forge.max_consecutive_failures` (5) tick/event failures → module auto-disabled (persisted in `state.json`), unloaded, and Mika notified once with the error so she can `forge_read_module` → fix → `forge_command(enable)`.
+- **Dynamic config**: at load, the host registers a `ConfigSection` "Forge · <title>" + items via `registry.register_replace()` (new registry method; `registry.unregister()` on erase). Values persist in `ConfigValue` across reload/disable.
+- **Views**: forged views are namespaced into the host's `get_views()` as `<module>__<viewkey>` (generic Option-A renderer only; payloads sanitized — `html`/`js`/`template` keys stripped so forged code can never inject markup into the dashboard).
+- **MCP tools** (in every tools-enabled conversation): `forge_list_modules`, `forge_read_module`, `forge_write_module` (create/update: manifest merge + AST validation + version archive + hot reload; on failure the old version keeps running), `forge_command` (`enable|disable|reload|rollback|erase|reset_storage`), `forge_test_module` (run any handler NOW, returns result + logs — the iteration loop), `forge_read_logs`.
+- **HTTP routes**: `GET /api/modules/forge/` (list), `POST /api/modules/forge/command`, `GET /api/modules/forge/source?name=`, `GET /api/modules/forge/logs` — plus a "Forge" dashboard page (Modules/Journal/Stockage tabs, per-module detail modal, reload-all action).
+- **Scheduling** reuses [projects/schedule.py](backend/projects/schedule.py) (`interval:`/`cron:`/`idle:`/`manual`); event-driven wake-up goes through manifest `events`, not `schedule`.
+- Models `ForgeRecord`/`ForgeLog` are shared host tables (regular migration `modules/0010`); threat model is accident-prevention + prompt-injection hardening, not OS-grade isolation (in-process execution — documented in the README).
 
 ### Conscience Layer ([conscience/](backend/conscience/))
 
@@ -414,6 +430,7 @@ OAuth tried first, API key as fallback. OAuth tokens start with `sk-ant-oat01-`;
 | `SLEEP_CHECK_INTERVAL` | No | `60` | Cadence of the dedicated sleep-cycle loop (s). Restart required on change. |
 | `PROJECT_PROMPT_HISTORY_SIZE` | No | `30` | Rolling-buffer size of LLM prompt/response pairs kept per project (audit/debug). Set to `0` to disable capture entirely. |
 | `PROJECT_RUNNER_INTERVAL` | No | `30` | Cadence of the dedicated project runner loop (s). Restart required on change. |
+| `FORGE_DIR` | No | `data/forge_modules` | Confined directory holding AI-forged modules. Runtime limits (`forge.*`: handler timeout, quotas, breaker threshold…) are config-service keys, not env vars. |
 
 ## Testing notes
 
@@ -422,4 +439,5 @@ OAuth tried first, API key as fallback. OAuth tokens start with `sk-ant-oat01-`;
 - DB tests with `transaction=True` often need an autouse fixture to truncate leaked rows from prior non-transactional `django_db` tests — this pattern appears in `test_self_narrative.py`, `test_person_profile.py`, `test_sleep.py`
 - **Sleep cycle tests** (`test_sleep.py`, `test_sleep_debug_views.py`): cover phase gates, night detection, dream classification, rumination digestion, dream persistence, phase transition broadcasts, and the debug HTTP endpoints. LLM calls are mocked — the LLM prompts themselves are not unit-tested.
 - **Project tests** (`test_projects.py`): schedule parser (interval/cron/idle/event/manual), model defaults (critical: `emotion_policy` defaults to OFF), project detection heuristic, prompt injection + emotion suppression, runner JSON extraction, HTTP endpoints (create/list/detail/patch, task add/update, pending approve/reject, prompt history), MCP `create_project` handler, rolling-buffer prune (respects `PROJECT_PROMPT_HISTORY_SIZE=0` as disable).
+- **Forge tests** (`test_forge_sandbox.py`, `test_forge_store.py`, `test_forge_api.py`, `test_forge_host.py`): AST validator (rejects imports/dunders/`_`-attrs/`.format`/async, accepts legit code), frozen exec env, deadline tracer, manifest validation, version archive/rollback/trash, storage quotas + module isolation, HTTP allowlist + private-IP block, notify cooldown / emit rate limit, and the full host lifecycle (write→load→tick→events→breaker→commands→views sanitization→dynamic config→MCP tools). `test_forge_host.py` uses `django_db(transaction=True)` because forged handlers run in worker threads (committed rows must be visible cross-connection).
 - Two tests are currently flaky due to wall-clock/circadian bias at run time (they assert positions that depend on the phase_bias home vector): `test_emotion_engine.py::TestTemperamentVariants::test_melancholic_returns_to_melancholic` and `test_scenario_troll.py::TestTrollWithStoicTemperament::test_stoic_global_barely_moves`. They pre-date the sleep work and are typically excluded in CI runs via `--deselect`.

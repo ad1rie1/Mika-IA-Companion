@@ -1,5 +1,10 @@
 # Écrire un module
 
+> **Note** : ce guide concerne les modules « système » écrits par un humain dans
+> le code. Les modules que **Mika écrit elle-même** passent par la **Forge**
+> ([forge/README.md](forge/README.md)) — un espace confiné (`data/forge_modules/`)
+> avec validation sandbox, hot reload, disjoncteur et outils MCP dédiés.
+
 Un module est un plugin auto-contenu qui vit sous `backend/modules/plugins/<nom>/`. Il peut au choix :
 
 - tourner en tâche de fond (`worker_cron`, connexions, pollers…)

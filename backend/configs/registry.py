@@ -40,6 +40,37 @@ class ConfigRegistry:
             else:
                 logger.warning("Unknown schema entry %r", e)
 
+    def register_replace(self, entries: Iterable) -> None:
+        """Comme ``register()`` mais une clé re-déclarée REMPLACE la
+        précédente au lieu d'être ignorée.
+
+        Réservé aux déclarants dynamiques (modules forgés) dont le schéma
+        change légitimement en cours d'exécution — le hot reload d'un
+        module doit pouvoir mettre à jour libellés et défauts.
+        """
+        for e in entries or ():
+            if isinstance(e, ConfigSection):
+                self._sections[e.key] = e
+            elif isinstance(e, ConfigItem):
+                self._items[e.key] = e
+            else:
+                logger.warning("Unknown schema entry %r", e)
+
+    def unregister(self, *, key_prefix: str = "", section_key: str = "") -> int:
+        """Retire des entrées déclarées dynamiquement.
+
+        Les ``ConfigValue`` en base ne sont PAS touchées — réactiver le
+        déclarant retrouve ses valeurs. Retourne le nombre d'items retirés.
+        """
+        removed = 0
+        if key_prefix:
+            for key in [k for k in self._items if k.startswith(key_prefix)]:
+                del self._items[key]
+                removed += 1
+        if section_key:
+            self._sections.pop(section_key, None)
+        return removed
+
     def autodiscover(self) -> None:
         """Import ``<app_label>.config_schema`` for every installed app."""
         from django.apps import apps as django_apps

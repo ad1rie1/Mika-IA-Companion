@@ -291,6 +291,14 @@ class ConfigService:
 
     # ── Cache ───────────────────────────────────────────────────
 
+    def invalidate_cache(self, key: str | None = None) -> None:
+        """Purge le cache de valeurs (tout, ou une clé).
+
+        Utile aux déclarants dynamiques (forge) après un
+        ``registry.register_replace`` qui change des défauts.
+        """
+        self._invalidate(key)
+
     def _invalidate(self, key: str | None = None) -> None:
         with self._cache_lock:
             if key is None:
