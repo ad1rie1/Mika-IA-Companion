@@ -140,6 +140,22 @@ async function init() {
   }
 
   // WebSocket connection with identity handshake
+  // Voice mute toggle — persisted so a muted session stays muted on reload.
+  const muteBtn = document.getElementById("tts-mute");
+  if (muteBtn) {
+    const applyMuteUI = () => {
+      muteBtn.textContent = tts.isMuted ? "🔇" : "🔊";
+      muteBtn.classList.toggle("muted", tts.isMuted);
+    };
+    tts.setMuted(localStorage.getItem("vtuber_tts_muted") === "1");
+    applyMuteUI();
+    muteBtn.addEventListener("click", () => {
+      tts.setMuted(!tts.isMuted);
+      localStorage.setItem("vtuber_tts_muted", tts.isMuted ? "1" : "0");
+      applyMuteUI();
+    });
+  }
+
   const ws = new WebSocketClient(WS_URL);
   ws.setIdentity(
     identity.personId,
@@ -148,13 +164,30 @@ async function init() {
   const chatOverlay = new ChatOverlay(ws);
   wireIdentityBar(identity, ws);
 
+  // Connection badge: green "Connectée" that fades out after a few seconds,
+  // amber spinner while a reconnect attempt is in flight, red with the retry
+  // countdown otherwise.
+  let settleTimer: number | null = null;
   ws.on("connection", (data) => {
+    if (settleTimer !== null) {
+      window.clearTimeout(settleTimer);
+      settleTimer = null;
+    }
     if (data.status === "connected") {
       connectionStatus.className = "connected";
-      connectionStatus.textContent = "Connected";
+      connectionStatus.textContent = "Connectée";
+      settleTimer = window.setTimeout(() => {
+        connectionStatus.classList.add("settled");
+      }, 3000);
+    } else if (data.status === "reconnecting") {
+      connectionStatus.className = "reconnecting";
+      connectionStatus.textContent = "Reconnexion…";
     } else {
       connectionStatus.className = "disconnected";
-      connectionStatus.textContent = "Disconnected";
+      const retry = typeof data.retryInMs === "number"
+        ? ` (réessai dans ${Math.round(data.retryInMs / 1000)}s)`
+        : "";
+      connectionStatus.textContent = `Déconnectée${retry}`;
     }
   });
 
@@ -213,7 +246,7 @@ async function init() {
     // Speak — the backend decides whether this turn is voiced at all, and
     // in which voice (see backend/pipeline/voice.py). `speak: false` still
     // shows the text and animates the avatar; it just stays silent.
-    if (data.speak === false) {
+    if (data.speak === false || typeof data.text !== "string" || !data.text) {
       return;
     }
     const estimatedDuration = Math.min(data.text.length * 60, 15000);
@@ -245,6 +278,22 @@ async function init() {
   });
 
   ws.connect();
+
+  // Typing anywhere (outside another field) focuses the chat input, so you
+  // can just start writing without clicking the box first.
+  const chatInput = document.getElementById("chat-input") as HTMLTextAreaElement | null;
+  document.addEventListener("keydown", (e) => {
+    if (!chatInput) return;
+    const target = e.target as HTMLElement;
+    const inField =
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target.isContentEditable;
+    if (inField || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key.length === 1 || e.key === "Enter") {
+      chatInput.focus();
+    }
+  });
 
   // Update loop
   sceneManager.onUpdate((delta) => {

@@ -86,6 +86,13 @@
         font-size: 14px;
         outline: none;
         backdrop-filter: blur(12px);
+        font-family: inherit;
+        line-height: 1.4;
+        resize: none;
+        max-height: 120px;
+        overflow-y: auto;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(255,255,255,0.2) transparent;
       }
       #chat-input::placeholder {
         color: rgba(255, 255, 255, 0.5);
@@ -118,6 +125,25 @@
       }
       #chat-attach:hover {
         background: rgba(255, 255, 255, 0.2);
+      }
+      #tts-mute, #chat-clear {
+        padding: 12px 14px;
+        border: none;
+        border-radius: 24px;
+        background: rgba(255, 255, 255, 0.1);
+        color: rgba(255,255,255,0.7);
+        font-size: 16px;
+        cursor: pointer;
+        backdrop-filter: blur(12px);
+        transition: background 0.2s;
+        flex-shrink: 0;
+      }
+      #tts-mute:hover, #chat-clear:hover {
+        background: rgba(255, 255, 255, 0.2);
+      }
+      #tts-mute.muted {
+        background: rgba(239, 68, 68, 0.3);
+        color: #fca5a5;
       }
       #attachment-previews {
         display: flex;
@@ -178,7 +204,7 @@
         pointer-events: none;
       }
 
-      /* Emotion indicator */
+      /* Emotion indicator — border tinted by emotion category */
       #emotion-display {
         position: absolute;
         top: 16px;
@@ -186,10 +212,23 @@
         padding: 8px 16px;
         border-radius: 20px;
         background: rgba(0, 0, 0, 0.4);
+        border: 1px solid rgba(255, 255, 255, 0.15);
         color: white;
         font-size: 13px;
         backdrop-filter: blur(8px);
         transition: all 0.3s ease;
+      }
+      #emotion-display[data-category="positive"] {
+        border-color: rgba(52, 211, 153, 0.6);
+        background: rgba(6, 78, 59, 0.45);
+      }
+      #emotion-display[data-category="negative"] {
+        border-color: rgba(248, 113, 113, 0.6);
+        background: rgba(127, 29, 29, 0.45);
+      }
+      #emotion-display[data-category="complex"] {
+        border-color: rgba(167, 139, 250, 0.6);
+        background: rgba(76, 29, 149, 0.45);
       }
 
       /* Connection status */
@@ -201,19 +240,64 @@
         border-radius: 12px;
         font-size: 12px;
         backdrop-filter: blur(8px);
+        transition: opacity 0.8s ease;
+        z-index: 10;
       }
       #connection-status.connected {
         background: rgba(34, 197, 94, 0.3);
         color: #86efac;
       }
+      /* Once connected for a few seconds, fade to near-invisible until hover */
+      #connection-status.connected.settled { opacity: 0.15; }
+      #connection-status.connected.settled:hover { opacity: 1; }
       #connection-status.disconnected {
         background: rgba(239, 68, 68, 0.3);
         color: #fca5a5;
       }
+      #connection-status.reconnecting {
+        background: rgba(251, 191, 36, 0.25);
+        color: #fcd34d;
+      }
+      #connection-status.reconnecting::before {
+        content: "";
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        margin-right: 6px;
+        border-radius: 50%;
+        border: 2px solid #fcd34d;
+        border-top-color: transparent;
+        animation: spin 0.9s linear infinite;
+        vertical-align: -1px;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
 
       @keyframes fadeIn {
         from { opacity: 0; transform: translateY(8px); }
         to { opacity: 1; transform: translateY(0); }
+      }
+      .chat-bubble.no-anim { animation: none; }
+
+      /* Typing indicator — three pulsing dots inside a vtuber bubble */
+      .typing-indicator {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        padding: 12px 16px;
+        width: fit-content;
+      }
+      .typing-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.85);
+        animation: typingPulse 1.2s infinite ease-in-out;
+      }
+      .typing-dot:nth-child(2) { animation-delay: 0.15s; }
+      .typing-dot:nth-child(3) { animation-delay: 0.3s; }
+      @keyframes typingPulse {
+        0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+        30% { transform: translateY(-4px); opacity: 1; }
       }
 
       /* Identity bar (top, centered) */
@@ -610,6 +694,42 @@
         border-left: 2px solid #fca5a5;
         border-radius: 4px;
       }
+
+      /* ---- Mobile / narrow screens ---- */
+      @media (max-width: 640px) {
+        #connection-status {
+          top: 8px;
+          left: 8px;
+          font-size: 11px;
+          padding: 4px 8px;
+        }
+        #emotion-display {
+          top: 8px;
+          right: 8px;
+          font-size: 11px;
+          padding: 6px 10px;
+        }
+        #identity-bar {
+          top: 44px;
+          left: 8px;
+          right: 8px;
+          transform: none;
+          justify-content: center;
+        }
+        #identity-name { width: 110px; }
+        #inner-life-panel {
+          top: 84px;
+          left: 8px;
+          right: 8px;
+          width: auto;
+          max-height: 42%;
+          font-size: 12px;
+        }
+        #chat-container { max-height: 50%; }
+        .chat-bubble { max-width: 85%; font-size: 13px; }
+        #chat-input-container { padding: 8px 10px; }
+        #chat-send { padding: 12px 14px; }
+      }
     </style>
   </head>
   <body>
@@ -626,8 +746,10 @@
         <div id="chat-messages"></div>
         <div id="attachment-previews"></div>
         <div id="chat-input-container">
+          <button id="tts-mute" title="Couper / activer la voix">🔊</button>
+          <button id="chat-clear" title="Effacer l'historique du chat">🗑️</button>
           <button id="chat-attach" title="Joindre un fichier">📎</button>
-          <input id="chat-input" type="text" placeholder="Envoie un message..." autocomplete="off" />
+          <textarea id="chat-input" rows="1" placeholder="Envoie un message..." autocomplete="off"></textarea>
           <button id="chat-send">Envoyer</button>
         </div>
       </div>

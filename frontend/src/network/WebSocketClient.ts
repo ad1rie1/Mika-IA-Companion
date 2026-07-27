@@ -65,7 +65,10 @@ export class WebSocketClient {
 
       this.ws.onclose = () => {
         console.log("WebSocket disconnected, reconnecting...");
-        this.emit("connection", { status: "disconnected" });
+        this.emit("connection", {
+          status: "disconnected",
+          retryInMs: this.currentDelay,
+        });
         this.scheduleReconnect();
       };
 
@@ -84,6 +87,7 @@ export class WebSocketClient {
         this.currentDelay * 1.5,
         this.maxReconnectDelay
       );
+      this.emit("connection", { status: "reconnecting" });
       this.connect();
     }, this.currentDelay);
   }

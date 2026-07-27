@@ -334,11 +334,35 @@ export class TTSService {
     return this.analyser;
   }
 
+  /**
+   * Mute switch. Muting drops queued utterances and cuts the current one
+   * short (speechSynthesis.cancel() fires the utterance's end event, so
+   * onSpeakEnd/lip-sync teardown still run). Unmuting only affects future
+   * replies.
+   */
+  setMuted(muted: boolean) {
+    this.muted = muted;
+    if (muted) {
+      this.speechQueue.length = 0;
+      this.nextPreDelayMs = 0;
+      if ("speechSynthesis" in window) {
+        speechSynthesis.cancel();
+      }
+    }
+  }
+
+  get isMuted(): boolean {
+    return this.muted;
+  }
+
+  private muted = false;
+
   async speak(
     text: string,
     emotion: EmotionName = "neutral",
     profile: VoiceProfile = NEUTRAL_PROFILE
   ) {
+    if (this.muted) return;
     this.speechQueue.push({ text, emotion, profile });
     if (!this.processing) {
       this.processQueue();
