@@ -49,6 +49,10 @@ class ConversationContext:
     # Only injected until early afternoon and only for non-internal persons,
     # so Mika can spontaneously mention it in the first few conversations.
     dream_context: str = ""
+    # Yesterday's journal — the narrative thread of the previous day, so
+    # "hier" is something Mika actually remembers as a day, not just as
+    # disconnected souvenirs surfaced by semantic luck.
+    journal_context: str = ""
     # Project layer — set when an active Project matches the current turn
     # (user talked about it, owner mentioned, keyword hit). The string is
     # injected as `--- PROJET EN COURS ---`; the boolean forces the
@@ -136,8 +140,10 @@ async def gather_context(
     # only to real interlocutors (not to Mika's own conscience trigger).
     if person_id in _INTERNAL_PERSON_IDS:
         dream_context = ""
+        journal_context = ""
     else:
         dream_context = await _fetch_dream_context()
+        journal_context = await _fetch_journal_context()
 
     # Project detection — is this turn about an active project?
     # Skipped for internal triggers (conscience prompts don't reference
@@ -182,6 +188,7 @@ async def gather_context(
         rumination_context=rumination_context,
         user_mood_hint=user_mood_hint,
         dream_context=dream_context,
+        journal_context=journal_context,
         project_context=project_context,
         project_suppresses_emotion=project_suppresses_emotion,
         project_id=project_id,
@@ -358,6 +365,56 @@ async def _fetch_dream_context() -> str:
         "le garder pour toi). N'en parle pas tout de suite si l'autre commence "
         "par quelque chose d'important — laisse la conversation couler naturellement."
     )
+
+
+# Cap on the journal narrative injected into the prompt — the recap is
+# a thread, not a transcript.
+_JOURNAL_MAX_CHARS = 450
+
+
+async def _fetch_journal_context() -> str:
+    """Return a compact recap of yesterday's journal, or ''.
+
+    The nightly journal gives Mika a causal thread through the previous
+    day; without this injection it was write-only (frontend panel + tool
+    only) and "hier" relied on semantic retrieval luck. Available all
+    day: unlike a dream, yesterday doesn't fade by mid-afternoon.
+    """
+    try:
+        from asgiref.sync import sync_to_async
+        from memory.models import DailyJournal
+    except ImportError:
+        return ""
+
+    from datetime import date, timedelta
+
+    yesterday = date.today() - timedelta(days=1)
+    try:
+        journal = await sync_to_async(
+            lambda: DailyJournal.objects.filter(date=yesterday).first()
+        )()
+    except Exception:
+        logger.debug("Journal context fetch failed", exc_info=True)
+        return ""
+
+    if not journal or not journal.narrative:
+        return ""
+
+    narrative = journal.narrative.strip()
+    if len(narrative) > _JOURNAL_MAX_CHARS:
+        narrative = narrative[:_JOURNAL_MAX_CHARS].rstrip() + "..."
+
+    lines = [f"Ce que tu retiens d'hier : {narrative}"]
+    persons = [p for p in (journal.persons_interacted or []) if p]
+    if persons:
+        lines.append("Tu avais interagi avec : " + ", ".join(persons[:4]) + ".")
+    if journal.dominant_emotion:
+        lines.append(f"La journee etait teintee de : {journal.dominant_emotion}.")
+    lines.append(
+        "C'est ton fil de continuite — tu peux y faire reference naturellement "
+        "(\"comme hier...\") sans le reciter."
+    )
+    return "\n".join(lines)
 
 
 async def _fetch_rumination_context() -> str:

@@ -212,6 +212,16 @@ class AIRouter:
         """Drop a cached provider so the next call re-reads its credentials."""
         self._providers.pop(provider_name, None)
 
+    def provider_by_name(self, provider_name: str) -> AIProvider:
+        """Public access to a (cached) provider instance by registry name.
+
+        For capability-specific call sites (e.g. Whisper transcription)
+        that need a provider outside the role system. Benefits from the
+        same cache + credential-change eviction as role-routed calls.
+        Raises when the provider is unknown or its credentials are missing.
+        """
+        return self._get_provider(provider_name)
+
     def resolve(self, role: AIRole) -> tuple[str, str, float, str]:
         """Public alias of ``_resolve`` for callers that need provider/model/temp."""
         return self._resolve(role)

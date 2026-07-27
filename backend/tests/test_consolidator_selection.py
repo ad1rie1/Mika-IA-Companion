@@ -112,7 +112,7 @@ class TestCheckpointNeverSkips:
         # message query by inserting from inside the extractor call.
         late_id = {}
 
-        async def _insert_then_return(msgs):
+        async def _insert_then_return(msgs, **kw):
             m = await sync_to_async(Message.objects.create)(
                 conversation=conv, role="user", source="frontend",
                 content="message arrivé pendant la passe",

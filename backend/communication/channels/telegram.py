@@ -69,6 +69,15 @@ class TelegramChannel:
         self._app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message)
         )
+        # Inbound media: photos → vision caption, voice/audio → transcript,
+        # documents → text extraction. The pipeline's preprocessors do the
+        # heavy lifting; this handler only downloads + lifts to a Perception.
+        self._app.add_handler(
+            MessageHandler(
+                filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL,
+                self._handle_media,
+            )
+        )
 
         await self._app.initialize()
         await self._app.start()
@@ -102,21 +111,19 @@ class TelegramChannel:
     ):
         await update.message.reply_text(personality.greeting)
 
-    async def _handle_message(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
-    ):
-        if not update.message or not update.message.text:
-            return
+    async def _register_interlocutor(self, message) -> str:
+        """Register presence + identity for the sender; returns person_id.
 
-        person_id = f"tg_{update.message.from_user.id}"
-        chat_id = update.message.chat_id
-        display_name = update.message.from_user.full_name or ""
+        Registering makes this user PROACTIVELY reachable later (the
+        external API is push-capable any time we hold the chat_id) and
+        stops a telegram turn from leaking to the global websocket
+        broadcast: the recipient is resolvable, and broadcast skips the
+        originating module's echo.
+        """
+        person_id = f"tg_{message.from_user.id}"
+        chat_id = message.chat_id
+        display_name = message.from_user.full_name or ""
 
-        # Register the interlocutor so Mika can reach this user PROACTIVELY
-        # later (the external API is push-capable any time we hold the chat_id),
-        # and persist the handle so it survives restarts. Also stops a telegram
-        # turn from leaking to the global websocket broadcast: the recipient is
-        # now resolvable, and broadcast skips the originating module's echo.
         from communication.presence import presence_registry
 
         presence_registry.register(
@@ -135,6 +142,15 @@ class TelegramChannel:
             delivery_ref=str(chat_id),
             display_name=display_name,
         )
+        return person_id
+
+    async def _handle_message(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
+        if not update.message or not update.message.text:
+            return
+
+        person_id = await self._register_interlocutor(update.message)
 
         from pipeline.perception import Perception
         from pipeline.router import perceive
@@ -149,6 +165,100 @@ class TelegramChannel:
         output = await perceive(perception)
         if output and output.text:
             await update.message.reply_text(output.text)
+
+    async def _handle_media(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
+        """Photos, voice notes, audio files, documents — with optional caption.
+
+        Downloads the payload, wraps it as a MediaAttachment, and routes a
+        MIXED Perception. The preprocessors turn it into text (caption /
+        transcript / extraction) before the AI sees it — same path as a
+        frontend upload.
+        """
+        message = update.message
+        if not message:
+            return
+
+        person_id = await self._register_interlocutor(message)
+
+        attachment = await self._download_media(message)
+        if attachment is None:
+            return
+
+        from pipeline.perception import Perception
+        from pipeline.router import perceive
+
+        perception = Perception.from_mixed(
+            text=message.caption or "",
+            attachments=[attachment],
+            source="telegram",
+            person_id=person_id,
+        )
+        output = await perceive(perception)
+        if output and output.text:
+            await message.reply_text(output.text)
+
+    async def _download_media(self, message):
+        """Pick the richest media on the message and download it.
+
+        Returns a validated ``MediaAttachment`` or None (unsupported type,
+        oversized payload, or download failure — all logged, none fatal).
+        """
+        from pipeline.media import (
+            MAX_FILE_SIZE_BYTES,
+            MediaAttachment,
+            _categorize,
+        )
+
+        if message.voice:
+            media = message.voice
+            name = "note_vocale.ogg"
+            mime = media.mime_type or "audio/ogg"
+        elif message.audio:
+            media = message.audio
+            name = media.file_name or "audio.mp3"
+            mime = media.mime_type or "audio/mpeg"
+        elif message.photo:
+            media = message.photo[-1]  # largest resolution
+            name = "photo.jpg"
+            mime = "image/jpeg"
+        elif message.document:
+            media = message.document
+            name = media.file_name or "document"
+            mime = media.mime_type or "application/octet-stream"
+        else:
+            return None
+
+        size = getattr(media, "file_size", None)
+        if size and size > MAX_FILE_SIZE_BYTES:
+            logger.info(
+                "Telegram media ignoré (trop grand): %s (%d o)", name, size
+            )
+            try:
+                await message.reply_text(
+                    "(fichier trop lourd pour moi — 5 Mo max)"
+                )
+            except Exception:
+                pass
+            return None
+
+        try:
+            import base64
+
+            tg_file = await media.get_file()
+            data = bytes(await tg_file.download_as_bytearray())
+        except Exception:
+            logger.exception("Téléchargement du média Telegram échoué (%s)", name)
+            return None
+
+        mime = mime.lower().split(";")[0].strip()
+        return MediaAttachment(
+            name=name,
+            media_type=mime,
+            data=base64.b64encode(data).decode("ascii"),
+            category=_categorize(mime),
+        )
 
     # ── Outbound delivery (proactive push) ────────────────────────
 

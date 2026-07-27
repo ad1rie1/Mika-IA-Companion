@@ -734,6 +734,24 @@ class EmailModule(BaseModule):
             )
         return {"content": [{"type": "text", "text": "\n".join(lines)}]}
 
+    async def send_email(
+        self, *, to: str, subject: str, body: str, account_id=None,
+    ) -> tuple[bool, str]:
+        """Public façade for out-of-band senders (project approvals, …).
+
+        Same path as the MCP tool, unwrapped into (ok, message) so callers
+        outside the tool protocol don't have to parse MCP content blocks.
+        """
+        result = await self._tool_send_email({
+            "to": to, "subject": subject, "body": body,
+            "account_id": account_id,
+        })
+        text = "; ".join(
+            c.get("text", "") for c in result.get("content", [])
+            if isinstance(c, dict)
+        ).strip()
+        return (not result.get("isError", False), text)
+
     async def _tool_send_email(self, args: dict) -> dict:
         account_id = args.get("account_id")
 

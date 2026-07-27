@@ -12,8 +12,17 @@ def sleep(request):
     from memory.sleep import sleep_cycle
     from memory.models import DailyJournal, Dream
 
+    from datetime import timedelta
+
+    # The nightly journal is dated the day it covers — strictly matching
+    # today's date left this endpoint empty from midnight to ~23h.
     today = timezone.localdate()
-    journal = DailyJournal.objects.filter(date=today).first()
+    journal = (
+        DailyJournal.objects
+        .filter(date__gte=today - timedelta(days=1))
+        .order_by("-date")
+        .first()
+    )
     last_dream = Dream.objects.order_by("-created_at").first()
 
     return JsonResponse({

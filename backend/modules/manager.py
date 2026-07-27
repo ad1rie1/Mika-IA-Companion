@@ -608,6 +608,14 @@ class ModuleManager:
                         "Error in on_event() for module %s", module.name
                     )
 
+        # Wake projects scheduled on "event:<type>" — without this hook the
+        # rule parsed fine but could never fire (notify_event had no caller).
+        try:
+            from projects.runner import project_runner
+            await project_runner.notify_event(event.event_type)
+        except Exception:
+            logger.debug("Project event notification failed", exc_info=True)
+
     # ── Notify AI ─────────────────────────────────────────────────
 
     async def _notify_ai(self, notification: ModuleNotification) -> AIDecision:

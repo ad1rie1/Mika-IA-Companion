@@ -5,10 +5,10 @@ Flux :
   2. save_attachments(validated, person_id)  → list[UploadedFile]  (disque + BDD + module)
 
 Catégories :
-  image   → vision IA via files_analyze_image
-  audio   → transcription Whisper via files_transcribe (TODO)
-  text    → lecture via files_read
-  unknown → fichier brut disponible
+  image   → vision IA (préprocesseur vision + files_analyze_image)
+  audio   → transcription Whisper (préprocesseur audio + files_transcribe)
+  text    → lecture (préprocesseur files + files_read)
+  unknown → extraction tentée par le préprocesseur files (pdf/docx), sinon brut
 """
 
 from __future__ import annotations

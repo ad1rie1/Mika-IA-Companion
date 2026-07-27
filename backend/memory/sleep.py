@@ -58,6 +58,14 @@ NIGHT_END_HOUR = 6          # closes at 6h
 IDLE_SECONDS_THRESHOLD = 900  # 15 min without interaction
 REST_DRIVE_THRESHOLD = 0.5    # Mika must have earned her rest
 
+# Each sleeping tick relieves the REST drive by this `satisfy()` amount —
+# sleep is what rest tension is FOR. With REST's decay_on_satisfy (0.3),
+# 0.1 ≈ 3%/tick: tension melts over the first couple of hours of sleep,
+# so morning-Mika wakes with real energy instead of yesterday's fatigue.
+# The REST eligibility gate only applies to *falling* asleep (entry);
+# once asleep for the night, draining tension doesn't wake her up.
+SLEEP_REST_RECOVERY = 0.1
+
 # Dream generation
 DREAM_PROBABILITY = 0.6              # per-check chance of producing a dream
 MAX_DREAMS_PER_NIGHT = 2
@@ -186,6 +194,10 @@ class SleepCycle:
         self._last_dream_night: date | None = None
         self._last_dream_attempt: float = 0.0  # monotonic()
         self._last_digestion_night: date | None = None
+        # Night for which Mika already fell asleep — entry/stay hysteresis:
+        # the REST gate governs falling asleep, not staying asleep (sleep
+        # drains REST, and draining it must not bounce her awake).
+        self._asleep_night: date | None = None
         # Current phase — observable by the frontend via the inner_state
         # broadcast. Transitions trigger an inner_state push so the UI
         # can dim the scene, close the VTuber's eyes, etc.
@@ -273,12 +285,14 @@ class SleepCycle:
             await self._set_phase(SleepPhase.AWAKE)
             return
 
-        if not await self._is_eligible_to_sleep():
+        current_night = self._night_of(now_dt)
+
+        already_asleep = self._asleep_night == current_night
+        if not await self._is_eligible_to_sleep(already_asleep=already_asleep):
             # Night hours but she's active — she's up late, not asleep.
             await self._set_phase(SleepPhase.AWAKE)
             return
-
-        current_night = self._night_of(now_dt)
+        self._asleep_night = current_night
 
         # A phase is entered only when it has real work to do. Announcing
         # LIGHT_SLEEP then REM on every tick regardless would make the
@@ -322,6 +336,16 @@ class SleepCycle:
         # night gate re-evaluates to false.
         await self._set_phase(SleepPhase.DEEP_SLEEP)
 
+        # Sleeping is what actually relieves the REST drive. Without this,
+        # rest tension only had its tiny natural decay and Mika woke up as
+        # tired as she fell asleep, dragging energy_level() down all day.
+        try:
+            from drives.engine import drive_engine
+            from drives.state import DriveKind
+            drive_engine.satisfy(DriveKind.REST, SLEEP_REST_RECOVERY)
+        except Exception:
+            logger.debug("Sleep REST recovery failed", exc_info=True)
+
     # ── Gates ────────────────────────────────────────────────────
 
     @staticmethod
@@ -348,12 +372,14 @@ class SleepCycle:
         return now.date()
 
     @staticmethod
-    async def _is_eligible_to_sleep() -> bool:
+    async def _is_eligible_to_sleep(already_asleep: bool = False) -> bool:
         """Check idle time + REST drive tension.
 
-        Both conditions must pass — Mika actively engaging shouldn't
-        tip into sleep regardless of the hour, and a completely fresh
-        Mika at 23h hasn't earned a night's processing yet.
+        Idle always applies — an interaction wakes her whatever the hour.
+        The REST gate applies only to *falling* asleep: a fresh Mika at
+        23h hasn't earned a night's processing yet. Once asleep for the
+        night (``already_asleep``), the recovery draining her REST
+        tension must not bounce her back awake.
         """
         try:
             from conscience.engine import conscience_engine
@@ -363,6 +389,9 @@ class SleepCycle:
 
         if idle_seconds < IDLE_SECONDS_THRESHOLD:
             return False
+
+        if already_asleep:
+            return True
 
         try:
             from drives.engine import drive_engine

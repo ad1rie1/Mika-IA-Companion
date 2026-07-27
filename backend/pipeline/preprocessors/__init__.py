@@ -2,11 +2,9 @@
 
 The router calls `run_preprocessors(perception)` before the AI step so
 the LLM always sees a text prompt. Each preprocessor is responsible for
-one modality: vision (image), audio (voice), files (documents).
-
-Stubs for now — they produce placeholder descriptions so the full
-pipeline works end-to-end without real LLM-based analysis. Replace
-the `process()` body of each preprocessor when wiring a real provider.
+one modality: vision (image → LLM caption), audio (voice → Whisper
+transcript), files (documents → extracted text). All degrade to a safe
+placeholder when their engine is unavailable or fails.
 
 Design notes:
   - Preprocessors MUTATE `perception.parts` in place: the non-text part

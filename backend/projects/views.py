@@ -379,8 +379,8 @@ def approve_pending(request, action_id: int):
     """Approve a pending action and execute its payload.
 
     Payload execution is dispatched by `payload.kind`. Supported kinds:
-      - "send_email": requires 'email' module available
-      - "write_file": requires 'files' module (future)
+      - "send_email": real send through the email module; a send failure
+        marks the action FAILED with the reason, never "executed".
       - Unknown kinds → execution is skipped, action marked executed with
         the payload recorded (audit only).
     """
@@ -530,13 +530,18 @@ def project_prompt_history(request, project_id: int):
 
 
 def _execute_pending_payload(a: ProjectPendingAction) -> str:
-    """Dispatch on `payload.kind`. Returns a short audit string."""
+    """Dispatch on `payload.kind`. Returns a short audit string.
+
+    Raising marks the action FAILED (with the reason as execution_result)
+    — an approved action whose side effect did not happen must never show
+    a green "executed" badge.
+    """
     kind = (a.payload or {}).get("kind")
     if not kind:
         return "no-kind payload (audit-only)"
 
     if kind == "send_email":
-        # Delegate to the email module's tool if it's loaded. Schema:
+        # Delegate to the email module's real send path. Schema:
         #   {"kind": "send_email", "to": "...", "subject": "...", "body": "..."}
         try:
             from modules.manager import module_manager
@@ -544,21 +549,16 @@ def _execute_pending_payload(a: ProjectPendingAction) -> str:
         except Exception:
             em = None
         if em is None:
-            return "email module not loaded — action logged only"
-        # Best-effort — the email module exposes `send_email` as a tool.
-        # We call a direct sync helper if available.
-        send_fn = getattr(em, "send_email_sync", None)
-        if send_fn:
-            try:
-                send_fn(
-                    to=a.payload.get("to", ""),
-                    subject=a.payload.get("subject", ""),
-                    body=a.payload.get("body", ""),
-                )
-                return f"email sent to {a.payload.get('to', '')}"
-            except Exception as e:
-                return f"email send failed: {e}"
-        return "email module lacks send_email_sync — action logged only"
+            raise RuntimeError("email module not loaded — nothing was sent")
+
+        ok, message = async_to_sync(em.send_email)(
+            to=a.payload.get("to", ""),
+            subject=a.payload.get("subject", ""),
+            body=a.payload.get("body", ""),
+        )
+        if not ok:
+            raise RuntimeError(message or "email send failed")
+        return message or f"email sent to {a.payload.get('to', '')}"
 
     # Unknown kinds: audit-only
     return f"unsupported payload kind '{kind}' — logged for audit"

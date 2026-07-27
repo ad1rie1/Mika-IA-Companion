@@ -146,44 +146,212 @@ class TestVisionPreprocessor:
         assert result.metadata["original_mime_type"] == "image/jpeg"
 
 
+class _FakeSTTProvider:
+    """Duck-typed provider exposing transcribe_audio."""
+
+    def __init__(self, result="salut, tu vas bien ?", error=None):
+        self.result = result
+        self.error = error
+        self.calls: list[tuple[bytes, str]] = []
+
+    async def transcribe_audio(self, data: bytes, filename: str, **kw):
+        self.calls.append((data, filename))
+        if self.error:
+            raise self.error
+        return self.result
+
+
 @pytest.mark.asyncio
 class TestAudioPreprocessor:
 
-    async def test_replaces_audio_with_text(self):
+    async def test_no_provider_falls_back_to_placeholder(self):
         part = Part(kind="audio", content=b"\x00", mime_type="audio/mpeg")
-        result = await audio.process(part)
+        with patch.object(audio, "_transcription_provider", return_value=None):
+            result = await audio.process(part)
         assert result.kind == "text"
         assert "transcription" in result.content
+        assert result.metadata["preprocessor"] == "audio-stub"
 
     async def test_duration_included_in_description(self):
         part = Part(
             kind="audio", content=b"\x00", mime_type="audio/wav",
             metadata={"duration_seconds": 12},
         )
-        result = await audio.process(part)
+        with patch.object(audio, "_transcription_provider", return_value=None):
+            result = await audio.process(part)
         assert "12s" in result.content
+
+    async def test_transcribes_via_provider(self):
+        provider = _FakeSTTProvider(result="on se voit demain ?")
+        part = Part(
+            kind="audio", content=b"OggS\x00fake", mime_type="audio/ogg",
+            metadata={"name": "note.ogg"},
+        )
+        with patch.object(audio, "_transcription_provider", return_value=provider):
+            result = await audio.process(part)
+
+        assert result.kind == "text"
+        assert "on se voit demain ?" in result.content
+        assert result.metadata["preprocessor"] == "audio-whisper"
+        assert result.metadata["original_kind"] == "audio"
+        # Provider got the raw bytes + a filename with extension
+        data, filename = provider.calls[0]
+        assert data == b"OggS\x00fake"
+        assert filename == "note.ogg"
+
+    async def test_base64_content_is_decoded_before_transcription(self):
+        import base64
+        raw = b"RIFFfake-wav"
+        provider = _FakeSTTProvider()
+        part = Part(
+            kind="audio",
+            content=base64.b64encode(raw).decode("ascii"),
+            mime_type="audio/wav",
+        )
+        with patch.object(audio, "_transcription_provider", return_value=provider):
+            result = await audio.process(part)
+
+        assert provider.calls[0][0] == raw
+        # No name in metadata → extension derived from the MIME type
+        assert provider.calls[0][1].endswith(".wav")
+        assert "salut" in result.content
+
+    async def test_provider_error_falls_back_to_placeholder(self):
+        provider = _FakeSTTProvider(error=RuntimeError("api down"))
+        part = Part(kind="audio", content=b"\x00", mime_type="audio/mpeg")
+        with patch.object(audio, "_transcription_provider", return_value=provider):
+            result = await audio.process(part)
+        assert "transcription non disponible" in result.content
+        assert result.metadata["preprocessor"] == "audio-stub"
+
+    async def test_empty_content_skips_provider(self):
+        provider = _FakeSTTProvider()
+        part = Part(kind="audio", content="", mime_type="audio/ogg")
+        with patch.object(audio, "_transcription_provider", return_value=provider):
+            result = await audio.process(part)
+        assert not provider.calls
+        assert "transcription non disponible" in result.content
+
+    async def test_transcript_length_capped(self):
+        provider = _FakeSTTProvider(result="blabla " * 1000)
+        part = Part(kind="audio", content=b"\x00", mime_type="audio/ogg")
+        with patch.object(audio, "_transcription_provider", return_value=provider):
+            result = await audio.process(part)
+        assert len(result.content) <= audio.MAX_TRANSCRIPT_CHARS + 80
 
 
 @pytest.mark.asyncio
 class TestFilesPreprocessor:
 
-    async def test_extractable_hint_for_pdf(self):
+    async def test_plain_text_extracted(self):
         part = Part(
-            kind="file", content=b"\x00", mime_type="application/pdf",
+            kind="file",
+            content="bonjour Mika, voici mes notes du jour".encode("utf-8"),
+            mime_type="text/plain",
+            metadata={"name": "notes.txt"},
+        )
+        result = await files.process(part)
+        assert result.kind == "text"
+        assert "notes.txt" in result.content
+        assert "voici mes notes du jour" in result.content
+        assert result.metadata["extracted"] is True
+        assert result.metadata["extract_method"] == "texte"
+
+    async def test_base64_json_extracted(self):
+        import base64
+        payload = b'{"projet": "vtuber", "avancement": 0.8}'
+        part = Part(
+            kind="file",
+            content=base64.b64encode(payload).decode("ascii"),
+            mime_type="application/json",
+            metadata={"name": "etat.json"},
+        )
+        result = await files.process(part)
+        assert '"vtuber"' in result.content
+
+    async def test_extension_dispatch_without_mime(self):
+        part = Part(
+            kind="file", content=b"# Titre\ndu markdown",
+            mime_type="application/octet-stream",
+            metadata={"name": "doc.md"},
+        )
+        result = await files.process(part)
+        assert "du markdown" in result.content
+
+    async def test_html_tags_stripped(self):
+        html = b"<html><head><style>p{color:red}</style></head><body><p>Un article &eacute;crit</p><script>alert(1)</script></body></html>"
+        part = Part(
+            kind="file", content=html, mime_type="text/html",
+            metadata={"name": "page.html"},
+        )
+        result = await files.process(part)
+        assert "Un article écrit" in result.content
+        assert "alert(1)" not in result.content
+        assert "color:red" not in result.content
+
+    async def test_latin1_fallback(self):
+        part = Part(
+            kind="file", content="café crème".encode("latin-1"),
+            mime_type="text/plain", metadata={"name": "menu.txt"},
+        )
+        result = await files.process(part)
+        assert "café crème" in result.content
+
+    async def test_long_content_truncated(self):
+        part = Part(
+            kind="file", content=(b"x" * (files.MAX_EXTRACT_CHARS + 5000)),
+            mime_type="text/plain", metadata={"name": "gros.txt"},
+        )
+        result = await files.process(part)
+        assert "[...tronqué]" in result.content
+        assert result.metadata["truncated"] is True
+        assert len(result.content) <= files.MAX_EXTRACT_CHARS + 200
+
+    async def test_pdf_extracted_via_pypdf(self):
+        import sys
+        import types
+
+        class _FakePage:
+            def __init__(self, text):
+                self._text = text
+            def extract_text(self):
+                return self._text
+
+        class _FakeReader:
+            def __init__(self, _buf):
+                self.pages = [_FakePage("Page un."), _FakePage("Page deux.")]
+
+        fake_pypdf = types.SimpleNamespace(PdfReader=_FakeReader)
+        part = Part(
+            kind="file", content=b"%PDF-1.4 fake", mime_type="application/pdf",
+            metadata={"name": "rapport.pdf"},
+        )
+        with patch.dict(sys.modules, {"pypdf": fake_pypdf}):
+            result = await files.process(part)
+
+        assert "Page un." in result.content
+        assert "Page deux." in result.content
+        assert result.metadata["extract_method"] == "pdf"
+
+    async def test_corrupt_pdf_yields_placeholder(self):
+        part = Part(
+            kind="file", content=b"\x00\x01notapdf", mime_type="application/pdf",
             metadata={"name": "report.pdf"},
         )
         result = await files.process(part)
         assert result.kind == "text"
         assert "report.pdf" in result.content
-        assert "extractable" in result.content
+        assert "non extractible" in result.content
+        assert result.metadata["extracted"] is False
 
-    async def test_unknown_extension_marked_non_extractable(self):
+    async def test_unknown_binary_marked_non_extractible(self):
         part = Part(
             kind="file", content=b"\x00", mime_type="application/x-7z-compressed",
             metadata={"name": "archive.7z"},
         )
         result = await files.process(part)
-        assert "non extractable" in result.content
+        assert "non extractible" in result.content
+        assert "format non supporté" in result.content
 
 
 @pytest.mark.asyncio

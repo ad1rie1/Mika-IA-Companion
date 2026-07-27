@@ -143,6 +143,19 @@ class DriveEngine:
         intensity = min(2.0, 1.0 + word_count / 50)
         self._register_activity(intensity)
 
+    def on_reply(self, word_count: int = 0) -> None:
+        """Called when Mika answers someone (reactive speech).
+
+        Answering expresses less than speaking up on her own initiative
+        — partial EXPRESSION relief — but it *is* speech: without this, a
+        Mika who chatted all day still carried full expression tension
+        and was pushed to speak spontaneously as if she'd been silent.
+        It is also activity, so REST pressure climbs like for any act.
+        """
+        self.satisfy(DriveKind.EXPRESSION, 0.4)
+        intensity = min(2.0, 1.0 + word_count / 50)
+        self._register_activity(intensity)
+
     def on_observation(self, pertinence: float) -> None:
         """Called when a pertinent signal is observed (email, RSS, etc.)."""
         if pertinence > 0.6:

@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 # hour is plenty — running it on every 60s tick would be pure query load.
 RETENTION_SWEEP_INTERVAL_S = 3600
 
+# Pending commitments older than this are dropped (see _expire_commitments).
+COMMITMENT_MAX_AGE_DAYS = 30
+
 
 class MemoryConsolidator:
     """Background task that periodically processes raw messages into
@@ -160,8 +163,21 @@ class MemoryConsolidator:
         # 3. Format for Claude
         msg_dicts = [{"role": m["role"], "content": m["content"]} for m in messages]
 
-        # 4. Extract via Claude
-        extractions = await self.extractor.analyze_messages(msg_dicts)
+        # 4. Extract via Claude. Open commitments ride along so the same
+        #    call can notice one being honored in the conversation window
+        #    ("voila la playlist !") — that's the autonomous half of the
+        #    commitment lifecycle; the explicit half is the
+        #    memory_resolve_commitment tool.
+        pending_commitments = await sync_to_async(
+            lambda: list(
+                Commitment.objects.filter(status="pending")
+                .order_by("-created_at")
+                .values("id", "description")[:10]
+            )
+        )()
+        extractions = await self.extractor.analyze_messages(
+            msg_dicts, pending_commitments=pending_commitments
+        )
 
         souvenirs_created = 0
         connaissances_created = 0
@@ -302,6 +318,22 @@ class MemoryConsolidator:
                         extraction["content"][:120],
                     )
 
+                elif extraction["type"] == "commitment_resolved":
+                    resolution = extraction.get("resolution", "honored")
+                    if resolution not in ("honored", "dropped"):
+                        resolution = "honored"
+                    updated = await sync_to_async(
+                        lambda: Commitment.objects.filter(
+                            pk=extraction.get("commitment_id"),
+                            status="pending",
+                        ).update(status=resolution, resolved_at=timezone.now())
+                    )()
+                    if updated:
+                        logger.info(
+                            "Commitment #%s resolved (%s) from conversation",
+                            extraction.get("commitment_id"), resolution,
+                        )
+
             except Exception:
                 logger.exception("Failed to process extraction: %s", extraction)
 
@@ -362,7 +394,36 @@ class MemoryConsolidator:
         Remove those below threshold."""
         await self._decay_souvenirs()
         await self._decay_connaissances()
+        await self._expire_commitments()
         await self._sweep_retention()
+
+    async def _expire_commitments(self):
+        """Age out stale promises — the "dropped" half of the lifecycle.
+
+        A commitment past its ``due_at``, or pending for more than
+        COMMITMENT_MAX_AGE_DAYS, stops being re-asserted in every prompt
+        as "tu lui avais dit que..." — after a month it's not a plan
+        anymore, it's guilt. Cheap UPDATEs, safe to run every tick.
+        """
+        from memory.models import Commitment
+
+        now = timezone.now()
+        try:
+            dropped = await sync_to_async(
+                lambda: Commitment.objects.filter(
+                    status="pending", due_at__isnull=False, due_at__lt=now,
+                ).update(status="dropped", resolved_at=now)
+            )()
+            cutoff = now - timedelta(days=COMMITMENT_MAX_AGE_DAYS)
+            dropped += await sync_to_async(
+                lambda: Commitment.objects.filter(
+                    status="pending", created_at__lt=cutoff,
+                ).update(status="dropped", resolved_at=now)
+            )()
+            if dropped:
+                logger.info("Dropped %d stale commitment(s)", dropped)
+        except Exception:
+            logger.exception("Commitment expiry failed (non-fatal)")
 
     async def _sweep_retention(self):
         """Cap the append-only audit tables. Hourly, not every tick.

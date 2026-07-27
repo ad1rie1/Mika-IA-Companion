@@ -17,6 +17,7 @@ def build_system_prompt(
     rumination_context: str = "",
     user_mood_hint: str = "",
     dream_context: str = "",
+    journal_context: str = "",
     project_context: str = "",
     project_suppresses_emotion: bool = False,
 ) -> str:
@@ -88,6 +89,12 @@ def build_system_prompt(
         system += (
             "\n\n--- CE QUE TU AS REVE CETTE NUIT ---\n"
             + dream_context
+            + "\n--- FIN ---"
+        )
+    if journal_context:
+        system += (
+            "\n\n--- TON FIL D'HIER ---\n"
+            + journal_context
             + "\n--- FIN ---"
         )
     if module_context:

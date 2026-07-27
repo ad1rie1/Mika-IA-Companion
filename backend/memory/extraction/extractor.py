@@ -36,6 +36,15 @@ TROIS TYPES A EXTRAIRE:
    - "person" = a qui l'engagement est fait (optionnel si generique)
    - NE PAS confondre avec une simple intention vague ("je devrais peut-etre..." n'est PAS un commitment)
 
+4. COMMITMENT_RESOLVED (engagement tenu ou caduc):
+   - SEULEMENT si une liste "ENGAGEMENTS EN COURS" est fournie apres la conversation
+   - Si la conversation montre que {name} a TENU un de ces engagements
+     (elle dit l'avoir fait: "voila la playlist!", "c'est fait", "je l'ai regarde hier"),
+     retourne {{"type": "commitment_resolved", "store": true, "commitment_id": <id>, "resolution": "honored"}}
+   - Si la conversation montre que l'engagement n'a PLUS DE SENS
+     (l'autre dit "laisse tomber", le sujet est annule), retourne "resolution": "dropped"
+   - Sois CONSERVATEUR: en cas de doute, ne retourne rien pour cet engagement
+
 REGLES:
 - "Il aime le cafe" → connaissance | "Il a bu un cafe" → souvenir
 - "Je te ferai la playlist ce soir" → commitment (+ souvenir de la conversation)
@@ -123,11 +132,18 @@ class MemoryExtractor:
             )
         return self._system_prompt
 
-    async def analyze_messages(self, messages: list[dict]) -> list[dict]:
+    async def analyze_messages(
+        self,
+        messages: list[dict],
+        pending_commitments: list[dict] | None = None,
+    ) -> list[dict]:
         """Analyze a batch of messages and extract souvenirs + connaissances.
 
         Args:
             messages: list of {"role": "user"|"assistant", "content": "..."}
+            pending_commitments: open promises as {"id": int, "description": str}.
+                When provided, the model also checks whether the conversation
+                shows one being honored (→ ``commitment_resolved`` extraction).
 
         Returns:
             list of extraction dicts with keys:
@@ -140,6 +156,15 @@ class MemoryExtractor:
             f"{'User' if m['role'] == 'user' else 'Assistant'}: {m['content']}"
             for m in messages
         )
+
+        if pending_commitments:
+            lines = "\n".join(
+                f"- [{c['id']}] {c['description']}" for c in pending_commitments
+            )
+            conversation_text += (
+                "\n\nENGAGEMENTS EN COURS (verifie si la conversation montre "
+                "qu'ils ont ete tenus ou sont devenus caducs):\n" + lines
+            )
 
         try:
             return await asyncio.wait_for(

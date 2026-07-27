@@ -267,10 +267,17 @@ async def _collect_inner_state(person_id: str | None) -> dict:
     # Today's daily journal — recap written at the previous light-sleep
     # phase. Exposed so the panel can show "aujourd'hui" narratively.
     try:
-        from datetime import date
+        from datetime import date, timedelta
         from memory.models import DailyJournal
+        # The journal written tonight is dated the day it COVERS (the day
+        # that just ended). Matching strictly on today's date left the
+        # panel blank from midnight to the next 23h — show the most
+        # recent of {today, yesterday} instead.
         journal = await sync_to_async(
-            lambda: DailyJournal.objects.filter(date=date.today()).first()
+            lambda: DailyJournal.objects
+            .filter(date__gte=date.today() - timedelta(days=1))
+            .order_by("-date")
+            .first()
         )()
         if journal and journal.narrative:
             state["today_journal"] = {

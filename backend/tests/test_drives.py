@@ -319,3 +319,29 @@ class TestReset:
         engine.on_act(word_count=100)
         engine.reset()
         assert engine._activity == []
+
+
+# ---------------------------------------------------------------------------
+# Reactive reply (on_reply)
+# ---------------------------------------------------------------------------
+
+class TestOnReply:
+    """Answering someone is speech too: partial EXPRESSION relief +
+    activity. Before on_reply existed, a Mika who chatted all day kept
+    full expression tension, as if she had been silent."""
+
+    def test_reply_relieves_expression_partially(self, engine):
+        engine.states[DriveKind.EXPRESSION].tension = 1.0
+        engine.on_reply(word_count=30)
+        after = engine.states[DriveKind.EXPRESSION].tension
+        assert after < 1.0
+        # Partial: less relief than a spontaneous act (amount 1.0)
+        spontaneous = DriveEngine()
+        spontaneous.states[DriveKind.EXPRESSION].tension = 1.0
+        spontaneous.on_act()
+        assert after > spontaneous.states[DriveKind.EXPRESSION].tension
+
+    def test_reply_registers_activity_for_rest(self, engine):
+        engine.on_reply(word_count=80)
+        engine.update()
+        assert engine.states[DriveKind.REST].tension > 0.0

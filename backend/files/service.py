@@ -171,10 +171,12 @@ class FilesService:
         if record["category"] != "audio":
             return {"error": f"Ce fichier n'est pas un audio (catégorie: {record['category']})."}
         try:
-            from ai.providers.openai_provider import OpenAIProvider
+            from ai.router import ai_router
             try:
-                provider = OpenAIProvider()
-            except ValueError as e:
+                # Router cache: a credential rotation evicts the instance,
+                # a fresh OpenAIProvider() here would pin the old key.
+                provider = ai_router.provider_by_name("openai")
+            except (ValueError, ImportError) as e:
                 return {"error": f"Transcription indisponible — {e}"}
             audio_bytes = await asyncio.to_thread(Path(record["path"]).read_bytes)
             text = await provider.transcribe_audio(audio_bytes, record["name"])

@@ -435,6 +435,139 @@ class TestPendingEndpoints:
         assert log is not None
         assert "ejet" in log.summary.lower()
 
+    def _approve(self, client: Client, action_id: int):
+        with patch(
+            "pipeline.broadcast.broadcast_inner_state_update"
+        ) as mock_bc:
+            async def _noop(*_a, **_k): return None
+            mock_bc.side_effect = _noop
+            return client.post(
+                f"/api/projects/pending/{action_id}/approve",
+                data="{}", content_type="application/json",
+            )
+
+    def test_approve_send_email_executes_real_send(self, client: Client):
+        """An approved send_email must reach the email module's send path."""
+        from projects.models import Project, ProjectPendingAction
+        p = Project.objects.create(title="X")
+        a = ProjectPendingAction.objects.create(
+            project=p, proposal="send email",
+            payload={"kind": "send_email", "to": "a@b.c",
+                     "subject": "Rapport", "body": "Voici."},
+        )
+
+        sent = {}
+
+        class _FakeEmailModule:
+            async def send_email(self, *, to, subject, body, account_id=None):
+                sent.update(to=to, subject=subject, body=body)
+                return True, f"Email sent to {to} from Test."
+
+        with patch("modules.manager.module_manager") as mm:
+            mm.get_module.return_value = _FakeEmailModule()
+            resp = self._approve(client, a.pk)
+
+        assert resp.status_code == 200
+        assert sent == {"to": "a@b.c", "subject": "Rapport", "body": "Voici."}
+        a.refresh_from_db()
+        assert a.status == ProjectPendingAction.Status.EXECUTED
+        assert "sent" in a.execution_result
+
+    def test_approve_send_email_failure_marks_failed(self, client: Client):
+        """A send failure must yield FAILED — never a green 'executed'."""
+        from projects.models import Project, ProjectPendingAction
+        p = Project.objects.create(title="X")
+        a = ProjectPendingAction.objects.create(
+            project=p, proposal="send email",
+            payload={"kind": "send_email", "to": "a@b.c",
+                     "subject": "S", "body": "B"},
+        )
+
+        class _BrokenEmailModule:
+            async def send_email(self, **kw):
+                return False, "No SMTP-configured account available."
+
+        with patch("modules.manager.module_manager") as mm:
+            mm.get_module.return_value = _BrokenEmailModule()
+            resp = self._approve(client, a.pk)
+
+        assert resp.status_code == 200
+        a.refresh_from_db()
+        assert a.status == ProjectPendingAction.Status.FAILED
+        assert "SMTP" in a.execution_result
+
+    def test_approve_send_email_without_module_marks_failed(self, client: Client):
+        from projects.models import Project, ProjectPendingAction
+        p = Project.objects.create(title="X")
+        a = ProjectPendingAction.objects.create(
+            project=p, proposal="send email",
+            payload={"kind": "send_email", "to": "a@b.c",
+                     "subject": "S", "body": "B"},
+        )
+        with patch("modules.manager.module_manager") as mm:
+            mm.get_module.return_value = None
+            resp = self._approve(client, a.pk)
+
+        assert resp.status_code == 200
+        a.refresh_from_db()
+        assert a.status == ProjectPendingAction.Status.FAILED
+
+
+@pytest.mark.django_db(transaction=True)
+class TestEventScheduleWiring:
+    """`event:<name>` schedule rules fire via the module bus.
+
+    notify_event existed but had no caller — every event-scheduled
+    project was dead. emit_event now wakes matching projects.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clean(self):
+        from projects.models import Project
+        Project.objects.all().delete()
+        yield
+
+    @pytest.mark.asyncio
+    async def test_emit_event_wakes_matching_project(self):
+        from asgiref.sync import sync_to_async
+        from django.utils import timezone
+        from modules.manager import ModuleManager
+        from modules.types import ModuleEvent
+        from projects.models import Project
+
+        p = await sync_to_async(Project.objects.create)(
+            title="Veille email", schedule_rule="event:email.received",
+            next_run_at=None,
+        )
+
+        manager = ModuleManager()
+        before = timezone.now()
+        await manager.emit_event(ModuleEvent(
+            event_type="email.received", source_module="email", data={},
+        ))
+
+        refreshed = await sync_to_async(Project.objects.get)(pk=p.pk)
+        assert refreshed.next_run_at is not None
+        assert refreshed.next_run_at >= before
+
+    @pytest.mark.asyncio
+    async def test_non_matching_event_leaves_project_alone(self):
+        from asgiref.sync import sync_to_async
+        from modules.manager import ModuleManager
+        from modules.types import ModuleEvent
+        from projects.models import Project
+
+        p = await sync_to_async(Project.objects.create)(
+            title="Veille email", schedule_rule="event:email.received",
+            next_run_at=None,
+        )
+        manager = ModuleManager()
+        await manager.emit_event(ModuleEvent(
+            event_type="rss.new_entry", source_module="rss", data={},
+        ))
+        refreshed = await sync_to_async(Project.objects.get)(pk=p.pk)
+        assert refreshed.next_run_at is None
+
 
 # ---------------------------------------------------------------------------
 # 7. MCP tool — create_project via handler

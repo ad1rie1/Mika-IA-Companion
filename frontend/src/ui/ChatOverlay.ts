@@ -11,6 +11,7 @@ const ACCEPTED_TYPES = [
   "image/jpeg", "image/png", "image/gif", "image/webp",
   "audio/mpeg", "audio/mp3", "audio/wav", "audio/ogg", "audio/webm",
   "text/plain", "text/csv", "text/markdown", "application/json",
+  "application/pdf", // extrait côté backend (pipeline/preprocessors/files.py)
 ].join(",");
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB

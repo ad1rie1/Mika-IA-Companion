@@ -200,6 +200,17 @@ async def process_message(
     if emit_event and not ai_failed:
         await emit_communication_event(source, person_id)
 
+    # 5b. Answering someone relieves the EXPRESSION drive (partially) and
+    #     counts as activity toward REST. Internal triggers are excluded:
+    #     the conscience already calls drive_engine.on_act() for those,
+    #     and double-counting would empty EXPRESSION on every murmur.
+    if not ai_failed and perception.intent is not Intent.INTERNAL_TRIGGER:
+        try:
+            from drives.engine import drive_engine
+            drive_engine.on_reply(word_count=len(response_text.split()))
+        except Exception:
+            logger.debug("Drive on_reply hook failed", exc_info=True)
+
     # 6. Compute final blended emotion for the reply's display.
     msg_emotion = emotion_engine.compute_message_emotion(person_id)
 

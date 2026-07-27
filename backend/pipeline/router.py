@@ -174,9 +174,9 @@ async def _save_raw_media(perception: Perception) -> None:
 
 
 async def _preprocess(perception: Perception) -> None:
-    """Replace non-text Parts with text descriptions via modality-specific
-    preprocessors. Phase 3 introduces real preprocessors; for now this is
-    a no-op stub so tests can assert the flow without burning LLM calls.
+    """Replace non-text Parts with text via modality-specific preprocessors:
+    image → vision caption, audio → Whisper transcript, file → extracted
+    text. Each degrades to a safe placeholder on failure.
     """
     try:
         from pipeline.preprocessors import run_preprocessors
