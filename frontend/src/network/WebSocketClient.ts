@@ -1,3 +1,5 @@
+import type { ServerMessageMap } from "../types";
+
 export type MessageHandler = (data: any) => void;
 
 export class WebSocketClient {
@@ -137,6 +139,11 @@ export class WebSocketClient {
     this.send(this.withIdentity({ type: "chat", message, attachments }));
   }
 
+  on<K extends keyof ServerMessageMap>(
+    type: K,
+    handler: (msg: ServerMessageMap[K]) => void
+  ): void;
+  on(type: string, handler: MessageHandler): void;
   on(type: string, handler: MessageHandler) {
     if (!this.handlers.has(type)) {
       this.handlers.set(type, []);

@@ -1,0 +1,151 @@
+{
+  "version": 1,
+  "clips": {
+    "idle_breathing": {
+      "url": "/animations/idle/idle_breathing.fbx",
+      "category": "idle",
+      "weight": 3,
+      "hold": [8, 16],
+      "hands": ["relaxed", "relaxed"]
+    },
+    "idle_happy": {
+      "url": "/animations/idle/idle_happy.fbx",
+      "category": "idle",
+      "weight": 2,
+      "hold": [7, 14],
+      "hands": ["relaxed", "relaxed"]
+    },
+    "idle_bored": {
+      "url": "/animations/idle/idle_bored.fbx",
+      "category": "idle",
+      "weight": 0,
+      "hold": [8, 14],
+      "hands": ["relaxed", "relaxed"]
+    },
+    "idle_sad": {
+      "url": "/animations/idle/idle_sad.fbx",
+      "category": "idle",
+      "weight": 0,
+      "hold": [8, 14],
+      "hands": ["relaxed", "relaxed"]
+    },
+    "idle_nervous": {
+      "url": "/animations/idle/idle_nervous.fbx",
+      "category": "idle",
+      "weight": 0,
+      "hold": [7, 12],
+      "hands": ["relaxed", "relaxed"]
+    },
+    "talk_main": {
+      "url": "/animations/talk/talk_main.fbx",
+      "category": "talk",
+      "weight": 2,
+      "hold": [4, 9],
+      "hands": ["open", "relaxed"]
+    },
+    "talk_heated": {
+      "url": "/animations/talk/talk_heated.fbx",
+      "category": "talk",
+      "weight": 1,
+      "hold": [4, 8],
+      "hands": ["open", "open"]
+    },
+    "talk_variant_b": {
+      "url": "/animations/talk/talk_variant_b.fbx",
+      "category": "talk",
+      "weight": 2,
+      "hold": [4, 9],
+      "hands": ["open", "relaxed"]
+    },
+    "talk_variant_c": {
+      "url": "/animations/talk/talk_variant_c.fbx",
+      "category": "talk",
+      "weight": 2,
+      "hold": [4, 9],
+      "hands": ["relaxed", "open"]
+    },
+    "gesture_wave": {
+      "url": "/animations/gesture/gesture_wave.fbx",
+      "category": "gesture",
+      "fadeIn": 0.25,
+      "fadeOut": 0.45,
+      "hands": ["open", "open"]
+    },
+    "gesture_laugh": {
+      "url": "/animations/gesture/gesture_laugh.fbx",
+      "category": "gesture",
+      "fadeIn": 0.2,
+      "fadeOut": 0.5
+    },
+    "gesture_think": {
+      "url": "/animations/gesture/gesture_think.fbx",
+      "category": "gesture",
+      "loop": true,
+      "hold": [3.5, 5.5],
+      "fadeIn": 0.3,
+      "fadeOut": 0.5
+    },
+    "gesture_surprised": {
+      "url": "/animations/gesture/gesture_surprised.fbx",
+      "category": "gesture",
+      "fadeIn": 0.15,
+      "fadeOut": 0.45,
+      "hands": ["open", "open"]
+    },
+    "gesture_bashful": {
+      "url": "/animations/gesture/gesture_bashful.fbx",
+      "category": "gesture",
+      "fadeIn": 0.3,
+      "fadeOut": 0.5
+    },
+    "gesture_angry": {
+      "url": "/animations/gesture/gesture_angry.fbx",
+      "category": "gesture",
+      "fadeIn": 0.25,
+      "fadeOut": 0.45
+    },
+    "gesture_nod": {
+      "url": "/animations/gesture/gesture_nod.fbx",
+      "category": "gesture",
+      "fadeIn": 0.25,
+      "fadeOut": 0.4
+    },
+    "gesture_headshake": {
+      "url": "/animations/gesture/gesture_headshake.fbx",
+      "category": "gesture",
+      "fadeIn": 0.25,
+      "fadeOut": 0.4
+    },
+    "gesture_excited": {
+      "url": "/animations/gesture/gesture_excited.fbx",
+      "category": "gesture",
+      "fadeIn": 0.2,
+      "fadeOut": 0.5,
+      "hands": ["open", "open"]
+    },
+    "gesture_sigh": {
+      "url": "/animations/gesture/gesture_sigh.fbx",
+      "category": "gesture",
+      "fadeIn": 0.3,
+      "fadeOut": 0.5
+    },
+    "gesture_yawn": {
+      "url": "/animations/gesture/gesture_yawn.fbx",
+      "category": "gesture",
+      "fadeIn": 0.35,
+      "fadeOut": 0.5
+    },
+    "gesture_stretch": {
+      "url": "/animations/gesture/gesture_stretch.fbx",
+      "category": "gesture",
+      "fadeIn": 0.35,
+      "fadeOut": 0.5,
+      "hands": ["open", "open"]
+    }
+  },
+  "sleep": {
+    "light_sleep": { "clip": "idle_breathing", "timeScale": 1.0 },
+    "rem": { "clip": "idle_breathing", "timeScale": 0.85 },
+    "deep_sleep": { "clip": "idle_breathing", "timeScale": 0.6 }
+  }
+}

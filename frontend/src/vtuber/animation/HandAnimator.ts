@@ -1,21 +1,17 @@
 import { VRM } from "@pixiv/three-vrm";
 import type { VRMHumanBoneName } from "@pixiv/three-vrm";
-import type { EmotionName } from "./EmotionController";
-
-export type SleepPhase = "awake" | "light_sleep" | "rem" | "deep_sleep";
-
-/** Named hand shapes the IdleAnimator picks per body pose. */
-export type HandShapeName = "relaxed" | "open" | "tucked" | "loose" | "clasp";
+import type { EmotionName, HandShapeName, SleepPhase } from "../../types";
 
 /**
  * Full finger articulation for both hands (30 VRM humanoid bones).
  *
- * Nothing else in the app touches finger bones, so this animator owns
- * them exclusively. Without it the fingers stay frozen in the bind pose
- * (stiff, splayed flat) — the single biggest "wax statue" tell.
+ * The Mixamo retarget STRIPS finger tracks (mixamoRetarget.ts), so this
+ * animator keeps exclusive ownership of the finger bones — its absolute
+ * writes never fight the clip mixer. Fingers are the one place where
+ * procedural beats Mixamo: emotion-reactive curl, ripples, sleep shapes.
  *
  * What it layers, per finger:
- *   1. base shape        — from the current idle pose (IdleAnimator)
+ *   1. base shape        — from the current clip's manifest `hands` entry
  *   2. emotion offset    — tense curl when angry, open + lively when excited
  *   3. organic noise     — slow per-finger drift so hands never freeze
  *   4. ripple events     — a little→index curl wave every few seconds,
@@ -23,10 +19,10 @@ export type HandShapeName = "relaxed" | "open" | "tucked" | "loose" | "clasp";
  *   5. spring smoothing  — per-finger, staggered (index leads, little
  *                          trails) so shape changes cascade naturally
  *
- * Sign conventions follow the empirically-verified rig convention from
- * VTuberModel/IdleAnimator (left arm along -X, so left-hand curl is +Z,
- * right-hand curl is -Z; thumbs curl around ±Y). If a different model
- * bends fingers backward, flip CURL_SIGN / THUMB_SIGN.
+ * Sign conventions follow the empirically-verified rig convention
+ * (left arm along -X, so left-hand curl is +Z, right-hand curl is -Z;
+ * thumbs curl around ±Y). If a different model bends fingers backward,
+ * flip CURL_SIGN / THUMB_SIGN.
  */
 
 type Side = "left" | "right";
@@ -98,7 +94,7 @@ const SHAPES: Record<HandShapeName, HandShape> = {
   tucked: { curl: 0.5, spread: 0.0, thumbCurl: 0.4 },
   // Deep sleep / drowsy: heavy, half-closed.
   loose: { curl: 0.38, spread: 0.05, thumbCurl: 0.3 },
-  // Hands clasped behind the back: half-holding the other hand.
+  // Hands clasped: half-holding the other hand.
   clasp: { curl: 0.42, spread: 0.0, thumbCurl: 0.35 },
 };
 
@@ -132,7 +128,8 @@ const EMOTION_HAND: Partial<Record<EmotionName, HandMood>> = {
 
 const NEUTRAL_MOOD: HandMood = { curl: 0, speed: 1, micro: 1 };
 
-/** Same cheap organic noise as IdleAnimator: three incommensurate sines. */
+/** Cheap organic noise: three incommensurate sines summed. Reads as
+ * drift, not as a metronome — the period never visibly repeats. */
 function noise(t: number, seed: number): number {
   return (
     (Math.sin(t * 0.37 + seed * 1.7) +
@@ -189,7 +186,8 @@ export class HandAnimator {
     this.isSpeaking = speaking;
   }
 
-  /** Called by IdleAnimator when the body pose changes. */
+  /** Called by the state machine when the base clip changes (manifest
+   * `hands` metadata). */
   setPoseShape(left: HandShapeName, right: HandShapeName): void {
     if (left !== this.shapeTarget.left) {
       this.prevShape.left = this.shapeTarget.left;

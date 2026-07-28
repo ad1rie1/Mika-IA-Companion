@@ -13,82 +13,13 @@
  * peut être replié (clic sur le header) pour libérer l'écran.
  */
 
-type EmotionBlend = Array<{ emotion: string; weight: number }>;
-
-export type SleepPhase = "awake" | "light_sleep" | "rem" | "deep_sleep";
-
-export interface ProjectSummary {
-  id: number;
-  title: string;
-  status: string;
-  priority: string;
-  origin: string;
-  emotion_policy: string;
-  schedule_rule: string;
-  next_run_at: string | null;
-  tasks_total: number;
-  tasks_done: number;
-  tasks_blocked: number;
-}
-
-export interface PendingProjectAction {
-  id: number;
-  project_id: number;
-  project_title: string;
-  proposal: string;
-  payload_kind: string;
-  created_at: string;
-}
-
-interface InnerState {
-  drives?: Record<string, { tension: number; last_satisfied: number }>;
-  energy?: number;
-  circadian?: {
-    phase: "morning" | "afternoon" | "evening" | "night";
-    hour: number;
-    energy: number;
-    bias_emotion: string;
-  };
-  sleep_phase?: SleepPhase;
-  today_journal?: {
-    date: string;
-    narrative: string;
-    dominant_emotion: string;
-    persons_interacted: string[];
-  };
-  last_dream?: {
-    content: string;
-    dream_type: "associative" | "nightmare" | "pleasant" | "mundane";
-    vividness: number;
-    emotion: string;
-    night_of: string;
-    recalled: boolean;
-  };
-  projects?: ProjectSummary[];
-  pending_project_actions?: PendingProjectAction[];
-  self_narrative?: {
-    content: string;
-    key_themes: string[];
-    key_people: string[];
-    dominant_mood: string;
-    created_at: string;
-  };
-  ruminations?: Array<{
-    summary: string;
-    intensity: number;
-    emotion: string;
-  }>;
-  person_profile?: {
-    name: string;
-    summary: string;
-    closeness: string;
-    preferred_tone: string;
-    topics_of_interest: string[];
-    sensitive_topics: string[];
-    interaction_count: number;
-  };
-  pending_commitments?: string[];
-}
+import type {
+  EmotionBlend,
+  InnerState,
+  PendingProjectAction,
+  ProjectSummary,
+  SleepPhase,
+} from "../types";
 
 const PHASE_META: Record<
   "morning" | "afternoon" | "evening" | "night",

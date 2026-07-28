@@ -1,39 +1,15 @@
 import { VRM } from "@pixiv/three-vrm";
+import { EMOTION_NAMES, type EmotionName } from "../types";
 
-// All 29 emotions matching backend ai/emotion_types.py
-export type EmotionName =
-  | "neutral"
-  // Positive
-  | "happy"
-  | "excited"
-  | "love"
-  | "proud"
-  | "grateful"
-  | "playful"
-  | "amused"
-  | "hopeful"
-  | "relieved"
-  // Negative
-  | "sad"
-  | "angry"
-  | "scared"
-  | "disgusted"
-  | "frustrated"
-  | "lonely"
-  | "anxious"
-  | "bored"
-  | "jealous"
-  // Complex
-  | "surprised"
-  | "thinking"
-  | "confused"
-  | "embarrassed"
-  | "nostalgic"
-  | "dreamy"
-  | "determined"
-  | "mischievous"
-  | "curious"
-  | "melancholic";
+/**
+ * FACE-ONLY emotion rendering: maps the 29 emotions to VRM expression
+ * weights with intensity scaling and per-frame easing.
+ *
+ * The emotional head pose that used to live here moved to
+ * vtuber/animation/overlays/HeadEmotionOverlay.ts — it now composes an
+ * additive delta ON TOP of the clip-driven head, instead of absolute
+ * Euler writes that would erase clip motion.
+ */
 
 interface BlendShapeTarget {
   [presetName: string]: number;
@@ -123,43 +99,6 @@ const PERULA_EMOTION_MAP: Record<EmotionName, BlendShapeTarget> = {
   melancholic: { Sad2: 0.6, Relaxy: 0.2 },
 };
 
-// Per-emotion head pose offsets (radians). Applied to the `head` bone on
-// top of whatever the sleep layer does to the neck. Positive pitch = look
-// down, negative = look up. Positive roll = tilt right (left ear down).
-// Positive yaw = turn right.
-interface HeadPose {
-  pitch: number;
-  roll: number;
-  yaw: number;
-}
-
-const ZERO_POSE: HeadPose = { pitch: 0, roll: 0, yaw: 0 };
-
-const EMOTION_HEAD_POSE: Partial<Record<EmotionName, HeadPose>> = {
-  // Curiosity + thinking → classic head-tilt to one side
-  curious:     { pitch: -0.04, roll:  0.10, yaw: 0 },
-  thinking:    { pitch: -0.02, roll:  0.08, yaw: 0.03 },
-  confused:    { pitch:  0.0,  roll: -0.10, yaw: 0 },
-  // Embarrassment → head turns down-away
-  embarrassed: { pitch:  0.08, roll: -0.05, yaw: -0.05 },
-  // Proud → chin up slightly
-  proud:       { pitch: -0.06, roll:  0.0,  yaw: 0 },
-  determined:  { pitch: -0.03, roll:  0.0,  yaw: 0 },
-  // Sad family → head down
-  sad:         { pitch:  0.08, roll:  0.0,  yaw: 0 },
-  lonely:      { pitch:  0.06, roll:  0.0,  yaw: 0 },
-  melancholic: { pitch:  0.06, roll:  0.03, yaw: 0 },
-  // Surprised → head back a touch
-  surprised:   { pitch: -0.05, roll:  0.0,  yaw: 0 },
-  scared:      { pitch: -0.03, roll:  0.04, yaw: 0 },
-  // Dreamy / love → soft tilt
-  dreamy:      { pitch: -0.02, roll:  0.05, yaw: 0 },
-  love:        { pitch:  0.0,  roll:  0.04, yaw: 0 },
-  // Mischievous → slight lean + side glance complement
-  mischievous: { pitch: -0.02, roll:  0.06, yaw: 0.05 },
-  // Everything else stays at rest
-};
-
 export class EmotionController {
   private vrm: VRM | null = null;
   private currentEmotion: EmotionName = "neutral";
@@ -169,13 +108,6 @@ export class EmotionController {
   private transitionSpeed = 3.0;
   private activeMap: Record<EmotionName, BlendShapeTarget> =
     STANDARD_EMOTION_MAP;
-
-  // Head pose state (eased toward target per-frame so changes are smooth).
-  private currentHeadPose: HeadPose = { pitch: 0, roll: 0, yaw: 0 };
-  private targetHeadPose: HeadPose = { pitch: 0, roll: 0, yaw: 0 };
-  // Emotions where head pose is suppressed (avoid stacking with sleep).
-  // Set to true when entering sleep phase; main.ts pushes this.
-  private suppressHeadPose = false;
 
   setVRM(vrm: VRM) {
     this.vrm = vrm;
@@ -210,7 +142,7 @@ export class EmotionController {
     }
 
     console.log(
-      `EmotionController: ${richCount}/28 emotions using rich model expressions`
+      `EmotionController: ${richCount}/${EMOTION_NAMES.length} emotions using rich model expressions`
     );
     return resolved;
   }
@@ -230,28 +162,9 @@ export class EmotionController {
       this.targetWeights[key] = value * clampedIntensity;
     }
 
-    // Update target head pose — scaled by intensity so low-intensity
-    // emotions barely tilt the head.
-    const pose = EMOTION_HEAD_POSE[emotion] || ZERO_POSE;
-    const scale = 0.3 + clampedIntensity * 0.7;
-    this.targetHeadPose = {
-      pitch: pose.pitch * scale,
-      roll: pose.roll * scale,
-      yaw: pose.yaw * scale,
-    };
-
     console.log(
       `Emotion: ${emotion} (intensity: ${clampedIntensity.toFixed(2)})`
     );
-  }
-
-  /** Called by main.ts when sleep phase changes. Sleep owns the neck;
-   * we freeze the head pose during sleep to avoid layered conflicts. */
-  setSuppressHeadPose(suppressed: boolean): void {
-    this.suppressHeadPose = suppressed;
-    if (suppressed) {
-      this.targetHeadPose = { pitch: 0, roll: 0, yaw: 0 };
-    }
   }
 
   update(delta: number) {
@@ -280,36 +193,6 @@ export class EmotionController {
 
       this.currentWeights.set(name, newValue);
       this.vrm.expressionManager.setValue(name, newValue);
-    }
-
-    this.updateHeadPose(delta);
-  }
-
-  private updateHeadPose(delta: number): void {
-    if (!this.vrm?.humanoid) return;
-    // While suppressed the target is (0,0,0) and we keep easing toward it:
-    // bailing out here froze the head at whatever tilt the last emotion left,
-    // which then stacked on top of the sleep neck tilt all night — exactly
-    // the layered conflict the suppression exists to prevent.
-
-    const ease = Math.min(1, delta * 2.0); // slower than expressions — natural
-    this.currentHeadPose = {
-      pitch:
-        this.currentHeadPose.pitch +
-        (this.targetHeadPose.pitch - this.currentHeadPose.pitch) * ease,
-      roll:
-        this.currentHeadPose.roll +
-        (this.targetHeadPose.roll - this.currentHeadPose.roll) * ease,
-      yaw:
-        this.currentHeadPose.yaw +
-        (this.targetHeadPose.yaw - this.currentHeadPose.yaw) * ease,
-    };
-
-    const head = this.vrm.humanoid.getNormalizedBoneNode("head");
-    if (head) {
-      head.rotation.x = this.currentHeadPose.pitch;
-      head.rotation.y = this.currentHeadPose.yaw;
-      head.rotation.z = this.currentHeadPose.roll;
     }
   }
 

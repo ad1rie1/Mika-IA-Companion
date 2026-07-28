@@ -1,6 +1,9 @@
 import * as THREE from "three";
-
-export type SleepPhase = "awake" | "light_sleep" | "rem" | "deep_sleep";
+import type {
+  AnchorId,
+  EnvironmentAnchor,
+  SleepPhase,
+} from "../types";
 
 // Per-phase multipliers applied to all ambient / directional / accent
 // light intensities. Deep sleep = almost dark blue room.
@@ -119,6 +122,19 @@ export class Environment {
     this.sleepPhase = phase;
     this.targetMultiplier = PHASE_LIGHT_MULTIPLIER[phase];
     this.targetBgColor = new THREE.Color(PHASE_BG_COLOR[phase]);
+  }
+
+  /**
+   * v2 locomotion seam: named walk-to targets tied to the furniture this
+   * class positions. Returns undefined until the anchor table ships with
+   * the locomotion work. Coordinates for the future table (from the
+   * furniture constants below):
+   *   bed_lie:      position [-3.35, 0.42, 1.3] (mattress top), pose "lie"
+   *   desk_sit:     position [-1.4, 0, -3.3] (chair in front of desk), pose "sit"
+   *   window_stand: position [2.5, 0, -3.8], pose "stand"
+   */
+  getAnchor(_id: AnchorId): EnvironmentAnchor | undefined {
+    return undefined;
   }
 
   /** Called by the main update loop. Eases lights + bg, animates the room. */

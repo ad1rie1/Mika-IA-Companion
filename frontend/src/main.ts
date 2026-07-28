@@ -3,14 +3,9 @@ import { SceneManager } from "./scene/SceneManager";
 import { Environment } from "./scene/Environment";
 import { CameraController } from "./scene/CameraController";
 import { VTuberModel } from "./vtuber/VTuberModel";
-import {
-  EmotionController,
-  type EmotionName,
-} from "./vtuber/EmotionController";
-import { AnimationMixer } from "./vtuber/AnimationMixer";
-import { GazeController } from "./vtuber/GazeController";
-import { IdleAnimator } from "./vtuber/IdleAnimator";
-import { HandAnimator } from "./vtuber/HandAnimator";
+import { EmotionController } from "./vtuber/EmotionController";
+import { AnimationSystem } from "./vtuber/animation/AnimationSystem";
+import { AnimationDebugger } from "./vtuber/animation/AnimationDebugger";
 import { LipSyncController } from "./audio/LipSyncController";
 import { TTSService } from "./audio/TTSService";
 import { WebSocketClient } from "./network/WebSocketClient";
@@ -20,18 +15,12 @@ import { EmotionDisplay } from "./ui/EmotionDisplay";
 import { InnerLifePanel } from "./ui/InnerLifePanel";
 import { LoginOverlay } from "./ui/LoginOverlay";
 import { WS_URL, whoami } from "./network/api";
-
-// All valid backend emotion names for validation
-const VALID_EMOTIONS = new Set<string>([
-  "neutral",
-  "happy", "excited", "love", "proud", "grateful",
-  "playful", "amused", "hopeful", "relieved",
-  "sad", "angry", "scared", "disgusted", "frustrated",
-  "lonely", "anxious", "bored", "jealous",
-  "surprised", "thinking", "confused", "embarrassed",
-  "nostalgic", "dreamy", "determined", "mischievous",
-  "curious", "melancholic",
-]);
+import {
+  isEmotionName,
+  type EmotionName,
+  type SleepPhase,
+  type SpeechMessage,
+} from "./types";
 
 function wireIdentityBar(identity: IdentityService, ws: WebSocketClient) {
   const nameInput = document.getElementById("identity-name") as HTMLInputElement;
@@ -84,14 +73,11 @@ async function init() {
     sceneManager.renderer.domElement
   );
 
-  // VTuber model
+  // VTuber model + the whole body-animation stack (clips, state machine,
+  // overlays, hands, gaze, blink) behind one facade.
   const vtuberModel = new VTuberModel(sceneManager.scene);
   const emotionController = new EmotionController();
-  const animationMixer = new AnimationMixer();
-  const gazeController = new GazeController();
-  const idleAnimator = new IdleAnimator();
-  const handAnimator = new HandAnimator();
-  idleAnimator.attachHands(handAnimator);
+  const animationSystem = new AnimationSystem();
   const lipSyncController = new LipSyncController();
   const emotionDisplay = new EmotionDisplay();
   const innerLifePanel = new InnerLifePanel();
@@ -106,11 +92,15 @@ async function init() {
   try {
     const vrm = await vtuberModel.load("/models/default.vrm");
     emotionController.setVRM(vrm);
-    animationMixer.setVRM(vrm);
-    gazeController.setVRM(vrm);
-    idleAnimator.setVRM(vrm);
-    handAnimator.setVRM(vrm);
     lipSyncController.setVRM(vrm);
+    const root = vtuberModel.getRoot();
+    if (root) cameraController.setFollowTarget(root);
+    // Starts animating synchronously on the rest pose, then streams the
+    // Mixamo clips in — not awaited so the app boots without waiting for
+    // FBX downloads.
+    void animationSystem
+      .init(vrm, { root })
+      .catch((e) => console.warn("AnimationSystem init failed:", e));
     console.log("VTuber model ready");
   } catch (e) {
     console.warn(
@@ -120,21 +110,21 @@ async function init() {
     createPlaceholder(sceneManager);
   }
 
-  // TTS with lip-sync integration
+  // TTS with lip-sync + body-animation integration
   const tts = new TTSService({
     onSpeakStart: () => {
-      animationMixer.setSpeaking(true);
-      idleAnimator.setSpeaking(true);
-      handAnimator.setSpeaking(true);
+      animationSystem.setSpeaking(true);
     },
     onSpeakEnd: () => {
-      animationMixer.setSpeaking(false);
-      idleAnimator.setSpeaking(false);
-      handAnimator.setSpeaking(false);
+      animationSystem.setSpeaking(false);
       lipSyncController.stop();
     },
     onAudioData: (analyser) => {
       lipSyncController.startAudioDriven(analyser);
+    },
+    // [SIGH]/[LAUGH] tokens fire a body beat in sync with their audio.
+    onProsodicCue: (cue) => {
+      animationSystem.playCue(cue);
     },
   });
 
@@ -203,43 +193,44 @@ async function init() {
   });
 
   // Sleep phase plumbing. The InnerLifePanel extracts the phase from
-  // every inner_state payload; we fan it out to the animation mixer
-  // (avatar dozes) and the environment (lights dim). We also stamp
-  // `lastAsleepAt` every tick while asleep so the TTS can insert a
-  // wake-up pause on the first reply after waking — no matter whether
-  // the speech payload carries an already-awake phase or not.
+  // every inner_state payload; the fan-out collapsed to two calls with
+  // the animation rewrite (AnimationSystem forwards to the state
+  // machine, overlays, blink, gaze and hands internally). We also stamp
+  // `lastAsleepAt` while asleep so the TTS can insert a wake-up pause
+  // on the first reply after waking.
   let lastAsleepAt: number | null = null;
-  innerLifePanel.onSleepPhaseChange((phase) => {
-    animationMixer.setSleepPhase(phase);
+  const applySleepPhase = (phase: SleepPhase) => {
+    animationSystem.setSleepPhase(phase);
     environment.setSleepPhase(phase);
-    gazeController.setSleepPhase(phase);
-    idleAnimator.setSleepPhase(phase);
-    handAnimator.setSleepPhase(phase);
-    // Sleep owns the neck bone. When asleep, stop applying emotion-
-    // driven head pose to avoid layered conflicts (curious tilt +
-    // sleep forward tilt = broken geometry).
-    emotionController.setSuppressHeadPose(phase !== "awake");
     if (phase !== "awake") {
       lastAsleepAt = performance.now();
     }
-  });
+  };
+  innerLifePanel.onSleepPhaseChange(applySleepPhase);
 
-  const handleSpeech = (data: any) => {
+  const applyEmotion = (
+    emotion: EmotionName,
+    intensity: number,
+    blend: SpeechMessage["emotion_blend"] = [],
+    persona?: SpeechMessage["voice_persona"]
+  ) => {
+    emotionController.setEmotion(emotion, intensity);
+    animationSystem.setEmotion(emotion, intensity, blend ?? [], persona);
+    emotionDisplay.setEmotion(emotion, intensity);
+  };
+
+  const handleSpeech = (data: SpeechMessage) => {
     // Validate emotion from backend
-    const rawEmotion = data.emotion as string;
-    const emotion: EmotionName = VALID_EMOTIONS.has(rawEmotion)
-      ? (rawEmotion as EmotionName)
+    const emotion: EmotionName = isEmotionName(data.emotion)
+      ? data.emotion
       : "neutral";
     const intensity: number =
       typeof data.emotion_intensity === "number"
         ? data.emotion_intensity
         : 0.7;
 
-    // Facial expression + gaze direction
-    emotionController.setEmotion(emotion, intensity);
-    gazeController.setEmotion(emotion, intensity);
-    handAnimator.setEmotion(emotion, intensity);
-    emotionDisplay.setEmotion(emotion, intensity);
+    // Face + body + UI
+    applyEmotion(emotion, intensity, data.emotion_blend, data.voice_persona);
 
     // Ambivalence panel + rest of inner state
     innerLifePanel.setEmotionBlend(data.emotion_blend || [], intensity);
@@ -273,14 +264,14 @@ async function init() {
   // Pure state refresh — no speech, no lip-sync, just inner_state.
   // Emitted by the backend when Mika's sleep phase transitions during
   // the night without any conversation turn happening.
-  ws.on("inner_state_update", (data: any) => {
+  ws.on("inner_state_update", (data) => {
     innerLifePanel.applyInnerState(data.inner_state);
   });
 
   // Project reports — silent by default (no TTS). Show as a message
   // in the chat overlay so the user sees what Mika wrapped up. Prefixed
   // to distinguish from regular conversation.
-  ws.on("project_report", (data: any) => {
+  ws.on("project_report", (data) => {
     try {
       chatOverlay.addMessage(
         `[Projet · ${data.project_title}] ${data.text}`,
@@ -293,39 +284,15 @@ async function init() {
 
   ws.connect();
 
-  // Debug poses: Alt+P pins each idle pose in turn on the live model
-  // (the only reliable way to check clipping — axis conventions on this
-  // rig have burned every analytical guess so far), Alt+O resumes auto.
-  let poseToast: HTMLDivElement | null = null;
-  let poseToastTimer: number | null = null;
-  const showPoseToast = (text: string) => {
-    if (!poseToast) {
-      poseToast = document.createElement("div");
-      poseToast.style.cssText =
-        "position:fixed;bottom:16px;left:16px;z-index:9999;" +
-        "background:rgba(20,20,30,.85);color:#fff;padding:6px 12px;" +
-        "border-radius:8px;font:13px monospace;pointer-events:none;" +
-        "transition:opacity .3s";
-      document.body.appendChild(poseToast);
-    }
-    poseToast.textContent = text;
-    poseToast.style.opacity = "1";
-    if (poseToastTimer !== null) window.clearTimeout(poseToastTimer);
-    poseToastTimer = window.setTimeout(() => {
-      if (poseToast) poseToast.style.opacity = "0";
-    }, 2000);
-  };
-  document.addEventListener("keydown", (e) => {
-    if (!e.altKey || e.ctrlKey || e.metaKey) return;
-    const k = e.key.toLowerCase();
-    if (k === "p") {
-      e.preventDefault();
-      showPoseToast(`Pose: ${idleAnimator.cyclePose()} (Alt+O = auto)`);
-    } else if (k === "o") {
-      e.preventDefault();
-      idleAnimator.releasePose();
-      showPoseToast("Poses: auto");
-    }
+  // Manual QA hooks: Alt+M cycles every loaded clip on the live model
+  // (the only reliable retarget check on this rig), Alt+K skeleton,
+  // Alt+S/E/T/G force sleep/emotions/talking/gestures, Alt+D panel.
+  new AnimationDebugger({
+    system: animationSystem,
+    scene: sceneManager.scene,
+    avatarScene: vtuberModel.vrm?.scene ?? null,
+    applySleepPhase,
+    applyEmotion: (emotion, intensity) => applyEmotion(emotion, intensity),
   });
 
   // Typing anywhere (outside another field) focuses the chat input, so you
@@ -348,12 +315,9 @@ async function init() {
   sceneManager.onUpdate((delta) => {
     cameraController.update(delta);
     emotionController.update(delta);
-    animationMixer.update(delta);
-    idleAnimator.update(delta);
-    handAnimator.update(delta);
-    // Gaze runs after the mixer so the eye bone rotations aren't
-    // overwritten by any higher-level pose logic further up.
-    gazeController.update(delta);
+    // Owns every bone writer, in order: resetNormalizedPose → state
+    // machine → clip mixer → additive overlays → hands → gaze → blink.
+    animationSystem.update(delta);
     lipSyncController.update(delta);
     environment.update(delta);
     // vrm.update() applies expression weights and copies normalized bones to

@@ -69,7 +69,12 @@ export class SceneManager {
 
   private animate = () => {
     requestAnimationFrame(this.animate);
-    const delta = this.clock.getDelta();
+    // Clamped at the source: after a background-tab restore getDelta()
+    // returns seconds, which would make the animation mixer teleport the
+    // pose in one frame and feed the VRM spring bones (16 groups) an
+    // impulse big enough to diverge. Motion just catches up over a few
+    // frames instead.
+    const delta = Math.min(this.clock.getDelta(), 1 / 20);
     for (const cb of this.callbacks) {
       cb(delta);
     }

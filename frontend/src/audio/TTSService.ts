@@ -1,15 +1,6 @@
-import type { EmotionName } from "../vtuber/EmotionController";
+import type { EmotionName, ProsodicCue, VoiceProfile } from "../types";
 
-/**
- * Voice identity multipliers sent by the backend (pipeline/voice.py).
- * The INNER persona — Mika thinking out loud rather than talking to you —
- * arrives quieter, slower and slightly lower.
- */
-export interface VoiceProfile {
-  pitch: number;
-  rate: number;
-  gain: number;
-}
+export type { VoiceProfile } from "../types";
 
 const NEUTRAL_PROFILE: VoiceProfile = { pitch: 1.0, rate: 1.0, gain: 1.0 };
 
@@ -22,6 +13,10 @@ export interface TTSEvents {
   onSpeakStart: () => void;
   onSpeakEnd: () => void;
   onAudioData: (analyser: AnalyserNode) => void;
+  /** Fired when a [SIGH]/[LAUGH]/[BREATH] token is reached, right
+   * before its synthetic audio plays — so a body gesture can start in
+   * sync with the sound. */
+  onProsodicCue?: (cue: ProsodicCue) => void;
 }
 
 // Emotion-to-voice modulation: pitch and rate adjustments
@@ -435,6 +430,7 @@ export class TTSService {
         await new Promise((r) => setTimeout(r, seg.ms));
       } else if (seg.type === "sfx") {
         emitStart();
+        this.events.onProsodicCue?.(seg.kind);
         await this.playSfx(seg.kind);
       }
     }

@@ -1,9 +1,12 @@
 import { VRM } from "@pixiv/three-vrm";
-import type { EmotionName } from "./EmotionController";
+import type { EmotionName, SleepPhase } from "../../types";
 
 /**
  * Drives eye pose: where Mika is looking, and whether she's making
  * eye contact, averting, or just flickering around the scene.
+ *
+ * Mixamo rigs have no eye bones, so this controller's absolute writes
+ * never conflict with the clip mixer — it kept its pre-rewrite logic.
  *
  * Three interacting sources of eye direction (blended in priority
  * order — the highest-priority non-zero contribution wins):
@@ -21,8 +24,6 @@ import type { EmotionName } from "./EmotionController";
  * Values are tiny angles (± 0.15 rad max on each axis) — eye bones
  * rotate around their own origin, not the head's.
  */
-
-export type SleepPhase = "awake" | "light_sleep" | "rem" | "deep_sleep";
 
 interface GazeDirection {
   pitch: number; // up (-) / down (+)
@@ -103,7 +104,7 @@ export class GazeController {
     // Compute target gaze
     if (this.sleepPhase !== "awake") {
       // Asleep: eyes look forward+down, no saccades. The blink/closure
-      // is already handled by AnimationMixer — the bone rotation just
+      // is already handled by BlinkController — the bone rotation just
       // keeps them pointed naturally (not rolled up).
       this.target = { pitch: 0.05, yaw: 0 };
     } else {

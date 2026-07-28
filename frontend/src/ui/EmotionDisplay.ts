@@ -1,4 +1,4 @@
-import type { EmotionName } from "../vtuber/EmotionController";
+import type { EmotionName } from "../types";
 
 type EmotionCategory = "neutral" | "positive" | "negative" | "complex";
 

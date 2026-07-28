@@ -35,7 +35,9 @@
       "Bash(curl -s http://127.0.0.1:8001/api/dev/sleep/status -o /dev/null -w \"sleep debug endpoint \\(DEBUG-gated\\) HTTP: %{http_code}\\\\n\")",
       "Bash(pkill -f \"PROJET IA/vtuber/run.py\")",
       "Bash(API_PORT=8001 nohup python run.py)",
-      "Bash(echo \"launched, pid $!\")"
+      "Bash(echo \"launched, pid $!\")",
+      "Bash(npm run *)",
+      "Bash(npm install *)"
     ]
   }
 }

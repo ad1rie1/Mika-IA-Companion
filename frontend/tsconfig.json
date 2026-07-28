@@ -16,5 +16,8 @@
     "noFallthroughCasesInSwitch": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  // The smoke test runs under vitest in a NODE context (fs/path to read
+  // the real FBX downloads) — excluded from the browser-app typecheck.
+  "exclude": ["src/**/*.smoke.test.ts"]
 }

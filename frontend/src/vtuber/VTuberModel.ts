@@ -4,10 +4,14 @@ import { VRM, VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
 
 export class VTuberModel {
   public vrm: VRM | null = null;
-  public model: THREE.Group | null = null;
 
   private loader: GLTFLoader;
   private scene: THREE.Scene;
+  // AvatarRoot: the ONLY object whose world transform places Mika in the
+  // room. The VRM lives at the root's local origin, so v2 locomotion
+  // moves/rotates this group while clips keep animating in model-local
+  // space — and the camera can follow it.
+  private root: THREE.Group | null = null;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -26,7 +30,7 @@ export class VTuberModel {
             return;
           }
 
-          VRMUtils.removeUnnecessaryJoints(gltf.scene);
+          VRMUtils.combineSkeletons(gltf.scene);
           VRMUtils.removeUnnecessaryVertices(gltf.scene);
 
           // Enable shadows
@@ -37,15 +41,15 @@ export class VTuberModel {
             }
           });
 
-          // Position in room
-          vrm.scene.position.set(0, 0, -0.5);
-          vrm.scene.rotation.y = Math.PI; // Face camera
-
-          this.applyRestPose(vrm);
-
-          this.scene.add(vrm.scene);
+          // Position in room via the AvatarRoot. The Y-π turn is the
+          // VRM0 face-the-camera flip (equivalent to VRMUtils.rotateVRM0).
+          this.root = new THREE.Group();
+          this.root.name = "AvatarRoot";
+          this.root.position.set(0, 0, -0.5);
+          this.root.rotation.y = Math.PI;
+          this.root.add(vrm.scene);
+          this.scene.add(this.root);
           this.vrm = vrm;
-          this.model = gltf.scene;
 
           console.log("VRM model loaded successfully");
           resolve(vrm);
@@ -61,26 +65,10 @@ export class VTuberModel {
     });
   }
 
-  /** VRM files ship in T-pose (arms straight out — the rigging reference
-   * pose). Nothing re-poses the arms at runtime, so without this the
-   * avatar stands in the bind pose forever. Normalized rig convention
-   * (verified empirically on this rig): character faces -Z, left arm
-   * along -X, so positive Z rotation lowers the left arm. */
-  private applyRestPose(vrm: VRM) {
-    const humanoid = vrm.humanoid;
-    if (!humanoid) return;
-
-    const set = (bone: Parameters<typeof humanoid.getNormalizedBoneNode>[0], z: number) => {
-      const node = humanoid.getNormalizedBoneNode(bone);
-      if (node) node.rotation.z = z;
-    };
-
-    // ~66° down from horizontal: relaxed A-pose, arms along the body.
-    set("leftUpperArm", 1.15);
-    set("rightUpperArm", -1.15);
-    // Slight elbow follow-through so the arms don't look rigid.
-    set("leftLowerArm", 0.1);
-    set("rightLowerArm", -0.1);
+  /** The avatar's placement group — camera follow target, and the v2
+   * locomotion driver's write target. Null until load() succeeds. */
+  getRoot(): THREE.Object3D | null {
+    return this.root;
   }
 
   update(delta: number) {
