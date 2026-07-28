@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from django.http import JsonResponse
-from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
 from dashboard.serializers import iso, paginate
@@ -9,21 +8,19 @@ from dashboard.serializers import iso, paginate
 
 @require_http_methods(["GET"])
 def sleep(request):
+    from asgiref.sync import async_to_sync
+
+    from memory import read
     from memory.sleep import sleep_cycle
-    from memory.models import DailyJournal, Dream
 
-    from datetime import timedelta
-
-    # The nightly journal is dated the day it covers — strictly matching
-    # today's date left this endpoint empty from midnight to ~23h.
-    today = timezone.localdate()
-    journal = (
-        DailyJournal.objects
-        .filter(date__gte=today - timedelta(days=1))
-        .order_by("-date")
-        .first()
-    )
-    last_dream = Dream.objects.order_by("-created_at").first()
+    # Both queries used to live here in longhand. The journal one was a
+    # byte-for-byte copy of the WebSocket snapshot, comment included; the
+    # dream one had drifted into answering a different question entirely —
+    # ``order_by("-created_at").first()`` is the newest dream *ever*, so on
+    # a quiet week this endpoint presented a fortnight-old dream as last
+    # night's. Scoping to ``night_of`` is what the field is for.
+    journal = async_to_sync(read.latest_journal)()
+    last_dream = async_to_sync(read.dream_of_last_night)()
 
     return JsonResponse({
         "phase": sleep_cycle.phase,

@@ -367,34 +367,20 @@ async def _fetch_dream_context() -> str:
     Marks the dream as recalled the moment it is surfaced — we don't
     want the same dream popping up turn after turn.
     """
-    try:
-        from asgiref.sync import sync_to_async
-        from memory.models import Dream
-        from memory.sleep import NIGHT_END_HOUR
-    except ImportError:
-        return ""
+    from datetime import datetime
 
-    from datetime import datetime, timedelta
+    from memory import read
+    from memory.sleep import NIGHT_END_HOUR
 
     now = datetime.now()
     # Only eligible in the morning window [NIGHT_END_HOUR, +WINDOW]
     if not (NIGHT_END_HOUR <= now.hour < NIGHT_END_HOUR + _DREAM_RECALL_WINDOW_HOURS):
         return ""
 
-    # "Last night" = the night that ended at NIGHT_END_HOUR today
-    last_night = (now - timedelta(days=1)).date()
-
     try:
-        dream = await sync_to_async(
-            lambda: Dream.objects
-            .filter(
-                night_of=last_night,
-                recalled_at__isnull=True,
-                vividness__gte=_DREAM_VIVIDNESS_THRESHOLD,
-            )
-            .order_by("-vividness")
-            .first()
-        )()
+        dream = await read.dream_of_last_night(
+            unrecalled_only=True, min_vividness=_DREAM_VIVIDNESS_THRESHOLD,
+        )
     except Exception:
         logger.debug("Dream context fetch failed", exc_info=True)
         return ""
@@ -402,15 +388,9 @@ async def _fetch_dream_context() -> str:
     if not dream:
         return ""
 
-    # Mark as recalled atomically so subsequent turns don't re-surface
-    # the same dream. We accept losing the recall trace if the save
-    # fails — better than double-injection.
-    try:
-        from django.utils import timezone as tz
-        dream.recalled_at = tz.now()
-        await sync_to_async(dream.save)(update_fields=["recalled_at"])
-    except Exception:
-        logger.debug("Dream recalled_at save failed", exc_info=True)
+    # Mark as recalled so subsequent turns don't re-surface the same dream.
+    # A failed write is accepted — losing the trace beats double-injection.
+    await read.mark_dream_recalled(dream)
 
     # Build a human-readable residue hint.
     type_label = {
@@ -442,19 +422,15 @@ async def _fetch_journal_context() -> str:
     only) and "hier" relied on semantic retrieval luck. Available all
     day: unlike a dream, yesterday doesn't fade by mid-afternoon.
     """
-    try:
-        from asgiref.sync import sync_to_async
-        from memory.models import DailyJournal
-    except ImportError:
-        return ""
+    from memory import read
 
-    from datetime import date, timedelta
-
-    yesterday = date.today() - timedelta(days=1)
+    # Strictly yesterday, not "the latest": light sleep writes a journal late
+    # on the evening of the day it covers, so between 23h and midnight the
+    # newest row is *today's*. A block titled "ton fil d'hier" must not
+    # narrate the day currently in progress. The panels ask the other
+    # question — see memory.read.latest_journal.
     try:
-        journal = await sync_to_async(
-            lambda: DailyJournal.objects.filter(date=yesterday).first()
-        )()
+        journal = await read.journal_for(read.yesterday())
     except Exception:
         logger.debug("Journal context fetch failed", exc_info=True)
         return ""
@@ -487,20 +463,15 @@ async def _fetch_rumination_context() -> str:
     every turn lets them color REACTIONS too, not just spontaneous speech.
     Empty string when the table is missing, empty, or intensities are low.
     """
-    try:
-        from asgiref.sync import sync_to_async
-        from conscience.models import Rumination
-    except ImportError:
-        return ""
+    from conscience import read as conscience_read
 
     try:
-        items = await sync_to_async(
-            lambda: list(
-                Rumination.objects
-                .filter(status="active", intensity__gte=0.2)
-                .order_by("-intensity")[:3]
-            )
-        )()
+        # Top 3 above a floor: a thought too faint to notice should not be
+        # narrated as one. The panel shows more, and fainter — see
+        # conscience.read.active_ruminations.
+        items = await conscience_read.active_ruminations(
+            limit=3, min_intensity=0.2,
+        )
     except Exception:
         logger.debug("Rumination context fetch failed", exc_info=True)
         return ""
@@ -634,14 +605,10 @@ def _fetch_circadian_context() -> str:
 
 async def _fetch_self_concept() -> str:
     """Return the most recent self-narrative content, or '' if none."""
+    from memory import read
+
     try:
-        from asgiref.sync import sync_to_async
-
-        from memory.models import SelfNarrative
-
-        latest = await sync_to_async(
-            lambda: SelfNarrative.objects.order_by("-created_at").first()
-        )()
+        latest = await read.latest_self_narrative()
         return latest.content if latest and latest.content else ""
     except Exception:
         logger.debug("Self-concept fetch failed", exc_info=True)
@@ -689,39 +656,17 @@ async def _fetch_person_context(identity_ctx) -> str:
 
     entity = None
     try:
-        from asgiref.sync import sync_to_async
-
-        from memory.models import Commitment, EmotionalSummary, PersonProfile
+        from memory import read
 
         entity = await identity_resolver.entity_for_person(person_id)
         if entity is None:
             return affect
 
-        profile = await sync_to_async(
-            lambda: PersonProfile.objects
-            .select_related("entity")
-            .filter(entity=entity)
-            .first()
-        )()
-
-        commitments = await sync_to_async(
-            lambda: list(
-                Commitment.objects
-                .filter(person=entity, status="pending")
-                .order_by("-created_at")
-                .values_list("description", flat=True)[:5]
-            )
-        )()
-
-        weekly_trend = await sync_to_async(
-            lambda: _summarize_emotional_trend(
-                list(
-                    EmotionalSummary.objects
-                    .filter(person_id=person_id, period_type="daily")
-                    .order_by("-period_start")[:7]
-                )
-            )
-        )()
+        profile = await read.person_profile_for(entity)
+        commitments = await read.pending_commitments_for(entity)
+        weekly_trend = _summarize_emotional_trend(
+            await read.recent_daily_summaries(person_id)
+        )
 
         if (
             not affect

@@ -324,21 +324,13 @@ def _snapshot_sleep_phase() -> dict:
 async def _snapshot_today_journal() -> dict:
     """The recap written at the previous light-sleep phase.
 
-    A journal is dated the day it COVERS (the one that just ended), so
-    matching strictly on today left the panel blank from midnight to 23h.
-    Show the most recent of {today, yesterday} instead.
+    "Most recent", not "yesterday's": a journal is dated the day it COVERS,
+    so matching strictly on today left the panel blank from midnight to 23h.
+    The prompt asks the other question — see memory.read.
     """
-    from datetime import date, timedelta
+    from memory import read
 
-    from asgiref.sync import sync_to_async
-    from memory.models import DailyJournal
-
-    journal = await sync_to_async(
-        lambda: DailyJournal.objects
-        .filter(date__gte=date.today() - timedelta(days=1))
-        .order_by("-date")
-        .first()
-    )()
+    journal = await read.latest_journal()
     if not journal or not journal.narrative:
         return {}
     return {
@@ -357,18 +349,9 @@ async def _snapshot_last_dream() -> dict:
     Surfaced regardless of ``recalled_at`` so the panel keeps showing it
     after Mika has mentioned it in conversation.
     """
-    from datetime import date, timedelta
+    from memory import read
 
-    from asgiref.sync import sync_to_async
-    from memory.models import Dream
-
-    last_night = date.today() - timedelta(days=1)
-    dream = await sync_to_async(
-        lambda: Dream.objects
-        .filter(night_of=last_night)
-        .order_by("-vividness")
-        .first()
-    )()
+    dream = await read.dream_of_last_night()
     if not dream or not dream.content:
         return {}
     return {
@@ -408,12 +391,9 @@ def _snapshot_circadian() -> dict:
 
 async def _snapshot_self_narrative() -> dict:
     """One row, the most recent."""
-    from asgiref.sync import sync_to_async
-    from memory.models import SelfNarrative
+    from memory import read
 
-    narrative = await sync_to_async(
-        lambda: SelfNarrative.objects.order_by("-created_at").first()
-    )()
+    narrative = await read.latest_self_narrative()
     if not narrative or not narrative.content:
         return {}
     return {
@@ -429,22 +409,15 @@ async def _snapshot_self_narrative() -> dict:
 
 async def _snapshot_ruminations() -> dict:
     """Top-5 active. Always present, empty list included."""
-    from asgiref.sync import sync_to_async
-    from conscience.models import Rumination
+    from conscience import read
 
-    rows = await sync_to_async(
-        lambda: list(
-            Rumination.objects.filter(status="active")
-            .order_by("-intensity")[:5]
-            .values("summary", "intensity", "emotion")
-        )
-    )()
+    rows = await read.active_ruminations(limit=5)
     return {
         "ruminations": [
             {
-                "summary": r["summary"],
-                "intensity": round(r["intensity"], 2),
-                "emotion": r["emotion"],
+                "summary": r.summary,
+                "intensity": round(r.intensity, 2),
+                "emotion": r.emotion,
             }
             for r in rows
         ]
@@ -539,10 +512,8 @@ async def _snapshot_person(person_id: str) -> dict:
     the person's private life); the profile and commitments are gated on
     ``may_disclose``, exactly as the prompt is.
     """
-    from asgiref.sync import sync_to_async
-
     from identity.resolver import identity_resolver
-    from memory.models import Commitment, PersonProfile
+    from memory import read
 
     ident = await identity_resolver.resolve_context(person_id)
     out: dict = {
@@ -561,12 +532,7 @@ async def _snapshot_person(person_id: str) -> dict:
     if entity is None:
         return out
 
-    profile = await sync_to_async(
-        lambda: PersonProfile.objects
-        .select_related("entity")
-        .filter(entity=entity)
-        .first()
-    )()
+    profile = await read.person_profile_for(entity)
     if profile is None:
         return out
 
@@ -579,14 +545,7 @@ async def _snapshot_person(person_id: str) -> dict:
         "sensitive_topics": profile.sensitive_topics,
         "interaction_count": profile.interaction_count,
     }
-    out["pending_commitments"] = await sync_to_async(
-        lambda: list(
-            Commitment.objects
-            .filter(person=entity, status="pending")
-            .order_by("-created_at")
-            .values_list("description", flat=True)[:5]
-        )
-    )()
+    out["pending_commitments"] = await read.pending_commitments_for(entity)
     return out
 
 
