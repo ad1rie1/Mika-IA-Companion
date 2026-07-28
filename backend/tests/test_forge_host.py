@@ -351,46 +351,80 @@ class TestCommands:
 
 
 # ---------------------------------------------------------------------------
-# Vues dashboard
+# Panneaux GestionSystème
 # ---------------------------------------------------------------------------
 
 
 class _FakeRequest:
+    """Requête minimale : les panneaux ne lisent que la chaîne de requête.
+
+    ``GET`` est un vrai ``QueryDict`` et non un dict : les panneaux
+    construisent leurs liens avec ``tables.url_with``, qui appelle
+    ``urlencode()``. Un dict nu passerait ici et casserait en vrai.
+    """
+
     def __init__(self, **params):
-        self.GET = params
+        from django.http import QueryDict
+
+        qd = QueryDict(mutable=True)
+        qd.update({k: str(v) for k, v in params.items()})
+        self.GET = qd
+        self.path = "/gestion/modules/forge/p/modules/"
 
 
-class TestViews:
-    async def test_views_exposed_and_sanitized(self, host):
+class TestPanels:
+    async def test_panneaux_exposes(self, host):
         await _create_basic(host)
-        views = host.get_views()
-        keys = {v.key for v in views}
-        assert "forge" in keys
-        assert "compteur_test__stats" in keys
-        forged = next(v for v in views if v.key == "compteur_test__stats")
-        assert forged.detail_handler is not None
-        assert "Compteur" in forged.label
-        payload = await forged.data_handler(_FakeRequest(page="0"))
-        assert "rows" in payload
-        assert "html" not in payload  # payload assaini (anti-XSS)
-        detail = await forged.detail_handler(_FakeRequest(), "ticks")
-        assert detail["fields"][0]["value"] == "ticks"
+        cles = {p.key for p in host.get_panels()}
+        # Les trois panneaux de l'hôte…
+        assert {"modules", "journal", "stockage"} <= cles
+        # …plus une page par vue déclarée ET implémentée par un module forgé.
+        assert "compteur_test--stats" in cles
 
-    async def test_view_without_handler_not_exposed(self, host):
+    async def test_une_vue_declaree_sans_handler_n_est_pas_exposee(self, host):
         await _create_basic(
             host, code="def on_tick(api):\n    pass\n",
-        )  # manifest déclare 'stats' mais le code n'a pas view_stats
-        keys = {v.key for v in host.get_views()}
-        assert "compteur_test__stats" not in keys
+        )  # le manifest déclare 'stats' mais le code n'a pas view_stats
+        assert "compteur_test--stats" not in {p.key for p in host.get_panels()}
 
-    async def test_admin_view_lists_modules(self, host):
+    async def test_le_panneau_modules_liste_les_modules(self, host):
+        from GestionSysteme import panels as P
+
         await _create_basic(host)
-        admin = next(v for v in host.get_views() if v.key == "forge")
-        payload = await admin.data_handler(_FakeRequest())
-        modules_tab = next(t for t in payload["tabs"] if t["key"] == "modules")
-        assert any(r["name"] == "compteur_test" for r in modules_tab["rows"])
-        detail = await admin.detail_handler(_FakeRequest(), "compteur_test")
-        assert any(f["key"] == "code" for f in detail["fields"])
+        panneau = next(p for p in host.get_panels() if p.key == "modules")
+        bloc = await sync_to_async(panneau.handler)(_FakeRequest())
+        tableaux = [b for b in P.iter_blocks(bloc) if isinstance(b, P.Table)]
+        textes = [c.text for t in tableaux for r in t.rows for c in r.cells]
+        assert "compteur_test" in textes
+
+    async def test_la_fiche_d_un_module_porte_son_code(self, host):
+        from GestionSysteme import panels as P
+
+        await _create_basic(host)
+        panneau = next(p for p in host.get_panels() if p.key == "modules")
+        bloc = await sync_to_async(panneau.handler)(
+            _FakeRequest(module="compteur_test"),
+        )
+        titres = [b.title for b in P.iter_blocks(bloc) if isinstance(b, P.Prose)]
+        assert "module.py" in titres
+
+    async def test_une_charge_utile_forgee_devient_des_cellules_typees(self, host):
+        """Le code d'un module forgé est écrit par l'IA à l'exécution.
+
+        Sa charge utile n'a pas de type statique : la convertir en cellules
+        typées est précisément ce qui l'empêche de produire du balisage. Une
+        clé ``html`` n'est pas « nettoyée », elle n'est jamais lue.
+        """
+        from GestionSysteme import panels as P
+
+        await _create_basic(host)
+        panneau = next(p for p in host.get_panels() if p.key == "compteur_test--stats")
+        bloc = await sync_to_async(panneau.handler)(_FakeRequest(page="0"))
+        blocs = list(P.iter_blocks(P.blocks_from_payload(bloc)
+                                  if isinstance(bloc, dict) else bloc))
+        assert blocs, "le panneau doit produire au moins un bloc"
+        for b in blocs:
+            assert not isinstance(b, P.Template)
 
 
 # ---------------------------------------------------------------------------

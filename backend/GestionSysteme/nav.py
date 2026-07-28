@@ -37,19 +37,28 @@ class NavItem:
     description: str = ""
 
     def tab(self, key: str | None) -> Tab | None:
-        """Résout un segment d'onglet, avec repli sur le premier.
+        return resolve_tab(self.tabs, key)
 
-        Un segment inconnu retombe sur l'onglet par défaut plutôt que de
-        lever une 404 : une URL périmée après renommage d'un onglet doit
-        continuer à ouvrir la page, pas casser un favori.
-        """
-        if not self.tabs:
-            return None
-        if key:
-            for t in self.tabs:
-                if t.key == key:
-                    return t
-        return self.tabs[0]
+
+def resolve_tab(tabs: tuple[Tab, ...], key: str | None) -> Tab | None:
+    """Résout un segment d'onglet, avec repli sur le premier.
+
+    Un segment inconnu retombe sur l'onglet par défaut plutôt que de lever
+    une 404 : une URL périmée après renommage d'un onglet doit continuer à
+    ouvrir la page, pas casser un favori.
+
+    Vit hors de ``NavItem`` parce que les fiches de détail ont elles aussi
+    des onglets (``PERSON_TABS``) sans être des destinations du menu, et que
+    deux règles de repli qui divergent est exactement le genre d'écart qui ne
+    se voit qu'une fois l'URL cassée.
+    """
+    if not tabs:
+        return None
+    if key:
+        for t in tabs:
+            if t.key == key:
+                return t
+    return tabs[0]
 
 
 @dataclass(frozen=True)
@@ -106,6 +115,42 @@ SOCIAL = NavItem(
         Tab("politique", "Politique de confiance"),
     ),
 )
+
+# Onglets de la **fiche** d'une personne — pas une destination du menu, donc
+# hors de NAV. Même vocabulaire (segment d'URL + libellé) parce que c'est la
+# même promesse : l'onglet est dans l'adresse, il se partage et le retour
+# arrière fonctionne.
+#
+# L'ordre suit ce qu'on vient chercher : d'abord ce qu'elle croit savoir
+# d'elle (la synthèse), puis la matière d'où ça sort (souvenirs, faits,
+# messages), puis ce qui se joue entre elles (affect, promesses).
+PERSON_TABS: tuple[Tab, ...] = (
+    Tab("synthese", "Synthèse"),
+    Tab("souvenirs", "Souvenirs"),
+    Tab("connaissances", "Connaissances"),
+    Tab("echanges", "Échanges"),
+    Tab("affect", "Affect"),
+    Tab("engagements", "Engagements"),
+)
+
+
+# Onglets de la **fiche** d'une identité. Symétrique de PERSON_TABS et pour la
+# même raison : ces deux fiches sont les deux côtés de la même question. La
+# fiche personne part de l'entité mémoire (« que sait-elle de Thomas »), celle
+# d'une identité part du handle (« est-ce vraiment Thomas, pourquoi le croit-
+# elle, et qu'est-ce que ça ouvre »).
+#
+# Le verdict vient en premier parce que tout le reste s'y rapporte : les
+# handles expliquent son plafond, les preuves expliquent sa valeur, les
+# actions le déplacent.
+IDENTITY_TABS: tuple[Tab, ...] = (
+    Tab("verdict", "Verdict"),
+    Tab("handles", "Handles"),
+    Tab("echanges", "Échanges"),
+    Tab("preuves", "Preuves"),
+    Tab("actions", "Actions"),
+)
+
 
 CONSCIENCE = NavItem(
     key="conscience", label="Conscience", icon="◉", url_name="conscience",

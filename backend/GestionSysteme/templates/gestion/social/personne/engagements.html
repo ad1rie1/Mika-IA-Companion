@@ -1,0 +1,66 @@
+{% extends "gestion/social/personne/_base.html" %}
+{% load gestion %}
+
+{% block panneau %}
+<div class="alert alert-info mb-4">
+  Un engagement en attente est réaffirmé dans le prompt tant qu'il n'est pas
+  résolu. Trois choses le ferment : une extraction
+  <span class="mono">commitment_resolved</span>, l'outil
+  <span class="mono">memory_resolve_commitment</span> en pleine conversation,
+  ou l'expiration (échéance dépassée, ou 30 jours en attente).
+</div>
+
+<section class="card">
+  {% include "gestion/partials/filters.html" %}
+
+  {% if page.rows %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th style="min-width: 28rem;">Promesse</th>
+              <th class="fit">État</th>
+              <th class="fit">Échéance</th>
+              <th class="fit">Pris</th>
+              <th class="fit">Résolu</th>
+              <th>Souvenir source</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in page.rows %}
+              <tr {% if c.status != "pending" %}class="is-muted"{% endif %}>
+                <td><div class="cell-clamp">{{ c.description }}</div></td>
+                <td class="fit">
+                  <span class="badge {% if c.status == 'pending' %}badge-warn{% elif c.status == 'honored' %}badge-ok{% endif %}">{{ c.get_status_display }}</span>
+                </td>
+                <td class="fit">{% if c.due_at %}{{ c.due_at|dt }}{% else %}—{% endif %}</td>
+                <td class="fit muted" title="{{ c.created_at|dt_full }}">{{ c.created_at|ago }}</td>
+                <td class="fit muted">{% if c.resolved_at %}<span title="{{ c.resolved_at|dt_full }}">{{ c.resolved_at|ago }}</span>{% else %}—{% endif %}</td>
+                <td class="muted text-xs">
+                  {% if c.source_souvenir %}
+                    <div class="cell-clamp">{{ c.source_souvenir.content }}</div>
+                  {% else %}—{% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
+  {% else %}
+    <div class="card-body">
+      <div class="empty">
+        {% if filterset.active %}
+          Aucun engagement ne correspond à ce filtre.
+        {% else %}
+          <div class="empty-title">Aucun engagement</div>
+          Mika n'a rien promis à cette personne — ou l'extracteur n'a rien
+          reconnu comme une promesse.
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

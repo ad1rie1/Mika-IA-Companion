@@ -185,6 +185,24 @@ class Filter:
     autosubmit: bool = True
 
 
+def url_with(request, **overrides) -> str:
+    """URL courante avec des paramètres modifiés.
+
+    Équivalent Python de la balise ``{% qs %}``, pour les panneaux de modules
+    qui construisent leurs liens en code. Une valeur ``None`` retire le
+    paramètre — c'est ce qui permet à un lien « fermer la fiche » de ramener
+    exactement la liste filtrée qu'on regardait.
+    """
+    params = request.GET.copy()
+    for key, value in overrides.items():
+        if value in (None, "", False):
+            params.pop(key, None)
+        else:
+            params[key] = value
+    encoded = params.urlencode()
+    return f"{request.path}?{encoded}" if encoded else request.path
+
+
 def read_choice(request, param: str, allowed: Iterable[str], *, default: str = "") -> str:
     """Lit un paramètre contraint à une liste fermée.
 

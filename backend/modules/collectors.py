@@ -19,7 +19,7 @@ import logging
 from django.urls import path
 
 from modules.registry import ModuleRegistry
-from modules.types import ModuleCapability, ModuleTool, ModuleView
+from modules.types import ModuleCapability, ModuleTool
 
 logger = logging.getLogger(__name__)
 
@@ -197,40 +197,3 @@ class ModuleCollectors:
         return patterns
 
     # ── Dashboard views ───────────────────────────────────────────
-
-    def views(self, *, only_running: bool = True) -> dict[str, list[ModuleView]]:
-        """``{module_name: [ModuleView, ...]}``, each list sorted by order.
-
-        ``only_running`` filters to modules currently running (the UI
-        default); pass ``False`` to introspect everything registered.
-        """
-        result: dict[str, list[ModuleView]] = {}
-        pool = (
-            self._registry.running() if only_running
-            else self._registry.all_registered()
-        )
-        for module in pool:
-            try:
-                views = list(module.get_views() or [])
-            except Exception:
-                logger.exception("get_views() failed for module %s", module.name)
-                continue
-            if views:
-                views.sort(key=lambda v: (v.order, v.label))
-                result[module.name] = views
-        return result
-
-    def view(self, module_name: str, view_key: str) -> ModuleView | None:
-        """A single running module's view, by key."""
-        module = self._registry.get(module_name)
-        if not module or not module.is_running:
-            return None
-        try:
-            declared = module.get_views() or []
-        except Exception:
-            logger.exception("get_views() failed for module %s", module_name)
-            return None
-        for view in declared:
-            if view.key == view_key:
-                return view
-        return None

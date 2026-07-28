@@ -1,0 +1,64 @@
+{% extends "gestion/social/personne/_base.html" %}
+{% load gestion %}
+
+{% block panneau %}
+<section class="card">
+  {% include "gestion/partials/filters.html" %}
+
+  {% if page.rows %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th style="min-width: 30rem;">Fait</th>
+              <th style="min-width: 8rem;">Confiance</th>
+              <th class="fit">Valide</th>
+              <th>Thèmes</th>
+              <th class="fit">Modifié</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in page.rows %}
+              <tr {% if not c.is_valid %}class="is-muted"{% endif %}>
+                <td><div class="cell-clamp">{{ c.content }}</div></td>
+                <td>
+                  <div class="row">
+                    <span class="meter {{ c.confidence|tone_ratio }}" style="flex:1; min-width:4rem;">
+                      <span style="width: {{ c.confidence|bar_width }}%;"></span>
+                    </span>
+                    <span class="tabular text-xs">{{ c.confidence|num }}</span>
+                  </div>
+                </td>
+                <td class="fit">
+                  {% if c.is_valid %}
+                    <span class="badge badge-ok">valide</span>
+                  {% else %}
+                    <span class="badge badge-danger" title="Contredite puis invalidée par la conscience">invalidée</span>
+                  {% endif %}
+                </td>
+                <td><span class="chips">{% for t in c.themes.all %}<span class="chip">{{ t.name }}</span>{% endfor %}</span></td>
+                <td class="fit muted" title="{{ c.updated_at|dt_full }}">{{ c.updated_at|ago }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
+  {% else %}
+    <div class="card-body">
+      <div class="empty">
+        {% if filterset.active %}
+          Aucune connaissance ne correspond à ce filtre.
+        {% else %}
+          <div class="empty-title">Aucun fait retenu à son sujet</div>
+          Une connaissance est un fait écrit à la troisième personne, extrait
+          par le consolidateur. Sa confiance décroît à partir de
+          <span class="mono">decayed_at</span>.
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

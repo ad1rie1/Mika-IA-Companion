@@ -33,11 +33,47 @@ export class LoginOverlay {
 
   /** Resolve immediately if already authenticated, else show the right form. */
   async ensureAuthenticated(): Promise<AuthState> {
-    const state = await whoami();
+    let state: AuthState;
+    try {
+      state = await whoami();
+    } catch (err) {
+      // Backend injoignable : afficher *ça*, pas un formulaire de login. Le
+      // formulaire n'aurait jamais pu aboutir, et chaque tentative se serait
+      // soldée par un message parlant du mot de passe.
+      await this.blockOnUnreachable(
+        err instanceof Error ? err.message : String(err)
+      );
+      return this.ensureAuthenticated();
+    }
     if (state.authenticated) return state;
     // Auth disabled server-side: let the app run anonymously as before.
     if (state.auth_required === false) return state;
     return this.prompt(Boolean(state.needs_bootstrap));
+  }
+
+  /** Écran bloquant + bouton Réessayer ; résout quand on retente. */
+  private blockOnUnreachable(message: string): Promise<void> {
+    this.root.innerHTML = `
+      <div style="
+          display:flex; flex-direction:column; gap:12px; width:340px;
+          padding:28px; background:#16213e; border-radius:12px;
+          box-shadow:0 10px 40px rgba(0,0,0,.4);">
+        <h2 style="color:#e2e8f0; font-size:18px;">Connexion au serveur impossible</h2>
+        <p id="unreachable-msg" style="color:#f87171; font-size:13px; line-height:1.45;"></p>
+        <button id="unreachable-retry" style="
+          padding:10px; border:0; border-radius:8px; background:#6366f1; color:#fff;
+          font-weight:600; cursor:pointer;">Réessayer</button>
+      </div>`;
+    // textContent, jamais innerHTML : le message cite location.origin.
+    this.root.querySelector<HTMLParagraphElement>("#unreachable-msg")!.textContent =
+      message;
+    if (!this.root.isConnected) document.body.appendChild(this.root);
+
+    return new Promise<void>((resolve) => {
+      this.root
+        .querySelector<HTMLButtonElement>("#unreachable-retry")!
+        .addEventListener("click", () => resolve(), { once: true });
+    });
   }
 
   private render(isBootstrap: boolean): void {
@@ -106,9 +142,12 @@ export class LoginOverlay {
             resolve(await this.prompt(false));
             return;
           }
-          errorEl.textContent = isBootstrap
-            ? message
-            : "Identifiants invalides.";
+          // Ne pas réécrire le message : `login()` distingue déjà le 401 (le
+          // seul cas où le mot de passe est en cause) d'une panne de
+          // transport ou d'un rejet CSRF. Écraser les trois par
+          // « Identifiants invalides. » envoyait chercher un problème de mot
+          // de passe là où le backend était simplement injoignable.
+          errorEl.textContent = message;
           passEl.value = "";
           passEl.focus();
         }

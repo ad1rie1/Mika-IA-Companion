@@ -18,7 +18,7 @@ upside once the dashboard existed:
   `claude:claude-opus-4-6` resolves to nothing and raises
   `UnconfiguredRoleError`.
 
-Everything is now configured in the dashboard. Nothing is configured twice.
+Everything is now configured in GestionSystème. Nothing is configured twice.
 """
 
 from __future__ import annotations
@@ -199,9 +199,9 @@ class TestAllowedHosts:
         assert "localhost" in settings.ALLOWED_HOSTS
 
     def test_a_spoofed_host_is_refused(self, client):
-        resp = client.get("/dashboard/api/system/health", HTTP_HOST="evil.test")
+        resp = client.get("/gestion/", HTTP_HOST="evil.test")
         assert resp.status_code == 400
 
     def test_a_legitimate_host_is_served(self, client):
-        resp = client.get("/dashboard/api/system/health", HTTP_HOST="127.0.0.1")
+        resp = client.get("/gestion/", HTTP_HOST="127.0.0.1")
         assert resp.status_code == 200

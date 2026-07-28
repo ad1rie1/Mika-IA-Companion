@@ -13,7 +13,6 @@ from modules.types import (
     ModuleRoute,
     ModuleStatus,
     ModuleTool,
-    ModuleView,
 )
 
 if TYPE_CHECKING:
@@ -46,7 +45,7 @@ class BaseModule(ABC):
         get_models                              5/9
         get_status                              4/9
         is_available / config_schema            3/9
-        get_routes / get_views                  2/9
+        get_routes                              2/9
         on_event                                1/9
 
     Grouped by what you are opting into:
@@ -65,7 +64,7 @@ class BaseModule(ABC):
 
     Infrastructure
       - get_routes()         — HTTP endpoints, auto-mounted
-      - get_views()          — dashboard pages
+      - get_panels()         — pages in the module's admin space
       - config_schema()      — settings, surfaced in the dashboard
       - get_models()         — Django models you own (see the caveat there)
       - on_event(event)      — react to the bus; see EVENT_* below
@@ -168,25 +167,6 @@ class BaseModule(ABC):
         Auto-mounted under /api/modules/{name}/. Default: none."""
         return []
 
-    # ── Dashboard Views ───────────────────────────────────────────
-
-    def get_views(self) -> list[ModuleView]:
-        """Return visualization pages this module contributes to the dashboard.
-
-        Each ``ModuleView`` is auto-mounted under
-        ``/dashboard/modules/{module}/{view.key}/`` (HTML shell) and
-        ``/dashboard/api/modules/{module}/views/{view.key}`` (JSON).
-        Side-effect ``actions`` get ``.../actions/{action.key}``.
-
-        A view is only visible in the sidebar when the module is
-        both *enabled* and *running*. Default: no views.
-
-        **Superseded by ``get_panels()``.** GestionSystème adapts any
-        ``ModuleView`` automatically, so existing modules keep working
-        untouched; new ones should prefer panels.
-        """
-        return []
-
     # ── Module space (GestionSystème) ─────────────────────────────
 
     def get_panels(self) -> list:
@@ -202,14 +182,15 @@ class BaseModule(ABC):
         gauge"); it never emits markup. The rendering belongs to
         GestionSystème's templates, with Django's autoescaping on.
 
-        That is the difference from ``get_views()``: those returned JSON that
-        a browser script injected via ``innerHTML``, so a module piping an
-        email body or a scraped page through an ``html`` key was stored XSS on
-        the admin interface — which also edits the provider API keys. Panels
-        remove the class of bug rather than filtering it.
+        This replaced ``get_views()``, which returned JSON that a browser
+        script injected via ``innerHTML`` — so a module piping an email body
+        or a scraped page through an ``html`` key was stored XSS on the admin
+        interface, which also edits the provider API keys. Panels remove the
+        class of bug rather than filtering it, and the old contract was
+        deleted with the ``dashboard`` app rather than kept as a compatibility
+        path with no consumer.
 
-        Handlers may be sync or async. Default: no panels — the module is then
-        adapted from ``get_views()`` if it declares any.
+        Handlers may be sync or async. Default: no panels.
         """
         return []
 

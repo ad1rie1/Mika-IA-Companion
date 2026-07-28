@@ -34,7 +34,6 @@ from modules.types import (
     ModuleRoute,
     ModuleStatus,
     ModuleTool,
-    ModuleView,
 )
 from modules.plugins.forge import runtime, sandbox, store
 from modules.plugins.forge.api import ForgeAPI, write_log
@@ -797,9 +796,9 @@ class ForgeModule(BaseModule):
         from modules.plugins.forge.tools import build_tools
         return build_tools(self)
 
-    def get_views(self) -> list[ModuleView]:
-        from modules.plugins.forge.views import build_views
-        return build_views(self)
+    def get_panels(self) -> list:
+        from modules.plugins.forge.panels import build_panels
+        return build_panels(self)
 
     def get_routes(self) -> list[ModuleRoute]:
         from modules.plugins.forge.views import build_routes

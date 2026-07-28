@@ -51,9 +51,12 @@ class EmailModule(BaseModule):
         from modules.plugins.email.config_schema import CONFIG_SCHEMA
         return CONFIG_SCHEMA
 
-    def get_views(self):
-        from modules.plugins.email.views import email_views
-        return email_views()
+    def get_panels(self) -> list:
+        # Rendu serveur, cellules typées, sélecteur de compte. Pas de panneau
+        # « Comptes » : ils s'éditent dans l'onglet Configuration de l'espace,
+        # qui écrit dans la même table.
+        from modules.plugins.email.panels import get_panels
+        return get_panels()
 
     def get_models(self) -> list:
         from modules.plugins.email.models import Contact, Email, EmailAccount

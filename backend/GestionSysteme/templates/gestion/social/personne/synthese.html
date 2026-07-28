@@ -1,0 +1,225 @@
+{% extends "gestion/social/personne/_base.html" %}
+{% load gestion %}
+
+{% block panneau %}
+{% comment %} La divulgation d'abord : en dessous du seuil, tout ce que montre
+   la carte « théorie de l'esprit » existe en base sans jamais atteindre le
+   prompt. Une fiche complète et une fiche jamais lue se ressemblent
+   exactement, et rien d'autre sur cette page ne les distingue. {% endcomment %}
+{% if not may_disclose %}
+  <div class="alert alert-warn mb-4">
+    <div>
+      <strong>Fiche fermée au prompt.</strong>
+      Aucune identité liée à cette personne n'atteint le seuil de divulgation
+      ({{ threshold|num }}). Seule la posture affective de Mika est injectée —
+      le profil, l'historique et les engagements ci-dessous ne le sont pas.
+    </div>
+  </div>
+{% endif %}
+
+<section class="grid c4 mb-6">
+  <a class="stat" href="{% url 'gestionsysteme:person-detail-tab' entity.pk 'souvenirs' %}">
+    <div class="stat-label">Souvenirs</div>
+    <div class="stat-value">{{ person_counts.souvenirs }}</div>
+    <div class="stat-sub">épisodes la mentionnant</div>
+  </a>
+  <a class="stat" href="{% url 'gestionsysteme:person-detail-tab' entity.pk 'connaissances' %}">
+    <div class="stat-label">Connaissances</div>
+    <div class="stat-value">{{ person_counts.connaissances }}</div>
+    <div class="stat-sub">faits à son sujet</div>
+  </a>
+  <a class="stat" href="{% url 'gestionsysteme:person-detail-tab' entity.pk 'echanges' %}">
+    <div class="stat-label">Échanges</div>
+    <div class="stat-value">{{ person_counts.echanges }}</div>
+    <div class="stat-sub">messages sur ses handles</div>
+  </a>
+  <a class="stat" href="{% url 'gestionsysteme:person-detail-tab' entity.pk 'engagements' %}">
+    <div class="stat-label">Engagements</div>
+    <div class="stat-value">{{ person_counts.engagements }}</div>
+    <div class="stat-sub">promesses prises</div>
+  </a>
+</section>
+
+<section class="split mb-6">
+  <div class="card">
+    <div class="card-head">
+      <h3>Théorie de l'esprit</h3>
+      <span class="card-sub">régénérée périodiquement par le consolidateur</span>
+    </div>
+    <div class="card-body">
+      {% if profile %}
+        <div class="narrative mb-4">{{ profile.summary }}</div>
+        <dl class="kv">
+          <dt>Proximité</dt><dd><span class="badge">{{ profile.get_closeness_display }}</span></dd>
+          <dt>Ton préféré</dt><dd>{{ profile.get_preferred_tone_display|default:"—" }}</dd>
+          <dt>Échanges</dt><dd class="tabular">{{ profile.interaction_count }}</dd>
+          <dt>Confiance</dt>
+          <dd>
+            <div class="row">
+              <span class="meter {{ profile.confidence|tone_ratio }}" style="flex:1; min-width:4rem;">
+                <span style="width: {{ profile.confidence|bar_width }}%;"></span>
+              </span>
+              <span class="tabular text-xs">{{ profile.confidence|num }}</span>
+            </div>
+          </dd>
+          {% if profile.topics_of_interest %}
+            <dt>Sujets d'intérêt</dt>
+            <dd><span class="chips">{% for t in profile.topics_of_interest %}<span class="chip">{{ t }}</span>{% endfor %}</span></dd>
+          {% endif %}
+          {% if profile.sensitive_topics %}
+            <dt>Sujets sensibles</dt>
+            <dd><span class="chips">{% for t in profile.sensitive_topics %}<span class="chip">{{ t }}</span>{% endfor %}</span></dd>
+          {% endif %}
+          <dt>Généré le</dt><dd>{{ profile.generated_at|dt_full }}</dd>
+          <dt>Dernier contact</dt><dd>{{ profile.last_interaction_at|dt_full }}</dd>
+        </dl>
+      {% else %}
+        <div class="empty">
+          <div class="empty-title">Pas encore de fiche</div>
+          Elle se génère après ≥ 3 souvenirs mentionnant cette personne et ≥ 24 h
+          depuis la dernière génération.
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="col" style="gap: var(--sp-4);">
+    <div class="card">
+      <div class="card-head">
+        <h3>Ce qu'elle ressent</h3>
+        <span class="card-sub">mémoire vive, un oscillateur par handle</span>
+      </div>
+      <div class="card-body">
+        {% for a in affects %}
+          <div class="{% if not forloop.last %}mb-4{% endif %}">
+            <div class="spread mb-2">
+              <span class="emo text-lg" style="{{ a.emotion|emo_style }}">{{ a.emotion }}</span>
+              <span class="tabular muted">{{ a.intensity|pct }}</span>
+            </div>
+            <div class="meter {{ a.intensity|tone_ratio }} mb-2">
+              <span style="width: {{ a.intensity|bar_width }}%;"></span>
+            </div>
+            <div class="row-wrap text-xs muted">
+              <span class="mono">{{ a.person_id }}</span>
+              <span>dynamique {{ a.velocity|num }}</span>
+              <span>{{ a.history_size }} points d'historique</span>
+            </div>
+          </div>
+        {% empty %}
+          <p class="muted text-sm">
+            {% if person_ids %}
+              Aucune humeur en mémoire vive pour ses handles. L'état affectif se
+              reconstruit au fil des échanges et ne survit pas à un redémarrage.
+            {% else %}
+              Aucun handle lié — l'humeur est tenue par identifiant de transport,
+              elle n'a donc rien à quoi se rattacher ici.
+            {% endif %}
+          </p>
+        {% endfor %}
+      </div>
+    </div>
+
+    {% if projects %}
+      <div class="card">
+        <div class="card-head">
+          <h3>Projets confiés</h3>
+          <span class="card-sub">ce qu'elle lui a demandé de porter</span>
+        </div>
+        <div class="card-body">
+          <div class="col">
+            {% for p in projects %}
+              <div class="spread">
+                <a href="{% url 'gestionsysteme:project-detail' p.pk %}">{{ p.title }}</a>
+                <span class="badge">{{ p.get_status_display }}</span>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <h3>Identités &amp; handles</h3>
+    <span class="card-sub">par où elle la joint, et à quel point elle en est sûre</span>
+  </div>
+  {% if verdicts %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Identité</th>
+              <th style="min-width: 9rem;">Certitude effective</th>
+              <th class="fit">Canal</th>
+              <th class="fit">Divulgation</th>
+              <th>Handles</th>
+              <th class="fit">Vue</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for v in verdicts %}
+              <tr>
+                <td>
+                  <a href="{% url 'gestionsysteme:identity-detail' v.obj.pk %}">
+                    {{ v.obj.display_name|default:"Identité" }} #{{ v.obj.pk }}
+                  </a>
+                  <div class="text-xs muted">{{ v.decision.level.name|lower }}</div>
+                </td>
+                <td>
+                  <div class="row">
+                    <span class="meter {{ v.decision.certainty|tone_ratio }}" style="flex:1; min-width:4rem;">
+                      <span style="width: {{ v.decision.certainty|bar_width }}%;"></span>
+                    </span>
+                    <span class="tabular text-xs" title="Valeur stockée avant plancher et plafond du canal : {{ v.stored|num }}">{{ v.decision.certainty|num }}</span>
+                  </div>
+                </td>
+                <td class="fit">{{ v.decision.trust.value }}</td>
+                <td class="fit">
+                  {% if v.decision.may_disclose %}
+                    <span class="badge badge-ok">autorisée</span>
+                  {% else %}
+                    <span class="badge badge-danger">fermée</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <span class="chips">
+                    {% for h in v.handles %}
+                      <span class="chip mono" title="{{ h.channel }} · {{ h.trust }}{% if h.is_ephemeral %} · éphémère{% endif %}">{{ h.person_id }}</span>
+                    {% empty %}
+                      <span class="muted text-sm">aucun</span>
+                    {% endfor %}
+                  </span>
+                </td>
+                <td class="fit muted" title="{{ v.obj.last_seen|dt_full }}">{{ v.obj.last_seen|ago }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {% else %}
+    <div class="card-body">
+      <div class="empty">
+        <div class="empty-title">Aucune identité liée</div>
+        Sans liaison, la mémoire par personne ne se résout pas : ni les
+        messages, ni l'humeur, ni l'historique affectif ne peuvent être
+        rattachés à cette entité. La liaison se fait depuis l'onglet
+        <a href="{% url 'gestionsysteme:social-tab' 'identites' %}">Identités</a>.
+        {% if orphan %}
+          <div class="mt-3">
+            Un handle nommé <span class="mono">{{ orphan.person_id }}</span> existe
+            et porte <strong>{{ orphan.messages }}</strong> message(s)
+            {% if orphan.bound_elsewhere %}mais pointe vers une autre entité{% else %}sans être lié à quoi que ce soit{% endif %}.
+            {% if orphan.identity_id %}
+              <a href="{% url 'gestionsysteme:identity-detail' orphan.identity_id %}">Ouvrir cette identité</a>
+            {% endif %}
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

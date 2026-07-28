@@ -23,7 +23,7 @@ from django.urls import reverse
 
 from GestionSysteme import forms, panels, tables
 from GestionSysteme.formatting import emotion_var
-from GestionSysteme.nav import NAV, item_for
+from GestionSysteme.nav import NAV, PERSON_TABS, item_for
 
 
 # ── Couverture des routes ───────────────────────────────────────────────
@@ -193,17 +193,20 @@ def test_un_type_de_cellule_inconnu_retombe_sur_du_texte():
     assert cell.render_kind == "text"
 
 
-def test_l_adaptateur_convertit_une_vue_historique_en_tableau():
+def test_une_charge_utile_de_module_devient_un_tableau_type():
+    # C'est la forme que produisent les modules **forgés** : du code écrit par
+    # l'IA à l'exécution, sans type statique. La conversion en cellules typées
+    # est ce qui l'empêche de produire du balisage.
     payload = {
         "columns": [{"key": "id", "label": "#"}, {"key": "sujet", "label": "Sujet"}],
         "rows": [{"id": 1, "sujet": "Bonjour"}],
         "total": 1, "page": 0, "limit": 25,
     }
-    block = panels._blocks_from_legacy_payload(payload)
+    block = panels.blocks_from_payload(payload)
     assert isinstance(block, panels.Table)
     assert [c.label for c in block.columns] == ["#", "Sujet"]
     assert block.rows[0].cells[1].text == "Bonjour"
-    # Le contrat historique compte les pages à partir de zéro, l'interface à
+    # Ces charges utiles comptent les pages à partir de zéro, l'interface à
     # partir de un : la conversion se fait à l'unique endroit qui sait les deux.
     assert block.page.number == 1
 
@@ -216,7 +219,7 @@ def test_une_charge_utile_html_ne_peut_plus_rien_rendre():
     rendu ne connaît que des cellules typées : la clé n'est pas « nettoyée »,
     elle n'est jamais lue.
     """
-    block = panels._blocks_from_legacy_payload(
+    block = panels.blocks_from_payload(
         {"html": "<script>alert(1)</script>", "js": "x", "template": "y", "ok": "1"},
     )
     assert isinstance(block, panels.Fields)
@@ -288,6 +291,602 @@ def test_un_module_inconnu_donne_une_404(client):
     assert client.get(
         reverse("gestionsysteme:module-space", args=["nexistepas"]),
     ).status_code == 404
+
+
+# ── Projets : création et édition ───────────────────────────────────────
+
+def _donnees_projet(**extra) -> dict:
+    base = {
+        "title": "Veille technique",
+        "description": "",
+        "keywords": "",
+        "origin": "user",
+        "status": "active",
+        "priority": "normal",
+        "owner": "",
+        "tone_directive": "",
+        "emotion_policy": "off",
+        "instructions": "",
+        "out_of_scope": "",
+        "allowed_modules": [],
+        "resource_paths": "",
+        "contacts": "",
+        "schedule_rule": "",
+        "monthly_token_budget": "0",
+    }
+    base.update(extra)
+    return base
+
+
+@pytest.mark.django_db
+def test_la_liste_des_projets_propose_de_creer(client):
+    html = client.get(
+        reverse("gestionsysteme:projects-tab", args=["actifs"]),
+    ).content.decode()
+    assert reverse("gestionsysteme:project-new") in html
+
+
+@pytest.mark.django_db
+def test_creation_d_un_projet(client):
+    from projects.models import Project
+
+    response = client.post(
+        reverse("gestionsysteme:project-new"),
+        _donnees_projet(title="Veille IA", schedule_rule="interval:30m"),
+    )
+    assert response.status_code == 302
+
+    projet = Project.objects.get(title="Veille IA")
+    assert projet.schedule_rule == "interval:30m"
+    # Recalculée à l'enregistrement : sans cela le projet resterait en
+    # attente jusqu'au passage suivant du lanceur.
+    assert projet.next_run_at is not None
+
+
+@pytest.mark.django_db
+def test_un_projet_cree_ici_est_en_mode_professionnel(client):
+    """Le défaut du modèle doit survivre au passage par le formulaire."""
+    from projects.models import Project
+
+    client.post(reverse("gestionsysteme:project-new"), _donnees_projet(title="Sobre"))
+    assert Project.objects.get(title="Sobre").emotion_policy == "off"
+
+
+@pytest.mark.django_db
+def test_une_cadence_invalide_est_refusee(client):
+    """``schedule.parse_rule`` ne lève jamais : une règle qu'il ne reconnaît
+    pas devient « manuel ». Depuis un formulaire, cela donnerait un projet qui
+    n'avance plus jamais sans que rien ne le signale."""
+    from projects.models import Project
+
+    response = client.post(
+        reverse("gestionsysteme:project-new"),
+        # « 5min » n'est pas une unité reconnue — c'est « 5m ».
+        _donnees_projet(title="Mal réglé", schedule_rule="interval:5min"),
+    )
+    assert response.status_code == 200
+    assert "Cadence non reconnue" in response.content.decode()
+    assert not Project.objects.filter(title="Mal réglé").exists()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("regle", [
+    "", "manual", "interval:30m", "interval:45s", "cron:0 9 * * MON-FRI",
+    "idle:30m", "event:email.received",
+])
+def test_les_cadences_documentees_sont_acceptees(regle):
+    from GestionSysteme.project_forms import ProjectForm
+
+    form = ProjectForm(_donnees_projet(schedule_rule=regle))
+    assert form.is_valid(), form.errors
+
+
+@pytest.mark.django_db
+def test_un_titre_vide_est_refuse(client):
+    from projects.models import Project
+
+    avant = Project.objects.count()
+    response = client.post(reverse("gestionsysteme:project-new"), _donnees_projet(title=""))
+    assert response.status_code == 200
+    assert Project.objects.count() == avant
+
+
+@pytest.mark.django_db
+def test_les_listes_se_saisissent_une_valeur_par_ligne(client):
+    from projects.models import Project
+
+    client.post(reverse("gestionsysteme:project-new"), _donnees_projet(
+        title="Avec consignes",
+        instructions="Demander accord avant envoi\nCiter les sources",
+        keywords="veille\nIA",
+    ))
+    projet = Project.objects.get(title="Avec consignes")
+    assert projet.instructions == ["Demander accord avant envoi", "Citer les sources"]
+    assert projet.keywords == ["veille", "IA"]
+
+
+@pytest.mark.django_db
+def test_les_modules_autorises_sont_une_liste_fermee():
+    """Liste blanche stricte : un nom mal tapé ne doit pas être accepté — il
+    fermerait un accès silencieusement plutôt que d'en ouvrir un."""
+    from GestionSysteme.project_forms import ProjectForm
+
+    form = ProjectForm(_donnees_projet(allowed_modules=["module-qui-nexiste-pas"]))
+    assert not form.is_valid()
+    assert "allowed_modules" in form.errors
+
+
+@pytest.mark.django_db
+def test_edition_d_un_projet(client):
+    from projects.models import Project
+
+    projet = Project.objects.create(title="Avant")
+    response = client.post(
+        reverse("gestionsysteme:project-edit", args=[projet.pk]),
+        _donnees_projet(title="Après", status="paused"),
+    )
+    assert response.status_code == 302
+    projet.refresh_from_db()
+    assert (projet.title, projet.status) == ("Après", "paused")
+
+
+@pytest.mark.django_db
+def test_ajout_et_suppression_d_une_tache(client):
+    from projects.models import Project, ProjectTask
+
+    projet = Project.objects.create(title="Avec tâches")
+
+    client.post(reverse("gestionsysteme:task-create", args=[projet.pk]), {
+        "description": "Lire les flux", "status": "todo", "order": "",
+        "result": "", "blocked_reason": "",
+    })
+    tache = ProjectTask.objects.get(project=projet)
+    assert tache.description == "Lire les flux"
+    assert tache.order == 1  # numérotée automatiquement
+
+    client.post(reverse("gestionsysteme:task-update", args=[projet.pk, tache.pk]), {
+        "action": "etat", "status": "done",
+    })
+    tache.refresh_from_db()
+    assert tache.status == "done"
+
+    client.post(reverse("gestionsysteme:task-update", args=[projet.pk, tache.pk]), {
+        "action": "supprimer",
+    })
+    assert not ProjectTask.objects.filter(pk=tache.pk).exists()
+
+
+@pytest.mark.django_db
+def test_un_etat_de_tache_inconnu_est_refuse(client):
+    from projects.models import Project, ProjectTask
+
+    projet = Project.objects.create(title="P")
+    tache = ProjectTask.objects.create(project=projet, description="T", status="todo")
+
+    client.post(reverse("gestionsysteme:task-update", args=[projet.pk, tache.pk]), {
+        "action": "etat", "status": "n_importe_quoi",
+    })
+    tache.refresh_from_db()
+    assert tache.status == "todo"
+
+
+@pytest.mark.django_db
+def test_une_tache_d_un_autre_projet_est_refusee(client):
+    """L'identifiant de tâche vient de l'URL : il doit être vérifié contre le
+    projet, sinon on peut modifier la tâche de n'importe quel projet."""
+    from projects.models import Project, ProjectTask
+
+    a = Project.objects.create(title="A")
+    b = Project.objects.create(title="B")
+    tache = ProjectTask.objects.create(project=b, description="T", status="todo")
+
+    response = client.post(
+        reverse("gestionsysteme:task-update", args=[a.pk, tache.pk]),
+        {"action": "supprimer"},
+    )
+    assert response.status_code == 404
+    assert ProjectTask.objects.filter(pk=tache.pk).exists()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("route", [
+    "gestionsysteme:project-delete", "gestionsysteme:task-create",
+])
+def test_les_ecritures_de_projet_refusent_le_get(client, route):
+    from projects.models import Project
+
+    projet = Project.objects.create(title="P")
+    assert client.get(reverse(route, args=[projet.pk])).status_code == 405
+
+
+# ── Fiche personne : onglets, et le pont entité ↔ handle ────────────────
+
+@pytest.fixture
+def personne(db):
+    from memory.models import Entity
+
+    return Entity.objects.create(name="Thomas", entity_type="person")
+
+
+def _lie_un_handle(entity, person_id="web_abc123", *, trust="account"):
+    """Lie un handle de transport à cette entité mémoire.
+
+    C'est le pont que la couche identité existe pour faire : les messages,
+    les instantanés d'émotion et l'humeur vive sont gardés par identifiant de
+    transport, l'entité n'apparaît dans aucun d'eux.
+    """
+    from identity.models import Identity, IdentityHandle
+
+    identity = Identity.objects.create(
+        display_name=entity.name, entity=entity, certainty=0.85,
+    )
+    return IdentityHandle.objects.create(
+        identity=identity, person_id=person_id, channel="web", trust=trust,
+    )
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("onglet", [t.key for t in PERSON_TABS])
+def test_chaque_onglet_de_la_fiche_personne_repond(client, personne, onglet):
+    """Dérivé de PERSON_TABS : un onglet sans gabarit fait rougir la suite."""
+    url = reverse("gestionsysteme:person-detail-tab", args=[personne.pk, onglet])
+    assert client.get(url).status_code == 200
+
+
+@pytest.mark.django_db
+def test_la_fiche_personne_sans_onglet_ouvre_la_synthese(client, personne):
+    from GestionSysteme.nav import PERSON_TABS
+
+    response = client.get(
+        reverse("gestionsysteme:person-detail", args=[personne.pk]),
+    )
+    assert response.status_code == 200
+    assert response.context["active_person_tab"] == PERSON_TABS[0].key
+
+
+@pytest.mark.django_db
+def test_un_onglet_de_fiche_inconnu_retombe_sur_le_premier(client, personne):
+    """Même règle de repli que les onglets du menu — une seule fonction."""
+    from GestionSysteme.nav import PERSON_TABS
+
+    response = client.get(
+        reverse("gestionsysteme:person-detail-tab", args=[personne.pk, "nexistepas"]),
+    )
+    assert response.status_code == 200
+    assert response.context["active_person_tab"] == PERSON_TABS[0].key
+
+
+@pytest.mark.django_db
+def test_une_personne_inconnue_donne_une_404(client):
+    url = reverse("gestionsysteme:person-detail-tab", args=[999999, "souvenirs"])
+    assert client.get(url).status_code == 404
+
+
+@pytest.mark.django_db
+def test_les_echanges_se_resolvent_par_handle_pas_par_entite(client, personne):
+    """Le pont, testé de bout en bout.
+
+    Un ``Message`` porte ``person_id="web_abc123"`` et rien d'autre : aucune
+    colonne ne le relie à l'entité « Thomas ». Sans la résolution par la
+    couche identité, l'onglet reste vide en affichant « aucun message » — le
+    silence exact que cette couche a été écrite pour supprimer.
+    """
+    from memory.models import Conversation, Message
+
+    conversation = Conversation.objects.create()
+    Message.objects.create(
+        conversation=conversation, role="user", content="salut c'est moi",
+        person_id="web_abc123",
+    )
+    url = reverse("gestionsysteme:person-detail-tab", args=[personne.pk, "echanges"])
+
+    sans_liaison = client.get(url)
+    assert sans_liaison.context["no_handle"] is True
+    assert sans_liaison.context["page"] is None
+
+    _lie_un_handle(personne)
+    avec_liaison = client.get(url)
+    assert avec_liaison.context["no_handle"] is False
+    assert [m.content for m in avec_liaison.context["page"].rows] == ["salut c'est moi"]
+
+
+@pytest.mark.django_db
+def test_sans_handle_l_onglet_le_dit_au_lieu_de_paraitre_vide(client, personne):
+    """« Jamais parlé » et « handle non lié » ne doivent pas se ressembler."""
+    for onglet in ("echanges", "affect"):
+        response = client.get(
+            reverse("gestionsysteme:person-detail-tab", args=[personne.pk, onglet]),
+        )
+        assert response.context["no_handle"] is True
+        assert "Aucun handle lié" in response.content.decode()
+
+
+@pytest.mark.django_db
+def test_un_handle_homonyme_est_nomme_sans_etre_utilise_pour_resoudre(client):
+    """Le cas réel : l'entité porte le handle pour nom, rien n'est lié.
+
+    Le consolidateur nomme d'après le ``person_id`` tant que personne ne s'est
+    présenté, si bien que l'entité s'appelle ``web_abc123`` — le nom du handle.
+    La page doit **nommer** cette liaison manquante sans la faire : résoudre
+    par égalité de nom est exactement le bug que la couche identité remplace.
+    """
+    from identity.models import Identity, IdentityHandle
+    from memory.models import Conversation, Entity, Message
+
+    entity = Entity.objects.create(name="web_abc123", entity_type="person")
+    identity = Identity.objects.create(display_name="web_abc123")  # non liée
+    IdentityHandle.objects.create(
+        identity=identity, person_id="web_abc123", channel="web", trust="public",
+    )
+    conversation = Conversation.objects.create()
+    Message.objects.create(
+        conversation=conversation, role="user", content="coucou",
+        person_id="web_abc123",
+    )
+
+    response = client.get(
+        reverse("gestionsysteme:person-detail-tab", args=[entity.pk, "echanges"]),
+    )
+    # Le handle homonyme n'a pas servi à résoudre : l'onglet reste fermé…
+    assert response.context["no_handle"] is True
+    orphan = response.context["orphan"]
+    assert orphan["person_id"] == "web_abc123"
+    assert orphan["bound_elsewhere"] is None
+    # …mais la page dit précisément ce qui manque, chiffres à l'appui.
+    corps = response.content.decode()
+    assert "web_abc123" in corps
+    assert str(orphan["messages"]) == "1"
+
+
+@pytest.mark.django_db
+def test_l_humeur_vive_se_lit_sur_le_handle_pas_sur_la_cle_primaire(client, personne):
+    """L'oscillateur PAD est indexé par identifiant de transport.
+
+    La fiche l'interrogeait avec ``str(entity_id)`` : « Ce qu'elle ressent »
+    ne pouvait rien afficher, jamais, sans que rien ne le signale. Ce test
+    échoue si la clé redevient celle de l'entité.
+    """
+    from emotion.engine import emotion_engine
+    from emotion.state import PersonMood
+
+    _lie_un_handle(personne, "web_abc123")
+    emotion_engine.person_moods.pop(str(personne.pk), None)
+    emotion_engine.person_moods["web_abc123"] = PersonMood(person_id="web_abc123")
+    try:
+        response = client.get(
+            reverse("gestionsysteme:person-detail-tab", args=[personne.pk, "synthese"]),
+        )
+        affects = response.context["affects"]
+        assert [a["person_id"] for a in affects] == ["web_abc123"]
+    finally:
+        emotion_engine.person_moods.pop("web_abc123", None)
+
+
+@pytest.mark.django_db
+def test_la_synthese_annonce_une_fiche_fermee_au_prompt(client, personne):
+    """La divulgation est ce qui décide si tout le reste atteint le prompt.
+
+    Une personne sans identité liée a beau avoir un profil complet, il n'est
+    jamais injecté — et rien d'autre sur la page ne le dit.
+    """
+    url = reverse("gestionsysteme:person-detail-tab", args=[personne.pk, "synthese"])
+
+    fermee = client.get(url)
+    assert fermee.context["may_disclose"] is False
+    assert "Fiche fermée au prompt" in fermee.content.decode()
+
+    # Une session authentifiée : le plancher du canal suffit à ouvrir.
+    _lie_un_handle(personne, "user_1", trust="authenticated")
+    ouverte = client.get(url)
+    assert ouverte.context["may_disclose"] is True
+    assert "Fiche fermée au prompt" not in ouverte.content.decode()
+
+
+@pytest.mark.django_db
+def test_les_pastilles_comptent_ce_que_l_onglet_montre(client, personne):
+    from memory.models import Commitment, Connaissance, Souvenir
+    from django.utils import timezone
+
+    souvenir = Souvenir.objects.create(content="on a parlé", occurred_at=timezone.now())
+    souvenir.entities.add(personne)
+    fait = Connaissance.objects.create(content="Thomas aime le thé")
+    fait.entities.add(personne)
+    Commitment.objects.create(description="lui envoyer la playlist", person=personne)
+
+    response = client.get(
+        reverse("gestionsysteme:person-detail-tab", args=[personne.pk, "synthese"]),
+    )
+    counts = response.context["person_counts"]
+    assert counts["souvenirs"] == 1
+    assert counts["connaissances"] == 1
+    assert counts["engagements"] == 1
+
+    for onglet, attendu in (
+        ("souvenirs", "on a parlé"),
+        ("connaissances", "Thomas aime le thé"),
+        ("engagements", "lui envoyer la playlist"),
+    ):
+        page = client.get(
+            reverse("gestionsysteme:person-detail-tab", args=[personne.pk, onglet]),
+        ).context["page"]
+        assert page.total == 1, onglet
+        assert attendu in str(page.rows[0])
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("onglet,param,valeur", [
+    ("souvenirs", "tri", "'; DROP TABLE"),
+    ("connaissances", "validite", "../etc"),
+    ("engagements", "statut", "pending' OR 1=1"),
+    ("echanges", "role", "assistant; --"),
+    ("echanges", "handle", "web_autre"),
+    ("affect", "periode", "monthly"),
+])
+def test_aucun_parametre_d_onglet_n_atteint_l_orm_hors_liste(
+    client, personne, onglet, param, valeur,
+):
+    """Toute valeur d'URL qui touche l'ORM passe par une liste fermée.
+
+    Le filtre ``handle`` est le plus tentant : il porte un identifiant de
+    transport et servirait, non contraint, à lire les messages de n'importe
+    qui depuis la fiche de quelqu'un d'autre.
+    """
+    _lie_un_handle(personne)
+    url = reverse("gestionsysteme:person-detail-tab", args=[personne.pk, onglet])
+    assert client.get(url, {param: valeur}).status_code == 200
+
+
+@pytest.mark.django_db
+def test_le_filtre_handle_ne_lit_que_les_handles_de_la_personne(client, personne):
+    """Un handle étranger passé dans l'URL ne doit rien ouvrir de plus."""
+    from memory.models import Conversation, Message
+
+    conversation = Conversation.objects.create()
+    Message.objects.create(
+        conversation=conversation, role="user", content="à moi",
+        person_id="web_abc123",
+    )
+    Message.objects.create(
+        conversation=conversation, role="user", content="à quelqu'un d'autre",
+        person_id="web_etranger",
+    )
+    _lie_un_handle(personne, "web_abc123")
+
+    response = client.get(
+        reverse("gestionsysteme:person-detail-tab", args=[personne.pk, "echanges"]),
+        {"handle": "web_etranger"},
+    )
+    contenus = [m.content for m in response.context["page"].rows]
+    assert contenus == ["à moi"]
+
+
+# ── Espace du module email : panneaux natifs + sélecteur de compte ──────
+
+@pytest.fixture
+def deux_comptes_email(db):
+    from modules.plugins.email.models import EmailAccount
+
+    a = EmailAccount.objects.create(
+        name="Perso", email_address="perso@test.invalid",
+        imap_host="imap.test", imap_user="p", imap_password="x",
+    )
+    b = EmailAccount.objects.create(
+        name="Pro", email_address="pro@test.invalid",
+        imap_host="imap.test", imap_user="q", imap_password="x",
+    )
+    return a, b
+
+
+@pytest.mark.django_db
+def test_le_module_email_declare_des_panneaux_natifs():
+    """Et le panneau « Comptes » historique n'est plus affiché : les comptes
+    s'éditent dans l'onglet Configuration, qui écrit dans la même table. En
+    montrer une copie en lecture seule donnait deux entrées « Comptes » côte
+    à côte pour une seule chose."""
+    cles = {p.key for p in panels.panels_for("email")}
+    assert cles == {"reception", "contacts"}
+    assert "accounts" not in cles
+
+
+@pytest.mark.django_db
+def test_le_selecteur_de_compte_apparait_a_partir_de_deux_comptes(
+    client, deux_comptes_email,
+):
+    url = reverse("gestionsysteme:module-panel", args=["email", "reception"])
+    html = client.get(url).content.decode()
+    assert 'name="compte"' in html
+    assert "Perso" in html and "Pro" in html
+
+
+@pytest.mark.django_db
+def test_le_selecteur_de_compte_est_absent_avec_un_seul_compte(client):
+    """Proposer de filtrer sur l'unique valeur possible est du bruit."""
+    from modules.plugins.email.models import EmailAccount
+
+    EmailAccount.objects.create(
+        name="Unique", email_address="seul@test.invalid",
+        imap_host="imap.test", imap_user="u", imap_password="x",
+    )
+    url = reverse("gestionsysteme:module-panel", args=["email", "reception"])
+    assert 'name="compte"' not in client.get(url).content.decode()
+
+
+@pytest.mark.django_db
+def test_le_filtre_de_compte_filtre_vraiment(client, deux_comptes_email):
+    from modules.plugins.email.models import Email
+
+    perso, pro = deux_comptes_email
+    Email.objects.create(
+        account=perso, message_id="1", from_address="a@test.invalid",
+        to_addresses="perso@test.invalid", subject="SUJET-PERSO",
+        direction="inbound",
+    )
+    Email.objects.create(
+        account=pro, message_id="2", from_address="b@test.invalid",
+        to_addresses="pro@test.invalid", subject="SUJET-PRO",
+        direction="inbound",
+    )
+
+    url = reverse("gestionsysteme:module-panel", args=["email", "reception"])
+    tout = client.get(url).content.decode()
+    assert "SUJET-PERSO" in tout and "SUJET-PRO" in tout
+
+    filtre = client.get(url, {"compte": str(perso.pk)}).content.decode()
+    assert "SUJET-PERSO" in filtre
+    assert "SUJET-PRO" not in filtre
+
+
+@pytest.mark.django_db
+def test_un_corps_d_email_hostile_est_echappe(client, deux_comptes_email):
+    """Le contenu qui motivait toute la refonte : un corps d'e-mail est du
+    contenu hostile par défaut, et l'ancien rendu l'injectait via innerHTML."""
+    from modules.plugins.email.models import Email
+
+    perso, _ = deux_comptes_email
+    message = Email.objects.create(
+        account=perso, message_id="3", from_address="attaquant@test.invalid",
+        to_addresses="perso@test.invalid", subject="<img src=x onerror=alert(1)>",
+        body_text="<script>alert('xss')</script>", direction="inbound",
+    )
+
+    url = reverse("gestionsysteme:module-panel", args=["email", "reception"])
+    html = client.get(url, {"message": str(message.pk)}).content.decode()
+    assert "<script>alert('xss')</script>" not in html
+    assert "<img src=x onerror=alert(1)>" not in html
+    assert "&lt;script&gt;" in html
+
+
+@pytest.mark.django_db
+def test_le_corps_html_n_est_jamais_rendu(client, deux_comptes_email):
+    from modules.plugins.email.models import Email
+
+    perso, _ = deux_comptes_email
+    message = Email.objects.create(
+        account=perso, message_id="4", from_address="x@test.invalid",
+        to_addresses="perso@test.invalid", subject="html seul",
+        body_text="", body_html="<b>gras</b><script>alert(1)</script>",
+        direction="inbound",
+    )
+    url = reverse("gestionsysteme:module-panel", args=["email", "reception"])
+    html = client.get(url, {"message": str(message.pk)}).content.decode()
+    # Le contenu ne doit pas apparaître **du tout** — pas même échappé. Ne
+    # vérifier que l'absence de `<b>gras</b>` littéral testerait seulement
+    # l'échappement de Django, qui est couvert ailleurs, et laisserait passer
+    # un rendu de `body_html` en texte.
+    assert "gras" not in html
+    # Sans apostrophe : Django l'échappe en &#x27; dans la sortie.
+    assert "version HTML" in html
+
+
+def test_url_with_retire_un_parametre(rf):
+    """Ce qui permet au lien « fermer la fiche » de ramener exactement la
+    liste filtrée qu'on regardait."""
+    from GestionSysteme.tables import url_with
+
+    request = rf.get("/p/reception/", {"compte": "3", "etat": "non_lus", "message": "7"})
+    ferme = url_with(request, message=None)
+    assert "message=" not in ferme
+    assert "compte=3" in ferme and "etat=non_lus" in ferme
 
 
 # ── Configuration : les secrets ne descendent jamais ────────────────────
@@ -431,6 +1030,128 @@ def test_une_valeur_refusee_n_annule_pas_les_autres(rf):
         assert config_service.get(bon.key) == "valeur-acceptee"
     finally:
         config_service.unset(bon.key, actor="test")
+
+
+# ── Choix dynamiques : les modèles d'un fournisseur ─────────────────────
+
+@pytest.fixture
+def chargeur_bidon(monkeypatch):
+    """Remplace l'appel réseau au fournisseur par une liste fixe.
+
+    Sans cela le test dépendrait d'une clé d'API valide et d'un service tiers
+    joignable — donc passerait ou échouerait pour des raisons sans rapport
+    avec le code testé.
+    """
+    from GestionSysteme import choices
+
+    appels = []
+
+    def faux(payload):
+        appels.append(payload)
+        if payload.get("provider") == "casse":
+            raise RuntimeError("502 depuis le fournisseur")
+        return [("m-rapide", "Modèle rapide"), ("m-lent", "Modèle lent")], ""
+
+    original = choices.for_list("ai.models")
+    monkeypatch.setitem(
+        choices._REGISTRY, "ai.models",
+        choices.DynamicField(
+            parent_key=original.parent_key,
+            field_key=original.field_key,
+            depends_on=original.depends_on,
+            button_label=original.button_label,
+            empty_message=original.empty_message,
+            loader=faux,
+        ),
+    )
+    return appels
+
+
+def _url_modele_nouveau() -> str:
+    return reverse(
+        "gestionsysteme:config-record-new", args=["ai_models", "ai.models"],
+    )
+
+
+@pytest.mark.django_db
+def test_le_formulaire_propose_de_charger_la_liste(client):
+    """Le schéma le dit lui-même : « l'utilisateur ne tape jamais un nom de
+    modèle ». Le bouton doit donc être là dès l'ouverture."""
+    html = client.get(_url_modele_nouveau()).content.decode()
+    assert "Charger les modèles du fournisseur" in html
+    assert "Choisis d&#x27;abord un fournisseur" in html or "Choisis d'abord un fournisseur" in html
+
+
+@pytest.mark.django_db
+def test_charger_sans_fournisseur_ne_charge_rien(client, chargeur_bidon):
+    response = client.post(_url_modele_nouveau(), {
+        "internal_name": "", "provider": "", "model_id": "", "temperature": "0.7",
+        "__charger": "1",
+    })
+    assert response.status_code == 200
+    assert not chargeur_bidon, "le fournisseur ne doit pas être interrogé sans sélection"
+
+
+@pytest.mark.django_db
+def test_charger_transforme_le_champ_en_liste_deroulante(client, chargeur_bidon):
+    response = client.post(_url_modele_nouveau(), {
+        "internal_name": "chat-rapide", "provider": "ollama",
+        "model_id": "", "temperature": "0.7", "__charger": "1",
+    })
+    html = response.content.decode()
+    assert response.status_code == 200
+    assert chargeur_bidon and chargeur_bidon[0]["provider"] == "ollama"
+    assert '<option value="m-rapide"' in html
+    assert "Modèle lent" in html
+    # La saisie déjà faite repart dans le POST : rien n'est perdu.
+    assert 'value="chat-rapide"' in html
+
+
+@pytest.mark.django_db
+def test_charger_n_enregistre_jamais(client, chargeur_bidon):
+    """Le bouton recharge des options, il ne crée pas la ligne."""
+    from configs.service import config_service
+
+    avant = len(config_service.list_rows("ai.models"))
+    client.post(_url_modele_nouveau(), {
+        "internal_name": "ne-doit-pas-exister", "provider": "ollama",
+        "model_id": "m-rapide", "temperature": "0.7", "__charger": "1",
+    })
+    assert len(config_service.list_rows("ai.models")) == avant
+
+
+@pytest.mark.django_db
+def test_un_fournisseur_injoignable_laisse_le_champ_saisissable(client, chargeur_bidon):
+    """C'est précisément quand un fournisseur ne répond pas qu'on vient
+    réparer la configuration : le formulaire doit rester utilisable."""
+    response = client.post(_url_modele_nouveau(), {
+        "internal_name": "x", "provider": "casse",
+        "model_id": "modele-tape-a-la-main", "temperature": "0.7", "__charger": "1",
+    })
+    html = response.content.decode()
+    assert response.status_code == 200
+    assert "Chargement impossible" in html
+    # Champ texte, pas une liste vide dans laquelle on ne pourrait rien choisir.
+    assert 'name="model_id"' in html
+    assert '<select id="c-model_id"' not in html
+    assert "modele-tape-a-la-main" in html
+
+
+@pytest.mark.django_db
+def test_une_valeur_absente_de_la_liste_chargee_est_conservee():
+    """Modifier une ligne ne doit pas lui faire perdre silencieusement son
+    modèle parce que le fournisseur ne le liste plus."""
+    from GestionSysteme.forms import build_record_form, require_record_list
+
+    item = require_record_list("ai.models")
+    form = build_record_form(
+        item, {"payload": {"provider": "ollama", "model_id": "modele-retire"}},
+        options=[("m-rapide", "Modèle rapide")],
+    )
+    champ = next(f for f in form.fields if f.name == "model_id")
+    valeurs = [v for v, _ in champ.options]
+    assert "modele-retire" in valeurs
+    assert champ.widget == "select"
 
 
 @pytest.mark.django_db
@@ -642,6 +1363,62 @@ def test_aucune_jauge_dans_une_cellule_alignee_a_droite():
             if 'class="meter' in m.group(1):
                 fautes.append(f"{gabarit.name}:{src[:m.start()].count(chr(10)) + 1}")
     assert not fautes, fautes
+
+
+def test_l_ancien_dashboard_a_disparu():
+    """L'application ``dashboard`` est supprimée, pas seulement démontée.
+
+    Un import résiduel ne casserait rien tant que le paquet traîne sur le
+    disque d'un développeur : c'est exactement ainsi qu'une suppression se
+    transforme en dette silencieuse. Ce test échoue sur la référence, pas sur
+    l'absence du fichier.
+    """
+    import re
+    from pathlib import Path
+
+    import GestionSysteme
+
+    racine = Path(GestionSysteme.__file__).parent.parent   # backend/
+    motif = re.compile(r"\b(from|import)\s+dashboard\b|\bdashboard\.(views|urls|middleware|sanitize|config_)")
+
+    fautes = []
+    for source in racine.rglob("*.py"):
+        if "__pycache__" in source.parts or source.parts[-2:] == ("tests", __file__):
+            continue
+        for numero, ligne in enumerate(source.read_text().splitlines(), 1):
+            if motif.search(ligne):
+                fautes.append(f"{source.relative_to(racine)}:{numero}")
+    assert not fautes, fautes
+
+    assert not (racine / "dashboard").exists()
+
+    from django.conf import settings
+    assert not any("dashboard" in app for app in settings.INSTALLED_APPS)
+    assert not any("dashboard" in m for m in settings.MIDDLEWARE)
+
+
+def test_aucune_url_ne_pointe_vers_l_ancien_prefixe(client):
+    """``/dashboard/`` ne doit plus être routé : une redirection silencieuse
+    laisserait croire que les deux interfaces coexistent encore."""
+    assert client.get("/dashboard/").status_code == 404
+
+
+def test_le_contrat_moduleview_est_supprime():
+    """Retiré avec le dashboard plutôt que gardé en compatibilité.
+
+    Les deux modules livrés déclarent des panneaux ; une capacité sans
+    déclarant est une capacité dont le défaut est la seule réponse que
+    quiconque reçoit — le motif que ce dépôt documente déjà pour ``deliver()``.
+    """
+    import modules.types as types
+    from modules.base import BaseModule
+    from modules.manager import module_manager
+
+    assert not hasattr(types, "ModuleView")
+    assert not hasattr(types, "ModuleViewAction")
+    assert not hasattr(BaseModule, "get_views")
+    assert not hasattr(module_manager, "collect_views")
+    assert not hasattr(panels, "_adapt_legacy_view")
 
 
 def test_le_javascript_ne_rend_aucune_donnee():

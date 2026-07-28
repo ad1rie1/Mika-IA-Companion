@@ -338,19 +338,23 @@ def _labelled_sites(tree):
 @pytest.mark.django_db
 class TestHealthEndpoint:
 
+    # La santé n'est plus un point JSON mais une page rendue par le serveur.
+    # On lit le contexte de la vue : ce qui est testé est ce qu'elle rapporte,
+    # pas sa mise en forme.
+    URL = "/gestion/systeme/sante/"
+
     def test_it_reports_recorded_degradations(self, client):
         degradations.record("prompt: journal context", ValueError("db down"))
 
-        payload = client.get("/dashboard/api/system/health").json()
-        labels = [s["label"] for s in payload["degradations"]["sites"]]
+        ctx = client.get(self.URL).context
+        labels = [s["label"] for s in ctx["sites_page"].rows]
         assert "prompt: journal context" in labels
-        assert payload["degradations"]["total_events"] >= 1
+        assert ctx["total_events"] >= 1
 
     def test_it_reports_bus_subscriptions(self, client):
-        payload = client.get("/dashboard/api/system/health").json()
-        names = [s["name"] for s in payload["event_bus"]["subscriptions"]]
+        ctx = client.get(self.URL).context
+        names = [s["name"] for s in ctx["subscriptions"]]
         assert "projects" in names
 
     def test_a_healthy_process_reports_nothing_failing(self, client):
-        payload = client.get("/dashboard/api/system/health").json()
-        assert payload["event_bus"]["failing"] == []
+        assert client.get(self.URL).context["failing"] == []

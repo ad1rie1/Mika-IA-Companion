@@ -15,9 +15,14 @@
 {% block page_actions %}
   {% if panel.actions %}
     <div class="page-actions">
+      {% comment %} La chaîne de requête est reportée sur l'URL d'action : une
+         action porte sur ce que l'écran montre (la fiche ouverte, le filtre
+         en place), pas sur le panneau en général. Sans elle, un bouton
+         « Recharger » ne saurait pas quel module est sélectionné.
+      {% endcomment %}
       {% for a in panel.actions %}
         <form method="post"
-              action="{% url 'gestionsysteme:module-action' module_name panel.key a.key %}"
+              action="{% url 'gestionsysteme:module-action' module_name panel.key a.key %}{% qs %}"
               {% if a.confirm %}data-confirm="{{ a.confirm }}"{% endif %}>
           {% csrf_token %}
           <button class="btn {% if a.danger %}btn-danger{% endif %}" type="submit">{{ a.label }}</button>

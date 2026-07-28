@@ -247,7 +247,13 @@ def module_action(request, module: str, panel: str, action: str):
         messages.warning(request, note.text)
     else:
         messages.success(request, note.text)
-    return redirect("gestionsysteme:module-panel", module=module, panel=panel)
+
+    # Retour sur l'écran exact d'où l'action est partie : la fiche ouverte et
+    # les filtres en place sont dans la chaîne de requête, que le formulaire
+    # d'action reporte sur son URL.
+    cible = reverse("gestionsysteme:module-panel", args=[module, panel])
+    encodee = request.GET.urlencode()
+    return redirect(f"{cible}?{encodee}" if encodee else cible)
 
 
 # ── Configuration du module (espace dynamique) ──────────────────────────

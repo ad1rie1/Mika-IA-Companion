@@ -8,7 +8,6 @@ urlpatterns = [
     path("api/modules/", include("modules.urls")),
     path("", include("projects.urls")),
     path("", include("ai.urls")),
-    path("", include("dashboard.urls")),
     path("gestion/", include("GestionSysteme.urls")),
 ]
 

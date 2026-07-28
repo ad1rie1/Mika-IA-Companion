@@ -1,0 +1,31 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% comment %} Socle de la fiche personne : fil d'Ariane, sous-navigation, entête.
+   Chaque onglet est un gabarit à part qui n'écrit que son `panneau` — la
+   sous-navigation n'existe donc qu'une fois, et un onglet ajouté sans
+   gabarit tombe à l'ouverture plutôt que de rendre une page à moitié. {% endcomment %}
+
+{% block breadcrumbs %}
+<div class="crumbs">
+  <a href="{% url 'gestionsysteme:social-tab' 'personnes' %}">Personnes</a>
+  <span class="sep">/</span><span>{{ entity.name }}</span>
+</div>
+{% endblock %}
+
+{% block tabs %}
+<nav class="tabs" aria-label="Sections de la fiche">
+  {% for t in person_tabs %}
+    <a class="tab"
+       href="{% url 'gestionsysteme:person-detail-tab' entity.pk t.key %}"
+       {% if active_person_tab == t.key %}aria-current="page"{% endif %}>
+      {{ t.label }}
+      {% with n=person_counts|get:t.key %}
+        {% if n %}<span class="tab-count">{{ n }}</span>{% endif %}
+      {% endwith %}
+    </a>
+  {% endfor %}
+</nav>
+{% endblock %}
+
+{% block content %}{% block panneau %}{% endblock %}{% endblock %}

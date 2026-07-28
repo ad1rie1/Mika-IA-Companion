@@ -9,6 +9,9 @@
     {% if block.caption %}
       <div class="card-head"><h3>{{ block.caption }}</h3></div>
     {% endif %}
+    {% if block.filters %}
+      {% include "gestion/partials/filters.html" with filterset=block.filters %}
+    {% endif %}
     {% if block.rows %}
       <div class="card-body flush">
         <div class="table-scroll">

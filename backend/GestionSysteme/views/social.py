@@ -29,7 +29,7 @@ from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from GestionSysteme import tables
-from GestionSysteme.nav import item_for
+from GestionSysteme.nav import PERSON_TABS, item_for, resolve_tab
 from GestionSysteme.shell import page_context
 from identity import trust as trust_policy
 from identity.trust import Certainty, ChannelTrust
@@ -391,8 +391,19 @@ def _persons(request) -> dict:
     return {"filterset": fs, "page": page}
 
 
-def person_detail(request, entity_id: int):
-    from memory.models import Commitment, Entity, Souvenir
+def person_detail(request, entity_id: int, tab: str | None = None):
+    """Fiche d'une personne, en onglets.
+
+    Une seule page portait tout : théorie de l'esprit, affect, handles,
+    engagements et souvenirs empilés, les souvenirs paginés quinze par quinze
+    tout en bas. Les trois quarts de ce qu'on sait d'une personne n'y étaient
+    pas du tout — ce qu'elle *sait* d'elle (connaissances), ce qu'elles se
+    sont *dit* (messages), comment l'humeur a *bougé* (résumés affectifs).
+
+    Découpé en onglets, chacun peut porter ses propres filtres et sa propre
+    pagination, et l'onglet est un segment d'URL comme partout ailleurs ici.
+    """
+    from memory.models import Entity
 
     entity = (
         Entity.objects.filter(entity_type="person", id=entity_id)
@@ -400,6 +411,16 @@ def person_detail(request, entity_id: int):
     )
     if entity is None:
         raise Http404("Personne introuvable")
+
+    current = resolve_tab(PERSON_TABS, tab)
+    identities = _person_identities(entity_id)
+    handles = [h for identity in identities for h in identity.handles.all()]
+    # Les tables gardées par identifiant de transport (messages, instantanés
+    # d'émotion, humeur vive) ne se joignent pas à une entité mémoire : elles
+    # sont indexées par handle. C'est la couche identité qui fait le pont, et
+    # c'est le seul pont — l'égalité par le nom est précisément le bug qu'elle
+    # existe pour corriger.
+    person_ids = sorted({h.person_id for h in handles})
 
     item = item_for("social")
     ctx = page_context(
@@ -410,55 +431,309 @@ def person_detail(request, entity_id: int):
     ctx.update({
         "entity": entity,
         "profile": getattr(entity, "profile", None),
-        "commitments": Commitment.objects.filter(person_id=entity_id).order_by(
-            "status", "-created_at",
-        )[:50],
-        "souvenirs_page": tables.paginate(
-            request,
-            Souvenir.objects.filter(entities=entity).order_by("-occurred_at"),
-            per_page=15,
-        ),
-        "affect": _live_affect(entity_id),
-        "handles": _handles_for_entity(entity.name),
+        "person_tabs": PERSON_TABS,
+        "active_person_tab": current.key,
+        "person_counts": _person_counts(entity, person_ids),
+        "person_ids": person_ids,
+        "orphan": None if person_ids else _orphan_hint(entity),
     })
-    return render(request, "gestion/social/personne_detail.html", ctx)
+    ctx.update({
+        "synthese": _person_synthese,
+        "souvenirs": _person_souvenirs,
+        "connaissances": _person_connaissances,
+        "echanges": _person_echanges,
+        "affect": _person_affect,
+        "engagements": _person_engagements,
+    }[current.key](request, entity, identities, person_ids))
+    return render(request, f"gestion/social/personne/{current.key}.html", ctx)
 
 
-def _live_affect(entity_id: int) -> dict | None:
-    """Humeur vivante envers cette personne (mémoire vive).
+def _person_identities(entity_id: int) -> list:
+    """Les identités liées à cette entité, handles compris.
 
-    L'appariement se fait sur une clé fondée sur l'identifiant, jamais sur le
-    nom affiché : c'est précisément l'égalité par le nom qui avait laissé la
-    théorie de l'esprit renvoyer du vide sur chaque tour.
+    Interrogé par ``entity_id``, pas par nom : ``handles_for_entity_names``
+    résout par ``entity__name``, ce qui suffit à son appelant (le routage par
+    préoccupation part d'un nom) mais ferait dépendre cette page d'une égalité
+    de chaîne là où elle tient déjà la clé primaire.
     """
+    from identity.models import Identity
+
+    return list(
+        Identity.objects.filter(entity_id=entity_id)
+        .prefetch_related("handles")
+        .order_by("-last_seen")
+    )
+
+
+def _orphan_hint(entity) -> dict | None:
+    """Ce qu'il manque, quand rien n'est lié — jamais ce qu'on suppose.
+
+    Sur une base réelle les entités-personnes portent souvent le handle pour
+    nom : tant que personne ne s'est présenté, le consolidateur nomme d'après
+    l'identifiant de transport. L'égalité de nom **ne résout rien ici** — c'est
+    exactement le rapprochement que la couche identité existe pour supprimer,
+    et le faire silencieusement rendrait cette page complice du bug.
+
+    Elle sert seulement à *nommer ce qu'il faudrait lier* : « un handle porte
+    ce nom, il n'est lié à rien, et voilà combien de messages dorment dessus ».
+    Un onglet vide se lit « ils ne se sont jamais parlé » ; ceci se lit
+    « personne n'a fait la liaison ».
+    """
+    from identity.models import IdentityHandle
+    from memory.models import Message
+
+    handle = (
+        IdentityHandle.objects.select_related("identity")
+        .filter(person_id=entity.name)
+        .order_by("-last_seen")
+        .first()
+    )
+    if handle is None:
+        return None
+    return {
+        "person_id": handle.person_id,
+        "channel": handle.channel,
+        "trust": handle.trust,
+        "identity_id": handle.identity_id,
+        "bound_elsewhere": handle.identity.entity_id,
+        "messages": Message.objects.filter(person_id=handle.person_id).count(),
+    }
+
+
+def _person_counts(entity, person_ids: list[str]) -> dict:
+    """Volumes par onglet, pour les pastilles de la sous-navigation.
+
+    Six ``COUNT`` sur des colonnes indexées — c'est ce qui évite d'ouvrir un
+    onglet pour découvrir qu'il est vide, et de croire qu'un onglet vide
+    signifie « rien à dire » alors qu'il signifie souvent « aucun handle lié ».
+    """
+    from memory.models import Commitment, Connaissance, Message, Souvenir
+
+    counts = {
+        "souvenirs": Souvenir.objects.filter(entities=entity).count(),
+        "connaissances": Connaissance.objects.filter(entities=entity).count(),
+        "engagements": Commitment.objects.filter(person_id=entity.id).count(),
+        "echanges": 0,
+        "affect": 0,
+    }
+    if person_ids:
+        from memory.models import EmotionSnapshot
+
+        counts["echanges"] = Message.objects.filter(person_id__in=person_ids).count()
+        counts["affect"] = EmotionSnapshot.objects.filter(
+            person_id__in=person_ids,
+        ).count()
+    return counts
+
+
+# ── Onglet : synthèse ───────────────────────────────────────────────────
+
+def _person_synthese(request, entity, identities, person_ids) -> dict:
+    from projects.models import Project
+
+    verdicts = []
+    for identity in identities:
+        handles = list(identity.handles.all())
+        handle, decision = _decide(identity, handles)
+        verdicts.append({
+            "obj": identity,
+            "handle": handle,
+            "handles": handles,
+            "decision": decision,
+            "stored": float(identity.certainty or 0.0),
+        })
+
+    return {
+        "verdicts": verdicts,
+        # La divulgation est ce qui décide si la fiche ci-dessus atteint le
+        # prompt. Une personne dont aucune identité ne passe le seuil a beau
+        # avoir un profil complet, il n'est jamais injecté — et rien ailleurs
+        # sur cette page ne le dirait.
+        "may_disclose": any(v["decision"].may_disclose for v in verdicts),
+        "threshold": trust_policy.PRIVATE_CONTEXT_THRESHOLD,
+        "affects": _live_affects(person_ids),
+        "projects": list(
+            Project.objects.filter(owner=entity).order_by("-updated_at")[:10],
+        ),
+    }
+
+
+def _live_affects(person_ids: list[str]) -> list[dict]:
+    """Humeurs vivantes envers cette personne (mémoire vive).
+
+    Une par handle : l'oscillateur est tenu par identifiant de transport, donc
+    quelqu'un joint sur le web et sur Telegram en a deux, qui n'ont aucune
+    raison d'être au même endroit. Interroger avec la clé primaire de l'entité
+    ne renvoyait jamais rien — c'est la même confusion entité/handle que la
+    couche identité a été écrite pour supprimer.
+    """
+    if not person_ids:
+        return []
     try:
         from emotion import pad
         from emotion.engine import emotion_engine
 
-        key = str(entity_id)
-        mood = emotion_engine.person_moods.get(key)
-        if mood is None:
-            return None
-        label, intensity = pad.pad_to_label(mood.dynamic.position)
-        return {
-            "emotion": label.value,
-            "intensity": intensity,
-            "velocity": pad.norm(mood.dynamic.velocity),
-            "history_size": len(getattr(mood, "history", ()) or ()),
-        }
+        out = []
+        for person_id in person_ids:
+            mood = emotion_engine.person_moods.get(person_id)
+            if mood is None:
+                continue
+            label, intensity = pad.pad_to_label(mood.dynamic.position)
+            out.append({
+                "person_id": person_id,
+                "emotion": label.value,
+                "intensity": intensity,
+                "velocity": pad.norm(mood.dynamic.velocity),
+                "history_size": len(getattr(mood, "history", ()) or ()),
+            })
+        return out
     except Exception:
         logger.debug("affect vivant indisponible", exc_info=True)
-        return None
-
-
-def _handles_for_entity(name: str) -> list[dict]:
-    try:
-        from identity.resolver import identity_resolver
-        mapping = async_to_sync(identity_resolver.handles_for_entity_names)([name])
-        return mapping.get(name, [])
-    except Exception:
-        logger.debug("handles de l'entité indisponibles", exc_info=True)
         return []
+
+
+# ── Onglet : souvenirs ──────────────────────────────────────────────────
+
+_SOUVENIR_SORTS = {
+    "recent": ("-occurred_at",),
+    "important": ("-importance", "-occurred_at"),
+}
+
+
+def _person_souvenirs(request, entity, identities, person_ids) -> dict:
+    from memory.models import Souvenir
+
+    fs = tables.FilterSet(per_page=tables.read_per_page(request))
+    search = fs.add(tables.search_filter(
+        request, "q", "Recherche", placeholder="contenu du souvenir",
+    ))
+    order = fs.add(tables.select_filter(
+        request, "tri", "Tri",
+        [("recent", "les plus récents"), ("important", "les plus importants")],
+        default="recent", all_label="les plus récents",
+    ))
+
+    qs = Souvenir.objects.filter(entities=entity).prefetch_related("themes")
+    if search.value:
+        qs = qs.filter(content__icontains=search.value)
+    qs = qs.order_by(*_SOUVENIR_SORTS.get(order.value, _SOUVENIR_SORTS["recent"]))
+
+    return {"filterset": fs, "page": tables.paginate(request, qs, per_page=fs.per_page)}
+
+
+# ── Onglet : connaissances ──────────────────────────────────────────────
+
+def _person_connaissances(request, entity, identities, person_ids) -> dict:
+    from memory.models import Connaissance
+
+    fs = tables.FilterSet(per_page=tables.read_per_page(request))
+    search = fs.add(tables.search_filter(
+        request, "q", "Recherche", placeholder="contenu du fait",
+    ))
+    validity = fs.add(tables.select_filter(
+        request, "validite", "Validité",
+        [("valides", "valides"), ("invalidees", "invalidées")],
+        all_label="Toutes",
+    ))
+
+    qs = Connaissance.objects.filter(entities=entity).prefetch_related("themes")
+    if search.value:
+        qs = qs.filter(content__icontains=search.value)
+    if validity.value == "valides":
+        qs = qs.filter(is_valid=True)
+    elif validity.value == "invalidees":
+        qs = qs.filter(is_valid=False)
+    qs = qs.order_by("-confidence", "-updated_at")
+
+    return {"filterset": fs, "page": tables.paginate(request, qs, per_page=fs.per_page)}
+
+
+# ── Onglet : échanges ───────────────────────────────────────────────────
+
+def _person_echanges(request, entity, identities, person_ids) -> dict:
+    from memory.models import Message
+
+    fs = tables.FilterSet(per_page=tables.read_per_page(request))
+    search = fs.add(tables.search_filter(
+        request, "q", "Recherche", placeholder="contenu du message",
+    ))
+    role = fs.add(tables.select_filter(
+        request, "role", "Rôle",
+        [("user", "elle/lui"), ("assistant", "Mika")],
+    ))
+    handle = fs.add(tables.select_filter(
+        request, "handle", "Handle",
+        [(p, p) for p in person_ids],
+        all_label="Tous",
+    ))
+
+    if not person_ids:
+        # Sans handle lié, la question n'a pas de réponse — et une liste vide
+        # se lirait comme « ils ne se sont jamais parlé », ce qui est faux.
+        return {"filterset": None, "page": None, "no_handle": True}
+
+    qs = Message.objects.filter(person_id__in=[handle.value] if handle.value else person_ids)
+    if search.value:
+        qs = qs.filter(content__icontains=search.value)
+    if role.value:
+        qs = qs.filter(role=role.value)
+    qs = qs.order_by("-created_at")
+
+    return {
+        "filterset": fs,
+        "page": tables.paginate(request, qs, per_page=fs.per_page),
+        "no_handle": False,
+    }
+
+
+# ── Onglet : affect ─────────────────────────────────────────────────────
+
+def _person_affect(request, entity, identities, person_ids) -> dict:
+    from memory.models import EmotionalSummary, EmotionSnapshot
+
+    if not person_ids:
+        return {"no_handle": True, "summaries": [], "snapshots_page": None,
+                "affects": []}
+
+    period = tables.read_choice(request, "periode", ("daily", "weekly"), default="weekly")
+
+    return {
+        "no_handle": False,
+        "affects": _live_affects(person_ids),
+        "period": period,
+        "summaries": list(
+            EmotionalSummary.objects.filter(
+                person_id__in=person_ids, period_type=period,
+            ).order_by("-period_start")[:30],
+        ),
+        # Paginé sous son propre paramètre : les deux listes de cet onglet ne
+        # doivent pas se déplacer ensemble.
+        "snapshots_page": tables.paginate(
+            request,
+            EmotionSnapshot.objects.filter(person_id__in=person_ids),
+            per_page=25, page_param="instantanes",
+        ),
+    }
+
+
+# ── Onglet : engagements ────────────────────────────────────────────────
+
+def _person_engagements(request, entity, identities, person_ids) -> dict:
+    from memory.models import Commitment
+
+    fs = tables.FilterSet(per_page=tables.read_per_page(request))
+    status = fs.add(tables.select_filter(
+        request, "statut", "État",
+        [("pending", "en attente"), ("honored", "tenu"), ("dropped", "abandonné")],
+        all_label="Tous",
+    ))
+
+    qs = Commitment.objects.filter(person_id=entity.id).select_related("source_souvenir")
+    if status.value:
+        qs = qs.filter(status=status.value)
+    qs = qs.order_by("status", "-created_at")
+
+    return {"filterset": fs, "page": tables.paginate(request, qs, per_page=fs.per_page)}
 
 
 # ── Engagements ─────────────────────────────────────────────────────────

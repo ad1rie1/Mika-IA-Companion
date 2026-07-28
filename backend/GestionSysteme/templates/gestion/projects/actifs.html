@@ -1,6 +1,12 @@
 {% extends "gestion/base.html" %}
 {% load gestion %}
 
+{% block page_actions %}
+  <div class="page-actions">
+    <a class="btn btn-primary" href="{% url 'gestionsysteme:project-new' %}">Nouveau projet</a>
+  </div>
+{% endblock %}
+
 {% block content %}
 <div class="alert alert-warn mb-4">
   <div>
@@ -83,7 +89,13 @@
   {% else %}
     <div class="card-body"><div class="empty">
       <div class="empty-title">Aucun projet</div>
-      Ils se créent en conversation, via l'outil <span class="mono">create_project</span>.
+      <p>
+        Mika en crée elle-même en conversation, via l'outil
+        <span class="mono">create_project</span>, quand on lui confie un travail.
+      </p>
+      <a class="btn btn-primary mt-3" href="{% url 'gestionsysteme:project-new' %}">
+        En créer un ici
+      </a>
     </div></div>
   {% endif %}
 </section>

@@ -239,26 +239,33 @@ class TestActiveRuminations:
 
 
 @pytest.mark.django_db(transaction=True)
-class TestDashboardEndpoint:
+class TestOverviewScreen:
+    """End-to-end on the screen that carried the drifted query.
 
-    def test_sleep_endpoint_reports_a_night_scoped_dream(self, client):
-        """End-to-end on the endpoint that carried the drifted query."""
+    C'était un point JSON du dashboard ; c'est maintenant la carte « Sommeil »
+    de la vue d'ensemble. Elle passe par les mêmes fonctions de `memory.read`,
+    ce qui est exactement ce que ces tests protègent : un seul endroit pose la
+    question, trois consommateurs la formatent.
+    """
+
+    URL = "/gestion/"
+
+    def test_a_fortnight_old_dream_is_not_last_nights(self, client):
         _dream(read.today() - timedelta(days=14), content="vieux reve")
 
-        payload = client.get("/dashboard/api/sleep").json()
-        assert payload["last_dream"] is None
+        assert client.get(self.URL).context["sleep"]["dream"] is None
 
-    def test_sleep_endpoint_returns_last_nights_dream(self, client):
+    def test_last_nights_dream_is_shown(self, client):
         _dream(read.yesterday(), content="reve de cette nuit")
 
-        payload = client.get("/dashboard/api/sleep").json()
-        assert payload["last_dream"]["content"] == "reve de cette nuit"
+        dream = client.get(self.URL).context["sleep"]["dream"]
+        assert dream.content == "reve de cette nuit"
 
-    def test_sleep_endpoint_returns_the_latest_journal(self, client):
+    def test_the_latest_journal_is_shown(self, client):
         _journal(read.yesterday(), "hier")
 
-        payload = client.get("/dashboard/api/sleep").json()
-        assert payload["today_journal"]["narrative"] == "hier"
+        journal = client.get(self.URL).context["sleep"]["journal"]
+        assert journal.narrative == "hier"
 
 
 class TestNoDuplicateQueries:
@@ -294,6 +301,6 @@ class TestNoDuplicateQueries:
         off by a day between midnight and dawn where they do not."""
         import inspect
 
-        from dashboard.views.api import sleep as sleep_api
+        from GestionSysteme.views import overview
 
-        assert "localdate()" not in inspect.getsource(sleep_api)
+        assert "localdate()" not in inspect.getsource(overview)

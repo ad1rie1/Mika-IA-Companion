@@ -1,6 +1,0 @@
-{% extends "dashboard/base.html" %}
-{% load static %}
-{% block scripts %}
-<script>window.PROJECT_ID = {{ project_id|default:"null" }};</script>
-<script src="{% static 'dashboard/js/views/project_edit.js' %}"></script>
-{% endblock %}

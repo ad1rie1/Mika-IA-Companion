@@ -39,7 +39,6 @@ from modules.types import (
     ModuleEvent,
     ModuleStatus,
     ModuleTool,
-    ModuleView,
 )
 from utils.eventbus import (
     PRIORITY_OBSERVER,
@@ -143,12 +142,6 @@ class ModuleManager:
 
     def collect_routes(self) -> list:
         return self.collectors.routes()
-
-    def collect_views(self, *, only_running: bool = True) -> dict[str, list[ModuleView]]:
-        return self.collectors.views(only_running=only_running)
-
-    def get_view(self, module_name: str, view_key: str) -> ModuleView | None:
-        return self.collectors.view(module_name, view_key)
 
     # ── Event bus ─────────────────────────────────────────────────
 

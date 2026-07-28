@@ -1,0 +1,162 @@
+{% extends "gestion/social/personne/_base.html" %}
+{% load gestion %}
+
+{% block panneau %}
+{% if no_handle %}
+  {% include "gestion/social/personne/_sans_handle.html" with quoi="L'historique affectif est gardé par identifiant de transport" %}
+{% else %}
+  <section class="card mb-6">
+    <div class="card-head">
+      <h3>Humeur vive</h3>
+      <span class="card-sub">l'oscillateur PAD en RAM — ne survit pas à un redémarrage</span>
+    </div>
+    <div class="card-body">
+      <div class="grid c3">
+        {% for a in affects %}
+          <div class="stat">
+            <div class="stat-label mono">{{ a.person_id }}</div>
+            <div class="stat-value">
+              <span class="emo" style="{{ a.emotion|emo_style }}">{{ a.emotion }}</span>
+            </div>
+            <div class="meter {{ a.intensity|tone_ratio }} mt-2">
+              <span style="width: {{ a.intensity|bar_width }}%;"></span>
+            </div>
+            <div class="stat-sub">
+              {{ a.intensity|pct }} · dynamique {{ a.velocity|num }} ·
+              {{ a.history_size }} points
+            </div>
+          </div>
+        {% empty %}
+          <p class="muted text-sm">
+            Aucune humeur en mémoire vive pour ses handles — soit rien n'a été
+            échangé depuis le démarrage, soit l'oscillateur a été élagué faute
+            d'activité.
+          </p>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+
+  <section class="card mb-6">
+    <div class="card-head">
+      <h3>Tendance</h3>
+      <span class="card-sub">résumés agrégés par le consolidateur</span>
+    </div>
+
+    <form class="filters" method="get" role="search">
+      <div class="field">
+        <label class="field-label" for="filtre-periode">Période</label>
+        <select id="filtre-periode" name="periode" data-autosubmit>
+          <option value="weekly" {% if period == "weekly" %}selected{% endif %}>hebdomadaire</option>
+          <option value="daily" {% if period == "daily" %}selected{% endif %}>quotidienne</option>
+        </select>
+      </div>
+      <div class="filters-actions">
+        <button type="submit" class="btn">Filtrer</button>
+      </div>
+    </form>
+
+    {% if summaries %}
+      <div class="card-body flush">
+        <div class="table-scroll">
+          <table class="table">
+            <thead>
+              <tr>
+                <th class="fit">Début</th>
+                <th>Émotion dominante</th>
+                <th style="min-width: 8rem;">Intensité</th>
+                <th class="fit">Tendance</th>
+                <th class="num">Instantanés</th>
+                <th>Répartition</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for s in summaries %}
+                <tr>
+                  <td class="fit">{{ s.period_start|dt }}</td>
+                  <td><span class="emo" style="{{ s.dominant_emotion|emo_style }}">{{ s.dominant_emotion }}</span></td>
+                  <td>
+                    <div class="row">
+                      <span class="meter {{ s.dominant_intensity|tone_ratio }}" style="flex:1; min-width:4rem;">
+                        <span style="width: {{ s.dominant_intensity|bar_width }}%;"></span>
+                      </span>
+                      <span class="tabular text-xs">{{ s.dominant_intensity|num }}</span>
+                    </div>
+                  </td>
+                  <td class="fit"><span class="badge">{{ s.trend }}</span></td>
+                  <td class="num">{{ s.snapshot_count }}</td>
+                  <td>
+                    <span class="chips">
+                      {% for nom, poids in s.emotion_distribution.items %}
+                        <span class="chip emo" style="{{ nom|emo_style }}">{{ nom }}
+                          <span class="emo-weight">{{ poids|num }}</span>
+                        </span>
+                      {% endfor %}
+                    </span>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% else %}
+      <div class="card-body">
+        <div class="empty">
+          Aucun résumé {% if period == "daily" %}quotidien{% else %}hebdomadaire{% endif %}.
+          Ils sont agrégés depuis les instantanés ci-dessous, pas mesurés à part.
+        </div>
+      </div>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h3>Instantanés</h3>
+      <span class="card-sub">la matière brute des résumés</span>
+    </div>
+    {% if snapshots_page.rows %}
+      <div class="card-body flush">
+        <div class="table-scroll">
+          <table class="table">
+            <thead>
+              <tr>
+                <th class="fit">Quand</th>
+                <th class="fit">Handle</th>
+                <th>Envers elle/lui</th>
+                <th style="min-width: 8rem;">Intensité</th>
+                <th>Humeur globale</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for s in snapshots_page.rows %}
+                <tr>
+                  <td class="fit muted" title="{{ s.created_at|dt_full }}">{{ s.created_at|ago }}</td>
+                  <td class="fit mono text-xs">{{ s.person_id }}</td>
+                  <td><span class="emo" style="{{ s.primary_emotion|emo_style }}">{{ s.primary_emotion }}</span></td>
+                  <td>
+                    <div class="row">
+                      <span class="meter {{ s.primary_intensity|tone_ratio }}" style="flex:1; min-width:4rem;">
+                        <span style="width: {{ s.primary_intensity|bar_width }}%;"></span>
+                      </span>
+                      <span class="tabular text-xs">{{ s.primary_intensity|num }}</span>
+                    </div>
+                  </td>
+                  <td>
+                    <span class="emo" style="{{ s.global_emotion|emo_style }}">{{ s.global_emotion }}
+                      <span class="emo-weight">{{ s.global_intensity|pct }}</span>
+                    </span>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card-foot">{% include "gestion/partials/pager.html" with page=snapshots_page %}</div>
+    {% else %}
+      <div class="card-body"><div class="empty">Aucun instantané enregistré.</div></div>
+    {% endif %}
+  </section>
+{% endif %}
+{% endblock %}

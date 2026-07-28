@@ -10,6 +10,12 @@
 
 {% block tabs %}{% endblock %}
 
+{% block page_actions %}
+  <div class="page-actions">
+    <a class="btn" href="{% url 'gestionsysteme:project-edit' project.pk %}">Modifier</a>
+  </div>
+{% endblock %}
+
 {% block content %}
 {% if pending %}
   <div class="alert alert-warn mb-4">
@@ -115,7 +121,15 @@
   <div class="card-body flush">
     <div class="table-scroll">
       <table class="table">
-        <thead><tr><th class="num">#</th><th style="min-width:26rem;">Description</th><th class="fit">État</th><th>Résultat</th></tr></thead>
+        <thead>
+          <tr>
+            <th class="num">#</th>
+            <th style="min-width:24rem;">Description</th>
+            <th class="fit">État</th>
+            <th>Résultat</th>
+            <th class="fit"></th>
+          </tr>
+        </thead>
         <tbody>
           {% for t in tasks %}
             <tr {% if t.status == "done" %}class="is-muted"{% endif %}>
@@ -126,13 +140,47 @@
                 {% if t.blocked_reason %}<small>{{ t.blocked_reason }}</small>{% endif %}
               </td>
               <td class="muted"><div class="cell-clamp">{{ t.result|default:"—" }}</div></td>
+              <td class="fit">
+                <div class="row">
+                  <form method="post" action="{% url 'gestionsysteme:task-update' project.pk t.pk %}" class="row">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="etat">
+                    <select name="status" aria-label="État de la tâche" data-autosubmit>
+                      {% for valeur, libelle in task_statuses %}
+                        <option value="{{ valeur }}" {% if valeur == t.status %}selected{% endif %}>{{ libelle }}</option>
+                      {% endfor %}
+                    </select>
+                    <button class="btn btn-sm" type="submit">Appliquer</button>
+                  </form>
+                  <form method="post" action="{% url 'gestionsysteme:task-update' project.pk t.pk %}"
+                        data-confirm="Supprimer cette tâche ?">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="supprimer">
+                    <button class="btn btn-sm btn-danger" type="submit">Supprimer</button>
+                  </form>
+                </div>
+              </td>
             </tr>
           {% empty %}
-            <tr><td colspan="4"><span class="muted">Aucune tâche.</span></td></tr>
+            <tr><td colspan="5"><span class="muted">Aucune tâche.</span></td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
+  </div>
+
+  <div class="card-foot">
+    <form method="post" action="{% url 'gestionsysteme:task-create' project.pk %}"
+          style="display: flex; gap: var(--sp-3); align-items: flex-end; flex-wrap: wrap; width: 100%;">
+      {% csrf_token %}
+      <div style="flex: 1; min-width: 18rem;">
+        {% include "gestion/partials/django_field.html" with field=task_form.description %}
+      </div>
+      <div>
+        {% include "gestion/partials/django_field.html" with field=task_form.status %}
+      </div>
+      <button class="btn btn-primary" type="submit">Ajouter la tâche</button>
+    </form>
   </div>
 </section>
 

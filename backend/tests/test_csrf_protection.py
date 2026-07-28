@@ -2,7 +2,7 @@
 
 While every endpoint was anonymous, a forged cross-site request bought an
 attacker nothing they couldn't already do by calling the API directly. With a
-logged-in owner session there are endpoints worth forging: the dashboard
+logged-in owner session there are endpoints worth forging: GestionSystème
 rewrites provider API keys and reads the whole conversation history.
 
 These tests use ``Client(enforce_csrf_checks=True)`` **on purpose**. The
@@ -111,16 +111,15 @@ class TestProtectedSurfaces:
         resp = _json_post(strict, "/api/projects/create", title="forged")
         assert resp.status_code == 403
 
-    def test_dashboard_config_write_needs_a_token(self, strict):
+    def test_config_write_needs_a_token(self, strict):
         """The config editor holds the provider API keys."""
         user = get_user_model().objects.create_user(
             username="owner", password="pw", is_staff=True,
         )
         strict.force_login(user)
-        resp = strict.patch(
-            "/dashboard/api/config/values",
-            data=json.dumps({"key": "ai.claude.api_key", "value": "stolen"}),
-            content_type="application/json",
+        resp = strict.post(
+            "/gestion/configuration/ai_providers/",
+            data={"__champ": "ai.claude.api_key", "ai.claude.api_key": "stolen"},
         )
         assert resp.status_code == 403
 

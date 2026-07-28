@@ -1,0 +1,128 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block breadcrumbs %}
+<div class="crumbs">
+  <a href="{% url 'gestionsysteme:projects' %}">Projets</a>
+  <span class="sep">/</span>
+  {% if projet %}
+    <a href="{% url 'gestionsysteme:project-detail' projet.pk %}">{{ projet.title }}</a>
+    <span class="sep">/</span><span>Modifier</span>
+  {% else %}
+    <span>Nouveau</span>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block tabs %}{% endblock %}
+
+{% block content %}
+{% if form.non_field_errors %}
+  <div class="alert-stack">
+    {% for erreur in form.non_field_errors %}
+      <div class="alert alert-danger">{{ erreur }}</div>
+    {% endfor %}
+  </div>
+{% endif %}
+
+<form method="post" style="max-width: 68rem;">
+  {% csrf_token %}
+
+  <section class="card mb-4">
+    <div class="card-head"><h3>Identité</h3></div>
+    <div class="card-body">
+      <div class="form-grid">
+        {% include "gestion/partials/django_field.html" with field=form.title wide=1 %}
+        {% include "gestion/partials/django_field.html" with field=form.description wide=1 %}
+        {% include "gestion/partials/django_field.html" with field=form.origin %}
+        {% include "gestion/partials/django_field.html" with field=form.status %}
+        {% include "gestion/partials/django_field.html" with field=form.priority %}
+        {% include "gestion/partials/django_field.html" with field=form.owner %}
+        {% include "gestion/partials/django_field.html" with field=form.keywords wide=1 %}
+      </div>
+    </div>
+  </section>
+
+  <section class="card mb-4">
+    <div class="card-head">
+      <h3>Cadre d'exécution</h3>
+      <span class="card-sub">ce qui gouverne son comportement pendant ce projet</span>
+    </div>
+    <div class="card-body">
+      <div class="alert alert-warn mb-4">
+        <div>
+          <strong>Le mode professionnel est le défaut.</strong>
+          Avec <span class="mono">emotion_policy = off</span>, Mika supprime son
+          étiquette d'émotion, son bloc de variabilité et l'impulsion affective
+          envers la personne pendant les tours qui concernent ce projet. Le
+          rallumer est un choix explicite.
+        </div>
+      </div>
+      <div class="form-grid">
+        {% include "gestion/partials/django_field.html" with field=form.emotion_policy %}
+        {% include "gestion/partials/django_field.html" with field=form.tone_directive wide=1 %}
+        {% include "gestion/partials/django_field.html" with field=form.instructions wide=1 %}
+        {% include "gestion/partials/django_field.html" with field=form.out_of_scope wide=1 %}
+      </div>
+    </div>
+  </section>
+
+  <section class="card mb-4">
+    <div class="card-head">
+      <h3>Périmètre et sécurité</h3>
+      <span class="card-sub">liste blanche stricte</span>
+    </div>
+    <div class="card-body">
+      <div class="form-grid">
+        {% include "gestion/partials/django_field.html" with field=form.requires_approval wide=1 %}
+        {% include "gestion/partials/django_field.html" with field=form.allowed_modules %}
+        {% include "gestion/partials/django_field.html" with field=form.resource_paths %}
+        {% include "gestion/partials/django_field.html" with field=form.contacts %}
+      </div>
+    </div>
+  </section>
+
+  <section class="card mb-4">
+    <div class="card-head"><h3>Cadence et budget</h3></div>
+    <div class="card-body">
+      <div class="form-grid">
+        {% include "gestion/partials/django_field.html" with field=form.schedule_rule wide=1 %}
+        {% include "gestion/partials/django_field.html" with field=form.monthly_token_budget %}
+      </div>
+      <p class="field-hint mt-3">
+        Un projet sans retour humain s'arrête de lui-même au bout de 10 passages
+        (<span class="mono">runs_since_user_input</span>) : c'est le garde-fou
+        contre l'avance perpétuelle.
+      </p>
+    </div>
+  </section>
+
+  <div class="form-actions">
+    <button class="btn btn-primary" type="submit">
+      {% if projet %}Enregistrer{% else %}Créer le projet{% endif %}
+    </button>
+    <a class="btn btn-ghost"
+       href="{% if projet %}{% url 'gestionsysteme:project-detail' projet.pk %}{% else %}{% url 'gestionsysteme:projects' %}{% endif %}">
+      Annuler
+    </a>
+  </div>
+</form>
+
+{% if projet %}
+  <details class="disclosure mt-6" style="max-width: 68rem;">
+    <summary>Supprimer ce projet</summary>
+    <div class="disclosure-body">
+      <p class="field-desc">
+        Supprime le projet, ses tâches, son journal d'exécution et ses actions
+        en attente. Mettre l'état sur « terminé » ou « en pause » suffit si tu
+        veux seulement l'arrêter — l'historique est alors conservé.
+      </p>
+      <form method="post" action="{% url 'gestionsysteme:project-delete' projet.pk %}"
+            data-confirm="Supprimer définitivement « {{ projet.title }} » et tout son historique ?">
+        {% csrf_token %}
+        <button class="btn btn-danger" type="submit">Supprimer</button>
+      </form>
+    </div>
+  </details>
+{% endif %}
+{% endblock %}

@@ -86,7 +86,7 @@ class TestMinimalModule:
         assert module.return_tools() == []
         assert module.get_capabilities() == []
         assert module.get_routes() == []
-        assert module.get_views() == []
+        assert module.get_panels() == []
         assert module.get_models() == []
         assert module.config_schema() == []
         assert module.get_context("user_1") == ""

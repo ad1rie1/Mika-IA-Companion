@@ -1,0 +1,46 @@
+{% comment %} Onglet inatteignable faute de liaison identité → entité.
+
+   Délibérément pas un tableau vide : « ils ne se sont jamais parlé » et
+   « personne n'a lié le handle à cette entité » se ressemblent à l'écran et
+   n'ont rien à voir. C'est exactement le silence que la couche identité a
+   été écrite pour supprimer.
+
+   Le bloc `orphan` nomme le handle homonyme sans jamais s'en servir pour
+   résoudre : la fiche dit ce qu'il faudrait lier, elle ne le suppose pas. {% endcomment %}
+{% load gestion %}
+<section class="card">
+  <div class="card-body">
+    <div class="empty">
+      <div class="empty-title">Aucun handle lié à cette personne</div>
+      {{ quoi }} — sans identité liée à cette entité mémoire, il n'y a rien à
+      interroger. Ce n'est pas « aucune donnée » : c'est « la question ne peut
+      pas être posée ».
+
+      {% if orphan %}
+        <div class="alert alert-warn mt-3" style="text-align: left;">
+          <div>
+            Un handle nommé <span class="mono">{{ orphan.person_id }}</span>
+            ({{ orphan.channel }} · {{ orphan.trust }}) existe et porte
+            <strong>{{ orphan.messages }}</strong> message(s), mais
+            {% if orphan.bound_elsewhere %}
+              il est lié à une <em>autre</em> entité mémoire.
+            {% else %}
+              il n'est lié à aucune entité mémoire.
+            {% endif %}
+            Le nom identique ne suffit pas à faire la liaison — c'est
+            précisément l'égalité par le nom que la couche identité remplace.
+          </div>
+        </div>
+      {% endif %}
+
+      <div class="mt-3">
+        {% if orphan.identity_id %}
+          <a class="btn btn-primary" href="{% url 'gestionsysteme:identity-detail' orphan.identity_id %}">
+            Ouvrir cette identité
+          </a>
+        {% endif %}
+        <a class="btn" href="{% url 'gestionsysteme:social-tab' 'identites' %}">Toutes les identités</a>
+      </div>
+    </div>
+  </div>
+</section>

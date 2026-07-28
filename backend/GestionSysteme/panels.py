@@ -1,16 +1,14 @@
 """Espaces de modules — le contrat par lequel un greffon expose une interface.
 
-**Ce qui change par rapport à l'ancien système.**
-
-Avant, un module déclarait des ``ModuleView`` dont le ``data_handler``
-renvoyait du JSON, rendu dans le navigateur par un script générique qui
-l'injectait via ``innerHTML``. Deux conséquences :
+**Ce qu'il remplace.** Un module déclarait des ``ModuleView`` dont le
+``data_handler`` renvoyait du JSON, rendu dans le navigateur par un script
+générique qui l'injectait via ``innerHTML``. Deux conséquences :
 
 1. Un module qui faisait transiter un corps d'e-mail, un article RSS ou une
    page aspirée par une clé ``html`` obtenait du XSS stocké sur l'interface
-   d'administration — celle qui édite les clés d'API. Il a fallu écrire
-   ``dashboard/sanitize.py`` pour retirer ``html``/``js``/``template`` de
-   *toutes* les charges utiles, avec ``allow_raw_html`` comme dérogation.
+   d'administration — celle qui édite les clés d'API. Il a fallu écrire une
+   couche d'assainissement retirant ``html``/``js``/``template`` de *toutes*
+   les charges utiles, avec ``allow_raw_html`` comme dérogation.
 2. Chaque module obtenait des **pages éparpillées** dans le menu global, sans
    endroit où voir sa configuration, son état et ses données ensemble.
 
@@ -28,9 +26,15 @@ Ici :
 - Chaque module reçoit un **espace** : ses panneaux, sa configuration et son
   état au même endroit, sous ``/gestion/modules/<nom>/``.
 
-La compatibilité est assurée : un module qui déclare encore ``get_views()``
-est adapté automatiquement (voir ``_adapt_legacy_view``). Rien à réécrire pour
-qu'un greffon existant continue d'apparaître.
+``ModuleView`` a été supprimé avec l'application ``dashboard`` plutôt que
+gardé en chemin de compatibilité : les deux modules livrés déclarent des
+panneaux, et une capacité sans déclarant est une capacité dont le défaut est
+la seule réponse que quiconque reçoit.
+
+``blocks_from_payload`` reste, mais ce n'est pas un vestige : c'est par là que
+passent les charges utiles des **modules forgés**, écrites par l'IA à
+l'exécution. Elles n'ont pas de type statique, et les convertir en cellules
+typées est précisément ce qui les empêche de produire du balisage.
 """
 from __future__ import annotations
 
@@ -153,10 +157,18 @@ class Row:
 
 @dataclass
 class Table:
-    """Un tableau. ``page`` porte la pagination si le module en fournit une."""
+    """Un tableau. ``page`` porte la pagination si le module en fournit une.
+
+    ``filters`` accepte un ``tables.FilterSet`` : le module décrit les filtres
+    qu'il veut, la coquille les rend et les relit depuis l'URL. Ils vivent sur
+    le tableau plutôt que dans un bloc séparé parce qu'un filtre détaché de la
+    liste qu'il filtre n'a pas de sens — et parce que la barre doit se placer
+    dans l'en-tête de la carte, pas au-dessus d'elle.
+    """
     columns: Sequence[Column]
     rows: Sequence[Row]
     page: Any = None                 # tables.PageResult | None
+    filters: Any = None              # tables.FilterSet | None
     empty: str = "Rien à afficher."
     caption: str = ""
     block = "table"
@@ -376,10 +388,7 @@ def panels_for(module_name: str) -> list[ModulePanel]:
     if module is None:
         return []
 
-    native = _native_panels(module)
-    if native:
-        return native
-    return _legacy_panels(module)
+    return _native_panels(module)
 
 
 def _native_panels(module) -> list[ModulePanel]:
@@ -396,79 +405,7 @@ def _native_panels(module) -> list[ModulePanel]:
     return panels
 
 
-def _legacy_panels(module) -> list[ModulePanel]:
-    """Adapte les ``ModuleView`` historiques.
-
-    Le module continue de renvoyer ``{columns, rows, total, page, limit}`` ;
-    on le convertit en cellules typées. Les clés ``html`` / ``js`` /
-    ``template`` d'une charge utile ne sont pas « nettoyées » : elles ne sont
-    simplement jamais lues, puisque le rendu ne connaît que des cellules.
-    """
-    getter = getattr(module, "get_views", None)
-    if not callable(getter):
-        return []
-    try:
-        views = list(getter() or [])
-    except Exception:
-        logger.exception("get_views() a échoué pour %s", module.name)
-        return []
-
-    panels = [_adapt_legacy_view(module, v) for v in views]
-    panels = [p for p in panels if p is not None]
-    panels.sort(key=lambda p: (p.order, p.label))
-    return panels
-
-
-def _adapt_legacy_view(module, view) -> ModulePanel | None:
-    key = getattr(view, "key", "")
-    if not key:
-        return None
-
-    data_handler = getattr(view, "data_handler", None)
-
-    def handler(request, _handler=data_handler, _view=view):
-        if _handler is None:
-            return Note("Cette vue ne fournit aucune donnée.", tone="warn")
-        payload = _call(_handler, request)
-        if not isinstance(payload, dict):
-            return Note("Réponse inattendue de la vue du module.", tone="warn")
-        return _blocks_from_legacy_payload(payload)
-
-    actions = tuple(
-        PanelAction(
-            key=a.key,
-            label=a.label,
-            handler=_legacy_action(a),
-            confirm=getattr(a, "confirm", "") or "",
-        )
-        for a in (getattr(view, "actions", None) or [])
-        if getattr(a, "key", "")
-    )
-
-    return ModulePanel(
-        key=key,
-        label=getattr(view, "label", key),
-        icon=getattr(view, "icon", "▦") or "▦",
-        order=getattr(view, "order", 100),
-        handler=handler,
-        actions=actions,
-    )
-
-
-def _legacy_action(action):
-    def run(request, _a=action):
-        result = _call(_a.handler, request)
-        if isinstance(result, dict):
-            if result.get("error"):
-                return Note(str(result["error"]), tone="danger")
-            message = result.get("message") or result.get("detail")
-            if message:
-                return Note(str(message), tone="ok")
-        return Note(f"Action « {_a.label} » exécutée.", tone="ok")
-    return run
-
-
-def _blocks_from_legacy_payload(payload: dict):
+def blocks_from_payload(payload: dict):
     """Convertit ``{columns, rows, …}`` (ou ``{tabs: [...]}``) en blocs."""
     if payload.get("tabs"):
         items = []
@@ -477,7 +414,7 @@ def _blocks_from_legacy_payload(payload: dict):
                 continue
             title = str(tab.get("label") or tab.get("key") or "")
             if tab.get("columns") is not None:
-                table = _table_from_legacy(tab)
+                table = _table_from_payload(tab)
                 table.caption = title
                 items.append(table)
             else:
@@ -492,7 +429,7 @@ def _blocks_from_legacy_payload(payload: dict):
         return Blocks(items=items)
 
     if payload.get("columns") is not None:
-        return _table_from_legacy(payload)
+        return _table_from_payload(payload)
 
     return Fields(items=[
         Field(label=str(k), value=_str(v))
@@ -501,7 +438,7 @@ def _blocks_from_legacy_payload(payload: dict):
     ])
 
 
-def _table_from_legacy(payload: dict) -> Table:
+def _table_from_payload(payload: dict) -> Table:
     raw_columns = payload.get("columns") or []
     columns: list[Column] = []
     keys: list[str] = []
@@ -523,11 +460,11 @@ def _table_from_legacy(payload: dict) -> Table:
             cells = (text(raw),)
         rows.append(Row(cells=cells))
 
-    return Table(columns=columns, rows=rows, page=_legacy_page(payload, len(rows)))
+    return Table(columns=columns, rows=rows, page=_payload_page(payload, len(rows)))
 
 
 @dataclass
-class _LegacyPage:
+class _PayloadPage:
     """Pagination reconstituée depuis ``{total, page, limit}``.
 
     L'ancien contrat compte les pages à partir de **zéro** ; l'interface
@@ -567,7 +504,7 @@ class _LegacyPage:
         return _elided_range(self.number, self.num_pages)
 
 
-def _legacy_page(payload: dict, fallback_rows: int) -> _LegacyPage | None:
+def _payload_page(payload: dict, fallback_rows: int) -> _PayloadPage | None:
     if "total" not in payload:
         return None
     try:
@@ -577,7 +514,7 @@ def _legacy_page(payload: dict, fallback_rows: int) -> _LegacyPage | None:
     except (TypeError, ValueError):
         return None
     num_pages = max(1, -(-total // per_page))
-    return _LegacyPage(
+    return _PayloadPage(
         total=total,
         number=min(num_pages, zero_based_page + 1),
         per_page=per_page,
@@ -628,7 +565,7 @@ def run_panel(request, module_name: str, panel: ModulePanel):
     if isinstance(result, BLOCK_TYPES):
         return result
     if isinstance(result, dict):
-        return _blocks_from_legacy_payload(result)
+        return blocks_from_payload(result)
     return Prose(text=str(result))
 
 

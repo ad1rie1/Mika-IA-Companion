@@ -23,17 +23,53 @@
   <form method="post" action="{{ post_url }}">
     {% csrf_token %}
     <div class="card-body">
+
+      {% if form.dynamic %}
+        {% if form.load_error %}
+          <div class="alert alert-warn mb-4">
+            <div>
+              {{ form.load_error }}
+              <div class="field-hint mt-2">
+                Le champ « {{ form.dynamic.field_key }} » reste saisissable :
+                un fournisseur injoignable ne doit pas empêcher de réparer la
+                configuration.
+              </div>
+            </div>
+          </div>
+        {% elif form.loaded %}
+          <div class="alert alert-ok mb-4">
+            Liste chargée depuis le fournisseur. Sélectionne un modèle ci-dessous.
+          </div>
+        {% else %}
+          <div class="alert alert-info mb-4">
+            {{ form.dynamic.empty_message }}
+          </div>
+        {% endif %}
+      {% endif %}
+
       <div class="form-grid">
         {% for f in form.fields %}
           {% include "gestion/partials/field.html" with f=f marker=0 %}
         {% endfor %}
       </div>
     </div>
+
     <div class="card-foot">
       <button class="btn btn-primary" type="submit">
         {% if form.is_new %}Créer{% else %}Enregistrer{% endif %}
       </button>
-      <a class="btn" href="{{ back_url }}">Annuler</a>
+
+      {% if form.dynamic %}
+        {% comment %} Même formulaire, autre bouton : la saisie en cours repart
+           dans le POST, donc rien n'est perdu. `formnovalidate` évite qu'un
+           champ obligatoire encore vide bloque un simple chargement de liste.
+           Tout se fait par aller-retour serveur — aucun JavaScript. {% endcomment %}
+        <button class="btn" type="submit" name="__charger" value="1" formnovalidate>
+          {{ form.dynamic.button_label }}
+        </button>
+      {% endif %}
+
+      <a class="btn btn-ghost" href="{{ back_url }}">Annuler</a>
     </div>
   </form>
 </div>

@@ -61,9 +61,7 @@ INSTALLED_APPS = [
     "files",
     "modules",
     "projects",
-    "dashboard",
-    # Interface d'administration serveur-rendue. Remplace `dashboard`, qui
-    # reste monté le temps de la bascule (voir GestionSysteme/__init__.py).
+    # Interface d'administration, rendue par le serveur.
     "GestionSysteme",
     "configs",
     "identity",
@@ -81,8 +79,7 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
-    # Must sit after AuthenticationMiddleware — they read request.user.
-    "dashboard.middleware.DashboardAuthMiddleware",
+    # Must sit after AuthenticationMiddleware — it reads request.user.
     "GestionSysteme.middleware.GestionAuthMiddleware",
 ]
 

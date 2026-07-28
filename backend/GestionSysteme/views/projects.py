@@ -77,12 +77,140 @@ def _active(request) -> dict:
     return {"filterset": fs, "page": page}
 
 
-def project_detail(request, project_id: int):
-    from projects.models import Project, ProjectLog, ProjectPendingAction, ProjectTask
+# ── Création / édition ──────────────────────────────────────────────────
+
+def _project_or_404(project_id: int):
+    from projects.models import Project
 
     project = Project.objects.select_related("owner").filter(pk=project_id).first()
     if project is None:
         raise Http404("Projet introuvable")
+    return project
+
+
+def project_new(request):
+    from GestionSysteme.project_forms import ProjectForm
+
+    if request.method == "POST":
+        form = ProjectForm(request.POST)
+        if form.is_valid():
+            projet = form.save()
+            messages.success(request, f"Projet « {projet.title} » créé.")
+            return redirect("gestionsysteme:project-detail", project_id=projet.pk)
+        messages.error(request, "Le formulaire comporte des erreurs.")
+    else:
+        form = ProjectForm()
+
+    return _render_project_form(request, form, projet=None)
+
+
+def project_edit(request, project_id: int):
+    from GestionSysteme.project_forms import ProjectForm
+
+    projet = _project_or_404(project_id)
+
+    if request.method == "POST":
+        form = ProjectForm(request.POST, instance=projet)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Projet enregistré.")
+            return redirect("gestionsysteme:project-detail", project_id=projet.pk)
+        messages.error(request, "Le formulaire comporte des erreurs.")
+    else:
+        form = ProjectForm(instance=projet)
+
+    return _render_project_form(request, form, projet=projet)
+
+
+def _render_project_form(request, form, *, projet):
+    item = item_for("projects")
+    ctx = page_context(
+        request, item=item, active_key="projects", active_tab="actifs",
+        title=(f"Modifier · {projet.title}" if projet else "Nouveau projet"),
+        description=(
+            "Un projet créé ici a exactement le même statut qu'un projet "
+            "que Mika s'est vu confier en conversation."
+        ),
+    )
+    ctx.update({"form": form, "projet": projet})
+    return render(request, "gestion/projects/formulaire.html", ctx)
+
+
+@require_POST
+def project_delete(request, project_id: int):
+    projet = _project_or_404(project_id)
+    titre = projet.title
+    projet.delete()
+    messages.success(request, f"Projet « {titre} » supprimé.")
+    return redirect("gestionsysteme:projects")
+
+
+# ── Tâches ──────────────────────────────────────────────────────────────
+
+@require_POST
+def task_create(request, project_id: int):
+    from GestionSysteme.project_forms import ProjectTaskForm
+    from projects.models import ProjectTask
+
+    projet = _project_or_404(project_id)
+    form = ProjectTaskForm(request.POST)
+    if form.is_valid():
+        tache = form.save(commit=False)
+        tache.project = projet
+        if not tache.order:
+            dernier = ProjectTask.objects.filter(project=projet).order_by("-order").first()
+            tache.order = (dernier.order + 1) if dernier else 1
+        tache.save()
+        messages.success(request, "Tâche ajoutée.")
+    else:
+        messages.error(request, _premier_message(form) or "Tâche invalide.")
+    return redirect("gestionsysteme:project-detail", project_id=projet.pk)
+
+
+@require_POST
+def task_update(request, project_id: int, task_id: int):
+    from projects.models import ProjectTask
+
+    projet = _project_or_404(project_id)
+    tache = ProjectTask.objects.filter(project=projet, pk=task_id).first()
+    if tache is None:
+        raise Http404("Tâche introuvable")
+
+    action = request.POST.get("action", "")
+
+    if action == "supprimer":
+        tache.delete()
+        messages.success(request, "Tâche supprimée.")
+    elif action == "etat":
+        nouvel = request.POST.get("status", "")
+        valides = {v for v, _ in ProjectTask.Status.choices}
+        if nouvel not in valides:
+            messages.error(request, "État de tâche inconnu.")
+        else:
+            tache.status = nouvel
+            if nouvel != ProjectTask.Status.BLOCKED:
+                tache.blocked_reason = ""
+            tache.save(update_fields=["status", "blocked_reason"])
+            messages.success(request, "Tâche mise à jour.")
+    else:
+        messages.error(request, "Action inconnue.")
+
+    return redirect("gestionsysteme:project-detail", project_id=projet.pk)
+
+
+def _premier_message(form) -> str:
+    for champ, erreurs in form.errors.items():
+        if erreurs:
+            return f"{champ} : {erreurs[0]}"
+    return ""
+
+
+def project_detail(request, project_id: int):
+    from projects.models import ProjectLog, ProjectPendingAction, ProjectTask
+
+    from GestionSysteme.project_forms import ProjectTaskForm
+
+    project = _project_or_404(project_id)
 
     tasks = ProjectTask.objects.filter(project=project).order_by("order", "id")
     done = sum(1 for t in tasks if t.status == "done")
@@ -106,6 +234,8 @@ def project_detail(request, project_id: int):
             ProjectLog.objects.filter(project=project).select_related("task"),
             per_page=25,
         ),
+        "task_form": ProjectTaskForm(),
+        "task_statuses": ProjectTask.Status.choices,
     })
     return render(request, "gestion/projects/detail.html", ctx)
 

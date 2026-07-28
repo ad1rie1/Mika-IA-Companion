@@ -1,0 +1,57 @@
+{% extends "gestion/social/personne/_base.html" %}
+{% load gestion %}
+
+{% block panneau %}
+<section class="card">
+  {% include "gestion/partials/filters.html" %}
+
+  {% if page.rows %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th style="min-width: 30rem;">Contenu</th>
+              <th>Ressenti</th>
+              <th style="min-width: 8rem;">Importance</th>
+              <th>Thèmes</th>
+              <th class="fit">Vécu</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in page.rows %}
+              <tr>
+                <td><div class="cell-clamp">{{ s.content }}</div></td>
+                <td><span class="emo" style="{{ s.emotion|emo_style }}">{{ s.emotion }}</span></td>
+                <td>
+                  <div class="row">
+                    <span class="meter {{ s.importance|tone_ratio }}" style="flex:1; min-width:4rem;">
+                      <span style="width: {{ s.importance|bar_width }}%;"></span>
+                    </span>
+                    <span class="tabular text-xs">{{ s.importance|num }}</span>
+                  </div>
+                </td>
+                <td><span class="chips">{% for t in s.themes.all %}<span class="chip">{{ t.name }}</span>{% endfor %}</span></td>
+                <td class="fit muted" title="{{ s.occurred_at|dt_full }}">{{ s.occurred_at|ago }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
+  {% else %}
+    <div class="card-body">
+      <div class="empty">
+        {% if filterset.active %}
+          Aucun souvenir ne correspond à ce filtre.
+        {% else %}
+          <div class="empty-title">Aucun souvenir rattaché</div>
+          Le consolidateur rattache un souvenir à cette entité quand elle est
+          nommée dans le contenu, ou quand elle est l'interlocutrice du tour.
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

@@ -42,6 +42,10 @@ urlpatterns = [
 
     path("social/", social.social, name="social"),
     path("social/personnes/<int:entity_id>/", social.person_detail, name="person-detail"),
+    path(
+        "social/personnes/<int:entity_id>/<slug:tab>/",
+        social.person_detail, name="person-detail-tab",
+    ),
     path("social/identites/<int:identity_id>/", social.identity_detail, name="identity-detail"),
     path("social/identites/<int:identity_id>/action/", social.identity_action, name="identity-action"),
     path("social/demandes/<int:claim_id>/action/", social.claim_action, name="claim-action"),
@@ -50,11 +54,21 @@ urlpatterns = [
     path("conscience/", conscience.conscience, name="conscience"),
     path("conscience/<slug:tab>/", conscience.conscience, name="conscience-tab"),
 
-    # Le détail est déclaré avant l'onglet : le convertisseur ``int`` ne
-    # capture pas « actifs », donc l'ordre suffit à lever l'ambiguïté.
+    # Les segments littéraux sont déclarés avant ``<slug:tab>``, qui les
+    # capturerait sinon : « nouveau » est une page, pas un onglet. Le détail
+    # passe en premier sans ambiguïté, le convertisseur ``int`` ne capturant
+    # pas « actifs ».
     path("projets/", projects.projects, name="projects"),
-    path("projets/<int:project_id>/", projects.project_detail, name="project-detail"),
+    path("projets/nouveau/", projects.project_new, name="project-new"),
     path("projets/action/<int:action_id>/", projects.pending_action, name="project-pending-action"),
+    path("projets/<int:project_id>/", projects.project_detail, name="project-detail"),
+    path("projets/<int:project_id>/modifier/", projects.project_edit, name="project-edit"),
+    path("projets/<int:project_id>/supprimer/", projects.project_delete, name="project-delete"),
+    path("projets/<int:project_id>/taches/", projects.task_create, name="task-create"),
+    path(
+        "projets/<int:project_id>/taches/<int:task_id>/",
+        projects.task_update, name="task-update",
+    ),
     path("projets/<slug:tab>/", projects.projects, name="projects-tab"),
 
     # ── Administration ───────────────────────────────────────────────
