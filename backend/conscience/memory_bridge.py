@@ -45,11 +45,6 @@ class MemoryBridge:
         from memory.manager import memory_manager
         return await memory_manager.get_important_souvenirs(min_importance, limit)
 
-    async def search_related(self, text: str, n: int = 5) -> list[dict]:
-        """Semantic search for souvenirs related to text."""
-        from memory.manager import memory_manager
-        return await memory_manager.search_related_souvenirs(text, n=n)
-
     async def who_is_concerned(self, signal_text: str, n: int = 5) -> list[dict]:
         """Who does this signal concern, ranked, with reachable handles.
 

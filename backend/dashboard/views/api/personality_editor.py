@@ -16,7 +16,6 @@ import tempfile
 import yaml
 from django.conf import settings
 from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 logger = logging.getLogger(__name__)
@@ -39,7 +38,6 @@ def personality_read(request):
     return JsonResponse({"exists": True, "path": str(path), "data": data})
 
 
-@csrf_exempt
 @require_http_methods(["PATCH", "PUT"])
 def personality_write(request):
     try:

@@ -34,8 +34,36 @@ export interface AuthState {
   needs_bootstrap?: boolean;
 }
 
+/**
+ * Read Django's CSRF token from the cookie it sets on `/auth/whoami`.
+ *
+ * The cookie is deliberately not HttpOnly: it is not the secret. What a
+ * cross-site page cannot do is produce the *pair* — it can neither read this
+ * cookie (same-origin policy) nor set the `X-CSRFToken` header on a
+ * cross-origin request without a preflight it will fail.
+ */
+function csrfToken(): string {
+  const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]*)/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
+/** POST JSON with credentials + the CSRF token. */
+async function postJson(path: string, body: unknown): Promise<Response> {
+  return fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRFToken": csrfToken(),
+    },
+    body: JSON.stringify(body),
+  });
+}
+
 export async function whoami(): Promise<AuthState> {
   try {
+    // Also the call that plants the CSRF cookie (see @ensure_csrf_cookie on
+    // the view), so it has to happen before any mutating request.
     const resp = await fetch(`${API_BASE}/auth/whoami`, {
       credentials: "include",
     });
@@ -53,12 +81,7 @@ export async function bootstrap(
   username: string,
   password: string
 ): Promise<AuthState> {
-  const resp = await fetch(`${API_BASE}/auth/bootstrap`, {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password }),
-  });
+  const resp = await postJson("/auth/bootstrap", { username, password });
   const body = await resp.json().catch(() => ({}));
   if (!resp.ok) {
     throw new Error(body.error || "bootstrap refusé");
@@ -70,12 +93,7 @@ export async function login(
   username: string,
   password: string
 ): Promise<AuthState> {
-  const resp = await fetch(`${API_BASE}/auth/login`, {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password }),
-  });
+  const resp = await postJson("/auth/login", { username, password });
   if (!resp.ok) {
     throw new Error("invalid credentials");
   }
@@ -83,5 +101,8 @@ export async function login(
 }
 
 export async function logout(): Promise<void> {
-  await fetch(`${API_BASE}/auth/logout`, { credentials: "include" });
+  await fetch(`${API_BASE}/auth/logout`, {
+    credentials: "include",
+    headers: { "X-CSRFToken": csrfToken() },
+  });
 }

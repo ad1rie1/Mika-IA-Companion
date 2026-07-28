@@ -8,6 +8,9 @@
 {% block head_extra %}{% endblock %}
 </head>
 <body data-view="{{ active_view }}">
+  {# Plants the csrftoken cookie on every dashboard page. app.js reads it
+     and attaches X-CSRFToken to every mutating same-origin fetch. #}
+  {% csrf_token %}
 <div class="app">
   <nav class="sidebar">
     <a class="logo" href="{% url 'dash-home' %}">

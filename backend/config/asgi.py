@@ -1,7 +1,9 @@
 import os
 import logging
 
+from channels.auth import AuthMiddlewareStack
 from channels.routing import ProtocolTypeRouter, URLRouter
+from channels.security.websocket import OriginValidator
 from django.core.asgi import get_asgi_application
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
@@ -115,10 +117,42 @@ class LifespanWrapper:
         logger.info("VTuber Engine shut down cleanly")
 
 
+def _websocket_application():
+    """The WebSocket stack: origin check → session auth → routing.
+
+    **AuthMiddlewareStack** resolves the session cookie into ``scope["user"]``.
+    Without it the key is simply absent, so every consumer sees an anonymous
+    connection — and with CONSUMER_REQUIRE_AUTH on (the default), that means
+    *every* connection is refused with 4401, valid session or not.
+
+    **OriginValidator** is the other half, and it only became necessary once
+    the socket started authenticating by cookie. CORS does not apply to
+    WebSockets: any page the user visits can open ``ws://.../ws``, and the
+    browser will attach their session cookie. Without an origin check that is
+    cross-site WebSocket hijacking — a third-party page holding a live,
+    authenticated conversation with Mika, reading back memories and profiles
+    as her owner. The allow-list is the same one CORS uses, because "may talk
+    to the backend" is one decision, not two.
+
+    A missing ``Origin`` header is rejected (unless the list is ``*``): real
+    browsers always send one on a WebSocket handshake.
+    """
+    from django.conf import settings
+
+    if getattr(settings, "CORS_ALLOW_ALL_ORIGINS", False):
+        allowed = ["*"]
+    else:
+        allowed = list(getattr(settings, "CORS_ALLOWED_ORIGINS", []))
+
+    return OriginValidator(
+        AuthMiddlewareStack(URLRouter(websocket_urlpatterns)), allowed,
+    )
+
+
 inner_app = ProtocolTypeRouter(
     {
         "http": django_asgi_app,
-        "websocket": URLRouter(websocket_urlpatterns),
+        "websocket": _websocket_application(),
     }
 )
 

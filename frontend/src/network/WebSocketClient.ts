@@ -2,6 +2,13 @@ import type { ServerMessageMap } from "../types";
 
 export type MessageHandler = (data: any) => void;
 
+/**
+ * Close code the consumer uses when CONSUMER_REQUIRE_AUTH refuses an
+ * unauthenticated socket (see communication/channels/web_frontend.py).
+ * Permanent by nature — the session has to change before a retry can differ.
+ */
+export const WS_CLOSE_UNAUTHORIZED = 4401;
+
 export class WebSocketClient {
   private ws: WebSocket | null = null;
   private url: string;
@@ -65,7 +72,16 @@ export class WebSocketClient {
         }
       };
 
-      this.ws.onclose = () => {
+      this.ws.onclose = (event) => {
+        // A closure the server will make again on every attempt is not a
+        // network blip: retrying just produces a silent loop where the user
+        // watches "reconnecting…" forever without being told the one thing
+        // they could act on — that they need to sign in.
+        if (event.code === WS_CLOSE_UNAUTHORIZED) {
+          console.warn("WebSocket refused: authentication required");
+          this.emit("connection", { status: "unauthorized" });
+          return;
+        }
         console.log("WebSocket disconnected, reconnecting...");
         this.emit("connection", {
           status: "disconnected",

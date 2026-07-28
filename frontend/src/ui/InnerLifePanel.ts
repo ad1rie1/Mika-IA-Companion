@@ -214,7 +214,9 @@ export class InnerLifePanel {
     this.renderDrives(state.drives);
     this.renderNarrative(state.self_narrative);
     this.renderRuminations(state.ruminations);
-    this.renderProfile(state.person_profile, state.pending_commitments);
+    this.renderProfile(
+      state.person_profile, state.pending_commitments, state.identity,
+    );
   }
 
   /** Subscribe to sleep-phase transitions (drives avatar + scene visuals). */
@@ -528,11 +530,21 @@ export class InnerLifePanel {
   private renderProfile(
     profile: InnerState["person_profile"],
     commitments: InnerState["pending_commitments"],
+    identity?: InnerState["identity"],
   ) {
     const section = document.getElementById("il-profile")!;
+    // The identity block stands on its own: it is precisely when Mika is
+    // *not* sure who this is that showing it matters most, and that is
+    // exactly when `profile` is withheld.
+    const identityHtml = identity ? renderIdentity(identity) : "";
     if (!profile) {
-      section.setAttribute("hidden", "");
-      this.profileEl.innerHTML = "";
+      if (identityHtml) {
+        section.removeAttribute("hidden");
+        this.profileEl.innerHTML = identityHtml;
+      } else {
+        section.setAttribute("hidden", "");
+        this.profileEl.innerHTML = "";
+      }
       return;
     }
     section.removeAttribute("hidden");
@@ -545,6 +557,7 @@ export class InnerLifePanel {
     const avoid = profile.sensitive_topics.slice(0, 3).join(", ");
 
     const parts: string[] = [];
+    if (identityHtml) parts.push(identityHtml);
     if (profile.summary) {
       parts.push(`<p class="il-profile-summary">${escapeHtml(profile.summary)}</p>`);
     }
@@ -578,4 +591,42 @@ function escapeHtml(s: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+/**
+ * Who Mika thinks she's talking to, and how sure.
+ *
+ * Rendered even — especially — when `person_profile` is absent: the whole
+ * point of the certainty model is that she can be unsure who someone is
+ * while still talking to them, and that state is invisible otherwise.
+ * Everything here can originate from a user-supplied message (a claimed
+ * name, the quoted evidence), so it all goes through escapeHtml.
+ */
+function renderIdentity(identity: NonNullable<InnerState["identity"]>): string {
+  const pct = Math.round(identity.certainty * 100);
+  const tone =
+    identity.certainty >= 0.85 ? "sure"
+      : identity.certainty >= 0.7 ? "likely"
+        : identity.certainty >= 0.45 ? "claimed"
+          : "unknown";
+
+  const parts = [
+    `<div class="il-identity il-identity-${tone}">`,
+    `<span class="il-identity-name">${escapeHtml(identity.known_as)}</span>`,
+    `<span class="il-weight">(${pct}% — ${escapeHtml(identity.trust)})</span>`,
+    `<p class="il-identity-level">${escapeHtml(identity.level)}</p>`,
+  ];
+
+  if (identity.pending_claims?.length) {
+    parts.push(`<ul class="il-identity-claims">`);
+    for (const claim of identity.pending_claims) {
+      parts.push(
+        `<li>se présente comme <strong>${escapeHtml(claim.name)}</strong>` +
+          ` — « ${escapeHtml(claim.evidence)} »</li>`,
+      );
+    }
+    parts.push(`</ul>`);
+  }
+  parts.push(`</div>`);
+  return parts.join("");
 }

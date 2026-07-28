@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 from typing import TYPE_CHECKING
 
 from channels.layers import get_channel_layer
 
+from identity.trust import is_identifiable_person
 from memory.manager import memory_manager
 from modules.manager import module_manager
 from modules.types import ModuleEvent
@@ -245,127 +247,200 @@ async def broadcast_inner_state_update(person_id: str | None = None) -> None:
 async def _collect_inner_state(person_id: str | None) -> dict:
     """Assemble a JSON-safe snapshot of Mika's inner life for the frontend.
 
-    Kept resilient: if a sub-system fails (DB unavailable, model not
-    migrated yet, ...), the corresponding field is omitted rather than
-    breaking the whole broadcast.
+    Each section is gathered independently and merged in: if a sub-system
+    fails (DB unavailable, model not migrated yet, ...), that field is
+    omitted rather than breaking the whole broadcast. The isolation used to
+    be ten hand-written ``try/except`` blocks that differed only in the log
+    message — which meant a new section silently inherited "all or nothing"
+    the day someone forgot the wrapper.
     """
-    from asgiref.sync import sync_to_async
+    state: dict = {}
+    for label, loader in (
+        ("drives", _snapshot_drives),
+        ("sleep phase", _snapshot_sleep_phase),
+        ("daily journal", _snapshot_today_journal),
+        ("dream", _snapshot_last_dream),
+        ("circadian", _snapshot_circadian),
+        ("self-narrative", _snapshot_self_narrative),
+        ("ruminations", _snapshot_ruminations),
+        ("projects", _snapshot_projects),
+        ("pending actions", _snapshot_pending_actions),
+    ):
+        await _merge_section(state, label, loader)
 
+    # Per-person material: only for an id that can belong to someone (not
+    # Mika's own plumbing, not a throwaway socket). The panel is a window
+    # onto the same private memory the prompt gates, so it answers to the
+    # same rule — see identity.trust.may_disclose_private_context.
+    if is_identifiable_person(person_id):
+        await _merge_section(
+            state, "person profile", lambda: _snapshot_person(person_id),
+        )
+    return state
+
+
+async def _merge_section(state: dict, label: str, loader) -> None:
+    """Run one snapshot loader and merge its keys, swallowing failures.
+
+    ``loader`` may be sync or async and returns a dict of keys to merge (or
+    an empty one when it has nothing to say).
+    """
+    try:
+        result = loader()
+        if inspect.isawaitable(result):
+            result = await result
+        if result:
+            state.update(result)
+    except Exception:
+        logger.debug("%s snapshot failed", label, exc_info=True)
+
+
+# ── Snapshot sections ─────────────────────────────────────────────
+# Each returns the keys it contributes, or {} for "nothing to report".
+# None of them handle their own errors: _merge_section owns that, so a new
+# section cannot forget to be isolated.
+
+
+def _snapshot_drives() -> dict:
+    """In-RAM, cheap, always available."""
     from drives.engine import drive_engine
 
-    state: dict = {}
+    return {
+        "drives": drive_engine.to_dict(),
+        "energy": round(drive_engine.energy_level(), 3),
+    }
 
-    # Drives — in-RAM, cheap, always available
+
+def _snapshot_sleep_phase() -> dict:
+    """Whether Mika is asleep (journaling / dreaming / digesting) or awake.
+
+    Drives avatar + scene visuals on the frontend.
+    """
+    from memory.sleep import sleep_cycle
+
+    return {"sleep_phase": sleep_cycle.phase}
+
+
+async def _snapshot_today_journal() -> dict:
+    """The recap written at the previous light-sleep phase.
+
+    A journal is dated the day it COVERS (the one that just ended), so
+    matching strictly on today left the panel blank from midnight to 23h.
+    Show the most recent of {today, yesterday} instead.
+    """
+    from datetime import date, timedelta
+
+    from asgiref.sync import sync_to_async
+    from memory.models import DailyJournal
+
+    journal = await sync_to_async(
+        lambda: DailyJournal.objects
+        .filter(date__gte=date.today() - timedelta(days=1))
+        .order_by("-date")
+        .first()
+    )()
+    if not journal or not journal.narrative:
+        return {}
+    return {
+        "today_journal": {
+            "date": journal.date.isoformat(),
+            "narrative": journal.narrative,
+            "dominant_emotion": journal.dominant_emotion,
+            "persons_interacted": list(journal.persons_interacted or []),
+        }
+    }
+
+
+async def _snapshot_last_dream() -> dict:
+    """Last night's dream, with vividness for UI opacity scaling.
+
+    Surfaced regardless of ``recalled_at`` so the panel keeps showing it
+    after Mika has mentioned it in conversation.
+    """
+    from datetime import date, timedelta
+
+    from asgiref.sync import sync_to_async
+    from memory.models import Dream
+
+    last_night = date.today() - timedelta(days=1)
+    dream = await sync_to_async(
+        lambda: Dream.objects
+        .filter(night_of=last_night)
+        .order_by("-vividness")
+        .first()
+    )()
+    if not dream or not dream.content:
+        return {}
+    return {
+        "last_dream": {
+            "content": dream.content,
+            "dream_type": dream.dream_type,
+            "vividness": round(dream.vividness, 2),
+            "emotion": dream.emotion,
+            "night_of": dream.night_of.isoformat(),
+            "recalled": dream.recalled_at is not None,
+        }
+    }
+
+
+def _snapshot_circadian() -> dict:
+    """Pure function, no IO."""
+    from emotion import circadian
+
     try:
-        state["drives"] = drive_engine.to_dict()
-        state["energy"] = round(drive_engine.energy_level(), 3)
+        from config.personality import personality
+        profile = personality.circadian_profile
     except Exception:
-        logger.debug("drives snapshot failed", exc_info=True)
+        # A missing personality file must not cost the circadian block; the
+        # module's own defaults describe a plain diurnal rhythm.
+        profile = None
 
-    # Sleep phase — whether Mika is currently asleep (journaling / dreaming
-    # / digesting) or awake. Drives avatar + scene visuals on the frontend.
-    try:
-        from memory.sleep import sleep_cycle
-        state["sleep_phase"] = sleep_cycle.phase
-    except Exception:
-        logger.debug("sleep phase snapshot failed", exc_info=True)
-
-    # Today's daily journal — recap written at the previous light-sleep
-    # phase. Exposed so the panel can show "aujourd'hui" narratively.
-    try:
-        from datetime import date, timedelta
-        from memory.models import DailyJournal
-        # The journal written tonight is dated the day it COVERS (the day
-        # that just ended). Matching strictly on today's date left the
-        # panel blank from midnight to the next 23h — show the most
-        # recent of {today, yesterday} instead.
-        journal = await sync_to_async(
-            lambda: DailyJournal.objects
-            .filter(date__gte=date.today() - timedelta(days=1))
-            .order_by("-date")
-            .first()
-        )()
-        if journal and journal.narrative:
-            state["today_journal"] = {
-                "date": journal.date.isoformat(),
-                "narrative": journal.narrative,
-                "dominant_emotion": journal.dominant_emotion,
-                "persons_interacted": list(journal.persons_interacted or []),
-            }
-    except Exception:
-        logger.debug("daily journal snapshot failed", exc_info=True)
-
-    # Last night's dream — if any, with vividness for UI opacity scaling.
-    # We surface it regardless of `recalled_at` so the panel can show it
-    # even after Mika has mentioned it in a conversation.
-    try:
-        from datetime import date, timedelta
-        from memory.models import Dream
-        last_night = date.today() - timedelta(days=1)
-        dream = await sync_to_async(
-            lambda: Dream.objects
-            .filter(night_of=last_night)
-            .order_by("-vividness")
-            .first()
-        )()
-        if dream and dream.content:
-            state["last_dream"] = {
-                "content": dream.content,
-                "dream_type": dream.dream_type,
-                "vividness": round(dream.vividness, 2),
-                "emotion": dream.emotion,
-                "night_of": dream.night_of.isoformat(),
-                "recalled": dream.recalled_at is not None,
-            }
-    except Exception:
-        logger.debug("dream snapshot failed", exc_info=True)
-
-    # Circadian — pure function, no IO
-    try:
-        from emotion import circadian
-        try:
-            from config.personality import personality
-            profile = personality.circadian_profile
-        except Exception:
-            profile = None
-        cstate = circadian.current_state(profile=profile)
-        state["circadian"] = {
+    cstate = circadian.current_state(profile=profile)
+    return {
+        "circadian": {
             "phase": cstate.phase.value,
             "hour": cstate.hour,
             "energy": round(cstate.energy, 3),
             "bias_emotion": cstate.bias_anchor.value,
         }
-    except Exception:
-        logger.debug("circadian snapshot failed", exc_info=True)
+    }
 
-    # Self-narrative — one row, most recent
-    try:
-        from memory.models import SelfNarrative
-        narrative = await sync_to_async(
-            lambda: SelfNarrative.objects.order_by("-created_at").first()
-        )()
-        if narrative and narrative.content:
-            state["self_narrative"] = {
-                "content": narrative.content,
-                "key_themes": narrative.key_themes,
-                "key_people": narrative.key_people,
-                "dominant_mood": narrative.dominant_mood,
-                "created_at": narrative.created_at.isoformat(),
-            }
-    except Exception:
-        logger.debug("self-narrative snapshot failed", exc_info=True)
 
-    # Ruminations — top-5 active
-    try:
-        from conscience.models import Rumination
-        rows = await sync_to_async(
-            lambda: list(
-                Rumination.objects.filter(status="active")
-                .order_by("-intensity")[:5]
-                .values("summary", "intensity", "emotion")
-            )
-        )()
-        state["ruminations"] = [
+async def _snapshot_self_narrative() -> dict:
+    """One row, the most recent."""
+    from asgiref.sync import sync_to_async
+    from memory.models import SelfNarrative
+
+    narrative = await sync_to_async(
+        lambda: SelfNarrative.objects.order_by("-created_at").first()
+    )()
+    if not narrative or not narrative.content:
+        return {}
+    return {
+        "self_narrative": {
+            "content": narrative.content,
+            "key_themes": narrative.key_themes,
+            "key_people": narrative.key_people,
+            "dominant_mood": narrative.dominant_mood,
+            "created_at": narrative.created_at.isoformat(),
+        }
+    }
+
+
+async def _snapshot_ruminations() -> dict:
+    """Top-5 active. Always present, empty list included."""
+    from asgiref.sync import sync_to_async
+    from conscience.models import Rumination
+
+    rows = await sync_to_async(
+        lambda: list(
+            Rumination.objects.filter(status="active")
+            .order_by("-intensity")[:5]
+            .values("summary", "intensity", "emotion")
+        )
+    )()
+    return {
+        "ruminations": [
             {
                 "summary": r["summary"],
                 "intensity": round(r["intensity"], 2),
@@ -373,133 +448,147 @@ async def _collect_inner_state(person_id: str | None) -> dict:
             }
             for r in rows
         ]
-    except Exception:
-        logger.debug("ruminations snapshot failed", exc_info=True)
+    }
 
-    # Active projects — a condensed view for the InnerLifePanel
-    try:
-        from django.db.models import Count, Q
-        from projects.models import Project, ProjectTask
 
-        # Task counts are annotated, not looped: this runs on every reply
-        # before the text reaches the user, and three COUNT queries per
-        # project (each its own sync_to_async round-trip) put ~30 queries on
-        # the critical path for a panel nobody is watching mid-sentence.
-        active = await sync_to_async(
-            lambda: list(
-                Project.objects.filter(status=Project.Status.ACTIVE)
-                .annotate(
-                    tasks_total=Count("tasks", distinct=True),
-                    tasks_done=Count(
-                        "tasks", distinct=True,
-                        filter=Q(tasks__status=ProjectTask.Status.DONE),
-                    ),
-                    tasks_blocked=Count(
-                        "tasks", distinct=True,
-                        filter=Q(tasks__status=ProjectTask.Status.BLOCKED),
-                    ),
-                )
-                .order_by("-priority", "-updated_at")[:10]
+async def _snapshot_projects() -> dict:
+    """Condensed active-project view for the InnerLifePanel.
+
+    Task counts are annotated, not looped: this runs on every reply before
+    the text reaches the user, and three COUNT queries per project (each its
+    own sync_to_async round-trip) put ~30 queries on the critical path for a
+    panel nobody is watching mid-sentence.
+    """
+    from asgiref.sync import sync_to_async
+    from django.db.models import Count, Q
+    from projects.models import Project, ProjectTask
+
+    active = await sync_to_async(
+        lambda: list(
+            Project.objects.filter(status=Project.Status.ACTIVE)
+            .annotate(
+                tasks_total=Count("tasks", distinct=True),
+                tasks_done=Count(
+                    "tasks", distinct=True,
+                    filter=Q(tasks__status=ProjectTask.Status.DONE),
+                ),
+                tasks_blocked=Count(
+                    "tasks", distinct=True,
+                    filter=Q(tasks__status=ProjectTask.Status.BLOCKED),
+                ),
             )
-        )()
-        if active:
-            state["projects"] = [
-                {
-                    "id": p.id,
-                    "title": p.title,
-                    "status": p.status,
-                    "priority": p.priority,
-                    "origin": p.origin,
-                    "emotion_policy": p.emotion_policy,
-                    "schedule_rule": p.schedule_rule,
-                    "next_run_at": p.next_run_at.isoformat() if p.next_run_at else None,
-                    "tasks_total": p.tasks_total,
-                    "tasks_done": p.tasks_done,
-                    "tasks_blocked": p.tasks_blocked,
-                }
-                for p in active
-            ]
-    except Exception:
-        logger.debug("projects snapshot failed", exc_info=True)
-
-    # Pending actions — user-actionable queue
-    try:
-        from projects.models import ProjectPendingAction
-        pending = await sync_to_async(
-            lambda: list(
-                ProjectPendingAction.objects
-                .filter(status=ProjectPendingAction.Status.PENDING)
-                .select_related("project")
-                .order_by("-created_at")[:20]
-            )
-        )()
-        if pending:
-            state["pending_project_actions"] = [
-                {
-                    "id": a.id,
-                    "project_id": a.project_id,
-                    "project_title": a.project.title,
-                    "proposal": a.proposal,
-                    "payload_kind": (a.payload or {}).get("kind", ""),
-                    "created_at": a.created_at.isoformat(),
-                }
-                for a in pending
-            ]
-    except Exception:
-        logger.debug("pending actions snapshot failed", exc_info=True)
-
-    # Person profile + commitments — only when a non-internal person_id, and
-    # only when the identity layer says this handle really is that person.
-    # The panel is a window onto the same private material the prompt gates,
-    # so it has to answer to the same rule.
-    if person_id and person_id not in (
-        "", "anonymous", "conscience_mika", "__global__",
-    ) and not person_id.startswith("anon_"):
-        try:
-            from identity.resolver import identity_resolver
-            from memory.models import Commitment, PersonProfile
-
-            ident = await identity_resolver.resolve_context(person_id)
-            state["identity"] = {
-                "known_as": ident.known_as,
-                "certainty": round(ident.certainty, 3),
-                "level": ident.description,
-                "trust": ident.trust.value,
-                "pending_claims": ident.pending_claims,
+            .order_by("-priority", "-updated_at")[:10]
+        )
+    )()
+    if not active:
+        return {}
+    return {
+        "projects": [
+            {
+                "id": p.id,
+                "title": p.title,
+                "status": p.status,
+                "priority": p.priority,
+                "origin": p.origin,
+                "emotion_policy": p.emotion_policy,
+                "schedule_rule": p.schedule_rule,
+                "next_run_at": p.next_run_at.isoformat() if p.next_run_at else None,
+                "tasks_total": p.tasks_total,
+                "tasks_done": p.tasks_done,
+                "tasks_blocked": p.tasks_blocked,
             }
-            entity = (
-                await identity_resolver.entity_for_person(person_id)
-                if ident.may_disclose else None
-            )
-            profile = await sync_to_async(
-                lambda: PersonProfile.objects
-                .select_related("entity")
-                .filter(entity=entity)
-                .first()
-            )() if entity is not None else None
-            if profile:
-                state["person_profile"] = {
-                    "name": profile.entity.name,
-                    "summary": profile.summary,
-                    "closeness": profile.closeness,
-                    "preferred_tone": profile.preferred_tone,
-                    "topics_of_interest": profile.topics_of_interest,
-                    "sensitive_topics": profile.sensitive_topics,
-                    "interaction_count": profile.interaction_count,
-                }
-                commitments = await sync_to_async(
-                    lambda: list(
-                        Commitment.objects
-                        .filter(person=profile.entity, status="pending")
-                        .order_by("-created_at")
-                        .values_list("description", flat=True)[:5]
-                    )
-                )()
-                state["pending_commitments"] = list(commitments)
-        except Exception:
-            logger.debug("person profile snapshot failed", exc_info=True)
+            for p in active
+        ]
+    }
 
-    return state
+
+async def _snapshot_pending_actions() -> dict:
+    """The user-actionable approval queue."""
+    from asgiref.sync import sync_to_async
+    from projects.models import ProjectPendingAction
+
+    pending = await sync_to_async(
+        lambda: list(
+            ProjectPendingAction.objects
+            .filter(status=ProjectPendingAction.Status.PENDING)
+            .select_related("project")
+            .order_by("-created_at")[:20]
+        )
+    )()
+    if not pending:
+        return {}
+    return {
+        "pending_project_actions": [
+            {
+                "id": a.id,
+                "project_id": a.project_id,
+                "project_title": a.project.title,
+                "proposal": a.proposal,
+                "payload_kind": (a.payload or {}).get("kind", ""),
+                "created_at": a.created_at.isoformat(),
+            }
+            for a in pending
+        ]
+    }
+
+
+async def _snapshot_person(person_id: str) -> dict:
+    """Who Mika thinks this is, and — only if she may — what she knows of them.
+
+    ``identity`` is always reported (it is about the connection, not about
+    the person's private life); the profile and commitments are gated on
+    ``may_disclose``, exactly as the prompt is.
+    """
+    from asgiref.sync import sync_to_async
+
+    from identity.resolver import identity_resolver
+    from memory.models import Commitment, PersonProfile
+
+    ident = await identity_resolver.resolve_context(person_id)
+    out: dict = {
+        "identity": {
+            "known_as": ident.known_as,
+            "certainty": round(ident.certainty, 3),
+            "level": ident.description,
+            "trust": ident.trust.value,
+            "pending_claims": ident.pending_claims,
+        }
+    }
+    if not ident.may_disclose:
+        return out
+
+    entity = await identity_resolver.entity_for_person(person_id)
+    if entity is None:
+        return out
+
+    profile = await sync_to_async(
+        lambda: PersonProfile.objects
+        .select_related("entity")
+        .filter(entity=entity)
+        .first()
+    )()
+    if profile is None:
+        return out
+
+    out["person_profile"] = {
+        "name": profile.entity.name,
+        "summary": profile.summary,
+        "closeness": profile.closeness,
+        "preferred_tone": profile.preferred_tone,
+        "topics_of_interest": profile.topics_of_interest,
+        "sensitive_topics": profile.sensitive_topics,
+        "interaction_count": profile.interaction_count,
+    }
+    out["pending_commitments"] = await sync_to_async(
+        lambda: list(
+            Commitment.objects
+            .filter(person=entity, status="pending")
+            .order_by("-created_at")
+            .values_list("description", flat=True)[:5]
+        )
+    )()
+    return out
+
 
 
 async def emit_communication_event(source: str, person_id: str) -> None:

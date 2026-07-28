@@ -46,6 +46,7 @@ from django.utils import timezone as tz
 
 from ai.router import AIRole, UnconfiguredRoleError, ai_router
 from utils.parsing import strip_markdown_json
+from utils.periodic import PeriodicLoop
 
 logger = logging.getLogger(__name__)
 
@@ -205,45 +206,22 @@ class SleepCycle:
         # Dedicated background loop (since 2026-04): previously piggy-backed
         # on the consolidator's tick budget, now independent so a 45s LLM
         # call here never delays memory consolidation.
-        self._task: asyncio.Task | None = None
-        self._running: bool = False
+        self._loop = PeriodicLoop("Sleep cycle", self.run_if_due, interval=60)
 
     # ── Lifecycle ─────────────────────────────────────────────────
 
     async def start(self) -> None:
         """Start the dedicated sleep-check loop. Idempotent."""
-        if self._running:
-            return
         from configs.service import config_service
-        self._interval = int(
-            config_service.get("memory.sleep_check_interval", default=60)
+        await self._loop.start(
+            interval=int(
+                config_service.get("memory.sleep_check_interval", default=60)
+            ),
         )
-        self._running = True
-        self._task = asyncio.create_task(self._loop())
-        logger.info("Sleep cycle loop started (interval=%ds)", self._interval)
 
     async def stop(self) -> None:
         """Stop the loop gracefully."""
-        self._running = False
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-            self._task = None
-        logger.info("Sleep cycle loop stopped")
-
-    async def _loop(self) -> None:
-        while self._running:
-            try:
-                await asyncio.sleep(self._interval)
-                if self._running:
-                    await self.run_if_due()
-            except asyncio.CancelledError:
-                break
-            except Exception:
-                logger.exception("Sleep cycle loop error")
+        await self._loop.stop()
 
     # ── Public entry point ────────────────────────────────────────
 

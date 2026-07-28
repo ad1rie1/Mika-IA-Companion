@@ -453,14 +453,14 @@ class TestCorroborationLookup:
         await sync_to_async(conn.entities.set)([entity])
 
         score, reason = await identity_resolver.check_corroboration(
-            "tg_42", "le festival de guitare à Toulouse, quel souvenir", "Thomas",
+            "le festival de guitare à Toulouse, quel souvenir", "Thomas",
         )
         assert score > 0.0
         assert "recoupe" in reason
 
     async def test_unknown_name_scores_zero(self):
         score, _ = await identity_resolver.check_corroboration(
-            "tg_42", "peu importe ce que je dis", "Personne",
+            "peu importe ce que je dis", "Personne",
         )
         assert score == 0.0
 

@@ -71,11 +71,11 @@ class FakeScheduledAction:
 _ALL_GREETED = frozenset({"morning", "evening", "night"})
 
 
-def _score(ctx, threshold: float = 0.5):
+def _score(ctx):
     """Wrap compute_decision_score with time-of-day isolation."""
     greeted = set(_ALL_GREETED)
     today = date.today()
-    return compute_decision_score(ctx, threshold, greeted, today)
+    return compute_decision_score(ctx, greeted, today)
 
 
 # ===================================================================
@@ -285,10 +285,10 @@ class TestSelfRegulation:
     def test_ignored_acts_reduce_score(self):
         """Consecutive ignored acts should reduce score."""
         ctx_no_ignore = make_context(max_pertinence=0.8)
-        score_normal, _, _, _ = compute_decision_score(ctx_no_ignore, 0.5, set(), None)
+        score_normal, _, _, _ = compute_decision_score(ctx_no_ignore, set(), None)
 
         ctx_ignored = make_context(max_pertinence=0.8, consecutive_ignored_acts=3)
-        score_penalized, reason, _, _ = compute_decision_score(ctx_ignored, 0.5, set(), None)
+        score_penalized, reason, _, _ = compute_decision_score(ctx_ignored, set(), None)
 
         assert score_penalized < score_normal, "Ignored acts should reduce score"
         assert "ignored" in reason

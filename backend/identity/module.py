@@ -165,11 +165,6 @@ class IdentityToolsModule(BaseModule):
                         "message", ToolParameterType.STRING,
                         "Ce qu'elle vient de dire (ou l'extrait qui t'intrigue)",
                     ),
-                    ToolParameter(
-                        "person_id", ToolParameterType.STRING,
-                        "Contact concerne (vide = personne actuelle)",
-                        required=False, default="",
-                    ),
                 ],
                 handler=self._check_story,
             ),
@@ -336,9 +331,7 @@ class IdentityToolsModule(BaseModule):
         if not name or not message:
             return self._text("Il me faut un nom et ce qui a ete dit.")
 
-        score, reason = await identity_resolver.check_corroboration(
-            self._current_person_id(args), message, name,
-        )
+        score, reason = await identity_resolver.check_corroboration(message, name)
         if score <= 0.0:
             return self._text(
                 f"Rien dans ce qui a ete dit ne recoupe ce que tu sais de {name}. "

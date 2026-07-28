@@ -20,7 +20,7 @@ from django.contrib.auth.password_validation import (
     ValidationError, validate_password,
 )
 from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_POST
 
 from config.personality import personality
@@ -37,11 +37,13 @@ def _no_users_yet() -> bool:
     return not get_user_model().objects.exists()
 
 
-@csrf_exempt
 @require_POST
 def login_view(request):
-    """Session login for owned frontends. CSRF-exempt for JSON/cross-origin
-    clients; pair with explicit CORS origins + credentials in production."""
+    """Session login for owned frontends.
+
+    CSRF-protected like every other mutating endpoint: the client picks up the
+    token from the cookie ``whoami`` sets and echoes it in ``X-CSRFToken``.
+    """
     try:
         data = json.loads(request.body or b"{}")
     except (ValueError, TypeError):
@@ -62,7 +64,6 @@ def login_view(request):
     })
 
 
-@csrf_exempt
 @require_POST
 def bootstrap_view(request):
     """Create the very first account, then permanently disable itself.
@@ -113,12 +114,17 @@ def logout_view(request):
     return JsonResponse({"ok": True})
 
 
+@ensure_csrf_cookie
 def whoami(request):
     """Report the current session's authentication state.
 
     Also tells the client whether authentication is required at all and
     whether the bootstrap window is open, so the frontend can render the
     right screen without probing endpoints until one succeeds.
+
+    Carries ``@ensure_csrf_cookie`` because it is the client's *first* call:
+    login and bootstrap are CSRF-protected POSTs, and without the cookie
+    being set here there would be no token for them to echo back.
     """
     from django.conf import settings
 

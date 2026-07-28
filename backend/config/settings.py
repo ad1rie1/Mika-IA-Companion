@@ -43,11 +43,19 @@ MIDDLEWARE = [
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
+    # Only meaningful now that sessions carry authority: while every endpoint
+    # was anonymous, a forged request bought an attacker nothing they couldn't
+    # already do directly. With a logged-in owner session there are mutating
+    # endpoints worth forging — the dashboard rewrites provider API keys.
+    "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     # Must sit after AuthenticationMiddleware — it reads request.user.
     "dashboard.middleware.DashboardAuthMiddleware",
 ]
+
+# CSRF cookie/origin settings live just after the CORS + session block below,
+# because they derive their defaults from it.
 
 # Django's admin login doubles as the dashboard login when the gate is on:
 # both want a staff account, so there is no second credential to manage.
@@ -78,11 +86,30 @@ CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[
     "http://localhost:3000", "http://127.0.0.1:3000",
     "http://localhost:4173", "http://127.0.0.1:4173",
 ])
-CORS_ALLOW_CREDENTIALS = env.bool("CORS_ALLOW_CREDENTIALS", default=False)
+# On by default, and it has to be: the frontend authenticates with a session
+# cookie and every request goes out with `credentials: "include"`. Without
+# `Access-Control-Allow-Credentials: true` in the response, the browser
+# discards it — login failed with "invalid credentials" even when the
+# credentials were right, because the client never got to read the 200.
+#
+# Safe here precisely because CORS_ALLOW_ALL_ORIGINS is False: credentials
+# and a wildcard origin cannot be combined, and the allowed origins are
+# listed explicitly above.
+CORS_ALLOW_CREDENTIALS = env.bool("CORS_ALLOW_CREDENTIALS", default=True)
 
 # Allow the session cookie to ride cross-site requests in dev (frontend on a
 # different port). Tighten/secure in production.
 SESSION_COOKIE_SAMESITE = env("SESSION_COOKIE_SAMESITE", default="Lax")
+
+# Origins allowed to submit a CSRF-protected request. Mirrors the CORS
+# allow-list: "may talk to the backend" is one decision, not two.
+CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=CORS_ALLOWED_ORIGINS)
+# The SPA reads the token from the cookie to echo it in X-CSRFToken, so it
+# cannot be HttpOnly. That is the standard Django SPA setup: the cookie is not
+# the secret — the *matching pair* (cookie + header) is what a cross-site page
+# cannot produce, since it can neither read the cookie nor set the header.
+CSRF_COOKIE_HTTPONLY = False
+CSRF_COOKIE_SAMESITE = env("CSRF_COOKIE_SAMESITE", default=SESSION_COOKIE_SAMESITE)
 
 ROOT_URLCONF = "config.urls"
 ASGI_APPLICATION = "config.asgi.application"

@@ -24,6 +24,43 @@ from dataclasses import dataclass
 from enum import Enum
 
 
+#: person_ids that are Mika's own plumbing, not people to identify: her
+#: conscience triggers, the global mood key, the unresolved placeholder.
+#:
+#: Single source of truth. This lived in three places — the resolver, the
+#: context builder, and inline in the broadcast payload — and they had already
+#: drifted: only one of them also excluded ``anon_*``. A rule about who counts
+#: as a person, stated three times, is the same shape of mistake that produced
+#: the identity bug this layer exists to fix.
+INTERNAL_PERSON_IDS = frozenset({
+    "conscience_mika", "__global__", "anonymous", "",
+})
+
+#: Prefix of per-connection throwaway ids. A browser tab that never
+#: authenticated is a *socket*, not a returning visitor: the id changes on
+#: every reconnect, so nothing durable should ever be filed under it.
+EPHEMERAL_PERSON_PREFIX = "anon_"
+
+
+def is_internal_person(person_id: str | None) -> bool:
+    """True when this id is Mika's own plumbing rather than an interlocutor."""
+    return (person_id or "") in INTERNAL_PERSON_IDS
+
+
+def is_ephemeral_person(person_id: str | None) -> bool:
+    """True for a per-connection id that will not survive a reconnect."""
+    return (person_id or "").startswith(EPHEMERAL_PERSON_PREFIX)
+
+
+def is_identifiable_person(person_id: str | None) -> bool:
+    """True when it is worth trying to attach durable knowledge to this id.
+
+    Excludes both internal plumbing and throwaway connection ids — the two
+    cases where per-person memory has nobody to belong to.
+    """
+    return not is_internal_person(person_id) and not is_ephemeral_person(person_id)
+
+
 class ChannelTrust(str, Enum):
     """What the transport itself can prove about the sender."""
 

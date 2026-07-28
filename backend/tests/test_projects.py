@@ -529,8 +529,6 @@ class TestEventScheduleWiring:
 
     @pytest.mark.asyncio
     async def test_emit_event_wakes_matching_project(self):
-        from asgiref.sync import sync_to_async
-        from django.utils import timezone
         from modules.manager import ModuleManager
         from modules.types import ModuleEvent
         from projects.models import Project
@@ -552,7 +550,6 @@ class TestEventScheduleWiring:
 
     @pytest.mark.asyncio
     async def test_non_matching_event_leaves_project_alone(self):
-        from asgiref.sync import sync_to_async
         from modules.manager import ModuleManager
         from modules.types import ModuleEvent
         from projects.models import Project

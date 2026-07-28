@@ -24,7 +24,7 @@ from django.conf import settings
 
 from conscience.interpreter import SignalInterpreter
 from conscience.memory_bridge import MemoryBridge
-from conscience.scoring import compute_decision_score, urgency_from_context
+from conscience.scoring import compute_decision_score
 from conscience.types import DecisionContext, InterpretedSignal
 from drives.engine import drive_engine
 from emotion.engine import emotion_engine
@@ -381,7 +381,6 @@ class ConscienceEngine:
         """Gather all context needed for a decision."""
         from conscience.models import Observation
 
-        from emotion.engine import emotion_engine
 
         now = time.time()
 
@@ -505,12 +504,17 @@ class ConscienceEngine:
             lines.append(f"- Tu repenses {label} a: {r.summary[:120]}")
         return "Ces pensees te trottent dans la tete:\n" + "\n".join(lines)
 
-    async def _resolve_ruminations_after_act(self, response_text: str) -> None:
-        """When Mika speaks, fade ruminations whose themes overlap the response.
+    async def _resolve_ruminations_after_act(self) -> None:
+        """When Mika speaks up, every active rumination loses half its charge.
 
-        Simple heuristic: any active rumination loses 50% intensity on an
-        act (she "got it off her chest"). If post-decay intensity falls
-        below 0.1, mark as resolved.
+        The relief is *unconditional*, not matched against what she actually
+        said: the model here is "she got it off her chest", and the act of
+        breaking her own silence is what does it, whatever the subject.
+        Anything falling below 0.1 afterwards is marked resolved.
+
+        The docstring used to promise theme-matching against the response
+        text, and the signature carried a ``response_text`` nothing ever
+        read — describing a behaviour the code has never had.
         """
         try:
             from conscience.models import Rumination
@@ -589,7 +593,6 @@ class ConscienceEngine:
 
         # Import inside to avoid circulars
         from django.utils import timezone as tz
-        from emotion.engine import emotion_engine
         from emotion.types import Emotion, EmotionData
 
         now_tz = tz.now()
@@ -742,7 +745,7 @@ class ConscienceEngine:
         called by the caller once the decision is actually "act".
         """
         score, reason, periods, date = compute_decision_score(
-            ctx, self._threshold, self._greeted_periods, self._greeted_date
+            ctx, self._greeted_periods, self._greeted_date,
         )
         self._pending_greeted = (periods, date)
         return score, reason
@@ -956,8 +959,8 @@ class ConscienceEngine:
                 word_count=len(output.text.split()),
             )
 
-            # Speaking resolves related ruminations (fades their intensity).
-            await self._resolve_ruminations_after_act(output.text)
+            # Speaking at all fades every active rumination by half.
+            await self._resolve_ruminations_after_act()
 
             logger.info(
                 "Conscience acted [%s] (modules=%s, tools=%d): %s",
@@ -1165,10 +1168,6 @@ class ConscienceEngine:
         )
 
         return "\n\n".join(parts)
-
-    @staticmethod
-    def _urgency_from_score(ctx: DecisionContext) -> str:
-        return urgency_from_context(ctx)
 
     # ── Decision Logging ──────────────────────────────────────────
 

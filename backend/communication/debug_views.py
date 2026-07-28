@@ -27,7 +27,6 @@ from datetime import date
 from asgiref.sync import async_to_sync, sync_to_async
 from django.conf import settings
 from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 logger = logging.getLogger(__name__)
@@ -45,7 +44,6 @@ def _forbidden_if_not_debug():
     return None
 
 
-@csrf_exempt
 @require_http_methods(["POST"])
 def force_phase(request):
     """Force a sleep phase. Triggers a WS broadcast so the frontend
@@ -77,7 +75,6 @@ def force_phase(request):
     )
 
 
-@csrf_exempt
 @require_http_methods(["POST"])
 def force_journal(request):
     """Trigger the light-sleep journal phase right now (today's date).
@@ -118,7 +115,6 @@ def force_journal(request):
     )
 
 
-@csrf_exempt
 @require_http_methods(["POST"])
 def force_dream(request):
     """Generate a dream right now. Bypasses the probability + per-night
@@ -177,7 +173,6 @@ def force_dream(request):
     )
 
 
-@csrf_exempt
 @require_http_methods(["POST"])
 def force_digest(request):
     """Run the deep-sleep digestion phase now. Processes ruminations
@@ -197,7 +192,6 @@ def force_digest(request):
     return JsonResponse({"ok": True, "processed": processed})
 
 
-@csrf_exempt
 @require_http_methods(["POST"])
 def wake_up(request):
     """Shortcut: force AWAKE phase."""

@@ -162,7 +162,6 @@ class TestEmotionContext:
 
     def test_active_state_adds_anchoring_text(self, engine):
         """Strong active person state adds the 'bien ancree' marker."""
-        from emotion import pad
         pid = "anchored_user"
         for _ in range(6):
             engine.process_emotion(EmotionData(Emotion.HAPPY, 0.9), pid)

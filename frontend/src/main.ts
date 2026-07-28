@@ -185,6 +185,16 @@ async function init() {
       window.clearTimeout(settleTimer);
       settleTimer = null;
     }
+    if (data.status === "unauthorized") {
+      // Terminal: the client stopped retrying on purpose. Say what to do
+      // instead of leaving a spinner turning forever.
+      connectionStatus.className = "disconnected";
+      connectionStatus.textContent = "Session expirée — reconnecte-toi";
+      connectionStatus.onclick = () => window.location.reload();
+      connectionStatus.style.cursor = "pointer";
+      connectionStatus.title = "Cliquer pour se reconnecter";
+      return;
+    }
     if (data.status === "connected") {
       connectionStatus.className = "connected";
       connectionStatus.textContent = "Connectée";

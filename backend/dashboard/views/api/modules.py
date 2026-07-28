@@ -16,7 +16,6 @@ import json
 
 from asgiref.sync import async_to_sync
 from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 
@@ -147,19 +146,16 @@ def _run_action(name: str, action: str):
     return JsonResponse({"ok": True, "action": action, "module": row})
 
 
-@csrf_exempt
 @require_http_methods(["POST"])
 def module_enable(request, name: str):
     return _run_action(name, "enable")
 
 
-@csrf_exempt
 @require_http_methods(["POST"])
 def module_disable(request, name: str):
     return _run_action(name, "disable")
 
 
-@csrf_exempt
 @require_http_methods(["POST"])
 def module_uninstall(request, name: str):
     # Require an explicit confirm flag in the body so a mis-routed

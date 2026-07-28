@@ -6,7 +6,6 @@ import json
 import logging
 
 from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 
 from modules.base import BaseModule
 from modules.types import (
@@ -285,13 +284,13 @@ class WakeModule(BaseModule):
         return [
             ModuleRoute(
                 path="",
-                handler=csrf_exempt(self._view_wake),
+                handler=self._view_wake,
                 method="POST",
                 name="wake",
             ),
             ModuleRoute(
                 path="now",
-                handler=csrf_exempt(self._view_wake_now),
+                handler=self._view_wake_now,
                 method="POST",
                 name="wake_now",
             ),

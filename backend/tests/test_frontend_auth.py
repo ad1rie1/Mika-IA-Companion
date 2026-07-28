@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from channels.routing import URLRouter
 from django.contrib.auth import get_user_model
 from django.test import Client
 
@@ -129,8 +130,115 @@ class TestLogin:
 
 
 @pytest.mark.django_db(transaction=True)
+class TestAsgiAuthWiring:
+    """The real socket, through the real ASGI stack.
+
+    These exist because the previous tests only ever checked the *negative*
+    half of the contract — that an anonymous connection is refused — and that
+    half passed while the application was completely unreachable: the
+    WebSocket router had no ``AuthMiddlewareStack``, so ``scope["user"]`` was
+    never populated and every connection, valid session or not, was closed
+    with 4401. Asserting a door is locked proves nothing about the key.
+    """
+
+    #: Any allow-listed dev origin; a browser always sends one.
+    ORIGIN = b"http://localhost:3000"
+
+    @classmethod
+    async def _connect(cls, cookie_header: bytes | None, origin: bytes | None = b""):
+        from channels.testing import WebsocketCommunicator
+        from config.asgi import inner_app
+
+        headers = []
+        if origin is not None:
+            headers.append((b"origin", origin or cls.ORIGIN))
+        if cookie_header:
+            headers.append((b"cookie", cookie_header))
+        comm = WebsocketCommunicator(inner_app, "/ws", headers=headers)
+        try:
+            return await comm.connect(timeout=5)
+        finally:
+            await comm.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_a_valid_session_is_accepted(self):
+        from channels.db import database_sync_to_async
+
+        user = await database_sync_to_async(
+            get_user_model().objects.create_user
+        )(username="ws_probe", password="pw-probe-12345")
+
+        def _session_cookie():
+            client = Client()
+            client.force_login(user)
+            return f"sessionid={client.cookies['sessionid'].value}".encode()
+
+        cookie = await database_sync_to_async(_session_cookie)()
+        connected, _ = await self._connect(cookie)
+        assert connected is True, (
+            "une session valide doit pouvoir ouvrir le WebSocket — sans "
+            "AuthMiddlewareStack, scope['user'] est absent et tout est refuse"
+        )
+
+    @pytest.mark.asyncio
+    async def test_anonymous_is_still_refused_through_the_real_stack(self):
+        connected, code = await self._connect(None)
+        assert connected is False
+        assert code == 4401
+
+    @pytest.mark.asyncio
+    async def test_a_foreign_origin_is_rejected(self):
+        """Cross-site WebSocket hijacking.
+
+        CORS does not apply to WebSockets: any page the user visits can open
+        the socket, and the browser attaches their session cookie. Without an
+        origin check, a third-party page gets an authenticated conversation
+        with Mika — reading back memories and profiles as the owner.
+        """
+        from channels.db import database_sync_to_async
+
+        user = await database_sync_to_async(
+            get_user_model().objects.create_user
+        )(username="ws_victim", password="pw-probe-12345")
+
+        def _session_cookie():
+            client = Client()
+            client.force_login(user)
+            return f"sessionid={client.cookies['sessionid'].value}".encode()
+
+        cookie = await database_sync_to_async(_session_cookie)()
+        connected, _ = await self._connect(cookie, origin=b"https://evil.example")
+        assert connected is False, (
+            "une page tierce ne doit pas pouvoir ouvrir une session WebSocket "
+            "authentifiee avec les cookies de la victime"
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_missing_origin_is_rejected(self):
+        """Browsers always send Origin on a WebSocket handshake."""
+        connected, _ = await self._connect(None, origin=None)
+        assert connected is False
+
+    def test_the_websocket_stack_is_wrapped(self):
+        """Guards the wiring itself, not just its effect.
+
+        Asserts the shape rather than an exact class: the stack legitimately
+        grows layers (origin validation was added after session auth), and a
+        test pinned to one concrete type breaks on every addition while
+        catching nothing extra.
+        """
+        from config import asgi
+
+        ws_app = asgi.inner_app.application_mapping["websocket"]
+        assert not isinstance(ws_app, URLRouter), (
+            "URLRouter nu = pas de scope['user'] = 4401 pour tout le monde, "
+            "et aucune verification d'origine"
+        )
+
+
+@pytest.mark.django_db(transaction=True)
 class TestConsumerGate:
-    """The socket itself, not just the HTTP surface."""
+    """The consumer's own decision, isolated from the ASGI stack."""
 
     @pytest.mark.asyncio
     async def test_unauthenticated_connection_is_refused_when_required(self):

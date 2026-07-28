@@ -89,6 +89,29 @@ export interface InnerState {
     interaction_count: number;
   };
   pending_commitments?: string[];
+  /**
+   * Who Mika thinks she is talking to, and how sure (identity/trust.py).
+   * Present for any non-throwaway person_id — unlike `person_profile`, which
+   * is withheld entirely until she is convinced. That asymmetry is the point:
+   * the panel can show "someone claims to be Thomas" without showing any of
+   * Thomas's history.
+   */
+  identity?: {
+    known_as: string;
+    /** 0..1 — see identity/trust.py::Certainty. */
+    certainty: number;
+    /** One French sentence describing the situation, not a score. */
+    level: string;
+    /** "authenticated" | "account" | "public" | "internal" */
+    trust: string;
+    pending_claims: Array<{
+      id: number;
+      name: string;
+      kind: string;
+      evidence: string;
+      created_at: string;
+    }>;
+  };
 }
 
 // ── Server → client frames ──────────────────────────────────────────
@@ -134,7 +157,9 @@ export interface AvatarStateMessage {
 
 /** Synthetic local event emitted by WebSocketClient (not from the wire). */
 export interface ConnectionEvent {
-  status: "connected" | "disconnected" | "reconnecting";
+  /** "unauthorized" is terminal: the socket was refused (4401) and no
+   *  amount of retrying changes that — the session has to. */
+  status: "connected" | "disconnected" | "reconnecting" | "unauthorized";
   retryInMs?: number;
 }
 

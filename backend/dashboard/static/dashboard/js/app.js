@@ -11,6 +11,48 @@
 (function () {
   "use strict";
 
+  // ── CSRF ────────────────────────────────────────────────────
+  // Every mutating request now needs a token (CsrfViewMiddleware is on, and
+  // no endpoint is @csrf_exempt any more). Rather than touching the ~16
+  // fetch() call sites scattered across the view scripts — and requiring
+  // every future one, including module-supplied views, to remember — the
+  // header is attached here once.
+  //
+  // Same-origin only: the dashboard is served by Django, so a request going
+  // anywhere else is not ours to sign, and leaking the token to a third
+  // party is exactly what it exists to prevent.
+  const CSRF_SAFE = /^(GET|HEAD|OPTIONS|TRACE)$/i;
+
+  function csrfToken() {
+    const m = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]*)/);
+    return m ? decodeURIComponent(m[1]) : "";
+  }
+
+  function isSameOrigin(input) {
+    try {
+      const url = new URL(
+        typeof input === "string" ? input : input.url, window.location.href,
+      );
+      return url.origin === window.location.origin;
+    } catch {
+      return false;
+    }
+  }
+
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    const opts = init || {};
+    const method = (opts.method || "GET").toUpperCase();
+    if (CSRF_SAFE.test(method) || !isSameOrigin(input)) {
+      return nativeFetch(input, opts);
+    }
+    const headers = new Headers(opts.headers || {});
+    if (!headers.has("X-CSRFToken")) {
+      headers.set("X-CSRFToken", csrfToken());
+    }
+    return nativeFetch(input, { credentials: "same-origin", ...opts, headers });
+  };
+
   // ── DOM helpers ─────────────────────────────────────────────
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];

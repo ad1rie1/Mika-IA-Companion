@@ -310,7 +310,7 @@ class TestScoringFatiguePenalty:
             weighted_urgency=0.0, energy=0.8,
         )
         greeted = {"morning", "evening", "night"}
-        score, reason, _, _ = compute_decision_score(ctx, 0.5, greeted, date.today())
+        score, reason, _, _ = compute_decision_score(ctx, greeted, date.today())
         assert "fatigue" not in reason
 
     def test_low_energy_subtracts(self):
@@ -329,8 +329,8 @@ class TestScoringFatiguePenalty:
         )
         greeted = {"morning", "evening", "night"}
         today = date.today()
-        s_fresh, _, _, _ = compute_decision_score(ctx_fresh, 0.5, greeted, today)
-        s_tired, reason_tired, _, _ = compute_decision_score(ctx_tired, 0.5, greeted, today)
+        s_fresh, _, _, _ = compute_decision_score(ctx_fresh, greeted, today)
+        s_tired, reason_tired, _, _ = compute_decision_score(ctx_tired, greeted, today)
         assert s_tired < s_fresh
         assert "fatigue" in reason_tired
 
@@ -345,7 +345,7 @@ class TestScoringFatiguePenalty:
             weighted_urgency=0.0, energy=0.0,
         )
         greeted = {"morning", "evening", "night"}
-        score, _, _, _ = compute_decision_score(ctx, 0.5, greeted, date.today())
+        score, _, _, _ = compute_decision_score(ctx, greeted, date.today())
         assert score >= -0.25 - 0.01
 
 

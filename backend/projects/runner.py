@@ -32,6 +32,7 @@ from ai.quota import QuotaExceeded, current_project_id
 from ai.router import AIRole, UnconfiguredRoleError, ai_router
 from projects import context_builder, schedule
 from utils.parsing import strip_markdown_json
+from utils.periodic import PeriodicLoop
 
 logger = logging.getLogger(__name__)
 
@@ -57,46 +58,20 @@ class ProjectRunner:
         # on the consolidator's 60s tick, now independent so `interval:30s`
         # schedules actually fire at 30s and a blocked 90s LLM call here
         # never starves memory consolidation.
-        self._task: asyncio.Task | None = None
-        self._running: bool = False
-        self._interval: int = 30
+        self._loop = PeriodicLoop("Project runner", self.tick, interval=30)
 
     # ── Lifecycle ─────────────────────────────────────────────────
 
     async def start(self) -> None:
         """Start the dedicated runner loop. Idempotent."""
-        if self._running:
-            return
         from configs.service import config_service
-        self._interval = int(
-            config_service.get("projects.runner_interval", default=30)
+        await self._loop.start(
+            interval=int(config_service.get("projects.runner_interval", default=30)),
         )
-        self._running = True
-        self._task = asyncio.create_task(self._loop())
-        logger.info("Project runner loop started (interval=%ds)", self._interval)
 
     async def stop(self) -> None:
         """Stop the loop gracefully."""
-        self._running = False
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-            self._task = None
-        logger.info("Project runner loop stopped")
-
-    async def _loop(self) -> None:
-        while self._running:
-            try:
-                await asyncio.sleep(self._interval)
-                if self._running:
-                    await self.tick()
-            except asyncio.CancelledError:
-                break
-            except Exception:
-                logger.exception("Project runner loop error")
+        await self._loop.stop()
 
     async def tick(self) -> int:
         """One pass of the scheduler. Returns number of projects advanced.

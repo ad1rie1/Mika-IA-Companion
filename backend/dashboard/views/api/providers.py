@@ -14,7 +14,6 @@ import logging
 
 from asgiref.sync import async_to_sync
 from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from ai.router import _PROVIDER_CLASSES
@@ -47,7 +46,6 @@ def list_models(request, provider: str):
     return JsonResponse({"provider": provider, "models": models})
 
 
-@csrf_exempt
 @require_http_methods(["POST"])
 def test_provider(request, provider: str):
     """Ping the provider to confirm credentials + reachability."""

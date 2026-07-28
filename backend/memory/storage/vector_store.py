@@ -118,22 +118,6 @@ class VectorStore:
         )
         return self._parse_results(results)
 
-    def get_all_connaissances(self) -> list[dict]:
-        """Get all valid connaissances (usually small enough to include entirely)."""
-        if self._connaissances.count() == 0:
-            return []
-        results = self._connaissances.get(
-            where={"is_valid": True},
-        )
-        out = []
-        for i, doc_id in enumerate(results["ids"]):
-            out.append({
-                "id": doc_id,
-                "content": results["documents"][i],
-                "metadata": results["metadatas"][i] if results["metadatas"] else {},
-            })
-        return out
-
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------

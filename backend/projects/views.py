@@ -26,7 +26,6 @@ from datetime import datetime
 from asgiref.sync import async_to_sync
 from django.http import JsonResponse
 from django.utils import timezone
-from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from projects import schedule
@@ -171,7 +170,6 @@ def list_projects(request):
     })
 
 
-@csrf_exempt
 @require_http_methods(["POST"])
 def create_project(request):
     body = _parse_body(request)
@@ -207,7 +205,6 @@ def create_project(request):
     return JsonResponse({"ok": True, "project": _project_to_dict(p)})
 
 
-@csrf_exempt
 @require_http_methods(["GET", "PATCH", "DELETE"])
 def project_detail(request, project_id: int):
     try:
@@ -263,7 +260,6 @@ def project_detail(request, project_id: int):
     return JsonResponse({"ok": True, "project": _project_to_dict(p)})
 
 
-@csrf_exempt
 @require_http_methods(["POST"])
 def advance_project(request, project_id: int):
     """Force a single runner advance tick for this project, bypassing its
@@ -304,7 +300,6 @@ def advance_project(request, project_id: int):
 # ── Task endpoints ──────────────────────────────────────────────
 
 
-@csrf_exempt
 @require_http_methods(["POST"])
 def add_task(request, project_id: int):
     try:
@@ -328,7 +323,6 @@ def add_task(request, project_id: int):
     return JsonResponse({"ok": True, "task": _task_to_dict(t)})
 
 
-@csrf_exempt
 @require_http_methods(["PATCH", "DELETE"])
 def task_detail(request, project_id: int, task_id: int):
     try:
@@ -373,7 +367,6 @@ def list_pending(request):
     })
 
 
-@csrf_exempt
 @require_http_methods(["POST"])
 def approve_pending(request, action_id: int):
     """Approve a pending action and execute its payload.
@@ -426,7 +419,6 @@ def approve_pending(request, action_id: int):
     return JsonResponse({"ok": True, "pending": _pending_to_dict(a)})
 
 
-@csrf_exempt
 @require_http_methods(["POST"])
 def reject_pending(request, action_id: int):
     try:

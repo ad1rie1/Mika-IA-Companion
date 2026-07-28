@@ -19,7 +19,6 @@ import json
 import logging
 
 from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from configs.registry import registry
@@ -111,7 +110,6 @@ def values(request):
     return JsonResponse({"values": config_service.snapshot_redacted()})
 
 
-@csrf_exempt
 @require_http_methods(["PATCH", "DELETE"])
 def value_write(request):
     if request.method == "DELETE":
@@ -153,7 +151,6 @@ def rows(request):
     return JsonResponse({"parent_key": parent_key, "rows": rows})
 
 
-@csrf_exempt
 @require_http_methods(["POST"])
 def row_add(request):
     body = _body(request)
@@ -189,7 +186,6 @@ def _declared_model_references(internal_name: str) -> list[str]:
     return refs
 
 
-@csrf_exempt
 @require_http_methods(["PATCH", "DELETE"])
 def row_detail(request, row_id: str):
     parent_key = request.GET.get("parent_key") or (_body(request).get("parent_key", ""))

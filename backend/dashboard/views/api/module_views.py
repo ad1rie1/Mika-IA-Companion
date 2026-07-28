@@ -20,7 +20,6 @@ import logging
 
 from asgiref.sync import async_to_sync
 from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from dashboard.sanitize import sanitize_view_result
@@ -120,7 +119,6 @@ def view_item(request, module: str, view_key: str, item_id: str):
     return JsonResponse(sanitize_view_result(result, view))
 
 
-@csrf_exempt
 def view_action(request, module: str, view_key: str, action_key: str):
     from modules.manager import module_manager
 

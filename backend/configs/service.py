@@ -98,7 +98,6 @@ class ConfigService:
         """
         from django.conf import settings
         from configs.models import ConfigValue
-        from configs.registry import registry
 
         # Guard: if the seed marker exists we've run once already.
         marker_key = "__seed_complete"

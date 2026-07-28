@@ -70,10 +70,10 @@ def make_context(
 _ALL_GREETED = frozenset({"morning", "evening", "night"})
 
 
-def _score(ctx, threshold: float = 0.5):
+def _score(ctx):
     from datetime import date
     greeted = set(_ALL_GREETED)
-    return compute_decision_score(ctx, threshold, greeted, date.today())
+    return compute_decision_score(ctx, greeted, date.today())
 
 
 class TestDriveScoring:
@@ -92,8 +92,8 @@ class TestDriveScoring:
     def test_strong_positive_drives_increase_score(self):
         base = make_context()
         with_drives = make_context(drive_bonus=0.3, drive_summary="social:0.9")
-        s1, _, _, _ = _score(base, 0.5)
-        s2, r2, _, _ = _score(with_drives, 0.5)
+        s1, _, _, _ = _score(base)
+        s2, r2, _, _ = _score(with_drives)
         assert s2 > s1
         assert "drives" in r2
         assert "social" in r2
@@ -106,7 +106,7 @@ class TestDriveScoring:
         )
         ctx_alert = make_context(max_pertinence=0.8)
         s_tired, _, _, _ = _score(ctx)
-        s_fresh, _, _, _ = _score(ctx_alert, 0.5)
+        s_fresh, _, _, _ = _score(ctx_alert)
         assert s_tired < s_fresh
 
     def test_drive_contribution_clamped_positive(self):
@@ -147,8 +147,8 @@ class TestRuminationScoring:
     def test_moderate_rumination_adds_to_score(self):
         base = make_context()
         with_rum = make_context(rumination_pressure=0.5, rumination_count=2)
-        s1, _, _, _ = _score(base, 0.5)
-        s2, r2, _, _ = _score(with_rum, 0.5)
+        s1, _, _, _ = _score(base)
+        s2, r2, _, _ = _score(with_rum)
         assert s2 > s1
         assert "rumination" in r2
 
@@ -204,8 +204,8 @@ class TestCombined:
             rumination_pressure=0.5,
             rumination_count=2,
         )
-        s_tired, _, _, _ = _score(tired, 0.5)
-        s_fresh, _, _, _ = _score(fresh, 0.5)
+        s_tired, _, _, _ = _score(tired)
+        s_fresh, _, _, _ = _score(fresh)
         assert s_tired < s_fresh
 
 
@@ -318,7 +318,7 @@ class TestConscienceRuminationHelpers:
         )
 
         engine = ConscienceEngine()
-        await engine._resolve_ruminations_after_act("j'ai parle")
+        await engine._resolve_ruminations_after_act()
 
         await sync_to_async(r.refresh_from_db)()
         assert abs(r.intensity - 0.4) < 0.01
@@ -335,7 +335,7 @@ class TestConscienceRuminationHelpers:
         )
 
         engine = ConscienceEngine()
-        await engine._resolve_ruminations_after_act("")
+        await engine._resolve_ruminations_after_act()
 
         await sync_to_async(r.refresh_from_db)()
         # 0.15 × 0.5 = 0.075 < 0.1 → resolved

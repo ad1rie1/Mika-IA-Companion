@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from drives.engine import drive_engine
 from emotion.engine import emotion_engine
 from identity.resolver import identity_resolver
+from identity.trust import is_internal_person
 from memory.manager import memory_manager
 from modules.manager import module_manager
 
@@ -154,14 +155,14 @@ async def gather_context(
     # User mood heuristic — a best-effort read of the user's emotional
     # tone from the raw message. Skipped for internal triggers (messages
     # Mika sent herself — she doesn't "read" her own rumination).
-    if person_id in _INTERNAL_PERSON_IDS:
+    if is_internal_person(person_id):
         user_mood_hint = ""
     else:
         user_mood_hint = detect_user_mood_hint(message)
 
     # Dream residue from last night. Only surfaces in the morning and
     # only to real interlocutors (not to Mika's own conscience trigger).
-    if person_id in _INTERNAL_PERSON_IDS:
+    if is_internal_person(person_id):
         dream_context = ""
         journal_context = ""
     else:
@@ -174,7 +175,7 @@ async def gather_context(
     project_context = ""
     project_suppresses_emotion = False
     project_id: int | None = None
-    if person_id not in _INTERNAL_PERSON_IDS:
+    if not is_internal_person(person_id):
         try:
             from projects.detection import (
                 detect_project_for_message,
@@ -647,9 +648,9 @@ async def _fetch_self_concept() -> str:
         return ""
 
 
-# System/internal person_ids that never correspond to a real Entity.
-# Skipping them avoids a round-trip per conversation turn from internals.
-_INTERNAL_PERSON_IDS = frozenset({"conscience_mika", "__global__", "anonymous", ""})
+# System/internal person_ids live in identity.trust — one definition, because
+# "is this id a person?" was previously answered in three places that had
+# already drifted apart.
 
 
 async def _fetch_person_context(identity_ctx) -> str:
@@ -690,7 +691,6 @@ async def _fetch_person_context(identity_ctx) -> str:
     try:
         from asgiref.sync import sync_to_async
 
-        from identity.resolver import identity_resolver
         from memory.models import Commitment, EmotionalSummary, PersonProfile
 
         entity = await identity_resolver.entity_for_person(person_id)

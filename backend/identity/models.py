@@ -67,11 +67,6 @@ class Identity(models.Model):
     def __str__(self):
         return self.display_name or f"Identity #{self.pk}"
 
-    @property
-    def is_bound(self) -> bool:
-        """True when Mika has actually settled on who this is."""
-        return self.entity_id is not None and self.certainty >= float(Certainty.BOUND)
-
 
 class IdentityHandle(models.Model):
     """One reachable address for an identity on a given channel."""
@@ -86,9 +81,6 @@ class IdentityHandle(models.Model):
     kind = models.CharField(max_length=20, choices=KINDS, default="module")
     delivery_ref = models.CharField(max_length=255, blank=True, default="")  # chat_id / group
     display_name = models.CharField(max_length=200, blank=True, default="")
-    created_at = models.DateTimeField(auto_now_add=True)
-    last_seen = models.DateTimeField(auto_now=True)
-
     # What the transport itself proves about this handle, at the time it was
     # last seen. Stored rather than recomputed because it is a property of
     # how the handle was established, and the ceiling it implies must hold

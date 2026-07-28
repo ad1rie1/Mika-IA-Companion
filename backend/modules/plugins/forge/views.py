@@ -17,7 +17,6 @@ import logging
 import yaml
 from asgiref.sync import sync_to_async
 from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 
 from dashboard.sanitize import STRIPPED_KEYS, sanitize_payload
 from modules.types import ModuleRoute, ModuleView, ModuleViewAction
@@ -286,7 +285,6 @@ def build_routes(host) -> list[ModuleRoute]:
                                     thread_sensitive=False)()
         return JsonResponse({"modules": infos})
 
-    @csrf_exempt
     async def route_command(request):
         if request.method != "POST":
             return JsonResponse({"error": "POST attendu"}, status=405)

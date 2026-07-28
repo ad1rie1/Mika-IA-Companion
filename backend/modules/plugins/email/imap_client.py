@@ -53,10 +53,6 @@ class IMAPClient:
                 logger.debug("IMAP logout error (non-fatal)")
             self._client = None
 
-    async def fetch_unread(self) -> list[EmailMessage]:
-        """Fetch all unread emails from inbox."""
-        return await self._fetch_by_criteria("UNSEEN")
-
     async def fetch_all(self) -> list[EmailMessage]:
         """Fetch all emails from inbox."""
         return await self._fetch_by_criteria("ALL")

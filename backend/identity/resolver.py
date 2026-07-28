@@ -32,14 +32,13 @@ from django.utils import timezone
 
 from identity import trust as trust_policy
 from identity.detection import NameClaim, corroboration_score, detect_name_claim
-from identity.trust import Certainty, ChannelTrust
+from identity.trust import (
+    Certainty,
+    ChannelTrust,
+    is_internal_person,
+)
 
 logger = logging.getLogger(__name__)
-
-#: person_ids that are Mika's own plumbing, never a person to identify.
-INTERNAL_PERSON_IDS = frozenset({
-    "conscience_mika", "__global__", "anonymous", "",
-})
 
 #: Facts pulled from memory to test a claim against. Small on purpose — this
 #: runs inside a conversation turn.
@@ -78,7 +77,7 @@ class IdentityContext:
 
     @property
     def is_internal(self) -> bool:
-        return self.person_id in INTERNAL_PERSON_IDS
+        return is_internal_person(self.person_id)
 
     @property
     def known_as(self) -> str:
@@ -292,7 +291,7 @@ class IdentityResolver:
         not break the conversation.
         """
         ctx = IdentityContext(person_id=person_id, channel=channel)
-        if person_id in INTERNAL_PERSON_IDS:
+        if is_internal_person(person_id):
             ctx.trust = ChannelTrust.INTERNAL
             return ctx
 
@@ -413,7 +412,7 @@ class IdentityResolver:
         — we already know who this is — but it *is* how Mika learns what to
         call someone, so the display name is updated and nothing else moves.
         """
-        if person_id in INTERNAL_PERSON_IDS or not message:
+        if is_internal_person(person_id) or not message:
             return None
 
         claim = detect_name_claim(message)
@@ -525,13 +524,18 @@ class IdentityResolver:
     # ── Corroboration ─────────────────────────────────────────────
 
     async def check_corroboration(
-        self, person_id: str, message: str, claimed_name: str,
+        self, message: str, claimed_name: str,
     ) -> tuple[float, str]:
         """Does this message line up with what Mika knows about ``claimed_name``?
 
         The honest way to earn trust without a login: mention something only
         that person would bring up. Returns ``(score, reason)`` — a hint for
         Mika, never an automatic promotion.
+
+        Deliberately independent of who is speaking: it scores the *text*
+        against what memory holds about a name. Who said it is the caller's
+        business, and threading a person_id through here only ever looked
+        like it mattered.
         """
         if not message or not claimed_name:
             return 0.0, ""
@@ -801,7 +805,7 @@ class IdentityResolver:
         The single lookup every per-person memory read should go through —
         ``entity__name=person_id`` only ever worked by accident.
         """
-        if person_id in INTERNAL_PERSON_IDS:
+        if is_internal_person(person_id):
             return None
         return await sync_to_async(self._entity_for_person_sync)(person_id)
 

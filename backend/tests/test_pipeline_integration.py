@@ -139,8 +139,6 @@ class TestProcessMessage:
     @pytest.mark.asyncio
     async def test_attachments_meta_passed_to_persist(self):
         """The descriptor list for non-text parts must reach persist_to_memory."""
-        from pipeline.perception import Perception
-
         ctx = _fake_context()
         perception = Perception.from_mixed(
             text="look",

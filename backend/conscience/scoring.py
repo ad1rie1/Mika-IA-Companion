@@ -14,14 +14,16 @@ from conscience.types import DecisionContext
 
 def compute_decision_score(
     ctx: DecisionContext,
-    threshold: float,
     greeted_periods: set[str],
     greeted_date: object | None,
 ) -> tuple[float, str, set[str], object]:
     """Unified scoring. Returns (score, reason, updated_greeted_periods, updated_greeted_date).
 
     Pure function — no side effects. The caller is responsible for
-    persisting the updated greeted state.
+    persisting the updated greeted state, and for comparing the score against
+    the act threshold: this function deliberately doesn't know it. It used to
+    take one and never read it, which made the split of responsibility look
+    like the opposite of what it is.
     """
     # Cooldown check (in-memory, no DB query)
     if ctx.in_cooldown:

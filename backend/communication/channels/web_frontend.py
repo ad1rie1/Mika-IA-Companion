@@ -107,8 +107,11 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
         # An authenticated user has a stable identity already; greet now.
         # Anonymous clients defer the greeting to the identify handshake or the
         # first chat turn, so the greeting uses their persistent id.
+        #
+        # The memory Entity is created by _register_presence() above, through
+        # bind_authenticated() — a proven session is exactly the case where
+        # Mika may know who this is without being convinced first.
         if self.authenticated:
-            await self._ensure_entity(self.person_id)
             await self._send_greeting()
 
     async def disconnect(self, close_code):

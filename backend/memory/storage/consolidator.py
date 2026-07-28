@@ -10,12 +10,16 @@ from django.utils import timezone
 
 from memory.extraction.extractor import MemoryExtractor
 from memory.storage.vector_store import VectorStore
+from utils.periodic import PeriodicLoop
 
 logger = logging.getLogger(__name__)
 
 # The retention sweep is bookkeeping on tables measured in days, so once an
 # hour is plenty — running it on every 60s tick would be pure query load.
 RETENTION_SWEEP_INTERVAL_S = 3600
+
+# Message sources that are module plumbing, not user-facing exchanges.
+INTERNAL_MESSAGE_SOURCES = ("module_email", "module_wake")
 
 # Pending commitments older than this are dropped (see _expire_commitments).
 COMMITMENT_MAX_AGE_DAYS = 30
@@ -58,31 +62,19 @@ class MemoryConsolidator:
         self.vector_store = vector_store
         from configs.service import config_service
         self.interval = interval_seconds or config_service.get("memory.consolidation_interval")
-        self._task: asyncio.Task | None = None
         self._last_processed_id: int = 0
-        self._running = False
+        self._tick_count = 0
+        self._loop = PeriodicLoop("Consolidator", self._tick, self.interval)
 
     async def start(self):
         """Start the consolidation background loop."""
         await self._load_last_processed_id()
-        self._running = True
-        self._task = asyncio.create_task(self._loop())
-        logger.info(
-            "Consolidator started (interval=%ds, last_id=%d)",
-            self.interval,
-            self._last_processed_id,
-        )
+        await self._loop.start(self.interval)
+        logger.info("Consolidator resumed at last_id=%d", self._last_processed_id)
 
     async def stop(self):
         """Stop the loop gracefully."""
-        self._running = False
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-        logger.info("Consolidator stopped")
+        await self._loop.stop()
 
     async def force_consolidate(self):
         """Run consolidation immediately (e.g. on disconnect/shutdown)."""
@@ -93,20 +85,14 @@ class MemoryConsolidator:
     # Internal
     # ------------------------------------------------------------------
 
-    async def _loop(self):
-        """Main loop: consolidate every N seconds."""
-        tick = 0
-        while self._running:
-            try:
-                await asyncio.sleep(self.interval)
-                if self._running:
-                    tick += 1
-                    logger.info("Consolidation tick #%d (last_id=%d)", tick, self._last_processed_id)
-                    await self._consolidate()
-            except asyncio.CancelledError:
-                break
-            except Exception:
-                logger.exception("Consolidation loop error")
+    async def _tick(self):
+        """One scheduled pass. The counter is purely for reading logs."""
+        self._tick_count += 1
+        logger.info(
+            "Consolidation tick #%d (last_id=%d)",
+            self._tick_count, self._last_processed_id,
+        )
+        await self._consolidate()
 
     async def _load_last_processed_id(self):
         """Resume from last consolidation checkpoint."""
@@ -122,70 +108,94 @@ class MemoryConsolidator:
             logger.debug("No previous consolidation log found")
 
     async def _consolidate(self):
-        """Process new messages since last checkpoint."""
-        from memory.models import (
-            Commitment,
-            Connaissance,
-            ConsolidationLog,
-            Entity,
-            Message,
-            Souvenir,
-            Theme,
+        """Process new messages since last checkpoint.
+
+        Four steps, each its own method: select the window, turn it into
+        memories, checkpoint, then run the periodic maintenance that has to
+        happen whether or not anything was said.
+        """
+        messages, ceiling_id = await self._select_window()
+
+        if not messages:
+            # Advance past internal-only messages so the window doesn't
+            # re-scan them forever.
+            if ceiling_id:
+                self._last_processed_id = ceiling_id
+            logger.info(
+                "Consolidation: no new user messages (last_id=%d)",
+                self._last_processed_id,
+            )
+            await self._run_maintenance(regenerate=False)
+            return
+
+        logger.info("Consolidating %d new messages (skipped internal)", len(messages))
+
+        counts = await self._extract_and_store(messages)
+
+        max_id = ceiling_id or messages[-1]["id"]
+        await self._save_checkpoint(max_id, len(messages), counts)
+        self._last_processed_id = max_id
+
+        logger.info(
+            "Consolidation complete: %d souvenirs, %d connaissances, "
+            "%d commitments from %d messages",
+            counts["souvenirs"], counts["connaissances"], counts["commitments"],
+            len(messages),
         )
 
-        # 1. Pick the ceiling FIRST, then read below it. Reading the messages
-        #    first and taking the max id afterwards would let a turn persisted
-        #    between the two queries be counted by the checkpoint but never
-        #    extracted — that exchange would be skipped forever.
-        all_max_id = await sync_to_async(
+        await self._run_maintenance(regenerate=True)
+
+    # ── Step 1: pick the window ───────────────────────────────────
+
+    async def _select_window(self) -> tuple[list[dict], int | None]:
+        """Messages to consolidate, and the id ceiling they were read under.
+
+        The ceiling is picked FIRST, then messages are read below it. Reading
+        the messages first and taking the max id afterwards would let a turn
+        persisted between the two queries be counted by the checkpoint but
+        never extracted — that exchange would be skipped forever.
+        """
+        from memory.models import Message
+
+        ceiling_id = await sync_to_async(
             lambda: Message.objects.filter(id__gt=self._last_processed_id)
             .order_by("-id")
             .values_list("id", flat=True)
             .first()
         )()
+        if not ceiling_id:
+            return [], None
 
-        # 2. Fetch unprocessed messages up to that ceiling.
-        #    Exclude module notifications (not user-facing exchanges) and the
-        #    scaffolding prompts of internal triggers (role=user), while
-        #    keeping Mika's own replies (role=assistant) so she remembers her
-        #    initiatives.
-        INTERNAL_SOURCES = ("module_email", "module_wake")
-        messages = []
-        if all_max_id:
-            messages = await sync_to_async(list)(
-                Message.objects.filter(
-                    id__gt=self._last_processed_id, id__lte=all_max_id,
-                )
-                .exclude(source__in=INTERNAL_SOURCES)
-                .exclude(role="user", is_internal=True)
-                .exclude(source="conscience", role="user")
-                .order_by("created_at")
-                .values(
-                    "id", "role", "content", "created_at", "source", "person_id",
-                )
+        # Exclude module notifications (not user-facing exchanges) and the
+        # scaffolding prompts of internal triggers (role=user), while keeping
+        # Mika's own replies (role=assistant) so she remembers her initiatives.
+        messages = await sync_to_async(list)(
+            Message.objects.filter(
+                id__gt=self._last_processed_id, id__lte=ceiling_id,
             )
+            .exclude(source__in=INTERNAL_MESSAGE_SOURCES)
+            .exclude(role="user", is_internal=True)
+            .exclude(source="conscience", role="user")
+            .order_by("created_at")
+            .values("id", "role", "content", "created_at", "source", "person_id")
+        )
+        return messages, ceiling_id
 
-        if not messages:
-            # Advance checkpoint past internal-only messages
-            if all_max_id:
-                self._last_processed_id = all_max_id
-            logger.info("Consolidation: no new user messages (last_id=%d)", self._last_processed_id)
-            await self._apply_decay()
-            # Sleep cycle and project runner now run on their own dedicated
-            # loops (wired at lifespan startup) — no longer invoked here so
-            # a long LLM call in either never delays consolidation.
-            return
+    # ── Step 2: turn the window into memories ─────────────────────
 
-        logger.info("Consolidating %d new messages (skipped internal)", len(messages))
+    async def _extract_and_store(self, messages: list[dict]) -> dict[str, int]:
+        """Run the extraction LLM over the window and persist what comes back.
 
-        # 3. Format for Claude
+        Returns per-type creation counts for the checkpoint log.
+        """
+        from memory.models import Commitment
+
         msg_dicts = [{"role": m["role"], "content": m["content"]} for m in messages]
 
-        # 4. Extract via Claude. Open commitments ride along so the same
-        #    call can notice one being honored in the conversation window
-        #    ("voila la playlist !") — that's the autonomous half of the
-        #    commitment lifecycle; the explicit half is the
-        #    memory_resolve_commitment tool.
+        # Open commitments ride along so the same call can notice one being
+        # honored in the window ("voila la playlist !") — the autonomous half
+        # of the commitment lifecycle; the explicit half is the
+        # memory_resolve_commitment tool.
         pending_commitments = await sync_to_async(
             lambda: list(
                 Commitment.objects.filter(status="pending")
@@ -194,234 +204,269 @@ class MemoryConsolidator:
             )
         )()
         extractions = await self.extractor.analyze_messages(
-            msg_dicts, pending_commitments=pending_commitments
+            msg_dicts, pending_commitments=pending_commitments,
         )
 
-        # Who Mika was talking to in this window, as memory entities. The
-        # extractor names entities from the *content* ("Thomas said…"), which
-        # misses the most basic fact about an exchange: whom it was with. A
-        # conversation where someone never says their own name produced
-        # souvenirs attached to nobody, so PersonProfile never had material to
-        # generate from and the theory-of-mind layer stayed empty forever.
+        # Who Mika was talking to, as memory entities. The extractor names
+        # entities from the *content* ("Thomas said…"), which misses the most
+        # basic fact about an exchange: whom it was with. A conversation where
+        # nobody says their own name produced souvenirs attached to nobody, so
+        # PersonProfile never had material and theory-of-mind stayed empty.
         interlocutors = await self._resolve_interlocutors(messages)
 
-        souvenirs_created = 0
-        connaissances_created = 0
-        commitments_created = 0
-        now = timezone.now()
+        counts = {"souvenirs": 0, "connaissances": 0, "commitments": 0}
+        handlers = {
+            "souvenir": self._store_souvenir,
+            "connaissance": self._store_connaissance,
+            "commitment": self._store_commitment,
+            "commitment_resolved": self._resolve_commitment,
+        }
 
         for extraction in extractions:
+            handler = handlers.get(extraction.get("type"))
+            if handler is None:
+                logger.debug("Unknown extraction type: %s", extraction.get("type"))
+                continue
             try:
-                # Resolve themes
-                theme_objs = []
-                for theme_name in extraction.get("themes", []):
-                    theme, _ = await sync_to_async(Theme.objects.get_or_create)(
-                        name=theme_name.lower().strip()
-                    )
-                    theme_objs.append(theme)
-
-                # Resolve entities
-                entity_objs = []
-                for ent in extraction.get("entities", []):
-                    entity, _ = await sync_to_async(Entity.objects.get_or_create)(
-                        name=ent["name"].strip(),
-                        entity_type=ent.get("type", "concept"),
-                    )
-                    entity_objs.append(entity)
-
-                if extraction["type"] == "souvenir":
-                    emotion = extraction.get("emotion", "neutral")
-                    souvenir = await sync_to_async(Souvenir.objects.create)(
-                        content=extraction["content"],
-                        emotion=emotion,
-                        importance=1.0,
-                        occurred_at=now,
-                    )
-                    if theme_objs:
-                        await sync_to_async(souvenir.themes.set)(theme_objs)
-                    # An episode always involves whoever Mika was talking to,
-                    # whether or not the extractor thought to name them.
-                    linked = _merge_entities(entity_objs, interlocutors)
-                    if linked:
-                        await sync_to_async(souvenir.entities.set)(linked)
-
-                    # Index in ChromaDB (protected — ORM record exists even if indexing fails)
-                    try:
-                        await sync_to_async(self.vector_store.add_souvenir)(
-                            souvenir_id=souvenir.pk,
-                            content=extraction["content"],
-                            metadata={
-                                "importance": 1.0,
-                                "emotion": emotion,
-                                "occurred_at": now.isoformat(),
-                                "themes": ",".join(t.name for t in theme_objs),
-                            },
-                        )
-                    except Exception:
-                        logger.warning("ChromaDB indexing failed for souvenir #%d", souvenir.pk)
-
-                    souvenirs_created += 1
-                    logger.info(
-                        "Souvenir created: [%s] %s",
-                        emotion, extraction["content"][:120],
-                    )
-
-                elif extraction["type"] == "connaissance":
-                    # Check if new info contradicts existing connaissances
-                    await self._check_contradictions(extraction["content"])
-
-                    # Check for duplicate connaissances
-                    existing = await self._find_similar_connaissance(
-                        extraction["content"]
-                    )
-                    if existing:
-                        # Update confidence of existing
-                        existing.confidence = min(1.0, existing.confidence + 0.1)
-                        await sync_to_async(existing.save)()
-                        try:
-                            await sync_to_async(self.vector_store.add_connaissance)(
-                                connaissance_id=existing.pk,
-                                content=existing.content,
-                                metadata={
-                                    "confidence": existing.confidence,
-                                    "is_valid": existing.is_valid,
-                                },
-                            )
-                        except Exception:
-                            logger.warning("ChromaDB indexing failed for connaissance #%d", existing.pk)
-                        logger.info(
-                            "Connaissance reinforced (confidence=%.2f): %s",
-                            existing.confidence, existing.content[:120],
-                        )
-                    else:
-                        connaissance = await sync_to_async(
-                            Connaissance.objects.create
-                        )(
-                            content=extraction["content"],
-                            confidence=1.0,
-                            is_valid=True,
-                        )
-                        if theme_objs:
-                            await sync_to_async(connaissance.themes.set)(theme_objs)
-                        if entity_objs:
-                            await sync_to_async(connaissance.entities.set)(entity_objs)
-
-                        try:
-                            await sync_to_async(self.vector_store.add_connaissance)(
-                                connaissance_id=connaissance.pk,
-                                content=extraction["content"],
-                                metadata={
-                                    "confidence": 1.0,
-                                    "is_valid": True,
-                                    "themes": ",".join(t.name for t in theme_objs),
-                                },
-                            )
-                        except Exception:
-                            logger.warning("ChromaDB indexing failed for connaissance #%d", connaissance.pk)
-
-                        connaissances_created += 1
-                        logger.info(
-                            "Connaissance created: %s",
-                            extraction["content"][:120],
-                        )
-
-                elif extraction["type"] == "commitment":
-                    # Resolve target person if named (Entity type=person).
-                    # Extractor may omit for generic commitments — in that
-                    # case the promise was almost certainly made to whoever
-                    # Mika was talking to, so fall back to the interlocutor
-                    # rather than filing it against nobody.
-                    target_person = None
-                    person_name = (extraction.get("person") or "").strip()
-                    if person_name:
-                        target_person, _ = await sync_to_async(
-                            Entity.objects.get_or_create
-                        )(name=person_name, entity_type="person")
-                    elif len(interlocutors) == 1:
-                        target_person = interlocutors[0]
-
-                    await sync_to_async(Commitment.objects.create)(
-                        description=extraction["content"],
-                        person=target_person,
-                        status="pending",
-                    )
-                    commitments_created += 1
-                    logger.info(
-                        "Commitment created [to=%s]: %s",
-                        person_name or "—",
-                        extraction["content"][:120],
-                    )
-
-                elif extraction["type"] == "commitment_resolved":
-                    resolution = extraction.get("resolution", "honored")
-                    if resolution not in ("honored", "dropped"):
-                        resolution = "honored"
-                    updated = await sync_to_async(
-                        lambda: Commitment.objects.filter(
-                            pk=extraction.get("commitment_id"),
-                            status="pending",
-                        ).update(status=resolution, resolved_at=timezone.now())
-                    )()
-                    if updated:
-                        logger.info(
-                            "Commitment #%s resolved (%s) from conversation",
-                            extraction.get("commitment_id"), resolution,
-                        )
-
+                themes, entities = await self._resolve_tags(extraction)
+                created = await handler(
+                    extraction, themes=themes, entities=entities,
+                    interlocutors=interlocutors,
+                )
+                if created:
+                    counts[created] += 1
             except Exception:
+                # One malformed extraction must not cost the whole window.
                 logger.exception("Failed to process extraction: %s", extraction)
 
-        # 5. Update checkpoint atomically (transaction protects against crash
-        #    between in-memory update and DB write)
-        max_id = all_max_id or messages[-1]["id"]
+        return counts
 
-        @sync_to_async
-        def _save_checkpoint():
+    @staticmethod
+    async def _resolve_tags(extraction: dict) -> tuple[list, list]:
+        """Get-or-create the Themes and Entities an extraction refers to."""
+        from memory.models import Entity, Theme
+
+        themes = []
+        for name in extraction.get("themes", []):
+            theme, _ = await sync_to_async(Theme.objects.get_or_create)(
+                name=name.lower().strip()
+            )
+            themes.append(theme)
+
+        entities = []
+        for ent in extraction.get("entities", []):
+            entity, _ = await sync_to_async(Entity.objects.get_or_create)(
+                name=ent["name"].strip(),
+                entity_type=ent.get("type", "concept"),
+            )
+            entities.append(entity)
+        return themes, entities
+
+    async def _store_souvenir(
+        self, extraction: dict, *, themes: list, entities: list,
+        interlocutors: list,
+    ) -> str | None:
+        from memory.models import Souvenir
+
+        now = timezone.now()
+        emotion = extraction.get("emotion", "neutral")
+        souvenir = await sync_to_async(Souvenir.objects.create)(
+            content=extraction["content"], emotion=emotion,
+            importance=1.0, occurred_at=now,
+        )
+        if themes:
+            await sync_to_async(souvenir.themes.set)(themes)
+        # An episode always involves whoever Mika was talking to, whether or
+        # not the extractor thought to name them.
+        linked = _merge_entities(entities, interlocutors)
+        if linked:
+            await sync_to_async(souvenir.entities.set)(linked)
+
+        await self._index(
+            self.vector_store.add_souvenir, "souvenir", souvenir.pk,
+            souvenir_id=souvenir.pk,
+            content=extraction["content"],
+            metadata={
+                "importance": 1.0,
+                "emotion": emotion,
+                "occurred_at": now.isoformat(),
+                "themes": ",".join(t.name for t in themes),
+            },
+        )
+        logger.info(
+            "Souvenir created: [%s] %s", emotion, extraction["content"][:120],
+        )
+        return "souvenirs"
+
+    async def _store_connaissance(
+        self, extraction: dict, *, themes: list, entities: list,
+        interlocutors: list,
+    ) -> str | None:
+        from memory.models import Connaissance
+
+        content = extraction["content"]
+        await self._check_contradictions(content)
+
+        existing = await self._find_similar_connaissance(content)
+        if existing:
+            # Saying the same thing twice is evidence, not a duplicate row.
+            existing.confidence = min(1.0, existing.confidence + 0.1)
+            await sync_to_async(existing.save)()
+            await self._index(
+                self.vector_store.add_connaissance, "connaissance", existing.pk,
+                connaissance_id=existing.pk,
+                content=existing.content,
+                metadata={
+                    "confidence": existing.confidence,
+                    "is_valid": existing.is_valid,
+                },
+            )
+            logger.info(
+                "Connaissance reinforced (confidence=%.2f): %s",
+                existing.confidence, existing.content[:120],
+            )
+            return None
+
+        connaissance = await sync_to_async(Connaissance.objects.create)(
+            content=content, confidence=1.0, is_valid=True,
+        )
+        if themes:
+            await sync_to_async(connaissance.themes.set)(themes)
+        if entities:
+            await sync_to_async(connaissance.entities.set)(entities)
+
+        await self._index(
+            self.vector_store.add_connaissance, "connaissance", connaissance.pk,
+            connaissance_id=connaissance.pk,
+            content=content,
+            metadata={
+                "confidence": 1.0,
+                "is_valid": True,
+                "themes": ",".join(t.name for t in themes),
+            },
+        )
+        logger.info("Connaissance created: %s", content[:120])
+        return "connaissances"
+
+    @staticmethod
+    async def _store_commitment(
+        extraction: dict, *, themes: list, entities: list, interlocutors: list,
+    ) -> str | None:
+        from memory.models import Commitment, Entity
+
+        # The extractor may omit the target for a generic promise — in that
+        # case it was almost certainly made to whoever Mika was talking to,
+        # so fall back to the interlocutor rather than filing it against
+        # nobody (which is how a commitment becomes unresolvable).
+        target_person = None
+        person_name = (extraction.get("person") or "").strip()
+        if person_name:
+            target_person, _ = await sync_to_async(Entity.objects.get_or_create)(
+                name=person_name, entity_type="person",
+            )
+        elif len(interlocutors) == 1:
+            target_person = interlocutors[0]
+
+        await sync_to_async(Commitment.objects.create)(
+            description=extraction["content"], person=target_person,
+            status="pending",
+        )
+        logger.info(
+            "Commitment created [to=%s]: %s",
+            person_name or (target_person.name if target_person else "—"),
+            extraction["content"][:120],
+        )
+        return "commitments"
+
+    @staticmethod
+    async def _resolve_commitment(
+        extraction: dict, *, themes: list, entities: list, interlocutors: list,
+    ) -> str | None:
+        from memory.models import Commitment
+
+        resolution = extraction.get("resolution", "honored")
+        if resolution not in ("honored", "dropped"):
+            resolution = "honored"
+        updated = await sync_to_async(
+            lambda: Commitment.objects.filter(
+                pk=extraction.get("commitment_id"), status="pending",
+            ).update(status=resolution, resolved_at=timezone.now())
+        )()
+        if updated:
+            logger.info(
+                "Commitment #%s resolved (%s) from conversation",
+                extraction.get("commitment_id"), resolution,
+            )
+        return None
+
+    @staticmethod
+    async def _index(fn, kind: str, pk: int, **kwargs) -> None:
+        """Push a row into ChromaDB, tolerating failure.
+
+        Indexing is best-effort by design: the ORM record is the source of
+        truth, and losing a vector entry costs recall, not the memory itself.
+        """
+        try:
+            await sync_to_async(fn)(**kwargs)
+        except Exception:
+            logger.warning("ChromaDB indexing failed for %s #%d", kind, pk)
+
+    # ── Step 3: checkpoint ────────────────────────────────────────
+
+    @staticmethod
+    async def _save_checkpoint(
+        max_id: int, processed: int, counts: dict[str, int],
+    ) -> None:
+        """Record the window as done, atomically.
+
+        The transaction protects against a crash between the in-memory
+        update and the DB write.
+        """
+        from memory.models import ConsolidationLog
+
+        def _write():
             with transaction.atomic():
                 ConsolidationLog.objects.create(
-                    messages_processed=len(messages),
-                    souvenirs_created=souvenirs_created,
-                    connaissances_created=connaissances_created,
+                    messages_processed=processed,
+                    souvenirs_created=counts["souvenirs"],
+                    connaissances_created=counts["connaissances"],
                     last_message_id=max_id,
                 )
 
-        await _save_checkpoint()
-        self._last_processed_id = max_id
+        await sync_to_async(_write)()
 
-        logger.info(
-            "Consolidation complete: %d souvenirs, %d connaissances, %d commitments from %d messages",
-            souvenirs_created,
-            connaissances_created,
-            commitments_created,
-            len(messages),
-        )
+    # ── Step 4: periodic maintenance ──────────────────────────────
 
-        # 5. Apply decay
+    async def _run_maintenance(self, *, regenerate: bool) -> None:
+        """Decay, aggregation, and the two LLM-backed regenerations.
+
+        Runs on both consolidation paths — an install nobody talks to still
+        needs its decay and its retention sweep. ``regenerate`` gates the
+        narrative and profile passes, which have nothing new to work from
+        when no message was consolidated.
+
+        Sleep cycle and project runner have their own dedicated loops (wired
+        at lifespan startup), so a long LLM call in either never delays this.
+        """
         await self._apply_decay()
-
-        # 6. Aggregate emotion snapshots into summaries
         await self._aggregate_emotion_snapshots()
 
-        # 7. Regenerate self-concept narrative if due.
-        #    Gated by time + volume so it fires on the order of once/day,
-        #    not every consolidation tick. Failures are swallowed — the
-        #    narrative is best-effort, the memory pipeline is the priority.
+        if not regenerate:
+            return
+
+        # Both are best-effort: the memory pipeline is the priority, and a
+        # failed narrative must not cost the consolidation that produced it.
         try:
             from memory.narrative import narrative_generator
             await narrative_generator.run_if_due()
         except Exception:
             logger.exception("Self-narrative generation failed (non-fatal)")
 
-        # 8. Regenerate per-person profiles (theory of mind) for active
-        #    entities. Capped per-cycle so we don't burst LLM spend.
         try:
             from memory.person_profile import person_profile_generator
             await person_profile_generator.run_cycle()
         except Exception:
             logger.exception("Person profile generation failed (non-fatal)")
-
-        # Sleep cycle and project runner now run on their own dedicated
-        # loops (wired at lifespan startup) — no longer invoked here.
 
     @staticmethod
     async def _resolve_interlocutors(messages: list[dict]) -> list:
@@ -520,8 +565,6 @@ class MemoryConsolidator:
         messages), so it keeps running on an install nobody talks to — which
         is precisely when ConscienceLog grows fastest relative to content.
         """
-        import time as _time
-
         now = _time.monotonic()
         last = getattr(self, "_last_retention_sweep", 0.0)
         if last and (now - last) < RETENTION_SWEEP_INTERVAL_S:
