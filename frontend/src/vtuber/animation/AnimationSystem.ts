@@ -11,6 +11,7 @@ import type {
 import { ClipLibrary, applyRestPose } from "./ClipLibrary";
 import { AnimationStateMachine } from "./AnimationStateMachine";
 import { BlinkController } from "./BlinkController";
+import { FaceIdleController } from "./FaceIdleController";
 import { HandAnimator } from "./HandAnimator";
 import { GazeController } from "./GazeController";
 import { OverlayContext, type ProceduralOverlay } from "./overlays/Overlay";
@@ -46,6 +47,7 @@ export class AnimationSystem {
   private ctx: OverlayContext | null = null;
   private overlays: ProceduralOverlay[] = [];
   private blink = new BlinkController();
+  private faceIdle = new FaceIdleController();
   private hands = new HandAnimator();
   private gaze = new GazeController();
   private root: THREE.Object3D | null = null;
@@ -139,6 +141,9 @@ export class AnimationSystem {
     this.hands.update(dt);
     this.gaze.update(dt);
     this.blink.update(dt, ctx);
+    // Micro-expressions last: ARKit shapes, disjoint from the emotion
+    // shapes, the lip-sync visemes and `blink`, so all four compose.
+    this.faceIdle.update(dt, ctx);
   }
 
   // ── Signals ───────────────────────────────────────────────────────

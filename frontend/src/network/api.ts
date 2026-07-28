@@ -20,6 +20,18 @@ export const WS_URL =
 export interface AuthState {
   authenticated: boolean;
   username?: string;
+  /** Name Mika should call you — full name when set, else the username. */
+  display_name?: string;
+  /**
+   * Server-issued identity. Authoritative: an authenticated connection is
+   * bound to this id server-side and any client-supplied one is ignored, so
+   * the app must use this rather than its locally generated `web_*` id.
+   */
+  person_id?: string;
+  /** Whether the backend refuses unauthenticated WebSocket connections. */
+  auth_required?: boolean;
+  /** True while no account exists yet — the bootstrap window. */
+  needs_bootstrap?: boolean;
 }
 
 export async function whoami(): Promise<AuthState> {
@@ -31,6 +43,27 @@ export async function whoami(): Promise<AuthState> {
   } catch {
     return { authenticated: false };
   }
+}
+
+/**
+ * Create the first account. Open only while the user table is empty; the
+ * backend returns 409 forever once anyone exists.
+ */
+export async function bootstrap(
+  username: string,
+  password: string
+): Promise<AuthState> {
+  const resp = await fetch(`${API_BASE}/auth/bootstrap`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw new Error(body.error || "bootstrap refusé");
+  }
+  return body as AuthState;
 }
 
 export async function login(

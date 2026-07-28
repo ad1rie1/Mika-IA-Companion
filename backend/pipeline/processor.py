@@ -21,11 +21,12 @@ from ai.quota import QuotaExceeded
 from ai.router import UnconfiguredRoleError
 from emotion.engine import emotion_engine
 from emotion.types import Emotion, EmotionData
+from identity.resolver import identity_resolver
 from pipeline.broadcast import broadcast_to_websocket, emit_communication_event, persist_to_memory
 from pipeline.context import ConversationContext, gather_context
 from pipeline.perception import Intent, Perception
 from pipeline.response import call_ai_and_parse
-from pipeline.tracing import set_new_request_id
+from pipeline.tracing import set_current_person_id, set_new_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,28 @@ async def process_message(
     # already serialized images/audio/files into text descriptions.
     message = perception.text
 
+    # Bind the turn's person for the whole async context, so tool handlers
+    # ("who am I talking to?") don't need the model to repeat an id it never
+    # sees. Inherited by every coroutine awaited below.
+    set_current_person_id(person_id)
+
+    # What the transport itself proves about this turn. Absent metadata means
+    # "no proof", which is the safe reading for any adapter that hasn't been
+    # taught to say otherwise.
+    authenticated = bool(perception.metadata.get("authenticated", False))
+    is_public = bool(perception.metadata.get("is_public", False))
+
+    # Passive identification: read the turn for "moi c'est Thomas" and file a
+    # claim. This never binds anything on its own — it only gives Mika
+    # something to notice and decide on. Failures are non-fatal by design:
+    # not knowing who someone is must never cost them their answer.
+    try:
+        await identity_resolver.ingest_message(
+            person_id, message, channel=source, authenticated=authenticated,
+        )
+    except Exception:
+        logger.debug("Passive identification failed for %s", person_id, exc_info=True)
+
     # Hydrate person mood from DB if evicted from RAM since last interaction
     await emotion_engine.ensure_person_loaded(person_id)
 
@@ -125,7 +148,10 @@ async def process_message(
     try:
         # 1. Assemble context (memory, emotion, modules, self-concept, ...)
         if context is None:
-            context = await gather_context(message, person_id)
+            context = await gather_context(
+                message, person_id, channel=source,
+                authenticated=authenticated, is_public=is_public,
+            )
 
         # 2. Prompt -> AI call -> emotion extraction (bounded by timeout)
         response_text, emotion_data, tool_calls = await asyncio.wait_for(

@@ -20,12 +20,14 @@ def build_system_prompt(
     journal_context: str = "",
     project_context: str = "",
     project_suppresses_emotion: bool = False,
+    identity_context: str = "",
 ) -> str:
     """Assemble the full system prompt from personality + contextual layers.
 
     Order matters for the model's attention:
       personality        (who she is from the start)
       → self-concept      (who she is becoming, from her own memories)
+      → identity          (how sure she is who she's talking to)
       → person-context    (who she's talking to, what she knows about them)
       → user-mood         (how the interlocutor seems to feel right now)
       → circadian        (what time of day / how tired she is)
@@ -53,6 +55,16 @@ def build_system_prompt(
         system += (
             "\n\n--- QUI TU ES DEVENUE ---\n"
             + self_concept
+            + "\n--- FIN ---"
+        )
+    # Identity sits immediately before what she knows about them, because it
+    # qualifies that block: "here is Thomas's history" reads very differently
+    # after "someone claims to be Thomas". The context layer already withholds
+    # private material when certainty is too low; this tells her why.
+    if identity_context:
+        system += (
+            "\n\n--- QUI TU AS EN FACE ---\n"
+            + identity_context
             + "\n--- FIN ---"
         )
     if person_context:

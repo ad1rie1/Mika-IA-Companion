@@ -99,6 +99,18 @@ const PERULA_EMOTION_MAP: Record<EmotionName, BlendShapeTarget> = {
   melancholic: { Sad2: 0.6, Relaxy: 0.2 },
 };
 
+/** Slow incommensurate sines — a held expression breathes instead of
+ * freezing at an exact weight. Amplitude is a few percent: the point is
+ * that the face is never bit-for-bit identical across frames. */
+function pulse(t: number, seed: number): number {
+  return (
+    (Math.sin(t * 0.43 + seed * 2.1) + Math.sin(t * 0.79 + seed * 4.3) * 0.5) /
+    1.5
+  );
+}
+
+const PULSE_AMPLITUDE = 0.05;
+
 export class EmotionController {
   private vrm: VRM | null = null;
   private currentEmotion: EmotionName = "neutral";
@@ -106,6 +118,7 @@ export class EmotionController {
   private targetWeights: BlendShapeTarget = {};
   private currentWeights: Map<string, number> = new Map();
   private transitionSpeed = 3.0;
+  private time = 0;
   private activeMap: Record<EmotionName, BlendShapeTarget> =
     STANDARD_EMOTION_MAP;
 
@@ -170,6 +183,7 @@ export class EmotionController {
   update(delta: number) {
     if (!this.vrm?.expressionManager) return;
 
+    this.time += delta;
     const lerpFactor = Math.min(1, delta * this.transitionSpeed);
 
     // Ease every expression touched by the current OR a previous emotion,
@@ -179,7 +193,9 @@ export class EmotionController {
       ...this.currentWeights.keys(),
     ]);
 
+    let seed = 0;
     for (const name of names) {
+      seed++;
       const target = this.targetWeights[name] ?? 0;
       const current = this.currentWeights.get(name) ?? 0;
       const newValue = current + (target - current) * lerpFactor;
@@ -191,8 +207,14 @@ export class EmotionController {
         continue;
       }
 
+      // Track the clean eased value; the pulse only shades what is
+      // written, so it can't accumulate into the easing state.
       this.currentWeights.set(name, newValue);
-      this.vrm.expressionManager.setValue(name, newValue);
+      const shaded = newValue * (1 + pulse(this.time, seed) * PULSE_AMPLITUDE);
+      this.vrm.expressionManager.setValue(
+        name,
+        Math.max(0, Math.min(1, shaded))
+      );
     }
   }
 

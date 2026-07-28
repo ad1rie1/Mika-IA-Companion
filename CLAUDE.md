@@ -239,6 +239,42 @@ Three complementary systems feed the conscience scoring and the system prompt:
 - **Drives** (`drives/`): intrinsic motivational tensions (CURIOSITY, SOCIAL, EXPRESSION, REST). Grow with time, assuaged by actions. Contribute signed to the conscience score (REST subtracts). Inject a French description into the prompt.
 - **Rumination** (`conscience/models.py::Rumination`): short-term persistent thoughts — signals that were pertinent but unactioned. Decay, bleed emotion into global mood, and can push the conscience to eventually speak up.
 
+### Identity & trust ([identity/](backend/identity/))
+
+Who Mika is talking to, **how sure she is**, and what that certainty allows her to say. Everything per-person downstream — theory of mind, commitments, emotional history, concern-based routing — resolves through this layer.
+
+**The bug it replaces**: `Identity.entity` was never populated (`link_entity` existed but nothing called it), and per-person memory was looked up with `PersonProfile.filter(entity__name=person_id)`. That only matches when a person's memory Entity happens to be named after their transport handle, which never happens: the consolidator names entities after what people are *called* ("Thomas") while handles are `web_6f3e22ccb0ae`. Two disjoint rows per person, joined by nothing — the whole theory-of-mind layer returned `""` on every turn, silently. On the dev database, 95 `Identity` rows all carried `entity_id = NULL`.
+
+**Two orthogonal notions** ([identity/trust.py](backend/identity/trust.py), pure functions, no DB):
+
+- **`ChannelTrust`** — what the *transport* proves. `AUTHENTICATED` (verified Django session) > `ACCOUNT` (stable platform id: a Telegram DM proves the same account came back, not who holds it) > `PUBLIC` (group chat, unknown transport — proves nothing) > `INTERNAL` (not a person). Each grants a **floor** and imposes a **ceiling**.
+- **`Certainty`** — how sure she is that *this handle is that person*: `UNKNOWN` 0.0 → `SUSPECTED` 0.25 → `CLAIMED` 0.45 → `CORROBORATED` 0.70 → `BOUND` 0.85 → `VERIFIED` 1.0. Moves with evidence, clamped by the channel ceiling. **No amount of talking makes a public-room claim as good as a login.**
+
+**Three ways an identity gets established:**
+
+1. **Authenticated** — `bind_authenticated()` on connect. The session proves it; the memory Entity is created eagerly under the account's display name so profile/commitments resolve from the first turn. No deliberation.
+2. **Passive** — [identity/detection.py](backend/identity/detection.py) reads "moi c'est Thomas" off an ordinary turn (pure regex, no LLM: it runs on *every* inbound message). Files an `IdentityClaim` as `PENDING` and **binds nothing**. Deliberately conservative — `_NOT_NAMES` rejects states and roles ("je suis fatigué", "je suis développeur"), and a greedy two-word capture falls back to one word so "je ne suis pas Thomas en fait" still reads as a denial.
+3. **Active** — Mika's own MCP tools. Accepting a claim is what actually binds the handle to an Entity.
+
+**Se laisser convaincre** — on a channel with no login, recognition is earned. `EVIDENCE_WEIGHTS` is calibrated against the disclosure bar (0.70): `self_declared` 0.20 alone never clears it, `shared_memory` 0.50 alone never clears it (knowing a fact about Thomas doesn't make you Thomas), but **claim + corroboration lands exactly on it**. `corroboration_score()` measures lexical overlap between what was just said and what memory holds about the claimed person (≥3 distinct content words — one is coincidence, two is a common topic). Counter-evidence subtracts: `contradicted` −0.35, `denied` −0.50, `revoked` −1.0.
+
+**Disclosure gating** — `may_disclose_private_context()` decides whether per-person memory reaches the prompt at all:
+- authenticated → always
+- account channel → needs `CORROBORATED`
+- **public room → never, at any certainty**. The risk in a group isn't mistaken identity, it's the audience. She can greet someone warmly and talk normally; she just doesn't read out their file. A turn happening in public overrides whatever the private handle earned.
+
+`_fetch_person_context()` returns only the affective stance below the bar — Mika's own feeling toward the handle is hers, the other person's history is not.
+
+**Denial applies immediately**, without waiting for deliberation: if she's calling a stranger by a friend's name, everything downstream is already wrong. It unbinds when it targets the current binding.
+
+- **Models** ([identity/models.py](backend/identity/models.py)): `Identity` (+`certainty`, `bound_at`, `bound_via`, `binding_reason`), `IdentityHandle` (+`trust`, `is_ephemeral`), `IdentityClaim` (the audit ledger: every reason to believe or stop believing, with what it was worth). Migrations `identity/0002`, `identity/0003` (flags legacy `anon_*` handles).
+- **MCP tools** ([identity/module.py](backend/identity/module.py), registered via `identity/apps.py`): `identity_whoami_with`, `identity_check_story`, `identity_accept_claim`, `identity_reject_claim`, `identity_record_evidence`, `identity_forget_binding`. The current person is ambient via a ContextVar ([pipeline/tracing.py](backend/pipeline/tracing.py)) — from inside a turn "the person" is implicit, so the model never has to repeat an id it never sees.
+- **Prompt**: `--- QUI TU AS EN FACE ---` sits immediately before `--- CE QUE TU SAIS DE CETTE PERSONNE ---`, because it qualifies it ("here is Thomas's history" reads very differently after "someone *claims* to be Thomas"). Never prints a number — prompt text reads as a feeling, or the model starts quoting percentages back at the user.
+- **Consolidator**: souvenirs are now linked to the *interlocutor's* entity, not only to entities the extractor happened to name in the content. A conversation where nobody says their own name used to produce souvenirs attached to nobody, so `PersonProfile` never had material to generate from.
+- **Retention**: ephemeral `anon_*` handles expire after 7 days, orphan `Identity` rows are swept, resolved claims kept 180 days (pending ones protected).
+
+**Frontend is authenticated** — `CONSUMER_REQUIRE_AUTH` defaults to `True`; the WebSocket refuses anonymous connections. `GET /auth/whoami` reports `auth_required` + `needs_bootstrap` so the client renders the right screen, and `POST /auth/bootstrap` creates the **first** account (409 forever after) so a fresh clone isn't locked out before `createsuperuser` is run. `AUTH_PASSWORD_VALIDATORS` is now configured — without it `validate_password` was a no-op and the account owning the dashboard (conversation history + provider API keys) could have been "123".
+
 ### Self-concept and theory of mind
 
 Two layers built on top of the memory system regenerate periodically during consolidation:
@@ -387,7 +423,8 @@ Assembled by `build_system_prompt()` ([pipeline/prompt.py](backend/pipeline/prom
 
 1. **Personality** (static, from `personality.yaml`) — includes a `--- VARIABILITÉ NATURELLE ---` sub-block encouraging variable response length, backchannels ("hmm", "attends"), hesitations, selective echo, non-mandatory relances, and prosodic tokens (`[SIGH]`, `[LAUGH]`, `[PAUSE:ms]`, `[BREATH]`). *Stripped* when an active project has `emotion_policy=OFF` (professional mode).
 2. **`--- QUI TU ES DEVENUE ---`** (self-concept, evolving paragraph)
-3. **`--- CE QUE TU SAIS DE CETTE PERSONNE ---`** (person profile + affect + weekly trend + commitments)
+2bis. **`--- QUI TU AS EN FACE ---`** (identity certainty + pending identity claims — see "Identity & trust"). Qualifies the block below; silent for internal person_ids.
+3. **`--- CE QUE TU SAIS DE CETTE PERSONNE ---`** (person profile + affect + weekly trend + commitments). **Gated on identity certainty**: below the disclosure bar only the affective stance is injected, never the profile/history/commitments.
 4. **`--- CE QUE TU PERCOIS DE SON ETAT ---`** (heuristic read of user's current emotional tone: caps, punctuation, lexique, emojis, length — `detect_user_mood_hint` in `pipeline/context.py`)
 5. **`--- TON RYTHME ---`** (circadian phase + energy level, from `emotion/circadian.py`)
 6. **`--- ETAT COGNITIF ---`** (fatigue fog: 4 tiers below energy 0.5 shaping the TONE, not just the act/wait threshold)
@@ -408,7 +445,8 @@ Personality + self-concept + person-context + circadian are the "slow" layers (s
 - **3D**: `src/scene/` — `SceneManager` (render loop; `clock.getDelta()` clamped to 50ms so tab-restore spikes can't explode the spring bones), `Environment` (`setSleepPhase()` light dimming + bg tint; `getAnchor()` v2 locomotion seam, returns undefined for now), `CameraController` (orbit target follows the avatar root via `setFollowTarget(object3d, offset)`; falls back to the legacy constant on the placeholder path)
 - **VTuber**: `src/vtuber/` — `VTuberModel` (VRM under an `AvatarRoot` group at (0,0,-0.5) rot Y-π — v2 locomotion moves this root, clips animate in model-local space), `EmotionController` (FACE only: 29 emotions → blend shapes with rich-model fallback)
 - **Body animation**: `src/vtuber/animation/` — Mixamo-clip-based layered system:
-  - `AnimationSystem` — facade main.ts wires; per-frame order: `humanoid.resetNormalizedPose()` → state machine → `THREE.AnimationMixer` (rooted at `normalizedHumanBonesRoot`) → additive overlays (breathing spine, sleep neck tilt, emotion head pose — quaternion compose, never absolute Euler writes) → `HandAnimator` (30 finger bones, absolute — finger tracks are stripped from clips) → `GazeController` (eye bones, absolute — Mixamo has no eye bones) → `BlinkController` (blink expression + REM flicker)
+  - `AnimationSystem` — facade main.ts wires; per-frame order: `humanoid.resetNormalizedPose()` + `applyRestPose()` → state machine → `THREE.AnimationMixer` (rooted at `normalizedHumanBonesRoot`) → additive overlays (breathing spine, sleep neck tilt, emotion head pose — quaternion compose, never absolute Euler writes) → `HandAnimator` (30 finger bones, absolute — finger tracks are stripped from clips) → `GazeController` (eye bones, absolute — Mixamo has no eye bones) → `BlinkController` → `FaceIdleController`
+  - **Face layers** — four writers on **disjoint** expression-name sets, so they compose with no arbitration: `EmotionController` owns the emotion shapes (`Smile1`, `Angry1`…, with a few-percent breathing pulse on the written value so a held emotion never freezes), `LipSyncController` owns `aa`/`oh`/`ih`/`ee`, `BlinkController` owns `blink` (three flavours — quick / double / soft — with an emotion-modulated cadence, faster while speaking), and `FaceIdleController` drives the model's **ARKit perfect-sync** shapes (`BrowInnerUp`, `MouthDimpleLeft`, `CheekSquintRight`…): continuous micro-drift with deliberately different L/R noise rates, plus per-emotion brow/nose/cheek accents. That last layer exists because `neutral` maps to an **empty** expression set on this model — without it the face only blinks and reads as a mask next to a clip-animated body. Amplitudes stay small on purpose: VRM expression binds ACCUMULATE (`+=`) and the custom emotion shapes already bind some of the same morph targets. Shapes are resolved against the model once, so a VRM without perfect-sync degrades to blink + emotions.
   - `mixamoRetarget.ts` — runtime FBX→VRM retarget (official three-vrm algorithm): prefix detection, rest-pose conjugation, VRM0 x/z flip (`metaVersion "0"`), hips position scaled by `normalizedRestPose` height ratio (LOCAL position — cm-space trap), finger/scale/non-hips-position tracks stripped, per-clip report
   - `AnimationStateMachine` — states idle/talking/gesture/sleeping (+ reserved v2 walking/interacting behind `LOCOMOTION_ENABLED=false`); single `playClip` crossfade primitive (reset→play→crossFadeTo, never a snap); one-shot gestures fade back BEFORE clip end with `clampWhenFinished` as safety net; weighted idle pools with per-clip `hold`; talk-pool rotation at 4-9s IS the talk-beat cadence
   - `ClipLibrary` — manifest-driven ([public/animations/manifest.json](frontend/public/animations/manifest.json)); synthetic rest clip (A-pose) always available so missing assets degrade to a breathing, blinking, finger-fidgeting Mika — never frozen, never T-pose; first idle clip loads with priority, rest streams at concurrency 3, per-file failures isolated
@@ -418,7 +456,7 @@ Personality + self-concept + person-context + circadian are the "slow" layers (s
 - **Audio**: `src/audio/` — `TTSService` (Web Speech API, emotion-based pitch/rate, `requestWakeUpDelay(ms)`, `onProsodicCue` callback fires on `[SIGH]/[LAUGH]/[BREATH]` in sync with their audio → body gesture beats), `LipSyncController` (French phoneme mapping, expressions only)
 - **UI**: `src/ui/` — `ChatOverlay`, `EmotionDisplay` (29 emotion labels in French with intensity %), `InnerLifePanel` (drives + emotion blend + self-narrative + ruminations + person profile + sleep badge + dream-of-the-night + today's journal, with `onSleepPhaseChange` pub-sub)
 - **Network**: `src/network/WebSocketClient.ts` — event-driven client with exponential backoff; typed `on()` overloads over `ServerMessageMap` (`speech`, `inner_state_update`, `project_report`, + local `connection`)
-- **Frontend tests**: vitest (`cd frontend && npx vitest run`) — retarget math (prefix detection, VRM0 flip, hips scale, finger stripping), gesture gating, type guards. Not part of `npm run build` (tsc stays the hard gate).
+- **Frontend tests**: vitest (`cd frontend && npx vitest run`) — retarget math (prefix detection, VRM0 flip, hips scale, finger stripping, degenerate-track rejection), gesture gating, face-layer amplitude safety (micro + accent can never sum past 1.0 on a shared shape), type guards, plus a smoke suite that runs the real FBXLoader + retarget over every downloaded clip in `public/animations/` (auto-skips when none are present; excluded from `tsc` since it reads the filesystem). Not part of `npm run build` (tsc stays the hard gate).
 
 **Speech flow**: WebSocket `speech` event → `isEmotionName` validation → face (`EmotionController`) + body (`AnimationSystem.setEmotion`: gaze bias, hand mood, head-pose overlay, gated gesture) + UI → TTS + lip-sync. TTS `onSpeakStart/End` → `AnimationSystem.setSpeaking` (talking clip pool). If Mika was asleep within 10s, TTS is prefixed by 1.3s of silence (wake-up pause).
 
@@ -441,11 +479,11 @@ A `.vrm` file at [frontend/public/models/default.vrm](frontend/public/models/def
   - `REQUEST_RESPONSE` — user/channel expects an answer (default)
   - `OBSERVATION` — passive stimulus (camera frame, ambient audio, file drop). No forced response; conscience observes.
   - `INTERNAL_TRIGGER` — Mika-driven (conscience `_act`, module `notify_ai`, drive overflow, rumination resurfacing). Broadcasts; `emit_event=False`.
-- **Person identification**: each WebSocket connection gets a per-connection UUID; clients can pass a persistent `person_id` in chat messages; Telegram uses `tg_{user_id}`. Internal IDs `conscience_mika`, `__global__`, `anonymous` are reserved and never matched to `PersonProfile`.
+- **Person identification**: transport handles (`user_{pk}`, `web_*`, `tg_{user_id}`, `anon_*`) are resolved to memory `Entity` rows **through the identity layer**, never by name equality — see the "Identity & trust" section. Internal IDs `conscience_mika`, `__global__`, `anonymous` are reserved and never identified.
 - **Personality is config-driven**: edit [personality.yaml](personality.yaml) (name, language, tone, traits, quirks, values, temperament) — no code changes needed
 - **Singletons** (module-level, imported throughout): `ai_router` (`ai.router`), `ai_client` (`ai.client`), `memory_manager` (`memory.manager`), `emotion_engine` (`emotion.engine`), `drive_engine` (`drives.engine`), `personality` (`config.personality`), `module_manager` (`modules.manager`), `conscience_engine` (`conscience.engine`), `narrative_generator` (`memory.narrative`), `person_profile_generator` (`memory.person_profile`), `sleep_cycle` (`memory.sleep`), `project_runner` (`projects.runner`). Circadian is pure-function only (no singleton) — any caller passes the current `datetime` + the personality's `CircadianProfile`.
 - **Django settings** in [config/settings.py](backend/config/settings.py): `PROJECT_ROOT` = repo root (where `.env` and `personality.yaml` live), `BASE_DIR` = `backend/`
-- **INSTALLED_APPS**: `ai`, `communication`, `emotion`, `drives`, `memory`, `conscience`, `modules`, `projects`
+- **INSTALLED_APPS**: `ai`, `communication`, `emotion`, `drives`, `memory`, `conscience`, `modules`, `projects`, `identity`, `files`, `dashboard`, `configs`
 - **Adding a new input source** (e.g. Discord, webhook): write an adapter that builds a `Perception` and calls `pipeline.router.perceive()`. No pipeline changes needed.
 - **Adding a new modality** (e.g. ultrasound sensor): add a preprocessor in [pipeline/preprocessors/](backend/pipeline/preprocessors/) and register its dispatch entry. Router + processor pick it up automatically.
 
@@ -484,6 +522,7 @@ OAuth tried first, API key as fallback. OAuth tokens start with `sk-ant-oat01-`;
 | `API_PORT` | No | `8000` | Backend port |
 | `API_HOST` | No | `127.0.0.1` | Bind address. Loopback by default because the dashboard is unauthenticated unless gated |
 | `DASHBOARD_REQUIRE_AUTH` | No | `False` | Require an authenticated **staff** user for `/dashboard/*`. Needs a superuser (`python backend/manage.py createsuperuser`) |
+| `CONSUMER_REQUIRE_AUTH` | No | `True` | Refuse unauthenticated WebSocket connections. On by default: the frontend is the one channel where Mika is *certain* who she is talking to. First run is handled by `POST /auth/bootstrap` (creates the first account, 409s forever after), so this does not lock out a fresh clone |
 | `LOGIN_URL` | No | `/admin/login/` | Where the dashboard gate redirects unauthenticated HTML requests |
 | `MEMORY_SHORT_TERM_LIMIT` | No | `20` | Messages kept in RAM context |
 | `CONSOLIDATION_INTERVAL` | No | `60` | Consolidator loop period (s) |
@@ -522,6 +561,12 @@ OAuth tried first, API key as fallback. OAuth tokens start with `sk-ant-oat01-`;
 - **Sanitization tests** (`test_dashboard_sanitize.py`): `html`/`js`/`template` stripped at every nesting level including inside `rows` and `tabs`, depth cap, the `allow_raw_html` opt-in, and that the Forge re-exports the shared implementation.
 - **Config record tests** (`test_config_record_validation.py`): a row with `temperature: "hot"`, an out-of-range value, or an unknown `provider` is rejected at write time rather than blowing up later in the AI router.
 - **Retention tests** (`test_retention.py`): both policy shapes (age, row ceiling), the `protect` filter, throttling to once per hour, and a consistency test asserting every policy targets a real model/field with at least one ceiling — it caught `ConsolidationLog` using `ran_at` rather than `created_at`.
+- **Identity tests** (4 files, ~110 tests):
+  - `test_identity_trust.py` — pure policy: channel classification, floors/ceilings (a public claim can never reach `BOUND`), evidence arithmetic, and a **calibration guard** asserting `self_declared + shared_memory ≥ PRIVATE_CONTEXT_THRESHOLD` while neither alone clears it. Changing a weight without revisiting the threshold is exactly how a bare claim quietly becomes enough to unlock a private history.
+  - `test_identity_detection.py` — self-introductions, denials, and the expensive false positives ("je suis fatigué", "je suis développeur", `Agent007`); greedy two-word capture falling back to one word; corroboration overlap thresholds.
+  - `test_identity_resolver.py` — handle upsert idempotence, trust raised-never-lowered, the three binding paths, "accepting with proof actually unlocks disclosure", public-room override, denial unbinding, and `handles_for_entity_names` (dead until entities were actually bound).
+  - `test_identity_tools.py` — the MCP surface, ambient person_id resolution, and that bad LLM-supplied arguments are *answered*, never raised.
+- **Frontend auth tests** (`test_frontend_auth.py`): bootstrap window opens/closes, weak passwords rejected, `whoami` reports the server-issued `person_id`, and the consumer refuses anonymous sockets when required.
 - **Restart-continuity tests** (`test_memory_restart_continuity.py`): conversation resume window, chronological rehydration, scaffolding excluded, short-term limit respected.
 - **Provider-cache tests** (`test_ai_router_provider_cache.py`): credential change evicts only that provider, and every entry in `_PROVIDER_CLASSES` has a credential prefix (a new provider added without one would silently keep stale keys).
 - **Voice routing tests** (`test_voice_routing.py`): the per-sink context policy (quiet hours, sleep phase, presence, mute), the two voice personas, the voice→text delivery fallback chain, and the inner-thought generator (mocked LLM — asserts action *and* result both reach the prompt, that failures yield silence rather than an error string, and that output is de-quoted and length-capped).

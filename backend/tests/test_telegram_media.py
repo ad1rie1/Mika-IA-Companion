@@ -139,7 +139,7 @@ class TestHandleMedia:
 
         with patch.object(
             TelegramChannel, "_register_interlocutor",
-            new=AsyncMock(return_value="tg_99"),
+            new=AsyncMock(return_value=("tg_99", False)),
         ), patch("pipeline.router.perceive", new=fake_perceive):
             await channel._handle_media(update, context=None)
 
@@ -158,7 +158,7 @@ class TestHandleMedia:
 
         with patch.object(
             TelegramChannel, "_register_interlocutor",
-            new=AsyncMock(return_value="tg_99"),
+            new=AsyncMock(return_value=("tg_99", False)),
         ), patch("pipeline.router.perceive", new=AsyncMock(return_value=None)):
             await channel._handle_media(update, context=None)
 

@@ -28,6 +28,7 @@ async def call_ai_and_parse(
         journal_context=context.journal_context,
         project_context=context.project_context,
         project_suppresses_emotion=context.project_suppresses_emotion,
+        identity_context=context.identity_context,
     )
     user_prompt = format_conversation(message, context.history)
 

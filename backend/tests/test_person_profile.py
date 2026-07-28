@@ -790,36 +790,78 @@ class TestPromptInjection:
 # _fetch_person_context
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.django_db(transaction=True)
 class TestFetchPersonContext:
+    """The theory-of-mind block, resolved through the identity layer.
+
+    These tests bind a real handle to a real Entity rather than relying on
+    ``Entity.name == person_id``. That coincidence is what the old lookup
+    required, and it never held in production: handles are ``web_6f3e…``
+    while the consolidator names entities after what people are called.
+    """
 
     @pytest.fixture(autouse=True)
     def _clean(self):
+        from identity.models import Identity, IdentityClaim, IdentityHandle
         from memory.models import Commitment, Entity, PersonProfile
         Commitment.objects.all().delete()
         PersonProfile.objects.all().delete()
+        IdentityClaim.objects.all().delete()
+        IdentityHandle.objects.all().delete()
+        Identity.objects.all().delete()
         Entity.objects.all().delete()
         yield
 
+    @staticmethod
+    async def _bind(person_id: str, entity_name: str, *, authenticated=True):
+        """Create a handle for ``person_id`` bound to the named Entity."""
+        from identity.resolver import identity_resolver
+        from identity.trust import ChannelTrust
+
+        await identity_resolver.link_handle(
+            person_id=person_id, channel="web", kind="consumer",
+            trust=ChannelTrust.AUTHENTICATED if authenticated
+            else ChannelTrust.ACCOUNT,
+        )
+        if authenticated:
+            await identity_resolver.bind_authenticated(
+                person_id, "web", entity_name,
+            )
+        else:
+            await identity_resolver.link_entity(person_id, entity_name)
+        from memory.models import Entity
+        return await sync_to_async(
+            lambda: Entity.objects.get(name=entity_name, entity_type="person")
+        )()
+
+    @staticmethod
+    async def _context_for(person_id: str) -> str:
+        from identity.resolver import identity_resolver
+        from pipeline.context import _fetch_person_context
+
+        ctx = await identity_resolver.resolve_context(person_id, channel="web")
+        return await _fetch_person_context(ctx)
+
     @pytest.mark.asyncio
     async def test_internal_person_id_returns_empty(self):
-        from pipeline.context import _fetch_person_context
         for pid in ("conscience_mika", "__global__", "anonymous", ""):
-            assert await _fetch_person_context(pid) == ""
+            assert await self._context_for(pid) == ""
 
     @pytest.mark.asyncio
     async def test_unknown_person_returns_empty(self):
-        from pipeline.context import _fetch_person_context
-        assert await _fetch_person_context("someone_never_seen") == ""
+        assert await self._context_for("someone_never_seen") == ""
 
     @pytest.mark.asyncio
-    async def test_profile_only_formats_block(self):
-        from memory.models import Entity, PersonProfile
-        from pipeline.context import _fetch_person_context
+    async def test_profile_resolves_through_handle_not_name(self):
+        """The regression this whole layer exists for.
 
-        ent = await sync_to_async(Entity.objects.create)(
-            name="Thomas", entity_type="person",
-        )
+        The handle is ``web_6f3e22ccb0ae``; the person is "Thomas". Under the
+        old ``entity__name=person_id`` lookup this returned nothing at all.
+        """
+        from memory.models import PersonProfile
+
+        ent = await self._bind("web_6f3e22ccb0ae", "Thomas")
         await sync_to_async(PersonProfile.objects.create)(
             entity=ent,
             summary="Thomas est un pote de longue date.",
@@ -828,73 +870,52 @@ class TestFetchPersonContext:
             topics_of_interest=["gaming"],
         )
 
-        block = await _fetch_person_context("Thomas")
+        block = await self._context_for("web_6f3e22ccb0ae")
         assert "Thomas est un pote" in block
         assert "close" in block
         assert "playful" in block
         assert "gaming" in block
 
     @pytest.mark.asyncio
-    async def test_commitments_only_no_profile(self):
-        """If a profile doesn't exist but an Entity does and has commitments,
-        we still return the commitments block."""
-        from memory.models import Commitment, Entity, PersonProfile
-        from pipeline.context import _fetch_person_context
+    async def test_commitments_without_profile(self):
+        from memory.models import Commitment
 
-        # Create an entity + a commitment + a placeholder profile so
-        # the lookup finds the entity (profile is required by the SQL join).
-        ent = await sync_to_async(Entity.objects.create)(
-            name="Claire", entity_type="person",
-        )
-        await sync_to_async(PersonProfile.objects.create)(entity=ent)
+        ent = await self._bind("web_claire", "Claire")
         await sync_to_async(Commitment.objects.create)(
             description="Lui envoyer la photo", person=ent, status="pending",
         )
 
-        block = await _fetch_person_context("Claire")
+        block = await self._context_for("web_claire")
         assert "photo" in block
         assert "Tu lui avais dit" in block
 
     @pytest.mark.asyncio
     async def test_affect_block_included_when_person_mood_active(self):
-        """When Mika has a real stance toward the person, the person_context
-        block should include the affect line."""
         from emotion.engine import emotion_engine
         from emotion.types import Emotion, EmotionData
-        from memory.models import Entity, PersonProfile
-        from pipeline.context import _fetch_person_context
+        from memory.models import PersonProfile
 
-        ent = await sync_to_async(Entity.objects.create)(
-            name="Anna", entity_type="person",
-        )
+        pid = "web_anna"
+        ent = await self._bind(pid, "Anna")
         await sync_to_async(PersonProfile.objects.create)(
             entity=ent, summary="Anna est cool.",
         )
 
-        # Seed a strong person mood so the affect block is non-empty.
-        emotion_engine.person_moods.pop("Anna", None)
+        emotion_engine.person_moods.pop(pid, None)
         for _ in range(4):
-            emotion_engine.process_emotion(
-                EmotionData(Emotion.HAPPY, 0.8), "Anna",
-            )
+            emotion_engine.process_emotion(EmotionData(Emotion.HAPPY, 0.8), pid)
 
-        block = await _fetch_person_context("Anna")
-        # Affect description uses "tu" or "envers"
+        block = await self._context_for(pid)
         assert any(word in block.lower() for word in ("envers", "tu te sens"))
-        # And the profile summary is still there
         assert "Anna est cool" in block
 
     @pytest.mark.asyncio
     async def test_weekly_trend_added_when_two_plus_summaries(self):
-        """Two or more EmotionalSummary rows → trend sentence appears."""
         from datetime import date, timedelta as td
-        from memory.models import EmotionalSummary, Entity, PersonProfile
-        from pipeline.context import _fetch_person_context
+        from memory.models import EmotionalSummary, PersonProfile
 
-        pid = "Marc"
-        ent = await sync_to_async(Entity.objects.create)(
-            name=pid, entity_type="person",
-        )
+        pid = "web_marc"
+        ent = await self._bind(pid, "Marc")
         await sync_to_async(PersonProfile.objects.create)(
             entity=ent, summary="Marc est sympa.",
         )
@@ -912,7 +933,7 @@ class TestFetchPersonContext:
                 snapshot_count=10,
             )
 
-        block = await _fetch_person_context(pid)
+        block = await self._context_for(pid)
         assert "jours" in block
         assert "happy" in block
         assert "warming" in block
@@ -921,13 +942,10 @@ class TestFetchPersonContext:
     async def test_no_trend_with_single_summary(self):
         """A single day of data is not a trend — don't fabricate one."""
         from datetime import date
-        from memory.models import EmotionalSummary, Entity, PersonProfile
-        from pipeline.context import _fetch_person_context
+        from memory.models import EmotionalSummary, PersonProfile
 
-        pid = "Lone"
-        ent = await sync_to_async(Entity.objects.create)(
-            name=pid, entity_type="person",
-        )
+        pid = "web_lone"
+        ent = await self._bind(pid, "Lone")
         await sync_to_async(PersonProfile.objects.create)(
             entity=ent, summary="Lone.",
         )
@@ -941,17 +959,15 @@ class TestFetchPersonContext:
             snapshot_count=1,
         )
 
-        block = await _fetch_person_context(pid)
+        block = await self._context_for(pid)
         assert "jours" not in block
 
     @pytest.mark.asyncio
     async def test_honored_commitments_not_included(self):
-        from memory.models import Commitment, Entity, PersonProfile
-        from pipeline.context import _fetch_person_context
+        from memory.models import Commitment, PersonProfile
 
-        ent = await sync_to_async(Entity.objects.create)(
-            name="Bob", entity_type="person",
-        )
+        pid = "web_bob"
+        ent = await self._bind(pid, "Bob")
         await sync_to_async(PersonProfile.objects.create)(
             entity=ent, summary="Bob.",
         )
@@ -962,6 +978,78 @@ class TestFetchPersonContext:
             description="Faire Y (en cours)", person=ent, status="pending",
         )
 
-        block = await _fetch_person_context("Bob")
-        assert "X" not in block or "Faire X" not in block
+        block = await self._context_for(pid)
+        assert "Faire X" not in block
         assert "Faire Y" in block
+
+    # ── Disclosure gating ─────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_private_context_withheld_when_only_claimed(self):
+        """Someone merely *claiming* to be Thomas gets none of his history.
+
+        This is the failure mode the certainty model exists to prevent:
+        reciting what one person confided to whoever currently holds a
+        handle bearing their name.
+        """
+        from identity.models import Identity, IdentityHandle
+        from identity.resolver import identity_resolver
+        from identity.trust import Certainty, ChannelTrust
+        from memory.models import Commitment, Entity, PersonProfile
+
+        ent = await sync_to_async(Entity.objects.create)(
+            name="Thomas", entity_type="person",
+        )
+        await sync_to_async(PersonProfile.objects.create)(
+            entity=ent, summary="Thomas traverse un divorce difficile.",
+        )
+        await sync_to_async(Commitment.objects.create)(
+            description="Le rappeler ce week-end", person=ent, status="pending",
+        )
+
+        # A Telegram account that says it is Thomas, unconfirmed.
+        await identity_resolver.link_handle(
+            person_id="tg_999", channel="telegram", kind="module",
+            trust=ChannelTrust.ACCOUNT,
+        )
+        await sync_to_async(
+            lambda: Identity.objects.filter(
+                pk=IdentityHandle.objects.get(person_id="tg_999").identity_id
+            ).update(entity=ent, certainty=float(Certainty.CLAIMED))
+        )()
+
+        ctx = await identity_resolver.resolve_context(
+            "tg_999", channel="telegram",
+        )
+        from pipeline.context import _fetch_person_context
+        block = await _fetch_person_context(ctx)
+
+        assert "divorce" not in block
+        assert "week-end" not in block
+
+    @pytest.mark.asyncio
+    async def test_private_context_withheld_in_public_room(self):
+        """Known in DMs is not known in a group chat.
+
+        The room is a property of *this* turn and overrides whatever the
+        private handle earned — a crowded channel is the worst place to read
+        someone's history aloud.
+        """
+        from identity.resolver import identity_resolver
+        from memory.models import PersonProfile
+
+        ent = await self._bind("tg_555", "Julie", authenticated=False)
+        await sync_to_async(PersonProfile.objects.create)(
+            entity=ent, summary="Julie deteste qu'on parle de son travail.",
+        )
+
+        private = await identity_resolver.resolve_context(
+            "tg_555", channel="telegram",
+        )
+        public = await identity_resolver.resolve_context(
+            "tg_555", channel="telegram", is_public=True,
+        )
+
+        from pipeline.context import _fetch_person_context
+        assert "deteste" in await _fetch_person_context(private)
+        assert "deteste" not in await _fetch_person_context(public)

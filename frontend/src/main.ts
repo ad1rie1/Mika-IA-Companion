@@ -14,7 +14,7 @@ import { ChatOverlay } from "./ui/ChatOverlay";
 import { EmotionDisplay } from "./ui/EmotionDisplay";
 import { InnerLifePanel } from "./ui/InnerLifePanel";
 import { LoginOverlay } from "./ui/LoginOverlay";
-import { WS_URL, whoami } from "./network/api";
+import { WS_URL } from "./network/api";
 import {
   isEmotionName,
   type EmotionName,
@@ -128,17 +128,14 @@ async function init() {
     },
   });
 
-  // Auth: the WebSocket authenticates via the Django session cookie. Check for
-  // an existing session; when authenticated the backend derives a trusted
-  // user_{pk} and ignores the client id. Optionally force a login gate (set
-  // VITE_REQUIRE_LOGIN=true to mirror the backend CONSUMER_REQUIRE_AUTH policy);
-  // otherwise the app connects anonymously with the persistent IdentityService.
-  const requireLogin =
-    (import.meta as any).env?.VITE_REQUIRE_LOGIN === "true";
-  let auth = await whoami();
-  if (!auth.authenticated && requireLogin) {
-    auth = await new LoginOverlay().ensureAuthenticated();
-  }
+  // Auth: the WebSocket authenticates via the Django session cookie.
+  //
+  // The gate is driven by the *backend* (`auth_required` in /auth/whoami)
+  // rather than a build-time flag, so the frontend can't be configured into
+  // disagreeing with the server about whether a session is needed — that
+  // combination produced a login-free UI whose WebSocket was then refused.
+  // When no account exists yet the overlay switches to creating the first one.
+  const auth = await new LoginOverlay().ensureAuthenticated();
 
   // WebSocket connection with identity handshake
   // Voice mute toggle — persisted so a muted session stays muted on reload.
@@ -158,12 +155,26 @@ async function init() {
   }
 
   const ws = new WebSocketClient(WS_URL);
+  // The server-issued id wins when authenticated: the consumer binds the
+  // connection to user_{pk} and ignores any client claim, so sending the
+  // locally generated web_* one would just describe an identity that the
+  // backend already overrode.
   ws.setIdentity(
-    identity.personId,
-    auth.authenticated ? auth.username ?? identity.displayName : identity.displayName
+    auth.authenticated ? auth.person_id ?? identity.personId : identity.personId,
+    auth.authenticated
+      ? auth.display_name ?? auth.username ?? identity.displayName
+      : identity.displayName
   );
   const chatOverlay = new ChatOverlay(ws);
-  wireIdentityBar(identity, ws);
+  // The identity bar lets an anonymous visitor pick a name. Authenticated
+  // users have one already, and letting them edit it here would suggest they
+  // can change who Mika thinks they are — which is exactly what the session
+  // is there to settle.
+  if (!auth.authenticated) {
+    wireIdentityBar(identity, ws);
+  } else {
+    document.getElementById("identity-bar")?.style.setProperty("display", "none");
+  }
 
   // Connection badge: green "Connectée" that fades out after a few seconds,
   // amber spinner while a reconnect attempt is in flight, red with the retry

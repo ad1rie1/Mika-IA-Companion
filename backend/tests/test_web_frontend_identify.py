@@ -21,6 +21,8 @@ def _make_consumer():
     c.person_id = "anon_deadbeef"
     c.display_name = None
     c._greeted = False
+    c.authenticated = False
+    c._group = "vtuber_person_anon_deadbeef"
     c.channel_name = "test_ch"
     c.channel_layer = AsyncMock()
     c.send = AsyncMock()
@@ -39,7 +41,7 @@ class TestIdentifyHandshake:
         })
         with patch("communication.channels.web_frontend.perceive",
                    new_callable=AsyncMock), \
-             patch.object(c, "_ensure_entity", new=AsyncMock()):
+             patch.object(c, "_refresh_handle", new=AsyncMock()):
             await c.receive(text_data=payload)
 
         assert c.person_id == "web_abc123"
@@ -50,7 +52,7 @@ class TestIdentifyHandshake:
         payload = json.dumps({"type": "identify", "person_id": "web_xyz"})
         with patch("communication.channels.web_frontend.perceive",
                    new_callable=AsyncMock), \
-             patch.object(c, "_ensure_entity", new=AsyncMock()):
+             patch.object(c, "_refresh_handle", new=AsyncMock()):
             await c.receive(text_data=payload)
         assert c.person_id == "web_xyz"
         assert c.display_name is None
@@ -61,7 +63,7 @@ class TestIdentifyHandshake:
         payload = json.dumps({"type": "identify", "person_id": "   "})
         with patch("communication.channels.web_frontend.perceive",
                    new_callable=AsyncMock), \
-             patch.object(c, "_ensure_entity", new=AsyncMock()):
+             patch.object(c, "_refresh_handle", new=AsyncMock()):
             await c.receive(text_data=payload)
         assert c.person_id == "anon_orig"
 
@@ -70,33 +72,38 @@ class TestIdentifyHandshake:
         payload = json.dumps({"type": "identify", "person_id": "web_1"})
         with patch("communication.channels.web_frontend.perceive",
                    new_callable=AsyncMock) as mock_perceive, \
-             patch.object(c, "_ensure_entity", new=AsyncMock()):
+             patch.object(c, "_refresh_handle", new=AsyncMock()):
             await c.receive(text_data=payload)
             await c.receive(text_data=payload)  # second identify must not re-greet
         # First identify → greeting perception; second is a no-op on greeting.
         assert mock_perceive.call_count == 1
 
-    async def test_identify_always_ensures_entity_by_person_id(self):
-        """Entity must be keyed by person_id (stable) regardless of display_name,
-        because _fetch_person_context looks up via entity__name=person_id."""
+    async def test_identify_refreshes_the_persisted_handle(self):
+        """Identify re-persists the handle (picking up the display name).
+
+        It deliberately does NOT create a memory Entity: a person-Entity means
+        "someone Mika knows", and minting one per connection is what left the
+        table full of web_* rows that no souvenir ever referenced.
+        """
         c = _make_consumer()
         payload = json.dumps({
             "type": "identify", "person_id": "web_1", "display_name": "Bob",
         })
         with patch("communication.channels.web_frontend.perceive",
                    new_callable=AsyncMock), \
-             patch.object(c, "_ensure_entity", new=AsyncMock()) as mock_entity:
+             patch.object(c, "_refresh_handle", new=AsyncMock()) as mock_handle:
             await c.receive(text_data=payload)
-        mock_entity.assert_called_once_with("web_1")
+        mock_handle.assert_awaited_once()
 
-    async def test_identify_ensures_entity_for_person_id_when_no_display(self):
+    async def test_identify_refreshes_handle_without_display_name(self):
         c = _make_consumer()
         payload = json.dumps({"type": "identify", "person_id": "web_nodisplay"})
         with patch("communication.channels.web_frontend.perceive",
                    new_callable=AsyncMock), \
-             patch.object(c, "_ensure_entity", new=AsyncMock()) as mock_entity:
+             patch.object(c, "_refresh_handle", new=AsyncMock()) as mock_handle:
             await c.receive(text_data=payload)
-        mock_entity.assert_called_once_with("web_nodisplay")
+        assert c.person_id == "web_nodisplay"
+        mock_handle.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -126,33 +133,93 @@ class TestChatBeforeIdentify:
 
 
 @pytest.mark.django_db(transaction=True)
-class TestEnsureEntity:
+class TestHandleRegistration:
+    """What connecting persists, and — just as importantly — what it doesn't.
+
+    An anonymous socket is bookkeeping. It gets a handle so replies can be
+    routed back, flagged ephemeral so retention can reclaim it, and no memory
+    Entity at all. Only authentication turns a connection into a person.
+    """
 
     @pytest.mark.asyncio
-    async def test_creates_person_entity(self):
+    async def test_anonymous_connection_creates_no_entity(self):
         from asgiref.sync import sync_to_async
-        from communication.channels.web_frontend import WebSocketConsumer
         from memory.models import Entity
 
-        await WebSocketConsumer._ensure_entity("Alice")
+        c = _make_consumer()
+        c.person_id = "anon_cafe1234"
+        c.authenticated = False
+        c._group = "vtuber_person_anon_cafe1234"
+        await c._register_presence()
 
-        exists = await sync_to_async(
+        count = await sync_to_async(Entity.objects.count)()
+        assert count == 0, "une socket anonyme n'est pas une personne"
+
+    @pytest.mark.asyncio
+    async def test_anonymous_handle_is_marked_ephemeral(self):
+        from asgiref.sync import sync_to_async
+        from identity.models import IdentityHandle
+
+        c = _make_consumer()
+        c.person_id = "anon_beef5678"
+        c.authenticated = False
+        c._group = "vtuber_person_anon_beef5678"
+        await c._register_presence()
+
+        handle = await sync_to_async(
+            lambda: IdentityHandle.objects.get(person_id="anon_beef5678")
+        )()
+        assert handle.is_ephemeral is True
+        assert handle.trust == "public"
+
+    @pytest.mark.asyncio
+    async def test_authenticated_connection_binds_entity_with_certainty(self):
+        from asgiref.sync import sync_to_async
+        from identity.models import Identity
+        from memory.models import Entity
+
+        c = _make_consumer()
+        c.person_id = "user_7"
+        c.display_name = "Alice"
+        c.authenticated = True
+        c._group = "vtuber_person_user_7"
+        await c._register_presence()
+
+        entity = await sync_to_async(
             lambda: Entity.objects.filter(
                 name="Alice", entity_type="person",
-            ).exists()
+            ).first()
         )()
-        assert exists
+        assert entity is not None, "une session authentifiée EST une personne connue"
+
+        identity = await sync_to_async(
+            lambda: Identity.objects.filter(entity=entity).first()
+        )()
+        assert identity is not None
+        assert identity.certainty == 1.0
+        assert identity.bound_at is not None
 
     @pytest.mark.asyncio
-    async def test_idempotent(self):
+    async def test_reconnect_reuses_the_same_handle(self):
+        """Reconnecting must not mint a second Identity for the same id.
+
+        The backoff loop in the frontend reconnects freely; before the upsert
+        was keyed properly an install with zero messages had already collected
+        68 orphan handles.
+        """
         from asgiref.sync import sync_to_async
-        from communication.channels.web_frontend import WebSocketConsumer
-        from memory.models import Entity
+        from identity.models import Identity, IdentityHandle
 
-        await WebSocketConsumer._ensure_entity("Bob")
-        await WebSocketConsumer._ensure_entity("Bob")
+        for _ in range(3):
+            c = _make_consumer()
+            c.person_id = "web_stable"
+            c.authenticated = False
+            c._group = "vtuber_person_web_stable"
+            await c._register_presence()
 
-        count = await sync_to_async(
-            lambda: Entity.objects.filter(name="Bob", entity_type="person").count()
+        handles = await sync_to_async(
+            lambda: IdentityHandle.objects.filter(person_id="web_stable").count()
         )()
-        assert count == 1
+        identities = await sync_to_async(Identity.objects.count)()
+        assert handles == 1
+        assert identities == 1

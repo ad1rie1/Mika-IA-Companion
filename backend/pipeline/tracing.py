@@ -15,6 +15,12 @@ Usage:
 
     # Anywhere else (context already set by process_message):
     get_request_id()                    # "a3f1c8b2" or "-" outside a request
+
+The same mechanism carries the *person* of the current turn. Tool handlers
+are called by the provider with only their declared arguments, so without an
+ambient value a tool like ``identity_whoami_with`` would have to make the
+model repeat a person_id it never sees. The ContextVar lets "the person I am
+talking to" be implicit, exactly as it is in the conversation.
 """
 
 import logging
@@ -23,6 +29,9 @@ from contextvars import ContextVar
 
 # Default value "-" appears in logs for background tasks that have no request
 _request_id: ContextVar[str] = ContextVar("request_id", default="-")
+# Who the current turn is with. Empty outside a conversation (background
+# loops, cron ticks) — callers must treat "" as "no person in scope".
+_person_id: ContextVar[str] = ContextVar("person_id", default="")
 
 
 def set_new_request_id() -> str:
@@ -35,6 +44,16 @@ def set_new_request_id() -> str:
 def get_request_id() -> str:
     """Return the request_id active in the current async context."""
     return _request_id.get()
+
+
+def set_current_person_id(person_id: str) -> None:
+    """Bind the person this turn is with, for the rest of the async context."""
+    _person_id.set(person_id or "")
+
+
+def current_person_id() -> str:
+    """The person_id of the turn in progress, or "" outside one."""
+    return _person_id.get()
 
 
 class RequestIdFilter(logging.Filter):

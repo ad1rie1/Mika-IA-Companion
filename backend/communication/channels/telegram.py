@@ -111,18 +111,36 @@ class TelegramChannel:
     ):
         await update.message.reply_text(personality.greeting)
 
-    async def _register_interlocutor(self, message) -> str:
-        """Register presence + identity for the sender; returns person_id.
+    @staticmethod
+    def _is_public_chat(message) -> bool:
+        """True when the message came from a group / channel, not a DM.
 
-        Registering makes this user PROACTIVELY reachable later (the
-        external API is push-capable any time we hold the chat_id) and
-        stops a telegram turn from leaking to the global websocket
-        broadcast: the recipient is resolvable, and broadcast skips the
-        originating module's echo.
+        This is the "média public" case: in a room where anyone can type,
+        a Telegram account id still identifies the *account*, but the
+        conversation around it is not private, so Mika must not read out
+        someone's personal history on the strength of a display name.
+        """
+        chat_type = getattr(getattr(message, "chat", None), "type", "") or ""
+        return chat_type in ("group", "supergroup", "channel")
+
+    async def _register_interlocutor(self, message) -> tuple[str, bool]:
+        """Register presence + identity for the sender.
+
+        Returns ``(person_id, is_public)``. Registering makes this user
+        PROACTIVELY reachable later (the external API is push-capable any
+        time we hold the chat_id) and stops a telegram turn from leaking to
+        the global websocket broadcast: the recipient is resolvable, and
+        broadcast skips the originating module's echo.
+
+        Trust is the platform account, never more: ``tg_<id>`` proves the
+        same account came back, not who is holding it. In a group it drops
+        to public. Either way Mika has to be convinced before she treats
+        this person as someone she knows.
         """
         person_id = f"tg_{message.from_user.id}"
         chat_id = message.chat_id
         display_name = message.from_user.full_name or ""
+        is_public = self._is_public_chat(message)
 
         from communication.presence import presence_registry
 
@@ -134,6 +152,7 @@ class TelegramChannel:
             display_name=display_name,
         )
         from identity.resolver import identity_resolver
+        from identity.trust import ChannelTrust
 
         await identity_resolver.link_handle(
             person_id=person_id,
@@ -141,8 +160,9 @@ class TelegramChannel:
             kind="module",
             delivery_ref=str(chat_id),
             display_name=display_name,
+            trust=ChannelTrust.PUBLIC if is_public else ChannelTrust.ACCOUNT,
         )
-        return person_id
+        return person_id, is_public
 
     async def _handle_message(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -150,7 +170,7 @@ class TelegramChannel:
         if not update.message or not update.message.text:
             return
 
-        person_id = await self._register_interlocutor(update.message)
+        person_id, is_public = await self._register_interlocutor(update.message)
 
         from pipeline.perception import Perception
         from pipeline.router import perceive
@@ -159,6 +179,7 @@ class TelegramChannel:
             update.message.text,
             source="telegram",
             person_id=person_id,
+            metadata={"authenticated": False, "is_public": is_public},
         )
         # Reactive reply: we echo here. The pipeline's broadcast routing skips
         # the originating module on a reactive turn, so there is no double-send.
@@ -180,7 +201,7 @@ class TelegramChannel:
         if not message:
             return
 
-        person_id = await self._register_interlocutor(message)
+        person_id, is_public = await self._register_interlocutor(message)
 
         attachment = await self._download_media(message)
         if attachment is None:
@@ -194,6 +215,7 @@ class TelegramChannel:
             attachments=[attachment],
             source="telegram",
             person_id=person_id,
+            metadata={"authenticated": False, "is_public": is_public},
         )
         output = await perceive(perception)
         if output and output.text:

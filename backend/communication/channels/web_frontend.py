@@ -137,7 +137,16 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
 
     async def _register_presence(self) -> None:
         """Register runtime presence + persist the handle so this person is
-        reachable (targeted delivery) and known across sessions."""
+        reachable (targeted delivery) and known across sessions.
+
+        Anonymous per-connection ids are marked ephemeral: they represent a
+        socket, not a person, and every reconnect mints a new one. Without
+        the flag they accumulated forever — an install with zero messages
+        had already collected 68 of them.
+        """
+        from identity.resolver import identity_resolver
+        from identity.trust import ChannelTrust
+
         presence_registry.register(
             person_id=self.person_id,
             channel="web",
@@ -145,15 +154,29 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
             delivery_ref=self._group,
             display_name=self.display_name or "",
         )
-        from identity.resolver import identity_resolver
-
+        ephemeral = self.person_id.startswith("anon_")
         await identity_resolver.link_handle(
             person_id=self.person_id,
             channel="web",
             kind="consumer",
             delivery_ref=self._group,
             display_name=self.display_name or "",
+            trust=(
+                ChannelTrust.AUTHENTICATED if self.authenticated
+                else ChannelTrust.PUBLIC
+            ),
+            ephemeral=ephemeral,
         )
+        # An authenticated session *proves* who this is. Bind the handle to a
+        # memory Entity right away so the theory-of-mind layer (profile,
+        # commitments, shared history) resolves from the first turn instead
+        # of waiting for a name to be claimed and believed.
+        if self.authenticated:
+            await identity_resolver.bind_authenticated(
+                person_id=self.person_id,
+                channel="web",
+                entity_name=self.display_name or self.person_id,
+            )
 
     async def receive(self, text_data=None, bytes_data=None):
         try:
@@ -202,6 +225,11 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
 
         clean_message = message.strip()[:MAX_MESSAGE_LENGTH]
 
+        # The identity layer needs to know this turn arrived on a verified
+        # session — that is what makes the web the one channel where Mika is
+        # certain who she is talking to.
+        meta = {"authenticated": self.authenticated, "channel": "web"}
+
         if attachments:
             perception = Perception.from_mixed(
                 text=clean_message,
@@ -209,6 +237,7 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
                 source="frontend",
                 person_id=person_id,
                 intent=Intent.REQUEST_RESPONSE,
+                metadata=meta,
             )
         else:
             perception = Perception.from_text(
@@ -216,6 +245,7 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
                 source="frontend",
                 person_id=person_id,
                 intent=Intent.REQUEST_RESPONSE,
+                metadata=meta,
             )
 
         await perceive(perception)
@@ -234,9 +264,14 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
         if isinstance(display, str) and display.strip():
             self.display_name = display.strip()[:80]
 
-        # ALWAYS key the Entity by person_id (stable, collision-free) so the
-        # theory-of-mind layer (PersonProfile via entity__name=person_id) matches.
-        await self._ensure_entity(self.person_id)
+        # No Entity is created here any more. A memory person-Entity means "a
+        # person Mika knows"; minting one per connection filled the table with
+        # handles (web_6f3e22ccb0ae) that no souvenir would ever reference,
+        # while the consolidator created the *real* entity under the person's
+        # actual name — two rows for one person, joined by nothing. The entity
+        # is now created exactly when an identity is established: on
+        # authentication, or when Mika accepts a claim.
+        await self._refresh_handle()
 
         logger.info(
             "WS identify: person_id=%s display=%s channel=%s",
@@ -285,26 +320,19 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
         )
         await perceive(greeting_perception)
 
-    @staticmethod
-    async def _ensure_entity(name: str) -> None:
-        """Make sure a person-Entity exists with this name so theory-of-mind
-        lookups (PersonProfile via entity__name=person_id) succeed.
+    async def _refresh_handle(self) -> None:
+        """Re-persist the handle after identify, picking up the display name.
 
-        A first-time visitor won't have a profile yet, but the Entity row
-        is what lets the consolidator and conscience accumulate material
-        around them from the first exchange on.
+        Cheap and idempotent: ``link_handle`` upserts on (channel, person_id).
+        Separate from ``_register_presence`` only because identify can arrive
+        long after connect.
         """
-        if not name:
-            return
         try:
-            from asgiref.sync import sync_to_async
-            from memory.models import Entity
-
-            await sync_to_async(Entity.objects.get_or_create)(
-                name=name, entity_type="person",
-            )
+            await self._register_presence()
         except Exception:
-            logger.debug("ensure_entity failed for %s", name, exc_info=True)
+            logger.debug(
+                "handle refresh failed for %s", self.person_id, exc_info=True,
+            )
 
     def _is_rate_limited(self) -> bool:
         """Sliding-window rate limit: cap messages per connection."""

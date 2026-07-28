@@ -33,6 +33,8 @@ que du nom de fichier.
 | 4 | Sad Idle | `idle/idle_sad.fbx` | posture triste (sad/lonely/melancholic) |
 | 5 | Nervously Look Around | `idle/idle_nervous.fbx` | posture anxieuse (anxious) |
 | 6 | Talking | `talk/talk_main.fbx` | gestuelle de conversation |
+| 6b | Talking (variante 2) | `talk/talk_variant_b.fbx` | rotation de conversation (optionnel) |
+| 6c | Talking (variante 3) | `talk/talk_variant_c.fbx` | rotation de conversation (optionnel) |
 | 7 | Standing Arguing | `talk/talk_heated.fbx` | variante animée de conversation |
 | 8 | Waving | `gesture/gesture_wave.fbx` | salut (manuel/debug, futur greeting) |
 | 9 | Laughing | `gesture/gesture_laugh.fbx` | amused/playful + token [LAUGH] |

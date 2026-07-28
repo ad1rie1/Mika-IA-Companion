@@ -378,28 +378,33 @@ async def _collect_inner_state(person_id: str | None) -> dict:
 
     # Active projects — a condensed view for the InnerLifePanel
     try:
+        from django.db.models import Count, Q
         from projects.models import Project, ProjectTask
+
+        # Task counts are annotated, not looped: this runs on every reply
+        # before the text reaches the user, and three COUNT queries per
+        # project (each its own sync_to_async round-trip) put ~30 queries on
+        # the critical path for a panel nobody is watching mid-sentence.
         active = await sync_to_async(
             lambda: list(
                 Project.objects.filter(status=Project.Status.ACTIVE)
+                .annotate(
+                    tasks_total=Count("tasks", distinct=True),
+                    tasks_done=Count(
+                        "tasks", distinct=True,
+                        filter=Q(tasks__status=ProjectTask.Status.DONE),
+                    ),
+                    tasks_blocked=Count(
+                        "tasks", distinct=True,
+                        filter=Q(tasks__status=ProjectTask.Status.BLOCKED),
+                    ),
+                )
                 .order_by("-priority", "-updated_at")[:10]
             )
         )()
         if active:
-            projects_summary = []
-            for p in active:
-                counts = await sync_to_async(
-                    lambda pk=p.id: {
-                        "total": ProjectTask.objects.filter(project_id=pk).count(),
-                        "done": ProjectTask.objects.filter(
-                            project_id=pk, status=ProjectTask.Status.DONE,
-                        ).count(),
-                        "blocked": ProjectTask.objects.filter(
-                            project_id=pk, status=ProjectTask.Status.BLOCKED,
-                        ).count(),
-                    }
-                )()
-                projects_summary.append({
+            state["projects"] = [
+                {
                     "id": p.id,
                     "title": p.title,
                     "status": p.status,
@@ -408,11 +413,12 @@ async def _collect_inner_state(person_id: str | None) -> dict:
                     "emotion_policy": p.emotion_policy,
                     "schedule_rule": p.schedule_rule,
                     "next_run_at": p.next_run_at.isoformat() if p.next_run_at else None,
-                    "tasks_total": counts["total"],
-                    "tasks_done": counts["done"],
-                    "tasks_blocked": counts["blocked"],
-                })
-            state["projects"] = projects_summary
+                    "tasks_total": p.tasks_total,
+                    "tasks_done": p.tasks_done,
+                    "tasks_blocked": p.tasks_blocked,
+                }
+                for p in active
+            ]
     except Exception:
         logger.debug("projects snapshot failed", exc_info=True)
 
@@ -442,18 +448,35 @@ async def _collect_inner_state(person_id: str | None) -> dict:
     except Exception:
         logger.debug("pending actions snapshot failed", exc_info=True)
 
-    # Person profile + commitments — only when a non-internal person_id
+    # Person profile + commitments — only when a non-internal person_id, and
+    # only when the identity layer says this handle really is that person.
+    # The panel is a window onto the same private material the prompt gates,
+    # so it has to answer to the same rule.
     if person_id and person_id not in (
         "", "anonymous", "conscience_mika", "__global__",
     ) and not person_id.startswith("anon_"):
         try:
+            from identity.resolver import identity_resolver
             from memory.models import Commitment, PersonProfile
+
+            ident = await identity_resolver.resolve_context(person_id)
+            state["identity"] = {
+                "known_as": ident.known_as,
+                "certainty": round(ident.certainty, 3),
+                "level": ident.description,
+                "trust": ident.trust.value,
+                "pending_claims": ident.pending_claims,
+            }
+            entity = (
+                await identity_resolver.entity_for_person(person_id)
+                if ident.may_disclose else None
+            )
             profile = await sync_to_async(
                 lambda: PersonProfile.objects
                 .select_related("entity")
-                .filter(entity__name=person_id, entity__entity_type="person")
+                .filter(entity=entity)
                 .first()
-            )()
+            )() if entity is not None else None
             if profile:
                 state["person_profile"] = {
                     "name": profile.entity.name,

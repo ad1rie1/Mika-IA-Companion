@@ -1,4 +1,4 @@
-import type { SleepPhase } from "../../types";
+import type { EmotionName, SleepPhase } from "../../types";
 import type { OverlayContext, ProceduralOverlay } from "./overlays/Overlay";
 
 // Target eye-closure per phase — awake lets the regular blink cycle
@@ -12,19 +12,48 @@ const PHASE_EYE_CLOSURE: Record<SleepPhase, number> = {
 
 const EASE_SECONDS = 1.2;
 
+/** Blink shapes, in seconds. A real blink closes fast and opens slower;
+ * a single fixed timing for every blink is what makes an avatar read as
+ * a metronome. */
+interface BlinkShape {
+  close: number;
+  hold: number;
+  open: number;
+}
+
+const QUICK: BlinkShape = { close: 0.055, hold: 0.02, open: 0.09 };
+const SOFT: BlinkShape = { close: 0.13, hold: 0.07, open: 0.2 };
+
+// Alert emotions blink more often; low-energy ones blink slower and
+// favour the long, heavy-lidded blink.
+const RESTLESS = new Set<EmotionName>([
+  "excited", "scared", "anxious", "surprised", "angry", "frustrated",
+]);
+const HEAVY = new Set<EmotionName>([
+  "bored", "dreamy", "melancholic", "sad", "lonely", "relieved", "nostalgic",
+]);
+
 /**
  * Blink cycle + sleep eye closure + REM flicker, on the "blink"
- * expression only. Expressions are orthogonal to the bone-clip system,
- * so this survived the rewrite nearly verbatim (from the old custom
- * AnimationMixer class).
+ * expression only. Expressions are orthogonal to the bone-clip system.
+ *
+ * Three blink flavours (quick / double / soft), an emotion-modulated
+ * cadence, and a slightly faster rate while speaking — a single blink
+ * pattern on a loop is one of the strongest "it's a rig" tells, and the
+ * blink is most of what the face does when no emotion is active.
  */
 export class BlinkController implements ProceduralOverlay {
   private blinkTimer = 0;
-  private blinkInterval = 3 + Math.random() * 2;
-  private isBlinking = false;
-  private blinkProgress = 0;
+  private nextBlinkAt = 3 + Math.random() * 2;
   private eyeClosure = 0;
   private remFlickerTimer = 0;
+
+  // Current blink in flight
+  private blinking = false;
+  private elapsed = 0;
+  private shape: BlinkShape = QUICK;
+  /** A second quick blink follows this one (human double-blink). */
+  private doublePending = false;
 
   update(dt: number, ctx: OverlayContext): void {
     const manager = ctx.vrm.expressionManager;
@@ -43,7 +72,7 @@ export class BlinkController implements ProceduralOverlay {
         manager.setValue("blink", this.eyeClosure);
         return;
       }
-      this.updateBlink(dt, manager);
+      this.updateBlink(dt, ctx, manager);
       return;
     }
 
@@ -62,29 +91,64 @@ export class BlinkController implements ProceduralOverlay {
 
   private updateBlink(
     dt: number,
+    ctx: OverlayContext,
     manager: NonNullable<OverlayContext["vrm"]["expressionManager"]>
   ): void {
-    this.blinkTimer += dt;
+    if (!this.blinking) {
+      this.blinkTimer += dt;
+      if (this.blinkTimer >= this.nextBlinkAt) this.startBlink(ctx);
+      else return;
+    }
 
-    if (!this.isBlinking && this.blinkTimer >= this.blinkInterval) {
-      this.isBlinking = true;
-      this.blinkProgress = 0;
+    this.elapsed += dt;
+    const { close, hold, open } = this.shape;
+    const total = close + hold + open;
+
+    let value: number;
+    if (this.elapsed < close) {
+      value = this.elapsed / close;
+    } else if (this.elapsed < close + hold) {
+      value = 1;
+    } else if (this.elapsed < total) {
+      value = 1 - (this.elapsed - close - hold) / open;
+    } else {
+      value = 0;
+      this.blinking = false;
       this.blinkTimer = 0;
-      this.blinkInterval = 2.5 + Math.random() * 3;
-    }
-
-    if (this.isBlinking) {
-      this.blinkProgress += dt * 8;
-      let blinkValue: number;
-      if (this.blinkProgress < 0.5) {
-        blinkValue = this.blinkProgress * 2;
-      } else if (this.blinkProgress < 1.0) {
-        blinkValue = 1 - (this.blinkProgress - 0.5) * 2;
+      if (this.doublePending) {
+        // Second beat of a double blink: a short gap, then another quick one.
+        this.doublePending = false;
+        this.nextBlinkAt = 0.07;
+        this.shape = QUICK;
       } else {
-        blinkValue = 0;
-        this.isBlinking = false;
+        this.nextBlinkAt = this.sampleInterval(ctx);
       }
-      manager.setValue("blink", blinkValue);
     }
+    manager.setValue("blink", Math.max(0, Math.min(1, value)));
+  }
+
+  private startBlink(ctx: OverlayContext): void {
+    this.blinking = true;
+    this.elapsed = 0;
+    this.blinkTimer = 0;
+    if (this.shape === QUICK && this.doublePending) return; // second beat armed
+
+    const heavy = HEAVY.has(ctx.emotion);
+    const roll = Math.random();
+    if (roll < (heavy ? 0.45 : 0.15)) {
+      this.shape = SOFT;
+    } else {
+      this.shape = QUICK;
+      // Doubles only on quick blinks, and not when heavy-lidded.
+      this.doublePending = !heavy && roll > 0.85;
+    }
+  }
+
+  private sampleInterval(ctx: OverlayContext): number {
+    let base = 2.5 + Math.random() * 3;
+    if (RESTLESS.has(ctx.emotion)) base *= 0.65;
+    else if (HEAVY.has(ctx.emotion)) base *= 1.3;
+    if (ctx.speaking) base *= 0.85; // people blink more while talking
+    return base;
   }
 }

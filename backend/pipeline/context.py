@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from drives.engine import drive_engine
 from emotion.engine import emotion_engine
+from identity.resolver import identity_resolver
 from memory.manager import memory_manager
 from modules.manager import module_manager
 
@@ -64,12 +65,19 @@ class ConversationContext:
     # through so the processor can tag outgoing side effects / skip the
     # emotion impulse when the project is "off".
     project_id: int | None = None
+    # Who Mika thinks she is talking to and how sure she is — injected as
+    # `--- QUI TU AS EN FACE ---`. Also gates `person_context`: below the
+    # disclosure threshold, private per-person memory is withheld entirely.
+    identity_context: str = ""
 
 
 async def gather_context(
     message: str,
     person_id: str,
     include_tools: bool = True,
+    channel: str = "",
+    authenticated: bool = False,
+    is_public: bool = False,
 ) -> ConversationContext:
     """Assemble all context needed for an AI conversation turn.
 
@@ -77,6 +85,10 @@ async def gather_context(
         message: The user/trigger message (used for memory retrieval).
         person_id: Who is talking (for emotion + memory boosting).
         include_tools: Whether to include MCP tools from modules.
+        channel: Transport the turn arrived on ("web", "telegram", …), used
+            to decide how much the channel itself proves about the sender.
+        authenticated: The transport verified this session's credentials.
+        is_public: The turn happened in a shared room, not a 1:1 exchange.
     """
     # Memory context (graceful degradation)
     try:
@@ -92,9 +104,20 @@ async def gather_context(
     # generated), we just skip it and the prompt uses personality alone.
     self_concept = await _fetch_self_concept()
 
+    # Who is on the other end, and how sure Mika is. Resolved once here and
+    # reused below: it decides both what the prompt says about them and
+    # whether their private history may be surfaced at all.
+    identity_ctx = await identity_resolver.resolve_context(
+        person_id, channel=channel,
+        authenticated=authenticated, is_public=is_public,
+    )
+    identity_context = _format_identity_block(identity_ctx)
+
     # Theory of mind: profile + pending commitments for the current person.
-    # Only meaningful when person_id names an actual Entity in memory.
-    person_context = await _fetch_person_context(person_id)
+    # Gated on identity certainty — recounting what someone confided to a
+    # visitor who merely *claims* to be them is the failure mode this whole
+    # layer exists to prevent.
+    person_context = await _fetch_person_context(identity_ctx)
 
     # Circadian: where Mika sits in her daily rhythm.
     circadian_context = _fetch_circadian_context()
@@ -192,7 +215,45 @@ async def gather_context(
         project_context=project_context,
         project_suppresses_emotion=project_suppresses_emotion,
         project_id=project_id,
+        identity_context=identity_context,
     )
+
+
+def _format_identity_block(ctx) -> str:
+    """Render the identity situation as the `--- QUI TU AS EN FACE ---` body.
+
+    Silent for internal person_ids (Mika's own conscience triggers don't need
+    to be told who they are) and silent when an authenticated session made
+    the question moot *and* nothing is pending — in that case the person
+    context block already names them, and a paragraph explaining that she is
+    certain would only invite the model to talk about certainty.
+    """
+    if ctx.is_internal:
+        return ""
+
+    lines = [ctx.description] if ctx.description else []
+
+    if ctx.pending_claims:
+        lines.append("")
+        for claim in ctx.pending_claims:
+            lines.append(
+                f"- Revendication #{claim['id']} : se presente comme "
+                f"« {claim['name']} » (« {claim['evidence'][:140]} »)"
+            )
+        lines.append(
+            "Tu peux la tester avec identity_check_story (est-ce que ce qui "
+            "est dit recoupe ce que tu sais ?), puis trancher avec "
+            "identity_accept_claim ou identity_reject_claim. Rien ne t'oblige "
+            "a decider maintenant — tu as le droit de rester prudente et de "
+            "poser une question dont seule la vraie personne aurait la reponse."
+        )
+    elif not ctx.may_disclose and not ctx.is_identified:
+        lines.append(
+            "Si tu veux savoir a qui tu parles, demande-le simplement — "
+            "c'est plus honnete que de deviner."
+        )
+
+    return "\n".join(line for line in lines if line is not None).strip()
 
 
 def _format_project_block(data: dict) -> str:
@@ -591,7 +652,7 @@ async def _fetch_self_concept() -> str:
 _INTERNAL_PERSON_IDS = frozenset({"conscience_mika", "__global__", "anonymous", ""})
 
 
-async def _fetch_person_context(person_id: str) -> str:
+async def _fetch_person_context(identity_ctx) -> str:
     """Return a prompt-ready block combining everything Mika knows/feels
     about this specific person:
       - semantic profile (summary, closeness, preferred tone, topics)
@@ -602,37 +663,55 @@ async def _fetch_person_context(person_id: str) -> str:
     This block replaces the per-person half of what used to live in
     `emotion_context`. It gives the LLM a unified relational picture.
 
-    Empty string when internal/system person_id, or no data to show.
+    Resolution goes through the identity layer, not through
+    ``entity__name=person_id``. The old lookup could only ever match when a
+    person's memory Entity happened to be named after their transport handle
+    — which never happens in practice, because the consolidator names
+    entities after what people are *called* ("Thomas") while handles are
+    ``web_6f3e22ccb0ae``. Every profile lookup silently missed.
+
+    Empty string when internal/system person_id, when nothing is known, or
+    when certainty is too low to justify reading out someone's private
+    history to whoever is currently holding the handle.
     """
-    if person_id in _INTERNAL_PERSON_IDS:
+    person_id = identity_ctx.person_id
+    if identity_ctx.is_internal:
         return ""
 
     affect = emotion_engine.get_person_affect_context(person_id)
 
+    # Not sure enough who this is: the affective stance toward the handle is
+    # still Mika's own feeling and safe to keep, but the semantic profile,
+    # the shared history and the commitments are someone else's business.
+    if not identity_ctx.may_disclose:
+        return affect
+
+    entity = None
     try:
         from asgiref.sync import sync_to_async
 
+        from identity.resolver import identity_resolver
         from memory.models import Commitment, EmotionalSummary, PersonProfile
+
+        entity = await identity_resolver.entity_for_person(person_id)
+        if entity is None:
+            return affect
 
         profile = await sync_to_async(
             lambda: PersonProfile.objects
             .select_related("entity")
-            .filter(entity__name=person_id, entity__entity_type="person")
+            .filter(entity=entity)
             .first()
         )()
 
-        entity = profile.entity if profile else None
-
-        commitments: list[str] = []
-        if entity is not None:
-            commitments = await sync_to_async(
-                lambda: list(
-                    Commitment.objects
-                    .filter(person=entity, status="pending")
-                    .order_by("-created_at")
-                    .values_list("description", flat=True)[:5]
-                )
-            )()
+        commitments = await sync_to_async(
+            lambda: list(
+                Commitment.objects
+                .filter(person=entity, status="pending")
+                .order_by("-created_at")
+                .values_list("description", flat=True)[:5]
+            )
+        )()
 
         weekly_trend = await sync_to_async(
             lambda: _summarize_emotional_trend(

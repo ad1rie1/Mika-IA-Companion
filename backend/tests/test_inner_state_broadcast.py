@@ -134,9 +134,13 @@ class TestInnerStatePersonProfile:
 
     @pytest.fixture(autouse=True)
     def _clean(self):
+        from identity.models import Identity, IdentityClaim, IdentityHandle
         from memory.models import Commitment, Entity, PersonProfile
         Commitment.objects.all().delete()
         PersonProfile.objects.all().delete()
+        IdentityClaim.objects.all().delete()
+        IdentityHandle.objects.all().delete()
+        Identity.objects.all().delete()
         Entity.objects.all().delete()
         yield
 
@@ -160,12 +164,33 @@ class TestInnerStatePersonProfile:
         state = await _collect_inner_state(person_id="anon_deadbeef")
         assert "person_profile" not in state
 
+    @staticmethod
+    async def _bind(person_id: str, entity_name: str):
+        """Authenticate a handle and bind it to a memory Entity.
+
+        The panel resolves through the identity layer now, so a profile only
+        surfaces for someone Mika has actually identified — the same rule the
+        prompt follows. A row whose ``Entity.name`` happens to equal a
+        transport handle is no longer enough, and never should have been.
+        """
+        from identity.resolver import identity_resolver
+        from identity.trust import ChannelTrust
+        from memory.models import Entity
+
+        await identity_resolver.link_handle(
+            person_id=person_id, channel="web", kind="consumer",
+            trust=ChannelTrust.AUTHENTICATED,
+        )
+        await identity_resolver.bind_authenticated(person_id, "web", entity_name)
+        return await sync_to_async(
+            lambda: Entity.objects.get(name=entity_name, entity_type="person")
+        )()
+
     @pytest.mark.asyncio
     async def test_profile_serialized_for_known_person(self):
-        from memory.models import Entity, PersonProfile
-        ent = await sync_to_async(Entity.objects.create)(
-            name="web_abc123", entity_type="person",
-        )
+        from memory.models import PersonProfile
+
+        ent = await self._bind("web_abc123", "Thomas")
         await sync_to_async(PersonProfile.objects.create)(
             entity=ent,
             summary="Thomas est passionne de retro gaming.",
@@ -177,17 +202,19 @@ class TestInnerStatePersonProfile:
         )
 
         state = await _collect_inner_state(person_id="web_abc123")
-        assert state["person_profile"]["name"] == "web_abc123"
+        assert state["person_profile"]["name"] == "Thomas"
         assert state["person_profile"]["closeness"] == "friend"
         assert "gaming" in state["person_profile"]["topics_of_interest"]
         assert state["person_profile"]["interaction_count"] == 12
+        # The panel also reports how sure she is, so a human can see it.
+        assert state["identity"]["known_as"] == "Thomas"
+        assert state["identity"]["certainty"] == 1.0
 
     @pytest.mark.asyncio
     async def test_pending_commitments_included(self):
-        from memory.models import Commitment, Entity, PersonProfile
-        ent = await sync_to_async(Entity.objects.create)(
-            name="web_claire", entity_type="person",
-        )
+        from memory.models import Commitment, PersonProfile
+
+        ent = await self._bind("web_claire", "Claire")
         await sync_to_async(PersonProfile.objects.create)(
             entity=ent, summary="Claire.",
         )
@@ -201,6 +228,21 @@ class TestInnerStatePersonProfile:
         state = await _collect_inner_state(person_id="web_claire")
         assert "Lui envoyer la playlist" in state["pending_commitments"]
         assert "ancienne promesse tenue" not in state["pending_commitments"]
+
+    @pytest.mark.asyncio
+    async def test_unidentified_handle_exposes_no_profile(self):
+        """A handle Mika hasn't identified leaks nothing, even if an Entity
+        with a matching name exists — that match is a coincidence, not a link."""
+        from memory.models import Entity, PersonProfile
+
+        ent = await sync_to_async(Entity.objects.create)(
+            name="web_stranger", entity_type="person",
+        )
+        await sync_to_async(PersonProfile.objects.create)(
+            entity=ent, summary="ne doit pas fuiter",
+        )
+        state = await _collect_inner_state(person_id="web_stranger")
+        assert "person_profile" not in state
 
 
 @pytest.mark.asyncio

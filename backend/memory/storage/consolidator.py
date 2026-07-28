@@ -144,7 +144,9 @@ class MemoryConsolidator:
                 .exclude(role="user", is_internal=True)
                 .exclude(source="conscience", role="user")
                 .order_by("created_at")
-                .values("id", "role", "content", "created_at", "source")
+                .values(
+                    "id", "role", "content", "created_at", "source", "person_id",
+                )
             )
 
         if not messages:
@@ -178,6 +180,14 @@ class MemoryConsolidator:
         extractions = await self.extractor.analyze_messages(
             msg_dicts, pending_commitments=pending_commitments
         )
+
+        # Who Mika was talking to in this window, as memory entities. The
+        # extractor names entities from the *content* ("Thomas said…"), which
+        # misses the most basic fact about an exchange: whom it was with. A
+        # conversation where someone never says their own name produced
+        # souvenirs attached to nobody, so PersonProfile never had material to
+        # generate from and the theory-of-mind layer stayed empty forever.
+        interlocutors = await self._resolve_interlocutors(messages)
 
         souvenirs_created = 0
         connaissances_created = 0
@@ -213,8 +223,11 @@ class MemoryConsolidator:
                     )
                     if theme_objs:
                         await sync_to_async(souvenir.themes.set)(theme_objs)
-                    if entity_objs:
-                        await sync_to_async(souvenir.entities.set)(entity_objs)
+                    # An episode always involves whoever Mika was talking to,
+                    # whether or not the extractor thought to name them.
+                    linked = _merge_entities(entity_objs, interlocutors)
+                    if linked:
+                        await sync_to_async(souvenir.entities.set)(linked)
 
                     # Index in ChromaDB (protected — ORM record exists even if indexing fails)
                     try:
@@ -298,13 +311,18 @@ class MemoryConsolidator:
 
                 elif extraction["type"] == "commitment":
                     # Resolve target person if named (Entity type=person).
-                    # Extractor may omit for generic commitments.
+                    # Extractor may omit for generic commitments — in that
+                    # case the promise was almost certainly made to whoever
+                    # Mika was talking to, so fall back to the interlocutor
+                    # rather than filing it against nobody.
                     target_person = None
                     person_name = (extraction.get("person") or "").strip()
                     if person_name:
                         target_person, _ = await sync_to_async(
                             Entity.objects.get_or_create
                         )(name=person_name, entity_type="person")
+                    elif len(interlocutors) == 1:
+                        target_person = interlocutors[0]
 
                     await sync_to_async(Commitment.objects.create)(
                         description=extraction["content"],
@@ -388,6 +406,40 @@ class MemoryConsolidator:
 
         # Sleep cycle and project runner now run on their own dedicated
         # loops (wired at lifespan startup) — no longer invoked here.
+
+    @staticmethod
+    async def _resolve_interlocutors(messages: list[dict]) -> list:
+        """Memory entities for the people Mika exchanged with in this window.
+
+        Goes through the identity layer, so a person only shows up once Mika
+        actually knows who they are — authenticated, or a claim she accepted.
+        An unidentified visitor contributes nothing here, which is correct:
+        their souvenirs stay unattached until she recognizes them, and
+        attaching them to a transport handle would just recreate the
+        entity-per-socket problem this replaced.
+        """
+        from identity.resolver import identity_resolver
+
+        person_ids = {
+            (m.get("person_id") or "").strip()
+            for m in messages
+            if m.get("role") == "user"
+        }
+        entities: list = []
+        seen: set[int] = set()
+        for person_id in sorted(p for p in person_ids if p):
+            try:
+                entity = await identity_resolver.entity_for_person(person_id)
+            except Exception:
+                logger.debug(
+                    "Interlocutor resolution failed for %s", person_id,
+                    exc_info=True,
+                )
+                continue
+            if entity is not None and entity.pk not in seen:
+                seen.add(entity.pk)
+                entities.append(entity)
+        return entities
 
     async def _apply_decay(self):
         """Reduce importance of old souvenirs and confidence of old connaissances.
@@ -745,3 +797,19 @@ class MemoryConsolidator:
             except (Connaissance.DoesNotExist, ValueError):
                 pass
         return None
+
+
+def _merge_entities(extracted: list, interlocutors: list) -> list:
+    """Union of extractor-named entities and the people actually present.
+
+    Order matters only for readability; de-duplication is by pk because the
+    two sources routinely produce the same row (someone who says their own
+    name mid-conversation is both).
+    """
+    merged = list(extracted)
+    seen = {e.pk for e in merged}
+    for entity in interlocutors:
+        if entity.pk not in seen:
+            seen.add(entity.pk)
+            merged.append(entity)
+    return merged

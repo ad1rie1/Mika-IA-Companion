@@ -53,6 +53,17 @@ MIDDLEWARE = [
 # both want a staff account, so there is no second credential to manage.
 LOGIN_URL = env("LOGIN_URL", default="/admin/login/")
 
+# Django ships these but does not enable them; without the list,
+# `validate_password` is a no-op and /auth/bootstrap would happily accept
+# "123" for the account that owns the dashboard — which holds the whole
+# conversation history and the provider API keys.
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
+
 # CORS. Note: credentialed requests (session cookies for the frontend login)
 # cannot be combined with the wildcard origin — to use auth from a separate
 # frontend origin, keep CORS_ALLOW_ALL_ORIGINS=False + list CORS_ALLOWED_ORIGINS
@@ -164,7 +175,16 @@ AI_CALL_TIMEOUT = env.int("AI_CALL_TIMEOUT", default=60)
 
 # When True, owned WebSocket consumers must be authenticated (else connection
 # is refused). External modules (Telegram, ...) authenticate via their own API.
-CONSUMER_REQUIRE_AUTH = env.bool("CONSUMER_REQUIRE_AUTH", default=False)
+#
+# On by default: the frontend is the one channel where Mika can be *certain*
+# who she is talking to, and the whole identity-certainty model is built on
+# that. An anonymous browser tab is indistinguishable from any other, so
+# nothing it says can ever be attached to a person with confidence.
+#
+# The first-run lock-out this would normally cause is handled by
+# POST /auth/bootstrap, which creates the initial account and then disables
+# itself permanently (see communication/views.py).
+CONSUMER_REQUIRE_AUTH = env.bool("CONSUMER_REQUIRE_AUTH", default=True)
 
 # Person ids treated as the operator/owner — they see private module context
 # (unread emails, pending wakes). Authenticated users (user_*) and Mika's own

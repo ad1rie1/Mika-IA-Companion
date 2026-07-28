@@ -62,6 +62,19 @@ POLICIES: tuple[Policy, ...] = (
     # has a ring buffer; this one was simply missed.
     Policy("projects", "ProjectLog", keep_days=90, keep_rows=20_000,
            note="project audit trail"),
+    # One handle (and one Identity) per anonymous socket. The frontend
+    # reconnects on backoff, so these accumulate on their own: an install
+    # with zero messages had already collected 68 of them. Only the
+    # ephemeral ones are swept — a handle Mika can actually reach someone
+    # on is exactly what the identity layer is for.
+    Policy("identity", "IdentityHandle", date_field="last_seen", keep_days=7,
+           protect={"is_ephemeral": False},
+           note="anonymous per-connection handles"),
+    # Resolved claims are the identity ledger. Kept long enough to explain a
+    # binding, not forever; pending ones are still awaiting Mika's judgement.
+    Policy("identity", "IdentityClaim", keep_days=180, keep_rows=10_000,
+           protect={"status": "pending"},
+           note="identity evidence ledger"),
 )
 
 
@@ -78,9 +91,46 @@ async def run_sweep() -> dict[str, int]:
             continue
         if count:
             deleted[f"{policy.app_label}.{policy.model_name}"] = count
+
+    try:
+        orphans = await _sweep_orphan_identities()
+    except Exception:
+        logger.debug("Orphan identity sweep failed", exc_info=True)
+    else:
+        if orphans:
+            deleted["identity.Identity"] = orphans
+
     if deleted:
         logger.info("Retention sweep removed %s", deleted)
     return deleted
+
+
+async def _sweep_orphan_identities() -> int:
+    """Drop Identities left with no handles and nobody behind them.
+
+    Deleting an ephemeral handle doesn't cascade upward — the FK points the
+    other way — so sweeping handles alone would trade one orphan table for
+    another. An Identity is only removed when it has no remaining handle AND
+    no memory entity AND no claim worth keeping: at that point it is a row
+    that represents a socket somebody once opened.
+    """
+    from django.apps import apps
+
+    Identity = apps.get_model("identity", "Identity")
+
+    def _delete() -> int:
+        ids = list(
+            Identity.objects.filter(
+                handles__isnull=True, entity__isnull=True,
+            )
+            .exclude(claims__status="pending")
+            .values_list("pk", flat=True)[:10_000]
+        )
+        if not ids:
+            return 0
+        return Identity.objects.filter(pk__in=ids).delete()[0]
+
+    return await sync_to_async(_delete)()
 
 
 async def _sweep_one(policy: Policy) -> int:
