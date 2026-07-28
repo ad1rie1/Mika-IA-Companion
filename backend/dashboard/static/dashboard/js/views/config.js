@@ -731,24 +731,30 @@ Dash.render(async (root) => {
   }
 
   function renderRowInput(f, val) {
+    // A readonly field is server-owned (e.g. person_id, assigned at
+    // creation). Rendered disabled rather than editable-then-reverted:
+    // a write that silently changes nothing is worse than no field.
+    const ro = f.readonly ? "disabled" : "";
     if (f.type === "bool") {
-      return `<label class="flex gap center"><input type="checkbox" name="${f.key}" ${val ? "checked" : ""} /> <span class="muted">${val ? "oui" : "non"}</span></label>`;
+      return `<label class="flex gap center"><input type="checkbox" name="${f.key}" ${val ? "checked" : ""} ${ro} /> <span class="muted">${val ? "oui" : "non"}</span></label>`;
     }
     if (f.type === "select") {
-      return `<select name="${f.key}">${(f.choices||[]).map(c => `<option value="${escapeHTML(c)}" ${c===val?"selected":""}>${escapeHTML(c)}</option>`).join("")}</select>`;
+      return `<select name="${f.key}" ${ro}>${(f.choices||[]).map(c => `<option value="${escapeHTML(c)}" ${c===val?"selected":""}>${escapeHTML(c)}</option>`).join("")}</select>`;
     }
     if (f.type === "secret") {
+      // `length: 0` means "presence only, no character count" — a stored
+      // password hash has no length worth reporting.
       const preview = val && typeof val === "object" && val.has_value
-        ? `<div class="muted" style="font-size:10px;margin-bottom:4px">actuel : ${escapeHTML(val.preview)} (${val.length} car.)</div>`
+        ? `<div class="muted" style="font-size:10px;margin-bottom:4px">actuel : ${escapeHTML(val.preview)}${val.length ? ` (${val.length} car.)` : ""}</div>`
         : `<div class="muted" style="font-size:10px;margin-bottom:4px">— vide —</div>`;
-      return preview + `<input type="password" name="${f.key}" placeholder="Laisser vide pour conserver" autocomplete="new-password" />`;
+      return preview + `<input type="password" name="${f.key}" placeholder="Laisser vide pour conserver" autocomplete="new-password" ${ro} />`;
     }
     if (f.type === "text") {
-      return `<textarea name="${f.key}">${escapeHTML(val != null ? String(val) : "")}</textarea>`;
+      return `<textarea name="${f.key}" ${ro}>${escapeHTML(val != null ? String(val) : "")}</textarea>`;
     }
     const inputType = f.type === "int" || f.type === "float" ? "number" : "text";
     const step = f.type === "float" ? "any" : (f.type === "int" ? "1" : "");
-    return `<input type="${inputType}" ${step ? `step="${step}"` : ""} name="${f.key}" value="${val != null ? escapeHTML(String(val)) : ""}" />`;
+    return `<input type="${inputType}" ${step ? `step="${step}"` : ""} name="${f.key}" value="${val != null ? escapeHTML(String(val)) : ""}" ${ro} />`;
   }
 
   renderTabs();

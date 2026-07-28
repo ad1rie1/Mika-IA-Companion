@@ -215,6 +215,11 @@ def row_detail(request, row_id: str):
             config_service.delete_row(parent_key, row_id, actor=_actor(request))
         except KeyError as e:
             return _error(str(e), status=404)
+        except ValidationError as e:
+            # A backend may refuse a deletion outright (deleting the last
+            # active admin locks everyone out). Answer it like any other
+            # refused write instead of surfacing a 500.
+            return _error(str(e), status=409)
         return JsonResponse({"ok": True})
 
     body = _body(request)

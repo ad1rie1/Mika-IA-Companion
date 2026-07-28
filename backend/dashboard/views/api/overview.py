@@ -20,6 +20,7 @@ def overview(request):
         PersonProfile, Commitment, SelfNarrative, DailyJournal, Dream,
     )
     from conscience.models import Observation, ConscienceLog, Rumination
+    from identity.models import Identity, IdentityClaim
     from projects.models import Project, ProjectPendingAction
     from memory.sleep import sleep_cycle
 
@@ -72,6 +73,12 @@ def overview(request):
             "person_profiles": PersonProfile.objects.count(),
             "commitments_pending": Commitment.objects.filter(status="pending").count(),
             "observations_pending": Observation.objects.filter(status="pending").count(),
+            # A pending identity claim waits on a human, not on a loop: it is
+            # deliberately not scored until someone decides, so it badges the
+            # sidebar the same way a pending approval does.
+            "identity": IdentityClaim.objects.filter(status="pending").count(),
+            "identities_bound": Identity.objects.filter(entity__isnull=False).count(),
+            "identities_unbound": Identity.objects.filter(entity__isnull=True).count(),
             "ruminations_active": Rumination.objects.filter(status="active").count(),
             "conscience_logs": ConscienceLog.objects.count(),
             "dreams": Dream.objects.count(),

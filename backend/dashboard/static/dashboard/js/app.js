@@ -238,6 +238,7 @@
       souvenirs: d.counts.souvenirs,
       connaissances: d.counts.connaissances,
       persons: d.counts.persons,
+      identity: d.counts.identity,
       projects: d.counts.projects_active,
       ruminations: d.counts.ruminations_active,
       commitments: d.counts.commitments_pending,

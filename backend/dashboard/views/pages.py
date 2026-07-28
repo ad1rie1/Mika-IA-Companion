@@ -33,7 +33,13 @@ MENU: list[dict] = [
         {"key": "entities",     "label": "Entités",      "icon": "⛨"},
         {"key": "messages",     "label": "Messages",     "icon": "✉"},
     ]},
+    # Ordered the way the system prompt assembles these blocks: identity
+    # qualifies the person fiche ("--- QUI TU AS EN FACE ---" sits
+    # immediately before "--- CE QUE TU SAIS DE CETTE PERSONNE ---"), so
+    # reading the group top-down is qui parle → ce qu'elle en sait → ce
+    # qu'elle leur a promis.
     {"group": "Social", "items": [
+        {"key": "identity",     "label": "Identités",    "icon": "⚿"},
         {"key": "persons",      "label": "Personnes",    "icon": "☻"},
         {"key": "commitments",  "label": "Engagements",  "icon": "✓"},
     ]},
@@ -61,7 +67,8 @@ TITLES = {
     "emotion": "Émotions", "drives": "Drives", "ruminations": "Ruminations",
     "sleep": "Sommeil & Rêves", "souvenirs": "Souvenirs", "connaissances": "Connaissances",
     "themes": "Thèmes", "entities": "Entités", "messages": "Messages",
-    "persons": "Personnes", "commitments": "Engagements", "observations": "Observations",
+    "persons": "Personnes", "identity": "Identités & confiance",
+    "commitments": "Engagements", "observations": "Observations",
     "logs": "Journal conscience", "scheduled": "Actions planifiées",
     "projects": "Projets", "modules": "Gestion des modules", "quota": "Quota IA",
     "system": "Système", "config": "Configuration",
@@ -167,6 +174,7 @@ def themes(request):       return _render(request, "themes")
 def entities(request):     return _render(request, "entities")
 def messages(request):     return _render(request, "messages")
 def persons(request):      return _render(request, "persons")
+def identity(request):     return _render(request, "identity")
 
 
 def person_detail(request, entity_id):
