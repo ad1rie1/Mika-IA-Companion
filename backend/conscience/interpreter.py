@@ -135,15 +135,89 @@ def _heuristic_telegram_message(data: dict) -> InterpretedSignal:
     )
 
 
-# email.received goes through LLM path (rich content, needs interpretation)
-# It is NOT in HEURISTIC_EVENTS, so it falls through to _interpret_with_llm()
+def _heuristic_rss_entry(data: dict) -> InterpretedSignal:
+    """A news headline is not worth an LLM call.
+
+    The RSS poller emits one event per *new entry* — up to 15 per feed, and a
+    first poll across a handful of feeds produces dozens at once. Each one
+    took a Haiku call (15s timeout) and, because ``emit_event`` awaits the
+    conscience, they ran strictly in series. That was minutes of frozen
+    scheduler and a stack of LLM calls to decide that a headline is mildly
+    interesting.
+
+    Pertinence is scored from the feed's own signal: title keywords matched
+    against what Mika is curious about. Anything that scores high enough to
+    matter still reaches her — the conscience decides whether to act, and a
+    genuinely pertinent item can be read in full through the RSS tools.
+    """
+    title = data.get("title", "") or ""
+    summary = data.get("summary", "") or ""
+    feed = data.get("feed_name", "") or "un flux"
+    themes = _extract_themes_from_text(f"{title} {summary}")
+
+    # Matching a theme Mika cares about is the whole signal here; without one
+    # this is background noise she happens to subscribe to.
+    pertinence = 0.45 if themes else 0.2
+    return InterpretedSignal(
+        summary=f"[{feed}] {title[:120]}",
+        category="information",
+        pertinence=pertinence,
+        emotional_reaction="curious" if themes else "",
+        emotional_intensity=0.25 if themes else 0.0,
+        themes=themes,
+        entities=[],
+        should_remember=False,
+    )
+
+
+def _heuristic_forge_event(data: dict) -> InterpretedSignal:
+    """Signals Mika's own forged modules emit about themselves.
+
+    She wrote the module and chose what it reports, so paying for an LLM to
+    tell her what her own code just said is circular. Low pertinence by
+    default: a forged module that wants attention says so through
+    ``api.notify_ai``, which is a different path entirely.
+    """
+    return InterpretedSignal(
+        summary=f"Un de tes modules a signale: {str(data)[:160]}",
+        category="system",
+        pertinence=0.2,
+        emotional_reaction="",
+        emotional_intensity=0.0,
+        themes=[],
+        entities=[],
+        should_remember=False,
+    )
+
+
+# email.received goes through LLM path: an email is genuinely rich content
+# whose importance cannot be read off a keyword table, and there are few
+# enough of them that the call is worth it.
 
 HEURISTIC_EVENTS = {
     "chat.message": _heuristic_chat_message,
     "chat.connect": _heuristic_chat_connect,
     "chat.disconnect": _heuristic_chat_disconnect,
     "telegram.message": _heuristic_telegram_message,
+    "rss.new_entry": _heuristic_rss_entry,
 }
+
+#: Event-type prefixes routed to a heuristic. Forged modules emit
+#: ``forge.<module>.<type>``, so they cannot be listed exhaustively.
+HEURISTIC_PREFIXES: tuple[tuple[str, callable], ...] = (
+    ("forge.", _heuristic_forge_event),
+)
+
+
+def heuristic_for(event_type: str):
+    """Return the heuristic handling ``event_type``, or None for the LLM path."""
+    handler = HEURISTIC_EVENTS.get(event_type)
+    if handler is not None:
+        return handler
+    for prefix, prefix_handler in HEURISTIC_PREFIXES:
+        if event_type.startswith(prefix):
+            return prefix_handler
+    return None
 
 
 class SignalInterpreter:
@@ -159,8 +233,8 @@ class SignalInterpreter:
     async def interpret(self, event: ModuleEvent) -> InterpretedSignal:
         """Interpret a module event into a structured signal."""
 
-        # Fast-path: known event types
-        heuristic = HEURISTIC_EVENTS.get(event.event_type)
+        # Fast-path: known event types (exact match or prefix)
+        heuristic = heuristic_for(event.event_type)
         if heuristic:
             signal = heuristic(event.data)
             logger.debug(

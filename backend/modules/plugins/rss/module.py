@@ -29,6 +29,13 @@ from modules.types import (
 
 logger = logging.getLogger(__name__)
 
+# Per-feed fetch ceiling, applied both at the socket and around the executor
+# call. feedparser has no timeout of its own and urllib's default is "wait
+# forever", so a single unresponsive host used to hang the poll indefinitely.
+FEED_FETCH_TIMEOUT = 20
+# A feed is a list of headlines; anything past this is not one.
+MAX_FEED_BYTES = 5 * 1024 * 1024
+
 
 class RSSModule(BaseModule):
     """Polls RSS/Atom feeds and emits events to the event bus."""
@@ -94,6 +101,28 @@ class RSSModule(BaseModule):
                 await sync_to_async(RSSFeed.objects.create)(name=name, url=url)
                 self.logger.info("Migrated env feed: %s (%s)", name, url)
 
+    # ── Fetch ─────────────────────────────────────────────────────
+
+    def _fetch_feed(self, url: str):
+        """Fetch and parse one feed, with a real socket timeout.
+
+        ``feedparser.parse(url)`` does its own urllib request and inherits
+        the global default socket timeout — which is ``None``, i.e. wait
+        forever. Fetching the bytes ourselves is the only way to bound it:
+        the ``asyncio.wait_for`` upstream would otherwise stop *awaiting* a
+        stuck request while the worker thread stayed blocked on it, and that
+        thread comes from the default executor shared with ``sync_to_async``,
+        so a few dead feeds would starve the ORM.
+        """
+        import urllib.request
+
+        request = urllib.request.Request(
+            url, headers={"User-Agent": "vtuber-rss/1.0"},
+        )
+        with urllib.request.urlopen(request, timeout=FEED_FETCH_TIMEOUT) as resp:
+            raw = resp.read(MAX_FEED_BYTES)
+        return self._feedparser.parse(raw)
+
     # ── Cron ──────────────────────────────────────────────────────
 
     async def worker_cron(self) -> None:
@@ -118,10 +147,27 @@ class RSSModule(BaseModule):
 
         for feed in feeds:
             try:
-                parsed = await loop.run_in_executor(
-                    None, partial(self._feedparser.parse, feed.url)
+                parsed = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None, partial(self._fetch_feed, feed.url),
+                    ),
+                    timeout=FEED_FETCH_TIMEOUT,
                 )
+            except asyncio.TimeoutError:
+                # The executor thread may still be blocked in the socket; the
+                # per-request timeout below caps that, and the default pool is
+                # shared with sync_to_async, so leaving it hanging would eat
+                # an ORM worker.
+                self.logger.warning(
+                    "RSS feed %s timed out after %ss", feed.name,
+                    FEED_FETCH_TIMEOUT,
+                )
+                continue
+            except Exception:
+                self.logger.exception("RSS fetch failed for %s", feed.name)
+                continue
 
+            try:
                 if parsed.bozo and not parsed.entries:
                     self.logger.warning(
                         "RSS feed error for %s: %s", feed.name, parsed.bozo_exception

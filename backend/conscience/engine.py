@@ -332,44 +332,47 @@ class ConscienceEngine:
 
         today_start = tz.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
-        try:
-            # Count today's acts
-            acts_today = await sync_to_async(
-                lambda: ConscienceLog.objects.filter(
-                    decision="act", created_at__gte=today_start
-                ).count()
-            )()
+        def _query() -> tuple[int, int]:
+            # One round-trip for the whole introspection. This runs on every
+            # decision cycle (30s by default, forever, whether or not anyone
+            # is talking), and the old shape was 2 queries plus one
+            # `.exists()` per recent act — each its own sync_to_async thread
+            # hop — to answer a question about at most 5 rows.
+            acts_today = ConscienceLog.objects.filter(
+                decision="act", created_at__gte=today_start,
+            ).count()
 
-            # Get timestamps of recent "act" decisions
-            recent_act_times = await sync_to_async(
-                lambda: list(
-                    ConscienceLog.objects.filter(decision="act")
-                    .order_by("-created_at")[:5]
-                    .values_list("created_at", flat=True)
-                )
-            )()
-
+            recent_act_times = list(
+                ConscienceLog.objects.filter(decision="act")
+                .order_by("-created_at")
+                .values_list("created_at", flat=True)[:5]
+            )
             if not recent_act_times:
                 return acts_today, 0
 
-            # For each recent act, check if a user response followed within 10 min
+            # Fetch every user reply since the oldest act in the window once,
+            # then answer "was this act followed by a reply within 10 min?"
+            # in Python. The window is bounded by definition — 5 acts.
+            oldest = recent_act_times[-1]
+            newest_window_end = recent_act_times[0] + timedelta(minutes=10)
+            replies = list(
+                Observation.objects.filter(
+                    event_type__in=("chat.message", "telegram.message"),
+                    created_at__gt=oldest,
+                    created_at__lte=newest_window_end,
+                ).values_list("created_at", flat=True)
+            )
+
             consecutive_ignored = 0
             for act_time in recent_act_times:
-                response_window = act_time + timedelta(minutes=10)
-                response_exists = await sync_to_async(
-                    lambda t=act_time, w=response_window: Observation.objects.filter(
-                        event_type__in=("chat.message", "telegram.message"),
-                        created_at__gt=t,
-                        created_at__lte=w,
-                    ).exists()
-                )()
-
-                if response_exists:
+                deadline = act_time + timedelta(minutes=10)
+                if any(act_time < reply <= deadline for reply in replies):
                     break
                 consecutive_ignored += 1
-
             return acts_today, consecutive_ignored
 
+        try:
+            return await sync_to_async(_query)()
         except Exception:
             logger.debug("Introspection failed", exc_info=True)
             return 0, 0

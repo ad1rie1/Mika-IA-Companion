@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time as _time
 from datetime import timedelta
 
 from asgiref.sync import sync_to_async
@@ -18,6 +19,21 @@ RETENTION_SWEEP_INTERVAL_S = 3600
 
 # Pending commitments older than this are dropped (see _expire_commitments).
 COMMITMENT_MAX_AGE_DAYS = 30
+
+# Memory decay is measured in days; sweeping for it every 60s was pure load.
+DECAY_INTERVAL_S = 3600
+
+# Only rows whose decay anchor is at least this old can move by more than the
+# write threshold, so the sweep filters on it in SQL instead of reading the
+# whole table into RAM. Generous on purpose: a row that turns out not to move
+# simply keeps its anchor, and its elapsed time accumulates for the next pass.
+DECAY_MIN_AGE = timedelta(hours=1)
+
+# Ceiling on rows rewritten per pass. Each write also re-indexes into
+# ChromaDB (an embedding call), so a first run over a large backlog stays
+# bounded instead of stalling the consolidator; the rest is picked up next
+# hour, with no loss — the anchor keeps their elapsed time.
+DECAY_BATCH = 500
 
 
 class MemoryConsolidator:
@@ -443,7 +459,27 @@ class MemoryConsolidator:
 
     async def _apply_decay(self):
         """Reduce importance of old souvenirs and confidence of old connaissances.
-        Remove those below threshold."""
+        Remove those below threshold.
+
+        Throttled to ``DECAY_INTERVAL_S``. Memory decay is measured in days,
+        so running it on every 60s tick was 1440 full-table sweeps a day to
+        apply changes that only become visible after hours — and it ran on
+        the "no new messages" path too, so an install nobody talks to paid
+        the full cost forever. Correctness is unaffected: decay is anchored
+        on each row's ``decayed_at``, so a longer gap just means a larger
+        (still exact) step.
+        """
+        now = _time.monotonic()
+        last = getattr(self, "_last_decay", 0.0)
+        if last and (now - last) < DECAY_INTERVAL_S:
+            # Commitment expiry is a pair of cheap indexed UPDATEs and is
+            # what stops a stale promise being re-asserted in every prompt,
+            # so it keeps running on its own cadence.
+            await self._expire_commitments()
+            await self._sweep_retention()
+            return
+        self._last_decay = now
+
         await self._decay_souvenirs()
         await self._decay_connaissances()
         await self._expire_commitments()
@@ -498,17 +534,30 @@ class MemoryConsolidator:
             logger.exception("Retention sweep failed (non-fatal)")
 
     async def _decay_souvenirs(self):
-        """Reduce importance of old souvenirs. Remove those below threshold."""
+        """Reduce importance of old souvenirs. Remove those below threshold.
+
+        Only rows whose anchor is older than ``DECAY_MIN_AGE`` are read: a
+        souvenir touched minutes ago cannot move by more than the write
+        threshold, so loading it just to skip it was the bulk of the work.
+        The rest of the loop stays row-by-row because each write also
+        re-indexes into ChromaDB, which no bulk UPDATE can do.
+        """
+        from django.db.models import Q
         from memory.models import Souvenir
 
         from configs.service import config_service
         decay_rate = config_service.get("memory.decay_rate")
         min_importance = config_service.get("memory.min_importance")
         now = timezone.now()
+        cutoff = now - DECAY_MIN_AGE
 
         souvenirs = await sync_to_async(list)(
             Souvenir.objects.filter(importance__gt=min_importance)
+            .filter(Q(decayed_at__isnull=True) | Q(decayed_at__lt=cutoff))
+            .order_by("decayed_at")[:DECAY_BATCH]
         )
+        if not souvenirs:
+            return
 
         for souvenir in souvenirs:
             # Use occurred_at (when it happened) not created_at (when it was stored)
@@ -554,29 +603,55 @@ class MemoryConsolidator:
         Decay rate: ~2% per week after 7 days without reinforcement.
         This is gentler than souvenir decay (0.95^days) because knowledge
         is more durable than episodic memory.
+
+        Decay is measured from ``decayed_at``, not ``updated_at``. The latter
+        is ``auto_now``, and Django only refreshes an ``auto_now`` field when
+        it is among the columns being written — ``save(update_fields=
+        ["confidence"])`` never is. So the anchor never advanced and every
+        pass re-subtracted the *entire* elapsed decay: at a 60s tick, a fact
+        a month old lost ~0.086 per tick and hit the floor in about ten
+        minutes. Measured, not theorised: three simulated passes on a 30-day
+        row went 1.0 → 0.914 → 0.828 → 0.742.
+
+        This is the same relative-vs-absolute bug already fixed for
+        ``Souvenir.decayed_at``; connaissances were simply never migrated.
         """
+        from django.db.models import Q
         from memory.models import Connaissance
 
         now = timezone.now()
         min_confidence = 0.2  # Floor — don't decay below this
+        # Nothing reinforced in the last week can have accrued a full week of
+        # decay, so the 7-day grace period is expressed in SQL rather than by
+        # loading the table and skipping most of it in Python.
+        grace_cutoff = now - timedelta(days=7)
+        anchor_cutoff = now - DECAY_MIN_AGE
 
         connaissances = await sync_to_async(list)(
-            Connaissance.objects.filter(is_valid=True, confidence__gt=min_confidence)
+            Connaissance.objects.filter(
+                is_valid=True,
+                confidence__gt=min_confidence,
+                updated_at__lt=grace_cutoff,
+            )
+            .filter(Q(decayed_at__isnull=True) | Q(decayed_at__lt=anchor_cutoff))
+            .order_by("decayed_at")[:DECAY_BATCH]
         )
 
         for conn in connaissances:
-            days_since_update = (now - conn.updated_at).total_seconds() / 86400
-            if days_since_update < 7:
-                continue  # Recently reinforced — skip
+            # First pass for this row: fall back to updated_at, which is when
+            # it was last reinforced — the correct starting point.
+            anchor = conn.decayed_at or conn.updated_at
+            days_since = max(0.0, (now - anchor).total_seconds() / 86400)
 
-            # Gentle decay: lose ~2% confidence per week after 7 days
-            weeks_past = days_since_update / 7
-            decay = 0.02 * weeks_past
+            # Gentle decay: lose ~2% confidence per week since the anchor.
+            decay = 0.02 * (days_since / 7)
             new_confidence = max(min_confidence, conn.confidence - decay)
 
             if abs(new_confidence - conn.confidence) > 0.01:
                 conn.confidence = round(new_confidence, 3)
-                await sync_to_async(conn.save)(update_fields=["confidence"])
+                conn.decayed_at = now
+                await sync_to_async(conn.save)(
+                    update_fields=["confidence", "decayed_at"])
                 logger.debug(
                     "Decayed connaissance #%d confidence to %.2f",
                     conn.pk, conn.confidence,

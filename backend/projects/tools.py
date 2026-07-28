@@ -295,20 +295,27 @@ class ProjectToolsModule(BaseModule):
         from projects.models import Project, ProjectTask
 
         def _load():
-            out = []
-            for p in Project.objects.filter(
-                status=Project.Status.ACTIVE,
-            ).order_by("-priority", "-updated_at")[:20]:
-                total = ProjectTask.objects.filter(project=p).count()
-                done = ProjectTask.objects.filter(
-                    project=p, status=ProjectTask.Status.DONE,
-                ).count()
-                out.append(
-                    f"#{p.pk} [{p.priority}] {p.title} "
-                    f"({done}/{total} tâches, ep={p.emotion_policy}, "
-                    f"schedule={p.schedule_rule or '—'})"
+            from django.db.models import Count, Q
+
+            # Task counts are annotated rather than counted per project:
+            # 20 projects meant 41 queries to render one list.
+            projects = (
+                Project.objects.filter(status=Project.Status.ACTIVE)
+                .annotate(
+                    task_total=Count("tasks", distinct=True),
+                    task_done=Count(
+                        "tasks", distinct=True,
+                        filter=Q(tasks__status=ProjectTask.Status.DONE),
+                    ),
                 )
-            return out
+                .order_by("-priority", "-updated_at")[:20]
+            )
+            return [
+                f"#{p.pk} [{p.priority}] {p.title} "
+                f"({p.task_done}/{p.task_total} tâches, ep={p.emotion_policy}, "
+                f"schedule={p.schedule_rule or '—'})"
+                for p in projects
+            ]
 
         lines = await sync_to_async(_load)()
         body = "\n".join(lines) if lines else "(aucun projet actif)"

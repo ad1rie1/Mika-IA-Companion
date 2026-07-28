@@ -65,6 +65,9 @@ class ModuleManager:
         # Active modules: those the manager currently considers runnable.
         self._modules: dict[str, BaseModule] = {}
         self._scheduler_task: asyncio.Task | None = None
+        # In-flight detached cron ticks, one per module. Held so they aren't
+        # garbage-collected mid-run, and consulted to avoid overlapping ticks.
+        self._cron_tasks: dict[str, asyncio.Task] = {}
         self._tick_interval: int = DEFAULT_TICK_INTERVAL
         self._tools_cache: list[ModuleTool] | None = None
         self._conscience_callback: Callable[[ModuleEvent], Awaitable[None]] | None = None
@@ -372,6 +375,16 @@ class ModuleManager:
                 pass
             logger.info("Cron scheduler stopped")
 
+        # Detached ticks outlive the loop that spawned them, so shutdown has
+        # to reap them explicitly — otherwise a module is stopped while its
+        # own cron is still mid-write.
+        inflight = [t for t in self._cron_tasks.values() if not t.done()]
+        for task in inflight:
+            task.cancel()
+        if inflight:
+            await asyncio.gather(*inflight, return_exceptions=True)
+        self._cron_tasks.clear()
+
         for module in reversed(list(self._modules.values())):
             if module.is_running:
                 try:
@@ -382,7 +395,21 @@ class ModuleManager:
     # ── Scheduler (per-module intervals) ──────────────────────────
 
     async def _scheduler_loop(self) -> None:
-        """Tick every second, dispatch worker_cron() per-module interval."""
+        """Tick every second, dispatch worker_cron() per-module interval.
+
+        Each module's tick runs **detached**. Awaiting them inline made the
+        shared scheduler only as fast as its slowest module: an IMAP fetch or
+        an RSS poll (which then interprets each new entry through an LLM) held
+        up every other module — Forge, wake, camera — for as long as it ran,
+        and a hung socket held them up forever. The Forge already worked
+        around this by spawning its own task; doing it here means no module
+        has to know about the others.
+
+        One task per module at a time: if the previous tick is still running,
+        this one is skipped rather than queued, so a module that is slower
+        than its own interval degrades to "runs as often as it can" instead
+        of accumulating an unbounded backlog of overlapping ticks.
+        """
         last_tick: dict[str, float] = {}
         while True:
             try:
@@ -395,19 +422,50 @@ class ModuleManager:
                         continue
                     interval = module.CRON_INTERVAL or self._tick_interval
                     last = last_tick.get(module.name, 0.0)
-                    if now - last >= interval:
-                        last_tick[module.name] = now
-                        try:
-                            await module.worker_cron()
-                        except Exception:
-                            logger.exception(
-                                "Error in worker_cron() for module %s",
-                                module.name,
-                            )
+                    if now - last < interval:
+                        continue
+
+                    running = self._cron_tasks.get(module.name)
+                    if running is not None and not running.done():
+                        logger.debug(
+                            "Skipping cron for %s: previous tick still running",
+                            module.name,
+                        )
+                        continue
+
+                    last_tick[module.name] = now
+                    self._spawn_cron(module)
             except asyncio.CancelledError:
                 break
             except Exception:
                 logger.exception("Scheduler error")
+
+    def _spawn_cron(self, module: BaseModule) -> None:
+        """Run one module's ``worker_cron`` off the scheduler's await chain.
+
+        A strong reference is kept until completion: a bare ``create_task``
+        can be garbage-collected mid-flight, and an exception in a dropped
+        task vanishes silently.
+        """
+        task = asyncio.create_task(
+            self._run_cron(module), name=f"cron:{module.name}",
+        )
+        self._cron_tasks[module.name] = task
+        task.add_done_callback(
+            lambda t, name=module.name: self._cron_tasks.pop(name, None)
+            if self._cron_tasks.get(name) is t else None
+        )
+
+    @staticmethod
+    async def _run_cron(module: BaseModule) -> None:
+        try:
+            await module.worker_cron()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "Error in worker_cron() for module %s", module.name,
+            )
 
     # ── Tool Aggregation ──────────────────────────────────────────
 

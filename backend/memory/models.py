@@ -120,6 +120,10 @@ class Souvenir(models.Model):
         indexes = [
             models.Index(fields=["-importance"]),
             models.Index(fields=["-occurred_at"]),
+            # The decay pass selects on this: without it, narrowing the sweep
+            # to eligible rows would just trade a full table read for a full
+            # table scan.
+            models.Index(fields=["decayed_at"]),
         ]
 
     def __str__(self):
@@ -141,12 +145,24 @@ class Connaissance(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    decayed_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text=(
+            "Anchor for confidence decay, mirroring Souvenir.decayed_at. "
+            "Decay used to be measured from updated_at, which save("
+            "update_fields=['confidence']) never advances (auto_now only "
+            "fires for fields being written) — so every tick re-subtracted "
+            "the full elapsed decay and a week-old fact hit the floor in "
+            "minutes instead of months."
+        ),
+    )
 
     class Meta:
         ordering = ["-confidence"]
         indexes = [
             models.Index(fields=["is_valid", "-confidence"]),
             models.Index(fields=["-updated_at"]),
+            models.Index(fields=["decayed_at"]),
         ]
 
     def __str__(self):

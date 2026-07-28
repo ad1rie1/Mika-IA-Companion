@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from email.utils import parseaddr
 
@@ -22,6 +23,11 @@ from modules.types import (
 logger = logging.getLogger(__name__)
 
 MAX_EMAILS_PER_ACCOUNT = 200
+
+# Ceiling on one account's fetch+process pass. Generous: an initial sync
+# imports a whole inbox and each new mail costs a triage call. The point is
+# not to be tight, it is to have a bound at all — aioimaplib has none.
+IMAP_TICK_TIMEOUT = 180
 
 
 class EmailModule(BaseModule):
@@ -128,10 +134,34 @@ class EmailModule(BaseModule):
     # ── Cron ──────────────────────────────────────────────────────
 
     async def worker_cron(self) -> None:
-        """Check all accounts for new emails."""
+        """Check all accounts for new emails.
+
+        Each account is bounded by ``IMAP_TICK_TIMEOUT``. ``aioimaplib`` has
+        no timeout of its own, so a server that accepts the TCP connection
+        and then goes quiet (a half-open socket, a firewall dropping the
+        flow) left the fetch awaiting forever. Nothing above would have
+        recovered it: the tick never returned, and this module never polled
+        again for the lifetime of the process.
+        """
         self.logger.debug("Email cron tick — checking %d account(s)", len(self._accounts))
         for account_id, entry in list(self._accounts.items()):
-            await self._check_account(account_id, entry)
+            try:
+                await asyncio.wait_for(
+                    self._check_account(account_id, entry),
+                    timeout=IMAP_TICK_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                # Drop the connection so the next tick reconnects rather than
+                # awaiting the same dead socket again.
+                self.logger.warning(
+                    "IMAP tick timed out after %ss for account %s — "
+                    "reconnecting next tick", IMAP_TICK_TIMEOUT, account_id,
+                )
+                try:
+                    await asyncio.wait_for(entry["imap"].disconnect(), timeout=5)
+                except Exception:
+                    self.logger.debug("IMAP disconnect after timeout failed",
+                                      exc_info=True)
 
     async def _check_account(self, account_id: int, entry: dict) -> None:
         imap = entry["imap"]

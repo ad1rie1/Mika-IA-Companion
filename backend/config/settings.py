@@ -87,10 +87,34 @@ SESSION_COOKIE_SAMESITE = env("SESSION_COOKIE_SAMESITE", default="Lax")
 ROOT_URLCONF = "config.urls"
 ASGI_APPLICATION = "config.asgi.application"
 
+# SQLite, tuned for a process that is almost never idle.
+#
+# Six background loops write continuously (conscience 30s, consolidator 60s,
+# sleep 60s, project runner 30s, module scheduler 1s, emotion snapshots), and
+# every `sync_to_async` call runs in its own thread with its own connection.
+# In the default `journal_mode=DELETE` a single writer blocks every reader,
+# and Python's default 5s busy timeout then surfaces as `database is locked`.
+#
+# WAL lets readers proceed during a write, which is the actual access pattern
+# here: a conversation turn reads memory/identity/projects while the loops
+# keep writing. `synchronous=NORMAL` is the standard companion — durable
+# against process crashes, only at risk on an OS-level crash, which is the
+# right trade for an audit trail nobody would miss the last second of.
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": PROJECT_ROOT / "data" / "vtuber.db",
+        "OPTIONS": {
+            "timeout": env.int("DB_LOCK_TIMEOUT", default=30),
+            "init_command": (
+                "PRAGMA journal_mode=WAL;"
+                "PRAGMA synchronous=NORMAL;"
+                "PRAGMA foreign_keys=ON;"
+                # Give the page cache room; the working set (souvenirs,
+                # messages, identity) is small enough to mostly live in RAM.
+                "PRAGMA cache_size=-32000;"
+            ),
+        },
     }
 }
 
