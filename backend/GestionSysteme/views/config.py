@@ -238,11 +238,37 @@ def _back_to(section: str) -> str:
     return reverse("gestionsysteme:config-section", args=[section])
 
 
+# Nom du bouton qui recharge les options d'un champ dynamique au lieu
+# d'enregistrer. Il porte la saisie en cours, donc rien n'est perdu.
+LOAD_MARKER = "__charger"
+
+
+def _reload_options(request, item, payload: dict, *, row_id: str = ""):
+    """Réaffiche le formulaire avec les options fraîchement chargées.
+
+    Aller-retour serveur ordinaire : pas de JavaScript, et la saisie déjà
+    faite est conservée puisqu'elle repart du POST.
+    """
+    from GestionSysteme import choices
+
+    options, erreur = choices.load(item.key, payload)
+    return forms.build_record_form(
+        item, {"payload": payload, "row_id": row_id},
+        options=options, load_error=erreur,
+    )
+
+
 def record_new(request, section: str, key: str):
     item = _require_item(section, key)
 
     if request.method == "POST":
         payload = forms.read_record_payload(request, item)
+
+        if LOAD_MARKER in request.POST:
+            return _render_record_form(
+                request, section, item, _reload_options(request, item, payload),
+            )
+
         try:
             config_service.add_row(key, payload, actor=forms.actor_for(request))
             messages.success(request, "Élément ajouté.")
@@ -270,6 +296,13 @@ def record_edit(request, section: str, key: str, row_id: str):
 
     if request.method == "POST":
         payload = forms.read_record_payload(request, item)
+
+        if LOAD_MARKER in request.POST:
+            return _render_record_form(
+                request, section, item,
+                _reload_options(request, item, payload, row_id=str(row_id)),
+            )
+
         try:
             config_service.update_row(key, row_id, payload, actor=forms.actor_for(request))
             messages.success(request, "Élément modifié.")
