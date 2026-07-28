@@ -24,7 +24,7 @@ from datetime import timedelta
 from asgiref.sync import sync_to_async
 from django.utils import timezone
 
-from ai.router import AIRole, ai_router
+from ai.router import AIRole, UnconfiguredRoleError, ai_router
 from utils.parsing import strip_markdown_json
 
 logger = logging.getLogger(__name__)
@@ -258,6 +258,11 @@ class PersonProfileGenerator:
             )
         except asyncio.TimeoutError:
             logger.warning("Profile generation timed out for %s", pool.entity_name)
+            return None
+        except UnconfiguredRoleError as exc:
+            logger.warning(
+                "Profil de %s ignoré — IA non configurée: %s", pool.entity_name, exc,
+            )
             return None
         except Exception:
             logger.exception("Profile LLM call failed for %s", pool.entity_name)

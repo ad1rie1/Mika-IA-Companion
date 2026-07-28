@@ -39,8 +39,10 @@ interface BlendShapeTarget {
   [presetName: string]: number;
 }
 
-// Map all 29 emotions to VRM blend shape combinations (weights at intensity 1.0)
-const EMOTION_MAP: Record<EmotionName, BlendShapeTarget> = {
+// Fallback map for models that only expose the standard VRM presets
+// (weights at intensity 1.0). Note: on VRM 0.x models three-vrm exposes
+// joy/sorrow/fun as happy/sad/relaxed, and "surprised" may not exist.
+const STANDARD_EMOTION_MAP: Record<EmotionName, BlendShapeTarget> = {
   // Neutral
   neutral: {},
 
@@ -79,14 +81,47 @@ const EMOTION_MAP: Record<EmotionName, BlendShapeTarget> = {
   melancholic: { sad: 0.6, relaxed: 0.3 },
 };
 
-const ALL_EXPRESSIONS = [
-  "happy",
-  "angry",
-  "sad",
-  "relaxed",
-  "surprised",
-  "neutral",
-];
+// Map for the Perula model (PerfectSync build), whose custom expressions
+// are far richer than the standard presets — its standard `angry` preset
+// is even empty (0 binds), so anger MUST go through the custom shapes.
+// Names are case-sensitive and match blendShapeGroups in the .vrm.
+const PERULA_EMOTION_MAP: Record<EmotionName, BlendShapeTarget> = {
+  neutral: {},
+
+  // --- Positive ---
+  happy: { Smile1: 1.0 },
+  excited: { Joy2: 0.9, InWonder: 0.2 },
+  love: { Love1: 0.9 },
+  proud: { Prond: 0.9 }, // sic — the model's author spelled "proud" this way
+  grateful: { Smile2: 0.8, Relaxy: 0.2 },
+  playful: { Smile4: 0.7, Wink1: 0.3 },
+  amused: { LMAO: 0.85 },
+  hopeful: { Smile3: 0.5, InWonder: 0.4 },
+  relieved: { Relaxy: 0.9 },
+
+  // --- Negative ---
+  sad: { Sad1: 0.9 },
+  angry: { Angry1: 0.9 },
+  scared: { Shocked2: 0.7, Pain: 0.25 },
+  disgusted: { Disgust: 0.9 },
+  frustrated: { Angry2: 0.7, GiveUp: 0.25 },
+  lonely: { Sad3: 0.8 },
+  anxious: { Pain: 0.5, Sad1: 0.3 },
+  bored: { Boring: 0.85 },
+  jealous: { BadSmile2: 0.5, Angry2: 0.4 },
+
+  // --- Complex ---
+  surprised: { Shocked: 0.9 },
+  thinking: { Interesting: 0.55, Numbly: 0.15 },
+  confused: { Hau: 0.7 },
+  embarrassed: { Shy: 0.85 },
+  nostalgic: { Sad2: 0.35, Smile2: 0.35, Relaxy: 0.2 },
+  dreamy: { InWonder: 0.6, Relaxy: 0.3 },
+  determined: { Healthy: 0.6, Angry4: 0.2 },
+  mischievous: { BadSmile1: 0.7, Taunt1: 0.2 },
+  curious: { Interesting: 0.8 },
+  melancholic: { Sad2: 0.6, Relaxy: 0.2 },
+};
 
 // Per-emotion head pose offsets (radians). Applied to the `head` bone on
 // top of whatever the sleep layer does to the neck. Positive pitch = look
@@ -132,6 +167,8 @@ export class EmotionController {
   private targetWeights: BlendShapeTarget = {};
   private currentWeights: Map<string, number> = new Map();
   private transitionSpeed = 3.0;
+  private activeMap: Record<EmotionName, BlendShapeTarget> =
+    STANDARD_EMOTION_MAP;
 
   // Head pose state (eased toward target per-frame so changes are smooth).
   private currentHeadPose: HeadPose = { pitch: 0, roll: 0, yaw: 0 };
@@ -142,6 +179,40 @@ export class EmotionController {
 
   setVRM(vrm: VRM) {
     this.vrm = vrm;
+    this.activeMap = this.resolveEmotionMap(vrm);
+    // Re-apply the current emotion so the new map takes effect immediately
+    const emotion = this.currentEmotion;
+    this.currentEmotion = "neutral";
+    this.setEmotion(emotion, this.intensity);
+  }
+
+  /** Per emotion, prefer the rich (Perula) entry when the model exposes
+   * every expression it needs; otherwise fall back to the standard-preset
+   * entry. Models are mixed freely: a partial match degrades per-emotion,
+   * not globally. */
+  private resolveEmotionMap(vrm: VRM): Record<EmotionName, BlendShapeTarget> {
+    const manager = vrm.expressionManager;
+    if (!manager) return STANDARD_EMOTION_MAP;
+
+    const has = (name: string) => manager.getExpression(name) != null;
+    const resolved = {} as Record<EmotionName, BlendShapeTarget>;
+    let richCount = 0;
+
+    for (const emotion of Object.keys(PERULA_EMOTION_MAP) as EmotionName[]) {
+      const rich = PERULA_EMOTION_MAP[emotion];
+      const richKeys = Object.keys(rich);
+      if (richKeys.length > 0 && richKeys.every(has)) {
+        resolved[emotion] = rich;
+        richCount++;
+      } else {
+        resolved[emotion] = STANDARD_EMOTION_MAP[emotion];
+      }
+    }
+
+    console.log(
+      `EmotionController: ${richCount}/28 emotions using rich model expressions`
+    );
+    return resolved;
   }
 
   setEmotion(emotion: EmotionName, intensity: number = 0.7) {
@@ -153,7 +224,7 @@ export class EmotionController {
     this.intensity = clampedIntensity;
 
     // Scale blend shape targets by intensity
-    const baseTargets = EMOTION_MAP[emotion] || {};
+    const baseTargets = this.activeMap[emotion] || {};
     this.targetWeights = {};
     for (const [key, value] of Object.entries(baseTargets)) {
       this.targetWeights[key] = value * clampedIntensity;
@@ -188,10 +259,24 @@ export class EmotionController {
 
     const lerpFactor = Math.min(1, delta * this.transitionSpeed);
 
-    for (const name of ALL_EXPRESSIONS) {
+    // Ease every expression touched by the current OR a previous emotion,
+    // so switching emotions fades the old shapes out instead of snapping.
+    const names = new Set<string>([
+      ...Object.keys(this.targetWeights),
+      ...this.currentWeights.keys(),
+    ]);
+
+    for (const name of names) {
       const target = this.targetWeights[name] ?? 0;
       const current = this.currentWeights.get(name) ?? 0;
       const newValue = current + (target - current) * lerpFactor;
+
+      if (target === 0 && newValue < 0.001) {
+        // Fully faded out — write the final 0 and stop tracking.
+        this.currentWeights.delete(name);
+        this.vrm.expressionManager.setValue(name, 0);
+        continue;
+      }
 
       this.currentWeights.set(name, newValue);
       this.vrm.expressionManager.setValue(name, newValue);

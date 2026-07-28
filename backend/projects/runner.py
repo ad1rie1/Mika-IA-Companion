@@ -29,7 +29,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from ai.quota import QuotaExceeded, current_project_id
-from ai.router import AIRole, ai_router
+from ai.router import AIRole, UnconfiguredRoleError, ai_router
 from projects import context_builder, schedule
 from utils.parsing import strip_markdown_json
 
@@ -251,6 +251,23 @@ class ProjectRunner:
                 duration_ms=int((time.time() - started) * 1000),
             )
             await self._log_error(project_id, "LLM timeout")
+            await self._bump_next_run(project_id)
+            return False
+        except UnconfiguredRoleError as exc:
+            logger.warning(
+                "Project %s: avance ignorée — IA non configurée: %s",
+                project_id, exc,
+            )
+            await self._save_prompt_history(
+                project_id=project_id,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                raw_response="",
+                parsed_output=None,
+                outcome="error",
+                duration_ms=int((time.time() - started) * 1000),
+            )
+            await self._log_error(project_id, f"IA non configurée: {exc}")
             await self._bump_next_run(project_id)
             return False
         except Exception:

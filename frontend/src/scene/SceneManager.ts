@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 
 export class SceneManager {
   public scene: THREE.Scene;
@@ -14,7 +15,9 @@ export class SceneManager {
     // Scene
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x1a1a2e);
-    this.scene.fog = new THREE.Fog(0x1a1a2e, 8, 15);
+    // Fog starts past the far walls (room is 8x8) so it only softens
+    // the corners, never washes out the character.
+    this.scene.fog = new THREE.Fog(0x1a1a2e, 10, 22);
 
     // Camera
     this.camera = new THREE.PerspectiveCamera(
@@ -23,21 +26,31 @@ export class SceneManager {
       0.1,
       100
     );
-    this.camera.position.set(0, 1.4, 3);
-    this.camera.lookAt(0, 1, 0);
+    this.camera.position.set(0, 1.35, 2.1);
+    this.camera.lookAt(0, 1.15, -0.5);
 
     // Renderer
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: false,
+      powerPreference: "high-performance",
     });
     this.renderer.setSize(container.clientWidth, container.clientHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.2;
+    this.renderer.toneMappingExposure = 1.15;
     container.prepend(this.renderer.domElement);
+
+    // Image-based environment lighting: gives PBR materials subtle
+    // reflections/fill without any external HDR asset. Kept faint —
+    // the room's own lights stay the visual authority (and Environment
+    // scales environmentIntensity with the sleep phase).
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    (this.scene as any).environmentIntensity = 0.3;
+    pmrem.dispose();
 
     // Resize
     window.addEventListener("resize", () => {

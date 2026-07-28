@@ -76,6 +76,12 @@ async def broadcast_to_websocket(
     profile = voice.profile_for(persona)
     payload["data"]["speak"] = screen.speak
     payload["data"]["voice_reason"] = screen.reason
+    # An error fallback ("j'ai eu un bug", quota, timeout) is shown as text
+    # but never voiced: hearing Mika speak her own error messages out loud
+    # reads as broken, while a silent chat line reads as informative.
+    if getattr(output, "ai_failed", False):
+        payload["data"]["speak"] = False
+        payload["data"]["voice_reason"] = "error_fallback_muted"
     payload["data"]["voice_persona"] = persona
     payload["data"]["voice_profile"] = {
         "pitch": profile.pitch, "rate": profile.rate, "gain": profile.gain,

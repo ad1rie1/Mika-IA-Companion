@@ -11,7 +11,7 @@ import asyncio
 import json
 import logging
 
-from ai.router import AIRole, ai_router
+from ai.router import AIRole, UnconfiguredRoleError, ai_router
 from utils.parsing import strip_markdown_json
 from conscience.types import InterpretedSignal
 from modules.types import ModuleEvent
@@ -183,6 +183,12 @@ class SignalInterpreter:
             return signal
         except asyncio.TimeoutError:
             logger.warning("Interpretation timed out for %s", event.event_type)
+            return self._fallback_signal(event)
+        except UnconfiguredRoleError as exc:
+            logger.warning(
+                "Interprétation heuristique pour %s — IA non configurée: %s",
+                event.event_type, exc,
+            )
             return self._fallback_signal(event)
         except Exception:
             logger.exception("Interpretation error for %s", event.event_type)

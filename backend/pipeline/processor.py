@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from django.conf import settings
 
 from ai.quota import QuotaExceeded
+from ai.router import UnconfiguredRoleError
 from emotion.engine import emotion_engine
 from emotion.types import Emotion, EmotionData
 from pipeline.broadcast import broadcast_to_websocket, emit_communication_event, persist_to_memory
@@ -79,6 +80,10 @@ class SpeechOutput:
     # Top-K emotion components for ambivalence display on the frontend.
     # List of {"emotion": str, "weight": float}.
     emotion_blend: list | None = None
+    # True when the text is an error fallback, not a real AI answer.
+    # Downstream: never spoken via TTS, and callers (conscience) must not
+    # count it as a successful act.
+    ai_failed: bool = False
 
 
 # -- Main entry point ---------------------------------------------------------
@@ -135,6 +140,19 @@ async def process_message(
         )
         ai_failed = True
         response_text = "Hmm, je reflechis plus lentement que prevu... Laisse-moi un instant."
+        emotion_data = EmotionData(emotion=Emotion.NEUTRAL, intensity=0.0)
+    except UnconfiguredRoleError as ure:
+        # Configuration error, not a runtime bug: no model is mapped to the
+        # role. One concise line — a traceback adds nothing actionable here.
+        logger.warning(
+            "IA non configurée (person=%s, source=%s): %s",
+            person_id, source, ure,
+        )
+        ai_failed = True
+        response_text = (
+            "Je ne suis pas encore configurée pour repondre... "
+            "Mon IA n'a pas de modele associe (Configuration > IA · Roles)."
+        )
         emotion_data = EmotionData(emotion=Emotion.NEUTRAL, intensity=0.0)
     except QuotaExceeded as qe:
         # Hit a daily/monthly LLM quota. Return a truthful short message
@@ -233,6 +251,7 @@ async def process_message(
             {"emotion": e.value, "weight": round(w, 2)}
             for e, w in msg_emotion.blend
         ],
+        ai_failed=ai_failed,
     )
 
     # 7. Broadcast to WebSocket (inner state attached so UI panels refresh).
@@ -241,6 +260,11 @@ async def process_message(
     #    replies. Skipped for internal triggers (Mika already decided
     #    deliberately; adding hesitation on top would be doubled latency)
     #    and for AI errors (fallback messages should come back fast).
+    #    An internal trigger that failed is NOT broadcast at all: nobody
+    #    asked a question, so an error fallback greeting/murmur would be
+    #    pure noise — silence is the valid outcome.
+    if ai_failed and perception.intent is Intent.INTERNAL_TRIGGER:
+        broadcast = False
     if broadcast:
         if not ai_failed:
             try:

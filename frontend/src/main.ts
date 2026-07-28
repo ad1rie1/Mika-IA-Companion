@@ -9,6 +9,8 @@ import {
 } from "./vtuber/EmotionController";
 import { AnimationMixer } from "./vtuber/AnimationMixer";
 import { GazeController } from "./vtuber/GazeController";
+import { IdleAnimator } from "./vtuber/IdleAnimator";
+import { HandAnimator } from "./vtuber/HandAnimator";
 import { LipSyncController } from "./audio/LipSyncController";
 import { TTSService } from "./audio/TTSService";
 import { WebSocketClient } from "./network/WebSocketClient";
@@ -87,6 +89,9 @@ async function init() {
   const emotionController = new EmotionController();
   const animationMixer = new AnimationMixer();
   const gazeController = new GazeController();
+  const idleAnimator = new IdleAnimator();
+  const handAnimator = new HandAnimator();
+  idleAnimator.attachHands(handAnimator);
   const lipSyncController = new LipSyncController();
   const emotionDisplay = new EmotionDisplay();
   const innerLifePanel = new InnerLifePanel();
@@ -103,6 +108,8 @@ async function init() {
     emotionController.setVRM(vrm);
     animationMixer.setVRM(vrm);
     gazeController.setVRM(vrm);
+    idleAnimator.setVRM(vrm);
+    handAnimator.setVRM(vrm);
     lipSyncController.setVRM(vrm);
     console.log("VTuber model ready");
   } catch (e) {
@@ -117,9 +124,13 @@ async function init() {
   const tts = new TTSService({
     onSpeakStart: () => {
       animationMixer.setSpeaking(true);
+      idleAnimator.setSpeaking(true);
+      handAnimator.setSpeaking(true);
     },
     onSpeakEnd: () => {
       animationMixer.setSpeaking(false);
+      idleAnimator.setSpeaking(false);
+      handAnimator.setSpeaking(false);
       lipSyncController.stop();
     },
     onAudioData: (analyser) => {
@@ -202,6 +213,8 @@ async function init() {
     animationMixer.setSleepPhase(phase);
     environment.setSleepPhase(phase);
     gazeController.setSleepPhase(phase);
+    idleAnimator.setSleepPhase(phase);
+    handAnimator.setSleepPhase(phase);
     // Sleep owns the neck bone. When asleep, stop applying emotion-
     // driven head pose to avoid layered conflicts (curious tilt +
     // sleep forward tilt = broken geometry).
@@ -225,6 +238,7 @@ async function init() {
     // Facial expression + gaze direction
     emotionController.setEmotion(emotion, intensity);
     gazeController.setEmotion(emotion, intensity);
+    handAnimator.setEmotion(emotion, intensity);
     emotionDisplay.setEmotion(emotion, intensity);
 
     // Ambivalence panel + rest of inner state
@@ -279,6 +293,41 @@ async function init() {
 
   ws.connect();
 
+  // Debug poses: Alt+P pins each idle pose in turn on the live model
+  // (the only reliable way to check clipping — axis conventions on this
+  // rig have burned every analytical guess so far), Alt+O resumes auto.
+  let poseToast: HTMLDivElement | null = null;
+  let poseToastTimer: number | null = null;
+  const showPoseToast = (text: string) => {
+    if (!poseToast) {
+      poseToast = document.createElement("div");
+      poseToast.style.cssText =
+        "position:fixed;bottom:16px;left:16px;z-index:9999;" +
+        "background:rgba(20,20,30,.85);color:#fff;padding:6px 12px;" +
+        "border-radius:8px;font:13px monospace;pointer-events:none;" +
+        "transition:opacity .3s";
+      document.body.appendChild(poseToast);
+    }
+    poseToast.textContent = text;
+    poseToast.style.opacity = "1";
+    if (poseToastTimer !== null) window.clearTimeout(poseToastTimer);
+    poseToastTimer = window.setTimeout(() => {
+      if (poseToast) poseToast.style.opacity = "0";
+    }, 2000);
+  };
+  document.addEventListener("keydown", (e) => {
+    if (!e.altKey || e.ctrlKey || e.metaKey) return;
+    const k = e.key.toLowerCase();
+    if (k === "p") {
+      e.preventDefault();
+      showPoseToast(`Pose: ${idleAnimator.cyclePose()} (Alt+O = auto)`);
+    } else if (k === "o") {
+      e.preventDefault();
+      idleAnimator.releasePose();
+      showPoseToast("Poses: auto");
+    }
+  });
+
   // Typing anywhere (outside another field) focuses the chat input, so you
   // can just start writing without clicking the box first.
   const chatInput = document.getElementById("chat-input") as HTMLTextAreaElement | null;
@@ -297,9 +346,11 @@ async function init() {
 
   // Update loop
   sceneManager.onUpdate((delta) => {
-    cameraController.update();
+    cameraController.update(delta);
     emotionController.update(delta);
     animationMixer.update(delta);
+    idleAnimator.update(delta);
+    handAnimator.update(delta);
     // Gaze runs after the mixer so the eye bone rotations aren't
     // overwritten by any higher-level pose logic further up.
     gazeController.update(delta);

@@ -27,7 +27,7 @@ from datetime import timedelta
 from asgiref.sync import sync_to_async
 from django.utils import timezone
 
-from ai.router import AIRole, ai_router
+from ai.router import AIRole, UnconfiguredRoleError, ai_router
 from utils.parsing import strip_markdown_json
 
 logger = logging.getLogger(__name__)
@@ -266,6 +266,9 @@ class NarrativeGenerator:
             )
         except asyncio.TimeoutError:
             logger.warning("Narrative generation timed out after %ds", NARRATIVE_TIMEOUT_SECONDS)
+            return None
+        except UnconfiguredRoleError as exc:
+            logger.warning("Narrative ignoré — IA non configurée: %s", exc)
             return None
         except Exception:
             logger.exception("Narrative LLM call failed")

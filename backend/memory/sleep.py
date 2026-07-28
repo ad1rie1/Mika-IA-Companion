@@ -44,7 +44,7 @@ from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.utils import timezone as tz
 
-from ai.router import AIRole, ai_router
+from ai.router import AIRole, UnconfiguredRoleError, ai_router
 from utils.parsing import strip_markdown_json
 
 logger = logging.getLogger(__name__)
@@ -569,6 +569,9 @@ class SleepCycle:
         except asyncio.TimeoutError:
             logger.warning("Sleep: journal LLM timed out")
             return None
+        except UnconfiguredRoleError as exc:
+            logger.warning("Sleep: journal ignoré — IA non configurée: %s", exc)
+            return None
         except Exception:
             logger.exception("Sleep: journal LLM failed")
             return None
@@ -742,6 +745,9 @@ class SleepCycle:
             )
         except asyncio.TimeoutError:
             logger.warning("Sleep: dream LLM timed out")
+            return None
+        except UnconfiguredRoleError as exc:
+            logger.warning("Sleep: rêve ignoré — IA non configurée: %s", exc)
             return None
         except Exception:
             logger.exception("Sleep: dream LLM failed")

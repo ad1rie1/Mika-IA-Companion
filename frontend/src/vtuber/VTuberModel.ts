@@ -41,6 +41,8 @@ export class VTuberModel {
           vrm.scene.position.set(0, 0, -0.5);
           vrm.scene.rotation.y = Math.PI; // Face camera
 
+          this.applyRestPose(vrm);
+
           this.scene.add(vrm.scene);
           this.vrm = vrm;
           this.model = gltf.scene;
@@ -57,6 +59,28 @@ export class VTuberModel {
         }
       );
     });
+  }
+
+  /** VRM files ship in T-pose (arms straight out — the rigging reference
+   * pose). Nothing re-poses the arms at runtime, so without this the
+   * avatar stands in the bind pose forever. Normalized rig convention
+   * (verified empirically on this rig): character faces -Z, left arm
+   * along -X, so positive Z rotation lowers the left arm. */
+  private applyRestPose(vrm: VRM) {
+    const humanoid = vrm.humanoid;
+    if (!humanoid) return;
+
+    const set = (bone: Parameters<typeof humanoid.getNormalizedBoneNode>[0], z: number) => {
+      const node = humanoid.getNormalizedBoneNode(bone);
+      if (node) node.rotation.z = z;
+    };
+
+    // ~66° down from horizontal: relaxed A-pose, arms along the body.
+    set("leftUpperArm", 1.15);
+    set("rightUpperArm", -1.15);
+    // Slight elbow follow-through so the arms don't look rigid.
+    set("leftLowerArm", 0.1);
+    set("rightLowerArm", -0.1);
   }
 
   update(delta: number) {

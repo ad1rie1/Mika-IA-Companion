@@ -908,6 +908,17 @@ class ConscienceEngine:
                 emit_event=False,
             )
 
+            if output.ai_failed:
+                # The AI call failed (unconfigured role, quota, timeout...):
+                # nothing was actually said. Leave observations pending and
+                # scheduled actions unexecuted so they retry after cooldown,
+                # and don't satisfy drives with a phantom act.
+                logger.warning(
+                    "Conscience act aborted [%s]: AI call failed — will retry "
+                    "after cooldown", reason,
+                )
+                return
+
             # Mark observations as acted
             for obs in ctx.pending_observations:
                 obs.status = "acted"

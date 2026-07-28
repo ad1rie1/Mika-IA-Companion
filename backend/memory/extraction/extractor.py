@@ -4,7 +4,7 @@ import logging
 
 from django.conf import settings
 
-from ai.router import AIRole, ai_router
+from ai.router import AIRole, UnconfiguredRoleError, ai_router
 from utils.parsing import strip_markdown_json
 
 EXTRACTION_TIMEOUT = 45  # seconds — prevent hanging the consolidation loop
@@ -177,6 +177,9 @@ class MemoryExtractor:
                 EXTRACTION_TIMEOUT, AIRole.MEMORY_EXTRACTION.value,
             )
             return []
+        except UnconfiguredRoleError as exc:
+            logger.warning("Extraction ignorée — IA non configurée: %s", exc)
+            return []
         except Exception:
             logger.exception("Extraction error (role=%s)", AIRole.MEMORY_EXTRACTION.value)
             return []
@@ -220,6 +223,9 @@ class MemoryExtractor:
                 system_prompt=self._get_system_prompt(),
                 user_prompt=user_prompt,
             )
+        except UnconfiguredRoleError as exc:
+            logger.warning("Appel IA ignoré — IA non configurée (role=%s): %s", role.value, exc)
+            return None
         except Exception:
             logger.exception("AI query failed (role=%s)", role.value)
             return None
@@ -260,6 +266,9 @@ class MemoryExtractor:
                     reason,
                 )
             return still_valid, max(0.0, min(1.0, confidence))
+        except UnconfiguredRoleError as exc:
+            logger.warning("Validity check ignoré — IA non configurée: %s", exc)
+            return True, 1.0
         except Exception:
             logger.exception("Validity check error")
             return True, 1.0  # Conservative: keep valid on error

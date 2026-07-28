@@ -2,7 +2,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 
-from ai.router import AIRole, ai_router
+from ai.router import AIRole, UnconfiguredRoleError, ai_router
 from modules.plugins.email.prompts import EMAIL_TRIAGE_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -65,6 +65,9 @@ class EmailAnalyzer:
             )
         except (json.JSONDecodeError, KeyError) as exc:
             logger.warning("Failed to parse email analysis: %s", exc)
+            return EmailAnalysis()
+        except UnconfiguredRoleError as exc:
+            logger.warning("Analyse email ignorée — IA non configurée: %s", exc)
             return EmailAnalysis()
         except Exception:
             logger.exception("Email analysis API error")
