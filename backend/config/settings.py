@@ -75,7 +75,7 @@ MIDDLEWARE = [
     # Only meaningful now that sessions carry authority: while every endpoint
     # was anonymous, a forged request bought an attacker nothing they couldn't
     # already do directly. With a logged-in owner session there are mutating
-    # endpoints worth forging — the dashboard rewrites provider API keys.
+    # endpoints worth forging — the admin rewrites provider API keys.
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
@@ -86,13 +86,13 @@ MIDDLEWARE = [
 # CSRF cookie/origin settings live just after the CORS + session block below,
 # because they derive their defaults from it.
 
-# Django's admin login doubles as the dashboard login when the gate is on:
+# Django's admin login doubles as the GestionSystème login when the gate is on:
 # both want a staff account, so there is no second credential to manage.
 LOGIN_URL = env("LOGIN_URL", default="/admin/login/")
 
 # Django ships these but does not enable them; without the list,
 # `validate_password` is a no-op and /auth/bootstrap would happily accept
-# "123" for the account that owns the dashboard — which holds the whole
+# "123" for the account that owns the admin — which holds the whole
 # conversation history and the provider API keys.
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
@@ -106,7 +106,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # frontend origin, keep CORS_ALLOW_ALL_ORIGINS=False + list CORS_ALLOWED_ORIGINS
 # and set CORS_ALLOW_CREDENTIALS=True.
 #
-# The wildcard is NOT the dev default: the dashboard API is unauthenticated,
+# The wildcard is NOT the dev default: the admin is unauthenticated by default,
 # so `*` let any page the user happened to visit read the whole conversation
 # history and rewrite the config (e.g. repoint ai.openai.base_url) from the
 # browser. The dev frontend origins are allow-listed explicitly instead.
@@ -227,12 +227,12 @@ VTUBER_NAME = env("VTUBER_NAME", default="Mika")
 # Role → provider:model mapping (defaults to Claude if not set)
 
 API_PORT = env.int("API_PORT", default=8000)
-# Loopback by default: the dashboard exposes the conversation history and the
+# Loopback by default: the admin exposes the conversation history and the
 # config editor (with provider API keys) and is unauthenticated unless
 # DASHBOARD_REQUIRE_AUTH is on. Set API_HOST=0.0.0.0 to serve the LAN — run.py
 # warns when that is combined with no auth gate.
 API_HOST = env("API_HOST", default="127.0.0.1")
-# When True, /dashboard/ (pages + API) requires an authenticated staff user.
+# When True, /gestion/ requires an authenticated staff user.
 # Off by default so a fresh single-user install isn't locked out of its own
 # admin before a superuser exists.
 DASHBOARD_REQUIRE_AUTH = env.bool("DASHBOARD_REQUIRE_AUTH", default=False)

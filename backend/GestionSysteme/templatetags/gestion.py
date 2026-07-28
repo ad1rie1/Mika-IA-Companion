@@ -47,6 +47,7 @@ def emo_style(name):
 
 
 register.filter("emo_tone", fmt.emotion_tone)
+register.filter("emo_fr", fmt.emotion_fr)
 
 
 @register.filter

@@ -32,7 +32,7 @@
                 <td><div class="cell-clamp">{{ r.summary }}</div></td>
                 <td>
                   {% if r.emotion %}
-                    <span class="emo" style="{{ r.emotion|emo_style }}">{{ r.emotion }}</span>
+                    <span class="emo" style="{{ r.emotion|emo_style }}">{{ r.emotion|emo_fr }}</span>
                   {% else %}—{% endif %}
                 </td>
                 <td>
@@ -49,7 +49,7 @@
                   </span>
                 </td>
                 <td class="fit">
-                  <span class="badge {% with tone=status_tones|get:r.status %}{% if tone %}badge-{{ tone }}{% endif %}{% endwith %}">{{ r.status }}</span>
+                  <span class="badge {% with tone=status_tones|get:r.status %}{% if tone %}badge-{{ tone }}{% endif %}{% endwith %}">{% with label=status_labels|get:r.status %}{{ label|default:r.status }}{% endwith %}</span>
                 </td>
                 <td class="fit muted" title="{{ r.created_at|dt_full }}">{{ r.created_at|ago }}</td>
               </tr>

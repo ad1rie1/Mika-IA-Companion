@@ -1,12 +1,14 @@
-"""Vues dashboard + routes HTTP de la Forge.
+"""Routes HTTP de la Forge, et exécution des vues déclarées par un module forgé.
 
-- Une page d'administration « Forge » (Option A générique, onglets) :
-  état des modules forgés, journal, stockage. Détail par module en modale.
-- Chaque vue déclarée par un module forgé devient une page sidebar
-  ``/dashboard/modules/forge/<module>__<vue>/`` — payload assaini
-  (aucun HTML brut d'un module forgé n'atteint le navigateur).
-- Routes techniques sous ``/api/modules/forge/`` pour piloter les
-  modules (list / command / source / logs) depuis curl ou le front.
+- ``build_routes`` monte ``/api/modules/forge/…`` (list / command / source /
+  logs) pour piloter les modules depuis curl ou le front.
+- ``_make_data_handler`` exécute le handler ``view_<clé>`` d'un module forgé
+  et borne sa charge utile. Il est appelé par ``panels.py``, qui en fait une
+  page dans l'espace de la Forge.
+
+Les pages d'administration vivaient ici du temps du ``dashboard`` ; elles sont
+dans ``panels.py`` depuis, avec la pagination et les filtres que le rendu
+serveur permet.
 """
 
 from __future__ import annotations

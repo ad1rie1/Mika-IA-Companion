@@ -1,0 +1,47 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block breadcrumbs %}
+<div class="crumbs">
+  <a href="{% url 'gestionsysteme:forge-apps' %}">Forge apps</a>
+  <span class="sep">/</span><span>{{ app_label }}</span>
+</div>
+{% endblock %}
+
+{% block tabs %}{% include "gestion/forge/_nav.html" %}{% endblock %}
+
+{% block page_actions %}
+{% comment %} Les commandes portent sur l'app nommée dans l'URL, pas sur une chaîne de
+   requête : le bouton « Effacer » ne doit jamais dépendre d'un paramètre
+   invisible à côté de lui. {% endcomment %}
+<div class="page-actions">
+  {% for cmd, label, confirm in commandes %}
+    <form method="post" action="{% url 'gestionsysteme:forge-app-command' app_name %}"
+          {% if confirm %}data-confirm="{{ confirm }}"{% endif %}>
+      {% csrf_token %}
+      <input type="hidden" name="commande" value="{{ cmd }}">
+      <button class="btn {% if cmd == 'erase' %}btn-danger{% endif %}" type="submit">{{ label }}</button>
+    </form>
+  {% endfor %}
+</div>
+{% endblock %}
+
+{% block content %}
+{% if info.status == "cassé" %}
+  <div class="alert alert-danger mb-4">
+    Cette app ne se charge pas. Son code et ses réglages restent lisibles ici —
+    c'est précisément ce qu'on vient consulter. Mika peut la corriger avec
+    <span class="mono">forge_write_module</span>, ou tu peux revenir à la
+    version précédente.
+  </div>
+{% elif not info.enabled %}
+  <div class="alert alert-warn mb-4">
+    App désactivée : elle ne tourne plus et ne reçoit plus d'événement. Son
+    code, ses réglages et ses données sont conservés.
+  </div>
+{% endif %}
+
+{% for block in blocks %}
+  {% include "gestion/partials/block.html" %}
+{% endfor %}
+{% endblock %}

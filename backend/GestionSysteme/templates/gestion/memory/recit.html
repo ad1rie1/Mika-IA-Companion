@@ -20,7 +20,7 @@
         <dt>Écrit le</dt><dd>{{ current.created_at|dt_full }}</dd>
         {% if current.dominant_mood %}
           <dt>Humeur dominante</dt>
-          <dd><span class="emo" style="{{ current.dominant_mood|emo_style }}">{{ current.dominant_mood }}</span></dd>
+          <dd><span class="emo" style="{{ current.dominant_mood|emo_style }}">{{ current.dominant_mood|emo_fr }}</span></dd>
         {% endif %}
         {% if current.key_themes %}
           <dt>Thèmes</dt>
@@ -46,7 +46,7 @@
               <div class="row-wrap mb-2">
                 <strong>{{ n.created_at|dt_full }}</strong>
                 {% if n.dominant_mood %}
-                  <span class="emo" style="{{ n.dominant_mood|emo_style }}">{{ n.dominant_mood }}</span>
+                  <span class="emo" style="{{ n.dominant_mood|emo_style }}">{{ n.dominant_mood|emo_fr }}</span>
                 {% endif %}
               </div>
               <div class="quote">{{ n.content }}</div>

@@ -16,7 +16,7 @@
           <div class="stat">
             <div class="stat-label mono">{{ a.person_id }}</div>
             <div class="stat-value">
-              <span class="emo" style="{{ a.emotion|emo_style }}">{{ a.emotion }}</span>
+              <span class="emo" style="{{ a.emotion|emo_style }}">{{ a.emotion|emo_fr }}</span>
             </div>
             <div class="meter {{ a.intensity|tone_ratio }} mt-2">
               <span style="width: {{ a.intensity|bar_width }}%;"></span>
@@ -74,7 +74,7 @@
               {% for s in summaries %}
                 <tr>
                   <td class="fit">{{ s.period_start|dt }}</td>
-                  <td><span class="emo" style="{{ s.dominant_emotion|emo_style }}">{{ s.dominant_emotion }}</span></td>
+                  <td><span class="emo" style="{{ s.dominant_emotion|emo_style }}">{{ s.dominant_emotion|emo_fr }}</span></td>
                   <td>
                     <div class="row">
                       <span class="meter {{ s.dominant_intensity|tone_ratio }}" style="flex:1; min-width:4rem;">
@@ -88,7 +88,7 @@
                   <td>
                     <span class="chips">
                       {% for nom, poids in s.emotion_distribution.items %}
-                        <span class="chip emo" style="{{ nom|emo_style }}">{{ nom }}
+                        <span class="chip emo" style="{{ nom|emo_style }}">{{ nom|emo_fr }}
                           <span class="emo-weight">{{ poids|num }}</span>
                         </span>
                       {% endfor %}
@@ -133,7 +133,7 @@
                 <tr>
                   <td class="fit muted" title="{{ s.created_at|dt_full }}">{{ s.created_at|ago }}</td>
                   <td class="fit mono text-xs">{{ s.person_id }}</td>
-                  <td><span class="emo" style="{{ s.primary_emotion|emo_style }}">{{ s.primary_emotion }}</span></td>
+                  <td><span class="emo" style="{{ s.primary_emotion|emo_style }}">{{ s.primary_emotion|emo_fr }}</span></td>
                   <td>
                     <div class="row">
                       <span class="meter {{ s.primary_intensity|tone_ratio }}" style="flex:1; min-width:4rem;">
@@ -143,7 +143,7 @@
                     </div>
                   </td>
                   <td>
-                    <span class="emo" style="{{ s.global_emotion|emo_style }}">{{ s.global_emotion }}
+                    <span class="emo" style="{{ s.global_emotion|emo_style }}">{{ s.global_emotion|emo_fr }}
                       <span class="emo-weight">{{ s.global_intensity|pct }}</span>
                     </span>
                   </td>

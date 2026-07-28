@@ -58,7 +58,7 @@
                 <td>
                   {% if o.emotional_reaction %}
                     <span class="emo" style="{{ o.emotional_reaction|emo_style }}">
-                      {{ o.emotional_reaction }}
+                      {{ o.emotional_reaction|emo_fr }}
                       <span class="emo-weight">{{ o.emotional_intensity|pct }}</span>
                     </span>
                   {% else %}—{% endif %}

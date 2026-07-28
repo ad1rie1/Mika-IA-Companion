@@ -199,7 +199,7 @@ class TestLockout:
 
     def test_last_dashboard_access_cannot_be_removed(self, item, backend, admin_user):
         # Superuser flag kept, staff flag dropped: /admin/ would still open,
-        # /dashboard/ would not — the middleware is staff-gated.
+        # /gestion/ would not — the middleware is staff-gated.
         with pytest.raises(ValidationError):
             backend.update_row(item, str(admin_user.pk), {"is_staff": False})
 

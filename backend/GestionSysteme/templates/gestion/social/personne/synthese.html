@@ -93,7 +93,7 @@
         {% for a in affects %}
           <div class="{% if not forloop.last %}mb-4{% endif %}">
             <div class="spread mb-2">
-              <span class="emo text-lg" style="{{ a.emotion|emo_style }}">{{ a.emotion }}</span>
+              <span class="emo text-lg" style="{{ a.emotion|emo_style }}">{{ a.emotion|emo_fr }}</span>
               <span class="tabular muted">{{ a.intensity|pct }}</span>
             </div>
             <div class="meter {{ a.intensity|tone_ratio }} mb-2">

@@ -26,7 +26,9 @@ async def complete_with_tools(
 ) -> tuple[str, list[str]]:
     """Route a tool-enabled completion to the CONVERSATION_TOOLS provider."""
     provider_name, model, _temp, internal = ai_router.resolve(AIRole.CONVERSATION_TOOLS)
-    provider = ai_router.get_provider(AIRole.CONVERSATION_TOOLS)
+    # provider_by_name rather than get_provider(role): the role is already
+    # resolved above, and resolving it twice re-reads ai.models from the DB.
+    provider = ai_router.provider_by_name(provider_name)
     logger.debug(
         "complete_with_tools: role=conversation_tools internal=%s provider=%s model=%s tools=%d",
         internal, provider_name, model, len(tools or []),

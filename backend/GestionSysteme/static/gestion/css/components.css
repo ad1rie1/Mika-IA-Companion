@@ -380,6 +380,45 @@ a.chip:hover { background: var(--surface-3); color: var(--text); text-decoration
 .meter-label { font-size: var(--fs-sm); color: var(--text-muted); }
 .meter-val { font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
 
+/* ── Frise ──────────────────────────────────────────────────────────────
+   Une série temporelle courte, rendue côté serveur : une barre par relevé,
+   hauteur = valeur, couleur = émotion (variable `--emo` posée en style
+   inline, comme pour `.emo`). Pas de canevas, pas de JS — la page reste
+   lisible sans script et le gabarit ne fabrique aucun balisage.
+
+   Les barres partagent la largeur restante (`flex: 1 1 0`), donc la frise
+   n'a pas besoin de connaître le nombre de points ; elle déborde en défilant
+   plutôt que d'écraser la page si la série grandit. */
+
+.timeline {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 72px;
+  padding: var(--sp-1) 0;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+.timeline-bar {
+  flex: 1 1 0;
+  min-width: 3px;
+  /* Un relevé d'intensité nulle reste visible : « rien ressenti » est une
+     mesure, pas une absence de mesure. */
+  min-height: 3px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: var(--emo, var(--text-subtle));
+}
+.timeline-axis {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-top: var(--sp-1);
+  font-size: var(--fs-xs);
+  color: var(--text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── Liste clé/valeur ───────────────────────────────────────────────── */
 
 .kv {
@@ -441,6 +480,38 @@ a.chip:hover { background: var(--surface-3); color: var(--text); text-decoration
 }
 .form-grid .field-full { grid-column: 1 / -1; }
 
+/* Alignement : les trois pistes d'un champ — libellé, description, contrôle —
+   sont portées par la LIGNE, pas par le champ.
+
+   Sans cela chaque champ empile librement, et comme les descriptions n'ont pas
+   la même hauteur (aucune, une ligne, deux), les saisies d'une même ligne
+   tombaient à trois hauteurs différentes. La sous-grille donne à chaque piste
+   la hauteur du plus grand de la ligne : les libellés commencent ensemble, les
+   saisies aussi. Rien ici ne dépend du nombre de champs ni de leur type — un
+   ConfigItem ajouté au registre s'y range tout seul.
+
+   Les gabarits `partials/field.html` et `partials/django_field.html` émettent
+   donc toujours les trois emplacements, description comprise même vide : un
+   emplacement absent décalerait le contrôle d'une piste. */
+.form-grid > .field {
+  display: grid;
+  grid-template-rows: subgrid;
+  grid-row: span 3;
+}
+.field-control { display: flex; flex-direction: column; min-width: 0; }
+/* Une description vide ne doit pas réserver sa marge : sur une ligne où aucun
+   champ n'en a, la piste doit disparaître. */
+.field-desc:empty { margin: 0; }
+
+/* Repli sans sous-grille (Safari < 16, Chrome < 117) : le contrôle est poussé
+   en bas du champ. Les saisies d'une ligne s'alignent quand même — jamais pire
+   que l'empilement d'origine, seulement moins exact si un champ porte une
+   note SOUS sa saisie. */
+@supports not (grid-template-rows: subgrid) {
+  .form-grid > .field { display: flex; flex-direction: column; }
+  .form-grid > .field > .field-control { margin-top: auto; }
+}
+
 .field { display: flex; flex-direction: column; min-width: 0; }
 .field-label {
   font-size: var(--fs-sm);
@@ -459,9 +530,11 @@ a.chip:hover { background: var(--surface-3); color: var(--text); text-decoration
 .field.has-error textarea,
 .field.has-error select { border-color: var(--danger); }
 
-/* Case à cocher : la boîte précède le libellé, tous deux cliquables. */
-.field-check { flex-direction: row; align-items: flex-start; gap: var(--sp-2); }
-.field-check > input { margin-top: 0.15rem; }
+/* Case à cocher : la boîte précède le libellé, tous deux cliquables. Elle
+   occupe la piste « libellé », ce qui la met à hauteur des libellés voisins
+   plutôt qu'à hauteur de leurs saisies. */
+.check-row { display: flex; align-items: flex-start; gap: var(--sp-2); }
+.check-row > input { margin-top: 0.15rem; }
 .field-check .field-label { margin-bottom: 0; font-weight: var(--fw-normal); }
 
 .field-flag {
@@ -496,10 +569,20 @@ a.chip:hover { background: var(--surface-3); color: var(--text); text-decoration
 
 /* ── Alertes / messages ─────────────────────────────────────────────── */
 
+/* Volontairement `block`, pas `flex`. Un conteneur flex *blockifie* ses
+   enfants : chaque <strong>, <em> ou <span> d'une phrase devient un élément
+   flexible, donc une colonne, et le texte se lit de travers — « Elle ne lie
+   [rien] toute seule » se rendait en trois colonnes juxtaposées. Neuf des
+   alertes du site étaient dans ce cas, et l'écrire cassé est la façon
+   naturelle de l'écrire : le contournement (envelopper le contenu dans un
+   <div>) n'était appliqué qu'une fois sur trois.
+
+   Une alerte qui veut vraiment deux colonnes (icône + texte, texte + bouton)
+   met le flex sur un enfant à elle, pas sur le conteneur que tout le monde
+   remplit de prose. */
 .alert {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--sp-3);
+  display: block;
+  line-height: var(--lh-base);
   padding: var(--sp-3) var(--sp-4);
   border: 1px solid var(--border);
   border-left: 3px solid var(--text-subtle);

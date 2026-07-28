@@ -61,7 +61,7 @@
               {% if f.render_kind == "badge" %}
                 <span class="badge {% if f.tone %}badge-{{ f.tone }}{% endif %}">{{ f.value }}</span>
               {% elif f.render_kind == "emotion" %}
-                <span class="emo" style="{{ f.value|emo_style }}">{{ f.value }}</span>
+                <span class="emo" style="{{ f.value|emo_style }}">{{ f.value|emo_fr }}</span>
               {% elif f.render_kind == "link" %}
                 <a href="{{ f.href }}">{{ f.value }}</a>
               {% elif f.render_kind == "mono" %}

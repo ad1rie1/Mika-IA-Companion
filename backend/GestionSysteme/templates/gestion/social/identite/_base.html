@@ -1,0 +1,48 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% comment %} Socle de la fiche identité — même découpage que la fiche personne :
+   le fil d'Ariane et la sous-navigation vivent ici, chaque onglet n'écrit que
+   son `panneau`. {% endcomment %}
+
+{% block breadcrumbs %}
+<div class="crumbs">
+  <a href="{% url 'gestionsysteme:social-tab' 'identites' %}">Identités</a>
+  <span class="sep">/</span><span>{{ page_title }}</span>
+</div>
+{% endblock %}
+
+{% block page_actions %}
+  {% comment %} Le verdict est ce qu'on vient vérifier : il reste visible depuis
+     tous les onglets, sinon « pourquoi ce handle ne lit rien » demande un
+     aller-retour à chaque fois. {% endcomment %}
+  <div class="page-actions row-wrap">
+    <span class="badge {% if decision.may_disclose %}badge-ok{% else %}badge-danger{% endif %}"
+          title="En dessous de {{ threshold|num }}, seule la posture affective atteint le prompt.">
+      divulgation {% if decision.may_disclose %}autorisée{% else %}fermée{% endif %}
+    </span>
+    <span class="badge">{{ decision.level.name|lower }} · {{ decision.certainty|num }}</span>
+    {% if identity.entity_id %}
+      <a class="btn" href="{% url 'gestionsysteme:person-detail' identity.entity_id %}">
+        Fiche de {{ identity.entity.name }}
+      </a>
+    {% endif %}
+  </div>
+{% endblock %}
+
+{% block tabs %}
+<nav class="tabs" aria-label="Sections de la fiche">
+  {% for t in identity_tabs %}
+    <a class="tab"
+       href="{% url 'gestionsysteme:identity-detail-tab' identity.pk t.key %}"
+       {% if active_identity_tab == t.key %}aria-current="page"{% endif %}>
+      {{ t.label }}
+      {% with n=identity_counts|get:t.key %}
+        {% if n %}<span class="tab-count">{{ n }}</span>{% endif %}
+      {% endwith %}
+    </a>
+  {% endfor %}
+</nav>
+{% endblock %}
+
+{% block content %}{% block panneau %}{% endblock %}{% endblock %}

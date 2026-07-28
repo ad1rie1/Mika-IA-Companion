@@ -1,0 +1,27 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block breadcrumbs %}
+<div class="crumbs">
+  <a href="{% url 'gestionsysteme:forge-apps' %}">Forge apps</a>
+  <span class="sep">/</span>
+  <a href="{% url 'gestionsysteme:forge-app' app_name %}">{{ app_label }}</a>
+  <span class="sep">/</span><span>{{ panel.label }}</span>
+</div>
+{% endblock %}
+
+{% block tabs %}{% include "gestion/forge/_nav.html" %}{% endblock %}
+
+{% block content %}
+{% comment %} Le contenu vient d'un handler écrit par Mika, exécuté dans le bac à sable.
+   Il a *déclaré* des colonnes et des lignes ; la mise en forme appartient à
+   GestionSystème. Une app forgée ne peut donc produire aucun balisage — ce
+   n'est pas assaini, ce n'est jamais lu. {% endcomment %}
+{% for block in blocks %}
+  {% include "gestion/partials/block.html" %}
+{% empty %}
+  <div class="card"><div class="card-body">
+    <div class="empty">Cette page n'a rien produit.</div>
+  </div></div>
+{% endfor %}
+{% endblock %}

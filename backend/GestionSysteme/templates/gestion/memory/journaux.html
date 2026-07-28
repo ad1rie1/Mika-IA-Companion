@@ -19,7 +19,7 @@
             <div class="row-wrap mb-2">
               <strong>{{ j.date|dt }}</strong>
               {% if j.dominant_emotion %}
-                <span class="emo" style="{{ j.dominant_emotion|emo_style }}">{{ j.dominant_emotion }}</span>
+                <span class="emo" style="{{ j.dominant_emotion|emo_style }}">{{ j.dominant_emotion|emo_fr }}</span>
               {% endif %}
               <span class="chip">{{ j.word_count }} mots</span>
               {% for p in j.persons_interacted %}<span class="chip">{{ p }}</span>{% endfor %}
@@ -48,7 +48,7 @@
             <div class="row-wrap mb-2">
               <strong>Nuit du {{ d.night_of|dt }}</strong>
               <span class="badge {% if d.dream_type == 'nightmare' %}badge-danger{% elif d.dream_type == 'pleasant' %}badge-ok{% endif %}">{{ d.dream_type }}</span>
-              {% if d.emotion %}<span class="emo" style="{{ d.emotion|emo_style }}">{{ d.emotion }}</span>{% endif %}
+              {% if d.emotion %}<span class="emo" style="{{ d.emotion|emo_style }}">{{ d.emotion|emo_fr }}</span>{% endif %}
               <span class="chip">vivacité {{ d.vividness|pct }}</span>
               {% if d.recalled_at %}
                 <span class="chip" title="{{ d.recalled_at|dt_full }}">rappelé</span>

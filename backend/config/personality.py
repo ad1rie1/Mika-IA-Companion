@@ -5,7 +5,7 @@ from django.conf import settings
 
 from emotion.circadian import CircadianProfile, profile_from_yaml
 from emotion.types import Emotion
-from emotion.state import Temperament
+from emotion.state import Temperament, load_temperament
 
 
 class Personality:
@@ -81,19 +81,17 @@ class Personality:
 
     @property
     def temperament(self) -> Temperament:
-        raw = self._data.get("temperament", {})
-        default_mood_str = raw.get("default_mood", "happy")
-        try:
-            default_mood = Emotion(default_mood_str)
-        except ValueError:
-            default_mood = Emotion.HAPPY
-        return Temperament(
-            volatility=float(raw.get("volatility", 0.7)),
-            intensity_base=float(raw.get("intensity_base", 0.6)),
-            recovery_speed=float(raw.get("recovery_speed", 0.5)),
-            default_mood=default_mood,
-            global_bleed=float(raw.get("global_bleed", 0.3)),
-        )
+        """Le tempérament effectif — lu depuis la **configuration**, pas d'ici.
+
+        Le bloc ``temperament:`` a quitté ``personality.yaml`` : il ne se
+        rédige pas, il se règle, et l'y laisser en second déclarant aurait
+        rendu possible qu'un fichier et le tableau de bord annoncent deux
+        valeurs différentes pour un même curseur. L'accesseur reste sur
+        ``personality`` parce que c'est là que tous les appelants le
+        cherchent, et parce que le tempérament reste conceptuellement une
+        propriété du personnage.
+        """
+        return load_temperament()
 
     def to_system_prompt(
         self,

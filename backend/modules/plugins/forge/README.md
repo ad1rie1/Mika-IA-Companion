@@ -20,10 +20,10 @@ data/forge_modules/
 | Capacité | Comment |
 |----------|---------|
 | Stockage / « BDD » | `api.storage.set/get/delete/find/keys/count/clear(collection, ...)` — clé/valeur JSON par collections, isolé par module, quotas (`forge.max_records_per_module`, `forge.max_value_kb`) |
-| Config utilisateur | section `config:` du manifest → apparaît dans **Dashboard ▸ Configuration ▸ « Forge · \<titre\> »** (types scalaires, `secret`, `select`, et `record_list` pour les listes d'objets). Lu via `api.config.get(key)` / `api.config.rows(key)` |
+| Config utilisateur | section `config:` du manifest → apparaît dans **l'espace de l'app** (`/gestion/forge/<nom>/configuration/`), pas dans la Configuration du cœur (types scalaires, `secret`, `select`, et `record_list` pour les listes d'objets). Lu via `api.config.get(key)` / `api.config.rows(key)` |
 | Planification | `schedule:` du manifest — `interval:30s/5m/2h`, `cron:0 9 * * MON-FRI`, `idle:15m`, `manual` → appelle `on_tick(api)` |
 | Réveil / signaux | `events:` du manifest (motifs `rss.new_entry`, `chat.*`, `forge.autre.*`) → `on_event(api, event)` ; `api.emit(type, data)` émet `forge.<module>.<type>` sur le bus (Conscience + autres modules) ; `api.notify_ai(...)` réveille Mika (cooldown `forge.notify_cooldown_s`) |
-| Pages dashboard | `views:` du manifest + fonctions `view_<key>(api, params)` / `view_<key>_detail(api, item_id)` → pages auto-montées dans la sidebar sous `/dashboard/modules/forge/<module>__<vue>/` (rendu générique Option A, payload assaini — pas de HTML brut) |
+| Pages | `views:` du manifest + fonction `view_<key>(api, params)` → page auto-montée dans l'espace de l'app sous `/gestion/forge/<module>/p/<vue>/`. La charge utile est convertie en **cellules typées** : un module forgé ne peut produire aucun balisage. |
 | Contexte prompt | `context: true` + `get_context(api) -> str` → injecté dans le prompt système de Mika (rafraîchi après chaque tick/événement) |
 | HTTP sortant | `api.http_get(url)` — uniquement vers les hôtes de `allowed_domains:`, redirections désactivées, IP privées/loopback bloquées, réponse tronquée |
 | Journal | `api.log/warn/error(...)` + `print(...)` → table `ForgeLog`, visible dans la page « Forge » et via `forge_read_logs` |
@@ -93,11 +93,26 @@ retourne résultat + logs — la boucle d'itération), `forge_read_logs`.
 /api/modules/forge/command` (`{"name", "command", "confirm"?}`), `GET
 /api/modules/forge/source?name=`, `GET /api/modules/forge/logs?name=&limit=`.
 
-**Dashboard** : page « Forge » (onglets Modules / Journal / Stockage,
-détail par module avec manifest + code + logs, action « Tout recharger »).
-Les sections de config des modules forgés apparaissent dans l'éditeur de
-configuration standard ; les valeurs survivent aux reload/disable (elles ne
-sont supprimées qu'avec la base).
+**GestionSystème — deux endroits, et c'est délibéré** :
+
+- *L'atelier*, `/gestion/modules/forge/` : ce que produit la Forge vue de
+  haut — table de toutes les apps, journal filtrable, stockage par
+  collection, action « Tout recharger ». Plus les réglages du bac à sable
+  ci-dessous.
+- *Les apps*, `/gestion/forge/` (menu « Forge apps », juste sous « Forge ») :
+  la liste, puis **un espace par app** — état, source, journal, commandes
+  (`enable/disable/reload/rollback/reset_storage/erase`), sa configuration
+  et ses pages sous une seule sous-navigation.
+
+Les sections de config des apps n'apparaissent **pas** dans la Configuration
+du cœur : elles sont créées à l'exécution par du code que Mika écrit, et
+elles s'y rangeaient entre les clés d'API et les seuils de la conscience,
+à trois écrans des pages de l'app concernée.
+
+La section est enregistrée depuis le **manifeste**, avant tout chargement :
+les réglages d'une app désactivée ou cassée restent lisibles et modifiables
+— c'est l'écran sur lequel on atterrit pour la réparer. Les valeurs
+survivent aux reload/disable ; seul `erase` les retire.
 
 ## Exemple complet
 

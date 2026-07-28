@@ -31,7 +31,7 @@ from typing import Any, Iterable, Sequence
 
 from configs.registry import registry
 from configs.service import ValidationError, config_service
-from configs.types import ConfigItem
+from configs.types import ConfigItem, choice_options, choice_values
 
 logger = logging.getLogger(__name__)
 
@@ -114,13 +114,13 @@ class BoundField:
 
     @property
     def choices(self) -> tuple:
-        return tuple(self.item.choices or ())
+        return choice_values(self.item.choices)
 
     @property
     def options(self) -> list[tuple[str, str]]:
         """Couples (valeur, libellé) — même forme que pour un champ de ligne,
         pour que le gabarit de champ n'ait qu'un seul chemin de rendu."""
-        return [(str(c), str(c)) for c in (self.item.choices or ())]
+        return choice_options(self.item.choices)
 
     @property
     def step(self) -> str:
@@ -291,7 +291,7 @@ class RecordField:
         silencieusement son modèle parce que le fournisseur ne le liste plus.
         """
         if self.dynamic_options is None:
-            return [(str(c), str(c)) for c in (self.item.choices or ())]
+            return choice_options(self.item.choices)
         options = list(self.dynamic_options)
         courante = self.text_value
         if courante and courante not in {v for v, _ in options}:
@@ -337,7 +337,7 @@ class RecordField:
 
     @property
     def choices(self) -> tuple:
-        return tuple(self.item.choices or ())
+        return choice_values(self.item.choices)
 
     @property
     def step(self) -> str:

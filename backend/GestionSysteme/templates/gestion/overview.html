@@ -30,7 +30,7 @@
     <div class="card-body">
       {% if mood %}
         <div class="row-wrap mb-3">
-          <span class="emo text-lg" style="{{ mood.label|emo_style }}">{{ mood.label }}</span>
+          <span class="emo text-lg" style="{{ mood.label|emo_style }}">{{ mood.label|emo_fr }}</span>
           <span class="tabular muted">{{ mood.intensity|pct }}</span>
           {% if mood.is_default %}
             <span class="badge" title="Son humeur de repos, définie par le tempérament">au repos</span>
@@ -48,7 +48,7 @@
           <div class="chips mb-3">
             {% for b in mood.blend %}
               <span class="emo" style="{{ b.emotion|emo_style }}">
-                {{ b.emotion }} <span class="emo-weight">{{ b.weight|pct }}</span>
+                {{ b.emotion|emo_fr }} <span class="emo-weight">{{ b.weight|pct }}</span>
               </span>
             {% endfor %}
           </div>
@@ -145,7 +145,7 @@
             <span class="chip">{{ sleep.dream.dream_type }}</span>
             <span class="chip">vivacité {{ sleep.dream.vividness|pct }}</span>
             {% if sleep.dream.emotion %}
-              <span class="emo" style="{{ sleep.dream.emotion|emo_style }}">{{ sleep.dream.emotion }}</span>
+              <span class="emo" style="{{ sleep.dream.emotion|emo_style }}">{{ sleep.dream.emotion|emo_fr }}</span>
             {% endif %}
           </div>
         {% else %}

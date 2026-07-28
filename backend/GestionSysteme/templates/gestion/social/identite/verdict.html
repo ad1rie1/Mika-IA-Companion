@@ -1,0 +1,176 @@
+{% extends "gestion/social/identite/_base.html" %}
+{% load gestion %}
+
+{% block panneau %}
+<section class="split mb-6">
+  <div class="card">
+    <div class="card-head">
+      <h3>Verdict</h3>
+      <span class="card-sub">tel que le prompt le calcule</span>
+    </div>
+    <div class="card-body">
+      <p class="narrative mb-4">{{ decision.description }}</p>
+
+      <div class="spread mb-2">
+        <span class="meter-label">Certitude effective</span>
+        <span class="meter-val">{{ decision.certainty|num }}</span>
+      </div>
+      <div class="meter {{ decision.certainty|tone_ratio }} mb-4">
+        <span style="width: {{ decision.certainty|bar_width }}%;"></span>
+      </div>
+
+      <dl class="kv">
+        <dt>Niveau</dt><dd><span class="badge">{{ decision.level.name|lower }}</span></dd>
+        <dt>Confiance du canal</dt><dd>{{ decision.trust.value }}</dd>
+        <dt>Divulgation privée</dt>
+        <dd>
+          {% if decision.may_disclose %}
+            <span class="badge badge-ok">autorisée</span>
+          {% else %}
+            <span class="badge badge-danger">fermée</span>
+            <div class="field-hint">Seuil : {{ threshold|num }}. En dessous, seule la posture affective est injectée — l'historique de la personne ne l'est pas.</div>
+          {% endif %}
+        </dd>
+        <dt>Entité mémoire</dt>
+        <dd>
+          {% if identity.entity_id %}
+            <a href="{% url 'gestionsysteme:person-detail' identity.entity_id %}">{{ identity.entity.name }}</a>
+          {% else %}
+            <span class="badge badge-warn">non liée</span>
+            <div class="field-hint">Sans liaison, la mémoire par personne ne se résout pas : le profil, les engagements et l'historique ne sont rattachés à rien.</div>
+          {% endif %}
+        </dd>
+        {% if identity.bound_at %}
+          <dt>Liée le</dt><dd>{{ identity.bound_at|dt_full }} <small>via {{ identity.bound_via }}</small></dd>
+        {% endif %}
+        {% if identity.binding_reason %}
+          <dt>Motif</dt><dd>{{ identity.binding_reason }}</dd>
+        {% endif %}
+        <dt>Vue</dt><dd title="{{ identity.last_seen|dt_full }}">{{ identity.last_seen|ago }}</dd>
+      </dl>
+    </div>
+  </div>
+
+  {% comment %} L'écart entre la valeur en base et le verdict n'est pas du bruit :
+     c'est le plancher et le plafond du canal, la seule règle qui fasse qu'une
+     revendication en salon public ne vaudra jamais un login. Sans elle à
+     l'écran, « j'ai enregistré trois preuves et rien ne bouge » n'a aucune
+     explication consultable. {% endcomment %}
+  <div class="card">
+    <div class="card-head">
+      <h3>Comment on arrive là</h3>
+      <span class="card-sub">servi depuis <span class="mono">identity/trust.py</span>, jamais recopié</span>
+    </div>
+    <div class="card-body">
+      <dl class="kv">
+        <dt title="La valeur en base, avant plancher et plafond">Valeur stockée</dt>
+        <dd class="tabular">{{ stored|num }}</dd>
+        <dt>Canal le plus permissif</dt><dd>{{ channel_trust.value }}</dd>
+        <dt>Plancher du canal</dt>
+        <dd class="tabular">
+          {{ floor|num }}
+          {% if raised_by_floor %}<span class="badge badge-info">relève</span>{% endif %}
+        </dd>
+        <dt>Plafond du canal</dt>
+        <dd class="tabular">
+          {{ ceiling|num }}
+          {% if capped_by_ceiling %}<span class="badge badge-warn">borne</span>{% endif %}
+        </dd>
+        <dt>Résultat</dt><dd class="tabular">{{ decision.certainty|num }}</dd>
+        <dt title="Somme des poids appliqués par les preuves acceptées">Total du registre</dt>
+        <dd class="tabular">{{ ledger_total|num }}</dd>
+        <dt>Seuil de confiance</dt><dd class="tabular">{{ confident_threshold|num }}</dd>
+        <dt>Seuil de divulgation</dt><dd class="tabular">{{ threshold|num }}</dd>
+      </dl>
+
+      {% if capped_by_ceiling %}
+        <div class="alert alert-warn mt-4">
+          <div>
+            Le plafond mord : les preuves accumulées valent {{ floored|num }},
+            le canal <span class="mono">{{ channel_trust.value }}</span> ne
+            laisse pas dépasser {{ ceiling|num }}. Enregistrer d'autres preuves
+            sur ce canal ne changera plus rien — c'est délibéré.
+          </div>
+        </div>
+      {% elif raised_by_floor %}
+        <div class="alert alert-info mt-4">
+          <div>
+            Le plancher relève : le canal
+            <span class="mono">{{ channel_trust.value }}</span> garantit
+            {{ floor|num }} à lui seul, au-dessus des {{ stored|num }} en base.
+            C'est pourquoi une session fraîchement authentifiée n'est pas
+            « inconnue » pour le prompt.
+          </div>
+        </div>
+      {% endif %}
+
+      <p class="field-desc mt-4">
+        Le détail complet des planchers, plafonds et poids est sur
+        <a href="{% url 'gestionsysteme:social-tab' 'politique' %}">Politique de confiance</a>.
+      </p>
+    </div>
+  </div>
+</section>
+
+{% if pending_claims %}
+  <section class="card mb-6">
+    <div class="card-head">
+      <h3>En attente de décision</h3>
+      <span class="card-sub">une revendication n'est pas comptée tant que personne n'a tranché</span>
+    </div>
+    <div class="card-body">
+      <div class="col">
+        {% for c in pending_claims %}
+          <div class="spread">
+            <span>
+              <strong>{{ c.claimed_name|default:"—" }}</strong>
+              <span class="badge">{{ c.get_kind_display }}</span>
+              <span class="muted text-xs">{{ c.created_at|ago }}</span>
+            </span>
+            <a class="btn btn-sm" href="{% url 'gestionsysteme:identity-detail-tab' identity.pk 'preuves' %}?statut=pending">Traiter</a>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+{% endif %}
+
+<section class="card">
+  <div class="card-head">
+    <h3>Dernières preuves</h3>
+    <span class="card-sub">
+      <a href="{% url 'gestionsysteme:identity-detail-tab' identity.pk 'preuves' %}">voir le registre complet ({{ identity_counts.preuves }})</a>
+    </span>
+  </div>
+  {% if recent_claims %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead><tr><th class="fit">Quand</th><th>Se dit</th><th class="fit">Type</th><th class="num">Poids</th><th class="fit">État</th></tr></thead>
+          <tbody>
+            {% for c in recent_claims %}
+              <tr>
+                <td class="fit muted" title="{{ c.created_at|dt_full }}">{{ c.created_at|ago }}</td>
+                <td>{{ c.claimed_name|default:"—" }}</td>
+                <td class="fit"><span class="badge">{{ c.get_kind_display }}</span></td>
+                <td class="num">{{ c.applied_weight|num }}</td>
+                <td class="fit">
+                  <span class="badge {% if c.status == 'pending' %}badge-warn{% elif c.status == 'accepted' %}badge-ok{% else %}badge-danger{% endif %}">{{ c.get_status_display }}</span>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {% else %}
+    <div class="card-body">
+      <div class="empty">
+        <div class="empty-title">Aucune preuve enregistrée</div>
+        La certitude affichée ne vient donc d'aucune conversation : elle est
+        entièrement celle que le canal accorde de lui-même.
+      </div>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

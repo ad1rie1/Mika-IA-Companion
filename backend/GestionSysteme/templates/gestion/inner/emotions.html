@@ -2,7 +2,7 @@
 {% load gestion %}
 
 {% block content %}
-<section class="split mb-6">
+<section class="mb-6">
   <div class="card">
     <div class="card-head">
       <h3>Humeur globale</h3>
@@ -10,7 +10,7 @@
     </div>
     <div class="card-body">
       <div class="row-wrap mb-3">
-        <span class="emo text-lg" style="{{ global_mood.label|emo_style }}">{{ global_mood.label }}</span>
+        <span class="emo text-lg" style="{{ global_mood.label|emo_style }}">{{ global_mood.label|emo_fr }}</span>
         <span class="tabular muted">{{ global_mood.intensity|pct }}</span>
       </div>
       <div class="meter {{ global_mood.intensity|tone_ratio }} mb-4">
@@ -22,7 +22,7 @@
         <div class="chips mb-4">
           {% for b in global_mood.blend %}
             <span class="emo" style="{{ b.emotion|emo_style }}">
-              {{ b.emotion }} <span class="emo-weight">{{ b.weight|pct }}</span>
+              {{ b.emotion|emo_fr }} <span class="emo-weight">{{ b.weight|pct }}</span>
             </span>
           {% endfor %}
         </div>
@@ -35,37 +35,42 @@
         <dd class="tabular">{{ global_mood.velocity|num }}</dd>
       </dl>
     </div>
-  </div>
-
-  <div class="card">
-    <div class="card-head"><h3>Tempérament</h3></div>
-    <div class="card-body">
-      <p class="field-desc">
-        Constantes du personnage, lues depuis <span class="mono">personality.yaml</span>.
-        Elles définissent le point de repos de l'oscillateur et sa façon d'y revenir.
+    <div class="card-foot">
+      <p class="field-hint" style="margin:0;">
+        Le point de repos vers lequel cette humeur revient, et la vitesse à
+        laquelle elle y revient, sont réglés par le tempérament —
+        <a href="{{ temperament_url }}">Configuration · Émotion</a>.
       </p>
-      <dl class="kv">
-        <dt>Humeur par défaut</dt>
-        <dd><span class="emo" style="{{ temperament.default_mood|emo_style }}">{{ temperament.default_mood }}</span></dd>
-        <dt title="Amplitude de réaction à un stimulus">Volatilité</dt><dd class="tabular">{{ temperament.volatility|num }}</dd>
-        <dt>Intensité de base</dt><dd class="tabular">{{ temperament.intensity_base|num }}</dd>
-        <dt title="Vitesse de retour au repos">Récupération</dt><dd class="tabular">{{ temperament.recovery_speed|num }}</dd>
-        <dt title="Part de l'affect envers une personne qui déteint sur l'humeur globale">Diffusion globale</dt>
-        <dd class="tabular">{{ temperament.global_bleed|num }}</dd>
-      </dl>
     </div>
   </div>
 </section>
 
 {% if analytics %}
   <section class="card mb-6">
-    <div class="card-head"><h3>Analyses</h3></div>
+    <div class="card-head">
+      <h3>Analyses</h3>
+      <span class="card-sub">agrégat des historiques par personne, en mémoire vive</span>
+    </div>
     <div class="card-body">
       <dl class="kv">
-        {% for key, value in analytics.items %}
-          <dt>{{ key|humanize_key }}</dt><dd>{{ value }}</dd>
-        {% endfor %}
+        <dt>Réactions enregistrées</dt>
+        <dd class="tabular">{{ analytics.total_interactions }}</dd>
+        <dt>Personnes suivies</dt>
+        <dd class="tabular">{{ analytics.persons_tracked }}</dd>
+        <dt>Émotion dominante</dt>
+        <dd><span class="emo" style="{{ analytics.dominant_emotion|emo_style }}">{{ analytics.dominant_emotion|emo_fr }}</span></dd>
       </dl>
+
+      {% if analytics.distribution %}
+        <div class="field-desc mt-4">Répartition</div>
+        <div class="chips">
+          {% for d in analytics.distribution %}
+            <span class="chip emo" style="{{ d.emotion|emo_style }}">{{ d.emotion|emo_fr }}
+              <span class="emo-weight">{{ d.weight|pct }}</span>
+            </span>
+          {% endfor %}
+        </div>
+      {% endif %}
     </div>
   </section>
 {% endif %}
@@ -97,7 +102,7 @@
             {% for p in people_page.rows %}
               <tr>
                 <td class="mono">{{ p.person_id }}</td>
-                <td><span class="emo" style="{{ p.emotion|emo_style }}">{{ p.emotion }}</span></td>
+                <td><span class="emo" style="{{ p.emotion|emo_style }}">{{ p.emotion|emo_fr }}</span></td>
                 <td>
                   <div class="row">
                     <span class="meter {{ p.intensity|tone_ratio }}" style="flex:1; min-width:4rem;">

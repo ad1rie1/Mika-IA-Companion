@@ -48,242 +48,182 @@ Les modules inactifs (config manquante, `is_available()==False`) apparaissent qu
 
 ---
 
-## Dashboard views — ajouter des pages au dashboard
+## Panneaux — ajouter des pages à l'espace du module
 
-Chaque module peut surfacer plusieurs **pages de visualisation** dans la sidebar du dashboard (boîte de réception, historique, stats, comptes…). Le système est symétrique à `config_schema()` : le module déclare, le dashboard découvre et monte automatiquement.
+Un module déclare `get_panels()` et reçoit un **espace** sous
+`/gestion/modules/<nom>/` : son état, son cycle de vie, sa configuration et
+ses pages, dans une seule sous-navigation. L'espace existe dès que le module
+est *enregistré*, qu'il tourne ou non — c'est justement quand il ne démarre
+pas qu'on a besoin de ses réglages.
+
+### Le principe : tu décris, tu ne rends pas
+
+Un gestionnaire renvoie des **blocs typés** faits de **cellules typées**. Tu
+déclares une intention (« ceci est un badge d'alerte », « ceci est une
+jauge ») ; la mise en forme appartient à GestionSystème.
+
+Ce n'est pas une contrainte esthétique. Le contrat précédent renvoyait du
+JSON qu'un script injectait via `innerHTML` : un module qui faisait transiter
+un corps d'e-mail, un article RSS ou une page aspirée obtenait du XSS stocké
+sur l'interface qui édite les clés d'API. Avec des cellules typées, le rendu
+n'a **aucun chemin** d'une donnée vers du balisage — la classe de bug a
+disparu au lieu d'être filtrée.
 
 ### Ce que tu obtiens gratuitement
 
-Pour chaque `ModuleView` déclarée, le shell du dashboard monte sans aucune configuration :
+- pagination et filtres pilotés par l'URL (partageables, compatibles retour arrière) ;
+- échappement automatique de Django sur tout ;
+- boutons d'action protégés par CSRF, qui conservent le contexte de l'écran ;
+- thème clair/sombre, tableaux adaptatifs, états vides ;
+- une page qui reste navigable même si ton panneau lève une exception.
 
-| Endpoint | Méthode | Qui consomme |
-|----------|---------|--------------|
-| `/dashboard/modules/<mod>/<view>/` | GET | Page HTML (template du module, sinon shell générique) |
-| `/dashboard/api/modules/<mod>/views` | GET | Liste des vues d'un module |
-| `/dashboard/api/modules/<mod>/views/<view>` | GET | Appelle `data_handler(request)` |
-| `/dashboard/api/modules/<mod>/views/<view>/items/<id>` | GET | Appelle `detail_handler(request, id)` |
-| `/dashboard/api/modules/<mod>/views/<view>/actions/<key>` | POST | Exécute l'action déclarée |
-
-Une vue est visible dans la sidebar uniquement si le module est **activé ET running**. Désactiver le module la fait disparaître.
-
-### Contrat `ModuleView` ([backend/modules/types.py](../types.py))
+### Exemple complet
 
 ```python
-ModuleView(
-    key            = "inbox",              # slug unique dans le module
-    label          = "Boîte de réception", # libellé sidebar
-    icon           = "✉",                  # un caractère
-    order          = 10,                   # ordre d'affichage
+# modules/plugins/todo/panels.py
+from GestionSysteme import panels as P
+from GestionSysteme import tables
 
-    data_handler   = async (request) -> dict,
-    detail_handler = async (request, item_id: str) -> dict | None,
-    id_field       = "id",                 # nom du champ ligne qui porte l'id
 
-    template       = None,                 # "email/inbox.html" pour opt-in custom
-    js             = None,                 # "/static/email/views/inbox.js"
+def liste(request):
+    from modules.plugins.todo.models import Tache
 
-    actions        = [ModuleViewAction(...), ...],
-)
-```
+    fs = tables.FilterSet(per_page=tables.read_per_page(request))
+    etat = fs.add(tables.select_filter(
+        request, "etat", "État", [("todo", "à faire"), ("done", "faite")],
+    ))
+    q = fs.add(tables.search_filter(request, "q", "Recherche"))
 
-```python
-ModuleViewAction(
-    key     = "mark_all_read",
-    label   = "Tout marquer comme lu",
-    handler = async (request) -> dict,
-    method  = "POST",
-    confirm = "Sûr ?",  # optionnel : prompt de confirmation côté UI
-)
-```
+    qs = Tache.objects.all()
+    if etat.value:
+        qs = qs.filter(status=etat.value)
+    if q.value:
+        qs = qs.filter(titre__icontains=q.value)
 
-### Deux façons de rendre une vue
+    page = tables.paginate(request, qs.order_by("-cree_le"), per_page=fs.per_page)
 
-#### Option A — shell générique (zéro fichier dans le module)
+    return P.Table(
+        caption="Tâches",
+        filters=fs,
+        columns=[
+            P.Column("Titre"),
+            P.Column("État", align="fit"),
+            P.Column("Avancement"),
+            P.Column("Créée", align="fit"),
+        ],
+        rows=[
+            P.Row(
+                # Rend la ligne cliquable : le détail est une URL, donc
+                # partageable, et le retour arrière ferme la fiche.
+                href=tables.url_with(request, tache=t.pk),
+                cells=(
+                    P.text(t.titre, clamp=True),
+                    P.badge(t.status, tone="ok" if t.status == "done" else "warn"),
+                    P.meter(t.progression),
+                    P.mono(t.cree_le.strftime("%d/%m %H:%M")),
+                ),
+            )
+            for t in page.rows
+        ],
+        page=page,
+        empty="Aucune tâche ne correspond à ces filtres.",
+    )
 
-Tu renvoies juste du JSON depuis tes handlers et le dashboard s'occupe du rendu. **Conventions de forme** comprises automatiquement par [dashboard/js/views/module_default.js](../../dashboard/static/dashboard/js/views/module_default.js) :
 
-**Liste paginée** (retourné par `data_handler`) :
-```json
-{
-  "columns": [{"key": "id", "label": "#"}, {"key": "subject", "label": "Sujet"}],
-  "rows":    [{"id": 1, "subject": "Hello"}, ...],
-  "total": 128, "page": 0, "limit": 25
-}
-```
-Query params standards (à lire dans `request.GET`) : `page`, `limit`, `q`. La pagination est de la responsabilité du handler.
+def tout_terminer(request):
+    from modules.plugins.todo.models import Tache
 
-**Détail** (retourné par `detail_handler`) :
-```json
-{"fields": [{"key":"from","label":"De","value":"alice@x"}, ...]}
-```
-ou n'importe quel dict plat → rendu en grille clé/valeur dans une modale.
-Si `detail_handler` est déclaré, le renderer ajoute automatiquement une colonne **"Voir"** aux lignes dont `row[id_field] != null`.
+    n = Tache.objects.filter(status="todo").update(status="done")
+    return P.Note(f"{n} tâche(s) terminée(s).", tone="ok")
 
-**Action** (retourné par `ModuleViewAction.handler`) : n'importe quel dict JSON-sérialisable. Un bouton par action est placé en tête de la vue.
 
-**Vue à onglets** (retourné par `data_handler`) — quand une page porte **plusieurs tables**, renvoie une clé `tabs` au lieu de `columns`/`rows`. Le shell rend une barre d'onglets (`Dash.tabs`, onglet actif mémorisé en `localStorage`) ; chaque onglet-table est **paginé côté client** automatiquement :
-```json
-{
-  "tabs": [
-    {"key": "unread", "label": "Non lus",
-     "columns": [{"key":"subject","label":"Sujet"}], "rows": [ ... ]},
-    {"key": "all",    "label": "Tous",
-     "columns": [{"key":"subject","label":"Sujet"}], "rows": [ ... ]},
-    {"key": "raw",    "label": "Brut", "html": "<p>markup maison</p>"}
-  ]
-}
-```
-Chaque onglet est soit une **table** (`columns` + `rows` → table paginée + bouton "Voir" si `detail_handler` est déclaré), soit du **HTML brut** (`html`), soit un **dict plat** rendu en grille clé/valeur. Comme tout le jeu de données arrive en un seul payload, la pagination des onglets est cliente — réserve ce format aux volumes raisonnables (sinon reste sur la liste paginée serveur ci-dessus, ou passe en Option B).
-
-Exemple (simplifié) :
-```python
-# modules/plugins/todo/views.py
-async def _list(request):
-    rows = await sync_to_async(
-        lambda: list(Task.objects.all().values("id", "title", "done"))
-    )()
-    return {
-        "columns": [{"key":"id","label":"#"}, {"key":"title","label":"Titre"},
-                    {"key":"done","label":"Fait"}],
-        "rows": rows, "total": len(rows),
-    }
-
-async def _detail(request, item_id):
-    t = await sync_to_async(Task.objects.get)(pk=int(item_id))
-    return {"fields": [
-        {"key":"title", "label":"Titre", "value": t.title},
-        {"key":"notes", "label":"Notes", "value": t.notes},
-    ]}
-
-def todo_views():
+def get_panels() -> list:
     return [
-        ModuleView(
-            key="tasks", label="Tâches", icon="✓",
-            data_handler=_list, detail_handler=_detail,
+        P.ModulePanel(
+            key="taches", label="Tâches", icon="✓", order=10,
+            handler=liste,
+            description="Ce qu'il reste à faire.",
+            actions=(
+                P.PanelAction(
+                    key="tout_terminer", label="Tout terminer",
+                    handler=tout_terminer,
+                    confirm="Marquer toutes les tâches comme faites ?",
+                ),
+            ),
         ),
     ]
 ```
 
-Dans ta classe module :
+Puis dans `module.py` :
+
 ```python
-def get_views(self):
-    from modules.plugins.todo.views import todo_views
-    return todo_views()
+    def get_panels(self) -> list:
+        from modules.plugins.todo.panels import get_panels
+        return get_panels()
 ```
 
-Et voilà — sidebar, table paginée, bouton "Voir", modale clé/valeur, le tout sans HTML ni JS.
+### Les blocs disponibles
 
-#### Option B — template + JS custom
+| Bloc | Pour quoi |
+|---|---|
+| `Table(columns, rows, page=, filters=, empty=, caption=)` | une liste |
+| `Fields(items=[Field(label, value, kind=, tone=, href=)])` | une fiche clé/valeur |
+| `Stats(items=[Stat(label, value, sub=, tone=)])` | des tuiles de chiffres |
+| `Note(text, tone=, title=)` | un encadré (info / ok / warn / danger) |
+| `Prose(text, title=)` | du texte long (narratif, corps de message) |
+| `Blocks(items=[...])` | plusieurs blocs dans un panneau |
+| `Template(name, context)` | ton propre gabarit Django (voir plus bas) |
 
-Pour un rendu riche (split master/détail, graphiques, form complet, rendu HTML d'un mail…), tu shipes ton propre template + JS dans le module lui-même.
+### Les cellules disponibles
 
-**Déclaration** :
-```python
-ModuleView(
-    key="inbox",
-    ...
-    template="email/inbox.html",       # résolu depuis modules/plugins/email/templates/
-    js="/static/email/views/inbox.js", # résolu depuis modules/plugins/email/static/
-)
-```
+`P.text(v, clamp=)` · `P.mono(v)` · `P.num(v)` · `P.muted(v)` ·
+`P.badge(v, tone=)` · `P.link(v, href=)` · `P.meter(ratio, tone=)` ·
+`P.boolean(v)` · `P.emotion(nom, weight=)`
 
-**Découverte automatique** — [backend/config/settings.py](../../config/settings.py) scanne au démarrage :
-- `backend/modules/plugins/*/templates` → ajouté à `TEMPLATES[0]['DIRS']`
-- `backend/modules/plugins/*/static` → ajouté à `STATICFILES_DIRS`
+`tone` vaut `""`, `ok`, `warn`, `danger` ou `info`. Un `kind` inconnu retombe
+sur du texte échappé : inventer une valeur ne casse pas la page.
 
-Nomenclature conventionnelle : préfixer les dossiers par le nom du module (`templates/email/inbox.html`, `static/email/views/inbox.js`) pour éviter les collisions entre modules.
+### L'échappatoire : ton propre gabarit
 
-**Template minimal** — le plus simple est d'étendre `dashboard/base.html` et d'exposer `window.ModuleView` pour que le JS retrouve les URLs :
+`Template("todo/vue.html", {...})` rend un gabarit que **tu** livres dans
+`modules/plugins/todo/templates/todo/`. C'est du code que tu possèdes, pas
+une donnée que tu relaies, et il passe quand même par le moteur de gabarits
+— donc échappé par défaut. À réserver aux mises en page que les blocs ne
+savent pas exprimer.
 
-```html
-{% extends "dashboard/base.html" %}
-{% block scripts %}
-  <script>
-    window.ModuleView = {
-      module: "{{ module_name }}",
-      key: "{{ view_key }}",
-      label: "{{ view_label|escapejs }}",
-      dataUrl: "/dashboard/api/modules/{{ module_name }}/views/{{ view_key }}",
-      itemUrl: (id) =>
-        `/dashboard/api/modules/{{ module_name }}/views/{{ view_key }}/items/${encodeURIComponent(id)}`,
-      actionUrl: (key) =>
-        `/dashboard/api/modules/{{ module_name }}/views/{{ view_key }}/actions/${encodeURIComponent(key)}`,
-      hasDetail: {% if view_has_detail %}true{% else %}false{% endif %},
-      idField: "{{ view_id_field|default:'id'|escapejs }}",
-    };
-  </script>
-  <script src="{{ view_js }}"></script>
-{% endblock %}
-```
+### Détail, actions, asynchrone
 
-**Outils JS disponibles** (chargés par `base.html`, exposés sur `window.Dash`) :
-- `Dash.api(url)` — fetch + JSON + gestion d'erreur silencieuse
-- `Dash.escapeHTML(str)` — échappement XSS
-- `Dash.fmtDate(iso)`, `Dash.fmtRel(iso)`, `Dash.pct(v)`, `Dash.clip(s, n)`
-- `Dash.openModal({title, body, footer})` — modale, clic backdrop/échap ferme
-- `Dash.confirm(msg)` — promesse qui résout bool
-- `Dash.pager({total, limit, offset, onPrev, onNext})` — élément de pagination (pagination **serveur** : tu rappelles ton `data_handler` avec le nouvel offset)
-- `Dash.clientPager({rows, limit, mount, render})` — pagination **côté client** d'un tableau déjà en mémoire ; `render(pageRows)` peint la tranche courante, le pager est (re)monté dans `mount` après chaque rendu
-- `Dash.tabs({mount, storeKey, tabs})` — barre d'onglets réutilisable ; `tabs = [{key, label, render(body)}]` (`render` peut être async et reçoit l'élément body à peupler), onglet actif persisté dans `localStorage[storeKey]`
-- `Dash.emoChip(emotion, weight)` — puce d'émotion colorée
-- `Dash.render(async fn)` — wrapper recommandé pour ton renderer principal
+- **Détail** : pas de contrat séparé. Lis un paramètre d'URL
+  (`request.GET.get("tache")`) et préfixe un `Fields` à ton tableau. C'est ce
+  que fait le module email pour ses messages.
+- **Actions** : `PanelAction` produit un bouton en haut de page, servi en POST
+  derrière un formulaire CSRF. Le formulaire **reporte la chaîne de requête**,
+  donc ton action sait quelle fiche est ouverte et quels filtres sont posés.
+  Elle renvoie une `Note` (ou une chaîne).
+- **Asynchrone** : un gestionnaire peut être `def` ou `async def`. Pas de
+  cérémonie pour un panneau qui lit trois lignes en base.
 
-Patron typique pour une vue custom multi-tables paginées :
-```js
-Dash.render(async (root) => {
-  const { api, tabs, pager } = Dash;
-  tabs({
-    mount: root,
-    storeKey: `dash.mv.${ModuleView.module}.${ModuleView.key}`,
-    tabs: [
-      { key: "a", label: "Onglet A", render: makeServerTab("a") },
-      { key: "b", label: "Onglet B", render: makeServerTab("b") },
-    ],
-  });
+### Sécurité et performance
 
-  function makeServerTab(kind) {
-    const st = { offset: 0, limit: 25 };
-    return async (body) => {
-      async function draw() {
-        const d = await api(`${ModuleView.dataUrl}?kind=${kind}&limit=${st.limit}&offset=${st.offset}`);
-        body.innerHTML = `<div class="card"><table>…${d.rows}…</table><div class="pager-slot"></div></div>`;
-        if (d.total > st.limit) body.querySelector(".pager-slot").appendChild(pager({
-          total: d.total, limit: st.limit, offset: st.offset,
-          onPrev: o => { st.offset = o; draw(); }, onNext: o => { st.offset = o; draw(); },
-        }));
-      }
-      await draw();
-    };
-  }
-});
-```
-> Astuce : pour un rendu **zéro-JS**, tu n'as souvent pas besoin de tout ça — renvoie simplement la forme `{tabs: [...]}` depuis ton `data_handler` (voir Option A) et le shell générique fait les onglets + pagination pour toi.
-
-Exemple complet : [modules/plugins/email/static/email/views/inbox.js](email/static/email/views/inbox.js).
-
-### Mélanger A et B
-
-Les deux coexistent à l'échelle d'un même module. Vois [modules/plugins/email/views.py](email/views.py) :
-- `inbox` → Option B (template custom + JS split master/détail)
-- `contacts` → Option A (shell générique + `detail_handler` → modale clé/valeur)
-- `accounts` → Option A simple (juste une liste, pas de détail)
-
-Tu peux commencer en A (vite), passer en B plus tard sans casser les URLs (même `data_handler`, même `detail_handler`, même actions).
-
-### Sécurité & performance
-
-- **XSS** : le shell générique et les helpers `escapeHTML`/`escapejs` protègent par défaut. Ne JAMAIS injecter du HTML non sanitisé (ex: `body_html` d'un email) sans passer par un sanitizer — l'exemple `inbox.js` affiche toujours le texte brut ou une version *stripped* du HTML.
-- **Pagination** : les listes non bornées vont finir par exploser la page. Cap le `limit` côté serveur (voir `_int(request, "limit", 25, hi=100)` dans `email/views.py`).
-- **Performance** : les handlers sont async ; toute lecture ORM doit passer par `sync_to_async`. Les modules sont libres de retourner un `JsonResponse` directement si tu veux contrôler `status` ou `headers`.
-- **Permissions** : pas d'auth sur le dashboard actuellement. Si ça change, le filtre sera ajouté au niveau du shell (`module_views.py`) — les modules n'ont pas à se préoccuper.
+- Tu ne produis jamais de balisage : il n'y a rien à assainir.
+- Un panneau qui lève devient un bloc d'erreur ; l'espace reste navigable.
+- **Pagine** : `tables.paginate` prend un queryset *ou* une liste en mémoire.
+  Un panneau qui charge tout ne se voit qu'en production.
+- Les filtres passent par `tables.select_filter` / `search_filter`, qui
+  bornent la saisie et refusent toute valeur hors liste — rien n'atteint
+  l'ORM sans passer par une liste fermée.
 
 ### Où regarder quand un truc ne marche pas
 
-| Symptôme | Où chercher |
-|----------|-------------|
-| Vue absente de la sidebar | Le module est-il **enabled + running** ? `/dashboard/api/modules` liste l'état |
-| 404 sur `/dashboard/modules/<mod>/<view>/` | `get_views()` retourne-t-elle bien la vue ? (page `modules/` recharge la liste) |
-| Template introuvable | Nom correct, arborescence `templates/<mod>/<view>.html` ? Redémarrer le serveur (les `DIRS` sont scannées au boot) |
-| JS 404 | Chemin préfixé `/static/` ? Fichier dans `static/<mod>/...` ? Même point : scan au boot |
-| "Voir" n'apparaît pas | Les lignes du `data_handler` contiennent-elles `id_field` (par défaut `"id"`) ? `detail_handler` déclaré ? |
-| Handler lève | Le shell log `logger.exception` et renvoie HTTP 500 + `{"error": "..."}`. Regarde la console `uvicorn` |
+| Symptôme | Vérifier |
+|---|---|
+| Le module n'a pas d'espace | Déclare-t-il `get_panels()` **ou** une section de configuration ? Un module sans ni l'un ni l'autre n'a rien à montrer. |
+| L'espace est là, pas le panneau | `get_panels()` lève-t-elle ? L'exception est journalisée, la liste retombe à vide. |
+| « Le panneau a échoué : … » | C'est ton gestionnaire ; le message porte l'exception. |
+| Les clés `etat` / `configuration` sont ignorées | Réservées par la coquille. |
+
+### Configuration
+
+Elle ne passe pas par les panneaux : déclare `config_schema()` et
+GestionSystème la rend elle-même dans l'onglet *Configuration* de ton espace.
+Rien de ton côté à écrire pour l'affichage.

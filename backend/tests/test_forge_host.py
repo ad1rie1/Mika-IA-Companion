@@ -373,19 +373,34 @@ class _FakeRequest:
 
 
 class TestPanels:
-    async def test_panneaux_exposes(self, host):
+    async def test_l_hote_n_expose_que_l_atelier(self, host):
+        """Les pages d'une app ne sont plus greffées dans l'espace de l'hôte.
+
+        Elles vivent dans l'espace de l'app (« Forge apps »), avec sa
+        configuration. Greffées ici, dix apps donnaient trente onglets à un
+        module qui n'en déclare que trois — et leurs réglages partaient
+        ailleurs encore, dans la Configuration du cœur.
+        """
+        from modules.plugins.forge.panels import panels_for_app
+
         await _create_basic(host)
         cles = {p.key for p in host.get_panels()}
-        # Les trois panneaux de l'hôte…
-        assert {"modules", "journal", "stockage"} <= cles
-        # …plus une page par vue déclarée ET implémentée par un module forgé.
-        assert "compteur_test--stats" in cles
+        assert cles == {"modules", "journal", "stockage"}
+        # La page existe, mais sous l'app.
+        assert [p.key for p in panels_for_app(host, "compteur_test")] == ["stats"]
 
     async def test_une_vue_declaree_sans_handler_n_est_pas_exposee(self, host):
+        from modules.plugins.forge.panels import panels_for_app
+
         await _create_basic(
             host, code="def on_tick(api):\n    pass\n",
         )  # le manifest déclare 'stats' mais le code n'a pas view_stats
-        assert "compteur_test--stats" not in {p.key for p in host.get_panels()}
+        assert panels_for_app(host, "compteur_test") == []
+
+    async def test_pas_de_pages_pour_une_app_non_chargee(self, host):
+        from modules.plugins.forge.panels import panels_for_app
+
+        assert panels_for_app(host, "nexiste_pas") == []
 
     async def test_le_panneau_modules_liste_les_modules(self, host):
         from GestionSysteme import panels as P
@@ -397,16 +412,16 @@ class TestPanels:
         textes = [c.text for t in tableaux for r in t.rows for c in r.cells]
         assert "compteur_test" in textes
 
-    async def test_la_fiche_d_un_module_porte_son_code(self, host):
+    async def test_la_fiche_d_une_app_porte_son_code(self, host):
         from GestionSysteme import panels as P
+        from modules.plugins.forge.panels import blocs_app
 
         await _create_basic(host)
-        panneau = next(p for p in host.get_panels() if p.key == "modules")
-        bloc = await sync_to_async(panneau.handler)(
-            _FakeRequest(module="compteur_test"),
-        )
-        titres = [b.title for b in P.iter_blocks(bloc) if isinstance(b, P.Prose)]
+        info = next(i for i in host.module_infos() if i["name"] == "compteur_test")
+        blocs = await sync_to_async(blocs_app)(host, "compteur_test", info)
+        titres = [b.title for b in blocs if isinstance(b, P.Prose)]
         assert "module.py" in titres
+        assert "manifest.yaml" in titres
 
     async def test_une_charge_utile_forgee_devient_des_cellules_typees(self, host):
         """Le code d'un module forgé est écrit par l'IA à l'exécution.
@@ -416,9 +431,11 @@ class TestPanels:
         clé ``html`` n'est pas « nettoyée », elle n'est jamais lue.
         """
         from GestionSysteme import panels as P
+        from modules.plugins.forge.panels import panels_for_app
 
         await _create_basic(host)
-        panneau = next(p for p in host.get_panels() if p.key == "compteur_test--stats")
+        panneau = next(p for p in panels_for_app(host, "compteur_test")
+                       if p.key == "stats")
         bloc = await sync_to_async(panneau.handler)(_FakeRequest(page="0"))
         blocs = list(P.iter_blocks(P.blocks_from_payload(bloc)
                                   if isinstance(bloc, dict) else bloc))

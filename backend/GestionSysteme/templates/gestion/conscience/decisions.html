@@ -59,7 +59,7 @@
                 <td>
                   {% if l.global_mood %}
                     <span class="emo" style="{{ l.global_mood|emo_style }}">
-                      {{ l.global_mood }} <span class="emo-weight">{{ l.global_intensity|pct }}</span>
+                      {{ l.global_mood|emo_fr }} <span class="emo-weight">{{ l.global_intensity|pct }}</span>
                     </span>
                   {% else %}—{% endif %}
                 </td>

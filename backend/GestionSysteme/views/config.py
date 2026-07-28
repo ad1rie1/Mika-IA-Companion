@@ -33,6 +33,10 @@ from GestionSysteme.shell import page_context
 logger = logging.getLogger(__name__)
 
 MODULE_SECTION_PREFIX = "module_"
+# Sections créées à l'exécution par la Forge, une par app forgée. Le préfixe
+# est déclaré ici plutôt que dans la vue des apps parce que c'est ici qu'on
+# décide ce qui est « du cœur » — et que l'inverse ferait un import circulaire.
+FORGE_SECTION_PREFIX = "forge_"
 
 # Regroupement des sections du cœur. L'ordre des groupes est celui-ci ;
 # l'ordre à l'intérieur reste celui déclaré au registre (champ ``order``).
@@ -59,9 +63,28 @@ def is_module_section(section_key: str) -> bool:
     return section_key.startswith(MODULE_SECTION_PREFIX)
 
 
+def is_forge_section(section_key: str) -> bool:
+    return section_key.startswith(FORGE_SECTION_PREFIX)
+
+
+def forge_app_of(section_key: str) -> str:
+    return section_key[len(FORGE_SECTION_PREFIX):]
+
+
 def core_sections() -> list:
-    """Sections du cœur, dans l'ordre déclaré, hors sections de modules."""
-    return [s for s in registry.sections() if not is_module_section(s.key)]
+    """Sections du cœur : ni celles des modules, ni celles des apps forgées.
+
+    Les secondes sont enregistrées **à l'exécution**, par du code que Mika
+    écrit elle-même (``ForgeModule._register_config``). Laissées ici, la page
+    des réglages du système s'allongeait toute seule, une app venant se
+    ranger entre les clés d'API et les seuils de la conscience — et ses
+    réglages se lisaient à trois écrans de ses propres pages. Elles vivent
+    maintenant dans l'espace de leur app.
+    """
+    return [
+        s for s in registry.sections()
+        if not is_module_section(s.key) and not is_forge_section(s.key)
+    ]
 
 
 def grouped_sections() -> list[dict]:
@@ -143,6 +166,11 @@ def config_section(request, section: str):
             "gestionsysteme:module-space",
             module=section[len(MODULE_SECTION_PREFIX):],
         )
+    if is_forge_section(section):
+        # Idem pour une app forgée — un favori d'avant le déménagement doit
+        # atterrir sur la bonne page, pas sur un 404.
+        return redirect("gestionsysteme:forge-app-config",
+                        app=forge_app_of(section))
 
     spec = next((s for s in core_sections() if s.key == section), None)
     if spec is None:
@@ -235,6 +263,9 @@ def _back_to(section: str) -> str:
             "gestionsysteme:module-panel",
             args=[section[len(MODULE_SECTION_PREFIX):], "configuration"],
         )
+    if is_forge_section(section):
+        return reverse("gestionsysteme:forge-app-config",
+                       args=[forge_app_of(section)])
     return reverse("gestionsysteme:config-section", args=[section])
 
 

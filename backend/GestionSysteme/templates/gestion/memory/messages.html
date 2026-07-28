@@ -38,7 +38,7 @@
                 <td><div class="cell-clamp">{{ m.content }}</div></td>
                 <td>
                   {% if m.emotion %}
-                    <span class="emo" style="{{ m.emotion|emo_style }}">{{ m.emotion }}
+                    <span class="emo" style="{{ m.emotion|emo_style }}">{{ m.emotion|emo_fr }}
                       <span class="emo-weight">{{ m.emotion_intensity|pct }}</span>
                     </span>
                   {% else %}—{% endif %}

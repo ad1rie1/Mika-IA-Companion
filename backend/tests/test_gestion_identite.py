@@ -199,7 +199,21 @@ class TestFiche:
         # La description est ce que ``resolve_context`` remet au constructeur
         # de prompt : c'est elle qui doit être affichée, pas une paraphrase.
         assert "Thomas" in res.context["decision"].description
-        assert len(res.context["claims"]) == 1
+        # Le verdict porte un aperçu du registre ; l'onglet « Preuves » porte
+        # le registre entier, filtrable et paginé (il était tronqué à cent
+        # lignes sans le dire).
+        assert len(res.context["recent_claims"]) == 1
+
+    def test_le_registre_complet_vit_dans_son_onglet(self, client):
+        identity = _identity(name="Thomas", certainty=0.45)
+        h = _handle(identity, person_id="tg_5")
+        _claim(identity, h)
+
+        res = client.get(
+            reverse("gestionsysteme:identity-detail-tab", args=[identity.pk, "preuves"]),
+        )
+        assert res.status_code == 200
+        assert res.context["page"].total == 1
 
     def test_une_identite_inconnue_donne_404(self, client):
         assert client.get(

@@ -27,6 +27,47 @@ EMOTION_NAMES = frozenset({
     "curious", "melancholic",
 })
 
+# Libellés d'affichage des 29 émotions. Le nom stocké reste l'anglais — c'est
+# la valeur de ``emotion/types.py::Emotion``, celle que le modèle produit dans
+# sa balise ``[EMOTION:...]`` et celle qui compose la variable CSS. Traduire
+# ici, au seul moment du rendu, évite d'avoir deux vocabulaires en base.
+#
+# Adjectifs au féminin et en minuscules : ils apparaissent en pastille au fil
+# d'un tableau, jamais en début de phrase. Volontairement sans les fioritures
+# de l'affichage de chat (« Excitée ! », « Réfléchit… ») — dans une colonne
+# c'est une valeur, pas une réplique.
+EMOTION_FR = {
+    "neutral": "neutre",
+    "happy": "contente",
+    "excited": "excitée",
+    "love": "amoureuse",
+    "proud": "fière",
+    "grateful": "reconnaissante",
+    "playful": "joueuse",
+    "amused": "amusée",
+    "hopeful": "pleine d'espoir",
+    "relieved": "soulagée",
+    "sad": "triste",
+    "angry": "en colère",
+    "scared": "effrayée",
+    "disgusted": "dégoûtée",
+    "frustrated": "frustrée",
+    "lonely": "seule",
+    "anxious": "anxieuse",
+    "bored": "s'ennuie",
+    "jealous": "jalouse",
+    "surprised": "surprise",
+    "thinking": "pensive",
+    "confused": "confuse",
+    "embarrassed": "gênée",
+    "nostalgic": "nostalgique",
+    "dreamy": "rêveuse",
+    "determined": "déterminée",
+    "mischievous": "malicieuse",
+    "curious": "curieuse",
+    "melancholic": "mélancolique",
+}
+
 # Familles utilisées pour teinter une jauge (positif → vert, négatif → rouge).
 POSITIVE_EMOTIONS = frozenset({
     "happy", "excited", "love", "proud", "grateful",
@@ -48,6 +89,20 @@ def emotion_var(name: str | None) -> str:
     if key not in EMOTION_NAMES:
         key = "neutral"
     return f"var(--emo-{key})"
+
+
+def emotion_fr(name: str | None) -> str:
+    """``curious`` → ``curieuse``. Un nom inconnu est rendu tel quel.
+
+    Contrairement à ``emotion_var``, un nom hors liste n'est **pas** replié sur
+    ``neutral`` : ici la sortie est du texte échappé, donc sans danger, et
+    afficher la valeur brute dit « cette émotion n'est pas dans la liste »
+    plutôt que de mentir en affichant « neutre ».
+    """
+    key = (name or "").strip().lower()
+    if not key:
+        return "—"
+    return EMOTION_FR.get(key, key)
 
 
 def emotion_tone(name: str | None) -> str:

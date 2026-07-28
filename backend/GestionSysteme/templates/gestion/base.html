@@ -55,15 +55,19 @@
         {% endfor %}
       {% endfor %}
 
-      {% if module_spaces %}
-        <div class="nav-group">Espaces modules</div>
-        {% for space in module_spaces %}
-          <a class="nav-item" href="{% url 'gestionsysteme:module-space' space.name %}"
-             {% if active_module_space == space.name %}aria-current="page"{% endif %}>
+      {% comment %} Le groupe itère des liens, pas des modules : « Forge apps » y figure
+         sans être un module, parce que les apps forgées sont écrites à
+         l'exécution et qu'aucune destination ne peut être déclarée pour
+         chacune. Le gabarit n'a donc à connaître aucun nom de module. {% endcomment %}
+      {% if spaces %}
+        <div class="nav-group">Espaces</div>
+        {% for space in spaces %}
+          <a class="nav-item" href="{{ space.url }}"
+             {% if active_space == space.key %}aria-current="page"{% endif %}>
             <span class="nav-ico" aria-hidden="true">{{ space.icon }}</span>
             <span>{{ space.label }}</span>
-            {% if not space.running %}
-              <span class="nav-count" title="{% if space.enabled %}activé mais arrêté{% else %}désactivé{% endif %}">!</span>
+            {% if space.alert %}
+              <span class="nav-count" title="{{ space.alert_title }}">{{ space.alert }}</span>
             {% endif %}
           </a>
         {% endfor %}

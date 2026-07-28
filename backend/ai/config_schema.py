@@ -7,9 +7,9 @@ Design:
 - **ai_models** is a ``record_list`` of *declared models*: a row is
   (internal_name, provider, model_id, temperature). The UI fills
   ``model_id`` by querying the provider's SDK — the user never types a
-  model name.
+  model name (voir GestionSysteme/choices.py).
 - **ai_roles** references a declared model by its ``internal_name``.
-  The dashboard API injects the currently-declared names as ``choices``
+  GestionSystème injects the currently-declared names as ``choices``
   at render time so the field is always a typed dropdown.
 """
 from __future__ import annotations
@@ -111,7 +111,7 @@ CONFIG_SCHEMA = [
 
     # ── Rôles ─────────────────────────────────────────────────────
     # type=select : les choix sont injectés dynamiquement à partir de
-    # ai.models par le handler /dashboard/api/config/schema.
+    # ai.models par GestionSysteme.views.config._inject_dynamic_choices.
     ConfigSection(
         key="ai_roles", label="IA · Rôles", icon="⟰", order=22,
         description="Associe chaque rôle à un modèle déclaré (par son nom interne).",

@@ -10,11 +10,13 @@ from emotion.dynamics import OscillatorParams
 from emotion.pad import Vec3
 from emotion.types import Emotion, EmotionData
 from emotion.state import (
+    TEMPERAMENT_PREFIX,
     EmotionHistoryEntry,
     GlobalMood,
     MessageEmotion,
     PersonMood,
     Temperament,
+    load_temperament,
 )
 from utils.degradation import degradations
 
@@ -97,6 +99,15 @@ class EmotionEngine:
             "emotion.snapshot_interval",
             lambda k, v: setattr(self, "_snapshot_interval", v),
         )
+        # Le tempérament est déclaré ``hot_reload`` : les cinq curseurs se
+        # règlent en regardant l'humeur qu'ils gouvernent bouger, ce qui n'a
+        # aucun sens si la valeur n'est relue qu'au démarrage. Recharger le
+        # tempérament ne suffit pas — ``_recompute_params`` en dérive la masse,
+        # la raideur et l'amortissement de l'oscillateur, et c'est cela que la
+        # boucle lit à chaque pas.
+        config_service.on_change(
+            TEMPERAMENT_PREFIX, lambda k, v: self._reload_temperament(k),
+        )
 
         restored = await self._restore_state()
 
@@ -125,6 +136,21 @@ class EmotionEngine:
             except asyncio.CancelledError:
                 pass
         logger.info("EmotionEngine shut down (state saved)")
+
+    def _reload_temperament(self, key: str) -> None:
+        """Re-read the temperament after a dashboard edit and re-derive params."""
+        self.temperament = load_temperament()
+        self._recompute_params()
+        logger.info(
+            "Temperament reloaded after %s changed (volatility=%.2f, "
+            "intensity_base=%.2f, recovery=%.2f, default_mood=%s, bleed=%.2f)",
+            key,
+            self.temperament.volatility,
+            self.temperament.intensity_base,
+            self.temperament.recovery_speed,
+            self.temperament.default_mood.value,
+            self.temperament.global_bleed,
+        )
 
     def _recompute_params(self) -> None:
         """Derive OscillatorParams from the current temperament.

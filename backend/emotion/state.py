@@ -41,6 +41,55 @@ class Temperament:
     global_bleed: float = 0.3
 
 
+#: Préfixe des clés de configuration qui portent le tempérament. Publié parce
+#: que le moteur s'y abonne pour recharger à chaud.
+TEMPERAMENT_PREFIX = "emotion.temperament."
+
+
+def load_temperament() -> Temperament:
+    """Le tempérament effectif, lu depuis la configuration.
+
+    Unique source : les cinq ``emotion.temperament.*`` du registre. Ce bloc
+    vivait auparavant dans ``personality.yaml``, où il ne se modifiait qu'en
+    éditant un fichier puis en redémarrant — alors que c'est un réglage, pas
+    une description du personnage : les quatre nombres ne se lisent pas, ils
+    s'essaient. Le YAML garde ce qui se rédige (ton, traits, manies), la
+    configuration prend ce qui se règle.
+
+    Ne lève jamais : la lecture peut arriver avant que la base ne soit
+    joignable, et un moteur d'émotion qui refuse de démarrer parce qu'un
+    curseur est illisible coûte plus cher que le curseur par défaut.
+    """
+    from configs.service import config_service
+
+    def value(name, fallback):
+        try:
+            got = config_service.get(f"{TEMPERAMENT_PREFIX}{name}")
+        except Exception:
+            return fallback
+        return fallback if got is None else got
+
+    defaults = Temperament()
+    try:
+        default_mood = Emotion(value("default_mood", defaults.default_mood.value))
+    except ValueError:
+        default_mood = defaults.default_mood
+
+    def number(name, fallback):
+        try:
+            return float(value(name, fallback))
+        except (TypeError, ValueError):
+            return fallback
+
+    return Temperament(
+        volatility=number("volatility", defaults.volatility),
+        intensity_base=number("intensity_base", defaults.intensity_base),
+        recovery_speed=number("recovery_speed", defaults.recovery_speed),
+        default_mood=default_mood,
+        global_bleed=number("global_bleed", defaults.global_bleed),
+    )
+
+
 @dataclass
 class EmotionHistoryEntry:
     """Single entry in an emotion timeline."""

@@ -141,7 +141,7 @@ class AIRouter:
 
         config_service.on_change("ai.role.", lambda k, v: self._reload_role(k, v))
         # Providers read their credentials once, in __init__, and were cached
-        # forever: rotating a leaked API key in the dashboard returned
+        # forever: rotating a leaked API key in the admin returned
         # {"ok": true} while the process kept authenticating with the old one.
         # Evict on any provider-credential change so the next call re-reads.
         for prefix in _PROVIDER_CONFIG_PREFIXES:

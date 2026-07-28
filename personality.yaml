@@ -45,12 +45,11 @@ mood_greetings:
   energetic: Yooo ! J'ai la patate aujourd'hui, on fait quoi ?!
   chill: Heeey, soirée tranquille ce soir ~ On se pose et on papote.
   curious: Salut ! Bon, faut que je vous raconte un truc que j'ai trouvé...
-temperament:
-  volatility: 0.7
-  intensity_base: 0.6
-  recovery_speed: 0.5
-  default_mood: happy
-  global_bleed: 0.3
+# Le tempérament (volatilité, intensité de base, récupération, humeur par
+# défaut, diffusion globale) n'est plus ici : il s'édite dans le tableau de
+# bord, Configuration > Émotion > Tempérament. Ce sont des curseurs, pas une
+# description du personnage — et deux endroits où les déclarer, c'est deux
+# valeurs qui finissent par diverger.
 circadian_profile:
   phase_hours:
     morning: 6

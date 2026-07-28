@@ -140,16 +140,23 @@ class ForgeModule(BaseModule):
             self._load_errors[name] = str(exc)
             return False, str(exc)
 
-        if not data["state"].get("enabled", True):
-            reason_txt = data["state"].get("disabled_reason") or "désactivé"
-            return False, f"module désactivé ({reason_txt})"
-
         manifest, errors = store.validate_manifest(data["manifest_raw"], name)
         if errors:
             message = "manifest invalide:\n- " + "\n- ".join(errors)
             self._load_errors[name] = message
             await self._log(name, "error", "system", message)
             return False, message
+
+        # La config est déclarée par le MANIFESTE, pas par le code : elle est
+        # enregistrée avant tout chargement, et survit à un module désactivé
+        # ou cassé. C'est précisément un module qui ne démarre pas qu'on vient
+        # reconfigurer — et sans section enregistrée, `config_service.set`
+        # refuse la clé, donc l'écran de réglages ne pourrait rien écrire.
+        self._register_config_entries(name, manifest)
+
+        if not data["state"].get("enabled", True):
+            reason_txt = data["state"].get("disabled_reason") or "désactivé"
+            return False, f"module désactivé ({reason_txt})"
 
         api = ForgeAPI(name, manifest, self)
 
@@ -181,7 +188,6 @@ class ForgeModule(BaseModule):
         from projects.schedule import compute_next_run
         lm.next_run_at = compute_next_run(manifest.schedule)
         self._loaded[name] = lm
-        self._register_config(lm)
         await self._log(name, "info", "system",
                         f"chargé ({reason}) — handlers: "
                         + (", ".join(lm.handler_names()) or "aucun"))
@@ -191,23 +197,31 @@ class ForgeModule(BaseModule):
         await self._refresh_context(lm)
         return True, "ok"
 
-    def _unload(self, name: str) -> None:
+    def _unload(self, name: str, *, drop_config: bool = False) -> None:
+        """Décharge le code. La config reste, sauf effacement.
+
+        Un module désactivé — par toi ou par le disjoncteur — garde ses
+        réglages **visibles et modifiables** : c'est l'écran sur lequel on
+        atterrit pour le réparer. Seul l'effacement les retire.
+        """
         self._loaded.pop(name, None)
         self._load_errors.pop(name, None)
-        self._unregister_config(name)
+        if drop_config:
+            self._unregister_config(name)
 
     # ══ Config dynamique (sections dashboard par module forgé) ════
 
-    def _register_config(self, lm: runtime.LoadedForgeModule) -> None:
-        if not lm.manifest.config:
+    def _register_config_entries(self, name: str,
+                                 manifest: store.ForgeManifest) -> None:
+        if not manifest.config:
             return
         try:
             from configs.registry import registry
             from configs.service import config_service
-            registry.register_replace(self._build_config_entries(lm))
+            registry.register_replace(self._build_config_entries(name, manifest))
             config_service.invalidate_cache()
         except Exception:
-            self.logger.exception("registration config forge.%s", lm.name)
+            self.logger.exception("registration config forge.%s", name)
 
     def _unregister_config(self, name: str) -> None:
         try:
@@ -219,20 +233,20 @@ class ForgeModule(BaseModule):
             self.logger.exception("unregistration config forge.%s", name)
 
     @staticmethod
-    def _build_config_entries(lm: runtime.LoadedForgeModule) -> list:
+    def _build_config_entries(name: str, manifest: store.ForgeManifest) -> list:
         from configs.types import ConfigItem, ConfigRecord, ConfigSection, record_item
         entries: list = [ConfigSection(
-            key=f"forge_{lm.name}",
-            label=f"Forge · {lm.manifest.title}",
+            key=f"forge_{name}",
+            label=f"Forge · {manifest.title}",
             icon="⚒",
             order=91,
-            description=lm.manifest.description or "Module forgé par Mika.",
+            description=manifest.description or "App forgée par Mika.",
         )]
-        for f in lm.manifest.config:
+        for f in manifest.config:
             kwargs = dict(
-                key=f"forge.{lm.name}.{f['key']}",
+                key=f"forge.{name}.{f['key']}",
                 type=f["type"],
-                section=f"forge_{lm.name}",
+                section=f"forge_{name}",
                 label=f["label"],
                 description=f.get("description", ""),
                 default=f.get("default"),
@@ -565,8 +579,8 @@ class ForgeModule(BaseModule):
             return {"ok": True,
                     "message": f"stockage de {name} vidé ({deleted} lignes)"}
 
-        # erase
-        self._unload(name)
+        # erase — le seul cas où les réglages disparaissent avec le module.
+        self._unload(name, drop_config=True)
         try:
             dest = await sync_to_async(store.erase,
                                        thread_sensitive=False)(name)

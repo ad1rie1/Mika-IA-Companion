@@ -30,7 +30,7 @@
             {% for s in page.rows %}
               <tr>
                 <td><div class="cell-clamp">{{ s.content }}</div></td>
-                <td><span class="emo" style="{{ s.emotion|emo_style }}">{{ s.emotion }}</span></td>
+                <td><span class="emo" style="{{ s.emotion|emo_style }}">{{ s.emotion|emo_fr }}</span></td>
                 <td>
                   <div class="row">
                     <span class="meter {{ s.importance|tone_ratio }}" style="flex:1; min-width:4rem;">

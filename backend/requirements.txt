@@ -16,3 +16,7 @@ aioimaplib>=2.0.0
 aiosmtplib>=3.0.0
 Pillow>=10.0.0
 pypdf>=4.0.0  # extraction texte des PDF joints (pipeline/preprocessors/files.py)
+feedparser>=6.0.0  # module RSS. Optionnel : modules/plugins/rss/parser.py sait
+                   # lire RSS/RDF/Atom avec la bibliothèque standard. Absent, le
+                   # module tournait quand même mais tolérait moins de flux tordus
+                   # — et, avant, ne démarrait pas du tout.

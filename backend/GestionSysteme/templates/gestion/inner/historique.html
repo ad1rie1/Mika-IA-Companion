@@ -1,15 +1,88 @@
 {% extends "gestion/base.html" %}
 {% load gestion %}
 
+{% comment %} Historique affectif — trois questions, trois cartes.
+
+   1. « Son humeur à elle » : la série `__global__`, en frise chronologique.
+      C'est le seul endroit de l'interface où l'on voit une humeur *bouger*.
+   2. « Envers chaque personne » : un relevé par ligne, avec l'écart au
+      global du même instant.
+   3. « Résumés » : ce que le consolidateur en retient, répartition comprise.
+
+   `__global__` est volontairement absent du tableau 2 : ce n'est pas un
+   interlocuteur, et l'y laisser doublait chaque instant d'une ligne où les
+   deux colonnes d'émotion portaient la même valeur. {% endcomment %}
+
 {% block content %}
+
+{# 1. Son humeur à elle #}
 <section class="card mb-6">
-  {% include "gestion/partials/filters.html" %}
   <div class="card-head">
-    <h3>Instantanés</h3>
-    <span class="card-sub">un relevé périodique de l'état affectif</span>
+    <h3>Son humeur à elle</h3>
+    <span class="card-sub">la série <code>__global__</code> — son état de fond, indépendant de qui lui parle</span>
   </div>
 
-  {% if snapshots_page.rows %}
+  {% if global_timeline.points %}
+    <div class="card-body">
+      <div class="mb-4">
+        <div class="stat-label">Au dernier relevé</div>
+        <div class="row">
+          <span class="emo text-lg" style="{{ global_timeline.current.emotion|emo_style }}">{{ global_timeline.current.emotion|emo_fr }}</span>
+          <span class="tabular text-sm muted">{{ global_timeline.current.intensity|pct }}</span>
+        </div>
+      </div>
+
+      <div class="timeline" role="img"
+           aria-label="Évolution de l'humeur globale sur les {{ global_timeline.count }} derniers relevés.">
+        {% for p in global_timeline.points %}
+          <span class="timeline-bar"
+                style="height: {{ p.intensity|bar_width }}%; {{ p.emotion|emo_style }}"
+                title="{{ p.at|dt_full }} — {{ p.emotion|emo_fr }} {{ p.intensity|pct }}"></span>
+        {% endfor %}
+      </div>
+      <div class="timeline-axis">
+        <span>{{ global_timeline.first_at|dt_full }}</span>
+        <span>{{ global_timeline.last_at|dt_full }}</span>
+      </div>
+
+      <div class="chips mt-4">
+        {% for l in global_timeline.legend %}
+          <span class="chip emo" style="{{ l.emotion|emo_style }}">{{ l.emotion|emo_fr }}
+            <span class="emo-weight">{{ l.share|pct }}</span>
+          </span>
+        {% endfor %}
+      </div>
+
+      <p class="muted text-xs mt-3">
+        Hauteur = intensité sur une échelle 0–100 %, couleur = émotion, un
+        trait par relevé — les traits sont également espacés quel que soit le
+        temps écoulé entre deux, survolez-en un pour sa date.
+        {{ global_timeline.count }} relevé{{ global_timeline.count|pluralize }} affiché{{ global_timeline.count|pluralize }}{% if global_timeline.truncated %}, les plus récents{% endif %}.
+        Les relevés sont écrits périodiquement par le moteur d'émotion{% if retention_days %}, puis élagués par le consolidateur au-delà de {{ retention_days }} jours{% endif %} :
+        une frise courte veut souvent dire « peu d'activité », pas « humeur plate ».
+      </p>
+    </div>
+  {% else %}
+    <div class="card-body">
+      <div class="empty">
+        Aucun relevé global. Ils sont écrits pendant qu'une conversation est
+        ouverte — sans conversation en cours, le moteur n'a rien à quoi les
+        rattacher.
+      </div>
+    </div>
+  {% endif %}
+</section>
+
+{# 2. Envers chaque personne #}
+<section class="card mb-6">
+  <div class="card-head">
+    <h3>Envers chaque personne</h3>
+    <span class="card-sub">ce qu'elle ressent pour un interlocuteur donné, relevé par relevé</span>
+  </div>
+
+  {% if has_person_filter %}{% include "gestion/partials/filters.html" %}{% endif %}
+
+  {% if snapshot_rows %}
     <div class="card-body flush">
       <div class="table-scroll">
         <table class="table">
@@ -17,21 +90,53 @@
             <tr>
               <th class="fit">Quand</th>
               <th>Personne</th>
-              <th>Envers elle</th>
-              <th class="num">Intensité</th>
-              <th>Humeur globale</th>
-              <th class="num">Intensité</th>
+              <th>Ce qu'elle ressent</th>
+              <th style="min-width: 8rem;">Intensité</th>
+              <th class="fit">Écart à son humeur</th>
             </tr>
           </thead>
           <tbody>
-            {% for s in snapshots_page.rows %}
+            {% for r in snapshot_rows %}
               <tr>
-                <td class="fit muted" title="{{ s.created_at|dt_full }}">{{ s.created_at|ago }}</td>
-                <td class="mono text-xs">{{ s.person_id|default:"—" }}</td>
-                <td><span class="emo" style="{{ s.primary_emotion|emo_style }}">{{ s.primary_emotion }}</span></td>
-                <td class="num">{{ s.primary_intensity|pct }}</td>
-                <td><span class="emo" style="{{ s.global_emotion|emo_style }}">{{ s.global_emotion }}</span></td>
-                <td class="num">{{ s.global_intensity|pct }}</td>
+                <td class="fit muted" title="{{ r.at|dt_full }}">{{ r.at|ago }}</td>
+                <td>
+                  {% if r.entity_id %}
+                    <a href="{% url 'gestionsysteme:person-detail' r.entity_id %}">{{ r.entity_name }}</a>
+                    <div class="mono text-xs muted">{{ r.person_id }}</div>
+                  {% else %}
+                    <span class="mono text-xs">{{ r.person_id }}</span>
+                    <div class="text-xs muted">
+                      {% if r.kind == "interne" %}sa propre boucle, pas un interlocuteur
+                      {% elif r.kind == "éphémère" %}connexion jetable, rien de durable dessus
+                      {% else %}aucune fiche personne rattachée à ce handle{% endif %}
+                    </div>
+                  {% endif %}
+                </td>
+                <td><span class="emo" style="{{ r.emotion|emo_style }}">{{ r.emotion|emo_fr }}</span></td>
+                <td>
+                  {% comment %} Teinte prise sur la *valence* de l'émotion,
+                     pas sur le niveau : une intensité faible n'est pas une
+                     alerte, et une jauge rouge sous « relieved 26 % » se lit
+                     à l'envers. {% endcomment %}
+                  <div class="row">
+                    <span class="meter {{ r.emotion|emo_tone }}" style="flex:1; min-width:4rem;">
+                      <span style="width: {{ r.intensity|bar_width }}%;"></span>
+                    </span>
+                    <span class="tabular text-xs">{{ r.intensity|pct }}</span>
+                  </div>
+                </td>
+                <td class="fit text-xs">
+                  {% if r.same_as_global %}
+                    <span class="muted">même émotion,
+                      {% if r.delta > 0.01 %}+{{ r.delta|pct }}
+                      {% elif r.delta < -0.01 %}{{ r.delta|pct }}
+                      {% else %}identique{% endif %}
+                    </span>
+                  {% else %}
+                    <span class="muted">au lieu de</span>
+                    <span class="emo" style="{{ r.global_emotion|emo_style }}">{{ r.global_emotion|emo_fr }}</span>
+                  {% endif %}
+                </td>
               </tr>
             {% endfor %}
           </tbody>
@@ -40,41 +145,105 @@
     </div>
     <div class="card-foot">{% include "gestion/partials/pager.html" with page=snapshots_page %}</div>
   {% else %}
-    <div class="card-body"><div class="empty">Aucun instantané.</div></div>
+    <div class="card-body">
+      <div class="empty">
+        {% if filterset.active %}
+          Aucun relevé pour ce handle.
+        {% else %}
+          Aucun relevé par personne. Elle n'a encore rien ressenti envers
+          quelqu'un en particulier — son humeur de fond, elle, est au-dessus.
+        {% endif %}
+      </div>
+    </div>
   {% endif %}
 </section>
 
+{# 3. Résumés #}
 <section class="card">
   <div class="card-head">
-    <h3>Résumés de période</h3>
-    <span class="card-sub">agrégés par le consolidateur</span>
+    <h3>Ce qu'il en reste</h3>
+    <span class="card-sub">résumés agrégés par le consolidateur — la semaine est un cumul de ses jours, pas une seconde mesure</span>
   </div>
 
-  {% if summaries_page.rows %}
+  {% comment %} Les deux granularités se recouvrent : entrelacées par date,
+     une ligne « semaine » atterrit au milieu de ses propres jours. Le
+     sélecteur garde ses voisins (`qs`), donc changer de granularité ne perd
+     ni le filtre personne ni la page du tableau du dessus. {% endcomment %}
+  <form class="filters" method="get" role="search">
+    {% if filterset.filters.0.value %}
+      <input type="hidden" name="personne" value="{{ filterset.filters.0.value }}">
+    {% endif %}
+    <div class="field">
+      <label class="field-label" for="filtre-periode">Granularité</label>
+      <select id="filtre-periode" name="periode" data-autosubmit>
+        <option value="weekly" {% if period == "weekly" %}selected{% endif %}>par semaine</option>
+        <option value="daily" {% if period == "daily" %}selected{% endif %}>par jour</option>
+      </select>
+    </div>
+    <div class="filters-actions">
+      <button type="submit" class="btn">Filtrer</button>
+    </div>
+  </form>
+
+  {% if summary_rows %}
     <div class="card-body flush">
       <div class="table-scroll">
         <table class="table">
           <thead>
             <tr>
-              <th class="fit">Début</th>
               <th class="fit">Période</th>
               <th>Personne</th>
               <th>Émotion dominante</th>
-              <th class="num">Intensité</th>
-              <th>Tendance</th>
+              <th style="min-width: 7rem;">Intensité</th>
+              <th class="fit">Tendance</th>
               <th class="num">Relevés</th>
+              <th>Répartition</th>
             </tr>
           </thead>
           <tbody>
-            {% for s in summaries_page.rows %}
+            {% for r in summary_rows %}
               <tr>
-                <td class="fit">{{ s.period_start|dt }}</td>
-                <td class="fit"><span class="badge">{{ s.period_type }}</span></td>
-                <td class="mono text-xs">{{ s.person_id|default:"—" }}</td>
-                <td><span class="emo" style="{{ s.dominant_emotion|emo_style }}">{{ s.dominant_emotion }}</span></td>
-                <td class="num">{{ s.dominant_intensity|pct }}</td>
-                <td>{{ s.trend|default:"—" }}</td>
-                <td class="num">{{ s.snapshot_count }}</td>
+                <td class="fit">
+                  {{ r.period_start|dt }}
+                  {% if r.period_end %}
+                    <div class="text-xs muted">→ {{ r.period_end|dt }}</div>
+                  {% else %}
+                    <div class="text-xs muted">journée</div>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if r.entity_id %}
+                    <a href="{% url 'gestionsysteme:person-detail' r.entity_id %}">{{ r.entity_name }}</a>
+                    <div class="mono text-xs muted">{{ r.person_id }}</div>
+                  {% else %}
+                    <span class="mono text-xs">{{ r.person_id }}</span>
+                    {% if r.kind %}<div class="text-xs muted">{{ r.kind }}</div>{% endif %}
+                  {% endif %}
+                </td>
+                <td><span class="emo" style="{{ r.dominant_emotion|emo_style }}">{{ r.dominant_emotion|emo_fr }}</span></td>
+                <td>
+                  <div class="row">
+                    <span class="meter {{ r.dominant_emotion|emo_tone }}" style="flex:1; min-width:3rem;">
+                      <span style="width: {{ r.dominant_intensity|bar_width }}%;"></span>
+                    </span>
+                    <span class="tabular text-xs">{{ r.dominant_intensity|pct }}</span>
+                  </div>
+                </td>
+                <td class="fit">
+                  <span class="badge {% if r.trend_tone %}badge-{{ r.trend_tone }}{% endif %}">{{ r.trend_fr }}</span>
+                </td>
+                <td class="num">{{ r.snapshot_count }}</td>
+                <td>
+                  <span class="chips">
+                    {% for d in r.distribution %}
+                      <span class="chip emo" style="{{ d.emotion|emo_style }}">{{ d.emotion|emo_fr }}
+                        <span class="emo-weight">{{ d.weight|pct }}</span>
+                      </span>
+                    {% empty %}
+                      <span class="muted text-xs">—</span>
+                    {% endfor %}
+                  </span>
+                </td>
               </tr>
             {% endfor %}
           </tbody>
@@ -83,7 +252,14 @@
     </div>
     <div class="card-foot">{% include "gestion/partials/pager.html" with page=summaries_page %}</div>
   {% else %}
-    <div class="card-body"><div class="empty">Aucun résumé.</div></div>
+    <div class="card-body">
+      <div class="empty">
+        Aucun résumé {% if period == "weekly" %}hebdomadaire{% else %}quotidien{% endif %}.
+        Ils sont produits par le consolidateur — le résumé du jour à partir
+        des relevés ci-dessus, celui de la semaine à partir des résumés du
+        jour. Ils n'apparaissent donc pas avant qu'un cycle soit passé.
+      </div>
+    </div>
   {% endif %}
 </section>
 {% endblock %}

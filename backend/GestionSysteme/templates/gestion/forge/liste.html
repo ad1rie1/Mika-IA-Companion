@@ -1,0 +1,86 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+{% if forge_absent %}
+  <div class="alert alert-warn mb-4">
+    Le module <span class="mono">forge</span> n'est pas enregistré : les apps
+    présentes sur disque ne sont ni chargées ni listables. Active-le depuis son
+    espace.
+  </div>
+{% endif %}
+
+<section class="grid auto-lg mb-6">
+  {% for a in rows %}
+    <article class="card">
+      <div class="card-head">
+        <h3><a href="{% url 'gestionsysteme:forge-app' a.name %}">{{ a.title }}</a></h3>
+        <span class="card-head-actions">
+          {% if a.status == "actif" %}
+            <span class="badge badge-ok">active</span>
+          {% elif a.status == "cassé" %}
+            <span class="badge badge-danger" title="Chargement en échec">cassée</span>
+          {% elif a.status == "désactivé" %}
+            <span class="badge">désactivée</span>
+          {% else %}
+            <span class="badge badge-warn">{{ a.status }}</span>
+          {% endif %}
+        </span>
+      </div>
+      <div class="card-body">
+        {% if a.status_detail %}
+          <div class="alert alert-danger mb-3">{{ a.status_detail }}</div>
+        {% endif %}
+
+        {% comment %} Le texte que l'app injecte dans le prompte de Mika : c'est ce
+           qu'elle en perçoit réellement, et il n'était visible nulle part. {% endcomment %}
+        {% if a.context %}
+          <p class="text-sm mb-3">{{ a.context }}</p>
+        {% endif %}
+
+        <dl class="kv">
+          <dt>Nom technique</dt><dd class="mono text-xs">{{ a.name }}</dd>
+          <dt>Cadence</dt><dd class="mono text-xs">{{ a.schedule|default:"manuelle" }}</dd>
+          {% if a.events %}
+            <dt>Écoute</dt>
+            <dd><span class="chips">{% for e in a.events %}<span class="chip mono">{{ e }}</span>{% endfor %}</span></dd>
+          {% endif %}
+          {% if a.version %}<dt>Version</dt><dd class="tabular">{{ a.version }}</dd>{% endif %}
+          {% if a.failures %}
+            <dt>Échecs consécutifs</dt>
+            <dd><span class="badge {% if a.failures >= 3 %}badge-danger{% else %}badge-warn{% endif %}">{{ a.failures }}</span></dd>
+          {% endif %}
+        </dl>
+      </div>
+      <div class="card-foot">
+        <a class="btn btn-sm" href="{% url 'gestionsysteme:forge-app' a.name %}">Ouvrir l'espace</a>
+        {% if a.has_config %}
+          <a class="btn btn-sm" href="{% url 'gestionsysteme:forge-app-config' a.name %}">Configurer</a>
+        {% endif %}
+        {% if a.panels %}
+          <span class="muted text-xs push">{{ a.panels|length }} page(s)</span>
+        {% endif %}
+      </div>
+    </article>
+  {% empty %}
+    <div class="card"><div class="card-body">
+      <div class="empty">
+        <div class="empty-title">Aucune app forgée</div>
+        Mika en crée elle-même pendant une conversation, avec ses outils
+        <span class="mono">forge_write_module</span> et
+        <span class="mono">forge_test_module</span>. Elles apparaissent ici dès
+        qu'elles existent sur disque, même désactivées ou cassées.
+      </div>
+    </div></div>
+  {% endfor %}
+</section>
+
+<section class="card">
+  <div class="card-body">
+    <p class="muted text-sm">
+      L'atelier — journal de toutes les apps, stockage, rechargement global —
+      est dans <a href="{% url 'gestionsysteme:module-space' 'forge' %}">l'espace du module Forge</a>.
+    </p>
+  </div>
+</section>
+{% endblock %}

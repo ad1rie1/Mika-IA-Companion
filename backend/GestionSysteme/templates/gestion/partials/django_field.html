@@ -11,12 +11,18 @@
    un modèle Django dans le vocabulaire du registre de configuration.
 {% endcomment %}
 
+{% comment %} Mêmes trois emplacements que `field.html` — libellé, description,
+   contrôle — parce que c'est la grille qui aligne les lignes, et qu'elle
+   n'a pas à savoir laquelle des deux sources a décrit le champ. {% endcomment %}
+
 {% if field.field.widget.input_type == "checkbox" %}
   <div class="field field-check {% if field.errors %}has-error{% endif %} {% if wide %}field-full{% endif %}">
-    {{ field }}
-    <div>
+    <div class="check-row">
+      {{ field }}
       <label class="field-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
-      {% if field.help_text %}<div class="field-hint">{{ field.help_text }}</div>{% endif %}
+    </div>
+    <div class="field-desc">{% if field.help_text %}{{ field.help_text }}{% endif %}</div>
+    <div class="field-control">
       {% for erreur in field.errors %}<div class="field-error">{{ erreur }}</div>{% endfor %}
     </div>
   </div>
@@ -27,8 +33,10 @@
       {{ field.label }}
       {% if field.field.required %}<span class="field-flag" title="Obligatoire">requis</span>{% endif %}
     </label>
-    {% if field.help_text %}<div class="field-desc">{{ field.help_text }}</div>{% endif %}
-    {{ field }}
-    {% for erreur in field.errors %}<div class="field-error">{{ erreur }}</div>{% endfor %}
+    <div class="field-desc">{% if field.help_text %}{{ field.help_text }}{% endif %}</div>
+    <div class="field-control">
+      {{ field }}
+      {% for erreur in field.errors %}<div class="field-error">{{ erreur }}</div>{% endfor %}
+    </div>
   </div>
 {% endif %}

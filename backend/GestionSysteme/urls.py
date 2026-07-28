@@ -19,6 +19,7 @@ from GestionSysteme.views import (
     api,
     config,
     conscience,
+    forge,
     inner,
     memory,
     modules,
@@ -47,7 +48,13 @@ urlpatterns = [
         social.person_detail, name="person-detail-tab",
     ),
     path("social/identites/<int:identity_id>/", social.identity_detail, name="identity-detail"),
+    # « action » est une écriture, pas un onglet : déclaré avant <slug:tab>,
+    # qui le capturerait sinon et rendrait la fiche à la place du POST.
     path("social/identites/<int:identity_id>/action/", social.identity_action, name="identity-action"),
+    path(
+        "social/identites/<int:identity_id>/<slug:tab>/",
+        social.identity_detail, name="identity-detail-tab",
+    ),
     path("social/demandes/<int:claim_id>/action/", social.claim_action, name="claim-action"),
     path("social/<slug:tab>/", social.social, name="social-tab"),
 
@@ -80,6 +87,16 @@ urlpatterns = [
         "modules/<str:module>/p/<slug:panel>/action/<slug:action>/",
         modules.module_action, name="module-action",
     ),
+
+    # ── Forge apps ───────────────────────────────────────────────────
+    # Les mini-modules que Mika écrit à l'exécution. Segments littéraux
+    # (« configuration », « commande ») déclarés avant les vues de l'app :
+    # ``<slug:panel>`` ne peut pas les capturer, il est sous ``/p/``.
+    path("forge/", forge.forge_apps, name="forge-apps"),
+    path("forge/<str:app>/", forge.forge_app, name="forge-app"),
+    path("forge/<str:app>/commande/", forge.forge_app_command, name="forge-app-command"),
+    path("forge/<str:app>/configuration/", forge.forge_app_config, name="forge-app-config"),
+    path("forge/<str:app>/p/<slug:panel>/", forge.forge_app_panel, name="forge-app-panel"),
 
     path("configuration/", config.config_home, name="config"),
     path("configuration/<slug:section>/", config.config_section, name="config-section"),

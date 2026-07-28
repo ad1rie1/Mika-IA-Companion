@@ -18,12 +18,13 @@ from __future__ import annotations
 
 import pytest
 from django.contrib.auth import get_user_model
+from asgiref.sync import sync_to_async
 from django.test import Client
 from django.urls import reverse
 
 from GestionSysteme import forms, panels, tables
 from GestionSysteme.formatting import emotion_var
-from GestionSysteme.nav import NAV, PERSON_TABS, item_for
+from GestionSysteme.nav import IDENTITY_TABS, NAV, PERSON_TABS, item_for
 
 
 # ── Couverture des routes ───────────────────────────────────────────────
@@ -758,6 +759,499 @@ def test_le_filtre_handle_ne_lit_que_les_handles_de_la_personne(client, personne
     )
     contenus = [m.content for m in response.context["page"].rows]
     assert contenus == ["à moi"]
+
+
+# ── Historique affectif : une frise, des personnes, des résumés ─────────
+#
+# La page listait à plat tout ``EmotionSnapshot``. Or le moteur écrit une
+# ligne **par personne suivie plus une pour ``__global__``**, au même instant :
+# on y lisait la mécanique d'écriture, pas une évolution. Ces tests tiennent
+# la séparation qui rend l'écran lisible, plus le piège ORM qui l'a mordue.
+
+@pytest.fixture
+def releves(db):
+    """Deux instants de relevés : un global, deux handles, un id interne."""
+    from memory.models import Conversation, EmotionSnapshot
+
+    conversation = Conversation.objects.create()
+    for emotion, intensite in (("happy", 0.8), ("sad", 0.3)):
+        EmotionSnapshot.objects.create(
+            conversation=conversation, person_id="__global__",
+            primary_emotion=emotion, primary_intensity=intensite,
+            global_emotion=emotion, global_intensity=intensite,
+        )
+        for person_id in ("web_abc123", "conscience_mika"):
+            EmotionSnapshot.objects.create(
+                conversation=conversation, person_id=person_id,
+                primary_emotion="excited", primary_intensity=0.6,
+                global_emotion=emotion, global_intensity=intensite,
+            )
+    return conversation
+
+
+def _historique(client, **params):
+    return client.get(
+        reverse("gestionsysteme:inner-tab", args=["historique"]), params,
+    )
+
+
+@pytest.mark.django_db
+def test_la_frise_globale_est_chronologique_et_exclut_les_personnes(client, releves):
+    """``__global__`` a sa propre carte : c'est son humeur à elle, pas un tiers."""
+    reponse = _historique(client)
+    frise = reponse.context["global_timeline"]
+
+    assert [p["emotion"] for p in frise["points"]] == ["happy", "sad"]
+    assert frise["points"][0]["at"] <= frise["points"][-1]["at"], (
+        "la base sert du plus récent au plus ancien ; la frise doit être remise "
+        "dans l'ordre du temps, sinon elle se lit à l'envers"
+    )
+    assert frise["current"]["emotion"] == "sad"
+
+
+@pytest.mark.django_db
+def test_le_tableau_des_personnes_ne_contient_jamais_le_global(client, releves):
+    reponse = _historique(client)
+    handles = {r["person_id"] for r in reponse.context["snapshot_rows"]}
+
+    assert handles == {"web_abc123", "conscience_mika"}
+    assert "__global__" not in handles
+
+
+@pytest.mark.django_db
+def test_la_liste_des_handles_est_dedoublonnee(client, releves):
+    """``Meta.ordering`` entre dans la clé de ``distinct()``.
+
+    ``EmotionSnapshot`` trie par ``created_at`` : sans ``order_by()`` vide, la
+    colonne de tri rejoint le SELECT et chaque relevé ressort comme un handle
+    distinct — la liste déroulante affichait le même handle une fois par ligne
+    en base.
+    """
+    reponse = _historique(client)
+    choix = [
+        c.value
+        for f in reponse.context["filterset"].filters
+        if f.param == "personne"
+        for c in f.choices if c.value
+    ]
+
+    assert choix == sorted(set(choix)), f"doublons dans la liste : {choix}"
+    assert set(choix) == {"web_abc123", "conscience_mika"}
+
+
+@pytest.mark.django_db
+def test_un_handle_hors_liste_est_ignore(client, releves):
+    """Le filtre est une liste close — aucune valeur d'URL n'atteint l'ORM."""
+    reponse = _historique(client, personne="' OR 1=1")
+
+    assert reponse.status_code == 200
+    assert {r["person_id"] for r in reponse.context["snapshot_rows"]} == {
+        "web_abc123", "conscience_mika",
+    }
+
+
+@pytest.mark.django_db
+def test_le_filtre_personne_restreint_les_deux_tableaux(client, releves):
+    from memory.models import EmotionalSummary
+
+    EmotionalSummary.objects.create(
+        person_id="web_abc123", period_type="daily",
+        period_start="2026-07-28", dominant_emotion="excited",
+        dominant_intensity=0.6, emotion_distribution={"excited": 1.0},
+        trend="warming", snapshot_count=2,
+    )
+    EmotionalSummary.objects.create(
+        person_id="conscience_mika", period_type="daily",
+        period_start="2026-07-28", dominant_emotion="sad",
+        dominant_intensity=0.4, emotion_distribution={"sad": 1.0},
+        trend="cooling", snapshot_count=2,
+    )
+
+    reponse = _historique(client, personne="web_abc123")
+
+    assert {r["person_id"] for r in reponse.context["snapshot_rows"]} == {"web_abc123"}
+    assert {r["person_id"] for r in reponse.context["summary_rows"]} == {"web_abc123"}
+
+
+@pytest.mark.django_db
+def test_un_releve_porte_son_ecart_a_l_humeur_globale(client, releves):
+    """La comparaison utile, à la place de deux colonnes « Intensité » muettes.
+
+    Les deux colonnes d'avant ne disaient pas laquelle était laquelle, et la
+    seconde répétait la même valeur sur toutes les lignes d'un même instant.
+    """
+    reponse = _historique(client, personne="web_abc123")
+    ligne = reponse.context["snapshot_rows"][0]
+
+    assert ligne["emotion"] == "excited"
+    assert ligne["same_as_global"] is False
+    assert ligne["global_emotion"] in ("happy", "sad")
+    assert ligne["delta"] == pytest.approx(
+        ligne["intensity"] - ligne["global_intensity"],
+    )
+
+
+@pytest.mark.django_db
+def test_un_id_interne_est_nomme_comme_tel(client, releves):
+    """``conscience_mika`` n'est pas une personne sans fiche : c'est sa propre
+    boucle. Servi par ``identity/trust.py``, jamais par une liste recopiée."""
+    reponse = _historique(client)
+    par_handle = {r["person_id"]: r for r in reponse.context["snapshot_rows"]}
+
+    assert par_handle["conscience_mika"]["kind"] == "interne"
+    assert par_handle["web_abc123"]["kind"] == ""
+
+
+@pytest.mark.django_db
+def test_un_handle_lie_renvoie_vers_sa_fiche_personne(client, releves, personne):
+    """Le lien passe par la couche identité, jamais par l'égalité de noms."""
+    avant = _historique(client).context["snapshot_rows"]
+    assert all(r["entity_id"] is None for r in avant)
+
+    _lie_un_handle(personne, "web_abc123")
+
+    apres = {r["person_id"]: r for r in _historique(client).context["snapshot_rows"]}
+    assert apres["web_abc123"]["entity_id"] == personne.pk
+    assert apres["web_abc123"]["entity_name"] == "Thomas"
+    assert apres["conscience_mika"]["entity_id"] is None
+
+
+@pytest.mark.django_db
+def test_un_resume_expose_sa_repartition_et_sa_tendance_en_francais(client, releves):
+    """``emotion_distribution`` est le champ le plus riche du modèle et n'était
+    pas affiché ; ``trend`` sortait tel quel, en anglais."""
+    from memory.models import EmotionalSummary
+
+    EmotionalSummary.objects.create(
+        person_id="web_abc123", period_type="daily",
+        period_start="2026-07-28", dominant_emotion="excited",
+        dominant_intensity=0.6,
+        emotion_distribution={"excited": 0.7, "happy": 0.3},
+        trend="warming", snapshot_count=4,
+    )
+
+    ligne = _historique(client).context["summary_rows"][0]
+
+    assert ligne["trend_fr"] == "se réchauffe"
+    assert ligne["trend_tone"] == "ok"
+    assert ligne["period_fr"] == "jour"
+    assert [d["emotion"] for d in ligne["distribution"]] == ["excited", "happy"], (
+        "la répartition doit descendre triée par poids"
+    )
+
+
+@pytest.mark.django_db
+def test_les_deux_paginations_sont_independantes(client, releves):
+    """Naviguer dans une liste ne doit pas déplacer l'autre."""
+    reponse = _historique(client)
+
+    assert reponse.context["snapshots_page"].param == "p_instantanes"
+    assert reponse.context["summaries_page"].param == "p_resumes"
+
+
+# ── Fiche identité : le verdict, et l'arithmétique qui le produit ───────
+
+@pytest.fixture
+def identite(db):
+    """Une identité sur un canal ``account`` (Telegram : plancher 0.25, plafond 0.85)."""
+    from identity.models import Identity, IdentityHandle
+
+    identity = Identity.objects.create(display_name="tg_42", certainty=0.45)
+    IdentityHandle.objects.create(
+        identity=identity, person_id="tg_42", channel="telegram", trust="account",
+    )
+    return identity
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("onglet", [t.key for t in IDENTITY_TABS])
+def test_chaque_onglet_de_la_fiche_identite_repond(client, identite, onglet):
+    """Dérivé d'IDENTITY_TABS : un onglet sans gabarit fait rougir la suite."""
+    url = reverse("gestionsysteme:identity-detail-tab", args=[identite.pk, onglet])
+    assert client.get(url).status_code == 200
+
+
+@pytest.mark.django_db
+def test_la_fiche_identite_sans_onglet_ouvre_le_verdict(client, identite):
+    response = client.get(
+        reverse("gestionsysteme:identity-detail", args=[identite.pk]),
+    )
+    assert response.status_code == 200
+    assert response.context["active_identity_tab"] == IDENTITY_TABS[0].key
+
+
+@pytest.mark.django_db
+def test_un_onglet_d_identite_inconnu_retombe_sur_le_premier(client, identite):
+    response = client.get(
+        reverse("gestionsysteme:identity-detail-tab", args=[identite.pk, "nexistepas"]),
+    )
+    assert response.context["active_identity_tab"] == IDENTITY_TABS[0].key
+
+
+@pytest.mark.django_db
+def test_l_ecriture_d_identite_n_est_pas_capturee_comme_un_onglet(client, identite):
+    """``/action/`` est un POST, pas un segment d'onglet.
+
+    ``<slug:tab>`` le capturerait s'il était déclaré avant : l'écriture
+    rendrait silencieusement la fiche au lieu de s'appliquer.
+    """
+    url = reverse("gestionsysteme:identity-action", args=[identite.pk])
+    assert url.endswith("/action/")
+    assert client.get(url).status_code == 405  # require_POST, donc bien la vue d'écriture
+
+
+@pytest.mark.django_db
+def test_une_identite_inconnue_donne_une_404(client):
+    url = reverse("gestionsysteme:identity-detail-tab", args=[999999, "preuves"])
+    assert client.get(url).status_code == 404
+
+
+@pytest.mark.django_db
+def test_le_verdict_expose_le_plancher_et_le_plafond_du_canal(client, identite):
+    """L'écart entre valeur stockée et verdict n'est pas du bruit.
+
+    C'est le plancher et le plafond du canal — la seule règle qui fasse qu'une
+    revendication en salon public ne vaudra jamais un login. La page l'affichait
+    sans jamais dire d'où il venait.
+    """
+    from identity import trust as trust_policy
+    from identity.trust import ChannelTrust
+
+    response = client.get(
+        reverse("gestionsysteme:identity-detail-tab", args=[identite.pk, "verdict"]),
+    )
+    ctx = response.context
+    assert ctx["channel_trust"] is ChannelTrust.ACCOUNT
+    assert ctx["floor"] == trust_policy.floor_for(ChannelTrust.ACCOUNT)
+    assert ctx["ceiling"] == trust_policy.ceiling_for(ChannelTrust.ACCOUNT)
+    assert ctx["stored"] == pytest.approx(0.45)
+    # 0.45 est entre plancher et plafond : ni relevé, ni borné.
+    assert ctx["raised_by_floor"] is False
+    assert ctx["capped_by_ceiling"] is False
+
+
+@pytest.mark.django_db
+def test_le_verdict_dit_quand_le_plafond_mord(client, identite):
+    """« J'enregistre des preuves et rien ne bouge » doit avoir une réponse.
+
+    Sur un canal ``public`` le plafond est CORROBORATED : au-delà, toute
+    preuve supplémentaire est délibérément sans effet, et rien ne le disait.
+    """
+    identite.certainty = 0.95
+    identite.save(update_fields=["certainty"])
+    identite.handles.update(channel="web", trust="public")
+
+    response = client.get(
+        reverse("gestionsysteme:identity-detail-tab", args=[identite.pk, "verdict"]),
+    )
+    assert response.context["capped_by_ceiling"] is True
+    assert "Le plafond mord" in response.content.decode()
+
+
+@pytest.mark.django_db
+def test_le_verdict_dit_quand_le_plancher_releve(client):
+    """Une session authentifiée n'est pas « inconnue », même à 0 en base."""
+    from identity.models import Identity, IdentityHandle
+
+    identity = Identity.objects.create(display_name="user_1", certainty=0.0)
+    IdentityHandle.objects.create(
+        identity=identity, person_id="user_1", channel="web", trust="authenticated",
+    )
+    response = client.get(
+        reverse("gestionsysteme:identity-detail-tab", args=[identity.pk, "verdict"]),
+    )
+    assert response.context["raised_by_floor"] is True
+    assert response.context["decision"].certainty == pytest.approx(1.0)
+    assert response.context["decision"].may_disclose is True
+
+
+@pytest.mark.django_db
+def test_le_handle_principal_est_celui_au_plafond_le_plus_haut(client, identite):
+    """Pas le plus récent : c'est le plafond qui fixe le verdict de l'identité."""
+    from identity.models import IdentityHandle
+
+    recent = IdentityHandle.objects.create(
+        identity=identite, person_id="web_tard", channel="web", trust="public",
+    )
+    response = client.get(
+        reverse("gestionsysteme:identity-detail-tab", args=[identite.pk, "handles"]),
+    )
+    principaux = [r["obj"].person_id for r in response.context["handle_rows"] if r["is_primary"]]
+    assert principaux == ["tg_42"], "le handle public le plus récent ne doit pas primer"
+    assert recent.person_id in [r["obj"].person_id for r in response.context["handle_rows"]]
+
+
+@pytest.mark.django_db
+def test_le_registre_de_preuves_est_pagine_et_filtrable(client, identite):
+    """Il était tronqué à cent lignes sans le dire, et sans aucun filtre."""
+    from identity.models import IdentityClaim
+
+    for i in range(30):
+        IdentityClaim.objects.create(
+            identity=identite, claimed_name=f"Nom {i}",
+            kind="self_declared",
+            status="pending" if i % 2 else "accepted",
+        )
+    url = reverse("gestionsysteme:identity-detail-tab", args=[identite.pk, "preuves"])
+
+    tout = client.get(url).context["page"]
+    assert tout.total == 30
+    assert len(tout.rows) == tables.DEFAULT_PER_PAGE
+
+    en_attente = client.get(url, {"statut": "pending"}).context["page"]
+    assert en_attente.total == 15
+    assert {c.status for c in en_attente.rows} == {"pending"}
+
+
+@pytest.mark.django_db
+def test_une_revendication_se_resout_depuis_la_fiche(client, identite):
+    """On lit le motif du doute ici ; aller cliquer ailleurs était une
+    navigation de trop."""
+    from identity.models import IdentityClaim
+
+    claim = IdentityClaim.objects.create(
+        identity=identite, claimed_name="Thomas", kind="self_declared",
+        handle=identite.handles.first(),
+    )
+    retour = reverse(
+        "gestionsysteme:identity-detail-tab", args=[identite.pk, "preuves"],
+    ) + "?statut=pending"
+
+    response = client.post(
+        reverse("gestionsysteme:claim-action", args=[claim.pk]),
+        {"action": "rejeter", "reason": "pas convaincue", "retour": retour},
+    )
+    assert response.status_code == 302
+    assert response["Location"] == retour, "l'onglet et ses filtres doivent être préservés"
+    claim.refresh_from_db()
+    assert claim.status == "rejected"
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("hostile", [
+    "https://evil.test/phishing",
+    "//evil.test/phishing",
+    "http://evil.test",
+])
+def test_le_retour_apres_ecriture_ne_sort_jamais_du_site(client, identite, hostile):
+    """``retour`` venait du POST et allait droit dans ``redirect()``.
+
+    Une redirection ouverte renvoie un opérateur *déjà authentifié* sur un
+    domaine tiers, qui n'a plus qu'à imiter l'écran de connexion. Le contrôle
+    est celui de Django, pas une liste d'URL en dur : onglets, filtres et
+    numéros de page font partie de la valeur légitime.
+    """
+    from identity.models import IdentityClaim
+
+    claim = IdentityClaim.objects.create(
+        identity=identite, claimed_name="Thomas", kind="self_declared",
+    )
+    for url, defaut in (
+        (reverse("gestionsysteme:claim-action", args=[claim.pk]),
+         reverse("gestionsysteme:social-tab", args=["demandes"])),
+        (reverse("gestionsysteme:identity-action", args=[identite.pk]),
+         reverse("gestionsysteme:identity-detail", args=[identite.pk])),
+    ):
+        response = client.post(url, {"action": "rejeter", "retour": hostile})
+        assert response.status_code == 302
+        assert response["Location"] == defaut, f"{url} a suivi {hostile}"
+
+
+@pytest.mark.django_db
+def test_une_identite_orpheline_reste_consultable_et_ses_ecritures_refusees(client):
+    """Une ligne sans handle est un fait sur la base, pas une 404.
+
+    Toutes les écritures passent par un identifiant de transport : il n'y a
+    rien à manipuler, et la page doit le dire plutôt que d'offrir trois
+    formulaires qui échoueront.
+    """
+    from identity.models import Identity
+
+    identity = Identity.objects.create(display_name="orpheline")
+    for onglet in [t.key for t in IDENTITY_TABS]:
+        url = reverse("gestionsysteme:identity-detail-tab", args=[identity.pk, onglet])
+        assert client.get(url).status_code == 200, onglet
+
+    actions = client.get(
+        reverse("gestionsysteme:identity-detail-tab", args=[identity.pk, "actions"]),
+    )
+    assert actions.context["acting_person_id"] == ""
+    assert "Aucun handle à manipuler" in actions.content.decode()
+
+    ecriture = client.post(
+        reverse("gestionsysteme:identity-action", args=[identity.pk]),
+        {"action": "lier", "entity_name": "Thomas"}, follow=True,
+    )
+    assert "aucun handle" in ecriture.content.decode().lower()
+
+
+@pytest.mark.django_db
+def test_le_verdict_signale_les_revendications_en_attente(client, identite):
+    """Une revendication non tranchée ne compte pour rien — donc elle se voit."""
+    from identity.models import IdentityClaim
+
+    IdentityClaim.objects.create(
+        identity=identite, claimed_name="Thomas", kind="self_declared",
+        handle=identite.handles.first(),
+    )
+    response = client.get(
+        reverse("gestionsysteme:identity-detail-tab", args=[identite.pk, "verdict"]),
+    )
+    assert len(response.context["pending_claims"]) == 1
+    assert "En attente de décision" in response.content.decode()
+
+
+@pytest.mark.django_db
+def test_les_deux_fiches_se_pointent_l_une_l_autre(client, identite):
+    """Les deux côtés de la même question : le handle et l'entité mémoire."""
+    from memory.models import Entity
+
+    entity = Entity.objects.create(name="Thomas", entity_type="person")
+    identite.entity = entity
+    identite.save(update_fields=["entity"])
+
+    fiche_identite = client.get(
+        reverse("gestionsysteme:identity-detail-tab", args=[identite.pk, "verdict"]),
+    ).content.decode()
+    assert reverse("gestionsysteme:person-detail", args=[entity.pk]) in fiche_identite
+
+    fiche_personne = client.get(
+        reverse("gestionsysteme:person-detail-tab", args=[entity.pk, "synthese"]),
+    ).content.decode()
+    assert reverse("gestionsysteme:identity-detail", args=[identite.pk]) in fiche_personne
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("onglet,param,valeur", [
+    ("preuves", "statut", "pending' OR 1=1"),
+    ("preuves", "type", "../etc"),
+    ("echanges", "role", "assistant; --"),
+    ("echanges", "handle", "tg_inconnu"),
+])
+def test_aucun_parametre_de_fiche_identite_n_atteint_l_orm_hors_liste(
+    client, identite, onglet, param, valeur,
+):
+    url = reverse("gestionsysteme:identity-detail-tab", args=[identite.pk, onglet])
+    assert client.get(url, {param: valeur}).status_code == 200
+
+
+@pytest.mark.django_db
+def test_le_filtre_handle_d_identite_ne_lit_que_ses_propres_handles(client, identite):
+    from memory.models import Conversation, Message
+
+    conversation = Conversation.objects.create()
+    Message.objects.create(
+        conversation=conversation, role="user", content="à moi", person_id="tg_42",
+    )
+    Message.objects.create(
+        conversation=conversation, role="user", content="ailleurs",
+        person_id="tg_etranger",
+    )
+    response = client.get(
+        reverse("gestionsysteme:identity-detail-tab", args=[identite.pk, "echanges"]),
+        {"handle": "tg_etranger"},
+    )
+    assert [m.content for m in response.context["page"].rows] == ["à moi"]
 
 
 # ── Espace du module email : panneaux natifs + sélecteur de compte ──────

@@ -1,0 +1,95 @@
+{% extends "gestion/social/identite/_base.html" %}
+{% load gestion %}
+
+{% block panneau %}
+<div class="alert alert-info mb-4">
+  Chaque raison de croire — et de cesser de croire — est une ligne, avec ce
+  qu'elle valait. La certitude affichée sur le verdict est le total courant ;
+  ceci est le registre. Une revendication en attente ne compte pour rien tant
+  que personne n'a tranché : c'est délibéré, elle attend un humain.
+</div>
+
+<section class="card">
+  {% include "gestion/partials/filters.html" %}
+
+  {% if page.rows %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="fit">Quand</th>
+              <th>Se dit</th>
+              <th class="fit">Type</th>
+              <th>Preuve</th>
+              <th class="num" title="Poids réellement appliqué à la certitude">Poids</th>
+              <th class="fit">Canal</th>
+              <th class="fit">État</th>
+              <th>Résolution</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in page.rows %}
+              <tr>
+                <td class="fit muted" title="{{ c.created_at|dt_full }}">{{ c.created_at|ago }}</td>
+                <td>{{ c.claimed_name|default:"—" }}</td>
+                <td class="fit">
+                  <span class="badge">{{ c.get_kind_display }}</span>
+                  {% with w=evidence_weights|get:c.kind %}{% if w %}<div class="text-xs muted tabular">barème {{ w|num }}</div>{% endif %}{% endwith %}
+                  {% with w=counter_weights|get:c.kind %}{% if w %}<div class="text-xs muted tabular">barème {{ w|num }}</div>{% endif %}{% endwith %}
+                </td>
+                <td><div class="cell-clamp">{{ c.evidence|default:"—" }}</div></td>
+                <td class="num">{{ c.applied_weight|num }}</td>
+                <td class="fit">{{ c.channel|default:"—" }} <span class="muted text-xs">{{ c.trust }}</span></td>
+                <td class="fit">
+                  <span class="badge {% if c.status == 'pending' %}badge-warn{% elif c.status == 'accepted' %}badge-ok{% else %}badge-danger{% endif %}">{{ c.get_status_display }}</span>
+                </td>
+                <td>
+                  {% if c.status == "pending" %}
+                    {% comment %} Traitable ici : on lit le motif du doute sur cet
+                       écran, aller cliquer sur un autre était une navigation de
+                       trop. `retour` ramène l'onglet et ses filtres — la vue le
+                       revalide côté serveur, il ne sort jamais du site. {% endcomment %}
+                    <form method="post" action="{% url 'gestionsysteme:claim-action' c.pk %}" class="col">
+                      {% csrf_token %}
+                      <input type="hidden" name="retour" value="{{ request.get_full_path }}">
+                      <input type="text" name="reason" placeholder="motif" aria-label="Motif de la décision">
+                      <div class="row">
+                        <select name="evidence_kind" aria-label="Type de preuve à l'acceptation">
+                          <option value="">barème du type déclaré</option>
+                          {% for k in accept_kinds %}
+                            <option value="{{ k }}">{{ k }} ({% with w=evidence_weights|get:k %}{{ w|num }}{% endwith %})</option>
+                          {% endfor %}
+                        </select>
+                        <button class="btn btn-sm btn-primary" type="submit" name="action" value="accepter">Accepter</button>
+                        <button class="btn btn-sm btn-danger" type="submit" name="action" value="rejeter">Rejeter</button>
+                      </div>
+                    </form>
+                  {% else %}
+                    <span class="muted text-xs">{{ c.resolution_note|default:"—" }}</span>
+                    {% if c.resolved_at %}<div class="muted text-xs" title="{{ c.resolved_at|dt_full }}">{{ c.resolved_at|ago }}</div>{% endif %}
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
+  {% else %}
+    <div class="card-body">
+      <div class="empty">
+        {% if filterset.active %}
+          Aucune preuve ne correspond à ce filtre.
+        {% else %}
+          <div class="empty-title">Registre vide</div>
+          Rien n'a jamais été avancé sur cette identité. Sa certitude ne vient
+          donc d'aucune conversation : elle est entièrement celle que le canal
+          accorde de lui-même.
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

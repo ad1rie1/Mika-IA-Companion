@@ -15,7 +15,9 @@ import logging
 from collections import OrderedDict
 from typing import Iterable
 
-from configs.types import ConfigItem, ConfigRecord, ConfigSection
+from configs.types import (
+    ConfigItem, ConfigRecord, ConfigSection, choice_options,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +169,7 @@ def _item_to_dict(i: ConfigItem) -> dict:
         "description": i.description,
         "hint": i.hint,
         "default": i.default,
-        "choices": list(i.choices) if i.choices else [],
+        "choices": list(choice_options(i.choices)) if i.choices else [],
         "min": i.min,
         "max": i.max,
         "sensitive": i.sensitive,

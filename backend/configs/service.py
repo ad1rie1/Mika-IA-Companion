@@ -15,14 +15,16 @@ Subscribers:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
 from configs import secrets
 from configs.registry import registry
-from configs.types import ConfigItem
+from configs.types import ConfigItem, choice_values
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,58 @@ _UNSET = object()
 
 class ValidationError(ValueError):
     pass
+
+
+# ── Async-context safety ────────────────────────────────────────
+#
+# Config reads are synchronous *by design*: they happen in provider
+# constructors, in engine ``__init__``s, in prompt builders — call sites
+# that cannot become coroutines without turning the whole tree async. But
+# half of them run under the ASGI loop, where Django refuses ORM access on
+# the loop thread, and both failure modes were silent-ish:
+#
+#   - ``list_rows()`` had no cache at all, so ``ai.models`` was read on
+#     *every* AI call and raised SynchronousOnlyOperation mid-conversation
+#     ("Oups, j'ai eu un petit bug..." on every turn).
+#   - ``get()`` swallowed the very same exception in ``_resolve``'s
+#     ``except Exception`` and returned the schema default, so a provider
+#     key configured in the dashboard read back as *absent*.
+#
+# The query is therefore handed to a dedicated worker thread and waited on.
+# It blocks the loop for the duration of one indexed row read on a WAL
+# database — microseconds — which is the price of keeping the read
+# synchronous at ~200 call sites. A single worker is deliberate: it mirrors
+# ``sync_to_async(thread_sensitive=True)``, keeps one long-lived SQLite
+# connection, and serialises config reads the way they already were.
+_db_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="config-db")
+
+
+def _in_async_context() -> bool:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    return True
+
+
+def db_read(fn: Callable, *args, **kwargs):
+    """Run a synchronous ORM query, whatever context the caller is in.
+
+    Inline when called from a sync context (the vast majority: startup,
+    dashboard views, management commands); off-loop otherwise.
+    """
+    if not _in_async_context():
+        return fn(*args, **kwargs)
+
+    def _call():
+        from django.db import close_old_connections
+        # The worker owns its own thread-local connection; drop it if it
+        # went stale (CONN_MAX_AGE, health check) rather than reusing a
+        # dead handle for the lifetime of the process.
+        close_old_connections()
+        return fn(*args, **kwargs)
+
+    return _db_pool.submit(_call).result()
 
 
 class ConfigService:
@@ -66,11 +120,7 @@ class ConfigService:
 
     def _resolve(self, key: str, item: ConfigItem | None) -> Any:
         # 1. DB value (seeded from .env on first boot, see seed_from_env())
-        try:
-            from configs.models import ConfigValue
-            row = ConfigValue.objects.filter(key=key).first()
-        except Exception:
-            row = None
+        row = db_read(_fetch_value_row, key)
         if row is not None:
             raw = row.value_json
             if row.encrypted and raw is not None:
@@ -179,7 +229,8 @@ class ConfigService:
     def list_rows(self, parent_key: str, *, decrypt_secrets: bool = False) -> list[dict]:
         from configs import backends
         item = self._require_record_list(parent_key)
-        return backends.resolve(parent_key).list_rows(item, decrypt_secrets=decrypt_secrets)
+        backend = backends.resolve(parent_key)
+        return db_read(backend.list_rows, item, decrypt_secrets=decrypt_secrets)
 
     def add_row(self, parent_key: str, payload: dict, *, actor: str = "") -> dict:
         from configs import backends
@@ -272,6 +323,33 @@ class ConfigService:
 
 # ── Helpers ─────────────────────────────────────────────────────
 
+def _fetch_value_row(key: str):
+    """The one ConfigValue read behind ``get()``. Returns None if unreadable.
+
+    "Unreadable" stays broad on purpose — a config read legitimately
+    precedes a usable database (module imports run before ``migrate``, and
+    the test suite blocks DB access at collection time), and falling back to
+    the schema default is the right answer there.
+
+    ``SynchronousOnlyOperation`` is the one exception that must *not* be
+    absorbed: it says the caller is on the event loop, not that the database
+    is unreachable. Swallowed, it handed back the schema default for a key
+    that *was* configured — a dashboard-set provider token reading as
+    absent, with nothing logged. ``db_read`` above means it can no longer be
+    raised here; this re-raise is what stops it becoming silent again.
+    """
+    from django.core.exceptions import SynchronousOnlyOperation
+
+    try:
+        from configs.models import ConfigValue
+        return ConfigValue.objects.filter(key=key).first()
+    except SynchronousOnlyOperation:
+        raise
+    except Exception:
+        logger.debug("Config key %s unreadable (database not ready)", key, exc_info=True)
+        return None
+
+
 def _coerce(item: ConfigItem, value):
     t = item.type
     if value is None or value == "":
@@ -282,7 +360,8 @@ def _coerce(item: ConfigItem, value):
         if t == "bool":   return bool(value) if not isinstance(value, str) else value.lower() in ("1", "true", "yes", "on")
         if t in ("str", "text", "secret"): return str(value)
         if t in ("select",):
-            if item.choices and value not in item.choices:
+            allowed = choice_values(item.choices)
+            if allowed and value not in allowed:
                 raise ValidationError(f"Valeur hors choix: {value!r}")
             return value
         if t in ("multiselect", "list"):

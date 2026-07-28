@@ -1,0 +1,104 @@
+{% extends "gestion/social/identite/_base.html" %}
+{% load gestion %}
+
+{% block panneau %}
+{% if not acting_person_id %}
+  <div class="alert alert-warn mb-4">
+    <div>
+      <strong>Aucun handle à manipuler.</strong>
+      Toutes les écritures ci-dessous passent par un identifiant de transport —
+      c'est le résolveur qui les applique, et il travaille sur des handles.
+      Une identité orpheline ne peut être ni liée, ni prouvée, ni révoquée.
+    </div>
+  </div>
+{% else %}
+  <div class="alert alert-info mb-4">
+    <div>
+      Toute écriture délègue à <span class="mono">identity_resolver</span>,
+      appliquée au handle <span class="mono">{{ acting_person_id }}</span>.
+      Aucune arithmétique de certitude ne vit ici : une seconde implémentation
+      est exactement la façon dont cette page et le prompt se mettraient à ne
+      plus être d'accord sur qui parle.
+    </div>
+  </div>
+{% endif %}
+
+<section class="grid c3">
+  <div class="card">
+    <div class="card-head"><h3>Lier à une entité</h3></div>
+    <div class="card-body">
+      <p class="field-desc">
+        Le chemin normal est d'accepter une revendication. Ceci couvre ce que
+        le flux de revendication n'atteint pas : un contact qui n'a jamais rien
+        revendiqué, ou une liaison à repointer.
+      </p>
+      <form method="post" action="{% url 'gestionsysteme:identity-action' identity.pk %}">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="lier">
+        <input type="hidden" name="retour" value="{{ request.get_full_path }}">
+        <div class="field mb-3">
+          <label class="field-label" for="entity_name">Nom de l'entité mémoire</label>
+          <input type="text" id="entity_name" name="entity_name" required
+                 value="{% if identity.entity_id %}{{ identity.entity.name }}{% endif %}">
+        </div>
+        <button class="btn btn-primary" type="submit" {% if not acting_person_id %}disabled{% endif %}>Lier</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h3>Enregistrer une preuve</h3></div>
+    <div class="card-body">
+      <p class="field-desc">
+        Le levier pour ce qu'accepter/rejeter n'exprime pas : un fait partagé
+        faux (<span class="mono">contradicted</span>), quelqu'un qui se porte
+        garant (<span class="mono">vouched</span>), une preuve que seule cette
+        personne pouvait donner (<span class="mono">shared_memory</span>).
+      </p>
+      <form method="post" action="{% url 'gestionsysteme:identity-action' identity.pk %}">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="preuve">
+        <input type="hidden" name="retour" value="{{ request.get_full_path }}">
+        <div class="field mb-3">
+          <label class="field-label" for="kind">Type</label>
+          <select id="kind" name="kind" required>
+            {% for k in evidence_kinds %}
+              <option value="{{ k }}">
+                {{ k }}
+                {% with w=evidence_weights|get:k %}{% if w %}({{ w|num }}){% endif %}{% endwith %}
+                {% with w=counter_weights|get:k %}{% if w %}({{ w|num }}){% endif %}{% endwith %}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field mb-3">
+          <label class="field-label" for="detail">Détail</label>
+          <input type="text" id="detail" name="detail" placeholder="ce qui s'est passé">
+        </div>
+        <button class="btn btn-primary" type="submit" {% if not acting_person_id %}disabled{% endif %}>Enregistrer</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h3>Révoquer</h3></div>
+    <div class="card-body">
+      <p class="field-desc">
+        Cesser de croire. Ce n'est <strong>pas</strong> une suppression : le
+        registre conserve pourquoi elle a cru et pourquoi elle a cessé.
+      </p>
+      <form method="post" action="{% url 'gestionsysteme:identity-action' identity.pk %}"
+            data-confirm="Révoquer cette liaison ? Le registre de preuves est conservé.">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="revoquer">
+        <input type="hidden" name="retour" value="{{ request.get_full_path }}">
+        <div class="field mb-3">
+          <label class="field-label" for="reason">Motif</label>
+          <input type="text" id="reason" name="reason" placeholder="pourquoi tu n'y crois plus">
+        </div>
+        <button class="btn btn-danger" type="submit" {% if not acting_person_id %}disabled{% endif %}>Révoquer</button>
+      </form>
+    </div>
+  </div>
+</section>
+{% endblock %}

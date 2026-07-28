@@ -26,10 +26,11 @@ from django.contrib import messages
 from django.http import Http404
 from django.shortcuts import redirect, render
 from django.urls import reverse
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
 from GestionSysteme import tables
-from GestionSysteme.nav import PERSON_TABS, item_for, resolve_tab
+from GestionSysteme.nav import IDENTITY_TABS, PERSON_TABS, item_for, resolve_tab
 from GestionSysteme.shell import page_context
 from identity import trust as trust_policy
 from identity.trust import Certainty, ChannelTrust
@@ -177,20 +178,30 @@ def _identities(request) -> dict:
     }
 
 
-def identity_detail(request, identity_id: int):
+def identity_detail(request, identity_id: int, tab: str | None = None):
+    """Fiche d'une identité, en onglets.
+
+    Symétrique de la fiche personne, et pour la même raison : une seule page
+    empilait le verdict, les handles, trois formulaires d'écriture et un
+    registre de preuves tronqué à cent lignes sans le dire. Le registre est
+    pourtant *la* chose qu'on vient lire quand un verdict surprend, et il n'y
+    avait ni filtre ni pagination dessus.
+    """
     from identity.models import Identity
 
     identity = (
         Identity.objects.select_related("entity")
-        .prefetch_related("handles", "claims")
+        .prefetch_related("handles")
         .filter(pk=identity_id)
         .first()
     )
     if identity is None:
         raise Http404("Identité introuvable")
 
+    current = resolve_tab(IDENTITY_TABS, tab)
     handles = list(identity.handles.all())
-    handle, decision = _decide(identity, handles)
+    primary, decision = _decide(identity, handles)
+    person_ids = sorted({h.person_id for h in handles})
 
     item = item_for("social")
     ctx = page_context(
@@ -202,18 +213,196 @@ def identity_detail(request, identity_id: int):
     ctx.update({
         "identity": identity,
         "handles": handles,
-        "primary_handle": handle,
+        "primary_handle": primary,
         "decision": decision,
         "stored": float(identity.certainty or 0.0),
-        "claims": identity.claims.order_by("-created_at")[:100],
+        "threshold": trust_policy.PRIVATE_CONTEXT_THRESHOLD,
+        "identity_tabs": IDENTITY_TABS,
+        "active_identity_tab": current.key,
+        "identity_counts": _identity_counts(identity, person_ids),
+        "person_ids": person_ids,
+    })
+    ctx.update({
+        "verdict": _identity_verdict,
+        "handles": _identity_handles,
+        "echanges": _identity_echanges,
+        "preuves": _identity_preuves,
+        "actions": _identity_actions,
+    }[current.key](request, identity, handles, person_ids))
+    return render(request, f"gestion/social/identite/{current.key}.html", ctx)
+
+
+def _identity_counts(identity, person_ids: list[str]) -> dict:
+    from identity.models import IdentityClaim
+    from memory.models import Message
+
+    return {
+        "handles": len(person_ids),
+        "preuves": IdentityClaim.objects.filter(identity=identity).count(),
+        "echanges": (
+            Message.objects.filter(person_id__in=person_ids).count()
+            if person_ids else 0
+        ),
+    }
+
+
+# ── Onglet : verdict ────────────────────────────────────────────────────
+
+def _identity_verdict(request, identity, handles, person_ids) -> dict:
+    """La décision **et l'arithmétique qui la produit**.
+
+    La page affichait le verdict et la valeur stockée côte à côte sans dire ce
+    qui les sépare. Or l'écart n'est pas du bruit : c'est le plancher et le
+    plafond du canal, la seule règle qui fasse qu'une revendication en salon
+    public ne vaudra jamais un login. Sans elle à l'écran, un verdict qui
+    surprend n'a aucune explication consultable.
+    """
+    from django.db.models import Sum
+
+    from identity.models import IdentityClaim
+
+    trust = _as_trust(_best_handle(handles).trust) if handles else ChannelTrust.PUBLIC
+    stored = float(identity.certainty or 0.0)
+    floored = max(stored, trust_policy.floor_for(trust))
+
+    claims = IdentityClaim.objects.filter(identity=identity)
+    return {
+        "channel_trust": trust,
+        "floor": trust_policy.floor_for(trust),
+        "ceiling": trust_policy.ceiling_for(trust),
+        "floored": floored,
+        # Rendu visible parce qu'un plafond qui mord est exactement le cas où
+        # « j'ai enregistré trois preuves et rien ne bouge » a une réponse.
+        "capped_by_ceiling": floored > trust_policy.ceiling_for(trust),
+        "raised_by_floor": trust_policy.floor_for(trust) > stored,
+        "confident_threshold": trust_policy.CONFIDENT_THRESHOLD,
+        "ledger_total": claims.filter(status="accepted").aggregate(
+            total=Sum("applied_weight"),
+        )["total"] or 0.0,
+        "pending_claims": list(
+            claims.filter(status="pending").order_by("-created_at")[:5],
+        ),
+        "recent_claims": list(claims.order_by("-created_at")[:5]),
+    }
+
+
+# ── Onglet : handles ────────────────────────────────────────────────────
+
+def _identity_handles(request, identity, handles, person_ids) -> dict:
+    """Chaque handle avec ce qu'il **permet**, pas seulement ce qu'il est.
+
+    Le plafond par handle est ce qui décide du verdict de toute l'identité :
+    c'est ``_best_handle`` qui choisit, et il choisit par plafond. Le montrer
+    en colonne rend ce choix lisible au lieu de le laisser dans le code.
+    """
+    from django.db.models import Count
+
+    from memory.models import Message
+
+    volumes = {}
+    if person_ids:
+        volumes = {
+            row["person_id"]: row["n"]
+            for row in Message.objects.filter(person_id__in=person_ids)
+            .values("person_id").annotate(n=Count("id"))
+        }
+
+    primary, _ = _decide(identity, handles)
+    rows = []
+    for h in handles:
+        trust = _as_trust(h.trust)
+        rows.append({
+            "obj": h,
+            "trust": trust,
+            "floor": trust_policy.floor_for(trust),
+            "ceiling": trust_policy.ceiling_for(trust),
+            "messages": volumes.get(h.person_id, 0),
+            "is_primary": primary is not None and h.pk == primary.pk,
+        })
+    return {"handle_rows": rows}
+
+
+# ── Onglet : échanges ───────────────────────────────────────────────────
+
+def _identity_echanges(request, identity, handles, person_ids) -> dict:
+    from memory.models import Message
+
+    fs = tables.FilterSet(per_page=tables.read_per_page(request))
+    search = fs.add(tables.search_filter(
+        request, "q", "Recherche", placeholder="contenu du message",
+    ))
+    role = fs.add(tables.select_filter(
+        request, "role", "Rôle", [("user", "elle/lui"), ("assistant", "Mika")],
+    ))
+    handle = fs.add(tables.select_filter(
+        request, "handle", "Handle", [(p, p) for p in person_ids], all_label="Tous",
+    ))
+
+    if not person_ids:
+        return {"filterset": None, "page": None, "no_handle": True}
+
+    qs = Message.objects.filter(
+        person_id__in=[handle.value] if handle.value else person_ids,
+    )
+    if search.value:
+        qs = qs.filter(content__icontains=search.value)
+    if role.value:
+        qs = qs.filter(role=role.value)
+
+    return {
+        "filterset": fs,
+        "page": tables.paginate(request, qs.order_by("-created_at"), per_page=fs.per_page),
+        "no_handle": False,
+    }
+
+
+# ── Onglet : preuves ────────────────────────────────────────────────────
+
+def _identity_preuves(request, identity, handles, person_ids) -> dict:
+    """Le registre, filtrable et paginé — et résoluble sur place.
+
+    Il était tronqué à cent lignes sans le dire, et une revendication en
+    attente n'était traitable que depuis l'onglet global « Revendications » :
+    on lisait le motif du doute ici et on allait cliquer ailleurs.
+    """
+    from identity.models import IdentityClaim
+
+    fs = tables.FilterSet(per_page=tables.read_per_page(request))
+    status = fs.add(tables.select_filter(
+        request, "statut", "État",
+        [(v, l) for v, l in IdentityClaim.Status.choices], all_label="Tous",
+    ))
+    kind = fs.add(tables.select_filter(
+        request, "type", "Type",
+        [(v, l) for v, l in IdentityClaim.Kind.choices],
+    ))
+
+    qs = IdentityClaim.objects.filter(identity=identity).select_related("handle")
+    if status.value:
+        qs = qs.filter(status=status.value)
+    if kind.value:
+        qs = qs.filter(kind=kind.value)
+
+    return {
+        "filterset": fs,
+        "page": tables.paginate(request, qs.order_by("-created_at"), per_page=fs.per_page),
+        "evidence_weights": trust_policy.EVIDENCE_WEIGHTS,
+        "counter_weights": trust_policy.COUNTER_EVIDENCE_WEIGHTS,
+        "accept_kinds": sorted(trust_policy.EVIDENCE_WEIGHTS),
+    }
+
+
+# ── Onglet : actions ────────────────────────────────────────────────────
+
+def _identity_actions(request, identity, handles, person_ids) -> dict:
+    return {
         "evidence_kinds": sorted(
             set(trust_policy.EVIDENCE_WEIGHTS) | set(trust_policy.COUNTER_EVIDENCE_WEIGHTS)
         ),
         "evidence_weights": trust_policy.EVIDENCE_WEIGHTS,
         "counter_weights": trust_policy.COUNTER_EVIDENCE_WEIGHTS,
-        "threshold": trust_policy.PRIVATE_CONTEXT_THRESHOLD,
-    })
-    return render(request, "gestion/social/identite_detail.html", ctx)
+        "acting_person_id": _person_id_for(identity),
+    }
 
 
 # ── Écritures ───────────────────────────────────────────────────────────
@@ -246,6 +435,29 @@ def _person_id_for(identity) -> str:
     return handle.person_id if handle else ""
 
 
+def _safe_back(request, default: str) -> str:
+    """Où revenir après une écriture, sans faire confiance au POST.
+
+    ``retour`` porte l'écran d'où l'on vient — c'est ce qui permet de résoudre
+    une revendication depuis la fiche de l'identité et d'y rester, filtres
+    compris. Passé tel quel à ``redirect()``, c'est une redirection ouverte :
+    un formulaire fabriqué renvoie l'opérateur, déjà authentifié, sur un
+    domaine tiers qui n'a plus qu'à imiter l'écran de connexion.
+
+    Le contrôle est celui de Django (même hôte, schéma cohérent), pas une
+    liste d'URL en dur : les onglets, filtres et numéros de page font partie
+    de la valeur, et les énumérer serait à refaire à chaque écran ajouté.
+    """
+    candidate = (request.POST.get("retour") or "").strip()
+    if candidate and url_has_allowed_host_and_scheme(
+        candidate,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return candidate
+    return default
+
+
 @require_POST
 def identity_action(request, identity_id: int):
     from identity.models import Identity
@@ -260,7 +472,9 @@ def identity_action(request, identity_id: int):
 
     action = request.POST.get("action", "")
     person_id = _person_id_for(identity)
-    back = reverse("gestionsysteme:identity-detail", args=[identity.pk])
+    back = _safe_back(
+        request, reverse("gestionsysteme:identity-detail", args=[identity.pk]),
+    )
 
     if not person_id:
         messages.error(request, "Cette identité n'a aucun handle à manipuler.")
@@ -310,7 +524,9 @@ def claim_action(request, claim_id: int):
     from identity.resolver import identity_resolver
 
     action = request.POST.get("action", "")
-    back = request.POST.get("retour") or reverse("gestionsysteme:social-tab", args=["demandes"])
+    back = _safe_back(
+        request, reverse("gestionsysteme:social-tab", args=["demandes"]),
+    )
 
     if action == "accepter":
         _resolver(

@@ -17,7 +17,7 @@
         <dt title="Courbe cosinus, sans la pulsion de repos">Énergie circadienne</dt>
         <dd class="tabular">{{ circadian_energy|pct }}</dd>
         <dt title="Émotion vers laquelle cette phase tire le point de repos">Ancrage de phase</dt>
-        <dd><span class="emo" style="{{ bias_anchor|emo_style }}">{{ bias_anchor }}</span></dd>
+        <dd><span class="emo" style="{{ bias_anchor|emo_style }}">{{ bias_anchor|emo_fr }}</span></dd>
         <dt>Sommeil</dt>
         <dd>
           {% if asleep %}
@@ -58,7 +58,7 @@
       <dl class="kv">
         {% for label, emotion in phase_anchors %}
           <dt>{{ label }}</dt>
-          <dd><span class="emo" style="{{ emotion|emo_style }}">{{ emotion }}</span></dd>
+          <dd><span class="emo" style="{{ emotion|emo_style }}">{{ emotion|emo_fr }}</span></dd>
         {% endfor %}
       </dl>
     </div>

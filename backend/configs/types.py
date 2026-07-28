@@ -97,3 +97,39 @@ def record_item(**kw) -> ConfigItem:
     dataclass requires it, so we fill a sentinel."""
     kw.setdefault("section", "__record__")
     return ConfigItem(**kw)
+
+
+# ── Choix ───────────────────────────────────────────────────────
+#
+# ``choices`` accepte deux formes : une valeur nue (``"claude"``), ou un
+# couple ``(valeur, libellé)`` quand ce qui est stocké n'est pas ce qu'on veut
+# lire. Le cas qui l'a rendu nécessaire : l'humeur par défaut du tempérament.
+# La valeur stockée est le nom canonique d'``emotion/types.py`` — celui que le
+# modèle produit dans sa balise ``[EMOTION:...]`` et qui compose la variable
+# CSS — mais une liste déroulante d'administration en français ne peut pas
+# proposer « mischievous ». Traduire à l'affichage sans toucher au stockage
+# suppose donc de séparer les deux, ici plutôt que dans chaque déclarant.
+
+def choice_values(choices) -> tuple:
+    """Les valeurs acceptables, quelle que soit la forme déclarée."""
+    return tuple(
+        c[0] if isinstance(c, (tuple, list)) else c
+        for c in (choices or ())
+    )
+
+
+def choice_options(choices) -> list[tuple[str, str]]:
+    """Couples ``(valeur, libellé)`` prêts pour un ``<option>``.
+
+    Une valeur nue est son propre libellé — c'est le cas courant, et il ne
+    doit rien coûter à déclarer.
+    """
+    out: list[tuple[str, str]] = []
+    for c in choices or ():
+        if isinstance(c, (tuple, list)):
+            value = c[0]
+            label = c[1] if len(c) > 1 else value
+        else:
+            value = label = c
+        out.append((str(value), str(label)))
+    return out

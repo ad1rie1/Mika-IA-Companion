@@ -28,7 +28,6 @@ from GestionSysteme import tables
 logger = logging.getLogger("module.forge")
 
 MAX_CODE = 8000
-COMMANDES = ("reload", "enable", "disable", "rollback")
 
 _TONS_STATUT = {
     "actif": "ok",
@@ -44,10 +43,12 @@ def modules_panel(host):
     def handler(request):
         infos = host.module_infos()
 
-        blocs = []
-        fiche = _fiche_module(host, request, infos)
-        if fiche is not None:
-            blocs.extend(fiche)
+        blocs = [P.Note(
+            "Chaque app a son propre espace (menu « Forge apps ») : sa "
+            "configuration, ses pages et ses commandes y tiennent ensemble. "
+            "Cette table est l'atelier — l'état de tout ce qui est forgé.",
+            tone="info",
+        )]
 
         blocs.append(P.Table(
             caption="Modules forgés",
@@ -72,10 +73,14 @@ def modules_panel(host):
 
 
 def _ligne_module(request, info: dict) -> P.Row:
+    from django.urls import reverse
+
     statut = info.get("status", "?")
     echecs = int(info.get("failures", 0) or 0)
     return P.Row(
-        href=tables.url_with(request, module=info["name"]),
+        # La ligne mène à l'espace de l'app, pas à une fiche locale : une app
+        # ne doit se lire qu'à un seul endroit.
+        href=reverse("gestionsysteme:forge-app", args=[info["name"]]),
         cells=(
             P.mono(info["name"]),
             P.text(info.get("title") or "—"),
@@ -90,15 +95,14 @@ def _ligne_module(request, info: dict) -> P.Row:
     )
 
 
-def _fiche_module(host, request, infos: list[dict]):
-    nom = (request.GET.get("module") or "").strip()
-    if not nom:
-        return None
+def blocs_app(host, nom: str, info: dict) -> list:
+    """Fiche d'une app forgée : état, source, journal.
 
-    info = next((i for i in infos if i["name"] == nom), None)
-    if info is None:
-        return [P.Note(f"Module forgé « {nom} » introuvable.", tone="warn")]
-
+    Rendue dans l'espace de l'app (« Forge apps »), plus dans l'atelier :
+    c'était la même fiche derrière ``?module=…``, mais à côté de la table de
+    toutes les apps plutôt qu'à côté de la configuration et des pages de
+    celle qu'on regarde.
+    """
     champs = [
         P.Field("Nom", nom, kind="mono"),
         P.Field("Statut", info.get("status", "?"), kind="badge",
@@ -107,16 +111,20 @@ def _fiche_module(host, request, infos: list[dict]):
     if info.get("status_detail"):
         champs.append(P.Field("Détail", info["status_detail"]))
     champs += [
-        P.Field("Activé", "oui" if info.get("enabled") else "non"),
+        P.Field("Activée", "oui" if info.get("enabled") else "non"),
         P.Field("Cadence", info.get("schedule") or "—", kind="mono"),
+        P.Field("Événements écoutés", ", ".join(info.get("events") or []) or "—"),
         P.Field("Handlers", ", ".join(info.get("handlers") or []) or "—"),
         P.Field("Prochain passage", str(info.get("next_run_at") or "—")),
         P.Field("Version", str(info.get("version") or "—")),
-        P.Field("Fermer la fiche", "retour à la liste", kind="link",
-                href=tables.url_with(request, module=None)),
+        P.Field("Échecs consécutifs", str(info.get("failures") or 0)),
     ]
+    if info.get("context"):
+        champs.append(P.Field("Injecté dans son prompt", info["context"]))
+    if info.get("last_error"):
+        champs.append(P.Field("Dernière erreur", info["last_error"]))
 
-    blocs = [P.Fields(title=f"Module · {nom}", items=champs)]
+    blocs = [P.Fields(title="État", items=champs)]
 
     manifeste, code = _source(nom)
     if manifeste:
@@ -125,7 +133,7 @@ def _fiche_module(host, request, infos: list[dict]):
         blocs.append(P.Prose(title="module.py", text=code))
 
     blocs.append(P.Table(
-        caption=f"Journal · {nom}",
+        caption="Journal",
         columns=[
             P.Column("Quand", align="fit"),
             P.Column("Niveau", align="fit"),
@@ -133,7 +141,7 @@ def _fiche_module(host, request, infos: list[dict]):
             P.Column("Message"),
         ],
         rows=[_ligne_journal(r, avec_module=False) for r in _journal(nom, 30)],
-        empty="Aucune entrée pour ce module.",
+        empty="Aucune entrée pour cette app.",
     ))
     return blocs
 
@@ -305,30 +313,6 @@ def _tout_recharger(host):
     return handler
 
 
-def _commande(host, commande: str):
-    """Applique une commande au module ouvert dans la fiche.
-
-    Le nom vient de la chaîne de requête (``?module=…``), que le formulaire
-    d'action conserve : une action porte sur ce que l'écran montre, pas sur
-    le panneau en général. Sans fiche ouverte, elle refuse plutôt que de
-    deviner une cible.
-    """
-    def handler(request):
-        from asgiref.sync import async_to_sync
-
-        nom = (request.GET.get("module") or "").strip()
-        if not nom:
-            return P.Note(
-                "Ouvre d'abord la fiche d'un module : la commande porte sur lui.",
-                tone="warn",
-            )
-        resultat = async_to_sync(host.command)(nom, commande)
-        message = resultat.get("message") or f"« {commande} » exécuté."
-        return P.Note(message, tone="ok" if resultat.get("ok", True) else "danger")
-
-    return handler
-
-
 # ── Vues déclarées par les modules forgés ───────────────────────────────
 
 def _panneau_forge(host, module_forge, vue):
@@ -353,39 +337,31 @@ def _panneau_forge(host, module_forge, vue):
         return charge
 
     return P.ModulePanel(
-        key=f"{module_forge.name}--{vue.key}",
-        label=f"{module_forge.manifest.title} · {vue.label}",
+        key=vue.key,
+        label=vue.label,
         icon=vue.icon or "▦",
-        order=200 + vue.order,
+        order=vue.order,
         handler=handler,
-        description="Page déclarée par un module forgé.",
+        description="Page déclarée par cette app.",
     )
 
 
 # ── Déclaration ─────────────────────────────────────────────────────────
 
 def _actions_modules(host) -> tuple:
-    """« Tout recharger », puis une commande par verbe du disjoncteur.
+    """Seule action de l'atelier : tout recharger.
 
-    Les commandes par module s'appliquent à la fiche ouverte : le formulaire
-    d'action conserve la chaîne de requête, donc ``?module=…`` leur parvient.
+    Les commandes visant **une** app (activer, recharger, revenir en
+    arrière, effacer) vivent dans l'espace de cette app : elles portaient
+    ici sur « la fiche ouverte », c'est-à-dire sur une chaîne de requête que
+    rien ne rendait visible à côté du bouton.
     """
     return (
         P.PanelAction(
             key="tout_recharger", label="Tout recharger",
             handler=_tout_recharger(host),
-            confirm="Recharger tous les modules forgés ?",
+            confirm="Recharger toutes les apps forgées ?",
         ),
-    ) + tuple(
-        P.PanelAction(
-            key=f"cmd_{verbe}", label=verbe.capitalize(),
-            handler=_commande(host, verbe),
-            confirm=(
-                "Revenir à la version précédente de ce module ?"
-                if verbe == "rollback" else ""
-            ),
-        )
-        for verbe in COMMANDES
     )
 
 
@@ -409,10 +385,23 @@ def build_panels(host) -> list:
         ),
     ]
 
-    for lm in list(host._loaded.values()):
-        for vue in lm.manifest.views:
-            if f"view_{vue.key}" not in lm.handlers:
-                continue  # déclarée mais pas implémentée → pas de page morte
-            panneaux.append(_panneau_forge(host, lm, vue))
-
     return panneaux
+
+
+def panels_for_app(host, nom: str) -> list:
+    """Pages déclarées **et** implémentées par une app forgée.
+
+    Elles ne sont plus greffées dans l'espace de l'hôte : une app forgée a
+    son propre espace (« Forge apps »), où sa configuration et ses pages
+    tiennent ensemble. Greffées ici, dix apps donnaient trente onglets à un
+    module qui n'en déclare que trois, et la config partait ailleurs encore.
+    """
+    lm = host._loaded.get(nom)
+    if lm is None:
+        return []
+    return [
+        _panneau_forge(host, lm, vue)
+        for vue in lm.manifest.views
+        # Déclarée mais pas implémentée → pas de page morte.
+        if f"view_{vue.key}" in lm.handlers
+    ]

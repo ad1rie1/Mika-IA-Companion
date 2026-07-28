@@ -28,6 +28,13 @@ COMMITMENT_MAX_AGE_DAYS = 30
 # Memory decay is measured in days; sweeping for it every 60s was pure load.
 DECAY_INTERVAL_S = 3600
 
+# Écart de valence entre le meilleur et le pire jour au-delà duquel une
+# semaine est dite « instable ». 0.4 sépare une semaine régulière d'une
+# semaine qui est passée du clairement négatif au clairement positif — la
+# tendance d'un jour se mesure à 0.15, mais sur sept jours c'est la
+# *dispersion* qui porte l'information, pas le déplacement moyen.
+WEEKLY_VOLATILE_SPREAD = 0.4
+
 # Only rows whose decay anchor is at least this old can move by more than the
 # write threshold, so the sweep filters on it in SQL instead of reading the
 # whole table into RAM. Generous on purpose: a row that turns out not to move
@@ -766,7 +773,9 @@ class MemoryConsolidator:
             dominant_intensity = round(distribution[dominant] / len(snapshots), 2)
 
             # Compute trend vs yesterday
-            trend = await self._compute_emotion_trend(pid, normalized, today)
+            trend = await self._compute_emotion_trend(
+                pid, normalized, today - timedelta(days=1), period_type="daily",
+            )
 
             await sync_to_async(
                 lambda p=pid, d=dominant, di=dominant_intensity, n=normalized, t=trend, sc=len(snapshots): (
@@ -785,6 +794,12 @@ class MemoryConsolidator:
                 )
             )()
 
+        # The week in progress, rebuilt from the days just refreshed. Must
+        # happen before the prune below: it reads daily rows, not snapshots,
+        # but keeping the two aggregations adjacent is what stops one being
+        # updated without the other.
+        await self._aggregate_weekly_summaries(person_ids, today)
+
         # Prune old snapshots (keep last N days for aggregation overlap)
         from configs.service import config_service
         retention_days = config_service.get("emotion.snapshot_retention_days")
@@ -799,37 +814,147 @@ class MemoryConsolidator:
             "Emotion aggregation: %d person(s) for %s", len(person_ids), today,
         )
 
-    async def _compute_emotion_trend(
-        self, person_id: str, today_dist: dict, today_date
-    ) -> str:
-        """Compare today's emotional distribution against yesterday's.
+    async def _aggregate_weekly_summaries(self, person_ids, today) -> None:
+        """Roll the week in progress up from its daily summaries.
 
-        Returns: 'warming', 'cooling', 'volatile', or 'stable'.
+        **Built from the daily rows, not from raw snapshots** — and that is
+        forced, not a preference: ``emotion.snapshot_retention_days`` defaults
+        to **2**, so by the time a week ends five of its seven days have been
+        pruned. Reading raw here would produce a row labelled "semaine" that
+        covers the last two days, which is worse than no row at all.
+
+        Refreshed in place on every pass, exactly like the daily row, so the
+        current week exists from Monday rather than appearing on Sunday night.
+        Driving it off *today's* ``person_ids`` is sufficient: a daily row can
+        only have changed for someone who was seen today, and every other
+        person's weekly row already covers their whole week.
+
+        Two combining rules worth stating, since neither is recoverable from
+        the stored daily fields:
+
+        - the distributions are mixed **weighted by ``snapshot_count``**, so a
+          busy Monday outweighs one relevé on a quiet Sunday. Exact mixing
+          would need each day's total intensity, which the daily row does not
+          keep — this is the faithful stand-in, not the same number.
+        - ``dominant_intensity`` is the same weighted mean of the dailies'.
+          ``snapshot_count`` alone is exact: it is a sum.
         """
         from memory.models import EmotionalSummary
 
-        yesterday = today_date - timedelta(days=1)
+        if not person_ids:
+            return
+
+        # Lundi de la semaine ISO en cours — le jour que porte la ligne.
+        week_start = today - timedelta(days=today.weekday())
+
+        for pid in person_ids:
+            days = await sync_to_async(
+                lambda p=pid: list(
+                    EmotionalSummary.objects.filter(
+                        person_id=p, period_type="daily",
+                        period_start__gte=week_start, period_start__lte=today,
+                    ).order_by("period_start")
+                )
+            )()
+            if not days:
+                continue
+
+            distribution: dict[str, float] = {}
+            weight_total = 0.0
+            intensity_total = 0.0
+            snapshot_total = 0
+            for day in days:
+                weight = float(day.snapshot_count or 0) or 1.0
+                for emotion, share in (day.emotion_distribution or {}).items():
+                    distribution[emotion] = (
+                        distribution.get(emotion, 0.0) + share * weight
+                    )
+                intensity_total += (day.dominant_intensity or 0.0) * weight
+                weight_total += weight
+                snapshot_total += day.snapshot_count or 0
+
+            total = sum(distribution.values()) or 1.0
+            normalized = {k: round(v / total, 3) for k, v in distribution.items()}
+            dominant = max(distribution, key=distribution.get)
+            dominant_intensity = round(intensity_total / (weight_total or 1.0), 2)
+
+            trend = await self._compute_emotion_trend(
+                pid, normalized, week_start - timedelta(days=7),
+                period_type="weekly",
+                sub_ratios=[
+                    self._valence(d.emotion_distribution or {}) for d in days
+                ],
+            )
+
+            await sync_to_async(
+                lambda p=pid, ws=week_start, d=dominant, di=dominant_intensity,
+                       n=normalized, t=trend, sc=snapshot_total: (
+                    EmotionalSummary.objects.update_or_create(
+                        person_id=p,
+                        period_type="weekly",
+                        period_start=ws,
+                        defaults={
+                            "dominant_emotion": d,
+                            "dominant_intensity": di,
+                            "emotion_distribution": n,
+                            "trend": t,
+                            "snapshot_count": sc,
+                        },
+                    )
+                )
+            )()
+
+        logger.debug(
+            "Weekly emotion rollup: %d person(s) for week of %s",
+            len(person_ids), week_start,
+        )
+
+    def _valence(self, dist: dict) -> float:
+        """Positif moins négatif — l'axe sur lequel une tendance se mesure."""
+        pos = sum(dist.get(e, 0) for e in self.POSITIVE_EMOTIONS)
+        neg = sum(dist.get(e, 0) for e in self.NEGATIVE_EMOTIONS)
+        return pos - neg
+
+    async def _compute_emotion_trend(
+        self, person_id: str, dist: dict, previous_start, *,
+        period_type: str = "daily", sub_ratios: list[float] | None = None,
+    ) -> str:
+        """Compare a period's emotional distribution against the one before.
+
+        Returns: 'warming', 'cooling', 'volatile', or 'stable'.
+
+        ``sub_ratios`` carries the valence of each sub-period (the days making
+        up a week) and is how volatility is measured for anything longer than
+        a day. The daily rule — "more than four distinct emotions plus a small
+        valence shift" — is a proxy for choppiness that only holds over a few
+        hours: **over a week five distinct emotions is the normal case**, so
+        reusing it would have stamped "instable" on nearly every weekly row.
+        A week is volatile when its *days* disagree, which is a thing we can
+        actually measure.
+        """
+        from memory.models import EmotionalSummary
+
         try:
-            prev = await sync_to_async(
-                EmotionalSummary.objects.get
-            )(person_id=person_id, period_type="daily", period_start=yesterday)
+            prev = await sync_to_async(EmotionalSummary.objects.get)(
+                person_id=person_id, period_type=period_type,
+                period_start=previous_start,
+            )
+            delta = self._valence(dist) - self._valence(prev.emotion_distribution)
         except EmotionalSummary.DoesNotExist:
-            return "stable"
-
-        def pos_neg_ratio(dist: dict) -> float:
-            pos = sum(dist.get(e, 0) for e in self.POSITIVE_EMOTIONS)
-            neg = sum(dist.get(e, 0) for e in self.NEGATIVE_EMOTIONS)
-            return pos - neg
-
-        today_ratio = pos_neg_ratio(today_dist)
-        prev_ratio = pos_neg_ratio(prev.emotion_distribution)
-        delta = today_ratio - prev_ratio
+            # Sans période précédente il n'y a pas de tendance à mesurer —
+            # mais un écart entre les jours, lui, reste observable.
+            delta = 0.0
+            if not sub_ratios:
+                return "stable"
 
         if delta > 0.15:
             return "warming"
-        elif delta < -0.15:
+        if delta < -0.15:
             return "cooling"
-        elif len(today_dist) > 4 and abs(delta) > 0.05:
+        if sub_ratios is not None:
+            spread = max(sub_ratios) - min(sub_ratios) if sub_ratios else 0.0
+            return "volatile" if spread > WEEKLY_VOLATILE_SPREAD else "stable"
+        if len(dist) > 4 and abs(delta) > 0.05:
             return "volatile"
         return "stable"
 

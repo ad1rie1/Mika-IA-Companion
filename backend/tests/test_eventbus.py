@@ -321,7 +321,7 @@ class TestSubscriptionManagement:
 
 class TestSubscriptionIntrospection:
     """Synchronous surface — no event loop needed to ask what would route
-    where, which is what makes it usable from a dashboard view."""
+    where, which is what makes it usable from an admin view."""
 
     def test_unsubscribe_unknown_name_is_false(self):
         assert EventBus().unsubscribe("nope") is False

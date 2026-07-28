@@ -31,6 +31,23 @@ class ModuleSpace:
     has_config: bool
 
 
+@dataclass(frozen=True)
+class SpaceLink:
+    """Une entrée du groupe « Espaces » du menu.
+
+    Le gabarit itère des liens, pas des modules : toutes les entrées de ce
+    groupe ne correspondent pas à un module (cf. « Forge apps »), et une
+    condition sur un nom de module dans un gabarit est exactement le genre
+    de connaissance qui n'a rien à y faire.
+    """
+    key: str
+    label: str
+    icon: str
+    url: str
+    alert: str = ""            # texte court de la pastille ("" = aucune)
+    alert_title: str = ""
+
+
 # ── Compteurs de badges ─────────────────────────────────────────────────
 
 def sidebar_counts() -> dict[str, int]:
@@ -132,7 +149,7 @@ def vitals() -> dict[str, str]:
             "status": "en ligne",
             "phase": _PHASE_FR.get(state.phase.value, state.phase.value),
             "energy": fmt.pct(drive_engine.energy_level()),
-            "mood": f"{label.value} {fmt.pct(intensity)}",
+            "mood": f"{fmt.emotion_fr(label.value)} {fmt.pct(intensity)}",
             "sleep": _SLEEP_FR.get(sleep_cycle.phase, sleep_cycle.phase),
         })
     except Exception:
@@ -174,6 +191,56 @@ def module_spaces() -> list[ModuleSpace]:
         return []
 
 
+FORGE_MODULE = "forge"
+
+
+def sidebar_spaces() -> list[SpaceLink]:
+    """Le groupe « Espaces » du menu : un lien par module, plus Forge apps.
+
+    « Forge apps » se glisse **juste après la Forge** : l'atelier d'abord, ce
+    qui en sort ensuite. C'est la seule entrée du groupe qui ne soit pas un
+    module, et elle ne peut pas en être une — les apps forgées sont écrites à
+    l'exécution, aucune destination ne peut être déclarée à l'avance pour
+    chacune. D'où une page qui les liste, et un espace par app derrière.
+    """
+    links: list[SpaceLink] = []
+    for space in module_spaces():
+        arrete = not space.running
+        links.append(SpaceLink(
+            key=space.name,
+            label=space.label,
+            icon=space.icon,
+            url=reverse("gestionsysteme:module-space", args=[space.name]),
+            alert="!" if arrete else "",
+            alert_title=("activé mais arrêté" if arrete else ""),
+        ))
+        if space.name == FORGE_MODULE:
+            links.append(_forge_apps_link())
+    return links
+
+
+def _forge_apps_link() -> SpaceLink:
+    casses = 0
+    try:
+        from modules.manager import module_manager
+        host = module_manager.get_registered(FORGE_MODULE)
+        if host is not None:
+            casses = sum(
+                1 for i in host.module_infos()
+                if i.get("status") in ("cassé", "désactivé")
+            )
+    except Exception:
+        logger.exception("comptage des apps forgées impossible")
+    return SpaceLink(
+        key="forge_apps",
+        label="Forge apps",
+        icon="◫",
+        url=reverse("gestionsysteme:forge-apps"),
+        alert=str(casses) if casses else "",
+        alert_title="app(s) désactivée(s) ou cassée(s)" if casses else "",
+    )
+
+
 # ── Contexte de page ────────────────────────────────────────────────────
 
 def page_context(
@@ -185,6 +252,7 @@ def page_context(
     title: str = "",
     description: str = "",
     module_space: str = "",
+    active_space: str = "",
     **extra,
 ) -> dict:
     """Contexte partagé par tous les gabarits de l'interface.
@@ -198,9 +266,11 @@ def page_context(
     ctx = {
         "nav": NAV,
         "nav_counts": counts,
-        "module_spaces": module_spaces(),
+        "spaces": sidebar_spaces(),
         "active_key": active_key or (item.key if item else ""),
-        "active_module_space": module_space,
+        # ``module_space`` reste le nom du module pour les espaces de modules ;
+        # une entrée qui n'en est pas un (Forge apps) passe ``active_space``.
+        "active_space": active_space or module_space,
         "active_tab": active_tab,
         "nav_item": item,
         "tabs": item.tabs if item else (),

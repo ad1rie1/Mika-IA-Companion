@@ -1,7 +1,7 @@
 """The single read layer for Mika's inner state (`memory.read`, `conscience.read`).
 
 Three consumers ask about the same rows — the system prompt, the WebSocket
-`inner_state` payload, and the dashboard — and each used to carry its own
+`inner_state` payload, and the admin — and each used to carry its own
 copy of the query. "Most recent journal" was written twice byte-for-byte
 (comment included); "last night's dream" was written three times, and one of
 those had drifted into answering a *different question* without anyone

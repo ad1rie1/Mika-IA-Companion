@@ -1,0 +1,66 @@
+{% extends "gestion/social/identite/_base.html" %}
+{% load gestion %}
+
+{% block panneau %}
+<div class="alert alert-info mb-4">
+  Le handle <strong>principal</strong> n'est pas le plus récent : c'est celui
+  dont le <em>plafond de canal</em> est le plus haut, le plus récemment vu.
+  C'est lui qui fixe le verdict de toute l'identité — un login vaut plus
+  qu'un salon public, quoi qu'il s'y dise.
+</div>
+
+<section class="card">
+  {% if handle_rows %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Identifiant</th>
+              <th class="fit">Canal</th>
+              <th class="fit">Confiance</th>
+              <th class="num" title="Certitude que ce canal accorde de lui-même">Plancher</th>
+              <th class="num" title="Certitude qu'il ne laissera jamais dépasser">Plafond</th>
+              <th class="num">Messages</th>
+              <th class="fit">Livraison</th>
+              <th class="fit">Vu</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in handle_rows %}
+              <tr {% if r.obj.is_ephemeral %}class="is-muted"{% endif %}>
+                <td class="mono text-xs">
+                  {{ r.obj.person_id }}
+                  {% if r.is_primary %}<span class="badge badge-info" title="Fixe le verdict de l'identité">principal</span>{% endif %}
+                  {% if r.obj.is_ephemeral %}<span class="badge" title="Socket anonyme — comptabilité, pas une personne">éphémère</span>{% endif %}
+                  {% if r.obj.display_name %}<div class="muted text-xs">{{ r.obj.display_name }}</div>{% endif %}
+                </td>
+                <td class="fit">{{ r.obj.channel }}</td>
+                <td class="fit">{{ r.trust.value }}</td>
+                <td class="num">{{ r.floor|num }}</td>
+                <td class="num">{{ r.ceiling|num }}</td>
+                <td class="num">
+                  {% if r.messages %}
+                    <a href="{% url 'gestionsysteme:identity-detail-tab' identity.pk 'echanges' %}?handle={{ r.obj.person_id }}">{{ r.messages }}</a>
+                  {% else %}0{% endif %}
+                </td>
+                <td class="fit mono text-xs">{{ r.obj.delivery_ref|default:"—" }}</td>
+                <td class="fit muted" title="{{ r.obj.last_seen|dt_full }}">{{ r.obj.last_seen|ago }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {% else %}
+    <div class="card-body">
+      <div class="empty">
+        <div class="empty-title">Aucun handle — ligne orpheline</div>
+        Une identité sans handle n'est joignable nulle part et ne peut porter
+        aucune preuve. Ce n'est pas un artefact d'affichage : c'est un fait
+        sur la base de données, souvent le reste d'un balayage de rétention.
+      </div>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

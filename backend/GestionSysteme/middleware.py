@@ -13,9 +13,10 @@ serveur écoute hors loopback sans elle.
 Réservé au personnel : un compte créé pour le frontend de conversation ne doit
 pas hériter de l'éditeur de configuration.
 
-Le même réglage gouverne l'ancien ``/dashboard/`` et le nouveau ``/gestion/`` —
-deux interrupteurs pour la même décision seraient une invitation à n'en régler
-qu'un.
+Le réglage garde son nom historique (``DASHBOARD_REQUIRE_AUTH``) : c'est une
+variable d'environnement qu'une installation existante a peut-être déjà posée,
+et la renommer transformerait une mise à jour silencieuse en portail
+subitement ouvert.
 """
 from __future__ import annotations
 

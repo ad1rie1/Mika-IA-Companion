@@ -1,0 +1,20 @@
+{% comment %} Sous-navigation de l'espace d'une app forgée.
+
+   Même promesse que pour un module : l'état, les réglages et les pages de
+   l'app au même endroit. La différence est que ces onglets sont décrits par
+   un manifeste écrit à l'exécution — l'app déclare ses pages, elle n'en
+   rend aucune. {% endcomment %}
+<nav class="tabs" aria-label="Sections de l'app">
+  <a class="tab" href="{% url 'gestionsysteme:forge-app' app_name %}"
+     {% if active_panel == "etat" %}aria-current="page"{% endif %}>État</a>
+
+  {% if has_config %}
+    <a class="tab" href="{% url 'gestionsysteme:forge-app-config' app_name %}"
+       {% if active_panel == "configuration" %}aria-current="page"{% endif %}>Configuration</a>
+  {% endif %}
+
+  {% for p in panels %}
+    <a class="tab" href="{% url 'gestionsysteme:forge-app-panel' app_name p.key %}"
+       {% if active_panel == p.key %}aria-current="page"{% endif %}>{{ p.label }}</a>
+  {% endfor %}
+</nav>

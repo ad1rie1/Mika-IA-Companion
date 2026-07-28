@@ -104,7 +104,19 @@ def link(value: Any, href: str, *, title: str = "") -> Cell:
 
 
 def emotion(name: str, *, weight: float | None = None) -> Cell:
-    return Cell(text=_str(name), kind="emotion", emotion=_str(name), ratio=weight)
+    """Pastille d'émotion. Le texte est traduit, la couleur reste sur le nom.
+
+    Les deux champs divergent volontairement : ``emotion`` compose une variable
+    CSS et doit donc rester le nom canonique anglais, ``text`` est ce que lit
+    l'opérateur. Traduire ici couvre d'un coup tous les panneaux de modules,
+    qui n'ont jamais à connaître le vocabulaire d'affichage.
+    """
+    from GestionSysteme.formatting import emotion_fr
+
+    return Cell(
+        text=emotion_fr(_str(name)), kind="emotion",
+        emotion=_str(name), ratio=weight,
+    )
 
 
 def meter(ratio: float | None, *, label: str = "", tone: str = "") -> Cell:
