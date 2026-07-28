@@ -58,6 +58,21 @@ class BaseModule(ABC):
     #   "public" — anyone Mika talks to
     CONTEXT_VISIBILITY: str = "owner"
 
+    # ── Event bus subscription (see utils/eventbus.py) ────────────
+    # How this module is wired to the bus when it starts. The defaults
+    # reproduce the pre-bus behaviour: woken for every event, awaited by the
+    # emitter, no deadline.
+    #
+    # Worth overriding, especially for modules Mika writes herself:
+    #   EVENT_PATTERN = "email.*"   don't wake for signals you ignore anyway
+    #   EVENT_MODE    = "spawn"     don't make the emitter wait on you
+    #   EVENT_TIMEOUT = 10.0        a handler that hangs is not the emitter's
+    #                               problem to inherit (AWAIT mode only)
+    EVENT_PATTERN: str = "*"
+    EVENT_MODE: str = "await"
+    EVENT_PRIORITY: int = 50
+    EVENT_TIMEOUT: float | None = None
+
     def __init__(self, name: str):
         self.name = name
         self._running = False

@@ -26,6 +26,7 @@ from pipeline.broadcast import broadcast_to_websocket, emit_communication_event,
 from pipeline.context import ConversationContext, gather_context
 from pipeline.perception import Intent, Perception
 from pipeline.response import call_ai_and_parse
+from pipeline.signals import publish_turn_completed
 from pipeline.tracing import set_current_person_id, set_new_request_id
 
 logger = logging.getLogger(__name__)
@@ -244,16 +245,29 @@ async def process_message(
     if emit_event and not ai_failed:
         await emit_communication_event(source, person_id)
 
-    # 5b. Answering someone relieves the EXPRESSION drive (partially) and
-    #     counts as activity toward REST. Internal triggers are excluded:
-    #     the conscience already calls drive_engine.on_act() for those,
-    #     and double-counting would empty EXPRESSION on every murmur.
-    if not ai_failed and perception.intent is not Intent.INTERNAL_TRIGGER:
-        try:
-            from drives.engine import drive_engine
-            drive_engine.on_reply(word_count=len(response_text.split()))
-        except Exception:
-            logger.debug("Drive on_reply hook failed", exc_info=True)
+    # 5b. Announce the turn. Everything that merely wants to *know* a turn
+    #     happened — the drives relieving EXPRESSION, the conscience filing
+    #     a "did I say that right?" rumination — subscribes to this instead
+    #     of being called from here. Each of those used to be an inline hook
+    #     with its own try/except and its own idea of when to skip, which
+    #     made this function the place every new subsystem had to edit.
+    #
+    #     Note what is NOT announced: the emotional impulse above and the
+    #     identity ingest at the top are pipeline *steps*, not listeners —
+    #     their effects are read further down this same function. See
+    #     pipeline/signals.py.
+    if not ai_failed:
+        await publish_turn_completed(
+            person_id=person_id,
+            source=source,
+            intent=perception.intent.name,
+            text=response_text,
+            emotion_name=emotion_data.emotion.value,
+            emotion_intensity=emotion_data.intensity,
+            project_suppresses_emotion=bool(
+                getattr(context, "project_suppresses_emotion", False)
+            ),
+        )
 
     # 6. Compute final blended emotion for the reply's display.
     msg_emotion = emotion_engine.compute_message_emotion(person_id)
@@ -308,23 +322,6 @@ async def process_message(
                 )
                 await asyncio.sleep(thinking_delay)
         await broadcast_to_websocket(output, source, person_id=person_id)
-
-    # 8. Post-action self-audit: an emotionally marked reply leaves a
-    #    brief "did I say that right?" trace in the form of a low-
-    #    intensity rumination. Fails silently, skipped on AI error or
-    #    when a project is muting emotions (pro mode shouldn't generate
-    #    lingering self-doubt about a professional email).
-    if not ai_failed and not getattr(context, "project_suppresses_emotion", False):
-        try:
-            from conscience.engine import conscience_engine
-            await conscience_engine.post_action_audit(
-                response_text=response_text,
-                emotion_name=emotion_data.emotion.value,
-                intensity=emotion_data.intensity,
-                person_id=person_id,
-            )
-        except Exception:
-            logger.debug("Post-action audit hook failed", exc_info=True)
 
     return output
 

@@ -86,6 +86,41 @@ class ConscienceEngine:
         # Restore cooldown from last "act" decision log (survives restarts)
         await self._restore_cooldown()
 
+        # Subscribe to the event bus rather than being installed into it by
+        # ModuleManager.set_conscience(). The conscience is the thing that
+        # wants to see every signal; the emitter should not have to know that.
+        #
+        # AWAIT at observer priority reproduces the previous ordering exactly:
+        # she interprets and files her Observation before any module reacts,
+        # and downstream code reads that row. The expensive part — deciding
+        # whether to *act* on it — is already spawned inside observe().
+        from pipeline.signals import TURN_COMPLETED
+        from utils.eventbus import PRIORITY_OBSERVER, DeliveryMode, event_bus
+        event_bus.subscribe(
+            self.observe,
+            name="conscience",
+            mode=DeliveryMode.AWAIT,
+            priority=PRIORITY_OBSERVER,
+        )
+
+        # Second, separate subscription: the post-action audit. It was an
+        # inline call at the tail of process_message, so the pipeline had to
+        # know that a rumination is what follows an emotionally marked reply.
+        #
+        # Deliberately not folded into observe(): a turn Mika just spoke is
+        # not a signal about the world, and interpreting her own reply as an
+        # external stimulus would cost an LLM call and file an Observation
+        # every single turn. The internal `_turn.*` namespace is invisible
+        # to the wildcard `observe` subscription for exactly that reason.
+        event_bus.subscribe(
+            self._audit_completed_turn,
+            name="conscience.audit",
+            pattern=TURN_COMPLETED,
+            # Detached: it writes a Rumination and has nothing the turn is
+            # waiting on. Awaiting it added DB work to every reply.
+            mode=DeliveryMode.SPAWN,
+        )
+
         self._decision_task = asyncio.create_task(self._decision_loop())
         self._initialized = True
 
@@ -124,6 +159,12 @@ class ConscienceEngine:
             logger.debug("Could not restore cooldown", exc_info=True)
 
     async def shutdown(self) -> None:
+        # Detach before cancelling the loop: an event arriving mid-shutdown
+        # would otherwise be interpreted by an engine that is on its way out.
+        from utils.eventbus import event_bus
+        event_bus.unsubscribe("conscience")
+        event_bus.unsubscribe("conscience.audit")
+
         if self._decision_task:
             self._decision_task.cancel()
             try:
@@ -1225,6 +1266,24 @@ class ConscienceEngine:
         "love":         ("grateful",    "Tu gardes en tete la chaleur de l'echange autour de : \"{excerpt}\"."),
         "jealous":      ("melancholic", "Ta reaction te reste un peu sur le coeur : \"{excerpt}\"."),
     }
+
+    async def _audit_completed_turn(self, event) -> None:
+        """Bus adapter for ``post_action_audit``.
+
+        Holds the one piece of policy the pipeline used to hold on the
+        conscience's behalf: a project in professional mode produces no
+        lingering self-doubt about a work email. That is a statement about
+        ruminations, so it belongs to the conscience, not to the processor.
+        """
+        data = event.data
+        if data.get("project_suppresses_emotion"):
+            return
+        await self.post_action_audit(
+            response_text=data.get("text", ""),
+            emotion_name=data.get("emotion_name", ""),
+            intensity=data.get("emotion_intensity", 0.0),
+            person_id=data.get("person_id", ""),
+        )
 
     async def post_action_audit(
         self,

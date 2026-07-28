@@ -62,7 +62,7 @@ class TestCollectContextScoping:
     def _manager_with(self, *modules):
         mgr = ModuleManager()
         for m in modules:
-            mgr._modules[m.name] = _running(m)
+            mgr.registry.activate(_running(m))
         return mgr
 
     def test_owner_context_hidden_from_anonymous(self):

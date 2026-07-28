@@ -46,16 +46,26 @@ class TestDatabaseConcurrency:
         assert options["timeout"] >= 10
 
 
+def _scheduler():
+    """A CronScheduler over an empty registry.
+
+    These used to build a ``ModuleManager.__new__`` shell and hand-set the
+    one attribute the scheduler needed — which worked only because the
+    manager was a bag of unrelated state. The scheduler is now its own
+    object, so the test constructs the real thing.
+    """
+    from modules.registry import ModuleRegistry
+    from modules.scheduler import CronScheduler
+
+    return CronScheduler(ModuleRegistry())
+
+
 @pytest.mark.asyncio
 class TestSchedulerIsolation:
     """One slow module must not hold up every other module."""
 
     async def test_a_slow_module_does_not_block_the_tick(self):
-        from modules.manager import ModuleManager
-
-        manager = ModuleManager.__new__(ModuleManager)
-        manager._cron_tasks = {}
-
+        scheduler = _scheduler()
         started = asyncio.Event()
 
         class _Slow:
@@ -65,16 +75,16 @@ class TestSchedulerIsolation:
                 started.set()
                 await asyncio.sleep(30)
 
-        manager._spawn_cron(_Slow())
+        scheduler._spawn(_Slow())
         # The scheduler returned immediately; the tick is still running.
         await asyncio.wait_for(started.wait(), timeout=1)
-        assert not manager._cron_tasks["slow"].done()
+        assert not scheduler._ticks["slow"].done()
 
-        manager._cron_tasks["slow"].cancel()
-        await asyncio.gather(*manager._cron_tasks.values(), return_exceptions=True)
+        scheduler._ticks["slow"].cancel()
+        await asyncio.gather(*scheduler._ticks.values(), return_exceptions=True)
 
     async def test_a_failing_tick_is_logged_not_propagated(self):
-        from modules.manager import ModuleManager
+        from modules.scheduler import CronScheduler
 
         class _Boom:
             name = "boom"
@@ -83,14 +93,11 @@ class TestSchedulerIsolation:
                 raise RuntimeError("boom")
 
         # Must not raise: the scheduler survives a broken module.
-        await ModuleManager._run_cron(_Boom())
+        await CronScheduler._run_once(_Boom())
 
     async def test_overlapping_ticks_are_skipped_not_queued(self):
         """A module slower than its interval degrades gracefully."""
-        from modules.manager import ModuleManager
-
-        manager = ModuleManager.__new__(ModuleManager)
-        manager._cron_tasks = {}
+        scheduler = _scheduler()
         calls = []
 
         class _Slow:
@@ -100,11 +107,10 @@ class TestSchedulerIsolation:
                 calls.append(1)
                 await asyncio.sleep(5)
 
-        module = _Slow()
-        manager._spawn_cron(module)
+        scheduler._spawn(_Slow())
         await asyncio.sleep(0)
 
-        running = manager._cron_tasks.get("slow")
+        running = scheduler._ticks.get("slow")
         assert running is not None and not running.done()
         # This is the scheduler's guard condition.
         assert len(calls) == 1
@@ -113,10 +119,7 @@ class TestSchedulerIsolation:
         await asyncio.gather(running, return_exceptions=True)
 
     async def test_finished_ticks_do_not_leak(self):
-        from modules.manager import ModuleManager
-
-        manager = ModuleManager.__new__(ModuleManager)
-        manager._cron_tasks = {}
+        scheduler = _scheduler()
 
         class _Quick:
             name = "quick"
@@ -124,9 +127,9 @@ class TestSchedulerIsolation:
             async def worker_cron(self):
                 return None
 
-        manager._spawn_cron(_Quick())
+        scheduler._spawn(_Quick())
         await asyncio.sleep(0.05)
-        assert "quick" not in manager._cron_tasks
+        assert "quick" not in scheduler._ticks
 
 
 class TestSignalInterpretationCost:
