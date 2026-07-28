@@ -113,6 +113,7 @@ urlpatterns = [
     path("dashboard/api/quota",               quota_api.quota),
     path("dashboard/api/system/consolidation",system.consolidation),
     path("dashboard/api/system/ai-config",    system.ai_config),
+    path("dashboard/api/system/health",       system.health),
 
     # Configuration system (schema-driven editor)
     path("dashboard/api/config/schema",            configuration.schema),

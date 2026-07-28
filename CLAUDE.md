@@ -4,18 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Development Commands
 
-**Authentication** (choose ONE method):
+**First run** — nothing is configured until you say so. Start the backend, open
+`http://localhost:8000/dashboard/` → Configuration, then:
 
-*Method 1: OAuth Token* (recommended — uses your Claude.ai login):
-```bash
-# Create .env at project root with:
-CLAUDE_OAUTH_TOKEN=your-oauth-token-here
-```
+1. *IA · Claude* — paste an OAuth token (recommended, from your Claude.ai login)
+   or an API key. Stored encrypted in the database, never in `.env`.
+2. *IA · Modèles* — declare a model (internal name + provider + model id).
+3. *IA · Rôles* — map at least `conversation` to that internal name.
 
-*Method 2: API Key* (requires paid Anthropic account):
-```bash
-ANTHROPIC_API_KEY=sk-ant-xxxxx
-```
+Until step 3, every turn answers "Mon IA n'a pas de modèle associé". See the
+Configuration section: `.env` holds infrastructure only.
 
 **Backend** (Django + Channels on Uvicorn):
 ```bash
@@ -143,9 +141,11 @@ Six background loops write continuously (conscience 30s, consolidator 60s, sleep
   - `memory/person_profile.py` — `PersonProfileGenerator`: theory of mind. Per person-entity, synthesizes closeness, preferred tone, topics of interest, sensitive topics. Gated per-person (≥24h + ≥3 new souvenirs mentioning them); capped at 3 persons/cycle
   - `memory/sleep.py` — `SleepCycle` singleton. Nighttime creative/narrative/healing work. See "Sleep Cycle" section below.
 - **Conscience** ([conscience/](backend/conscience/)): Mika's waking brain. See dedicated section below.
+- **Degradation ledger** ([utils/degradation.py](backend/utils/degradation.py)): the engine swallows failures on purpose — a background loop has no supervisor, so an escaping exception ends it for the life of the process, and not knowing who someone is must never cost them their answer. Measured: 189 typed handlers, 135 that log loudly, and **161 that do not** (75 at DEBUG, 62 silent fallbacks, 24 a bare `pass`). Individually defensible; collectively a partial failure becomes indistinguishable from normal operation — a prompt block empty because its query throws looks exactly like one with nothing to say, and nobody tails DEBUG logs on a personal install. This does not change *whether* failures are swallowed, it **counts** them: `degradations.record(label, exc)` replaces the `logger.debug` one-for-one with no control-flow change (deliberately — rewriting 161 sites into context managers would put all the risk in the parts that behave differently), and `degraded(label)` is the context-manager form for bare-`pass` sites. Per site: count, `first_seen` (so "broken since boot" is answerable), last error, distinct error types. In-RAM, process-scoped. **72 sites wired**, chosen where silence costs most: the conversation hot path (`pipeline/`, including `_merge_section`, whose single handler covered ten inner-state loaders so one broken section read as a card with nothing to show) and the four unsupervised loops (`projects/runner`, `conscience/engine`, `memory/sleep`, `memory/storage/consolidator`). Remaining: 13 quasi-silent, 24 bare `pass`, 55 silent fallbacks — mostly dashboard views, where a failure is already visible as an HTTP error. **Two label conventions**, deliberately: curated prose (`prompt: journal context`) for the hot-path sites, and machine-derived `module.function` for the AST sweep — derived rather than written, because a description invented for a site you did not read is worse than no description. A test asserts no label covers two different functions: the sweep first derived them from the enclosing *class*, so five distinct handlers in `EmotionEngine` all reported as `emotion.engine.EmotionEngine` — a counter that says something is broken but not what. Surfaced at `GET /dashboard/api/system/health` alongside `event_bus.stats()`. A test asserts every `record()` call sits inside an `except` — the sweep that added them initially mis-converted nine *informational* debug logs ("Pruned souvenir #12") into degradation records, and that guard is what caught it.
 - **Retention sweep** ([memory/retention.py](backend/memory/retention.py)): declarative ceilings on append-only tables, applied hourly from the consolidator tick (both paths — with and without new messages). `POLICIES` is a tuple of `Policy(app_label, model_name, date_field, keep_days, keep_rows, protect)`. Motivation: `ConscienceLog` gets a row on **every** decision cycle regardless of outcome, so at a 30s interval it grows ~2 880 rows/day — over a million a year on an install nobody talks to. Also covers `ConsolidationLog` (only the newest row is ever read), faded `Rumination`s (active/resolved are protected — journals and digestion still reference them), and `ProjectLog`. A broken policy is logged and skipped, never fatal. A test asserts every policy names a real model + field and has at least one ceiling.
 - **Module plugin system**: [modules/base.py](backend/modules/base.py) (`BaseModule` ABC) + [modules/manager.py](backend/modules/manager.py) (`ModuleManager` singleton). Each module is a subfolder with its own `models.py`. `modules/models.py` re-exports for Django discovery.
-- **Module capabilities** (opt-in): `instantiate`/`shutdown`, `worker_cron`, `return_tools`, `notify_ai`, `get_routes`, `get_views`, `get_context`, `on_event`, `get_status`, `is_available`
+- **Module capabilities** — **a module is required to have a name; everything else is opt-in.** `instantiate`/`shutdown` used to be `@abstractmethod`, which was backwards for the shape this codebase keeps growing: measured across the nine concrete modules, three (`memory_tools`, `identity_tools`, `project_tools`) implement *only* `instantiate`/`shutdown`/`return_tools`, and the first two are empty bodies written solely to satisfy the ABC — they are tool facades over subsystems the ASGI lifespan already owns. Both now default to no-ops. Opt-in surface: `is_available`, `worker_cron`, `return_tools`, `get_capabilities`, `get_context`, `get_routes`, `get_views`, `config_schema`, `get_models`, `on_event`, `get_status`. Usage across the nine: tools 9/9, context 6/9, cron & capabilities & models 5/9, status 4/9, availability & config 3/9, routes & views 2/9, `on_event` 1/9.
+- **`deliver()` is no longer a module capability.** It lived on `BaseModule` returning `False` and **no module ever implemented it** — the sole implementer in the codebase is `TelegramChannel`, which is not a module. A capability declared on the wrong class, whose default was the only answer anyone received. It is now the `Deliverable` protocol in [communication/delivery.py](backend/communication/delivery.py), duck-typed via `can_deliver()`; `_deliver_via_module` now says "channel has no outbound delivery" plainly instead of surfacing an `AttributeError` inside a handler reporting "deliver() failed".
 - **AI tools**: `ModuleManager` collects tools from all modules, builds an MCP server via `create_sdk_mcp_server()`, injected into `ClaudeAgentOptions.mcp_servers` when `complete_with_tools` is used
 - **`ModuleManager` is a façade, not the subsystem** (2026-07). It was a 739-line object holding twelve responsibilities and one shared cache field — registry, DDL, lifecycle, cron, "event bus", five aggregations, the notify_ai bridge, status. Each was defensible; together they meant changing any one required re-reading all of them, which does not survive a module set that Mika **writes at runtime**. The parts now live apart and the manager is ~200 lines of one-line delegations (a method growing a second line is the signal it belongs in a collaborator):
   - [modules/registry.py](backend/modules/registry.py) — who exists, who is active, what `ModuleState` says. Absorbs `config_schema()` **before** the availability check, because the point of surfacing a schema is to configure a module that can't run yet.
@@ -171,6 +171,7 @@ Six background loops write continuously (conscience 30s, consolidator 60s, sleep
 
 The dashboard reads the entire conversation history and writes the config, including provider API keys. Three layers now stand between that and the network:
 
+- **`ALLOWED_HOSTS` is not wildcarded** — it was a hardcoded `["*"]`, the one line in `settings.py` opting out of the posture every other line argues for. `*` disables Host-header validation, which is what stops `Host: evil.test` from making the app generate absolute URLs (password-reset links, redirects) pointing at an attacker's domain. Defaults to the loopback names actually served, plus the machine's own hostname/IP when `API_HOST` is not loopback; override with `ALLOWED_HOSTS` in `.env` behind a reverse proxy.
 - **Loopback by default** — `API_HOST` defaults to `127.0.0.1` (was a hardcoded `0.0.0.0`). Set `API_HOST=0.0.0.0` to serve the LAN; [run.py](run.py) then logs a `SECURITY:` warning if `DASHBOARD_REQUIRE_AUTH` is off.
 - **Optional auth gate** — [dashboard/middleware.py](backend/dashboard/middleware.py) `DashboardAuthMiddleware` covers the whole `/dashboard/` prefix when `DASHBOARD_REQUIRE_AUTH=1`: HTML requests redirect to `LOGIN_URL` (default `/admin/login/`, so the Django admin account doubles as the dashboard account) with `?next=`, API requests get a 401 JSON body. Staff-only, so an account created for the chat frontend doesn't inherit the config editor. **Off by default** — a fresh install has no superuser, and locking the owner out of their own admin before they can run `createsuperuser` is worse than loopback exposure. One middleware rather than 66 decorators: the next route added can't forget it.
 - **CORS is not wildcarded** — `CORS_ALLOW_ALL_ORIGINS` defaults to `False` with the dev frontend origins allow-listed. It previously followed `DEBUG`, so any page the user visited could read `/dashboard/api/messages` and `PATCH` the config cross-origin without needing credentials (nothing was authenticated).
@@ -531,68 +532,58 @@ A `.vrm` file at [frontend/public/models/default.vrm](frontend/public/models/def
 
 ## Authentication
 
-1. **OAuth Token** (recommended): `CLAUDE_OAUTH_TOKEN` in `.env`. Backend converts internally to `CLAUDE_CODE_OAUTH_TOKEN` for the Claude Agent SDK.
-2. **API Key**: `ANTHROPIC_API_KEY` in `.env` (requires paid Anthropic account).
+Provider credentials are **configured in the dashboard**, not in `.env` — see the Configuration section. `/dashboard/` → Configuration → *IA · Claude*:
 
-OAuth tried first, API key as fallback. OAuth tokens start with `sk-ant-oat01-`; API keys start with `sk-ant-api`.
+1. **OAuth Token** (recommended): `ai.claude.oauth_token`. The provider exports it as `CLAUDE_CODE_OAUTH_TOKEN` for the Claude Agent SDK at call time.
+2. **API Key**: `ai.claude.api_key` (requires a paid Anthropic account).
 
-## Environment Variables
+OAuth tried first, API key as fallback. OAuth tokens start with `sk-ant-oat01-`; API keys start with `sk-ant-api`. Values are encrypted at rest (`configs/secrets.py`) and redacted in every read path.
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `CLAUDE_OAUTH_TOKEN` | No* | `""` | Claude OAuth token (*required if no API key) |
-| `ANTHROPIC_API_KEY` | No* | `""` | Claude API key (*required if no OAuth) |
-| `TELEGRAM_TOKEN` | No | `""` | Telegram bot token |
-| `VTUBER_NAME` | No | `Mika` | Display name |
-| `CLAUDE_MODEL` | No | `claude-opus-4-6` | Heavy model |
-| `CLAUDE_MODEL_LIGHT` | No | `claude-sonnet-4-5` | Light model |
-| `OPENAI_API_KEY` | No | `""` | OpenAI provider (if used) |
-| `OPENAI_BASE_URL` | No | `""` | Custom OpenAI-compatible endpoint |
-| `OLLAMA_BASE_URL` | No | `http://localhost:11434` | Ollama server |
-| `AI_ROLE_CONVERSATION` | No | `claude:CLAUDE_MODEL` | Main chat |
-| `AI_ROLE_CONVERSATION_TOOLS` | No | `claude:CLAUDE_MODEL` | Chat with tools (Claude-only) |
-| `AI_ROLE_EMAIL_TRIAGE` | No | `claude:CLAUDE_MODEL_LIGHT` | Email analysis |
-| `AI_ROLE_SIGNAL_INTERPRETATION` | No | `claude:CLAUDE_MODEL_LIGHT` | Signal interpretation |
-| `AI_ROLE_MEMORY_EXTRACTION` | No | `claude:CLAUDE_MODEL_LIGHT` | Memory extraction + narrative + person profile |
-| `AI_ROLE_VALIDITY_CHECK` | No | `claude:CLAUDE_MODEL_LIGHT` | Connaissance validity checks |
-| `AI_ROLE_VISION_CAPTION` | No | `claude:CLAUDE_MODEL_LIGHT` | Image → text description (vision preprocessor) |
-| `AI_ROLE_INNER_VOICE` | No | `claude:CLAUDE_MODEL_LIGHT` | Murmured inner monologue. Fires far more often than a chat turn — keep a small model |
-| `TIME_ZONE` | No | `Europe/Paris` | Aligns ORM `__date` bucketing with the naive local wall clock used by circadian/sleep/journal logic. Django's own default (`America/Chicago`) shifted day boundaries ~7h |
-| `CORS_ALLOW_ALL_ORIGINS` | No | `False` | **Not** wildcarded in DEBUG: the dashboard API is unauthenticated, so `*` let any visited page read the conversation history and rewrite the config |
-| `CORS_ALLOWED_ORIGINS` | No | `localhost:3000,127.0.0.1:3000,localhost:4173,127.0.0.1:4173` | Dev frontend origins, allow-listed explicitly |
-| `CORS_ALLOW_CREDENTIALS` | No | `True` | Required: the SPA authenticates with a session cookie and sends `credentials: "include"`. Safe because the origin list is explicit — credentials and a wildcard origin cannot be combined |
-| `CSRF_TRUSTED_ORIGINS` | No | = `CORS_ALLOWED_ORIGINS` | Origins allowed to submit a CSRF-protected request |
-| `AI_CALL_TIMEOUT` | No | `60` | Seconds before `process_message` gives up waiting on the AI |
-| `DB_LOCK_TIMEOUT` | No | `30` | SQLite busy timeout (s). The 5s default surfaced as `database is locked` under the background loops |
-| `API_PORT` | No | `8000` | Backend port |
-| `API_HOST` | No | `127.0.0.1` | Bind address. Loopback by default because the dashboard is unauthenticated unless gated |
-| `DASHBOARD_REQUIRE_AUTH` | No | `False` | Require an authenticated **staff** user for `/dashboard/*`. Needs a superuser (`python backend/manage.py createsuperuser`) |
-| `CONSUMER_REQUIRE_AUTH` | No | `True` | Refuse unauthenticated WebSocket connections. On by default: the frontend is the one channel where Mika is *certain* who she is talking to. First run is handled by `POST /auth/bootstrap` (creates the first account, 409s forever after), so this does not lock out a fresh clone |
-| `LOGIN_URL` | No | `/admin/login/` | Where the dashboard gate redirects unauthenticated HTML requests |
-| `MEMORY_SHORT_TERM_LIMIT` | No | `20` | Messages kept in RAM context |
-| `CONSOLIDATION_INTERVAL` | No | `60` | Consolidator loop period (s) |
-| `MEMORY_DECAY_RATE` | No | `0.95` | Per-day souvenir importance decay |
-| `MEMORY_MIN_IMPORTANCE` | No | `0.1` | Prune threshold |
-| `MEMORY_RETRIEVAL_SOUVENIRS` | No | `5` | Souvenirs returned by retriever |
-| `MEMORY_RETRIEVAL_CONNAISSANCES` | No | `10` | Connaissances returned |
-| `EMBEDDING_MODEL` | No | `paraphrase-multilingual-MiniLM-L12-v2` | Sentence-transformer model for ChromaDB |
-| `EMOTION_DECAY_RATE` | No | `0.02` | Emotion intensity lost per second |
-| `EMOTION_SNAPSHOT_INTERVAL` | No | `30` | Seconds between `EmotionSnapshot` writes per person |
-| `EMOTION_SNAPSHOT_RETENTION_DAYS` | No | `2` | How long snapshots persist before summary fallback |
-| `CRON_TICK_INTERVAL` | No | `60` | Default scheduler tick period |
-| `IMAP_HOST` / `IMAP_PORT` / `IMAP_USER` / `IMAP_PASSWORD` | No | `""` / `993` | Email fetch |
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` | No | `""` / `587` | Email send |
-| `CONSCIENCE_DECISION_INTERVAL` | No | `30` | Seconds between conscience decisions |
-| `CONSCIENCE_COOLDOWN_SECONDS` | No | `300` | Min seconds between conscience actions |
-| `CONSCIENCE_ACT_THRESHOLD` | No | `0.5` | Score threshold for `act` decision |
-| `RSS_FEEDS` | No | `""` | Comma-separated `"name|url"` pairs |
-| `RSS_POLL_INTERVAL` | No | `600` | RSS fetch period (s) |
-| `CHROMA_PERSIST_DIR` | No | `data/chromadb` | ChromaDB on-disk location |
-| `SLEEP_CYCLE_ENABLED` | No | `True` | Master switch for the nighttime sleep cycle (journal + dreams + digestion) |
-| `SLEEP_CHECK_INTERVAL` | No | `60` | Cadence of the dedicated sleep-cycle loop (s). Restart required on change. |
-| `PROJECT_PROMPT_HISTORY_SIZE` | No | `30` | Rolling-buffer size of LLM prompt/response pairs kept per project (audit/debug). Set to `0` to disable capture entirely. |
-| `PROJECT_RUNNER_INTERVAL` | No | `30` | Cadence of the dedicated project runner loop (s). Restart required on change. |
-| `FORGE_DIR` | No | `data/forge_modules` | Confined directory holding AI-forged modules. Runtime limits (`forge.*`: handler timeout, quotas, breaker threshold…) are config-service keys, not env vars. |
+A credential alone is not enough to make Mika talk: declare a model under *IA · Modèles* and map the roles under *IA · Rôles*. Until then every turn answers "Mon IA n'a pas de modèle associé".
+
+## Configuration
+
+**Everything applicative is configured in the dashboard** (`/dashboard/` → Configuration), stored in `ConfigValue`, read at runtime through `config_service.get("<key>")`. `.env` holds infrastructure only — the things Django needs before a database exists.
+
+There used to be a bridge: `ConfigItem.env_fallback` named a Django settings attribute, and `seed_from_env()` materialised those into `ConfigValue` rows on first boot. It has been removed (2026-07), along with ~31 `settings.py` constants that existed only to feed it. Reasons, in increasing order of severity:
+
+1. **Two declared defaults per knob.** `settings.py` said `default=0.5` *and* `config_schema.py` said `default=0.5`; the settings one always won at seed time, so the registry default — the one a reader looks at — was decorative and free to drift.
+2. **The bridge silently didn't work for seven keys**, because it read a *settings attribute* and nobody had declared one: `GEMINI_API_KEY`, `GLM_API_KEY`, `AI_ROLE_VISION_CAPTION`, `AI_ROLE_INNER_VOICE`, `EMOTION_DECAY_RATE`, `SLEEP_CHECK_INTERVAL`, `PROJECT_RUNNER_INTERVAL`. Five were documented as supported.
+3. **`AI_ROLE_*` could only ever seed a broken value.** They carried the legacy `provider:model` string, while `AIRouter._resolve` looks the value up as an **internal name** declared in the `ai.models` record list. `claude:claude-opus-4-6` matches no declared model, so the seeded value raised `UnconfiguredRoleError` — the bridge was worse than absent.
+4. Once seeded, `.env` was inert forever with no feedback: edit the file, restart, nothing happens, no warning.
+
+A fresh clone therefore starts **unconfigured, on purpose**: declare a model under *IA · Modèles*, map the roles under *IA · Rôles*, set the provider key. Until then `process_message` answers "Mon IA n'a pas de modèle associé (Configuration > IA · Roles)". Every non-role knob carries a working registry default, so the background loops run regardless.
+
+Guarded by tests: no `ConfigItem` declares an `env_fallback`, no `settings.py` constant shadows a config key, no `AI_ROLE_*` constant survives, and every operational knob has a default.
+
+### What `.env` still holds
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DEBUG` | `True` | Django debug mode |
+| `DJANGO_SECRET_KEY` | `dev-secret-change-me` | Session/CSRF signing key |
+| `API_HOST` | `127.0.0.1` | Bind address. Loopback by default — the dashboard reads conversations and edits provider keys |
+| `API_PORT` | `8000` | Backend port |
+| `ALLOWED_HOSTS` | loopback names | Host-header allow-list. Not `*`; adds the machine's hostname/IP when `API_HOST` is not loopback |
+| `VTUBER_NAME` | `Mika` | Display name at startup |
+| `TIME_ZONE` | `Europe/Paris` | Aligns ORM `__date` bucketing with the naive local clock the circadian/sleep/journal logic uses |
+| `DB_LOCK_TIMEOUT` | `30` | SQLite busy timeout (s) |
+| `DASHBOARD_REQUIRE_AUTH` | `False` | Require an authenticated **staff** user for `/dashboard/*` |
+| `CONSUMER_REQUIRE_AUTH` | `True` | Refuse unauthenticated WebSocket connections |
+| `LOGIN_URL` | `/admin/login/` | Where the dashboard gate redirects |
+| `OWNER_PERSON_IDS` | `[]` | Extra person ids treated as the operator (read via `getattr`) |
+| `CORS_ALLOW_ALL_ORIGINS` | `False` | Not wildcarded: the dashboard API would otherwise be readable by any visited page |
+| `CORS_ALLOWED_ORIGINS` | dev frontend ports | Explicit allow-list |
+| `CORS_ALLOW_CREDENTIALS` | `True` | Required — the SPA authenticates by session cookie |
+| `CSRF_TRUSTED_ORIGINS` | = `CORS_ALLOWED_ORIGINS` | Origins allowed to submit a CSRF-protected request |
+| `CHROMA_PERSIST_DIR` | `data/chromadb` | ChromaDB on-disk location |
+| `EMBEDDING_MODEL` | `paraphrase-multilingual-MiniLM-L12-v2` | Sentence-transformer for ChromaDB |
+| `FORGE_DIR` | `data/forge_modules` | Confined directory for AI-forged modules |
+| `AI_QUOTA_ROLE_<ROLE>_DAILY` / `_MONTHLY` | `0` | Per-role token caps. Read by **computed name** in `ai/quota.py`, so they are settings constants rather than config keys |
+| `IMAP_*` / `SMTP_*` | `""` | Legacy single-account email config, read via `getattr` by the email module (the `email.accounts` record list supersedes it) |
+| `RSS_FEEDS` | `""` | Legacy `"name|url"` pairs, read by the RSS module |
+
+Everything else — AI providers and keys, model declarations, role mapping, timeouts, all loop cadences, memory/emotion/conscience/project tuning — lives in the dashboard.
 
 ## Testing notes
 
@@ -615,6 +606,9 @@ OAuth tried first, API key as fallback. OAuth tokens start with `sk-ant-oat01-`;
 - **CSRF tests** (`test_csrf_protection.py`): token required on login/bootstrap/project-creation/config-write, a stale token refused, the cookie planted by `whoami`, and a guard asserting `csrf_exempt` never reappears anywhere. Uses `Client(enforce_csrf_checks=True)` — the default client disables CSRF, so tests written without it pass against an unprotected app.
 - **Event bus tests** (`test_eventbus.py`, 36 tests): pattern matching (incl. `forge.*` not matching the bare namespace), self-delivery skipped and the `receive_own` opt-in the Forge would need, priority ordering, AWAIT blocking vs SPAWN not blocking, `drain`/`cancel_inflight`, **failure isolation** (one broken subscriber never stops the fan-out, `emit` never raises) with failures *counted* rather than swallowed, AWAIT timeouts, replace-on-duplicate-name, module attach/detach owned by the lifecycle (including that a module which failed to start is never subscribed), and a regression guard asserting `emit_event`'s source no longer names `project_runner` or `_conscience_callback`.
 - **Prompt layer tests** (`test_prompt_layers.py`, 18 tests): the `_LAYERS` table is well-formed (every entry names a real `ConversationContext` field — the one failure mode the table introduces, since a typo would silently drop a block from every prompt), only `emotion_context` is project-muted, only `memory_context` is appended raw, the ordering that attention depends on (identity before what-she-knows, project before emotion, memory last), rendering rules, and a guard that `response.py` passes the context object rather than transcribing it. Verified non-vacuous by mutation: a bogus field name, a swapped project/emotion order, or a dropped project-mute each turn the file red.
+- **Degradation tests** (`test_degradation.py`, 25 tests): the ledger (accumulation, `first_seen` preserved across later failures, distinct error types, bounded label space, `record()` never raising even when the exception's own `__str__` throws), the `degraded()` context manager (works around `await`, does not swallow `CancelledError`), the wired hot-path sites, the health endpoint, and the AST guard that every `record()` sits inside an `except`.
+- **Module interface tests** (`test_module_interface.py`, 13 tests): a module needs only a name, lifecycle defaults are no-ops and suffice to be started by the real lifecycle, every optional hook has a usable default, `BaseModule` no longer declares `deliver`, no concrete module implements it, `TelegramChannel` satisfies `Deliverable` without being a module, and delivering to a non-deliverer is refused clearly. Both files verified by mutation: restoring `deliver()`, re-abstracting `instantiate`, silencing a hot-path site, re-introducing a record outside an `except`, or overwriting `first_seen` each turn them red.
+- **Config source-of-truth tests** (`test_config_env_bridge.py`, 20 tests): no `ConfigItem` declares an `env_fallback`, the seeding machinery is gone, no `settings.py` constant shadows a config key, no `AI_ROLE_*` survives, the per-role quota constants *are* kept (read by computed name — a careless cleanup would silently disable per-role quotas by defaulting them to 0 = unlimited), every non-role knob has a registry default, and `ALLOWED_HOSTS` refuses a spoofed Host. Defaults are asserted on the **registry**, not through `config_service`: its cache is primed from the real `data/vtuber.db` during `AppConfig.ready()`, so a read there can return the developer's own config rather than what a fresh clone sees.
 - **Inner-state read tests** (`test_inner_state_read.py`, 25 tests): both journal questions and why they differ, dream night-scoping (the drifted dashboard query, tested end-to-end on the endpoint), the `unrecalled_only` / `min_vividness` filters the prompt needs and the panels don't, rumination limit/floor, plus guards that neither `pipeline/broadcast.py` nor `pipeline/context.py` queries those models directly again. Verified non-vacuous by mutation: restoring the old dashboard query, collapsing `journal_for` into `latest_journal`, or dropping the `night_of` scope each turn the file red.
 - **Pipeline signal tests** (`test_pipeline_signals.py`, 21 tests): the reserved `_` namespace (a `*` subscriber — including the conscience's interpreter — is never woken by a turn, an explicit `_turn.*` one is, public events unaffected), the processor announcing on success / staying silent on `ai_failed` / announcing internal triggers too, both subscribers' own skip rules, a regression guard that `process_message` no longer names `drive_engine.on_reply` or `post_action_audit`, and one **unmocked end-to-end** turn asserting EXPRESSION actually drops. That last one exists because neither wiring was ever covered before — the drive test exercised `on_reply` in isolation and nothing covered the audit at all, so the suite would have stayed green had the processor simply stopped calling them. Verified non-vacuous by mutation: removing the drives subscription, un-reserving the `_` prefix, or silencing the announcement each turn the file red.
 - **Periodic loop tests** (`test_periodic_loop.py`): idempotent start/stop, no tick during startup, and — the property a copy-paste could quietly lose — a failing tick never ends the loop.

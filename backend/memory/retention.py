@@ -21,6 +21,7 @@ from datetime import timedelta
 
 from asgiref.sync import sync_to_async
 from django.utils import timezone
+from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
@@ -84,8 +85,9 @@ async def run_sweep() -> dict[str, int]:
     for policy in POLICIES:
         try:
             count = await _sweep_one(policy)
-        except Exception:
+        except Exception as exc:
             # A missing app/model or a locked table must not break the tick.
+            degradations.record("memory.retention.run_sweep", exc)
             logger.debug("Retention sweep failed for %s.%s",
                          policy.app_label, policy.model_name, exc_info=True)
             continue
@@ -94,7 +96,8 @@ async def run_sweep() -> dict[str, int]:
 
     try:
         orphans = await _sweep_orphan_identities()
-    except Exception:
+    except Exception as exc:
+        degradations.record("memory.retention.run_sweep", exc)
         logger.debug("Orphan identity sweep failed", exc_info=True)
     else:
         if orphans:

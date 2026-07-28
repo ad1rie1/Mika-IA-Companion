@@ -17,6 +17,7 @@ from modules.types import (
     ToolParameter,
     ToolParameterType,
 )
+from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
@@ -324,7 +325,8 @@ class WakeModule(BaseModule):
             count = ScheduledAction.objects.filter(status="pending").count()
             if count:
                 return f"Tu as {count} action(s) programmee(s) en attente."
-        except Exception:
+        except Exception as exc:
+            degradations.record("modules.plugins.wake.module.get_context", exc)
             logger.debug("wake get_context query failed", exc_info=True)
         return ""
 

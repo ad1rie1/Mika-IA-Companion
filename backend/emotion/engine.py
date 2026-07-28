@@ -16,6 +16,7 @@ from emotion.state import (
     PersonMood,
     Temperament,
 )
+from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
@@ -314,7 +315,8 @@ class EmotionEngine:
 
             return restored
 
-        except Exception:
+        except Exception as exc:
+            degradations.record("emotion.engine._restore_from_summaries", exc)
             logger.debug("Failed to restore from summaries", exc_info=True)
             return 0
 
@@ -352,7 +354,8 @@ class EmotionEngine:
 
             return emotion, intensity
 
-        except Exception:
+        except Exception as exc:
+            degradations.record("emotion.engine._mood_from_summary", exc)
             logger.debug(
                 "Failed to load EmotionalSummary for %s", person_id, exc_info=True
             )
@@ -407,7 +410,8 @@ class EmotionEngine:
                     person_id, label.value, intensity,
                 )
 
-        except Exception:
+        except Exception as exc:
+            degradations.record("emotion.engine.ensure_person_loaded", exc)
             logger.debug(
                 "Failed to lazy-load mood for %s", person_id, exc_info=True
             )
@@ -454,7 +458,8 @@ class EmotionEngine:
                 global_emotion=g_label.value,
                 global_intensity=g_intensity,
             )
-        except Exception:
+        except Exception as exc:
+            degradations.record("emotion.engine._save_person_snapshot", exc)
             logger.debug("Failed to save snapshot for %s", person_id, exc_info=True)
 
     # ------------------------------------------------------------------
@@ -488,7 +493,8 @@ class EmotionEngine:
         try:
             from config.personality import personality
             profile = personality.circadian_profile
-        except Exception:
+        except Exception as exc:
+            degradations.record("emotion.engine._home_vector", exc)
             profile = None
 
         state = circadian.current_state(profile=profile)

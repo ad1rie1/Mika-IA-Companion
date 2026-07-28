@@ -10,13 +10,13 @@ CONFIG_SCHEMA = [
     ),
     ConfigItem(
         key="projects.prompt_history_size", type="int", section="projects",
-        label="Buffer prompt history", env_fallback="PROJECT_PROMPT_HISTORY_SIZE",
+        label="Buffer prompt history",
         default=30, min=0, max=500,
         hint="0 = désactive la capture prompt/response.",
     ),
     ConfigItem(
         key="projects.runner_interval", type="int", section="projects",
-        label="Période runner (s)", env_fallback="PROJECT_RUNNER_INTERVAL",
+        label="Période runner (s)",
         default=30, min=5, max=600, restart_required=True,
         hint="Cadence de la boucle dédiée qui fait avancer les projets dus. "
              "Découplée du consolidator — un interval:30s tient vraiment 30s.",

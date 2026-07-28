@@ -84,55 +84,6 @@ class ConfigService:
             return item.default
         return _UNSET
 
-    # ── One-shot seed from .env ─────────────────────────────────
-
-    def seed_from_env(self) -> int:
-        """Populate ConfigValue rows from ``env_fallback`` Django settings
-        for every declared item that doesn't already have a DB row.
-
-        Idempotent: a user-edited value is never overwritten. A user
-        ``unset`` that later re-deletes the row will *not* be re-seeded
-        because we mark every seeded key in ``_seed_complete`` below.
-
-        Returns the number of rows materialised.
-        """
-        from django.conf import settings
-        from configs.models import ConfigValue
-
-        # Guard: if the seed marker exists we've run once already.
-        marker_key = "__seed_complete"
-        if ConfigValue.objects.filter(key=marker_key).exists():
-            return 0
-
-        created = 0
-        for item in registry.all_items():
-            if item.type == "record_list":
-                continue
-            if not item.env_fallback:
-                continue
-            if ConfigValue.objects.filter(key=item.key).exists():
-                continue
-            env_value = getattr(settings, item.env_fallback, None)
-            if env_value in (None, ""):
-                continue
-            stored = env_value
-            encrypted = False
-            if item.sensitive:
-                stored = secrets.encrypt(str(env_value))
-                encrypted = True
-            ConfigValue.objects.create(
-                key=item.key, value_json=stored, encrypted=encrypted,
-                updated_by="env-seed",
-            )
-            created += 1
-
-        ConfigValue.objects.create(
-            key=marker_key, value_json={"count": created}, updated_by="env-seed",
-        )
-        if created:
-            logger.info("ConfigService: seeded %d config values from .env", created)
-        return created
-
     def snapshot(self) -> dict[str, Any]:
         """Effective value for every declared key (scalars only)."""
         out = {}

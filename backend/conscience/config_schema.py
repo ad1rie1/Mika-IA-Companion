@@ -10,17 +10,17 @@ CONFIG_SCHEMA = [
     ),
     ConfigItem(
         key="conscience.decision_interval", type="int", section="conscience",
-        label="Intervalle décision (s)", env_fallback="CONSCIENCE_DECISION_INTERVAL",
+        label="Intervalle décision (s)",
         default=30, min=5, max=3600, restart_required=True,
     ),
     ConfigItem(
         key="conscience.cooldown_seconds", type="int", section="conscience",
-        label="Cooldown entre actions (s)", env_fallback="CONSCIENCE_COOLDOWN_SECONDS",
+        label="Cooldown entre actions (s)",
         default=300, min=0, max=86400, hot_reload=True,
     ),
     ConfigItem(
         key="conscience.act_threshold", type="float", section="conscience",
-        label="Seuil score → agir", env_fallback="CONSCIENCE_ACT_THRESHOLD",
+        label="Seuil score → agir",
         default=0.5, min=0.0, max=1.0, hot_reload=True,
         hint="Plus haut = Mika parle moins spontanément.",
     ),

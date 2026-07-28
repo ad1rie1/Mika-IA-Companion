@@ -13,7 +13,35 @@ environ.Env.read_env(str(PROJECT_ROOT / ".env"))
 
 SECRET_KEY = env("DJANGO_SECRET_KEY", default="dev-secret-change-me")
 DEBUG = env.bool("DEBUG", default=True)
-ALLOWED_HOSTS = ["*"]
+
+# Hardcoded `["*"]` until now — the one line in this file that opted out of
+# the posture every other line argues for (loopback by default, no CORS
+# wildcard, CSRF enforced, WebSocket origins allow-listed).
+#
+# `*` disables Django's Host header validation, which is what stops a
+# request carrying `Host: evil.test` from making the app generate absolute
+# URLs (password-reset links, redirects) pointing at an attacker's domain.
+# It also makes the DEBUG-only `django-debug-toolbar`-style leaks reachable
+# from any name that resolves to the box.
+#
+# Default covers the loopback names the app actually serves plus the LAN
+# addresses someone setting API_HOST=0.0.0.0 means to use; override with
+# ALLOWED_HOSTS in .env for a real deployment or a reverse proxy.
+ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=[
+    "localhost", "127.0.0.1", "[::1]", ".localhost",
+])
+if env("API_HOST", default="127.0.0.1") not in ("127.0.0.1", "localhost", "::1"):
+    # Serving the LAN: accept the host names that reach us there. Narrower
+    # than `*` (still rejects a spoofed public domain) without demanding the
+    # operator enumerate their own IP.
+    ALLOWED_HOSTS += [".local", ".lan"]
+    import socket as _socket
+
+    try:
+        _hostname = _socket.gethostname()
+        ALLOWED_HOSTS += [_hostname, _socket.gethostbyname(_hostname)]
+    except Exception:
+        pass
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -191,27 +219,12 @@ TIME_ZONE = env("TIME_ZONE", default="Europe/Paris")
 USE_TZ = True
 
 # --- VTuber settings ---
-CLAUDE_OAUTH_TOKEN = env("CLAUDE_OAUTH_TOKEN", default="")
-ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", default="")
-TELEGRAM_TOKEN = env("TELEGRAM_TOKEN", default="")
 VTUBER_NAME = env("VTUBER_NAME", default="Mika")
-CLAUDE_MODEL = env("CLAUDE_MODEL", default="claude-opus-4-6")
-CLAUDE_MODEL_LIGHT = env("CLAUDE_MODEL_LIGHT", default="claude-sonnet-4-5")
 
 # --- Multi-provider AI ---
-OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
-OPENAI_BASE_URL = env("OPENAI_BASE_URL", default="")  # For Azure/custom endpoints
-OLLAMA_BASE_URL = env("OLLAMA_BASE_URL", default="http://localhost:11434")
 
 # Role → provider:model mapping (defaults to Claude if not set)
-AI_ROLE_CONVERSATION = env("AI_ROLE_CONVERSATION", default=f"claude:{CLAUDE_MODEL}")
-AI_ROLE_CONVERSATION_TOOLS = env("AI_ROLE_CONVERSATION_TOOLS", default=f"claude:{CLAUDE_MODEL}")
-AI_ROLE_EMAIL_TRIAGE = env("AI_ROLE_EMAIL_TRIAGE", default=f"claude:{CLAUDE_MODEL_LIGHT}")
-AI_ROLE_SIGNAL_INTERPRETATION = env("AI_ROLE_SIGNAL_INTERPRETATION", default=f"claude:{CLAUDE_MODEL_LIGHT}")
-AI_ROLE_MEMORY_EXTRACTION = env("AI_ROLE_MEMORY_EXTRACTION", default=f"claude:{CLAUDE_MODEL_LIGHT}")
-AI_ROLE_VALIDITY_CHECK = env("AI_ROLE_VALIDITY_CHECK", default=f"claude:{CLAUDE_MODEL_LIGHT}")
 
-MEMORY_SHORT_TERM_LIMIT = env.int("MEMORY_SHORT_TERM_LIMIT", default=20)
 API_PORT = env.int("API_PORT", default=8000)
 # Loopback by default: the dashboard exposes the conversation history and the
 # config editor (with provider API keys) and is unauthenticated unless
@@ -222,7 +235,6 @@ API_HOST = env("API_HOST", default="127.0.0.1")
 # Off by default so a fresh single-user install isn't locked out of its own
 # admin before a superuser exists.
 DASHBOARD_REQUIRE_AUTH = env.bool("DASHBOARD_REQUIRE_AUTH", default=False)
-AI_CALL_TIMEOUT = env.int("AI_CALL_TIMEOUT", default=60)
 
 # When True, owned WebSocket consumers must be authenticated (else connection
 # is refused). External modules (Telegram, ...) authenticate via their own API.
@@ -250,8 +262,6 @@ PERSONALITY_PATH = PROJECT_ROOT / "personality.yaml"
 # ``QuotaExceeded`` *before* the LLM call. 0 = unlimited.
 # Global caps apply to every call; per-role caps apply on top for a
 # specific AIRole. Per-project caps live on ``Project.monthly_token_budget``.
-AI_QUOTA_DAILY_TOKENS = env.int("AI_QUOTA_DAILY_TOKENS", default=0)
-AI_QUOTA_MONTHLY_TOKENS = env.int("AI_QUOTA_MONTHLY_TOKENS", default=0)
 
 # Per-role overrides. Add as many as you need. Role names match
 # ``AIRole`` values uppercased (conversation → AI_QUOTA_ROLE_CONVERSATION_*).
@@ -271,7 +281,6 @@ AI_QUOTA_ROLE_VISION_CAPTION_DAILY = env.int("AI_QUOTA_ROLE_VISION_CAPTION_DAILY
 AI_QUOTA_ROLE_VISION_CAPTION_MONTHLY = env.int("AI_QUOTA_ROLE_VISION_CAPTION_MONTHLY", default=0)
 
 # --- Scheduler ---
-CRON_TICK_INTERVAL = env.int("CRON_TICK_INTERVAL", default=60)  # seconds
 
 # --- Email Module ---
 IMAP_HOST = env("IMAP_HOST", default="")
@@ -288,31 +297,20 @@ FORGE_DIR = env("FORGE_DIR", default=str(PROJECT_ROOT / "data" / "forge_modules"
 
 # --- Contextual Memory ---
 CHROMA_PERSIST_DIR = env("CHROMA_PERSIST_DIR", default=str(PROJECT_ROOT / "data" / "chromadb"))
-CONSOLIDATION_INTERVAL = env.int("CONSOLIDATION_INTERVAL", default=60)  # seconds
-MEMORY_DECAY_RATE = env.float("MEMORY_DECAY_RATE", default=0.95)  # per day
-MEMORY_MIN_IMPORTANCE = env.float("MEMORY_MIN_IMPORTANCE", default=0.1)
-MEMORY_RETRIEVAL_SOUVENIRS = env.int("MEMORY_RETRIEVAL_SOUVENIRS", default=5)
-MEMORY_RETRIEVAL_CONNAISSANCES = env.int("MEMORY_RETRIEVAL_CONNAISSANCES", default=10)
 EMBEDDING_MODEL = env("EMBEDDING_MODEL", default="paraphrase-multilingual-MiniLM-L12-v2")
 
 # Emotional memory (snapshot aggregation)
-EMOTION_SNAPSHOT_INTERVAL = env.int("EMOTION_SNAPSHOT_INTERVAL", default=30)
-EMOTION_SNAPSHOT_RETENTION_DAYS = env.int("EMOTION_SNAPSHOT_RETENTION_DAYS", default=2)
 
 # --- Emotion Engine ---
 # Physics parameters (mass, stiffness, damping, impulse gain) are derived
 # at runtime from the `temperament` block in personality.yaml.
 
 # --- Conscience ---
-CONSCIENCE_DECISION_INTERVAL = env.int("CONSCIENCE_DECISION_INTERVAL", default=30)
-CONSCIENCE_COOLDOWN_SECONDS = env.int("CONSCIENCE_COOLDOWN_SECONDS", default=300)
-CONSCIENCE_ACT_THRESHOLD = env.float("CONSCIENCE_ACT_THRESHOLD", default=0.5)
 
 # --- Projects ---
 # How many (system_prompt, user_prompt, response) triples to keep per
 # project as a rolling buffer. Used for audit / debugging the runner's
 # LLM calls. Setting this to 0 disables history capture entirely.
-PROJECT_PROMPT_HISTORY_SIZE = env.int("PROJECT_PROMPT_HISTORY_SIZE", default=30)
 
 # RSS Observer
 # Format: comma-separated "name|url" pairs, e.g. "Tech|https://example.com/rss,Gaming|https://other.com/feed"
@@ -326,7 +324,6 @@ if _rss_raw:
             RSS_FEEDS.append({"name": name.strip(), "url": url.strip()})
         elif entry:
             RSS_FEEDS.append({"name": entry, "url": entry})
-RSS_POLL_INTERVAL = env.int("RSS_POLL_INTERVAL", default=600)
 
 # --- Logging ---
 # Format: timestamp [request_id] level module: message

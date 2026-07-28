@@ -195,8 +195,8 @@ async def gather_context(
                     project_context = _format_project_block(data)
                     project_suppresses_emotion = (data["emotion_policy"] == "off")
                     project_id = data["id"]
-        except Exception:
-            logger.debug("Project detection failed", exc_info=True)
+        except Exception as exc:
+            degradations.record("prompt: project detection", exc)
 
     # Tools (generic ModuleTool list — the provider does the translation)
     tools: list = []
@@ -388,8 +388,8 @@ async def _fetch_dream_context() -> str:
         dream = await read.dream_of_last_night(
             unrecalled_only=True, min_vividness=_DREAM_VIVIDNESS_THRESHOLD,
         )
-    except Exception:
-        logger.debug("Dream context fetch failed", exc_info=True)
+    except Exception as exc:
+        degradations.record("prompt: dream context", exc)
         return ""
 
     if not dream:
@@ -438,8 +438,8 @@ async def _fetch_journal_context() -> str:
     # question — see memory.read.latest_journal.
     try:
         journal = await read.journal_for(read.yesterday())
-    except Exception:
-        logger.debug("Journal context fetch failed", exc_info=True)
+    except Exception as exc:
+        degradations.record("prompt: journal context", exc)
         return ""
 
     if not journal or not journal.narrative:
@@ -479,8 +479,8 @@ async def _fetch_rumination_context() -> str:
         items = await conscience_read.active_ruminations(
             limit=3, min_intensity=0.2,
         )
-    except Exception:
-        logger.debug("Rumination context fetch failed", exc_info=True)
+    except Exception as exc:
+        degradations.record("prompt: rumination context", exc)
         return ""
 
     if not items:
@@ -504,6 +504,7 @@ async def _fetch_rumination_context() -> str:
 
 # Regex assets for user-mood heuristic
 import re as _re_mood  # noqa: E402
+from utils.degradation import degradations
 
 _CAPS_RUN = _re_mood.compile(r"[A-ZÉÈÀÔÂÊÎÛ]{4,}")
 _EXCLAM_RUN = _re_mood.compile(r"!{2,}")
@@ -605,8 +606,8 @@ def _fetch_circadian_context() -> str:
 
         state = circadian.current_state(profile=profile)
         return circadian.phase_description_fr(state)
-    except Exception:
-        logger.debug("Circadian context fetch failed", exc_info=True)
+    except Exception as exc:
+        degradations.record("prompt: circadian context", exc)
         return ""
 
 
@@ -617,8 +618,8 @@ async def _fetch_self_concept() -> str:
     try:
         latest = await read.latest_self_narrative()
         return latest.content if latest and latest.content else ""
-    except Exception:
-        logger.debug("Self-concept fetch failed", exc_info=True)
+    except Exception as exc:
+        degradations.record("prompt: self-concept", exc)
         return ""
 
 
@@ -690,8 +691,8 @@ async def _fetch_person_context(identity_ctx) -> str:
             weekly_trend=weekly_trend,
         )
 
-    except Exception:
-        logger.debug("Person-context fetch failed", exc_info=True)
+    except Exception as exc:
+        degradations.record("prompt: person context", exc)
         # If DB failed but we at least have an affect string, return that —
         # it's better than a silent blank about the person.
         return affect

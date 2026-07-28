@@ -10,38 +10,38 @@ CONFIG_SCHEMA = [
     ),
     ConfigItem(
         key="memory.short_term_limit", type="int", section="memory", group="Court-terme",
-        label="Messages en RAM", env_fallback="MEMORY_SHORT_TERM_LIMIT",
+        label="Messages en RAM",
         default=20, min=5, max=200, hot_reload=True,
     ),
     ConfigItem(
         key="memory.consolidation_interval", type="int", section="memory", group="Consolidation",
-        label="Période consolidation (s)", env_fallback="CONSOLIDATION_INTERVAL",
+        label="Période consolidation (s)",
         default=60, min=10, max=3600, restart_required=True,
     ),
     ConfigItem(
         key="memory.decay_rate", type="float", section="memory", group="Décroissance",
-        label="Taux de décroissance/jour", env_fallback="MEMORY_DECAY_RATE",
+        label="Taux de décroissance/jour",
         default=0.95, min=0.5, max=1.0, hot_reload=True,
         hint="0.95 = perd 5% d'importance par jour.",
     ),
     ConfigItem(
         key="memory.min_importance", type="float", section="memory", group="Décroissance",
-        label="Seuil de purge", env_fallback="MEMORY_MIN_IMPORTANCE",
+        label="Seuil de purge",
         default=0.1, min=0.0, max=1.0, hot_reload=True,
     ),
     ConfigItem(
         key="memory.retrieval_souvenirs", type="int", section="memory", group="Récupération",
-        label="Souvenirs retournés", env_fallback="MEMORY_RETRIEVAL_SOUVENIRS",
+        label="Souvenirs retournés",
         default=5, min=1, max=50, hot_reload=True,
     ),
     ConfigItem(
         key="memory.retrieval_connaissances", type="int", section="memory", group="Récupération",
-        label="Connaissances retournées", env_fallback="MEMORY_RETRIEVAL_CONNAISSANCES",
+        label="Connaissances retournées",
         default=10, min=1, max=50, hot_reload=True,
     ),
     ConfigItem(
         key="memory.sleep_check_interval", type="int", section="memory", group="Consolidation",
-        label="Période check sleep cycle (s)", env_fallback="SLEEP_CHECK_INTERVAL",
+        label="Période check sleep cycle (s)",
         default=60, min=10, max=600, restart_required=True,
         hint="Cadence de la boucle dédiée qui appelle sleep_cycle.run_if_due() "
              "(journal/rêves/digestion). Découplée du consolidator.",

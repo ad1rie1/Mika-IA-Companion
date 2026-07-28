@@ -29,6 +29,7 @@ from conscience.types import DecisionContext, InterpretedSignal
 from drives.engine import drive_engine
 from emotion.engine import emotion_engine
 from modules.types import ModuleEvent, ModuleNotification
+from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
@@ -155,8 +156,8 @@ class ConscienceEngine:
                     )
                 else:
                     logger.debug("Last conscience action was %ds ago (cooldown expired)", int(elapsed))
-        except Exception:
-            logger.debug("Could not restore cooldown", exc_info=True)
+        except Exception as exc:
+            degradations.record("conscience: could not restore cooldown", exc)
 
     async def shutdown(self) -> None:
         # Detach before cancelling the loop: an event arriving mid-shutdown
@@ -414,8 +415,8 @@ class ConscienceEngine:
 
         try:
             return await sync_to_async(_query)()
-        except Exception:
-            logger.debug("Introspection failed", exc_info=True)
+        except Exception as exc:
+            degradations.record("conscience: introspection", exc)
             return 0, 0
 
     async def _build_context(self) -> DecisionContext:
@@ -626,7 +627,7 @@ class ConscienceEngine:
             active = await sync_to_async(
                 lambda: list(Rumination.objects.filter(status="active")[:30])
             )()
-        except Exception:
+        except Exception as exc:
             return
 
         if not active:
@@ -672,11 +673,8 @@ class ConscienceEngine:
                 except ValueError:
                     # Unknown emotion label on a stale rumination — skip.
                     pass
-                except Exception:
-                    logger.debug(
-                        "Rumination emotional bleed failed for #%s",
-                        r.pk, exc_info=True,
-                    )
+                except Exception as exc:
+                    degradations.record("conscience: rumination emotional bleed failed for #", exc)
 
             if r.intensity < 0.1:
                 r.status = "faded"
@@ -719,7 +717,7 @@ class ConscienceEngine:
                     )[:5]
                 )
             )()
-        except Exception:
+        except Exception as exc:
             return
 
         for obs in pertinent_stale:
@@ -736,8 +734,8 @@ class ConscienceEngine:
                     "Promoted observation %d to rumination (p=%.2f)",
                     obs.id, obs.pertinence,
                 )
-            except Exception:
-                logger.debug("Rumination creation failed", exc_info=True)
+            except Exception as exc:
+                degradations.record("conscience: rumination creation", exc)
 
     async def _poll_scheduled_actions(self) -> list:
         """Query scheduled actions that are due (scheduled_at <= now)."""
@@ -753,8 +751,8 @@ class ConscienceEngine:
                     ).order_by("scheduled_at")[:10]
                 )
             )()
-        except Exception:
-            logger.debug("Failed to poll scheduled actions", exc_info=True)
+        except Exception as exc:
+            degradations.record("conscience: poll scheduled actions", exc)
             return []
 
     async def _get_upcoming_actions(self, limit: int = 5) -> list[tuple]:
@@ -773,7 +771,7 @@ class ConscienceEngine:
                 )
             )()
             return [(a, int((a.scheduled_at - now).total_seconds() / 60)) for a in actions]
-        except Exception:
+        except Exception as exc:
             return []
 
     def _compute_score(self, ctx: DecisionContext) -> tuple[float, str]:
@@ -848,8 +846,8 @@ class ConscienceEngine:
             )()
             if count:
                 logger.debug("Marked %d stale observations as skipped", count)
-        except Exception:
-            logger.debug("Failed to mark stale observations", exc_info=True)
+        except Exception as exc:
+            degradations.record("conscience: mark stale observations", exc)
 
         # Promote pertinent skipped observations to ruminations.
         await self._promote_stale_to_ruminations()
@@ -876,8 +874,8 @@ class ConscienceEngine:
             # .delete() returns (total, {model: count}) tuple
             if count and count[0]:
                 logger.info("Cleaned up %d old observations", count[0])
-        except Exception:
-            logger.debug("Observation cleanup failed", exc_info=True)
+        except Exception as exc:
+            degradations.record("conscience: observation cleanup", exc)
 
     # ── 4. ACT ────────────────────────────────────────────────────
 
@@ -1233,8 +1231,8 @@ class ConscienceEngine:
                 reason=f"{reason} (score={score:.2f})",
                 memory_actions=memory_actions,
             )
-        except Exception:
-            logger.debug("Failed to log decision", exc_info=True)
+        except Exception as exc:
+            degradations.record("conscience: log decision", exc)
 
         if decision != "skip":
             logger.info(
@@ -1338,8 +1336,8 @@ class ConscienceEngine:
                 "Post-action audit created rumination (%s, %.2f): %s",
                 rumination_emotion, rumination_intensity, excerpt[:40],
             )
-        except Exception:
-            logger.debug("Post-action audit failed", exc_info=True)
+        except Exception as exc:
+            degradations.record("conscience: post-action audit", exc)
 
 
 # Singleton

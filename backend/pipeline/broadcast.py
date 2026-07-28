@@ -13,6 +13,7 @@ from memory.manager import memory_manager
 from modules.manager import module_manager
 from modules.types import ModuleEvent
 from pipeline import voice
+from utils.degradation import degradations
 
 if TYPE_CHECKING:
     from pipeline.processor import SpeechOutput
@@ -155,13 +156,22 @@ async def _deliver_via_module(target, output, source: str = "") -> bool:
     want of a synthesizer.
     """
     from communication.delivery import (
-        deliver_voice, get_channel, voice_sink_of,
+        can_deliver, deliver_voice, get_channel, voice_sink_of,
     )
 
     channel = get_channel(target.channel)
     if not channel or not channel.is_running:
         logger.warning(
             "Cannot deliver to %s: channel '%s' unavailable",
+            target.person_id, target.channel,
+        )
+        return False
+    if not can_deliver(channel):
+        # Resolved to something that cannot initiate contact — a module,
+        # typically. Said plainly rather than surfacing later as an
+        # AttributeError inside a handler that reports "deliver() failed".
+        logger.warning(
+            "Cannot deliver to %s: channel '%s' has no outbound delivery",
             target.person_id, target.channel,
         )
         return False
@@ -205,8 +215,8 @@ async def _voice_decision(
     try:
         from memory.sleep import sleep_cycle
         sleep_phase = sleep_cycle.phase
-    except Exception:
-        logger.debug("sleep phase unavailable for voice decision", exc_info=True)
+    except Exception as exc:
+        degradations.record("voice: sleep phase lookup", exc)
 
     return voice.decide_voice(
         sink,
@@ -240,8 +250,8 @@ async def broadcast_inner_state_update(person_id: str | None = None) -> None:
                 },
             },
         )
-    except Exception:
-        logger.debug("Inner state broadcast failed", exc_info=True)
+    except Exception as exc:
+        degradations.record("broadcast: inner state push", exc)
 
 
 async def _collect_inner_state(person_id: str | None) -> dict:
@@ -291,8 +301,11 @@ async def _merge_section(state: dict, label: str, loader) -> None:
             result = await result
         if result:
             state.update(result)
-    except Exception:
-        logger.debug("%s snapshot failed", label, exc_info=True)
+    except Exception as exc:
+        # Counted per section, not just logged: this handler covers ten
+        # loaders, so a single broken one produced a panel silently missing
+        # one card — indistinguishable from a card with nothing to show.
+        degradations.record(f"inner state: {label}", exc)
 
 
 # ── Snapshot sections ─────────────────────────────────────────────

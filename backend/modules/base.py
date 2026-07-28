@@ -23,22 +23,56 @@ if TYPE_CHECKING:
 class BaseModule(ABC):
     """Base class for all VTuber engine plugin modules.
 
-    Lifecycle (managed by ModuleManager):
-      1. __init__(name)       — constructor, no I/O
-      2. is_available()       — check preconditions (config, deps)
-      3. instantiate()        — start resources (connections, tasks)
-      4. worker_cron()        — periodic work (called by scheduler)
-      5. shutdown()           — release resources
+    **A module is required to have a name. Everything else is opt-in.**
 
-    AI integration:
-      - return_tools()        — expose tools to Claude
-      - get_context()         — inject text into Claude system prompt
-      - self._notify_ai(n)    — wake Claude with structured info
+    That used to be less true than it should be. ``instantiate`` and
+    ``shutdown`` were ``@abstractmethod``, which is exactly backwards for the
+    shape of module this codebase keeps growing: measured across the nine
+    concrete modules, three of them (``memory_tools``, ``identity_tools``,
+    ``project_tools``) implement *only* ``instantiate``, ``shutdown`` and
+    ``return_tools`` — and the first two are empty, written solely to satisfy
+    the ABC. They are tool facades over a subsystem the ASGI lifespan already
+    owns; they have no resources to open. The abstract pair forced ceremony
+    on precisely the modules with nothing to declare.
 
-    Infrastructure:
-      - get_routes()          — declare HTTP endpoints (auto-mounted)
-      - on_event(event)       — react to inter-module events
-      - get_status()          — monitoring / debug
+    Both are now no-ops by default. Override them when there is something to
+    open and close.
+
+    Hook usage across the nine concrete modules, for calibration:
+
+        instantiate / shutdown / return_tools   9/9
+        get_context                             6/9
+        worker_cron / get_capabilities          5/9
+        get_models                              5/9
+        get_status                              4/9
+        is_available / config_schema            3/9
+        get_routes / get_views                  2/9
+        on_event                                1/9
+
+    Grouped by what you are opting into:
+
+    Lifecycle (managed by ModuleManager)
+      - is_available()       — preconditions unmet? return False, be skipped
+      - instantiate()        — open connections, start tasks
+      - shutdown()           — release them
+      - worker_cron()        — periodic work, per ``CRON_INTERVAL``
+
+    AI integration
+      - return_tools()       — expose MCP tools
+      - get_capabilities()   — describe what you can do, in prose
+      - get_context()        — inject text into the system prompt
+      - self._notify_ai(n)   — ask for Mika's attention (see modules/notify)
+
+    Infrastructure
+      - get_routes()         — HTTP endpoints, auto-mounted
+      - get_views()          — dashboard pages
+      - config_schema()      — settings, surfaced in the dashboard
+      - get_models()         — Django models you own (see the caveat there)
+      - on_event(event)      — react to the bus; see EVENT_* below
+      - get_status()         — monitoring
+
+    Outbound delivery is deliberately *not* here — see
+    ``communication.delivery.Deliverable``.
     """
 
     # Override to set a custom cron interval in seconds.
@@ -90,15 +124,18 @@ class BaseModule(ABC):
         Called before instantiate(). Return False to skip gracefully."""
         return True
 
-    @abstractmethod
     async def instantiate(self) -> None:
-        """Initialise the module: open connections, start background tasks."""
-        ...
+        """Open connections, start background tasks. Default: nothing to do.
 
-    @abstractmethod
+        Not abstract: a tool facade over an already-running subsystem has no
+        resources of its own, and forcing it to write ``return None`` here
+        taught nobody anything.
+        """
+        return None
+
     async def shutdown(self) -> None:
-        """Release all resources held by the module."""
-        ...
+        """Release everything ``instantiate`` opened. Default: nothing to do."""
+        return None
 
     # ── Cron ──────────────────────────────────────────────────────
 
@@ -157,19 +194,16 @@ class BaseModule(ABC):
         return ""
 
     # ── Outbound delivery ─────────────────────────────────────────
-
-    async def deliver(self, output, interlocutor) -> bool:
-        """Push an outbound message to a person via this module's external API.
-
-        Implemented by modules that can *initiate* contact (Telegram, Discord:
-        ``send_message(chat_id, ...)``). This is what lets Mika be proactive
-        toward an external transport instead of only replying to it.
-
-        ``output`` is the pipeline ``SpeechOutput``; ``interlocutor`` is the
-        ``Interlocutor`` from the presence registry (holds ``delivery_ref``).
-        Return ``True`` if delivered. Default: not deliverable.
-        """
-        return False
+    #
+    # `deliver()` used to live here, returning False. Measured: no module
+    # implements it, and none ever did — the only implementer in the codebase
+    # is `TelegramChannel`, which is a communication channel, not a module.
+    # So this was a capability declared on the wrong class, whose default
+    # answer was the only answer anyone ever got.
+    #
+    # It is now the `Deliverable` protocol in `communication.delivery`, which
+    # the caller duck-types against. A module that genuinely can initiate
+    # contact just grows the method; nothing needs to inherit anything.
 
     # ── Inter-module Events ───────────────────────────────────────
 

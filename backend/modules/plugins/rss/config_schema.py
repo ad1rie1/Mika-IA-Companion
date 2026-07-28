@@ -15,7 +15,7 @@ CONFIG_SCHEMA = [
     ),
     ConfigItem(
         key="rss.poll_interval", type="int", section="module_rss",
-        label="Intervalle polling (s)", env_fallback="RSS_POLL_INTERVAL",
+        label="Intervalle polling (s)",
         default=600, min=60, max=86400, hot_reload=True,
     ),
 ]

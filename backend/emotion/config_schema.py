@@ -10,17 +10,17 @@ CONFIG_SCHEMA = [
     ),
     ConfigItem(
         key="emotion.decay_rate", type="float", section="emotion",
-        label="Décroissance/seconde", env_fallback="EMOTION_DECAY_RATE",
+        label="Décroissance/seconde",
         default=0.02, min=0.001, max=0.5, hot_reload=True,
     ),
     ConfigItem(
         key="emotion.snapshot_interval", type="int", section="emotion",
-        label="Intervalle snapshot (s)", env_fallback="EMOTION_SNAPSHOT_INTERVAL",
+        label="Intervalle snapshot (s)",
         default=30, min=5, max=600, hot_reload=True,
     ),
     ConfigItem(
         key="emotion.snapshot_retention_days", type="int", section="emotion",
-        label="Rétention snapshots (jours)", env_fallback="EMOTION_SNAPSHOT_RETENTION_DAYS",
+        label="Rétention snapshots (jours)",
         default=2, min=1, max=90,
     ),
 ]

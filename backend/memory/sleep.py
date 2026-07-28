@@ -47,6 +47,7 @@ from django.utils import timezone as tz
 from ai.router import AIRole, UnconfiguredRoleError, ai_router
 from utils.parsing import strip_markdown_json
 from utils.periodic import PeriodicLoop
+from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
@@ -242,8 +243,8 @@ class SleepCycle:
         try:
             from pipeline.broadcast import broadcast_inner_state_update
             await broadcast_inner_state_update()
-        except Exception:
-            logger.debug("Sleep phase broadcast failed", exc_info=True)
+        except Exception as exc:
+            degradations.record("sleep: sleep phase broadcast", exc)
 
     async def run_if_due(self) -> None:
         """Invoked by the consolidator loop after each consolidation tick.
@@ -321,8 +322,8 @@ class SleepCycle:
             from drives.engine import drive_engine
             from drives.state import DriveKind
             drive_engine.satisfy(DriveKind.REST, SLEEP_REST_RECOVERY)
-        except Exception:
-            logger.debug("Sleep REST recovery failed", exc_info=True)
+        except Exception as exc:
+            degradations.record("sleep: sleep rest recovery", exc)
 
     # ── Gates ────────────────────────────────────────────────────
 
@@ -376,7 +377,7 @@ class SleepCycle:
             from drives.state import DriveKind
             drive_engine.update()
             rest_tension = drive_engine.states[DriveKind.REST].tension
-        except Exception:
+        except Exception as exc:
             rest_tension = 0.0
 
         return rest_tension >= REST_DRIVE_THRESHOLD
@@ -798,7 +799,7 @@ class SleepCycle:
                     .filter(status="active", created_at__lte=cutoff)[:30]
                 )
             )()
-        except Exception:
+        except Exception as exc:
             return 0
 
         if not aging:
@@ -832,9 +833,8 @@ class SleepCycle:
                         "Sleep: digested rumination #%s -> reflective souvenir #%s",
                         r.pk, souvenir.pk,
                     )
-                except Exception:
-                    logger.debug("Sleep: reflective souvenir creation failed",
-                                 exc_info=True)
+                except Exception as exc:
+                    degradations.record("sleep: sleep: reflective souvenir creation", exc)
 
             # 4. Close the rumination
             if r.intensity < 0.15:

@@ -39,6 +39,7 @@ from typing import Optional
 
 from django.conf import settings
 from django.utils import timezone
+from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +64,8 @@ def set_usage(input_tokens: int, output_tokens: int) -> None:
     token counts to the router. No-op when not running under the router."""
     try:
         _usage_ctx.set({"in": int(input_tokens), "out": int(output_tokens)})
-    except Exception:
-        pass
+    except Exception as exc:
+        degradations.record("ai.quota.set_usage", exc)
 
 
 def _reset_usage() -> None:
@@ -249,7 +250,8 @@ class QuotaTracker:
             if p is None:
                 return 0
             return int(getattr(p, "monthly_token_budget", 0) or 0)
-        except Exception:
+        except Exception as exc:
+            degradations.record("ai.quota._project_monthly_limit", exc)
             logger.debug("project limit lookup failed for %s", project_id, exc_info=True)
             return 0
 
@@ -367,7 +369,8 @@ class QuotaTracker:
                 cost_usd=cost,
                 today=today,
             )
-        except Exception:
+        except Exception as exc:
+            degradations.record("ai.quota.record", exc)
             logger.debug("Quota DB persistence failed", exc_info=True)
 
         return cost
@@ -420,7 +423,8 @@ class QuotaTracker:
                 return
             try:
                 from ai.models import AIQuotaUsage
-            except Exception:
+            except Exception as exc:
+                degradations.record("ai.quota.hydrate", exc)
                 return
             today = self._today()
             first_of_month = today.replace(day=1)
@@ -433,7 +437,8 @@ class QuotaTracker:
                 rows = list(
                     AIQuotaUsage.objects.filter(date__gte=first_of_month)
                 )
-            except Exception:
+            except Exception as exc:
+                degradations.record("ai.quota.hydrate", exc)
                 logger.debug("quota hydrate: DB read failed", exc_info=True)
                 self._hydrated = True
                 return

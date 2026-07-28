@@ -2,6 +2,7 @@ import logging
 
 from asgiref.sync import sync_to_async
 from django.conf import settings
+from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
@@ -312,7 +313,8 @@ class MemoryManager:
                     .order_by("-created_at")[:limit]
                 )
             )()
-        except Exception:
+        except Exception as exc:
+            degradations.record("memory.manager.get_important_souvenirs", exc)
             logger.debug("get_important_souvenirs failed", exc_info=True)
             return []
 
@@ -380,7 +382,8 @@ class MemoryManager:
             )
         except Connaissance.DoesNotExist:
             return None
-        except Exception:
+        except Exception as exc:
+            degradations.record("memory.manager.get_valid_connaissance", exc)
             logger.debug(
                 "get_valid_connaissance failed for #%d",
                 connaissance_id, exc_info=True,
@@ -395,7 +398,8 @@ class MemoryManager:
             return []
         try:
             return await sync_to_async(self.vector_store.search_connaissances)(text, n=n)
-        except Exception:
+        except Exception as exc:
+            degradations.record("memory.manager.search_related_connaissances", exc)
             logger.debug("search_related_connaissances failed", exc_info=True)
             return []
 
@@ -405,7 +409,8 @@ class MemoryManager:
             return []
         try:
             return await sync_to_async(self.vector_store.search_souvenirs)(text, n=n)
-        except Exception:
+        except Exception as exc:
+            degradations.record("memory.manager.search_related_souvenirs", exc)
             logger.debug("search_related_souvenirs failed", exc_info=True)
             return []
 

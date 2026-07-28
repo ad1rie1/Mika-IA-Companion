@@ -19,6 +19,7 @@ from modules.types import (
     ToolParameter,
     ToolParameterType,
 )
+from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +160,8 @@ class EmailModule(BaseModule):
                 )
                 try:
                     await asyncio.wait_for(entry["imap"].disconnect(), timeout=5)
-                except Exception:
+                except Exception as exc:
+                    degradations.record("modules.plugins.email.module.worker_cron", exc)
                     self.logger.debug("IMAP disconnect after timeout failed",
                                       exc_info=True)
 
@@ -339,7 +341,8 @@ class EmailModule(BaseModule):
             return None
         try:
             return parsedate_to_datetime(date_str)
-        except Exception:
+        except Exception as exc:
+            degradations.record("modules.plugins.email.module._parse_email_date", exc)
             return None
 
     async def _upsert_contact(self, email_address: str, display_raw: str, account, direction: str):
@@ -838,6 +841,7 @@ class EmailModule(BaseModule):
                 ]
             }
         except Exception as e:
+            degradations.record("modules.plugins.email.module._tool_send_email", e)
             return {
                 "content": [{"type": "text", "text": f"Failed to send email: {e}"}],
                 "isError": True,

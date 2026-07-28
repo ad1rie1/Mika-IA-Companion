@@ -11,6 +11,7 @@ from django.utils import timezone
 from memory.extraction.extractor import MemoryExtractor
 from memory.storage.vector_store import VectorStore
 from utils.periodic import PeriodicLoop
+from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
@@ -104,8 +105,13 @@ class MemoryConsolidator:
             )()
             if last_log:
                 self._last_processed_id = last_log.last_message_id
-        except Exception:
-            logger.debug("No previous consolidation log found")
+        except Exception as exc:
+            # The old message here was "No previous consolidation log found",
+            # which this handler never meant: `.first()` returns None on an
+            # empty table without raising, so reaching this line is a real DB
+            # failure — and one that silently restarts consolidation from the
+            # beginning of history.
+            degradations.record("consolidator: checkpoint read", exc)
 
     async def _consolidate(self):
         """Process new messages since last checkpoint.
@@ -491,11 +497,8 @@ class MemoryConsolidator:
         for person_id in sorted(p for p in person_ids if p):
             try:
                 entity = await identity_resolver.entity_for_person(person_id)
-            except Exception:
-                logger.debug(
-                    "Interlocutor resolution failed for %s", person_id,
-                    exc_info=True,
-                )
+            except Exception as exc:
+                degradations.record("consolidator: interlocutor resolution failed for", exc)
                 continue
             if entity is not None and entity.pk not in seen:
                 seen.add(entity.pk)
@@ -614,8 +617,8 @@ class MemoryConsolidator:
             if new_importance < min_importance:
                 try:
                     await sync_to_async(self.vector_store.remove_souvenir)(souvenir.pk)
-                except Exception:
-                    logger.debug("ChromaDB remove failed for souvenir #%d", souvenir.pk)
+                except Exception as exc:
+                    degradations.record("consolidator: chromadb remove failed for souvenir #", exc)
                 await sync_to_async(souvenir.delete)()
                 logger.debug("Pruned souvenir #%d (too old)", souvenir.pk)
             elif abs(new_importance - souvenir.importance) > 0.01:
@@ -634,8 +637,8 @@ class MemoryConsolidator:
                             "occurred_at": ref_date.isoformat(),
                         },
                     )
-                except Exception:
-                    logger.debug("ChromaDB update failed for souvenir #%d", souvenir.pk)
+                except Exception as exc:
+                    degradations.record("consolidator: chromadb update failed for souvenir #", exc)
 
     async def _decay_connaissances(self):
         """Slowly reduce confidence of old connaissances that haven't been reinforced.
@@ -899,8 +902,8 @@ class MemoryConsolidator:
                     conn.confidence = new_confidence
                     await sync_to_async(conn.save)(update_fields=["confidence"])
 
-        except Exception:
-            logger.debug("Contradiction check failed", exc_info=True)
+        except Exception as exc:
+            degradations.record("consolidator: contradiction check", exc)
 
     async def _find_similar_connaissance(self, content: str):
         """Check if a similar connaissance already exists via vector search."""

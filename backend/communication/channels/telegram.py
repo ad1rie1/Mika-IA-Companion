@@ -25,6 +25,7 @@ from telegram.ext import (
 
 from config.personality import personality
 from pipeline.voice import VoiceSink
+from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
@@ -261,8 +262,8 @@ class TelegramChannel:
                 await message.reply_text(
                     "(fichier trop lourd pour moi — 5 Mo max)"
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                degradations.record("communication.channels.telegram._download_media", exc)
             return None
 
         try:

@@ -37,6 +37,7 @@ from identity.trust import (
     ChannelTrust,
     is_internal_person,
 )
+from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
@@ -299,7 +300,8 @@ class IdentityResolver:
             return await sync_to_async(self._resolve_context_sync)(
                 person_id, channel, authenticated, is_public,
             )
-        except Exception:
+        except Exception as exc:
+            degradations.record("identity.resolver.resolve_context", exc)
             logger.debug("resolve_context failed for %s", person_id, exc_info=True)
             decision = trust_policy.evaluate(0.0, ChannelTrust.PUBLIC)
             ctx.may_disclose = decision.may_disclose
@@ -423,7 +425,8 @@ class IdentityResolver:
             await sync_to_async(self._file_claim_sync)(
                 person_id, channel, authenticated, claim, message,
             )
-        except Exception:
+        except Exception as exc:
+            degradations.record("identity.resolver.ingest_message", exc)
             logger.debug("ingest_message failed for %s", person_id, exc_info=True)
         return claim
 
@@ -541,7 +544,8 @@ class IdentityResolver:
             return 0.0, ""
         try:
             facts = await sync_to_async(self._facts_about)(claimed_name)
-        except Exception:
+        except Exception as exc:
+            degradations.record("identity.resolver.check_corroboration", exc)
             logger.debug("corroboration lookup failed", exc_info=True)
             return 0.0, ""
         return corroboration_score(message, facts)

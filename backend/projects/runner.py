@@ -33,6 +33,7 @@ from ai.router import AIRole, UnconfiguredRoleError, ai_router
 from projects import context_builder, schedule
 from utils.parsing import strip_markdown_json
 from utils.periodic import PeriodicLoop
+from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
@@ -138,8 +139,8 @@ class ProjectRunner:
                     Project.objects.filter(status=Project.Status.ACTIVE)
                 )
             )()
-        except Exception:
-            logger.debug("Due query failed", exc_info=True)
+        except Exception as exc:
+            degradations.record("projects: due query", exc)
             return []
 
         due_ids: list[int] = []
@@ -150,8 +151,8 @@ class ProjectRunner:
             try:
                 if schedule.is_due(p):
                     due_ids.append(p.id)
-            except Exception:
-                logger.debug("is_due raised for project %s", p.id, exc_info=True)
+            except Exception as exc:
+                degradations.record("projects: is_due raised for project", exc)
 
         # Priority ordering — build an id→priority map once to avoid an
         # O(N) linear scan inside the sort key (was O(N² log N)).
@@ -352,9 +353,8 @@ class ProjectRunner:
                 outcome=outcome,
                 duration_ms=duration_ms,
             )
-        except Exception:
-            logger.debug("history write failed for project %s", project_id,
-                         exc_info=True)
+        except Exception as exc:
+            degradations.record("projects: history write failed for project", exc)
             return
 
         # Ring-buffer prune — delete the oldest rows beyond the cap.
@@ -362,9 +362,8 @@ class ProjectRunner:
             await sync_to_async(
                 lambda: _prune_history(project_id=project_id, keep=size)
             )()
-        except Exception:
-            logger.debug("history prune failed for project %s", project_id,
-                         exc_info=True)
+        except Exception as exc:
+            degradations.record("projects: history prune failed for project", exc)
 
     # ── Applying LLM output ──────────────────────────────────────
 
@@ -408,8 +407,8 @@ class ProjectRunner:
                 if new_status == "done":
                     task.completed_at = timezone.now()
                 await sync_to_async(task.save)()
-            except Exception:
-                logger.debug("Failed to update task %s", task_id, exc_info=True)
+            except Exception as exc:
+                degradations.record("projects: update task", exc)
 
         # 2. New tasks
         for nt in (data.get("new_tasks") or []):
@@ -423,8 +422,8 @@ class ProjectRunner:
                     description=desc[:2000],
                     order=order,
                 )
-            except Exception:
-                logger.debug("Failed to create task", exc_info=True)
+            except Exception as exc:
+                degradations.record("projects: create task", exc)
 
         # 3. Proposed action (if the LLM output includes one) → pending queue
         # Projects using `requires_approval=True` should route proposals through
@@ -443,8 +442,8 @@ class ProjectRunner:
                     summary=f"Action proposée : {str(proposed.get('proposal') or summary)[:200]}",
                 )
                 await self._broadcast_pending_action()
-            except Exception:
-                logger.debug("Failed to queue pending action", exc_info=True)
+            except Exception as exc:
+                degradations.record("projects: queue pending action", exc)
 
         # 4. Report to user (optional — broadcast as speech)
         report = data.get("report_to_user")
@@ -456,8 +455,8 @@ class ProjectRunner:
                     action=ProjectLog.Action.REPORTED,
                     summary=f"Report: {report.strip()[:200]}",
                 )
-            except Exception:
-                logger.debug("Report broadcast failed", exc_info=True)
+            except Exception as exc:
+                degradations.record("projects: report broadcast", exc)
 
         # 5. The main advance log
         await self._record_log(
@@ -485,8 +484,8 @@ class ProjectRunner:
             if not thought:
                 return
             await self._broadcast_inner_thought(ctx, thought)
-        except Exception:
-            logger.debug("Inner thought failed (non-fatal)", exc_info=True)
+        except Exception as exc:
+            degradations.record("projects: inner thought failed (non-fatal)", exc)
 
     async def _broadcast_inner_thought(self, ctx, thought: str) -> None:
         """Push the murmur out through the normal speech routing.
@@ -525,8 +524,8 @@ class ProjectRunner:
                 summary=summary,
                 task_id=task_id,
             )
-        except Exception:
-            logger.debug("ProjectLog write failed", exc_info=True)
+        except Exception as exc:
+            degradations.record("projects: projectlog write", exc)
 
     async def _log_error(self, project_id: int, summary: str) -> None:
         from projects.models import ProjectLog
@@ -553,8 +552,8 @@ class ProjectRunner:
             await sync_to_async(p.save)(
                 update_fields=["last_run_at", "next_run_at", "runs_since_user_input"]
             )
-        except Exception:
-            logger.debug("bump_next_run failed", exc_info=True)
+        except Exception as exc:
+            degradations.record("projects: bump_next_run", exc)
 
     # ── External signals ─────────────────────────────────────────
 
@@ -569,8 +568,8 @@ class ProjectRunner:
                     runs_since_user_input=0,
                 )
             )()
-        except Exception:
-            logger.debug("notify_user_input failed", exc_info=True)
+        except Exception as exc:
+            degradations.record("projects: notify_user_input", exc)
 
     async def notify_event(self, event_name: str) -> None:
         """Handle "event:<name>" schedule rules by setting next_run_at=now
@@ -590,8 +589,8 @@ class ProjectRunner:
             for p in candidates:
                 p.next_run_at = now
                 await sync_to_async(p.save)(update_fields=["next_run_at"])
-        except Exception:
-            logger.debug("notify_event failed", exc_info=True)
+        except Exception as exc:
+            degradations.record("projects: notify_event", exc)
 
     # ── Broadcast helpers ────────────────────────────────────────
 
@@ -600,8 +599,8 @@ class ProjectRunner:
         try:
             from pipeline.broadcast import broadcast_inner_state_update
             await broadcast_inner_state_update()
-        except Exception:
-            logger.debug("pending action broadcast failed", exc_info=True)
+        except Exception as exc:
+            degradations.record("projects: pending action broadcast", exc)
 
     async def _broadcast_report(
         self, ctx: context_builder.ProjectRunContext, text: str,
@@ -624,8 +623,8 @@ class ProjectRunner:
                     },
                 },
             )
-        except Exception:
-            logger.debug("project_report broadcast failed", exc_info=True)
+        except Exception as exc:
+            degradations.record("projects: project_report broadcast", exc)
 
 
 def _prune_history(project_id: int, keep: int) -> int:

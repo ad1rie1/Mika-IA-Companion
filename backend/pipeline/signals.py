@@ -33,6 +33,7 @@ from __future__ import annotations
 import logging
 
 from modules.types import ModuleEvent
+from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
@@ -78,8 +79,8 @@ async def publish_turn_completed(
                 "project_suppresses_emotion": project_suppresses_emotion,
             },
         ))
-    except Exception:
+    except Exception as exc:
         # emit() already isolates subscriber failures; this guards the
         # emission itself. A reply that reached the user must never be
         # undone by bookkeeping about it.
-        logger.debug("publish_turn_completed failed", exc_info=True)
+        degradations.record("turn: publish completed signal", exc)

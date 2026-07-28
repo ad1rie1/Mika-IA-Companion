@@ -91,3 +91,37 @@ def ai_config(request):
         "providers": providers,
         "knobs": knobs,
     })
+
+
+@require_http_methods(["GET"])
+def health(request):
+    """Swallowed failures + event-bus delivery counters.
+
+    The engine degrades rather than crashes on purpose — a background loop
+    has no supervisor, and not knowing who someone is must never cost them
+    their answer. The cost of that choice is that a partial failure looks
+    exactly like normal operation: an empty prompt block, a missing panel
+    card, a drive that never relieves. Nobody tails DEBUG logs on a personal
+    install.
+
+    So this is the page that answers "is anything quietly broken?". A site
+    with a four-figure count and a `first_seen` at boot is a feature that has
+    never worked in this process, not a transient.
+    """
+    from utils.degradation import degradations
+    from utils.eventbus import event_bus
+
+    sites = degradations.snapshot()
+    bus = event_bus.stats()
+    return JsonResponse({
+        "degradations": {
+            "total_events": degradations.total(),
+            "distinct_sites": len(sites),
+            "sites": sites,
+        },
+        "event_bus": {
+            "emitted": bus["emitted"],
+            "subscriptions": bus["subscriptions"],
+            "failing": [s for s in bus["subscriptions"] if s["failed"]],
+        },
+    })

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from asgiref.sync import sync_to_async
+from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +132,7 @@ class FilesService:
                 content = content[:10_000] + "\n[...tronqué]"
             return {"content": content, "name": record["name"]}
         except Exception as e:
+            degradations.record("files.service.op_read", e)
             return {"error": f"Erreur de lecture : {e}"}
 
     async def op_analyze_image(self, file_id: str, question: str = "") -> dict:
@@ -212,6 +214,7 @@ class FilesService:
             await sync_to_async(self._update_db_path)(record["id"], str(new_path))
             return {"success": True, "new_path": str(new_path), "file_id": record["id"]}
         except Exception as e:
+            degradations.record("files.service.op_move", e)
             return {"error": f"Déplacement échoué : {e}"}
 
     async def op_delete(self, file_id: str) -> dict:
@@ -225,6 +228,7 @@ class FilesService:
             record["deleted"] = True
             return {"success": True, "file_id": record["id"], "name": record["name"]}
         except Exception as e:
+            degradations.record("files.service.op_delete", e)
             return {"error": f"Suppression échouée : {e}"}
 
     # ── DB helpers ────────────────────────────────────────────────

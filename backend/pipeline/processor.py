@@ -28,6 +28,7 @@ from pipeline.perception import Intent, Perception
 from pipeline.response import call_ai_and_parse
 from pipeline.signals import publish_turn_completed
 from pipeline.tracing import set_current_person_id, set_new_request_id
+from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
@@ -136,8 +137,8 @@ async def process_message(
         await identity_resolver.ingest_message(
             person_id, message, channel=source, authenticated=authenticated,
         )
-    except Exception:
-        logger.debug("Passive identification failed for %s", person_id, exc_info=True)
+    except Exception as exc:
+        degradations.record("turn: passive identification", exc)
 
     # Hydrate person mood from DB if evicted from RAM since last interaction
     await emotion_engine.ensure_person_loaded(person_id)

@@ -14,7 +14,7 @@ CONFIG_SCHEMA = [
     ),
     ConfigItem(
         key="modules.cron_tick_interval", type="int", section="modules_runtime",
-        label="Tick scheduler (s)", env_fallback="CRON_TICK_INTERVAL",
+        label="Tick scheduler (s)",
         default=60, min=1, max=3600, restart_required=True,
     ),
 ]

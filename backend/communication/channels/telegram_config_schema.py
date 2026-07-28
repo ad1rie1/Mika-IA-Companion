@@ -10,7 +10,7 @@ CONFIG_SCHEMA = [
     ),
     ConfigItem(
         key="telegram.token", type="secret", section="comm_telegram",
-        label="Bot token", env_fallback="TELEGRAM_TOKEN", sensitive=True,
+        label="Bot token", sensitive=True,
         hint="Jeton fourni par @BotFather.",
     ),
 ]
