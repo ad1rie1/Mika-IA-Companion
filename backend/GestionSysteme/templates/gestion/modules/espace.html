@@ -1,0 +1,139 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block breadcrumbs %}
+<div class="crumbs">
+  <a href="{% url 'gestionsysteme:modules' %}">Modules</a>
+  <span class="sep">/</span><span>{{ module_label }}</span>
+</div>
+{% endblock %}
+
+{% block tabs %}{% include "gestion/modules/_nav.html" %}{% endblock %}
+
+{% block content %}
+{% if error %}
+  <div class="alert alert-danger mb-4"><div><strong>Erreur rapportée par le module</strong><br>{{ error }}</div></div>
+{% endif %}
+
+{% if info.enabled and not info.running %}
+  <div class="alert alert-warn mb-4">
+    Ce module est activé mais ne tourne pas. Sa configuration reste accessible —
+    c'est justement le cas où on en a besoin.
+  </div>
+{% endif %}
+
+<section class="split mb-6">
+  <div class="card">
+    <div class="card-head"><h3>État</h3></div>
+    <div class="card-body">
+      <dl class="kv">
+        <dt>Nom technique</dt><dd class="mono">{{ module_name }}</dd>
+        <dt>Activé</dt><dd>{{ info.enabled|yes_no }}</dd>
+        <dt>En marche</dt><dd>{{ info.running|yes_no }}</dd>
+        <dt title="Le module se déclare capable de fonctionner (configuration présente, dépendances installées)">Disponible</dt>
+        <dd>{{ info.available|yes_no }}</dd>
+        {% if info.running %}<dt>Depuis</dt><dd>{{ uptime|duration }}</dd>{% endif %}
+        {% if cron_interval %}<dt>Cadence</dt><dd class="tabular">{{ cron_interval }} s</dd>{% endif %}
+        {% if installed_tables %}
+          <dt>Tables installées</dt>
+          <dd><span class="chips">{% for t in installed_tables %}<span class="chip mono">{{ t }}</span>{% endfor %}</span></dd>
+        {% elif info.has_models %}
+          <dt>Tables installées</dt><dd><span class="badge badge-warn">aucune</span></dd>
+        {% endif %}
+      </dl>
+
+      {% if details %}
+        <details class="disclosure mt-4">
+          <summary>Détails rapportés par le module</summary>
+          <div class="disclosure-body"><pre>{{ details|pprint }}</pre></div>
+        </details>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="col" style="gap: var(--sp-4);">
+    <div class="card">
+      <div class="card-head"><h3>Capacités</h3></div>
+      <div class="card-body">
+        {% if capabilities %}
+          <ul>{% for c in capabilities %}<li>{{ c }}</li>{% endfor %}</ul>
+        {% else %}
+          <p class="muted text-sm">Aucune capacité déclarée.</p>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Cycle de vie</h3></div>
+      <div class="card-body">
+        <div class="row-wrap mb-4">
+          {% if info.enabled %}
+            <form method="post" action="{% url 'gestionsysteme:module-lifecycle' module_name %}"
+                  data-confirm="Arrêter et désactiver ce module ?">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="desactiver">
+              <button class="btn" type="submit">Désactiver</button>
+            </form>
+          {% else %}
+            <form method="post" action="{% url 'gestionsysteme:module-lifecycle' module_name %}">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="activer">
+              <button class="btn btn-primary" type="submit">Activer et démarrer</button>
+            </form>
+          {% endif %}
+        </div>
+
+        {% if info.has_models %}
+          <details class="disclosure">
+            <summary>Désinstaller (destructif)</summary>
+            <div class="disclosure-body">
+              <p class="field-desc">
+                Arrête le module <strong>et supprime ses tables</strong>. Les
+                données sont perdues. Désactiver suffit si tu veux seulement
+                l'arrêter — les tables sont alors conservées.
+              </p>
+              <form method="post" action="{% url 'gestionsysteme:module-lifecycle' module_name %}"
+                    data-confirm="Supprimer définitivement les tables de ce module ?">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="desinstaller">
+                <div class="field mb-3">
+                  <label class="field-label" for="confirmation">
+                    Saisis <span class="mono">{{ module_name }}</span> pour confirmer
+                  </label>
+                  <input type="text" id="confirmation" name="confirmation" autocomplete="off" required>
+                </div>
+                <button class="btn btn-danger" type="submit">Désinstaller</button>
+              </form>
+            </div>
+          </details>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <h3>Outils exposés</h3>
+    <span class="card-sub">{{ tools|length }} outil(s) MCP</span>
+  </div>
+  <div class="card-body flush">
+    <div class="table-scroll">
+      <table class="table">
+        <thead><tr><th>Outil</th><th style="min-width:26rem;">Description</th><th>Paramètres</th></tr></thead>
+        <tbody>
+          {% for t in tools %}
+            <tr>
+              <td class="mono text-xs">{{ t.name }}</td>
+              <td><div class="cell-clamp">{{ t.description }}</div></td>
+              <td><span class="chips">{% for p in t.params %}<span class="chip mono">{{ p }}</span>{% endfor %}</span></td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="3"><span class="muted">Aucun outil — le module doit tourner pour les exposer.</span></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,98 @@
+{% comment %} Un champ de configuration. Attend `f` (forms.BoundField ou RecordField).
+   `marker` demande l'émission du marqueur `__champ` : il dit au serveur que
+   ce réglage était bien à l'écran, ce qui distingue une case décochée (à
+   enregistrer comme faux) d'un réglage absent du formulaire (à ne pas
+   toucher).
+
+   Le widget découle du type déclaré au registre. Aucune page ne code un
+   champ en dur : ajouter un ConfigItem le fait apparaître ici. {% endcomment %}
+
+{% if f.widget == "checkbox" %}
+  <div class="field field-check {% if f.error %}has-error{% endif %}">
+    {% if marker %}<input type="hidden" name="__champ" value="{{ f.name }}">{% endif %}
+    <input type="checkbox" id="c-{{ f.name }}" name="{{ f.name }}" value="1"
+           {% if f.checked %}checked{% endif %}
+           {% if f.item.readonly %}disabled{% endif %}>
+    <div>
+      <label class="field-label" for="c-{{ f.name }}">
+        {{ f.label }}
+        {% if f.item.hot_reload %}<span class="field-flag hot" title="Pris en compte sans redémarrage">à chaud</span>{% endif %}
+        {% if f.item.restart_required %}<span class="field-flag restart" title="Nécessite un redémarrage">redémarrage</span>{% endif %}
+      </label>
+      {% if f.item.description %}<div class="field-desc">{{ f.item.description }}</div>{% endif %}
+      {% if f.item.hint %}<div class="field-hint">{{ f.item.hint }}</div>{% endif %}
+      {% if f.error %}<div class="field-error">{{ f.error }}</div>{% endif %}
+    </div>
+  </div>
+
+{% else %}
+  <div class="field {% if f.widget == 'textarea' %}field-full{% endif %} {% if f.error %}has-error{% endif %}">
+    {% if marker %}<input type="hidden" name="__champ" value="{{ f.name }}">{% endif %}
+
+    <label class="field-label" for="c-{{ f.name }}">
+      {{ f.label }}
+      {% if f.item.hot_reload %}<span class="field-flag hot" title="Pris en compte sans redémarrage">à chaud</span>{% endif %}
+      {% if f.item.restart_required %}<span class="field-flag restart" title="Nécessite un redémarrage">redémarrage</span>{% endif %}
+      {% if f.item.readonly %}<span class="field-flag" title="Valeur attribuée par le serveur">lecture seule</span>{% endif %}
+    </label>
+
+    {% if f.item.description %}<div class="field-desc">{{ f.item.description }}</div>{% endif %}
+
+    {% if f.widget == "textarea" %}
+      <textarea id="c-{{ f.name }}" name="{{ f.name }}" rows="6"
+                {% if f.item.readonly %}readonly{% endif %}>{{ f.text_value }}</textarea>
+
+    {% elif f.widget == "number" %}
+      <input type="number" id="c-{{ f.name }}" name="{{ f.name }}"
+             value="{{ f.text_value }}" step="{{ f.step }}"
+             {% if f.item.min is not None %}min="{{ f.item.min }}"{% endif %}
+             {% if f.item.max is not None %}max="{{ f.item.max }}"{% endif %}
+             {% if f.item.readonly %}readonly{% endif %}>
+
+    {% elif f.widget == "secret" %}
+      {% comment %} La valeur ne descend jamais jusqu'au navigateur : le champ part vide
+         et un envoi vide vaut « inchangé ». C'est aussi ce qui permet
+         d'afficher une page de configuration sans exposer les clés d'API. {% endcomment %}
+      <input type="password" id="c-{{ f.name }}" name="{{ f.name }}" value=""
+             autocomplete="new-password" spellcheck="false"
+             placeholder="{% if f.has_secret_value %}inchangé{% else %}non défini{% endif %}"
+             {% if f.item.readonly %}readonly{% endif %}>
+      <div class="secret-state">
+        {% if f.has_secret_value %}
+          <span class="dot dot-ok"></span>
+          <span>défini <span class="mono">{{ f.secret_preview }}</span> — laisser vide pour conserver</span>
+        {% else %}
+          <span class="dot"></span><span>aucune valeur enregistrée</span>
+        {% endif %}
+      </div>
+
+    {% elif f.widget == "select" %}
+      <select id="c-{{ f.name }}" name="{{ f.name }}" {% if f.item.readonly %}disabled{% endif %}>
+        <option value="">— non défini —</option>
+        {% for valeur, libelle in f.options %}
+          <option value="{{ valeur }}" {% if valeur in f.selected %}selected{% endif %}>{{ libelle }}</option>
+        {% endfor %}
+      </select>
+
+    {% elif f.widget == "multiselect" %}
+      <select id="c-{{ f.name }}" name="{{ f.name }}" multiple size="5"
+              {% if f.item.readonly %}disabled{% endif %}>
+        {% for valeur, libelle in f.options %}
+          <option value="{{ valeur }}" {% if valeur in f.selected %}selected{% endif %}>{{ libelle }}</option>
+        {% endfor %}
+      </select>
+
+    {% elif f.widget == "list" %}
+      <input type="text" id="c-{{ f.name }}" name="{{ f.name }}" value="{{ f.text_value }}"
+             {% if f.item.readonly %}readonly{% endif %}>
+      <div class="field-hint">Valeurs séparées par des virgules.</div>
+
+    {% else %}
+      <input type="text" id="c-{{ f.name }}" name="{{ f.name }}" value="{{ f.text_value }}"
+             {% if f.item.readonly %}readonly{% endif %}>
+    {% endif %}
+
+    {% if f.item.hint %}<div class="field-hint">{{ f.item.hint }}</div>{% endif %}
+    {% if f.error %}<div class="field-error">{{ f.error }}</div>{% endif %}
+  </div>
+{% endif %}

@@ -1,0 +1,109 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+{% if router_error %}
+  <div class="alert alert-danger mb-4">Routeur IA indisponible : {{ router_error }}</div>
+{% endif %}
+
+{% if unconfigured %}
+  <div class="alert alert-warn mb-4">
+    <div>
+      <strong>{{ unconfigured|length }} rôle(s) sans modèle associé.</strong>
+      Une installation neuve démarre volontairement non configurée : déclare un
+      modèle sous <em>IA · Modèles</em>, puis associe les rôles sous
+      <em>IA · Rôles</em>. Tant que <span class="mono">conversation</span> n'est
+      pas associé, chaque tour répond « Mon IA n'a pas de modèle associé ».
+      <a href="{% url 'gestionsysteme:config' %}">Aller à la configuration →</a>
+    </div>
+  </div>
+{% endif %}
+
+<section class="card mb-6">
+  <div class="card-head">
+    <h3>Rôles</h3>
+    <span class="card-sub">ce que chaque rôle appelle réellement</span>
+  </div>
+  <div class="card-body flush">
+    <div class="table-scroll">
+      <table class="table">
+        <thead><tr><th>Rôle</th><th class="fit">Fournisseur</th><th>Modèle</th><th>État</th></tr></thead>
+        <tbody>
+          {% for r in roles %}
+            <tr>
+              <td class="mono">{{ r.role }}</td>
+              <td class="fit">{% if r.provider %}<span class="badge">{{ r.provider }}</span>{% else %}—{% endif %}</td>
+              <td class="mono text-xs">{{ r.model|default:"—" }}</td>
+              <td>
+                {% if r.error %}
+                  <span class="badge badge-danger" title="{{ r.error }}">non associé</span>
+                {% elif r.model %}
+                  <span class="badge badge-ok">associé</span>
+                {% else %}
+                  <span class="badge badge-warn">non associé</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="grid c2 mb-6">
+  <div class="card">
+    <div class="card-head">
+      <h3>Fournisseurs</h3>
+      <span class="card-sub">présence des identifiants, jamais leur valeur</span>
+    </div>
+    <div class="card-body">
+      {% for p in providers %}
+        <div class="mb-4">
+          <div class="field-label">{{ p.name }}</div>
+          <dl class="kv">
+            {% for label, value in p.details %}
+              <dt>{{ label }}</dt>
+              <dd>
+                {% if value is True %}<span class="badge badge-ok">configuré</span>
+                {% elif value is False %}<span class="badge">absent</span>
+                {% else %}<span class="mono text-xs">{{ value }}</span>{% endif %}
+              </dd>
+            {% endfor %}
+          </dl>
+        </div>
+      {% endfor %}
+      <p class="field-hint">
+        Une clé changée dans la configuration évince l'instance de fournisseur
+        en cache : la rotation prend effet immédiatement, sans redémarrage.
+      </p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <h3>Modèles déclarés</h3>
+      <span class="card-sub">un rôle ne peut viser qu'un nom déclaré ici</span>
+    </div>
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead><tr><th>Nom interne</th><th class="fit">Fournisseur</th><th>Identifiant</th><th class="fit">Actif</th></tr></thead>
+          <tbody>
+            {% for row in models %}
+              <tr>
+                <td class="mono">{{ row.payload.internal_name|default:"—" }}</td>
+                <td class="fit">{{ row.payload.provider|default:"—" }}</td>
+                <td class="mono text-xs">{{ row.payload.model_id|default:"—" }}</td>
+                <td class="fit">{{ row.enabled|yes_no }}</td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="4"><span class="muted">Aucun modèle déclaré.</span></td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

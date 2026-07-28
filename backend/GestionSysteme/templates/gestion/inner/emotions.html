@@ -1,0 +1,128 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+<section class="split mb-6">
+  <div class="card">
+    <div class="card-head">
+      <h3>Humeur globale</h3>
+      <span class="card-sub">position dans l'espace PAD</span>
+    </div>
+    <div class="card-body">
+      <div class="row-wrap mb-3">
+        <span class="emo text-lg" style="{{ global_mood.label|emo_style }}">{{ global_mood.label }}</span>
+        <span class="tabular muted">{{ global_mood.intensity|pct }}</span>
+      </div>
+      <div class="meter {{ global_mood.intensity|tone_ratio }} mb-4">
+        <span style="width: {{ global_mood.intensity|bar_width }}%;"></span>
+      </div>
+
+      {% if global_mood.blend|length > 1 %}
+        <div class="field-desc">Mélange</div>
+        <div class="chips mb-4">
+          {% for b in global_mood.blend %}
+            <span class="emo" style="{{ b.emotion|emo_style }}">
+              {{ b.emotion }} <span class="emo-weight">{{ b.weight|pct }}</span>
+            </span>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      <dl class="kv">
+        <dt title="Plaisir / Éveil / Dominance">Position PAD</dt>
+        <dd class="mono">{{ global_mood.pad|join:" · " }}</dd>
+        <dt title="Norme du vecteur vitesse — élevée = humeur en mouvement">Dynamique</dt>
+        <dd class="tabular">{{ global_mood.velocity|num }}</dd>
+      </dl>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h3>Tempérament</h3></div>
+    <div class="card-body">
+      <p class="field-desc">
+        Constantes du personnage, lues depuis <span class="mono">personality.yaml</span>.
+        Elles définissent le point de repos de l'oscillateur et sa façon d'y revenir.
+      </p>
+      <dl class="kv">
+        <dt>Humeur par défaut</dt>
+        <dd><span class="emo" style="{{ temperament.default_mood|emo_style }}">{{ temperament.default_mood }}</span></dd>
+        <dt title="Amplitude de réaction à un stimulus">Volatilité</dt><dd class="tabular">{{ temperament.volatility|num }}</dd>
+        <dt>Intensité de base</dt><dd class="tabular">{{ temperament.intensity_base|num }}</dd>
+        <dt title="Vitesse de retour au repos">Récupération</dt><dd class="tabular">{{ temperament.recovery_speed|num }}</dd>
+        <dt title="Part de l'affect envers une personne qui déteint sur l'humeur globale">Diffusion globale</dt>
+        <dd class="tabular">{{ temperament.global_bleed|num }}</dd>
+      </dl>
+    </div>
+  </div>
+</section>
+
+{% if analytics %}
+  <section class="card mb-6">
+    <div class="card-head"><h3>Analyses</h3></div>
+    <div class="card-body">
+      <dl class="kv">
+        {% for key, value in analytics.items %}
+          <dt>{{ key|humanize_key }}</dt><dd>{{ value }}</dd>
+        {% endfor %}
+      </dl>
+    </div>
+  </section>
+{% endif %}
+
+<section class="card">
+  <div class="card-head">
+    <h3>Affect par personne</h3>
+    <span class="card-sub">état vivant, en mémoire — remis à zéro au redémarrage</span>
+  </div>
+
+  {% if people_page.rows %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Personne</th>
+              <th>Émotion</th>
+              {% comment %} Pas `num` : le contenu est une jauge, qui se remplit
+                 depuis la gauche. Un en-tête aligné à droite au-dessus
+                 flotterait à l'autre bout de la colonne. {% endcomment %}
+              <th style="min-width: 9rem;">Intensité</th>
+              <th class="num" title="Norme du vecteur vitesse">Dynamique</th>
+              <th title="Plaisir / Éveil / Dominance">PAD</th>
+              <th class="num">Historique</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in people_page.rows %}
+              <tr>
+                <td class="mono">{{ p.person_id }}</td>
+                <td><span class="emo" style="{{ p.emotion|emo_style }}">{{ p.emotion }}</span></td>
+                <td>
+                  <div class="row">
+                    <span class="meter {{ p.intensity|tone_ratio }}" style="flex:1; min-width:4rem;">
+                      <span style="width: {{ p.intensity|bar_width }}%;"></span>
+                    </span>
+                    <span class="tabular text-xs">{{ p.intensity|pct }}</span>
+                  </div>
+                </td>
+                <td class="num">{{ p.velocity|num }}</td>
+                <td class="mono text-xs">{{ p.pad|join:" · " }}</td>
+                <td class="num">{{ p.history_size }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" with page=people_page %}</div>
+  {% else %}
+    <div class="card-body">
+      <div class="empty">
+        <div class="empty-title">Aucune personne suivie</div>
+        Les humeurs par personne sont reconstruites au fil des conversations.
+      </div>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

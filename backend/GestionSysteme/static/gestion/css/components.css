@@ -1,0 +1,620 @@
+/* ============================================================================
+   GestionSystème — composants
+   ----------------------------------------------------------------------------
+   Un composant = une classe racine + ses descendants. Aucune règle ici ne
+   connaît une page ni un module : les styles propres à un module vivent dans
+   `modules/plugins/<nom>/static/<nom>/`. L'ancienne feuille mélangeait le
+   noyau et le module email (`.mail-split`, `.mail-row`…), ce qui obligeait à
+   toucher au CSS du cœur pour changer une boîte de réception.
+   ========================================================================== */
+
+/* ── Carte ──────────────────────────────────────────────────────────── */
+
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+.card-head h2, .card-head h3 {
+  font-size: var(--fs-base);
+  font-weight: var(--fw-semi);
+  margin: 0;
+}
+.card-head .card-sub {
+  font-size: var(--fs-xs);
+  color: var(--text-subtle);
+  margin-left: var(--sp-1);
+}
+.card-head-actions { margin-left: auto; display: flex; gap: var(--sp-2); align-items: center; }
+
+.card-body { padding: var(--sp-4); }
+.card-body.tight { padding: var(--sp-3); }
+/* Une table remplit sa carte : les bordures de la carte servent de cadre. */
+.card-body.flush { padding: 0; }
+
+.card-foot {
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+/* ── Tuile de statistique ───────────────────────────────────────────── */
+
+.stat {
+  padding: var(--sp-4);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  min-width: 0;
+}
+.stat-label {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  margin-bottom: var(--sp-1);
+}
+.stat-value {
+  font-size: var(--fs-2xl);
+  font-weight: var(--fw-semi);
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stat-sub { font-size: var(--fs-xs); color: var(--text-subtle); margin-top: var(--sp-1); }
+a.stat { display: block; color: inherit; text-decoration: none; transition: border-color var(--dur-fast) var(--ease); }
+a.stat:hover { border-color: var(--accent-border); text-decoration: none; }
+
+/* ── Tableau ─────────────────────────────────────────────────────────
+   `.table-scroll` isole le débordement horizontal dans le composant : la
+   page elle-même ne défile jamais latéralement. */
+
+.table-scroll { width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
+
+table.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+table.table th,
+table.table td {
+  padding: var(--sp-2) var(--sp-3);
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+
+/* En-tête NON collant, délibérément.
+   ----------------------------------------------------------------------------
+   `.table-scroll` porte `overflow-x: auto`, et CSS interdit à `overflow-y` de
+   rester `visible` dans ce cas : il devient `auto`. Le conteneur est donc un
+   contexte de défilement, et `position: sticky` sur le `<thead>` s'y rattache
+   au lieu de la fenêtre — un `top` calé sur la hauteur de la barre supérieure
+   décalait alors l'en-tête de 52 px *vers le bas à l'intérieur du tableau*,
+   par-dessus les premières lignes.
+
+   Les alternatives coûtent plus cher qu'elles ne rapportent : borner la
+   hauteur du conteneur réintroduit un défilement imbriqué (ce que cette
+   interface évite justement), et détacher l'en-tête du tableau casse
+   l'alignement des colonnes. Les listes sont paginées à 25 lignes, donc
+   l'en-tête reste à l'écran presque tout le temps. */
+table.table thead th {
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-weight: var(--fw-medium);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border-strong);
+}
+
+table.table tbody tr:last-child td { border-bottom: none; }
+table.table tbody tr:hover td { background: var(--surface-2); }
+
+table.table td.num, table.table th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+table.table td.fit, table.table th.fit { width: 1%; white-space: nowrap; }
+table.table td.wrap { min-width: 22ch; }
+table.table td small { display: block; color: var(--text-subtle); font-size: var(--fs-xs); margin-top: 2px; }
+
+/* Cellule de texte long : bornée en hauteur, sinon une seule ligne de
+   souvenir de 900 caractères impose sa hauteur à toute la rangée. */
+.cell-clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  max-width: 68ch;
+}
+
+table.table tr.is-muted td { color: var(--text-subtle); }
+
+/* En-tête triable */
+th.sortable { padding: 0; }
+th.sortable > a {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
+  color: inherit;
+  text-decoration: none;
+}
+th.sortable > a:hover { color: var(--text); background: var(--surface-3); text-decoration: none; }
+th.sortable .sort-ind { font-size: 0.7em; opacity: 0.55; }
+th.sortable[aria-sort] > a { color: var(--accent-text); }
+th.sortable[aria-sort] .sort-ind { opacity: 1; }
+
+/* ── Pagination ─────────────────────────────────────────────────────── */
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+.pager-info { font-variant-numeric: tabular-nums; }
+.pager-spacer { margin-left: auto; }
+.pager-pages { display: flex; align-items: center; gap: var(--sp-1); }
+.pager-page {
+  min-width: 2rem;
+  padding: var(--sp-1) var(--sp-2);
+  text-align: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  text-decoration: none;
+}
+.pager-page:hover { background: var(--surface-2); color: var(--text); text-decoration: none; }
+.pager-page[aria-current="page"] {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent-text);
+  font-weight: var(--fw-medium);
+}
+.pager-gap { padding: 0 var(--sp-1); color: var(--text-subtle); }
+
+/* ── Onglets ─────────────────────────────────────────────────────────
+   Ce sont de vrais liens : l'onglet actif est dans l'URL, donc partageable,
+   marque-page-able, et le retour arrière fonctionne. L'ancienne interface
+   les gardait dans localStorage, où rien de tout ça n'est vrai. */
+
+.tabs {
+  display: flex;
+  gap: var(--sp-1);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--sp-5);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
+
+.tab {
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  color: var(--text-muted);
+  font-size: var(--fs-base);
+  white-space: nowrap;
+  text-decoration: none;
+  transition: color var(--dur-fast) var(--ease),
+              border-color var(--dur-fast) var(--ease);
+}
+.tab:hover { color: var(--text); text-decoration: none; }
+.tab[aria-current="page"] {
+  color: var(--accent-text);
+  border-bottom-color: var(--accent);
+  font-weight: var(--fw-medium);
+}
+.tab .tab-count {
+  margin-left: var(--sp-1);
+  font-size: var(--fs-xs);
+  color: var(--text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Boutons ────────────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background var(--dur-fast) var(--ease),
+              border-color var(--dur-fast) var(--ease),
+              color var(--dur-fast) var(--ease);
+}
+.btn:hover { background: var(--surface-2); text-decoration: none; }
+.btn:active { background: var(--surface-3); }
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn-primary:active { background: var(--accent-hover); }
+
+.btn-danger { color: var(--danger); border-color: var(--danger-border); }
+.btn-danger:hover { background: var(--danger-soft); }
+
+.btn-ghost { border-color: transparent; background: transparent; color: var(--text-muted); }
+.btn-ghost:hover { background: var(--surface-2); color: var(--text); }
+
+.btn-sm { padding: var(--sp-1) var(--sp-2); font-size: var(--fs-xs); }
+.btn-block { width: 100%; }
+
+.btn-group { display: inline-flex; }
+.btn-group .btn { border-radius: 0; margin-left: -1px; }
+.btn-group .btn:first-child { border-radius: var(--radius) 0 0 var(--radius); margin-left: 0; }
+.btn-group .btn:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
+
+/* ── Badges et pastilles ────────────────────────────────────────────── */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 1px var(--sp-2);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--neutral-border);
+  background: var(--neutral-soft);
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.badge-ok     { background: var(--success-soft); border-color: var(--success-border); color: var(--success); }
+.badge-warn   { background: var(--warn-soft);    border-color: var(--warn-border);    color: var(--warn); }
+.badge-danger { background: var(--danger-soft);  border-color: var(--danger-border);  color: var(--danger); }
+.badge-info   { background: var(--accent-soft);  border-color: var(--accent-border);  color: var(--accent-text); }
+
+/* Point d'état — la couleur seule ne suffit jamais : il est toujours
+   accompagné d'un libellé. */
+.dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--text-subtle);
+  display: inline-block;
+}
+.dot-ok     { background: var(--success); }
+.dot-warn   { background: var(--warn); }
+.dot-danger { background: var(--danger); }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 1px var(--sp-2);
+  border-radius: var(--radius);
+  background: var(--neutral-soft);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  text-decoration: none;
+}
+a.chip:hover { background: var(--surface-3); color: var(--text); text-decoration: none; }
+.chips { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+
+/* Émotion — pastille colorée + libellé. La couleur vient d'une variable
+   posée en style inline par le gabarit (`--emo`), seule exception admise :
+   elle est choisie dans une table fermée de 29 valeurs côté serveur. */
+.emo {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-xs);
+  color: var(--text);
+  white-space: nowrap;
+}
+.emo::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--emo, var(--text-subtle));
+  flex: 0 0 auto;
+}
+.emo-weight { color: var(--text-subtle); font-variant-numeric: tabular-nums; }
+
+/* ── Jauge ──────────────────────────────────────────────────────────── */
+
+.meter {
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--track);
+  overflow: hidden;
+}
+.meter > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width var(--dur) var(--ease);
+}
+.meter.ok > span     { background: var(--success); }
+.meter.warn > span   { background: var(--warn); }
+.meter.danger > span { background: var(--danger); }
+.meter-row { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-2) var(--sp-3); align-items: center; }
+.meter-label { font-size: var(--fs-sm); color: var(--text-muted); }
+.meter-val { font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+
+/* ── Liste clé/valeur ───────────────────────────────────────────────── */
+
+.kv {
+  display: grid;
+  grid-template-columns: minmax(9rem, max-content) minmax(0, 1fr);
+  gap: var(--sp-2) var(--sp-4);
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+.kv dt { color: var(--text-muted); }
+.kv dd { margin: 0; word-break: break-word; }
+.kv dd.mono { font-size: var(--fs-xs); }
+@media (max-width: 560px) {
+  .kv { grid-template-columns: minmax(0, 1fr); gap: var(--sp-1) 0; }
+  .kv dd { margin-bottom: var(--sp-2); }
+}
+
+/* Ligne d'indicateur simple (libellé à gauche, valeur à droite) */
+.metric {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+}
+.metric:last-child { border-bottom: none; }
+.metric > span:first-child { color: var(--text-muted); }
+.metric > span:last-child { font-variant-numeric: tabular-nums; text-align: right; }
+
+/* ── Barre de filtres ───────────────────────────────────────────────── */
+
+.filters {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+.filters .field { margin: 0; }
+.filters .field-label { font-size: var(--fs-xs); margin-bottom: var(--sp-1); }
+.filters input, .filters select { min-width: 10rem; width: auto; }
+.filters input[type="search"] { min-width: 15rem; }
+.filters .filters-actions { display: flex; gap: var(--sp-2); margin-left: auto; }
+@media (max-width: 560px) {
+  .filters input, .filters select, .filters input[type="search"] { min-width: 0; width: 100%; }
+  .filters .field { width: 100%; }
+  .filters .filters-actions { margin-left: 0; width: 100%; }
+}
+
+/* ── Formulaires ────────────────────────────────────────────────────── */
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--sp-4);
+}
+.form-grid .field-full { grid-column: 1 / -1; }
+
+.field { display: flex; flex-direction: column; min-width: 0; }
+.field-label {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  color: var(--text);
+  margin-bottom: var(--sp-1);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.field-desc { font-size: var(--fs-xs); color: var(--text-muted); margin-bottom: var(--sp-2); }
+.field-hint { font-size: var(--fs-xs); color: var(--text-subtle); margin-top: var(--sp-1); }
+.field-error { font-size: var(--fs-xs); color: var(--danger); margin-top: var(--sp-1); }
+.field.has-error input,
+.field.has-error textarea,
+.field.has-error select { border-color: var(--danger); }
+
+/* Case à cocher : la boîte précède le libellé, tous deux cliquables. */
+.field-check { flex-direction: row; align-items: flex-start; gap: var(--sp-2); }
+.field-check > input { margin-top: 0.15rem; }
+.field-check .field-label { margin-bottom: 0; font-weight: var(--fw-normal); }
+
+.field-flag {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-normal);
+  padding: 0 var(--sp-1);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--neutral-soft);
+  color: var(--text-subtle);
+}
+.field-flag.hot { border-color: var(--success-border); background: var(--success-soft); color: var(--success); }
+.field-flag.restart { border-color: var(--warn-border); background: var(--warn-soft); color: var(--warn); }
+
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+/* Champ secret : l'état « déjà renseigné » doit se lire sans révéler la
+   valeur. Le serveur n'envoie jamais le secret déchiffré au navigateur. */
+.secret-state {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  margin-top: var(--sp-1);
+}
+
+/* ── Alertes / messages ─────────────────────────────────────────────── */
+
+.alert {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  font-size: var(--fs-sm);
+}
+.alert-ok     { border-left-color: var(--success); background: var(--success-soft); border-color: var(--success-border); color: var(--success); }
+.alert-warn   { border-left-color: var(--warn);    background: var(--warn-soft);    border-color: var(--warn-border);    color: var(--warn); }
+.alert-danger { border-left-color: var(--danger);  background: var(--danger-soft);  border-color: var(--danger-border);  color: var(--danger); }
+.alert-info   { border-left-color: var(--accent);  background: var(--accent-soft);  border-color: var(--accent-border);  color: var(--accent-text); }
+.alert strong { font-weight: var(--fw-semi); }
+.alert-stack { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-4); }
+
+/* ── État vide ──────────────────────────────────────────────────────── */
+
+.empty {
+  padding: var(--sp-10) var(--sp-4);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+.empty-title { font-weight: var(--fw-medium); color: var(--text); margin-bottom: var(--sp-1); }
+
+/* ── Texte narratif ─────────────────────────────────────────────────── */
+
+.narrative {
+  font-size: var(--fs-md);
+  line-height: var(--lh-loose);
+  max-width: 76ch;
+  white-space: pre-wrap;
+}
+.quote {
+  padding: var(--sp-3) var(--sp-4);
+  border-left: 3px solid var(--accent-border);
+  background: var(--surface-inset);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  font-size: var(--fs-md);
+  line-height: var(--lh-loose);
+  white-space: pre-wrap;
+}
+
+/* ── Panneau dépliable (<details>) ──────────────────────────────────── */
+
+.disclosure {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  overflow: hidden;
+}
+.disclosure > summary {
+  padding: var(--sp-2) var(--sp-3);
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  color: var(--text-muted);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.disclosure > summary::-webkit-details-marker { display: none; }
+.disclosure > summary::before {
+  content: "▸";
+  font-size: 0.75em;
+  transition: transform var(--dur-fast) var(--ease);
+}
+.disclosure[open] > summary::before { transform: rotate(90deg); }
+.disclosure > summary:hover { background: var(--surface-2); color: var(--text); }
+.disclosure-body { padding: var(--sp-3); border-top: 1px solid var(--border); }
+
+/* ── Fiche détail (rangée dépliée / page enfant) ────────────────────── */
+
+.detail-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  padding-bottom: var(--sp-4);
+  margin-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+
+/* ── Fil d'Ariane ───────────────────────────────────────────────────── */
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--text-subtle);
+  margin-bottom: var(--sp-2);
+  flex-wrap: wrap;
+}
+.crumbs a { color: var(--text-muted); }
+.crumbs .sep { opacity: 0.6; }
+
+/* ── Bascule de thème ───────────────────────────────────────────────── */
+
+.theme-switch {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface-1);
+}
+.theme-switch button {
+  padding: var(--sp-1) var(--sp-2);
+  border: none;
+  background: transparent;
+  color: var(--text-subtle);
+  cursor: pointer;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+}
+.theme-switch button:hover { background: var(--surface-2); color: var(--text); }
+.theme-switch button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-text); }

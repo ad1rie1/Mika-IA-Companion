@@ -1,0 +1,70 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+<section class="grid c2 mb-6">
+  <div class="stat">
+    <div class="stat-label">Énergie disponible</div>
+    <div class="stat-value">{{ energy|pct }}</div>
+    <div class="stat-sub">70 % circadien + 30 % pulsion de repos</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Contribution au score de conscience</div>
+    <div class="stat-value">{{ contribution|num }}</div>
+    <div class="stat-sub">{{ contribution_label|default:"—" }}</div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <h3>Pulsions</h3>
+    <span class="card-sub">la tension monte avec le temps, retombe quand l'action a lieu</span>
+  </div>
+  <div class="card-body flush">
+    <div class="table-scroll">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Pulsion</th>
+            <th style="min-width: 12rem;">Tension</th>
+            <th class="num" title="Vitesse de montée par seconde">Croissance</th>
+            <th class="num" title="Part de tension retirée quand la pulsion est assouvie">Retombée</th>
+            <th class="num" title="Poids dans le score de décision de la conscience">Poids</th>
+            <th class="fit">Assouvie</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for d in drives %}
+            <tr>
+              <td>
+                {{ d.label }}
+                {% if d.dominant %}<span class="badge badge-info">dominante</span>{% endif %}
+                <small class="mono">{{ d.kind }}</small>
+              </td>
+              <td>
+                <div class="row">
+                  <span class="meter {{ d.tone }}" style="flex: 1; min-width: 6rem;">
+                    <span style="width: {{ d.tension|bar_width }}%;"></span>
+                  </span>
+                  <span class="tabular text-xs">{{ d.tension|pct }}</span>
+                </div>
+              </td>
+              <td class="num">{{ d.growth_rate|num:4 }}</td>
+              <td class="num">{{ d.decay_on_satisfy|num }}</td>
+              <td class="num">{{ d.weight|num }}</td>
+              <td class="fit muted">il y a {{ d.satisfied_ago|duration }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card-foot">
+    <p class="field-hint" style="margin:0;">
+      « Repos » contribue <strong>négativement</strong> : plus elle est fatiguée,
+      moins elle prend la parole d'elle-même. L'état est en mémoire vive et ne
+      survit pas à un redémarrage — c'est délibéré.
+    </p>
+  </div>
+</section>
+{% endblock %}

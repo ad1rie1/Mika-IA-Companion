@@ -1,0 +1,56 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+<div class="alert alert-info mb-4">
+  Un engagement se ferme de trois façons : le consolidateur le marque tenu ou
+  abandonné à partir de la conversation, Mika le résout explicitement via son
+  outil, ou il expire (échéance passée, ou plus de 30 jours en attente). Sans
+  ces trois chemins, une promesse était ré-affirmée dans chaque prompt pour
+  toujours.
+</div>
+
+<section class="card">
+  {% include "gestion/partials/filters.html" %}
+
+  {% if page.rows %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th style="min-width: 28rem;">Promesse</th>
+              <th class="fit">Envers</th>
+              <th class="fit">État</th>
+              <th class="fit">Échéance</th>
+              <th class="fit">Prise</th>
+              <th class="fit">Résolue</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in page.rows %}
+              <tr {% if c.status != "pending" %}class="is-muted"{% endif %}>
+                <td><div class="cell-clamp">{{ c.description }}</div></td>
+                <td class="fit">
+                  {% if c.person_id %}
+                    <a href="{% url 'gestionsysteme:person-detail' c.person_id %}">{{ c.person.name }}</a>
+                  {% else %}—{% endif %}
+                </td>
+                <td class="fit">
+                  <span class="badge {% if c.status == 'pending' %}badge-warn{% elif c.status == 'honored' %}badge-ok{% endif %}">{{ c.status }}</span>
+                </td>
+                <td class="fit">{% if c.due_at %}{{ c.due_at|dt }}{% else %}—{% endif %}</td>
+                <td class="fit muted" title="{{ c.created_at|dt_full }}">{{ c.created_at|ago }}</td>
+                <td class="fit muted">{% if c.resolved_at %}{{ c.resolved_at|ago }}{% else %}—{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
+  {% else %}
+    <div class="card-body"><div class="empty">Aucun engagement.</div></div>
+  {% endif %}
+</section>
+{% endblock %}

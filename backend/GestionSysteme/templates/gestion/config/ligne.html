@@ -1,0 +1,40 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block breadcrumbs %}
+<div class="crumbs">
+  <a href="{% url 'gestionsysteme:config' %}">Configuration</a>
+  <span class="sep">/</span>
+  <a href="{{ back_url }}">{{ section.label|default:"Section" }}</a>
+  <span class="sep">/</span><span>{{ form.title }}</span>
+</div>
+{% endblock %}
+
+{% block tabs %}{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 62rem;">
+  {% if list_item.record.description %}
+    <div class="card-body" style="padding-bottom:0;">
+      <div class="alert alert-info">{{ list_item.record.description }}</div>
+    </div>
+  {% endif %}
+
+  <form method="post" action="{{ post_url }}">
+    {% csrf_token %}
+    <div class="card-body">
+      <div class="form-grid">
+        {% for f in form.fields %}
+          {% include "gestion/partials/field.html" with f=f marker=0 %}
+        {% endfor %}
+      </div>
+    </div>
+    <div class="card-foot">
+      <button class="btn btn-primary" type="submit">
+        {% if form.is_new %}Créer{% else %}Enregistrer{% endif %}
+      </button>
+      <a class="btn" href="{{ back_url }}">Annuler</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

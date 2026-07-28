@@ -1,0 +1,41 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+<section class="card">
+  {% include "gestion/partials/filters.html" %}
+
+  {% if page.rows %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Thème</th>
+              <th class="num">Souvenirs</th>
+              <th class="num">Connaissances</th>
+              <th class="fit">Explorer</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for t in page.rows %}
+              <tr>
+                <td>{{ t.name }}</td>
+                <td class="num">{{ t.n_souvenirs }}</td>
+                <td class="num">{{ t.n_connaissances }}</td>
+                <td class="fit">
+                  <a class="btn btn-sm" href="{% url 'gestionsysteme:memory-tab' 'souvenirs' %}?theme={{ t.name|urlencode }}">Souvenirs</a>
+                  <a class="btn btn-sm" href="{% url 'gestionsysteme:memory-tab' 'connaissances' %}?theme={{ t.name|urlencode }}">Faits</a>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
+  {% else %}
+    <div class="card-body"><div class="empty">Aucun thème.</div></div>
+  {% endif %}
+</section>
+{% endblock %}

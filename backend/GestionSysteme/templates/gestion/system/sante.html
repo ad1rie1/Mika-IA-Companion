@@ -1,0 +1,136 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+<section class="grid c4 mb-6">
+  <div class="stat">
+    <div class="stat-label">Sites en dégradation</div>
+    <div class="stat-value">{{ distinct_sites }}</div>
+    <div class="stat-sub">endroits distincts qui ont avalé une erreur</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Occurrences</div>
+    <div class="stat-value">{{ total_events }}</div>
+    <div class="stat-sub">depuis le démarrage du processus</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Événements émis</div>
+    <div class="stat-value">{{ bus_emitted }}</div>
+    <div class="stat-sub">sur le bus interne</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Abonnés en échec</div>
+    <div class="stat-value">{{ failing|length }}</div>
+    <div class="stat-sub">un abonné cassé n'arrête jamais la diffusion</div>
+  </div>
+</section>
+
+<div class="alert alert-info mb-4">
+  Ce compteur ne change <strong>pas</strong> le fait que les pannes sont
+  avalées — il les rend visibles. Un site dont le premier passage remonte au
+  démarrage et dont le compteur est à quatre chiffres décrit une fonction qui
+  n'a jamais marché dans ce processus, pas un incident passager. L'état est en
+  mémoire vive et repart de zéro à chaque redémarrage.
+</div>
+
+{% if failing %}
+  <section class="card mb-6">
+    <div class="card-head">
+      <h3>Abonnés du bus en échec</h3>
+      <span class="card-sub">ils n'empêchent rien, mais ils ne font plus leur travail</span>
+    </div>
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead><tr><th>Abonné</th><th>Motif</th><th class="num">Livrés</th><th class="num">Échecs</th><th>Dernière erreur</th></tr></thead>
+          <tbody>
+            {% for s in failing %}
+              <tr>
+                <td class="mono">{{ s.name }}</td>
+                <td class="mono text-xs">{{ s.pattern }}</td>
+                <td class="num">{{ s.delivered }}</td>
+                <td class="num"><span class="badge badge-danger">{{ s.failed }}</span></td>
+                <td class="text-xs">{{ s.last_error|default:"—" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+{% endif %}
+
+<section class="card mb-6">
+  <div class="card-head">
+    <h3>Pannes silencieuses</h3>
+    <span class="card-sub">triées par nombre d'occurrences</span>
+  </div>
+
+  {% if sites_page.rows %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Site</th>
+              <th class="num">Occurrences</th>
+              <th class="fit">Cassé depuis</th>
+              <th>Types d'erreur</th>
+              <th style="min-width: 24rem;">Dernière erreur</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in sites_page.rows %}
+              <tr>
+                <td class="mono text-xs">{{ s.label }}</td>
+                <td class="num">
+                  <span class="badge {% if s.count > 100 %}badge-danger{% elif s.count > 10 %}badge-warn{% endif %}">{{ s.count }}</span>
+                </td>
+                <td class="fit muted">{{ s.age_seconds|duration }}</td>
+                <td><span class="chips">{% for t in s.error_types %}<span class="chip mono">{{ t }}</span>{% endfor %}</span></td>
+                <td class="text-xs break">{{ s.last_error|default:"—" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" with page=sites_page %}</div>
+  {% else %}
+    <div class="card-body">
+      <div class="empty">
+        <div class="empty-title">Rien à signaler</div>
+        Aucune dégradation enregistrée depuis le démarrage.
+      </div>
+    </div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <h3>Abonnements au bus</h3>
+    <span class="card-sub">qui écoute quoi</span>
+  </div>
+  <div class="card-body flush">
+    <div class="table-scroll">
+      <table class="table">
+        <thead><tr><th>Abonné</th><th>Motif</th><th class="fit">Mode</th><th class="num">Priorité</th><th class="num">Livrés</th><th class="num">Échecs</th></tr></thead>
+        <tbody>
+          {% for s in subscriptions %}
+            <tr>
+              <td class="mono">{{ s.name }}</td>
+              <td class="mono text-xs">{{ s.pattern }}</td>
+              <td class="fit"><span class="badge">{{ s.mode|default:"—" }}</span></td>
+              <td class="num">{{ s.priority|default:"—" }}</td>
+              <td class="num">{{ s.delivered }}</td>
+              <td class="num">{% if s.failed %}<span class="badge badge-danger">{{ s.failed }}</span>{% else %}0{% endif %}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="6"><span class="muted">Aucun abonnement.</span></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+{% endblock %}

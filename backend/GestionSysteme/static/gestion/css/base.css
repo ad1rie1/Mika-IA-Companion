@@ -1,0 +1,235 @@
+/* ============================================================================
+   GestionSystème — socle
+   ----------------------------------------------------------------------------
+   Reset, typographie, éléments natifs. Aucune couleur littérale ici : tout
+   vient de tokens.css.
+   ========================================================================== */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  -webkit-text-size-adjust: 100%;
+  font-size: 16px;
+}
+
+body {
+  margin: 0;
+  background: var(--surface-0);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Titres ──────────────────────────────────────────────────────────────
+   Pas de text-transform global, pas de letter-spacing étiré. L'ancienne
+   interface mettait tout en majuscules espacées, ce qui gonflait la largeur
+   des en-têtes de tableaux déjà larges et forçait un scroll horizontal. */
+h1, h2, h3, h4 {
+  margin: 0;
+  font-weight: var(--fw-semi);
+  line-height: var(--lh-tight);
+  color: var(--text);
+}
+h1 { font-size: var(--fs-xl); }
+h2 { font-size: var(--fs-lg); }
+h3 { font-size: var(--fs-md); }
+h4 { font-size: var(--fs-base); }
+
+p { margin: 0 0 var(--sp-3); }
+p:last-child { margin-bottom: 0; }
+
+a {
+  color: var(--accent-text);
+  text-decoration: none;
+}
+a:hover { text-decoration: underline; }
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: var(--sp-5) 0;
+}
+
+code, kbd, pre, samp, .mono {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+code:not(pre code) {
+  background: var(--neutral-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.08em 0.35em;
+}
+
+pre {
+  margin: 0;
+  padding: var(--sp-3);
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow-x: auto;
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+ul, ol { margin: 0 0 var(--sp-3); padding-left: var(--sp-5); }
+ul:last-child, ol:last-child { margin-bottom: 0; }
+li { margin-bottom: var(--sp-1); }
+
+dl { margin: 0; }
+
+img, svg { max-width: 100%; vertical-align: middle; }
+
+/* ── Focus ───────────────────────────────────────────────────────────────
+   :focus-visible seulement — un anneau sur chaque clic souris est du bruit,
+   mais la navigation clavier doit rester traçable. */
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+
+/* ── Champs natifs ──────────────────────────────────────────────────────
+   Base commune. Les variantes (taille, état d'erreur) vivent dans
+   components.css. */
+input, textarea, select, button {
+  font-family: inherit;
+  font-size: var(--fs-base);
+  color: inherit;
+}
+
+input[type="text"], input[type="number"], input[type="password"],
+input[type="search"], input[type="email"], input[type="url"],
+input[type="date"], input[type="datetime-local"],
+textarea, select {
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface-1);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  transition: border-color var(--dur-fast) var(--ease),
+              box-shadow var(--dur-fast) var(--ease);
+}
+
+input:hover:not(:disabled), textarea:hover:not(:disabled),
+select:hover:not(:disabled) { border-color: var(--text-subtle); }
+
+input:focus, textarea:focus, select:focus {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+input:disabled, textarea:disabled, select:disabled {
+  background: var(--surface-2);
+  color: var(--text-subtle);
+  cursor: not-allowed;
+}
+
+input::placeholder, textarea::placeholder { color: var(--text-subtle); }
+
+textarea {
+  min-height: 5.5rem;
+  resize: vertical;
+  line-height: var(--lh-base);
+}
+
+/* Le chevron natif d'un <select> ne suit pas la couleur du texte sur fond
+   sombre selon les navigateurs — on le dessine nous-mêmes, en currentColor,
+   donc correct dans les deux thèmes sans image. */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: var(--sp-8);
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 17px) calc(50% + 1px),
+    calc(100% - 12px) calc(50% + 1px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+select::-ms-expand { display: none; }
+
+input[type="checkbox"], input[type="radio"] {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+label { cursor: pointer; }
+
+/* ── Barres de défilement ───────────────────────────────────────────────
+   Discrètes, thématisées. Firefox via scrollbar-color, WebKit via ::. */
+* { scrollbar-color: var(--border-strong) transparent; scrollbar-width: thin; }
+::-webkit-scrollbar { width: 11px; height: 11px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--radius-pill);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background-clip: content-box; background-color: var(--text-subtle); }
+
+/* ── Utilitaires ────────────────────────────────────────────────────────
+   Volontairement peu nombreux. L'ancienne interface avait 151 style="…"
+   inline dans le JS : la moitié de la mise en page vivait hors du CSS. */
+.muted    { color: var(--text-muted); }
+.subtle   { color: var(--text-subtle); }
+.nowrap   { white-space: nowrap; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.break    { word-break: break-word; overflow-wrap: anywhere; }
+.tabular  { font-variant-numeric: tabular-nums; }
+.right    { text-align: right; }
+.center   { text-align: center; }
+
+.text-xs { font-size: var(--fs-xs); }
+.text-sm { font-size: var(--fs-sm); }
+.text-lg { font-size: var(--fs-lg); }
+.prose   { font-size: var(--fs-md); line-height: var(--lh-loose); }
+
+.row     { display: flex; align-items: center; gap: var(--sp-2); }
+.row-wrap{ display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.col     { display: flex; flex-direction: column; gap: var(--sp-2); }
+.spread  { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+.push    { margin-left: auto; }
+
+.mt-0 { margin-top: 0; }
+.mt-2 { margin-top: var(--sp-2); }
+.mt-3 { margin-top: var(--sp-3); }
+.mt-4 { margin-top: var(--sp-4); }
+.mt-6 { margin-top: var(--sp-6); }
+.mb-2 { margin-bottom: var(--sp-2); }
+.mb-3 { margin-bottom: var(--sp-3); }
+.mb-4 { margin-bottom: var(--sp-4); }
+.mb-6 { margin-bottom: var(--sp-6); }
+
+.hidden { display: none !important; }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

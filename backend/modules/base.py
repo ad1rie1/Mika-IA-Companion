@@ -180,6 +180,36 @@ class BaseModule(ABC):
 
         A view is only visible in the sidebar when the module is
         both *enabled* and *running*. Default: no views.
+
+        **Superseded by ``get_panels()``.** GestionSystème adapts any
+        ``ModuleView`` automatically, so existing modules keep working
+        untouched; new ones should prefer panels.
+        """
+        return []
+
+    # ── Module space (GestionSystème) ─────────────────────────────
+
+    def get_panels(self) -> list:
+        """Return ``GestionSysteme.panels.ModulePanel`` pages for this module.
+
+        Mounted inside the module's own space at
+        ``/gestion/modules/{name}/p/{panel.key}/``, alongside its state and
+        its configuration — rather than scattered through the global menu.
+
+        A handler returns **typed blocks** (``Table`` / ``Fields`` / ``Stats``
+        / ``Note`` / ``Prose`` / ``Template``) built from **typed cells**. A
+        module declares an intent ("this is a warning badge", "this is a
+        gauge"); it never emits markup. The rendering belongs to
+        GestionSystème's templates, with Django's autoescaping on.
+
+        That is the difference from ``get_views()``: those returned JSON that
+        a browser script injected via ``innerHTML``, so a module piping an
+        email body or a scraped page through an ``html`` key was stored XSS on
+        the admin interface — which also edits the provider API keys. Panels
+        remove the class of bug rather than filtering it.
+
+        Handlers may be sync or async. Default: no panels — the module is then
+        adapted from ``get_views()`` if it declares any.
         """
         return []
 

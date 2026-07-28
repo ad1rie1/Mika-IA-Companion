@@ -1,0 +1,48 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+<div class="alert alert-info mb-4">
+  Les valeurs sensibles sont remplacées par un marqueur <strong>au moment de
+  l'écriture</strong> : ce journal ne contient jamais un secret en clair, même
+  pour l'opérateur.
+</div>
+
+<section class="card">
+  {% include "gestion/partials/filters.html" %}
+
+  {% if page.rows %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="fit">Quand</th>
+              <th>Clé</th>
+              <th class="fit">Action</th>
+              <th>Avant</th>
+              <th>Après</th>
+              <th class="fit">Auteur</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for l in page.rows %}
+              <tr>
+                <td class="fit muted" title="{{ l.created_at|dt_full }}">{{ l.created_at|ago }}</td>
+                <td class="mono text-xs">{{ l.key }}</td>
+                <td class="fit"><span class="badge">{{ l.action }}</span></td>
+                <td class="mono text-xs break"><div class="cell-clamp">{{ l.before|default:"—" }}</div></td>
+                <td class="mono text-xs break"><div class="cell-clamp">{{ l.after|default:"—" }}</div></td>
+                <td class="fit muted">{{ l.actor|default:"—" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
+  {% else %}
+    <div class="card-body"><div class="empty">Aucun changement enregistré.</div></div>
+  {% endif %}
+</section>
+{% endblock %}

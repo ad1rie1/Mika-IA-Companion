@@ -1,0 +1,48 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+<div class="alert alert-info mb-4">
+  Le consolidateur lit d'abord le plafond d'identifiants, puis les messages
+  <span class="mono">id ≤ plafond</span>. Lire les messages d'abord et prendre
+  le maximum ensuite laissait un tour enregistré entre les deux requêtes être
+  compté par le point de reprise sans jamais être extrait — cet échange était
+  perdu pour toujours.
+</div>
+
+<section class="card">
+  {% if page.rows %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="fit">Passage</th>
+              <th class="num">Messages traités</th>
+              <th class="num">Souvenirs créés</th>
+              <th class="num">Connaissances créées</th>
+              <th class="num">Dernier message</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for l in page.rows %}
+              <tr {% if not l.messages_processed %}class="is-muted"{% endif %}>
+                <td class="fit" title="{{ l.ran_at|dt_full }}">
+                  {{ l.ran_at|dt }} <small>il y a {{ l.ran_at|ago }}</small>
+                </td>
+                <td class="num">{{ l.messages_processed }}</td>
+                <td class="num">{{ l.souvenirs_created }}</td>
+                <td class="num">{{ l.connaissances_created }}</td>
+                <td class="num mono text-xs">{{ l.last_message_id|default:"—" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
+  {% else %}
+    <div class="card-body"><div class="empty">Aucun passage enregistré.</div></div>
+  {% endif %}
+</section>
+{% endblock %}

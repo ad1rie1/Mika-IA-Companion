@@ -1,0 +1,230 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+
+{% comment %} 1. Ce qui attend une décision. Absent quand il n'y a rien : un bandeau
+      permanent affichant « 0 en attente » cesse d'être lu au bout d'un jour,
+      et c'est précisément le bandeau qu'on veut voir quand il apparaît. {% endcomment %}
+{% if attention %}
+  <section class="mb-6">
+    <div class="alert-stack">
+      {% for a in attention %}
+        <a class="alert alert-{{ a.tone }}" href="{{ a.href }}">
+          <strong class="tabular">{{ a.count }}</strong>
+          <span>{{ a.label }}</span>
+        </a>
+      {% endfor %}
+    </div>
+  </section>
+{% endif %}
+
+{# 2. Comment va-t-elle #}
+<section class="grid c2 mb-6">
+
+  <div class="card">
+    <div class="card-head">
+      <h3>Humeur globale</h3>
+      <span class="card-sub">ce qu'elle ressent, indépendamment de toute conversation</span>
+    </div>
+    <div class="card-body">
+      {% if mood %}
+        <div class="row-wrap mb-3">
+          <span class="emo text-lg" style="{{ mood.label|emo_style }}">{{ mood.label }}</span>
+          <span class="tabular muted">{{ mood.intensity|pct }}</span>
+          {% if mood.is_default %}
+            <span class="badge" title="Son humeur de repos, définie par le tempérament">au repos</span>
+          {% else %}
+            <span class="badge badge-info" title="Tempérament : {{ mood.default_mood }}">écart au tempérament</span>
+          {% endif %}
+        </div>
+
+        <div class="meter {{ mood.intensity|tone_ratio }} mb-3">
+          <span style="width: {{ mood.intensity|bar_width }}%;"></span>
+        </div>
+
+        {% if mood.blend|length > 1 %}
+          <div class="field-desc">Mélange ressenti</div>
+          <div class="chips mb-3">
+            {% for b in mood.blend %}
+              <span class="emo" style="{{ b.emotion|emo_style }}">
+                {{ b.emotion }} <span class="emo-weight">{{ b.weight|pct }}</span>
+              </span>
+            {% endfor %}
+          </div>
+        {% endif %}
+
+        <dl class="kv">
+          <dt>Tempérament</dt><dd>{{ mood.default_mood }}</dd>
+          <dt title="Vitesse de déplacement dans l'espace PAD — élevée = humeur en train de bouger">Dynamique</dt>
+          <dd class="tabular">{{ mood.velocity|num }}</dd>
+          <dt>Personnes suivies</dt><dd class="tabular">{{ mood.tracked_persons }}</dd>
+        </dl>
+      {% else %}
+        <div class="empty">Moteur émotionnel indisponible.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <h3>Pulsions</h3>
+      <span class="card-sub">ce qui la pousse à agir</span>
+    </div>
+    <div class="card-body">
+      {% if drives %}
+        <div class="col" style="gap: var(--sp-3);">
+          {% for d in drives %}
+            <div>
+              <div class="spread mb-2">
+                <span class="meter-label">
+                  {{ d.label }}
+                  {% if d.dominant %}<span class="badge badge-info">dominante</span>{% endif %}
+                </span>
+                <span class="meter-val">{{ d.tension|pct }}</span>
+              </div>
+              <div class="meter {{ d.tone }}"><span style="width: {{ d.tension|bar_width }}%;"></span></div>
+            </div>
+          {% endfor %}
+        </div>
+        <p class="field-hint mt-3">
+          La tension monte avec le temps et retombe quand l'action correspondante
+          a lieu. « Repos » contribue négativement au score de la conscience.
+        </p>
+      {% else %}
+        <div class="empty">Moteur de pulsions indisponible.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h3>Rythme</h3></div>
+    <div class="card-body">
+      {% if rhythm %}
+        <div class="spread mb-3">
+          <span class="meter-label">Énergie</span>
+          <span class="meter-val">{{ rhythm.energy|pct }}</span>
+        </div>
+        <div class="meter {{ rhythm.energy_tone }} mb-3">
+          <span style="width: {{ rhythm.energy|bar_width }}%;"></span>
+        </div>
+        <dl class="kv">
+          <dt>Phase circadienne</dt><dd>{{ rhythm.phase_fr }} ({{ rhythm.hour }} h)</dd>
+          <dt>Énergie circadienne</dt><dd class="tabular">{{ rhythm.circadian_energy|pct }}</dd>
+        </dl>
+        {% if rhythm.fatigued %}
+          <div class="alert alert-warn mt-3">
+            Sous 50 % d'énergie, la conscience applique une pénalité de fatigue
+            et le prompt bascule en ton « brouillard cognitif ». Elle parle
+            spontanément moins souvent.
+          </div>
+        {% endif %}
+      {% else %}
+        <div class="empty">Indisponible.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <h3>Sommeil</h3>
+      {% if sleep and sleep.asleep %}
+        <span class="badge badge-info">{{ sleep.phase_fr }}</span>
+      {% endif %}
+    </div>
+    <div class="card-body">
+      {% if sleep %}
+        <dl class="kv mb-3">
+          <dt>Phase</dt><dd>{{ sleep.phase_fr }}</dd>
+        </dl>
+
+        {% if sleep.dream %}
+          <div class="field-desc">Rêve de la nuit du {{ sleep.dream.night_of|dt }}</div>
+          <div class="quote mb-3">{{ sleep.dream.content|clip:400 }}</div>
+          <div class="chips">
+            <span class="chip">{{ sleep.dream.dream_type }}</span>
+            <span class="chip">vivacité {{ sleep.dream.vividness|pct }}</span>
+            {% if sleep.dream.emotion %}
+              <span class="emo" style="{{ sleep.dream.emotion|emo_style }}">{{ sleep.dream.emotion }}</span>
+            {% endif %}
+          </div>
+        {% else %}
+          <p class="muted text-sm">Aucun rêve enregistré pour la nuit dernière.</p>
+        {% endif %}
+
+        {% if sleep.journal %}
+          <div class="field-desc mt-4">Journal du {{ sleep.journal.date|dt }}</div>
+          <div class="quote">{{ sleep.journal.narrative|clip:400 }}</div>
+        {% endif %}
+      {% else %}
+        <div class="empty">Cycle de sommeil indisponible.</div>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+{% if narrative %}
+  <section class="card mb-6">
+    <div class="card-head">
+      <h3>Qui elle est devenue</h3>
+      <span class="card-sub">régénéré toutes les ~24 h</span>
+      <span class="card-head-actions">
+        <a class="btn btn-sm" href="{% url 'gestionsysteme:memory-tab' 'recit' %}">Historique</a>
+      </span>
+    </div>
+    <div class="card-body">
+      <div class="narrative">{{ narrative.content }}</div>
+      <p class="field-hint mt-3">
+        Écrit le {{ narrative.created_at|dt }}
+        {% if narrative.dominant_mood %} · humeur dominante : {{ narrative.dominant_mood }}{% endif %}
+      </p>
+    </div>
+  </section>
+{% endif %}
+
+{# 3. Volumes — en dernier, parce qu'un total ne se lit pas deux fois par jour #}
+<section class="mb-6">
+  <h3 class="mb-3">Volumes</h3>
+  <div class="grid auto">
+    {% for v in volumes %}
+      <a class="stat" href="{{ v.href }}">
+        <div class="stat-label">{{ v.label }}</div>
+        <div class="stat-value">{{ v.value }}</div>
+        <div class="stat-sub">{{ v.sub }}</div>
+      </a>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <h3>Boucles de fond</h3>
+    <span class="card-sub">rien ne les supervise — la date du dernier passage est le seul témoin</span>
+  </div>
+  <div class="card-body flush">
+    <div class="table-scroll">
+      <table class="table">
+        <thead>
+          <tr><th>Boucle</th><th class="fit">Dernier passage</th><th>Détail</th></tr>
+        </thead>
+        <tbody>
+          {% for l in loops %}
+            <tr>
+              <td>{{ l.label }}</td>
+              <td class="fit">
+                {% if l.at %}
+                  <span title="{{ l.at|dt_full }}">il y a {{ l.at|ago }}</span>
+                {% else %}
+                  <span class="badge badge-warn">jamais</span>
+                {% endif %}
+              </td>
+              <td class="muted">{{ l.detail }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+{% endblock %}

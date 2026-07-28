@@ -1,0 +1,71 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+<div class="alert alert-info mb-4">
+  Une rumination naît d'un signal jugé pertinent mais resté sans réponse. Elle
+  perd 5 % d'intensité par cycle, déteint sur l'humeur globale, et pousse la
+  conscience à finir par en parler. Le sommeil profond les digère plus vite
+  (×3) et convertit les plus fortes en souvenir réflexif.
+</div>
+
+<section class="card">
+  {% include "gestion/partials/filters.html" %}
+
+  {% if page.rows %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th style="min-width: 26rem;">Pensée</th>
+              <th>Émotion</th>
+              <th style="min-width: 9rem;">Intensité</th>
+              <th>Thèmes</th>
+              <th class="fit">État</th>
+              <th class="fit">Depuis</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in page.rows %}
+              <tr>
+                <td><div class="cell-clamp">{{ r.summary }}</div></td>
+                <td>
+                  {% if r.emotion %}
+                    <span class="emo" style="{{ r.emotion|emo_style }}">{{ r.emotion }}</span>
+                  {% else %}—{% endif %}
+                </td>
+                <td>
+                  <div class="row">
+                    <span class="meter {{ r.intensity|tone_ratio:"invert" }}" style="flex:1; min-width:5rem;">
+                      <span style="width: {{ r.intensity|bar_width }}%;"></span>
+                    </span>
+                    <span class="tabular text-xs">{{ r.intensity|pct }}</span>
+                  </div>
+                </td>
+                <td>
+                  <span class="chips">
+                    {% for t in r.themes %}<span class="chip">{{ t }}</span>{% endfor %}
+                  </span>
+                </td>
+                <td class="fit">
+                  <span class="badge {% with tone=status_tones|get:r.status %}{% if tone %}badge-{{ tone }}{% endif %}{% endwith %}">{{ r.status }}</span>
+                </td>
+                <td class="fit muted" title="{{ r.created_at|dt_full }}">{{ r.created_at|ago }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
+  {% else %}
+    <div class="card-body">
+      <div class="empty">
+        <div class="empty-title">Rien en tête</div>
+        Aucune rumination ne correspond à ce filtre.
+      </div>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

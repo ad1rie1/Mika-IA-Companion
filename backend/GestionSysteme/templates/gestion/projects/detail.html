@@ -1,0 +1,166 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block breadcrumbs %}
+<div class="crumbs">
+  <a href="{% url 'gestionsysteme:projects' %}">Projets</a>
+  <span class="sep">/</span><span>{{ project.title }}</span>
+</div>
+{% endblock %}
+
+{% block tabs %}{% endblock %}
+
+{% block content %}
+{% if pending %}
+  <div class="alert alert-warn mb-4">
+    <div>
+      <strong>{{ pending|length }} action(s) attendent ton accord.</strong>
+      <a href="{% url 'gestionsysteme:projects-tab' 'attente' %}">Les traiter →</a>
+    </div>
+  </div>
+{% endif %}
+
+<section class="split mb-6">
+  <div class="card">
+    <div class="card-head">
+      <h3>Cadre d'exécution</h3>
+      <span class="card-sub">ce qui gouverne son comportement pendant ce projet</span>
+    </div>
+    <div class="card-body">
+      {% if project.description %}<p class="narrative mb-4">{{ project.description }}</p>{% endif %}
+
+      <dl class="kv">
+        <dt>État</dt><dd><span class="badge">{{ project.get_status_display }}</span></dd>
+        <dt>Priorité</dt><dd>{{ project.get_priority_display }}</dd>
+        <dt>Origine</dt><dd>{{ project.get_origin_display }}</dd>
+        {% if project.owner %}<dt>Confié par</dt>
+          <dd><a href="{% url 'gestionsysteme:person-detail' project.owner_id %}">{{ project.owner.name }}</a></dd>{% endif %}
+        <dt>Politique émotionnelle</dt>
+        <dd>
+          {% if project.is_emotion_off %}
+            <span class="badge">coupées</span>
+            <div class="field-hint">Étiquette d'émotion, variabilité et impulsion affective supprimées pendant les tours qui correspondent à ce projet.</div>
+          {% else %}
+            <span class="badge badge-info">{{ project.emotion_policy }}</span>
+          {% endif %}
+        </dd>
+        {% if project.tone_directive %}<dt>Ton imposé</dt><dd>{{ project.tone_directive }}</dd>{% endif %}
+        <dt>Approbation requise</dt><dd>{{ project.requires_approval|yes_no }}</dd>
+        <dt>Cadence</dt><dd class="mono">{{ project.schedule_rule|default:"manuel" }}</dd>
+        <dt>Prochain passage</dt>
+        <dd>{% if project.next_run_at %}{{ project.next_run_at|dt_full }}{% else %}—{% endif %}</dd>
+        <dt>Dernier passage</dt>
+        <dd>{% if project.last_run_at %}{{ project.last_run_at|dt_full }}{% else %}—{% endif %}</dd>
+        <dt title="Plafond à 10 : au-delà, le projet n'avance plus sans retour humain">Passages sans retour</dt>
+        <dd class="tabular">{{ project.runs_since_user_input }} / 10</dd>
+        {% if project.monthly_token_budget %}
+          <dt>Budget mensuel</dt><dd class="tabular">{{ project.monthly_token_budget }} jetons</dd>
+        {% endif %}
+      </dl>
+
+      {% if project.instructions %}
+        <div class="field-desc mt-4">Consignes</div>
+        <ul>{% for i in project.instructions %}<li>{{ i }}</li>{% endfor %}</ul>
+      {% endif %}
+      {% if project.out_of_scope %}
+        <div class="field-desc mt-4">Hors périmètre</div>
+        <ul>{% for i in project.out_of_scope %}<li>{{ i }}</li>{% endfor %}</ul>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="col" style="gap: var(--sp-4);">
+    <div class="card">
+      <div class="card-head"><h3>Avancement</h3></div>
+      <div class="card-body">
+        <div class="spread mb-2">
+          <span class="meter-label">Tâches terminées</span>
+          <span class="meter-val">{{ done_count }} / {{ tasks|length }}</span>
+        </div>
+        <div class="meter ok"><span style="width: {{ progress|bar_width }}%;"></span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Ressources autorisées</h3></div>
+      <div class="card-body">
+        <p class="field-desc">Liste blanche stricte — vide signifie « aucun outil ».</p>
+        <dl class="kv">
+          <dt>Modules</dt>
+          <dd>
+            {% if project.allowed_modules %}
+              <span class="chips">{% for m in project.allowed_modules %}<span class="chip mono">{{ m }}</span>{% endfor %}</span>
+            {% else %}<span class="badge">aucun</span>{% endif %}
+          </dd>
+          {% if project.resource_paths %}
+            <dt>Chemins</dt>
+            <dd><span class="chips">{% for p in project.resource_paths %}<span class="chip mono">{{ p }}</span>{% endfor %}</span></dd>
+          {% endif %}
+          {% if project.contacts %}
+            <dt>Contacts</dt>
+            <dd><span class="chips">{% for c in project.contacts %}<span class="chip mono">{{ c }}</span>{% endfor %}</span></dd>
+          {% endif %}
+          {% if project.keywords %}
+            <dt title="Servent à détecter qu'un tour concerne ce projet">Mots-clés</dt>
+            <dd><span class="chips">{% for k in project.keywords %}<span class="chip">{{ k }}</span>{% endfor %}</span></dd>
+          {% endif %}
+        </dl>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="card mb-6">
+  <div class="card-head"><h3>Tâches</h3></div>
+  <div class="card-body flush">
+    <div class="table-scroll">
+      <table class="table">
+        <thead><tr><th class="num">#</th><th style="min-width:26rem;">Description</th><th class="fit">État</th><th>Résultat</th></tr></thead>
+        <tbody>
+          {% for t in tasks %}
+            <tr {% if t.status == "done" %}class="is-muted"{% endif %}>
+              <td class="num">{{ t.order }}</td>
+              <td>{{ t.description }}</td>
+              <td class="fit">
+                <span class="badge {% if t.status == 'done' %}badge-ok{% elif t.status == 'blocked' %}badge-danger{% elif t.status == 'in_progress' %}badge-info{% endif %}">{{ t.get_status_display }}</span>
+                {% if t.blocked_reason %}<small>{{ t.blocked_reason }}</small>{% endif %}
+              </td>
+              <td class="muted"><div class="cell-clamp">{{ t.result|default:"—" }}</div></td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="4"><span class="muted">Aucune tâche.</span></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-head"><h3>Journal d'exécution</h3></div>
+  {% if logs_page.rows %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead><tr><th class="fit">Quand</th><th class="fit">Action</th><th style="min-width:30rem;">Résumé</th><th>Outils</th></tr></thead>
+          <tbody>
+            {% for l in logs_page.rows %}
+              <tr>
+                <td class="fit muted" title="{{ l.created_at|dt_full }}">{{ l.created_at|ago }}</td>
+                <td class="fit">
+                  <span class="badge {% if l.action == 'error' %}badge-danger{% elif l.action == 'advanced' %}badge-ok{% endif %}">{{ l.get_action_display }}</span>
+                </td>
+                <td><div class="cell-clamp">{{ l.summary }}</div></td>
+                <td><span class="chips">{% for t in l.tools_used %}<span class="chip mono">{{ t }}</span>{% endfor %}</span></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" with page=logs_page %}</div>
+  {% else %}
+    <div class="card-body"><div class="empty">Aucun passage enregistré.</div></div>
+  {% endif %}
+</section>
+{% endblock %}

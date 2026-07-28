@@ -1,0 +1,159 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block tabs %}{% endblock %}
+
+{% block content %}
+<div class="split side-left">
+
+  {% comment %} Sous-navigation des sections du cœur. Les sections de modules n'y sont
+     pas : elles vivent dans l'espace de leur module, à côté de son état. {% endcomment %}
+  <nav class="card" aria-label="Sections de configuration">
+    <div class="card-body tight">
+      {% for group in groups %}
+        <div class="nav-group">{{ group.label }}</div>
+        {% for s in group.sections %}
+          <a class="nav-item" href="{% url 'gestionsysteme:config-section' s.key %}"
+             {% if section.key == s.key %}aria-current="page"{% endif %}>
+            <span class="nav-ico" aria-hidden="true">{{ s.icon }}</span>
+            <span>{{ s.label }}</span>
+          </a>
+        {% endfor %}
+      {% endfor %}
+    </div>
+  </nav>
+
+  <div>
+    {% if section.description %}
+      <div class="alert alert-info mb-4">{{ section.description }}</div>
+    {% endif %}
+
+    {% if form.fields %}
+      <form method="post" class="card mb-6">
+        {% csrf_token %}
+        <div class="card-head">
+          <h3>Réglages</h3>
+          <span class="card-sub">{{ form.fields|length }} paramètre(s)</span>
+        </div>
+
+        <div class="card-body">
+          {% for group in form.groups %}
+            {% if group.label %}
+              <h4 class="mb-3 {% if not forloop.first %}mt-6{% endif %}">{{ group.label }}</h4>
+            {% endif %}
+            <div class="form-grid {% if not group.label and not forloop.first %}mt-6{% endif %}">
+              {% for f in group.fields %}
+                {% include "gestion/partials/field.html" with f=f marker=1 %}
+              {% endfor %}
+            </div>
+          {% endfor %}
+        </div>
+
+        <div class="card-foot">
+          <button class="btn btn-primary" type="submit">Enregistrer</button>
+          <span class="field-hint" style="margin:0;">
+            Un champ secret laissé vide conserve la valeur en place.
+          </span>
+        </div>
+      </form>
+
+      <details class="disclosure mb-6">
+        <summary>Réinitialiser des réglages</summary>
+        <div class="disclosure-body">
+          <p class="field-desc">
+            Retire la valeur enregistrée : le réglage retombe sur le défaut
+            déclaré au registre. Les valeurs par défaut fonctionnent toutes,
+            c'est ce qui permet aux boucles de fond de tourner sur une
+            installation neuve.
+          </p>
+          <form method="post">
+            {% csrf_token %}
+            <div class="form-grid mb-4">
+              {% for f in form.fields %}
+                {% if not f.is_default %}
+                  <div class="field field-check">
+                    <input type="checkbox" id="r-{{ f.name }}" name="__reinitialiser" value="{{ f.name }}">
+                    <label class="field-label" for="r-{{ f.name }}">
+                      {{ f.label }} <span class="mono text-xs">{{ f.name }}</span>
+                    </label>
+                  </div>
+                {% endif %}
+              {% endfor %}
+            </div>
+            <button class="btn btn-danger" type="submit">Réinitialiser la sélection</button>
+          </form>
+        </div>
+      </details>
+    {% endif %}
+
+    {% for rl in record_lists %}
+      <section class="card mb-6">
+        <div class="card-head">
+          <h3>{{ rl.item.label }}</h3>
+          <span class="card-sub">{{ rl.rows|length }} élément(s)</span>
+          <span class="card-head-actions">
+            {% if rl.full %}
+              <span class="badge badge-warn">limite atteinte ({{ rl.item.max_items }})</span>
+            {% else %}
+              <a class="btn btn-sm btn-primary"
+                 href="{% url 'gestionsysteme:config-record-new' section.key rl.item.key %}">Ajouter</a>
+            {% endif %}
+          </span>
+        </div>
+
+        {% if rl.item.description %}
+          <div class="card-body" style="padding-bottom:0;">
+            <p class="field-desc">{{ rl.item.description }}</p>
+          </div>
+        {% endif %}
+
+        {% if rl.error %}
+          <div class="card-body"><div class="alert alert-danger">{{ rl.error }}</div></div>
+        {% elif rl.rows %}
+          <div class="card-body flush">
+            <div class="table-scroll">
+              <table class="table">
+                <thead>
+                  <tr>
+                    {% for c in rl.columns %}<th>{{ c }}</th>{% endfor %}
+                    <th class="fit">Actif</th>
+                    <th class="fit"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for entry in rl.rows %}
+                    <tr>
+                      {% for v in entry.values %}<td class="break">{{ v }}</td>{% endfor %}
+                      <td class="fit">{{ entry.row.enabled|yes_no }}</td>
+                      <td class="fit">
+                        <div class="row">
+                          <a class="btn btn-sm"
+                             href="{% url 'gestionsysteme:config-record-edit' section.key rl.item.key entry.row.row_id %}">Modifier</a>
+                          <form method="post"
+                                action="{% url 'gestionsysteme:config-record-delete' section.key rl.item.key entry.row.row_id %}"
+                                data-confirm="Supprimer cet élément ?">
+                            {% csrf_token %}
+                            <button class="btn btn-sm btn-danger" type="submit">Supprimer</button>
+                          </form>
+                        </div>
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        {% else %}
+          <div class="card-body"><div class="empty">Aucun élément.</div></div>
+        {% endif %}
+      </section>
+    {% endfor %}
+
+    {% if not form.fields and not record_lists %}
+      <div class="card"><div class="card-body">
+        <div class="empty">Cette section ne déclare aucun réglage.</div>
+      </div></div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

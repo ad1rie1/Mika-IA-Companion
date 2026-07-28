@@ -1,0 +1,90 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+<div class="alert alert-warn mb-4">
+  <div>
+    <strong>Mode professionnel par défaut.</strong> Un projet est créé avec
+    <span class="mono">emotion_policy = off</span> : quand il est actif et
+    correspond au tour en cours, Mika supprime son étiquette d'émotion, son
+    bloc de variabilité et l'impulsion affective envers la personne. Passer en
+    <span class="mono">muted</span> ou <span class="mono">full</span> est un
+    choix explicite.
+  </div>
+</div>
+
+<section class="card">
+  {% include "gestion/partials/filters.html" %}
+
+  {% if page.rows %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Projet</th>
+              <th class="fit">Priorité</th>
+              <th class="fit">Émotions</th>
+              <th style="min-width: 10rem;">Avancement</th>
+              <th class="fit">Cadence</th>
+              <th class="fit">Prochain passage</th>
+              <th class="fit">Garde-fou</th>
+              <th class="fit"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in page.rows %}
+              <tr>
+                <td>
+                  <a href="{% url 'gestionsysteme:project-detail' p.pk %}">{{ p.title }}</a>
+                  <small>
+                    {{ p.get_origin_display }}
+                    {% if p.owner %} · {{ p.owner.name }}{% endif %}
+                    {% if p.n_blocked %} · <span class="badge badge-danger">{{ p.n_blocked }} bloquée(s)</span>{% endif %}
+                  </small>
+                </td>
+                <td class="fit"><span class="badge">{{ p.get_priority_display }}</span></td>
+                <td class="fit">
+                  {% if p.is_emotion_off %}
+                    <span class="badge" title="Mode professionnel">coupées</span>
+                  {% else %}
+                    <span class="badge badge-info">{{ p.emotion_policy }}</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <div class="row">
+                    <span class="meter ok" style="flex:1; min-width:5rem;">
+                      <span style="width: {{ p.progress|bar_width }}%;"></span>
+                    </span>
+                    <span class="tabular text-xs">{{ p.n_done }}/{{ p.n_tasks }}</span>
+                  </div>
+                </td>
+                <td class="fit mono text-xs">{{ p.schedule_rule|default:"manuel" }}</td>
+                <td class="fit muted">
+                  {% if p.next_run_at %}
+                    <span title="{{ p.next_run_at|dt_full }}">{{ p.next_run_at|ago }}</span>
+                  {% else %}—{% endif %}
+                </td>
+                <td class="fit">
+                  {% if p.runs_since_user_input >= 10 %}
+                    <span class="badge badge-danger" title="Plafond atteint : le projet n'avance plus sans retour humain">{{ p.runs_since_user_input }}/10</span>
+                  {% else %}
+                    <span class="tabular text-xs">{{ p.runs_since_user_input }}/10</span>
+                  {% endif %}
+                </td>
+                <td class="fit"><a class="btn btn-sm" href="{% url 'gestionsysteme:project-detail' p.pk %}">Ouvrir</a></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
+  {% else %}
+    <div class="card-body"><div class="empty">
+      <div class="empty-title">Aucun projet</div>
+      Ils se créent en conversation, via l'outil <span class="mono">create_project</span>.
+    </div></div>
+  {% endif %}
+</section>
+{% endblock %}

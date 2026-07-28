@@ -1,0 +1,63 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+<div class="alert alert-info mb-4">
+  Une connaissance est un fait, écrit à la troisième personne. Sa confiance
+  décroît à partir de <span class="mono">decayed_at</span> — pas de
+  <span class="mono">updated_at</span>, qui ne s'actualise pas lors d'une
+  écriture partielle et faisait re-soustraire tout le temps écoulé à chaque
+  passage.
+</div>
+
+<section class="card">
+  {% include "gestion/partials/filters.html" %}
+
+  {% if page.rows %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th style="min-width: 30rem;">Fait</th>
+              <th style="min-width: 8rem;">Confiance</th>
+              <th class="fit">Valide</th>
+              <th>Thèmes</th>
+              <th>Entités</th>
+              <th class="fit">Modifié</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in page.rows %}
+              <tr {% if not c.is_valid %}class="is-muted"{% endif %}>
+                <td><div class="cell-clamp">{{ c.content }}</div></td>
+                <td>
+                  <div class="row">
+                    <span class="meter {{ c.confidence|tone_ratio }}" style="flex:1; min-width:4rem;">
+                      <span style="width: {{ c.confidence|bar_width }}%;"></span>
+                    </span>
+                    <span class="tabular text-xs">{{ c.confidence|num }}</span>
+                  </div>
+                </td>
+                <td class="fit">
+                  {% if c.is_valid %}
+                    <span class="badge badge-ok">valide</span>
+                  {% else %}
+                    <span class="badge badge-danger" title="Contredite puis invalidée par la conscience">invalidée</span>
+                  {% endif %}
+                </td>
+                <td><span class="chips">{% for t in c.themes.all %}<span class="chip">{{ t.name }}</span>{% endfor %}</span></td>
+                <td><span class="chips">{% for e in c.entities.all %}<span class="chip">{{ e.name }}</span>{% endfor %}</span></td>
+                <td class="fit muted" title="{{ c.updated_at|dt_full }}">{{ c.updated_at|ago }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
+  {% else %}
+    <div class="card-body"><div class="empty">Aucune connaissance.</div></div>
+  {% endif %}
+</section>
+{% endblock %}

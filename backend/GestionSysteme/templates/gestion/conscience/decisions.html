@@ -1,0 +1,81 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+<section class="grid c3 mb-6">
+  <div class="stat">
+    <div class="stat-label">Inactivité</div>
+    <div class="stat-value">{% if idle_seconds %}{{ idle_seconds|duration }}{% else %}—{% endif %}</div>
+    <div class="stat-sub">depuis la dernière interaction</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Cycles enregistrés</div>
+    <div class="stat-value">{{ total_logs }}</div>
+    <div class="stat-sub">une ligne par cycle, borné par la rétention</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Seuil d'action</div>
+    <div class="stat-value">0,50</div>
+    <div class="stat-sub">11 facteurs pondérés</div>
+  </div>
+</section>
+
+<div class="alert alert-info mb-4">
+  Une salutation n'est marquée comme faite que si le cycle décide
+  <strong>d'agir</strong>. La valider dès le calcul du score dépensait la
+  salutation du jour sur un cycle qui choisissait finalement de se taire — et
+  le facteur ne pèse que 0,35 contre un seuil de 0,50.
+</div>
+
+<section class="card">
+  {% include "gestion/partials/filters.html" %}
+
+  {% if page.rows %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="fit">Quand</th>
+              <th class="fit">Décision</th>
+              <th style="min-width: 26rem;">Motif</th>
+              <th class="num">Observations</th>
+              <th class="num">Pertinence max</th>
+              <th>Humeur</th>
+              <th class="fit">Inactivité</th>
+              <th>Mémoire</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for l in page.rows %}
+              <tr>
+                <td class="fit muted" title="{{ l.created_at|dt_full }}">{{ l.created_at|ago }}</td>
+                <td class="fit">
+                  <span class="badge {% if l.decision == 'act' %}badge-ok{% endif %}">{{ l.decision }}</span>
+                </td>
+                <td><div class="cell-clamp">{{ l.reason }}</div></td>
+                <td class="num">{{ l.observations_count }}</td>
+                <td class="num">{{ l.max_pertinence|num }}</td>
+                <td>
+                  {% if l.global_mood %}
+                    <span class="emo" style="{{ l.global_mood|emo_style }}">
+                      {{ l.global_mood }} <span class="emo-weight">{{ l.global_intensity|pct }}</span>
+                    </span>
+                  {% else %}—{% endif %}
+                </td>
+                <td class="fit muted">{{ l.idle_seconds|duration }}</td>
+                <td class="text-xs muted">
+                  {% if l.memory_actions %}{{ l.memory_actions }}{% else %}—{% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
+  {% else %}
+    <div class="card-body"><div class="empty">Aucune décision enregistrée.</div></div>
+  {% endif %}
+</section>
+{% endblock %}

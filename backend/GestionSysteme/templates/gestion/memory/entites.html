@@ -1,0 +1,44 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+<section class="card">
+  {% include "gestion/partials/filters.html" %}
+
+  {% if page.rows %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Nom</th>
+              <th class="fit">Type</th>
+              <th class="num">Souvenirs</th>
+              <th class="num">Connaissances</th>
+              <th class="fit"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for e in page.rows %}
+              <tr>
+                <td>{{ e.name }}</td>
+                <td class="fit"><span class="badge">{{ e.entity_type }}</span></td>
+                <td class="num">{{ e.n_souvenirs }}</td>
+                <td class="num">{{ e.n_connaissances }}</td>
+                <td class="fit">
+                  {% if e.entity_type == "person" %}
+                    <a class="btn btn-sm" href="{% url 'gestionsysteme:person-detail' e.id %}">Fiche</a>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
+  {% else %}
+    <div class="card-body"><div class="empty">Aucune entité.</div></div>
+  {% endif %}
+</section>
+{% endblock %}

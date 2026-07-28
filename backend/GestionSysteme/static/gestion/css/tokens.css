@@ -1,0 +1,372 @@
+/* ============================================================================
+   GestionSystème — jetons de design
+   ----------------------------------------------------------------------------
+   Le seul fichier qui déclare une couleur littérale. Tout le reste consomme
+   des variables : changer de thème, c'est éditer ce fichier et rien d'autre.
+
+   Trois couches, dans cet ordre :
+     1. jetons invariants (espacements, rayons, typo, durées)
+     2. palette claire  → :root
+     3. palette sombre  → @media (prefers-color-scheme: dark)
+
+   Le sélecteur [data-theme] écrase les deux : le bouton de thème pose
+   l'attribut sur <html> et doit gagner dans les deux sens, y compris contre
+   la préférence système. Les media queries n'ajoutent pas de spécificité,
+   donc les blocs [data-theme] sont déclarés APRÈS.
+   ========================================================================== */
+
+:root {
+  /* ── Typographie ────────────────────────────────────────────────────────
+     Pile système : rendu natif sur chaque OS, aucun octet téléchargé, et
+     surtout du sans-serif — l'interface sert majoritairement du texte long
+     en français (narratifs, souvenirs, journaux, rêves, prompts) que le
+     monospace rendait pénible à lire. Le mono est réservé aux identifiants,
+     clés de config et fragments de code, où l'alignement porte du sens. */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+               "Helvetica Neue", "Noto Sans", Arial, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", "Menlo",
+               "Consolas", "Liberation Mono", monospace;
+
+  --fs-xs:   0.75rem;   /* 12px — méta, légendes */
+  --fs-sm:   0.8125rem; /* 13px — tableaux, chips */
+  --fs-base: 0.875rem;  /* 14px — corps d'interface */
+  --fs-md:   0.9375rem; /* 15px — texte long */
+  --fs-lg:   1.0625rem; /* 17px — titres de section */
+  --fs-xl:   1.375rem;  /* 22px — titres de page */
+  --fs-2xl:  1.75rem;   /* 28px — valeurs de tuiles stat */
+
+  --lh-tight: 1.25;
+  --lh-base:  1.5;
+  --lh-loose: 1.7;   /* texte narratif */
+
+  --fw-normal: 400;
+  --fw-medium: 500;
+  --fw-semi:   600;
+
+  /* ── Espacements (base 4px) ─────────────────────────────────────────── */
+  --sp-1: 0.25rem;  /*  4px */
+  --sp-2: 0.5rem;   /*  8px */
+  --sp-3: 0.75rem;  /* 12px */
+  --sp-4: 1rem;     /* 16px */
+  --sp-5: 1.25rem;  /* 20px */
+  --sp-6: 1.5rem;   /* 24px */
+  --sp-8: 2rem;     /* 32px */
+  --sp-10: 2.5rem;  /* 40px */
+  --sp-12: 3rem;    /* 48px */
+
+  /* ── Rayons ─────────────────────────────────────────────────────────── */
+  --radius-sm: 3px;
+  --radius:    5px;
+  --radius-md: 7px;
+  --radius-lg: 10px;
+  --radius-pill: 999px;
+
+  /* ── Chrome ─────────────────────────────────────────────────────────── */
+  --sidebar-w: 236px;
+  --topbar-h: 52px;
+  --content-max: 1600px;
+
+  /* ── Mouvement ──────────────────────────────────────────────────────── */
+  --dur-fast: 100ms;
+  --dur:      160ms;
+  --ease: cubic-bezier(0.2, 0, 0.2, 1);
+
+  --focus-ring: 0 0 0 3px var(--accent-ring);
+  --z-sticky: 20;
+  --z-nav: 60;
+  --z-modal: 100;
+}
+
+/* ========================================================================
+   Palette claire (défaut)
+   ====================================================================== */
+:root {
+  color-scheme: light;
+
+  /* Surfaces, du fond de page vers l'élément le plus en avant */
+  --surface-0: #f6f7f9;   /* fond de page */
+  --surface-1: #ffffff;   /* cartes, panneaux */
+  --surface-2: #f1f3f6;   /* en-têtes de table, remplissages discrets */
+  --surface-3: #e7eaef;   /* survol */
+  --surface-inset: #fafbfc;
+
+  --border:        #e0e4ea;
+  --border-strong: #c9cfd9;
+
+  --text:        #1a1d23;
+  --text-muted:  #596272;
+  --text-subtle: #868e9c;
+  --text-invert: #ffffff;
+
+  --accent:        #2c5fd4;
+  --accent-hover:  #234ead;
+  --accent-text:   #234ead;   /* accent lisible sur surface claire */
+  --accent-soft:   #eaf0fd;
+  --accent-border: #b9cbf5;
+  --accent-ring:   rgba(44, 95, 212, 0.22);
+
+  --success:        #127a48;
+  --success-soft:   #e6f5ec;
+  --success-border: #a9dcc0;
+
+  --warn:        #a35a06;
+  --warn-soft:   #fdf1e0;
+  --warn-border: #f0cf9c;
+
+  --danger:        #b4232a;
+  --danger-soft:   #fdecec;
+  --danger-border: #f2b8ba;
+
+  --neutral-soft:   #eef0f3;
+  --neutral-border: #d6dbe3;
+
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow:    0 1px 3px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-lg: 0 8px 28px rgba(16, 24, 40, 0.12), 0 2px 6px rgba(16, 24, 40, 0.06);
+
+  --track: #e4e8ee;   /* fond des jauges */
+  --overlay: rgba(23, 28, 38, 0.45);
+}
+
+/* ========================================================================
+   Palette sombre — suit la préférence système
+   ====================================================================== */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    --surface-0: #101318;
+    --surface-1: #171b22;
+    --surface-2: #1d222b;
+    --surface-3: #262c37;
+    --surface-inset: #13171d;
+
+    --border:        #282e39;
+    --border-strong: #3a4250;
+
+    --text:        #e3e7ee;
+    --text-muted:  #98a1b0;
+    --text-subtle: #6d7686;
+    --text-invert: #0f1319;
+
+    --accent:        #5b8def;
+    --accent-hover:  #78a3f5;
+    --accent-text:   #86aff8;
+    --accent-soft:   #1a2436;
+    --accent-border: #2f4570;
+    --accent-ring:   rgba(91, 141, 239, 0.28);
+
+    --success:        #47b97e;
+    --success-soft:   #14251c;
+    --success-border: #27543c;
+
+    --warn:        #d99a3e;
+    --warn-soft:   #2a2013;
+    --warn-border: #574526;
+
+    --danger:        #ef7b7f;
+    --danger-soft:   #2b1719;
+    --danger-border: #5c2f32;
+
+    --neutral-soft:   #20252e;
+    --neutral-border: #333a46;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow:    0 1px 3px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 10px 32px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
+
+    --track: #262c37;
+    --overlay: rgba(6, 9, 13, 0.62);
+  }
+}
+
+/* ========================================================================
+   Choix explicite — écrase la préférence système dans les deux sens.
+   Déclaré en dernier : à spécificité égale, l'ordre source décide, et une
+   media query n'ajoute aucune spécificité.
+   ====================================================================== */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --surface-0: #f6f7f9;
+  --surface-1: #ffffff;
+  --surface-2: #f1f3f6;
+  --surface-3: #e7eaef;
+  --surface-inset: #fafbfc;
+  --border: #e0e4ea;
+  --border-strong: #c9cfd9;
+  --text: #1a1d23;
+  --text-muted: #596272;
+  --text-subtle: #868e9c;
+  --text-invert: #ffffff;
+  --accent: #2c5fd4;
+  --accent-hover: #234ead;
+  --accent-text: #234ead;
+  --accent-soft: #eaf0fd;
+  --accent-border: #b9cbf5;
+  --accent-ring: rgba(44, 95, 212, 0.22);
+  --success: #127a48;
+  --success-soft: #e6f5ec;
+  --success-border: #a9dcc0;
+  --warn: #a35a06;
+  --warn-soft: #fdf1e0;
+  --warn-border: #f0cf9c;
+  --danger: #b4232a;
+  --danger-soft: #fdecec;
+  --danger-border: #f2b8ba;
+  --neutral-soft: #eef0f3;
+  --neutral-border: #d6dbe3;
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow: 0 1px 3px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-lg: 0 8px 28px rgba(16, 24, 40, 0.12), 0 2px 6px rgba(16, 24, 40, 0.06);
+  --track: #e4e8ee;
+  --overlay: rgba(23, 28, 38, 0.45);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-0: #101318;
+  --surface-1: #171b22;
+  --surface-2: #1d222b;
+  --surface-3: #262c37;
+  --surface-inset: #13171d;
+  --border: #282e39;
+  --border-strong: #3a4250;
+  --text: #e3e7ee;
+  --text-muted: #98a1b0;
+  --text-subtle: #6d7686;
+  --text-invert: #0f1319;
+  --accent: #5b8def;
+  --accent-hover: #78a3f5;
+  --accent-text: #86aff8;
+  --accent-soft: #1a2436;
+  --accent-border: #2f4570;
+  --accent-ring: rgba(91, 141, 239, 0.28);
+  --success: #47b97e;
+  --success-soft: #14251c;
+  --success-border: #27543c;
+  --warn: #d99a3e;
+  --warn-soft: #2a2013;
+  --warn-border: #574526;
+  --danger: #ef7b7f;
+  --danger-soft: #2b1719;
+  --danger-border: #5c2f32;
+  --neutral-soft: #20252e;
+  --neutral-border: #333a46;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 10px 32px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
+  --track: #262c37;
+  --overlay: rgba(6, 9, 13, 0.62);
+}
+
+/* ========================================================================
+   Palette émotionnelle
+   ----------------------------------------------------------------------------
+   29 émotions. Volontairement désaturée par rapport à l'ancienne : ces
+   couleurs n'apparaissent qu'en pastille de 8px ou en chip, jamais en aplat.
+   Une pastille néon sur fond clair est illisible, et 29 teintes vives côte à
+   côte dans un tableau créent exactement le "fouillis" qu'on corrige ici.
+
+   Regroupées par famille (positif / négatif / cognitif) pour que deux
+   émotions voisines restent distinguables sans être criardes.
+   ====================================================================== */
+:root {
+  --emo-neutral:     #8b929e;
+  /* positives — verts, ambres, roses chauds */
+  --emo-happy:       #2e9e63;
+  --emo-excited:     #d97a1f;
+  --emo-love:        #cc4f8f;
+  --emo-proud:       #c19022;
+  --emo-grateful:    #559e35;
+  --emo-playful:     #d98a35;
+  --emo-amused:      #c7a01f;
+  --emo-hopeful:     #2f93ab;
+  --emo-relieved:    #4aa77f;
+  /* négatives — bleus froids, rouges, violets sourds */
+  --emo-sad:         #5470b8;
+  --emo-angry:       #c0392f;
+  --emo-scared:      #8a5bb5;
+  --emo-disgusted:   #6f9a34;
+  --emo-frustrated:  #c25c33;
+  --emo-lonely:      #5a678f;
+  --emo-anxious:     #9a5cae;
+  --emo-bored:       #7c8797;
+  --emo-jealous:     #b2842c;
+  /* cognitives — cyans, indigos, mauves */
+  --emo-surprised:   #c4a015;
+  --emo-thinking:    #3486a8;
+  --emo-confused:    #8272bb;
+  --emo-embarrassed: #c07290;
+  --emo-nostalgic:   #8878b8;
+  --emo-dreamy:      #7a63bd;
+  --emo-determined:  #c04a5c;
+  --emo-mischievous: #b5559b;
+  --emo-curious:     #3a8fb0;
+  --emo-melancholic: #6a7392;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --emo-neutral:     #98a1b0;
+    --emo-happy:       #52c489;
+    --emo-excited:     #eda153;
+    --emo-love:        #e87ab0;
+    --emo-proud:       #e0b653;
+    --emo-grateful:    #85c964;
+    --emo-playful:     #edad63;
+    --emo-amused:      #e0c552;
+    --emo-hopeful:     #58bcd6;
+    --emo-relieved:    #6fcaa3;
+    --emo-sad:         #7f99dd;
+    --emo-angry:       #e8695f;
+    --emo-scared:      #b184dd;
+    --emo-disgusted:   #9bc260;
+    --emo-frustrated:  #e88a5f;
+    --emo-lonely:      #8390b8;
+    --emo-anxious:     #bf85d3;
+    --emo-bored:       #99a3b3;
+    --emo-jealous:     #d8ab55;
+    --emo-surprised:   #ddc046;
+    --emo-thinking:    #5cadcd;
+    --emo-confused:    #a89ada;
+    --emo-embarrassed: #e39ab5;
+    --emo-nostalgic:   #ad9edd;
+    --emo-dreamy:      #9e88e0;
+    --emo-determined:  #e67285;
+    --emo-mischievous: #d97cc0;
+    --emo-curious:     #62b5d5;
+    --emo-melancholic: #909ab8;
+  }
+}
+
+:root[data-theme="dark"] {
+  --emo-neutral:     #98a1b0;
+  --emo-happy:       #52c489;
+  --emo-excited:     #eda153;
+  --emo-love:        #e87ab0;
+  --emo-proud:       #e0b653;
+  --emo-grateful:    #85c964;
+  --emo-playful:     #edad63;
+  --emo-amused:      #e0c552;
+  --emo-hopeful:     #58bcd6;
+  --emo-relieved:    #6fcaa3;
+  --emo-sad:         #7f99dd;
+  --emo-angry:       #e8695f;
+  --emo-scared:      #b184dd;
+  --emo-disgusted:   #9bc260;
+  --emo-frustrated:  #e88a5f;
+  --emo-lonely:      #8390b8;
+  --emo-anxious:     #bf85d3;
+  --emo-bored:       #99a3b3;
+  --emo-jealous:     #d8ab55;
+  --emo-surprised:   #ddc046;
+  --emo-thinking:    #5cadcd;
+  --emo-confused:    #a89ada;
+  --emo-embarrassed: #e39ab5;
+  --emo-nostalgic:   #ad9edd;
+  --emo-dreamy:      #9e88e0;
+  --emo-determined:  #e67285;
+  --emo-mischievous: #d97cc0;
+  --emo-curious:     #62b5d5;
+  --emo-melancholic: #909ab8;
+}

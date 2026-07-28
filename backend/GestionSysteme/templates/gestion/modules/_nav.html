@@ -1,0 +1,19 @@
+{% comment %} Sous-navigation de l'espace d'un module.
+
+   Ce sont les onglets qui matérialisent l'espace : état, configuration et
+   panneaux au même endroit. Avant, ces trois choses vivaient sur trois pages
+   distinctes du menu global. {% endcomment %}
+<nav class="tabs" aria-label="Sections du module">
+  <a class="tab" href="{% url 'gestionsysteme:module-space' module_name %}"
+     {% if active_panel == "etat" %}aria-current="page"{% endif %}>État</a>
+
+  {% if has_config %}
+    <a class="tab" href="{% url 'gestionsysteme:module-panel' module_name 'configuration' %}"
+       {% if active_panel == "configuration" %}aria-current="page"{% endif %}>Configuration</a>
+  {% endif %}
+
+  {% for p in panels %}
+    <a class="tab" href="{% url 'gestionsysteme:module-panel' module_name p.key %}"
+       {% if active_panel == p.key %}aria-current="page"{% endif %}>{{ p.label }}</a>
+  {% endfor %}
+</nav>

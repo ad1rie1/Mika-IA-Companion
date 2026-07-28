@@ -1,0 +1,90 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+<section class="grid auto-lg mb-6">
+  {% for m in rows %}
+    <article class="card">
+      <div class="card-head">
+        <h3><a href="{% url 'gestionsysteme:module-space' m.name %}">{{ m.label }}</a></h3>
+        <span class="card-head-actions">
+          {% if not m.enabled %}
+            <span class="badge">désactivé</span>
+          {% elif not m.available %}
+            <span class="badge badge-warn" title="Le module se déclare indisponible — souvent une configuration manquante">indisponible</span>
+          {% elif m.running %}
+            <span class="badge badge-ok">en marche</span>
+          {% else %}
+            <span class="badge badge-danger" title="Activé mais arrêté">arrêté</span>
+          {% endif %}
+        </span>
+      </div>
+      <div class="card-body">
+        {% if m.error %}
+          <div class="alert alert-danger mb-3">{{ m.error }}</div>
+        {% endif %}
+
+        {% if m.capabilities %}
+          <ul class="mb-3">
+            {% for c in m.capabilities %}<li>{{ c }}</li>{% endfor %}
+          </ul>
+        {% else %}
+          <p class="muted text-sm mb-3">Aucune capacité déclarée.</p>
+        {% endif %}
+
+        <dl class="kv">
+          <dt>Nom technique</dt><dd class="mono text-xs">{{ m.name }}</dd>
+          {% if m.running %}<dt>En marche depuis</dt><dd>{{ m.uptime|duration }}</dd>{% endif %}
+          {% if m.cron_interval %}<dt>Cadence</dt><dd class="tabular">{{ m.cron_interval }} s</dd>{% endif %}
+          {% if m.installed_tables %}
+            <dt>Tables</dt>
+            <dd><span class="chips">{% for t in m.installed_tables %}<span class="chip mono">{{ t }}</span>{% endfor %}</span></dd>
+          {% endif %}
+        </dl>
+      </div>
+      <div class="card-foot">
+        <a class="btn btn-sm" href="{% url 'gestionsysteme:module-space' m.name %}">Ouvrir l'espace</a>
+        {% if m.has_config %}
+          <a class="btn btn-sm" href="{% url 'gestionsysteme:module-panel' m.name 'configuration' %}">Configurer</a>
+        {% endif %}
+        {% if m.panels %}
+          <span class="muted text-xs push">{{ m.panels|length }} page(s)</span>
+        {% endif %}
+      </div>
+    </article>
+  {% empty %}
+    <div class="card"><div class="card-body">
+      <div class="empty">
+        <div class="empty-title">Aucun module</div>
+        Les greffons se déclarent dans <span class="mono">backend/modules/plugins/</span>.
+      </div>
+    </div></div>
+  {% endfor %}
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <h3>Outils exposés à l'IA</h3>
+    <span class="card-sub">{{ tools|length }} outil(s) MCP des modules en marche</span>
+  </div>
+  <div class="card-body flush">
+    <div class="table-scroll">
+      <table class="table">
+        <thead><tr><th>Outil</th><th class="fit">Module</th><th style="min-width:26rem;">Description</th><th>Paramètres</th></tr></thead>
+        <tbody>
+          {% for t in tools %}
+            <tr>
+              <td class="mono text-xs">{{ t.name }}</td>
+              <td class="fit"><a href="{% url 'gestionsysteme:module-space' t.module %}">{{ t.module }}</a></td>
+              <td><div class="cell-clamp">{{ t.description }}</div></td>
+              <td><span class="chips">{% for p in t.params %}<span class="chip mono">{{ p }}</span>{% endfor %}</span></td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="4"><span class="muted">Aucun outil exposé.</span></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+{% endblock %}

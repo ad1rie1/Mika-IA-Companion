@@ -1,0 +1,89 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+<section class="card mb-6">
+  {% include "gestion/partials/filters.html" %}
+  <div class="card-head">
+    <h3>Instantanés</h3>
+    <span class="card-sub">un relevé périodique de l'état affectif</span>
+  </div>
+
+  {% if snapshots_page.rows %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="fit">Quand</th>
+              <th>Personne</th>
+              <th>Envers elle</th>
+              <th class="num">Intensité</th>
+              <th>Humeur globale</th>
+              <th class="num">Intensité</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in snapshots_page.rows %}
+              <tr>
+                <td class="fit muted" title="{{ s.created_at|dt_full }}">{{ s.created_at|ago }}</td>
+                <td class="mono text-xs">{{ s.person_id|default:"—" }}</td>
+                <td><span class="emo" style="{{ s.primary_emotion|emo_style }}">{{ s.primary_emotion }}</span></td>
+                <td class="num">{{ s.primary_intensity|pct }}</td>
+                <td><span class="emo" style="{{ s.global_emotion|emo_style }}">{{ s.global_emotion }}</span></td>
+                <td class="num">{{ s.global_intensity|pct }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" with page=snapshots_page %}</div>
+  {% else %}
+    <div class="card-body"><div class="empty">Aucun instantané.</div></div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <h3>Résumés de période</h3>
+    <span class="card-sub">agrégés par le consolidateur</span>
+  </div>
+
+  {% if summaries_page.rows %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="fit">Début</th>
+              <th class="fit">Période</th>
+              <th>Personne</th>
+              <th>Émotion dominante</th>
+              <th class="num">Intensité</th>
+              <th>Tendance</th>
+              <th class="num">Relevés</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in summaries_page.rows %}
+              <tr>
+                <td class="fit">{{ s.period_start|dt }}</td>
+                <td class="fit"><span class="badge">{{ s.period_type }}</span></td>
+                <td class="mono text-xs">{{ s.person_id|default:"—" }}</td>
+                <td><span class="emo" style="{{ s.dominant_emotion|emo_style }}">{{ s.dominant_emotion }}</span></td>
+                <td class="num">{{ s.dominant_intensity|pct }}</td>
+                <td>{{ s.trend|default:"—" }}</td>
+                <td class="num">{{ s.snapshot_count }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" with page=summaries_page %}</div>
+  {% else %}
+    <div class="card-body"><div class="empty">Aucun résumé.</div></div>
+  {% endif %}
+</section>
+{% endblock %}

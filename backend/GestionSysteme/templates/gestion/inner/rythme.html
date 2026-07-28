@@ -1,0 +1,91 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+<section class="grid c2 mb-6">
+  <div class="card">
+    <div class="card-head"><h3>Maintenant</h3></div>
+    <div class="card-body">
+      <div class="spread mb-2">
+        <span class="meter-label">Énergie</span>
+        <span class="meter-val">{{ energy|pct }}</span>
+      </div>
+      <div class="meter {{ energy_tone }} mb-4"><span style="width: {{ energy|bar_width }}%;"></span></div>
+
+      <dl class="kv">
+        <dt>Phase circadienne</dt><dd>{{ phase_fr }} — {{ hour }} h</dd>
+        <dt title="Courbe cosinus, sans la pulsion de repos">Énergie circadienne</dt>
+        <dd class="tabular">{{ circadian_energy|pct }}</dd>
+        <dt title="Émotion vers laquelle cette phase tire le point de repos">Ancrage de phase</dt>
+        <dd><span class="emo" style="{{ bias_anchor|emo_style }}">{{ bias_anchor }}</span></dd>
+        <dt>Sommeil</dt>
+        <dd>
+          {% if asleep %}
+            <span class="badge badge-info">{{ sleep_phase_fr }}</span>
+          {% else %}
+            {{ sleep_phase_fr }}
+          {% endif %}
+        </dd>
+      </dl>
+
+      {% if fatigued %}
+        <div class="alert alert-warn mt-4">
+          Sous 50 %, la conscience applique une pénalité de fatigue (jusqu'à
+          −0,25 sur un seuil de 0,5) et le prompt reçoit un bloc
+          « état cognitif » qui infléchit le ton, pas seulement la fréquence.
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <h3>Profil circadien</h3>
+      <span class="card-sub">personality.yaml</span>
+    </div>
+    <div class="card-body">
+      <p class="field-desc">
+        Un personnage nocturne se règle ici, sans toucher au code : bornes de
+        phases, émotion d'ancrage par phase, heure du pic d'énergie.
+      </p>
+      <dl class="kv">
+        <dt>Pic d'énergie</dt><dd class="tabular">{{ profile.energy_peak_hour }} h</dd>
+        <dt>Amplitude</dt><dd class="tabular">{{ profile.energy_amplitude|num }}</dd>
+        <dt>Plancher</dt><dd class="tabular">{{ profile.energy_baseline|num }}</dd>
+      </dl>
+
+      <div class="field-desc mt-4">Ancrages par phase</div>
+      <dl class="kv">
+        {% for label, emotion in phase_anchors %}
+          <dt>{{ label }}</dt>
+          <dd><span class="emo" style="{{ emotion|emo_style }}">{{ emotion }}</span></dd>
+        {% endfor %}
+      </dl>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-head"><h3>Conditions du sommeil</h3></div>
+  <div class="card-body">
+    <p class="field-desc">
+      Les trois conditions doivent être réunies pour qu'une phase de sommeil
+      s'exécute. La troisième ne vaut qu'à l'entrée : une fois endormie pour la
+      nuit, vider la pulsion de repos ne la réveille pas — sinon elle se
+      réveillerait au bout d'une heure, précisément parce qu'elle a bien dormi.
+    </p>
+    <dl class="kv">
+      <dt>Heure</dt><dd>entre 23 h et 6 h</dd>
+      <dt>Inactivité</dt><dd>au moins 15 minutes sans interaction — s'applique toujours</dd>
+      <dt>Pulsion de repos</dt><dd>≥ 0,5 — à l'entrée seulement</dd>
+    </dl>
+
+    <div class="field-desc mt-4">Ce qui s'y passe</div>
+    <dl class="kv">
+      <dt>Sommeil léger</dt><dd>écriture du journal de la journée écoulée</dd>
+      <dt>Sommeil paradoxal</dt><dd>rêve à partir de 2–3 souvenirs de thèmes distincts</dd>
+      <dt>Sommeil profond</dt><dd>3 h–6 h : digestion des ruminations, dérive émotionnelle forcée</dd>
+    </dl>
+  </div>
+</section>
+{% endblock %}

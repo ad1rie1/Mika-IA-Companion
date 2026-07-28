@@ -62,6 +62,9 @@ INSTALLED_APPS = [
     "modules",
     "projects",
     "dashboard",
+    # Interface d'administration serveur-rendue. Remplace `dashboard`, qui
+    # reste monté le temps de la bascule (voir GestionSysteme/__init__.py).
+    "GestionSysteme",
     "configs",
     "identity",
 ]
@@ -78,8 +81,9 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
-    # Must sit after AuthenticationMiddleware — it reads request.user.
+    # Must sit after AuthenticationMiddleware — they read request.user.
     "dashboard.middleware.DashboardAuthMiddleware",
+    "GestionSysteme.middleware.GestionAuthMiddleware",
 ]
 
 # CSRF cookie/origin settings live just after the CORS + session block below,

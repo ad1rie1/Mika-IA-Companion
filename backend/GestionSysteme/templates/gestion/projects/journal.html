@@ -1,0 +1,50 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+<section class="card">
+  {% include "gestion/partials/filters.html" %}
+
+  {% if page.rows %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="fit">Quand</th>
+              <th class="fit">Projet</th>
+              <th class="fit">Action</th>
+              <th style="min-width: 30rem;">Résumé</th>
+              <th>Tâche</th>
+              <th>Outils</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for l in page.rows %}
+              <tr>
+                <td class="fit muted" title="{{ l.created_at|dt_full }}">{{ l.created_at|ago }}</td>
+                <td class="fit">
+                  <a href="{% url 'gestionsysteme:project-detail' l.project_id %}">{{ l.project.title|truncatechars:28 }}</a>
+                </td>
+                <td class="fit">
+                  <span class="badge {% if l.action == 'error' %}badge-danger{% elif l.action == 'blocked' %}badge-warn{% elif l.action == 'advanced' %}badge-ok{% endif %}">{{ l.get_action_display }}</span>
+                </td>
+                <td><div class="cell-clamp">{{ l.summary }}</div></td>
+                <td class="muted text-xs">{% if l.task %}{{ l.task.description|truncatechars:40 }}{% else %}—{% endif %}</td>
+                <td>
+                  <span class="chips">
+                    {% for t in l.tools_used %}<span class="chip mono">{{ t }}</span>{% endfor %}
+                  </span>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
+  {% else %}
+    <div class="card-body"><div class="empty">Aucune ligne de journal.</div></div>
+  {% endif %}
+</section>
+{% endblock %}

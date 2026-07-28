@@ -1,0 +1,152 @@
+{% load static gestion %}<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{{ page_title }}{% endblock %} · Gestion Système</title>
+<meta name="color-scheme" content="light dark">
+{% comment %} Applique le thème choisi AVANT le premier rendu. Sans ce script en ligne,
+   une préférence « sombre » stockée s'appliquerait après la peinture du
+   document et produirait un flash blanc à chaque navigation. {% endcomment %}
+<script>
+  (function () {
+    try {
+      var t = localStorage.getItem("gestion.theme");
+      if (t === "light" || t === "dark") {
+        document.documentElement.setAttribute("data-theme", t);
+      }
+    } catch (e) {}
+  })();
+</script>
+<link rel="stylesheet" href="{% static 'gestion/css/tokens.css' %}">
+<link rel="stylesheet" href="{% static 'gestion/css/base.css' %}">
+<link rel="stylesheet" href="{% static 'gestion/css/layout.css' %}">
+<link rel="stylesheet" href="{% static 'gestion/css/components.css' %}">
+{% block head_extra %}{% endblock %}
+</head>
+<body>
+
+{% comment %} La case pilote l'ouverture du menu sur petit écran. Elle précède .app pour
+   que le sélecteur frère `:checked ~ .app` fonctionne — pas de JavaScript
+   dans le chemin de la navigation. {% endcomment %}
+<input type="checkbox" id="nav-toggle" class="nav-toggle-input" aria-hidden="true" tabindex="-1">
+
+<div class="app">
+
+  <aside class="sidebar" aria-label="Navigation principale">
+    <a class="brand" href="{% url 'gestionsysteme:overview' %}">
+      <span class="brand-mark" aria-hidden="true">M</span>
+      <span>
+        <span class="brand-name">Gestion Système</span>
+        <span class="brand-sub">{{ vitals.status }}</span>
+      </span>
+    </a>
+
+    <nav>
+      {% for group in nav %}
+        {% if group.label %}<div class="nav-group">{{ group.label }}</div>{% endif %}
+        {% for item in group.items %}
+          <a class="nav-item" href="{% url 'gestionsysteme:'|add:item.url_name %}"
+             {% if active_key == item.key %}aria-current="page"{% endif %}>
+            <span class="nav-ico" aria-hidden="true">{{ item.icon }}</span>
+            <span>{{ item.label }}</span>
+            <span class="nav-count">{% if item.count_key %}{{ nav_counts|get:item.count_key|default_if_none:"" }}{% endif %}</span>
+          </a>
+        {% endfor %}
+      {% endfor %}
+
+      {% if module_spaces %}
+        <div class="nav-group">Espaces modules</div>
+        {% for space in module_spaces %}
+          <a class="nav-item" href="{% url 'gestionsysteme:module-space' space.name %}"
+             {% if active_module_space == space.name %}aria-current="page"{% endif %}>
+            <span class="nav-ico" aria-hidden="true">{{ space.icon }}</span>
+            <span>{{ space.label }}</span>
+            {% if not space.running %}
+              <span class="nav-count" title="{% if space.enabled %}activé mais arrêté{% else %}désactivé{% endif %}">!</span>
+            {% endif %}
+          </a>
+        {% endfor %}
+      {% endif %}
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="row" style="justify-content: space-between;">
+        <span>Thème</span>
+        <span class="theme-switch" role="group" aria-label="Choix du thème">
+          <button type="button" data-theme-set="auto" aria-pressed="true" title="Suivre le système">Auto</button>
+          <button type="button" data-theme-set="light" aria-pressed="false" title="Thème clair">Clair</button>
+          <button type="button" data-theme-set="dark" aria-pressed="false" title="Thème sombre">Sombre</button>
+        </span>
+      </div>
+    </div>
+  </aside>
+
+  {# Fermeture du menu par clic hors zone — un <label>, donc sans script. #}
+  <label for="nav-toggle" class="nav-scrim" aria-label="Fermer le menu"></label>
+
+  <div class="main">
+    <header class="topbar">
+      <label for="nav-toggle" class="nav-btn" title="Menu" aria-label="Ouvrir le menu">☰</label>
+      <h1>{{ page_title }}</h1>
+
+      <div class="vitals" data-vitals="{{ vitals_url }}" data-vitals-interval="10000">
+        <span class="vital" title="État du serveur">
+          <span class="dot {% if vitals.status == 'en ligne' %}dot-ok{% else %}dot-danger{% endif %}"></span>
+          <b data-vital="status">{{ vitals.status }}</b>
+        </span>
+        <span class="vital">Phase <b data-vital="phase">{{ vitals.phase }}</b></span>
+        <span class="vital">Énergie <b data-vital="energy">{{ vitals.energy }}</b></span>
+        <span class="vital">Humeur <b data-vital="mood">{{ vitals.mood }}</b></span>
+        <span class="vital">Sommeil <b data-vital="sleep">{{ vitals.sleep }}</b></span>
+      </div>
+    </header>
+
+    <main class="content">
+      {% block breadcrumbs %}{% endblock %}
+
+      {% if messages %}
+        <div class="alert-stack">
+          {% for message in messages %}
+            <div class="alert alert-{{ message.tags|default:'info' }}">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      {% block page_head %}
+        <div class="page-head">
+          <div>
+            <h2>{{ page_title }}</h2>
+            {% if page_description %}<p class="page-desc">{{ page_description }}</p>{% endif %}
+          </div>
+          {% block page_actions %}{% endblock %}
+        </div>
+      {% endblock %}
+
+      {% block tabs %}
+        {% if tabs %}
+          <nav class="tabs" aria-label="Sections">
+            {% for tab in tabs %}
+              <a class="tab" href="{% url 'gestionsysteme:'|add:nav_item.url_name|add:'-tab' tab.key %}"
+                 {% if active_tab == tab.key %}aria-current="page"{% endif %}>
+                {{ tab.label }}
+                {% if tab.count_key %}
+                  {% with n=nav_counts|get:tab.count_key %}
+                    {% if n %}<span class="tab-count">{{ n }}</span>{% endif %}
+                  {% endwith %}
+                {% endif %}
+              </a>
+            {% endfor %}
+          </nav>
+        {% endif %}
+      {% endblock %}
+
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+
+<script src="{% static 'gestion/js/gestion.js' %}" defer></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -9,6 +9,7 @@ urlpatterns = [
     path("", include("projects.urls")),
     path("", include("ai.urls")),
     path("", include("dashboard.urls")),
+    path("gestion/", include("GestionSysteme.urls")),
 ]
 
 if settings.DEBUG:

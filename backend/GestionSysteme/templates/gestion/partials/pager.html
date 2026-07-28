@@ -1,0 +1,40 @@
+{% load gestion %}
+{% comment %} Pagination. Attend `page` (tables.PageResult ou panels._LegacyPage).
+
+   Ce sont de vrais liens : la page est dans l'URL, donc partageable, et le
+   retour arrière du navigateur fonctionne. Les autres paramètres (filtres,
+   tri, taille de page) sont conservés par {% qs_set %}. {% endcomment %}
+{% if page and page.total %}
+<div class="pager">
+  <span class="pager-info">
+    {{ page.start_index }}–{{ page.end_index }} sur {{ page.total }}
+  </span>
+
+  {% if page.num_pages > 1 %}
+    <span class="pager-spacer"></span>
+
+    {% if page.has_prev %}
+      <a class="btn btn-sm" href="{% qs_set page.param page.prev_number %}" rel="prev">← Précédent</a>
+    {% else %}
+      <span class="btn btn-sm" aria-disabled="true">← Précédent</span>
+    {% endif %}
+
+    <span class="pager-pages">
+      {% for n in page.page_links %}
+        {% if n %}
+          <a class="pager-page" href="{% qs_set page.param n %}"
+             {% if n == page.number %}aria-current="page"{% endif %}>{{ n }}</a>
+        {% else %}
+          <span class="pager-gap" aria-hidden="true">…</span>
+        {% endif %}
+      {% endfor %}
+    </span>
+
+    {% if page.has_next %}
+      <a class="btn btn-sm" href="{% qs_set page.param page.next_number %}" rel="next">Suivant →</a>
+    {% else %}
+      <span class="btn btn-sm" aria-disabled="true">Suivant →</span>
+    {% endif %}
+  {% endif %}
+</div>
+{% endif %}

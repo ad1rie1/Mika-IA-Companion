@@ -1,0 +1,153 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+<div class="alert alert-info mb-4">
+  Ces valeurs sont lues <strong>depuis le module de politique</strong>
+  (<span class="mono">identity/trust.py</span>), pas recopiées. La page
+  explique donc ses propres verdicts, et l'explication ne peut pas diverger de
+  la politique qui tourne.
+</div>
+
+<section class="grid c2 mb-6">
+  <div class="card">
+    <div class="card-head">
+      <h3>Niveaux de certitude</h3>
+      <span class="card-sub">à quel point elle croit que ce handle est cette personne</span>
+    </div>
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead><tr><th>Niveau</th><th class="num">Valeur</th><th class="fit">Divulgation privée</th></tr></thead>
+          <tbody>
+            {% for l in levels %}
+              <tr>
+                <td>{{ l.name }}</td>
+                <td class="num">{{ l.value|num }}</td>
+                <td class="fit">
+                  {% if l.value >= private_threshold %}
+                    <span class="badge badge-ok">au-dessus du seuil</span>
+                  {% else %}
+                    <span class="badge">en dessous</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">
+      <span class="text-sm">
+        Seuil de divulgation : <strong>{{ private_threshold|num }}</strong> ·
+        seuil de confiance : <strong>{{ confident_threshold|num }}</strong>
+      </span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <h3>Confiance par canal</h3>
+      <span class="card-sub">ce que le transport prouve</span>
+    </div>
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead><tr><th>Canal</th><th class="num">Plancher</th><th class="num">Plafond</th></tr></thead>
+          <tbody>
+            {% for c in channels %}
+              <tr>
+                <td>{{ c.trust }}</td>
+                <td class="num">{{ c.floor|num }}</td>
+                <td class="num">{{ c.ceiling|num }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">
+      <p class="field-hint" style="margin:0;">
+        Le plafond est absolu : <strong>aucune quantité de discussion ne rend
+        une revendication en salon public équivalente à une connexion
+        authentifiée</strong>. En salon public, la fiche personne n'est jamais
+        injectée — quelle que soit la certitude. Le risque n'y est pas
+        l'erreur d'identité, c'est le public.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="grid c2 mb-6">
+  <div class="card">
+    <div class="card-head"><h3>Preuves — ce qui fait monter</h3></div>
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead><tr><th>Type</th><th class="num">Poids</th><th>Seul, franchit le seuil ?</th></tr></thead>
+          <tbody>
+            {% for kind, weight in evidence_weights %}
+              <tr>
+                <td class="mono">{{ kind }}</td>
+                <td class="num">+{{ weight|num }}</td>
+                <td>
+                  {% if weight >= private_threshold %}
+                    <span class="badge badge-warn">oui</span>
+                  {% else %}
+                    <span class="badge">non</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">
+      <p class="field-hint" style="margin:0;">
+        Calibré contre le seuil : une déclaration seule ne suffit jamais, un
+        fait partagé seul non plus (connaître une chose sur Thomas ne fait pas
+        de vous Thomas) — mais <strong>déclaration + corroboration tombe
+        exactement dessus</strong>.
+      </p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h3>Preuves — ce qui fait descendre</h3></div>
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead><tr><th>Type</th><th class="num">Poids</th></tr></thead>
+          <tbody>
+            {% for kind, weight in counter_weights %}
+              <tr><td class="mono">{{ kind }}</td><td class="num">{{ weight|num }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">
+      <p class="field-hint" style="margin:0;">
+        Un démenti s'applique <strong>immédiatement</strong>, sans attendre de
+        délibération : si elle appelle un inconnu par le prénom d'un ami, tout
+        ce qui suit est déjà faux.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-head"><h3>Identifiants réservés</h3></div>
+  <div class="card-body">
+    <dl class="kv">
+      <dt>Jamais identifiés</dt>
+      <dd><span class="chips">{% for p in internal_ids %}<span class="chip mono">{{ p }}</span>{% endfor %}</span></dd>
+      <dt>Préfixe éphémère</dt>
+      <dd><span class="mono">{{ ephemeral_prefix }}</span> — expire après 7 jours</dd>
+      <dt>Types de revendication</dt>
+      <dd><span class="chips">{% for v, label in claim_kinds %}<span class="chip">{{ label }}</span>{% endfor %}</span></dd>
+    </dl>
+  </div>
+</section>
+{% endblock %}

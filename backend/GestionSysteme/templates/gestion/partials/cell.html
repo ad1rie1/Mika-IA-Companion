@@ -1,0 +1,36 @@
+{% load gestion %}{% spaceless %}
+{% comment %} Rend une cellule typée (panels.Cell). C'est ici — et nulle part ailleurs —
+   que l'intention déclarée par un module devient du balisage. Un module ne
+   peut donc pas produire de HTML : au pire il choisit un `kind` inconnu, qui
+   retombe sur du texte échappé. {% endcomment %}
+{% if cell.render_kind == "badge" %}
+  <span class="badge {% if cell.tone %}badge-{{ cell.tone }}{% endif %}"{% if cell.title %} title="{{ cell.title }}"{% endif %}>{{ cell.text }}</span>
+
+{% elif cell.render_kind == "emotion" %}
+  <span class="emo" style="{{ cell.emotion|emo_style }}"{% if cell.title %} title="{{ cell.title }}"{% endif %}>{{ cell.text }}{% if cell.ratio is not None %} <span class="emo-weight">{{ cell.ratio|pct }}</span>{% endif %}</span>
+
+{% elif cell.render_kind == "link" %}
+  <a href="{{ cell.href }}"{% if cell.title %} title="{{ cell.title }}"{% endif %}>{{ cell.text }}</a>
+
+{% elif cell.render_kind == "meter" %}
+  <span class="row" style="min-width: 7rem;">
+    <span class="meter {{ cell.tone }}" style="flex: 1;"{% if cell.title %} title="{{ cell.title }}"{% endif %}><span style="width: {{ cell.ratio|bar_width }}%;"></span></span>
+    {% if cell.text %}<span class="text-xs tabular">{{ cell.text }}</span>{% endif %}
+  </span>
+
+{% elif cell.render_kind == "bool" %}
+  <span class="row"><span class="dot {% if cell.tone %}dot-{{ cell.tone }}{% endif %}"></span>{{ cell.text }}</span>
+
+{% elif cell.render_kind == "mono" %}
+  <span class="mono text-xs"{% if cell.title %} title="{{ cell.title }}"{% endif %}>{{ cell.text }}</span>
+
+{% elif cell.render_kind == "num" %}
+  <span class="tabular"{% if cell.title %} title="{{ cell.title }}"{% endif %}>{{ cell.text }}</span>
+
+{% elif cell.render_kind == "muted" %}
+  <span class="subtle"{% if cell.title %} title="{{ cell.title }}"{% endif %}>{{ cell.text }}</span>
+
+{% else %}
+  <span{% if cell.clamp %} class="cell-clamp"{% endif %}{% if cell.title %} title="{{ cell.title }}"{% endif %}>{{ cell.text }}</span>
+{% endif %}
+{% endspaceless %}

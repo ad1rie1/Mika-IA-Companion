@@ -1,0 +1,80 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+<div class="alert alert-info mb-4">
+  Quand un projet porte <span class="mono">requires_approval</span>, toute
+  action à effet de bord est mise en file au lieu d'être exécutée. Approuver
+  déclenche l'exécution réelle : un envoi qui échoue marque l'action
+  <strong>« failed »</strong>, jamais « exécutée ».
+</div>
+
+<section class="card">
+  {% include "gestion/partials/filters.html" %}
+
+  {% if page.rows %}
+    <div class="card-body">
+      <div class="col" style="gap: var(--sp-4);">
+        {% for a in page.rows %}
+          <article class="card">
+            <div class="card-head">
+              <h3>
+                <a href="{% url 'gestionsysteme:project-detail' a.project_id %}">{{ a.project.title }}</a>
+              </h3>
+              <span class="badge {% if a.status == 'pending' %}badge-warn{% elif a.status == 'executed' %}badge-ok{% elif a.status == 'failed' %}badge-danger{% endif %}">{{ a.status }}</span>
+              <span class="card-head-actions muted text-xs" title="{{ a.created_at|dt_full }}">{{ a.created_at|ago }}</span>
+            </div>
+            <div class="card-body">
+              <div class="narrative mb-3">{{ a.proposal }}</div>
+
+              {% if a.payload %}
+                <details class="disclosure mb-3">
+                  <summary>Charge utile</summary>
+                  <div class="disclosure-body"><pre>{{ a.payload|pprint }}</pre></div>
+                </details>
+              {% endif %}
+
+              {% if a.status == "pending" %}
+                <div class="row-wrap" style="align-items: flex-end;">
+                  <form method="post" action="{% url 'gestionsysteme:project-pending-action' a.pk %}"
+                        class="row" style="flex: 1; align-items: flex-end;"
+                        data-confirm="Approuver et exécuter cette action ?">
+                    {% csrf_token %}
+                    <input type="hidden" name="decision" value="approuver">
+                    <input type="hidden" name="retour" value="{{ request.get_full_path }}">
+                    <div class="field" style="flex: 1;">
+                      <label class="field-label" for="note-ok-{{ a.pk }}">Note (facultative)</label>
+                      <input type="text" id="note-ok-{{ a.pk }}" name="note">
+                    </div>
+                    <button class="btn btn-primary" type="submit">Approuver et exécuter</button>
+                  </form>
+
+                  <form method="post" action="{% url 'gestionsysteme:project-pending-action' a.pk %}"
+                        data-confirm="Rejeter cette action ?">
+                    {% csrf_token %}
+                    <input type="hidden" name="decision" value="rejeter">
+                    <input type="hidden" name="retour" value="{{ request.get_full_path }}">
+                    <button class="btn btn-danger" type="submit">Rejeter</button>
+                  </form>
+                </div>
+              {% else %}
+                <dl class="kv">
+                  {% if a.user_note %}<dt>Note</dt><dd>{{ a.user_note }}</dd>{% endif %}
+                  {% if a.execution_result %}<dt>Résultat</dt><dd class="mono">{{ a.execution_result }}</dd>{% endif %}
+                  {% if a.resolved_at %}<dt>Tranchée</dt><dd>{{ a.resolved_at|dt_full }}</dd>{% endif %}
+                </dl>
+              {% endif %}
+            </div>
+          </article>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
+  {% else %}
+    <div class="card-body"><div class="empty">
+      <div class="empty-title">Rien en attente</div>
+      Aucune action ne demande ton accord.
+    </div></div>
+  {% endif %}
+</section>
+{% endblock %}

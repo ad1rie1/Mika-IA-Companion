@@ -1,0 +1,147 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block breadcrumbs %}
+<div class="crumbs">
+  <a href="{% url 'gestionsysteme:social-tab' 'personnes' %}">Personnes</a>
+  <span class="sep">/</span><span>{{ entity.name }}</span>
+</div>
+{% endblock %}
+
+{% block tabs %}{% endblock %}
+
+{% block content %}
+<section class="split mb-6">
+  <div class="card">
+    <div class="card-head">
+      <h3>Théorie de l'esprit</h3>
+      <span class="card-sub">régénérée périodiquement par le consolidateur</span>
+    </div>
+    <div class="card-body">
+      {% if profile %}
+        <div class="narrative mb-4">{{ profile.summary }}</div>
+        <dl class="kv">
+          <dt>Proximité</dt><dd><span class="badge">{{ profile.closeness }}</span></dd>
+          <dt>Ton préféré</dt><dd>{{ profile.preferred_tone|default:"—" }}</dd>
+          <dt>Échanges</dt><dd class="tabular">{{ profile.interaction_count }}</dd>
+          <dt>Confiance</dt><dd class="tabular">{{ profile.confidence|num }}</dd>
+          {% if profile.topics_of_interest %}
+            <dt>Sujets d'intérêt</dt>
+            <dd><span class="chips">{% for t in profile.topics_of_interest %}<span class="chip">{{ t }}</span>{% endfor %}</span></dd>
+          {% endif %}
+          {% if profile.sensitive_topics %}
+            <dt>Sujets sensibles</dt>
+            <dd><span class="chips">{% for t in profile.sensitive_topics %}<span class="chip">{{ t }}</span>{% endfor %}</span></dd>
+          {% endif %}
+          <dt>Généré le</dt><dd>{{ profile.generated_at|dt_full }}</dd>
+          <dt>Dernier contact</dt><dd>{{ profile.last_interaction_at|dt_full }}</dd>
+        </dl>
+      {% else %}
+        <div class="empty">
+          <div class="empty-title">Pas encore de fiche</div>
+          Elle se génère après ≥ 3 souvenirs mentionnant cette personne et ≥ 24 h
+          depuis la dernière génération.
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="col" style="gap: var(--sp-4);">
+    <div class="card">
+      <div class="card-head"><h3>Ce qu'elle ressent</h3></div>
+      <div class="card-body">
+        {% if affect %}
+          <div class="row-wrap mb-3">
+            <span class="emo text-lg" style="{{ affect.emotion|emo_style }}">{{ affect.emotion }}</span>
+            <span class="tabular muted">{{ affect.intensity|pct }}</span>
+          </div>
+          <div class="meter {{ affect.intensity|tone_ratio }} mb-3">
+            <span style="width: {{ affect.intensity|bar_width }}%;"></span>
+          </div>
+          <dl class="kv">
+            <dt>Dynamique</dt><dd class="tabular">{{ affect.velocity|num }}</dd>
+            <dt>Historique</dt><dd class="tabular">{{ affect.history_size }}</dd>
+          </dl>
+        {% else %}
+          <p class="muted text-sm">
+            Aucune humeur en mémoire vive pour cette personne. L'état affectif
+            est reconstruit au fil des échanges et ne survit pas à un redémarrage.
+          </p>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Handles</h3></div>
+      <div class="card-body">
+        {% if handles %}
+          <div class="chips">
+            {% for h in handles %}
+              <span class="chip mono" title="{{ h.channel }} · {{ h.trust }}">{{ h.person_id }}</span>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="muted text-sm">
+            Aucun handle lié. Sans liaison, la mémoire par personne ne se résout
+            pas — c'est le point que la couche identité existe pour corriger.
+          </p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="card mb-6">
+  <div class="card-head">
+    <h3>Engagements</h3>
+    <span class="card-sub">ce qu'elle lui a promis</span>
+  </div>
+  <div class="card-body flush">
+    <div class="table-scroll">
+      <table class="table">
+        <thead><tr><th>Promesse</th><th class="fit">État</th><th class="fit">Échéance</th><th class="fit">Pris</th></tr></thead>
+        <tbody>
+          {% for c in commitments %}
+            <tr {% if c.status != "pending" %}class="is-muted"{% endif %}>
+              <td>{{ c.description }}</td>
+              <td class="fit">
+                <span class="badge {% if c.status == 'pending' %}badge-warn{% elif c.status == 'honored' %}badge-ok{% endif %}">{{ c.status }}</span>
+              </td>
+              <td class="fit">{% if c.due_at %}{{ c.due_at|dt }}{% else %}—{% endif %}</td>
+              <td class="fit muted" title="{{ c.created_at|dt_full }}">{{ c.created_at|ago }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="4"><span class="muted">Aucun engagement.</span></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-head"><h3>Souvenirs la concernant</h3></div>
+  {% if souvenirs_page.rows %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead><tr><th style="min-width:30rem;">Contenu</th><th>Ressenti</th><th class="num">Importance</th><th class="fit">Vécu</th></tr></thead>
+          <tbody>
+            {% for s in souvenirs_page.rows %}
+              <tr>
+                <td><div class="cell-clamp">{{ s.content }}</div></td>
+                <td><span class="emo" style="{{ s.emotion|emo_style }}">{{ s.emotion }}</span></td>
+                <td class="num">{{ s.importance|num }}</td>
+                <td class="fit muted" title="{{ s.occurred_at|dt_full }}">{{ s.occurred_at|ago }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" with page=souvenirs_page %}</div>
+  {% else %}
+    <div class="card-body"><div class="empty">Aucun souvenir rattaché.</div></div>
+  {% endif %}
+</section>
+{% endblock %}

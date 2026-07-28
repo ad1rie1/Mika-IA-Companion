@@ -1,0 +1,80 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+<div class="alert alert-info mb-4">
+  Chaque événement du bus devient une observation. Les flux à gros volume
+  (<span class="mono">chat.*</span>, <span class="mono">telegram.message</span>,
+  <span class="mono">rss.new_entry</span>, <span class="mono">forge.*</span>)
+  sont classés par heuristique ; seul <span class="mono">email.received</span>
+  passe encore par un appel LLM, parce qu'un e-mail est un contenu dont
+  l'importance ne se lit pas dans une table de mots-clés.
+</div>
+
+<section class="card">
+  {% include "gestion/partials/filters.html" %}
+
+  {% if page.rows %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="fit">Quand</th>
+              <th class="fit">Source</th>
+              <th style="min-width: 26rem;">Résumé</th>
+              <th class="fit">Catégorie</th>
+              <th style="min-width: 8rem;">Pertinence</th>
+              <th>Réaction</th>
+              <th class="fit">État</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for o in page.rows %}
+              <tr>
+                <td class="fit muted" title="{{ o.created_at|dt_full }}">{{ o.created_at|ago }}</td>
+                <td class="fit">
+                  <span class="badge">{{ o.source }}</span>
+                  <small class="mono">{{ o.event_type }}</small>
+                </td>
+                <td>
+                  <div class="cell-clamp">{{ o.summary }}</div>
+                  {% if o.action_response %}
+                    <details class="disclosure mt-2">
+                      <summary>Réponse produite</summary>
+                      <div class="disclosure-body">{{ o.action_response }}</div>
+                    </details>
+                  {% endif %}
+                </td>
+                <td class="fit">{{ o.category|default:"—" }}</td>
+                <td>
+                  <div class="row">
+                    <span class="meter {{ o.pertinence|tone_ratio }}" style="flex:1; min-width:4rem;">
+                      <span style="width: {{ o.pertinence|bar_width }}%;"></span>
+                    </span>
+                    <span class="tabular text-xs">{{ o.pertinence|num }}</span>
+                  </div>
+                </td>
+                <td>
+                  {% if o.emotional_reaction %}
+                    <span class="emo" style="{{ o.emotional_reaction|emo_style }}">
+                      {{ o.emotional_reaction }}
+                      <span class="emo-weight">{{ o.emotional_intensity|pct }}</span>
+                    </span>
+                  {% else %}—{% endif %}
+                </td>
+                <td class="fit">
+                  <span class="badge {% with t=status_tones|get:o.status %}{% if t %}badge-{{ t }}{% endif %}{% endwith %}">{{ o.status }}</span>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
+  {% else %}
+    <div class="card-body"><div class="empty">Aucune observation.</div></div>
+  {% endif %}
+</section>
+{% endblock %}

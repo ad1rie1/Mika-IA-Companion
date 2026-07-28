@@ -1,0 +1,113 @@
+{% load gestion %}
+{% comment %} Rend un bloc de panneau (panels.Table / Fields / Stats / Note / Prose /
+   Template). Le module a décrit *ce qu'il veut montrer* ; la mise en forme
+   appartient entièrement à GestionSystème, donc tous les modules se
+   ressemblent et aucun ne peut casser la page. {% endcomment %}
+
+{% if block.block == "table" %}
+  <div class="card mb-4">
+    {% if block.caption %}
+      <div class="card-head"><h3>{{ block.caption }}</h3></div>
+    {% endif %}
+    {% if block.rows %}
+      <div class="card-body flush">
+        <div class="table-scroll">
+          <table class="table">
+            <thead>
+              <tr>
+                {% for col in block.columns %}
+                  <th class="{{ col.align }}"{% if col.hint %} title="{{ col.hint }}"{% endif %}>{{ col.label }}</th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in block.rows %}
+                <tr {% if row.tone %}class="is-{{ row.tone }}"{% endif %}>
+                  {% for cell in row.cells %}
+                    <td class="{% if cell.render_kind == 'num' %}num{% endif %}">
+                      {% if forloop.first and row.href %}
+                        <a href="{{ row.href }}">{% include "gestion/partials/cell.html" %}</a>
+                      {% else %}
+                        {% include "gestion/partials/cell.html" %}
+                      {% endif %}
+                    </td>
+                  {% endfor %}
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% if block.page %}
+        <div class="card-foot">{% include "gestion/partials/pager.html" with page=block.page %}</div>
+      {% endif %}
+    {% else %}
+      <div class="card-body"><div class="empty">{{ block.empty }}</div></div>
+    {% endif %}
+  </div>
+
+{% elif block.block == "fields" %}
+  <div class="card mb-4">
+    {% if block.title %}<div class="card-head"><h3>{{ block.title }}</h3></div>{% endif %}
+    <div class="card-body">
+      {% if block.items %}
+        <dl class="kv">
+          {% for f in block.items %}
+            <dt>{{ f.label }}</dt>
+            <dd>
+              {% if f.render_kind == "badge" %}
+                <span class="badge {% if f.tone %}badge-{{ f.tone }}{% endif %}">{{ f.value }}</span>
+              {% elif f.render_kind == "emotion" %}
+                <span class="emo" style="{{ f.value|emo_style }}">{{ f.value }}</span>
+              {% elif f.render_kind == "link" %}
+                <a href="{{ f.href }}">{{ f.value }}</a>
+              {% elif f.render_kind == "mono" %}
+                <span class="mono">{{ f.value }}</span>
+              {% else %}
+                {{ f.value }}
+              {% endif %}
+            </dd>
+          {% endfor %}
+        </dl>
+      {% else %}
+        <div class="empty">Aucune donnée.</div>
+      {% endif %}
+    </div>
+  </div>
+
+{% elif block.block == "stats" %}
+  {% if block.title %}<h3 class="mb-3">{{ block.title }}</h3>{% endif %}
+  <div class="grid auto mb-4">
+    {% for s in block.items %}
+      <div class="stat">
+        <div class="stat-label">{{ s.label }}</div>
+        <div class="stat-value {% if s.tone %}tone-{{ s.tone }}{% endif %}">{{ s.value }}</div>
+        {% if s.sub %}<div class="stat-sub">{{ s.sub }}</div>{% endif %}
+      </div>
+    {% endfor %}
+  </div>
+
+{% elif block.block == "note" %}
+  <div class="alert alert-{{ block.tone }} mb-4">
+    <div>
+      {% if block.title %}<strong>{{ block.title }}</strong><br>{% endif %}
+      {{ block.text }}
+    </div>
+  </div>
+
+{% elif block.block == "prose" %}
+  <div class="card mb-4">
+    {% if block.title %}<div class="card-head"><h3>{{ block.title }}</h3></div>{% endif %}
+    <div class="card-body"><div class="narrative">{{ block.text }}</div></div>
+  </div>
+
+{% elif block.block == "template" %}
+  {% comment %} Échappatoire assumée : le module fournit son propre gabarit Django,
+     résolu depuis son dossier `templates/`. C'est du code qu'il possède, pas
+     une donnée qu'il relaie — et il passe quand même par le moteur de
+     gabarits, donc échappé par défaut. {% endcomment %}
+  {% include block.name with panel_context=block.context only %}
+
+{% else %}
+  <div class="alert alert-warn mb-4">Bloc non affichable.</div>
+{% endif %}

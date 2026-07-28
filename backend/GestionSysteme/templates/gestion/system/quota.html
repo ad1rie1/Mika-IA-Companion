@@ -1,0 +1,97 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+{% if not available %}
+  <div class="empty">
+    <div class="empty-title">Suivi de quota indisponible</div>
+    Le module <span class="mono">ai.quota</span> n'a pas pu être chargé.
+  </div>
+{% else %}
+  <div class="alert alert-info mb-4">
+    Les plafonds par rôle se règlent dans <span class="mono">.env</span>
+    (<span class="mono">AI_QUOTA_ROLE_&lt;RÔLE&gt;_DAILY</span> /
+    <span class="mono">_MONTHLY</span>) : ils sont lus par nom calculé, ce sont
+    donc des constantes de réglage et non des clés de configuration. Une valeur
+    à <strong>0 signifie illimité</strong>.
+  </div>
+
+  <section class="grid c2 mb-6">
+    <div class="stat">
+      <div class="stat-label">Jour en cours</div>
+      <div class="stat-value">{{ today }}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Mois en cours</div>
+      <div class="stat-value">{{ month }}</div>
+    </div>
+  </section>
+
+  <section class="card mb-6">
+    <div class="card-head"><h3>Par rôle</h3></div>
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Rôle</th>
+              <th class="num">Jetons (jour)</th>
+              <th class="num">Jetons (mois)</th>
+              <th class="num">Appels (jour)</th>
+              <th class="num">Coût (jour)</th>
+              <th class="num">Coût (mois)</th>
+              <th class="num">Plafond jour</th>
+              <th class="num">Plafond mois</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for role, c in roles.items %}
+              <tr>
+                <td class="mono">{{ role }}</td>
+                <td class="num">{{ c.tokens_day }}</td>
+                <td class="num">{{ c.tokens_month }}</td>
+                <td class="num">{{ c.calls_day }}</td>
+                <td class="num">{{ c.cost_usd_day|num:4 }} $</td>
+                <td class="num">{{ c.cost_usd_month|num:4 }} $</td>
+                <td class="num">{% if c.limit_daily %}{{ c.limit_daily }}{% else %}<span class="muted">illimité</span>{% endif %}</td>
+                <td class="num">{% if c.limit_monthly %}{{ c.limit_monthly }}{% else %}<span class="muted">illimité</span>{% endif %}</td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="8"><span class="muted">Aucun appel enregistré.</span></td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  {% if projects %}
+    <section class="card">
+      <div class="card-head">
+        <h3>Par projet</h3>
+        <span class="card-sub">un dépassement défère le prochain passage du lanceur</span>
+      </div>
+      <div class="card-body flush">
+        <div class="table-scroll">
+          <table class="table">
+            <thead>
+              <tr><th>Projet</th><th class="num">Jetons (jour)</th><th class="num">Jetons (mois)</th><th class="num">Appels (mois)</th><th class="num">Coût (mois)</th></tr>
+            </thead>
+            <tbody>
+              {% for pid, c in projects.items %}
+                <tr>
+                  <td><a href="{% url 'gestionsysteme:project-detail' pid %}">#{{ pid }}</a></td>
+                  <td class="num">{{ c.tokens_day }}</td>
+                  <td class="num">{{ c.tokens_month }}</td>
+                  <td class="num">{{ c.calls_month }}</td>
+                  <td class="num">{{ c.cost_usd_month|num:4 }} $</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  {% endif %}
+{% endif %}
+{% endblock %}

@@ -1,0 +1,105 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+<section class="grid auto mb-6">
+  <div class="stat">
+    <div class="stat-label">Identités visibles</div>
+    <div class="stat-value">{{ summary.total }}</div>
+    <div class="stat-sub">hors handles éphémères</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Liées à une entité</div>
+    <div class="stat-value">{{ summary.bound }}</div>
+    <div class="stat-sub">la mémoire par personne se résout</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Au-dessus du seuil</div>
+    <div class="stat-value">{{ summary.disclosing }}</div>
+    <div class="stat-sub">fiche personne injectée dans le prompt</div>
+  </div>
+</section>
+
+<div class="alert alert-info mb-4">
+  La colonne qui compte est <strong>Divulgation</strong>, pas le chiffre de
+  certitude. Sous {{ summary.threshold|num }}, la fiche personne n'est
+  <em>pas</em> injectée dans le prompt : Mika salue par le prénom et retient
+  délibérément l'historique. La certitude affichée est l'<strong>effective</strong>
+  — relevée au plancher du canal et bornée par son plafond, exactement comme
+  le prompt la calcule. La valeur stockée est en info-bulle.
+</div>
+
+<section class="card">
+  {% include "gestion/partials/filters.html" %}
+
+  {% if page.rows %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Connue comme</th>
+              <th class="fit">Entité mémoire</th>
+              <th class="fit">Canal</th>
+              <th style="min-width: 9rem;">Certitude</th>
+              <th class="fit">Niveau</th>
+              <th class="fit">Divulgation</th>
+              <th class="fit">Vue</th>
+              <th class="fit"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in page.rows %}
+              <tr>
+                <td>
+                  {{ r.obj.display_name|default:"—" }}
+                  {% if r.handle %}<small class="mono">{{ r.handle.person_id }}</small>{% endif %}
+                </td>
+                <td class="fit">
+                  {% if r.obj.entity_id %}
+                    <a href="{% url 'gestionsysteme:person-detail' r.obj.entity_id %}">{{ r.obj.entity.name }}</a>
+                  {% else %}
+                    <span class="badge badge-warn">non liée</span>
+                  {% endif %}
+                </td>
+                <td class="fit">
+                  {% if r.handle %}
+                    <span class="badge">{{ r.handle.channel }}</span>
+                    <small>{{ r.handle.trust }}</small>
+                  {% else %}—{% endif %}
+                </td>
+                <td title="valeur stockée : {{ r.stored|num }}">
+                  <div class="row">
+                    <span class="meter {{ r.decision.certainty|tone_ratio }}" style="flex:1; min-width:4rem;">
+                      <span style="width: {{ r.decision.certainty|bar_width }}%;"></span>
+                    </span>
+                    <span class="tabular text-xs">{{ r.decision.certainty|num }}</span>
+                  </div>
+                </td>
+                <td class="fit"><span class="badge">{{ r.decision.level.name|lower }}</span></td>
+                <td class="fit">
+                  {% if r.decision.may_disclose %}
+                    <span class="badge badge-ok">autorisée</span>
+                  {% else %}
+                    <span class="badge badge-danger" title="La fiche personne n'atteint pas le prompt">fermée</span>
+                  {% endif %}
+                </td>
+                <td class="fit muted" title="{{ r.obj.last_seen|dt_full }}">{{ r.obj.last_seen|ago }}</td>
+                <td class="fit">
+                  <a class="btn btn-sm" href="{% url 'gestionsysteme:identity-detail' r.obj.pk %}">Ouvrir</a>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
+  {% else %}
+    <div class="card-body"><div class="empty">
+      <div class="empty-title">Aucune identité</div>
+      Elles apparaissent dès qu'un transport se connecte.
+    </div></div>
+  {% endif %}
+</section>
+{% endblock %}

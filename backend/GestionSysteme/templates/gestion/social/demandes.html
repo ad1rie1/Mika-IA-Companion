@@ -1,0 +1,87 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+<div class="alert alert-info mb-4">
+  Une revendication est déposée passivement quand quelqu'un dit « moi c'est
+  Thomas ». Elle ne lie <strong>rien</strong> toute seule : la détection est
+  volontairement conservatrice et attend une décision. Une déclaration seule
+  (0,20) ne franchit jamais le seuil de divulgation ; c'est la
+  <em>corroboration</em> qui l'y amène.
+</div>
+
+<section class="card">
+  {% include "gestion/partials/filters.html" %}
+
+  {% if page.rows %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="fit">Déposée</th>
+              <th>Se dit</th>
+              <th class="fit">Type</th>
+              <th class="fit">Canal</th>
+              <th style="min-width: 22rem;">Preuve avancée</th>
+              <th class="fit">État</th>
+              <th class="fit">Décider</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in page.rows %}
+              <tr>
+                <td class="fit muted" title="{{ c.created_at|dt_full }}">{{ c.created_at|ago }}</td>
+                <td>
+                  <strong>{{ c.claimed_name|default:"—" }}</strong>
+                  {% if c.handle %}<small class="mono">{{ c.handle.person_id }}</small>{% endif %}
+                </td>
+                <td class="fit"><span class="badge">{{ c.get_kind_display }}</span></td>
+                <td class="fit">{{ c.channel|default:"—" }}<small>{{ c.trust }}</small></td>
+                <td><div class="cell-clamp">{{ c.evidence|default:"—" }}</div></td>
+                <td class="fit">
+                  <span class="badge {% if c.status == 'pending' %}badge-warn{% elif c.status == 'accepted' %}badge-ok{% else %}badge-danger{% endif %}">
+                    {{ c.get_status_display }}
+                  </span>
+                  {% if c.applied_weight %}<small class="tabular">poids {{ c.applied_weight|num }}</small>{% endif %}
+                </td>
+                <td class="fit">
+                  {% if c.status == "pending" %}
+                    <div class="row">
+                      <form method="post" action="{% url 'gestionsysteme:claim-action' c.pk %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="accepter">
+                        <input type="hidden" name="retour" value="{{ request.get_full_path }}">
+                        <select name="evidence_kind" aria-label="Preuve retenue" style="min-width:11rem;">
+                          <option value="">déclaration seule</option>
+                          {% for k in evidence_kinds %}<option value="{{ k }}">{{ k }}</option>{% endfor %}
+                        </select>
+                        <button class="btn btn-sm btn-primary mt-2 btn-block" type="submit">Accepter</button>
+                      </form>
+                      <form method="post" action="{% url 'gestionsysteme:claim-action' c.pk %}"
+                            data-confirm="Rejeter cette revendication ?">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="rejeter">
+                        <input type="hidden" name="retour" value="{{ request.get_full_path }}">
+                        <button class="btn btn-sm btn-danger" type="submit">Rejeter</button>
+                      </form>
+                    </div>
+                  {% else %}
+                    <span class="muted text-xs" title="{{ c.resolved_at|dt_full }}">{{ c.resolution_note|default:"—"|truncatechars:40 }}</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
+  {% else %}
+    <div class="card-body"><div class="empty">
+      <div class="empty-title">Rien à trancher</div>
+      Aucune revendication ne correspond à ce filtre.
+    </div></div>
+  {% endif %}
+</section>
+{% endblock %}

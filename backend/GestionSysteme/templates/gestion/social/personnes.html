@@ -1,0 +1,68 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+<section class="card">
+  {% include "gestion/partials/filters.html" %}
+
+  {% if page.rows %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Nom</th>
+              <th class="fit">Proximité</th>
+              <th class="fit">Ton</th>
+              <th class="num">Échanges</th>
+              <th style="min-width: 8rem;">Confiance</th>
+              <th class="num">Promesses</th>
+              <th class="fit">Dernier contact</th>
+              <th class="fit"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for e in page.rows %}
+              <tr>
+                <td>
+                  <a href="{% url 'gestionsysteme:person-detail' e.id %}">{{ e.name }}</a>
+                  {% if not e.profile %}
+                    <small title="Généré après ≥3 souvenirs la mentionnant et ≥24 h">pas encore de fiche</small>
+                  {% endif %}
+                </td>
+                <td class="fit">{% if e.profile %}<span class="badge">{{ e.profile.closeness }}</span>{% else %}—{% endif %}</td>
+                <td class="fit">{% if e.profile %}{{ e.profile.preferred_tone|default:"—" }}{% else %}—{% endif %}</td>
+                <td class="num">{% if e.profile %}{{ e.profile.interaction_count }}{% else %}0{% endif %}</td>
+                <td>
+                  {% if e.profile %}
+                    <div class="row">
+                      <span class="meter {{ e.profile.confidence|tone_ratio }}" style="flex:1; min-width:4rem;">
+                        <span style="width: {{ e.profile.confidence|bar_width }}%;"></span>
+                      </span>
+                      <span class="tabular text-xs">{{ e.profile.confidence|num }}</span>
+                    </div>
+                  {% else %}—{% endif %}
+                </td>
+                <td class="num">
+                  {% if e.pending_commitments %}
+                    <span class="badge badge-warn">{{ e.pending_commitments }}</span>
+                  {% else %}—{% endif %}
+                </td>
+                <td class="fit muted">
+                  {% if e.profile and e.profile.last_interaction_at %}
+                    <span title="{{ e.profile.last_interaction_at|dt_full }}">{{ e.profile.last_interaction_at|ago }}</span>
+                  {% else %}—{% endif %}
+                </td>
+                <td class="fit"><a class="btn btn-sm" href="{% url 'gestionsysteme:person-detail' e.id %}">Fiche</a></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
+  {% else %}
+    <div class="card-body"><div class="empty">Aucune personne connue.</div></div>
+  {% endif %}
+</section>
+{% endblock %}

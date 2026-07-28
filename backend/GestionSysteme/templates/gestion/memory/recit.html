@@ -1,0 +1,65 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+<div class="alert alert-info mb-4">
+  Régénéré quand le dernier date de plus de 24 h <em>et</em> qu'au moins 5
+  nouveaux souvenirs se sont accumulés. L'historique complet est conservé :
+  c'est ce qui rend la dérive du concept de soi lisible sur plusieurs semaines.
+</div>
+
+{% if current %}
+  <section class="card mb-6">
+    <div class="card-head">
+      <h3>Version courante</h3>
+      <span class="card-sub">injectée dans le prompt système</span>
+    </div>
+    <div class="card-body">
+      <div class="narrative mb-4">{{ current.content }}</div>
+      <dl class="kv">
+        <dt>Écrit le</dt><dd>{{ current.created_at|dt_full }}</dd>
+        {% if current.dominant_mood %}
+          <dt>Humeur dominante</dt>
+          <dd><span class="emo" style="{{ current.dominant_mood|emo_style }}">{{ current.dominant_mood }}</span></dd>
+        {% endif %}
+        {% if current.key_themes %}
+          <dt>Thèmes</dt>
+          <dd><span class="chips">{% for t in current.key_themes %}<span class="chip">{{ t }}</span>{% endfor %}</span></dd>
+        {% endif %}
+        {% if current.key_people %}
+          <dt>Personnes</dt>
+          <dd><span class="chips">{% for p in current.key_people %}<span class="chip">{{ p }}</span>{% endfor %}</span></dd>
+        {% endif %}
+      </dl>
+    </div>
+  </section>
+{% endif %}
+
+<section class="card">
+  <div class="card-head"><h3>Historique</h3></div>
+  {% if page.rows|length > 1 %}
+    <div class="card-body">
+      <div class="col" style="gap: var(--sp-4);">
+        {% for n in page.rows %}
+          {% if not forloop.first or page.number > 1 %}
+            <article>
+              <div class="row-wrap mb-2">
+                <strong>{{ n.created_at|dt_full }}</strong>
+                {% if n.dominant_mood %}
+                  <span class="emo" style="{{ n.dominant_mood|emo_style }}">{{ n.dominant_mood }}</span>
+                {% endif %}
+              </div>
+              <div class="quote">{{ n.content }}</div>
+            </article>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
+  {% else %}
+    <div class="card-body"><div class="empty">
+      Une seule version pour l'instant — l'évolution deviendra lisible avec le temps.
+    </div></div>
+  {% endif %}
+</section>
+{% endblock %}

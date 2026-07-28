@@ -1,0 +1,50 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block content %}
+<section class="card">
+  {% include "gestion/partials/filters.html" %}
+
+  {% if page.rows %}
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="fit">Prévue</th>
+              <th style="min-width: 28rem;">Consigne</th>
+              <th class="num">Priorité</th>
+              <th class="fit">Source</th>
+              <th class="fit">État</th>
+              <th class="fit">Exécutée</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for a in page.rows %}
+              <tr>
+                <td class="fit" title="{{ a.scheduled_at|dt_full }}">
+                  {{ a.scheduled_at|dt }}
+                  <small>{{ a.scheduled_at|ago }}</small>
+                </td>
+                <td><div class="cell-clamp">{{ a.prompt }}</div></td>
+                <td class="num">{{ a.priority|num }}</td>
+                <td class="fit"><span class="badge">{{ a.source|default:"—" }}</span></td>
+                <td class="fit">
+                  <span class="badge {% if a.status == 'pending' %}badge-warn{% elif a.status == 'executed' %}badge-ok{% elif a.status == 'failed' %}badge-danger{% endif %}">{{ a.status }}</span>
+                </td>
+                <td class="fit muted">{% if a.executed_at %}{{ a.executed_at|ago }}{% else %}—{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
+  {% else %}
+    <div class="card-body"><div class="empty">
+      <div class="empty-title">Rien de planifié</div>
+      Les actions différées sont créées par l'outil <span class="mono">schedule_action</span>.
+    </div></div>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,47 @@
+{% comment %} Barre de filtres. Attend `filterset` (tables.FilterSet).
+
+   Formulaire GET : les filtres finissent dans l'URL, l'écran est donc
+   reproductible et partageable. Comme un GET n'envoie que ses propres
+   champs, le paramètre `page` disparaît naturellement à chaque changement de
+   filtre — ce qui est le comportement voulu : filtrer ramène en page 1.
+
+   La taille de page est un champ du formulaire, sinon elle serait perdue au
+   premier filtrage. {% endcomment %}
+{% if filterset and filterset.filters %}
+<form class="filters" method="get" role="search">
+  {% for f in filterset.filters %}
+    <div class="field">
+      <label class="field-label" for="filtre-{{ f.param }}">{{ f.label }}</label>
+      {% if f.kind == "search" %}
+        <input type="search" id="filtre-{{ f.param }}" name="{{ f.param }}"
+               value="{{ f.value }}" placeholder="{{ f.placeholder }}">
+      {% else %}
+        <select id="filtre-{{ f.param }}" name="{{ f.param }}"
+                {% if f.autosubmit %}data-autosubmit{% endif %}>
+          {% for c in f.choices %}
+            <option value="{{ c.value }}" {% if c.value == f.value %}selected{% endif %}>{{ c.label }}</option>
+          {% endfor %}
+        </select>
+      {% endif %}
+    </div>
+  {% endfor %}
+
+  {% if filterset.show_per_page %}
+    <div class="field">
+      <label class="field-label" for="filtre-taille">Par page</label>
+      <select id="filtre-taille" name="per_page" data-autosubmit>
+        {% for n in filterset.per_page_choices %}
+          <option value="{{ n }}" {% if n == filterset.per_page %}selected{% endif %}>{{ n }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  {% endif %}
+
+  <div class="filters-actions">
+    <button type="submit" class="btn">Filtrer</button>
+    {% if filterset.active %}
+      <a class="btn btn-ghost" href="{{ request.path }}">Réinitialiser</a>
+    {% endif %}
+  </div>
+</form>
+{% endif %}

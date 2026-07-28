@@ -1,0 +1,201 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block breadcrumbs %}
+<div class="crumbs">
+  <a href="{% url 'gestionsysteme:social-tab' 'identites' %}">Identités</a>
+  <span class="sep">/</span>
+  <span>{{ page_title }}</span>
+</div>
+{% endblock %}
+
+{% block tabs %}{% endblock %}
+
+{% block content %}
+<section class="split mb-6">
+  <div class="card">
+    <div class="card-head">
+      <h3>Verdict</h3>
+      <span class="card-sub">tel que le prompt le calcule</span>
+    </div>
+    <div class="card-body">
+      <p class="narrative mb-4">{{ decision.description }}</p>
+
+      <div class="spread mb-2">
+        <span class="meter-label">Certitude effective</span>
+        <span class="meter-val">{{ decision.certainty|num }}</span>
+      </div>
+      <div class="meter {{ decision.certainty|tone_ratio }} mb-4">
+        <span style="width: {{ decision.certainty|bar_width }}%;"></span>
+      </div>
+
+      <dl class="kv">
+        <dt>Niveau</dt><dd><span class="badge">{{ decision.level.name|lower }}</span></dd>
+        <dt title="La valeur en base, avant plancher et plafond du canal">Valeur stockée</dt>
+        <dd class="tabular">{{ stored|num }}</dd>
+        <dt>Confiance du canal</dt><dd>{{ decision.trust.value }}</dd>
+        <dt>Divulgation privée</dt>
+        <dd>
+          {% if decision.may_disclose %}
+            <span class="badge badge-ok">autorisée</span>
+          {% else %}
+            <span class="badge badge-danger">fermée</span>
+            <div class="field-hint">Seuil : {{ threshold|num }}. En dessous, seule la posture affective est injectée — l'historique de la personne ne l'est pas.</div>
+          {% endif %}
+        </dd>
+        <dt>Entité mémoire</dt>
+        <dd>
+          {% if identity.entity_id %}
+            <a href="{% url 'gestionsysteme:person-detail' identity.entity_id %}">{{ identity.entity.name }}</a>
+          {% else %}<span class="badge badge-warn">non liée</span>{% endif %}
+        </dd>
+        {% if identity.bound_at %}
+          <dt>Liée le</dt><dd>{{ identity.bound_at|dt_full }} <small>via {{ identity.bound_via }}</small></dd>
+        {% endif %}
+        {% if identity.binding_reason %}
+          <dt>Motif</dt><dd>{{ identity.binding_reason }}</dd>
+        {% endif %}
+      </dl>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h3>Handles</h3></div>
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead><tr><th>Identifiant</th><th class="fit">Canal</th><th class="fit">Confiance</th><th class="fit">Vu</th></tr></thead>
+          <tbody>
+            {% for h in handles %}
+              <tr>
+                <td class="mono text-xs">
+                  {{ h.person_id }}
+                  {% if h == primary_handle %}<span class="badge badge-info">principal</span>{% endif %}
+                  {% if h.is_ephemeral %}<span class="badge">éphémère</span>{% endif %}
+                </td>
+                <td class="fit">{{ h.channel }}</td>
+                <td class="fit">{{ h.trust }}</td>
+                <td class="fit muted" title="{{ h.last_seen|dt_full }}">{{ h.last_seen|ago }}</td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="4"><span class="muted">Aucun handle — ligne orpheline.</span></td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="grid c3 mb-6">
+  <div class="card">
+    <div class="card-head"><h3>Lier à une entité</h3></div>
+    <div class="card-body">
+      <p class="field-desc">
+        Le chemin normal est d'accepter une revendication. Ceci couvre ce que
+        le flux de revendication n'atteint pas : un contact qui n'a jamais rien
+        revendiqué, ou une liaison à repointer.
+      </p>
+      <form method="post" action="{% url 'gestionsysteme:identity-action' identity.pk %}">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="lier">
+        <div class="field mb-3">
+          <label class="field-label" for="entity_name">Nom de l'entité mémoire</label>
+          <input type="text" id="entity_name" name="entity_name" required
+                 value="{% if identity.entity_id %}{{ identity.entity.name }}{% endif %}">
+        </div>
+        <button class="btn btn-primary" type="submit">Lier</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h3>Enregistrer une preuve</h3></div>
+    <div class="card-body">
+      <p class="field-desc">
+        Le levier pour ce qu'accepter/rejeter n'exprime pas : un fait partagé
+        faux (<span class="mono">contradicted</span>), quelqu'un qui se porte
+        garant (<span class="mono">vouched</span>), une preuve que seule cette
+        personne pouvait donner (<span class="mono">shared_memory</span>).
+      </p>
+      <form method="post" action="{% url 'gestionsysteme:identity-action' identity.pk %}">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="preuve">
+        <div class="field mb-3">
+          <label class="field-label" for="kind">Type</label>
+          <select id="kind" name="kind" required>
+            {% for k in evidence_kinds %}
+              <option value="{{ k }}">
+                {{ k }}
+                {% with w=evidence_weights|get:k %}{% if w %}({{ w|num }}){% endif %}{% endwith %}
+                {% with w=counter_weights|get:k %}{% if w %}({{ w|num }}){% endif %}{% endwith %}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field mb-3">
+          <label class="field-label" for="detail">Détail</label>
+          <input type="text" id="detail" name="detail" placeholder="ce qui s'est passé">
+        </div>
+        <button class="btn btn-primary" type="submit">Enregistrer</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h3>Révoquer</h3></div>
+    <div class="card-body">
+      <p class="field-desc">
+        Cesser de croire. Ce n'est <strong>pas</strong> une suppression : le
+        registre conserve pourquoi elle a cru et pourquoi elle a cessé.
+      </p>
+      <form method="post" action="{% url 'gestionsysteme:identity-action' identity.pk %}"
+            data-confirm="Révoquer cette liaison ? Le registre de preuves est conservé.">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="revoquer">
+        <div class="field mb-3">
+          <label class="field-label" for="reason">Motif</label>
+          <input type="text" id="reason" name="reason" placeholder="pourquoi tu n'y crois plus">
+        </div>
+        <button class="btn btn-danger" type="submit">Révoquer</button>
+      </form>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <h3>Registre des preuves</h3>
+    <span class="card-sub">chaque raison de croire, et ce qu'elle valait</span>
+  </div>
+  <div class="card-body flush">
+    <div class="table-scroll">
+      <table class="table">
+        <thead>
+          <tr>
+            <th class="fit">Quand</th><th>Se dit</th><th class="fit">Type</th>
+            <th>Preuve</th><th class="num">Poids</th><th class="fit">État</th><th>Résolution</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in claims %}
+            <tr>
+              <td class="fit muted" title="{{ c.created_at|dt_full }}">{{ c.created_at|ago }}</td>
+              <td>{{ c.claimed_name|default:"—" }}</td>
+              <td class="fit"><span class="badge">{{ c.get_kind_display }}</span></td>
+              <td><div class="cell-clamp">{{ c.evidence|default:"—" }}</div></td>
+              <td class="num">{{ c.applied_weight|num }}</td>
+              <td class="fit">
+                <span class="badge {% if c.status == 'pending' %}badge-warn{% elif c.status == 'accepted' %}badge-ok{% else %}badge-danger{% endif %}">{{ c.get_status_display }}</span>
+              </td>
+              <td class="muted text-xs">{{ c.resolution_note|default:"—" }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="7"><span class="muted">Aucune preuve enregistrée.</span></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+{% endblock %}

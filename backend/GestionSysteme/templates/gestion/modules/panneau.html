@@ -1,0 +1,43 @@
+{% extends "gestion/base.html" %}
+{% load gestion %}
+
+{% block breadcrumbs %}
+<div class="crumbs">
+  <a href="{% url 'gestionsysteme:modules' %}">Modules</a>
+  <span class="sep">/</span>
+  <a href="{% url 'gestionsysteme:module-space' module_name %}">{{ module_label }}</a>
+  <span class="sep">/</span><span>{{ panel.label }}</span>
+</div>
+{% endblock %}
+
+{% block tabs %}{% include "gestion/modules/_nav.html" %}{% endblock %}
+
+{% block page_actions %}
+  {% if panel.actions %}
+    <div class="page-actions">
+      {% for a in panel.actions %}
+        <form method="post"
+              action="{% url 'gestionsysteme:module-action' module_name panel.key a.key %}"
+              {% if a.confirm %}data-confirm="{{ a.confirm }}"{% endif %}>
+          {% csrf_token %}
+          <button class="btn {% if a.danger %}btn-danger{% endif %}" type="submit">{{ a.label }}</button>
+        </form>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+{% comment %} Chaque bloc a été *déclaré* par le module, jamais rendu par lui : il décrit
+   ce qu'il veut montrer, la mise en forme appartient à GestionSystème. C'est
+   ce qui fait qu'un module ne peut pas injecter de balisage — la classe de
+   vulnérabilité que l'ancienne couche d'assainissement rattrapait a
+   simplement disparu. {% endcomment %}
+{% for block in blocks %}
+  {% include "gestion/partials/block.html" %}
+{% empty %}
+  <div class="card"><div class="card-body">
+    <div class="empty">Ce panneau n'a rien produit.</div>
+  </div></div>
+{% endfor %}
+{% endblock %}
