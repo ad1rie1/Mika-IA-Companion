@@ -11,7 +11,7 @@ from datetime import date, timedelta
 import pytest
 from asgiref.sync import sync_to_async
 
-from pipeline.context import _fetch_journal_context
+from pipeline.context import ConversationContext, _fetch_journal_context
 from pipeline.prompt import build_system_prompt
 
 
@@ -66,9 +66,9 @@ class TestJournalContext:
 class TestPromptBlock:
 
     def test_journal_block_present(self):
-        system = build_system_prompt(journal_context="Ce que tu retiens d'hier : x")
+        system = build_system_prompt(ConversationContext(journal_context="Ce que tu retiens d'hier : x"))
         assert "--- TON FIL D'HIER ---" in system
 
     def test_absent_when_empty(self):
-        system = build_system_prompt(journal_context="")
+        system = build_system_prompt(ConversationContext(journal_context=""))
         assert "FIL D'HIER" not in system

@@ -19,6 +19,7 @@ import pytest
 from asgiref.sync import sync_to_async
 from django.test import Client
 from django.utils import timezone
+from pipeline.context import ConversationContext
 
 
 def _patched_history_size(size: int):
@@ -222,32 +223,32 @@ class TestProjectDetection:
 class TestPromptInjection:
     def test_no_project_no_block(self):
         from pipeline.prompt import build_system_prompt
-        out = build_system_prompt()
+        out = build_system_prompt(ConversationContext())
         assert "PROJET EN COURS" not in out
 
     def test_project_bloc_appears(self):
         from pipeline.prompt import build_system_prompt
-        out = build_system_prompt(project_context="Titre : test\nTon : neutre")
+        out = build_system_prompt(ConversationContext(project_context="Titre : test\nTon : neutre"))
         assert "--- PROJET EN COURS ---" in out
         assert "Titre : test" in out
 
     def test_project_suppresses_emotion_block(self):
         from pipeline.prompt import build_system_prompt
-        out_emit = build_system_prompt(
+        out_emit = build_system_prompt(ConversationContext(
             emotion_context="You feel happy",
             project_context="Titre : test",
             project_suppresses_emotion=True,
-        )
+        ))
         assert "TON ETAT EMOTIONNEL" not in out_emit
         assert "PROJET EN COURS" in out_emit
 
     def test_project_muted_keeps_emotion(self):
         from pipeline.prompt import build_system_prompt
-        out = build_system_prompt(
+        out = build_system_prompt(ConversationContext(
             emotion_context="You feel happy",
             project_context="Titre : test",
             project_suppresses_emotion=False,
-        )
+        ))
         assert "TON ETAT EMOTIONNEL" in out
 
     def test_personality_drops_emotion_tag_when_project_off(self):

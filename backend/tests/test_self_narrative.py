@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from asgiref.sync import sync_to_async
 from django.utils import timezone
+from pipeline.context import ConversationContext
 
 
 # ---------------------------------------------------------------------------
@@ -547,14 +548,14 @@ class TestPromptInjection:
 
     def test_build_system_prompt_omits_section_when_empty(self):
         from pipeline.prompt import build_system_prompt
-        prompt = build_system_prompt(self_concept="")
+        prompt = build_system_prompt(ConversationContext(self_concept=""))
         assert "QUI TU ES DEVENUE" not in prompt
 
     def test_build_system_prompt_includes_section_when_present(self):
         from pipeline.prompt import build_system_prompt
-        prompt = build_system_prompt(
+        prompt = build_system_prompt(ConversationContext(
             self_concept="Je suis quelqu'un qui code trop tard le soir."
-        )
+        ))
         assert "QUI TU ES DEVENUE" in prompt
         assert "code trop tard" in prompt
         assert "--- FIN ---" in prompt
@@ -562,10 +563,10 @@ class TestPromptInjection:
     def test_self_concept_before_emotion_section(self):
         """Self-concept should come before the dynamic layers."""
         from pipeline.prompt import build_system_prompt
-        prompt = build_system_prompt(
+        prompt = build_system_prompt(ConversationContext(
             self_concept="Je suis X.",
             emotion_context="Humeur: triste.",
-        )
+        ))
         sc_pos = prompt.index("QUI TU ES DEVENUE")
         em_pos = prompt.index("TON ETAT EMOTIONNEL")
         assert sc_pos < em_pos

@@ -15,6 +15,7 @@ from emotion import pad
 from emotion.types import Emotion, EmotionData
 from emotion.state import PersonMood, GlobalMood, Temperament, _intensity_label
 from emotion.engine import EmotionEngine
+from pipeline.context import ConversationContext
 from pipeline.prompt import build_system_prompt, format_conversation
 from tests.conftest import TEMPERAMENT_DEFAULT
 
@@ -198,13 +199,13 @@ class TestBuildSystemPrompt:
 
     def test_base_prompt_contains_emotion_instructions(self):
         """System prompt must contain emotion tag format instructions."""
-        prompt = build_system_prompt()
+        prompt = build_system_prompt(ConversationContext())
         assert "[EMOTION:" in prompt
         assert "intensite" in prompt.lower() or "intensité" in prompt
 
     def test_base_prompt_lists_all_emotions(self):
         """Prompt should list all 29+ emotion names."""
-        prompt = build_system_prompt()
+        prompt = build_system_prompt(ConversationContext())
         for emotion in [Emotion.HAPPY, Emotion.SAD, Emotion.ANGRY,
                         Emotion.CURIOUS, Emotion.MISCHIEVOUS, Emotion.MELANCHOLIC]:
             assert emotion.value in prompt, \
@@ -212,49 +213,49 @@ class TestBuildSystemPrompt:
 
     def test_emotion_context_injected(self):
         """Emotion context should appear in the prompt."""
-        prompt = build_system_prompt(
+        prompt = build_system_prompt(ConversationContext(
             emotion_context="Tu te sens tres excited envers cette personne."
-        )
+        ))
         assert "ETAT EMOTIONNEL" in prompt
         assert "tres excited" in prompt
 
     def test_memory_context_injected(self):
-        prompt = build_system_prompt(
+        prompt = build_system_prompt(ConversationContext(
             memory_context="Tu te souviens que cette personne aime les chats."
-        )
+        ))
         assert "aime les chats" in prompt
 
     def test_module_context_injected(self):
-        prompt = build_system_prompt(
+        prompt = build_system_prompt(ConversationContext(
             module_context="Tu as 3 emails non lus."
-        )
+        ))
         assert "CONTEXTE MODULES" in prompt
         assert "3 emails" in prompt
 
     def test_all_contexts_combined(self):
         """All three contexts should be present together without corruption."""
-        prompt = build_system_prompt(
+        prompt = build_system_prompt(ConversationContext(
             emotion_context="EMOTION_MARKER",
             memory_context="MEMORY_MARKER",
             module_context="MODULE_MARKER",
-        )
+        ))
         assert "EMOTION_MARKER" in prompt
         assert "MEMORY_MARKER" in prompt
         assert "MODULE_MARKER" in prompt
 
     def test_empty_contexts_dont_add_sections(self):
         """Empty contexts should not add section headers."""
-        prompt = build_system_prompt(
+        prompt = build_system_prompt(ConversationContext(
             emotion_context="",
             memory_context="",
             module_context="",
-        )
+        ))
         assert "CONTEXTE MODULES" not in prompt
         assert "ETAT EMOTIONNEL" not in prompt
 
     def test_prompt_mentions_personality_name(self):
         """Prompt should mention the VTuber's name."""
-        prompt = build_system_prompt()
+        prompt = build_system_prompt(ConversationContext())
         # personality.yaml defines name as "Mika"
         assert "Mika" in prompt
 
@@ -334,9 +335,9 @@ class TestEndToEndPromptCoherence:
         engine.process_emotion(EmotionData(Emotion.ANGRY, 0.8), "user1")
         emotion_ctx = engine.get_global_mood_context()
         person_ctx = engine.get_person_affect_context("user1")
-        prompt = build_system_prompt(
+        prompt = build_system_prompt(ConversationContext(
             emotion_context=emotion_ctx, person_context=person_ctx,
-        )
+        ))
         assert "angry" in prompt.lower()
 
     def test_default_state_shows_baseline_language(self, engine):
@@ -345,9 +346,9 @@ class TestEndToEndPromptCoherence:
         emotion_ctx = engine.get_global_mood_context()
         person_ctx = engine.get_person_affect_context("new_user")
         assert person_ctx == ""
-        prompt = build_system_prompt(
+        prompt = build_system_prompt(ConversationContext(
             emotion_context=emotion_ctx, person_context=person_ctx,
-        )
+        ))
         assert "habitude" in prompt or "humeur" in prompt
 
     def test_full_prompt_with_conversation(self, engine):
@@ -359,12 +360,12 @@ class TestEndToEndPromptCoherence:
         memory_ctx = "Souvenir: cette personne aime Python et les chats."
         module_ctx = "Tu as 2 emails non lus."
 
-        prompt = build_system_prompt(
+        prompt = build_system_prompt(ConversationContext(
             emotion_context=emotion_ctx,
             memory_context=memory_ctx,
             module_context=module_ctx,
             person_context=person_ctx,
-        )
+        ))
         user_prompt = format_conversation(
             "Tu connais Python ?",
             [{"role": "user", "content": "Salut !"}, {"role": "assistant", "content": "Hey !"}],

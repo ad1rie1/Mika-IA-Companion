@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from asgiref.sync import sync_to_async
 from django.utils import timezone
+from pipeline.context import ConversationContext
 
 
 # ---------------------------------------------------------------------------
@@ -762,24 +763,24 @@ class TestPromptInjection:
 
     def test_build_system_prompt_includes_person_section(self):
         from pipeline.prompt import build_system_prompt
-        prompt = build_system_prompt(
+        prompt = build_system_prompt(ConversationContext(
             person_context="Thomas est quelqu'un qui aime le gaming."
-        )
+        ))
         assert "CE QUE TU SAIS DE CETTE PERSONNE" in prompt
         assert "gaming" in prompt
 
     def test_build_system_prompt_omits_when_empty(self):
         from pipeline.prompt import build_system_prompt
-        prompt = build_system_prompt(person_context="")
+        prompt = build_system_prompt(ConversationContext(person_context=""))
         assert "CE QUE TU SAIS DE CETTE PERSONNE" not in prompt
 
     def test_person_context_between_self_concept_and_modules(self):
         from pipeline.prompt import build_system_prompt
-        prompt = build_system_prompt(
+        prompt = build_system_prompt(ConversationContext(
             self_concept="Je suis Mika.",
             person_context="Thomas est sympa.",
             module_context="Modules: email",
-        )
+        ))
         sc_pos = prompt.index("QUI TU ES DEVENUE")
         pc_pos = prompt.index("CE QUE TU SAIS DE CETTE PERSONNE")
         mc_pos = prompt.index("CONTEXTE MODULES")

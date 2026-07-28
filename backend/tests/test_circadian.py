@@ -24,6 +24,7 @@ from emotion.circadian import (
     energy_level, phase_bias, phase_description_fr, profile_from_yaml,
 )
 from emotion.types import Emotion
+from pipeline.context import ConversationContext
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -357,16 +358,16 @@ class TestCircadianPromptBlock:
 
     def test_build_system_prompt_includes_block(self):
         from pipeline.prompt import build_system_prompt
-        prompt = build_system_prompt(
+        prompt = build_system_prompt(ConversationContext(
             circadian_context="Il est 14h. En phase apres-midi, ton energie est haute (85%).",
-        )
+        ))
         assert "TON RYTHME" in prompt
         assert "14h" in prompt
         assert "apres-midi" in prompt
 
     def test_build_system_prompt_omits_when_empty(self):
         from pipeline.prompt import build_system_prompt
-        prompt = build_system_prompt(circadian_context="")
+        prompt = build_system_prompt(ConversationContext(circadian_context=""))
         assert "TON RYTHME" not in prompt
 
 
