@@ -122,7 +122,11 @@ class MemoryManager:
         def _tail():
             rows = list(
                 Message.objects.filter(conversation=self.conversation)
-                .exclude(role="user", is_internal=True)
+                # Machinery, whichever side it sits on: the scaffolding prompt
+                # of an internal trigger, and the fallback text a failed turn
+                # returned. Neither was said by anyone, so neither belongs in
+                # the history the model is handed after a restart.
+                .exclude(is_internal=True)
                 .order_by("-pk")
                 .values("role", "content")[: self.max_short_term]
             )
@@ -149,17 +153,35 @@ class MemoryManager:
         person_id: str = "",
         attachments_meta: list[dict] | None = None,
         is_internal: bool = False,
-    ):
+        awaiting_reply: bool = False,
+    ) -> int | None:
         """Add to short-term memory and persist via ORM.
+
+        Returns the persisted ``Message.pk``, or ``None`` when nothing was
+        written (memory not initialized yet, or the insert failed). That id
+        is the frontend's synchronisation cursor: ``Message`` rows are
+        append-only with a monotonic pk, so "everything after N" is the
+        whole catch-up query a reconnecting client needs. Returning it here
+        rather than re-querying afterwards keeps the answer exact under the
+        six background loops writing concurrently.
 
         ``attachments_meta`` is stored alongside the Message so retrieval
         and the consolidator can see what non-text parts came with the
         conversation turn (images, audio, files — descriptors only, not
         bytes; raw bytes live in the media store via pipeline.media).
+
+        An ``is_internal`` message is stored but kept **out of the RAM
+        buffer**, which is what ``_rehydrate_short_term`` already does after
+        a restart. The two disagreed: the same conversation showed Mika a
+        greeting brief before a restart and not after. It matters more now
+        that a failed turn persists its fallback — a run of timeouts would
+        otherwise fill the history the model reads with sentences she never
+        said, and invite her to say them again.
         """
-        self.short_term.append({"role": role, "content": content})
-        if len(self.short_term) > self.max_short_term:
-            self.short_term = self.short_term[-self.max_short_term :]
+        if not is_internal:
+            self.short_term.append({"role": role, "content": content})
+            if len(self.short_term) > self.max_short_term:
+                self.short_term = self.short_term[-self.max_short_term :]
 
         logger.debug(
             "Memory add_message: role=%s source=%s person=%s short_term=%d content=%.60s",
@@ -170,7 +192,7 @@ class MemoryManager:
             try:
                 from memory.models import Message
 
-                await Message.objects.acreate(
+                row = await Message.objects.acreate(
                     conversation=self.conversation,
                     role=role,
                     content=content,
@@ -178,9 +200,12 @@ class MemoryManager:
                     person_id=person_id,
                     attachments_meta=attachments_meta or [],
                     is_internal=is_internal,
+                    awaiting_reply=awaiting_reply,
                 )
+                return row.pk
             except Exception:
                 logger.exception("Failed to persist message to DB")
+        return None
 
     def get_conversation_context(self) -> list[dict]:
         """Get short-term conversation history for Claude."""

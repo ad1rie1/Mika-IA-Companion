@@ -60,7 +60,7 @@ class ValidationError(ValueError):
 _db_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="config-db")
 
 
-def _in_async_context() -> bool:
+def in_async_context() -> bool:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -74,7 +74,7 @@ def db_read(fn: Callable, *args, **kwargs):
     Inline when called from a sync context (the vast majority: startup,
     dashboard views, management commands); off-loop otherwise.
     """
-    if not _in_async_context():
+    if not in_async_context():
         return fn(*args, **kwargs)
 
     def _call():

@@ -39,6 +39,63 @@ class OllamaProvider:
 
         logger.info("OllamaProvider initialisé (host=%s)", host)
 
+    # -- Generation policy ---------------------------------------------------
+    #
+    # Two knobs that decide whether a local model answers at all.
+    #
+    # `think`: the reasoning models now shipped by Ollama (gemma4, qwen3,
+    # deepseek-r1) reason by DEFAULT, and that reasoning is generated before
+    # the first word of the reply. Measured on gemma4:12b, RTX 3060, fully
+    # in VRAM at ~30 tok/s: "coucou" answered in 1.5 s with thinking off and
+    # 27 s with it on. With a real system prompt and 34 tool declarations the
+    # same turn ran past 2000 generated tokens and was still going when the
+    # 120 s timeout fired — every reply was the fallback.
+    #
+    # `num_predict`: the caller's default `max_tokens=4096` was handed
+    # straight through, so a model that does not stop has a 4096-token rope.
+    # At the ~19 tok/s a long context degrades to, that is 219 s — a turn
+    # that CANNOT finish inside any sane timeout. The cap is the belt: even
+    # with thinking re-enabled, a turn is bounded.
+
+    def _generation_options(self, max_tokens: int, temperature: float) -> dict:
+        from configs.service import config_service
+
+        cap = max_tokens
+        try:
+            cap = min(max_tokens, int(config_service.get("ai.ollama.max_reply_tokens")))
+        except Exception:
+            # An unreadable config must not silently restore the unbounded
+            # behaviour this cap exists to prevent.
+            cap = min(max_tokens, 768)
+        return {"num_predict": cap, "temperature": temperature}
+
+    def _thinking(self) -> bool:
+        from configs.service import config_service
+
+        try:
+            return bool(config_service.get("ai.ollama.thinking"))
+        except Exception:
+            return False
+
+    async def _chat(self, **kwargs):
+        """Call the SDK, degrading gracefully when `think` is unsupported.
+
+        Not every model accepts the parameter, and older Ollama servers
+        reject it outright. A provider that cannot talk to half the local
+        models is worse than one that occasionally lets a model reason.
+        """
+        try:
+            return await self._client.chat(**kwargs)
+        except Exception as exc:
+            if "think" not in kwargs:
+                raise
+            logger.debug(
+                "Ollama rejected think=%s (%s) — retrying without it",
+                kwargs.get("think"), exc,
+            )
+            kwargs.pop("think", None)
+            return await self._client.chat(**kwargs)
+
     async def complete(
         self,
         system_prompt: str,
@@ -67,16 +124,14 @@ class OllamaProvider:
                     len(image_b64s), model,
                 )
 
-        response = await self._client.chat(
+        response = await self._chat(
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 user_message,
             ],
-            options={
-                "num_predict": max_tokens,
-                "temperature": temperature,
-            },
+            think=self._thinking(),
+            options=self._generation_options(max_tokens, temperature),
         )
 
         _record_ollama_usage(response)
@@ -135,19 +190,20 @@ class OllamaProvider:
         called: list[str] = []
         final_text = ""
 
+        think = self._thinking()
+        options = self._generation_options(max_tokens, temperature)
+
         for _ in range(max_turns):
             kwargs = {
                 "model": model,
                 "messages": messages,
-                "options": {
-                    "num_predict": max_tokens,
-                    "temperature": temperature,
-                },
+                "think": think,
+                "options": options,
             }
             if serialized:
                 kwargs["tools"] = serialized
 
-            response = await self._client.chat(**kwargs)
+            response = await self._chat(**kwargs)
             _record_ollama_usage(response)
 
             msg = response.message

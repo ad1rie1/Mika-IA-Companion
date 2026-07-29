@@ -179,15 +179,17 @@ class MemoryConsolidator:
         if not ceiling_id:
             return [], None
 
-        # Exclude module notifications (not user-facing exchanges) and the
-        # scaffolding prompts of internal triggers (role=user), while keeping
-        # Mika's own replies (role=assistant) so she remembers her initiatives.
+        # Exclude module notifications (not user-facing exchanges) and
+        # everything flagged as machinery: the scaffolding prompt of an
+        # internal trigger, and the fallback a failed turn returned. Mika's
+        # real replies (role=assistant, is_internal=False) stay in, so she
+        # still remembers her own initiatives.
         messages = await sync_to_async(list)(
             Message.objects.filter(
                 id__gt=self._last_processed_id, id__lte=ceiling_id,
             )
             .exclude(source__in=INTERNAL_MESSAGE_SOURCES)
-            .exclude(role="user", is_internal=True)
+            .exclude(is_internal=True)
             .exclude(source="conscience", role="user")
             .order_by("created_at")
             .values("id", "role", "content", "created_at", "source", "person_id")

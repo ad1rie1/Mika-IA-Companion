@@ -90,6 +90,16 @@ export interface InnerState {
   };
   pending_commitments?: string[];
   /**
+   * Whether this payload was collected *for* an identifiable person, and so
+   * whether `identity` / `person_profile` / `pending_commitments` are
+   * authoritative. A section with nothing to report is omitted from the
+   * payload, so without this flag "she knows nothing about you" and "this
+   * frame is not about anyone" look the same — and a panel that clears what
+   * it is handed nothing for lost the identity block on every sleep-phase
+   * transition.
+   */
+  person_scope?: boolean;
+  /**
    * Who Mika thinks she is talking to, and how sure (identity/trust.py).
    * Present for any non-throwaway person_id — unlike `person_profile`, which
    * is withheld entirely until she is convinced. That asymmetry is the point:
@@ -130,11 +140,99 @@ export interface SpeechMessage {
   voice_reason?: string;
   voice_persona?: VoicePersona;
   voice_profile?: VoiceProfile;
+  /**
+   * Persistence cursors (backend/communication/history.py). `message_id` is
+   * this reply's row; the client keeps the highest it has rendered and asks
+   * for everything after it on reconnect. Null when the turn was not
+   * persisted — a message the server did not record must never advance the
+   * cursor past it.
+   */
+  message_id?: number | null;
+  user_message_id?: number | null;
+  /** Echo of the id the browser attached to its own optimistic bubble. */
+  client_msg_id?: string | null;
+}
+
+/** One persisted message as the history frame carries it. */
+export interface HistoryEntry {
+  id: number;
+  role: string;
+  text: string;
+  /** Epoch milliseconds — read straight into `new Date()`. */
+  ts: number;
+  source?: string;
+  emotion?: string;
+  emotion_intensity?: number;
+  attachments?: unknown[];
+}
+
+/**
+ * The conversation as the server holds it. Sent unprompted at connect
+ * (`mode: "initial"`) and in answer to a `sync` (`mode: "catchup"`).
+ *
+ * `truncated` means the gap was wider than the server will ship at once and
+ * the *oldest* missed messages were dropped. It is reported rather than
+ * hidden: a silent cap would advance the cursor past messages that were
+ * never displayed, which is the same hole this protocol closes, wearing the
+ * appearance of a complete sync.
+ */
+export interface HistoryMessage {
+  type: "history";
+  mode: "initial" | "catchup";
+  messages: HistoryEntry[];
+  last_id: number;
+  truncated: boolean;
+}
+
+/**
+ * What became of a frame the client sent. Emitted before the pipeline runs:
+ * "the server has it" and "she answered" are different facts, and treating
+ * them as one is what made a queued message look delivered.
+ */
+export interface AckMessage {
+  type: "ack";
+  client_msg_id: string;
+  /**
+   * Anything other than `accepted` means no reply is ever coming. The list
+   * must stay in step with the consumer (`_send_ack` call sites in
+   * communication/channels/web_frontend.py): a status missing here is
+   * still treated as a refusal at runtime, but the type would be claiming
+   * the server cannot send it.
+   */
+  status:
+    | "accepted"
+    | "rate_limited"
+    | "empty"
+    | "overloaded"
+    | "too_long"
+    | "attachments_rejected";
+}
+
+/** Answer to the client's keepalive; `t` is echoed back verbatim. */
+export interface PongMessage {
+  type: "pong";
+  t?: number;
 }
 
 export interface InnerStateUpdateMessage {
   type: "inner_state_update";
   inner_state?: InnerState;
+}
+
+/**
+ * Live emotional state, pushed between turns (backend/emotion/sync.py).
+ * Same emotion fields as `speech`, no text and no inner state: the PAD
+ * oscillators keep moving while Mika is silent, and this is what stops the
+ * face and the readout from freezing on the last reply. Applied as ambient
+ * drift — expression, gaze and hand mood follow it, body one-shots do not.
+ */
+export interface EmotionUpdateMessage {
+  type: "emotion_update";
+  person_id?: string;
+  emotion?: string;
+  emotion_intensity?: number;
+  emotion_blend?: EmotionBlend;
+  emotion_state?: Record<string, unknown>;
 }
 
 export interface ProjectReportMessage {
@@ -165,7 +263,11 @@ export interface ConnectionEvent {
 
 export interface ServerMessageMap {
   speech: SpeechMessage;
+  history: HistoryMessage;
+  ack: AckMessage;
+  pong: PongMessage;
   inner_state_update: InnerStateUpdateMessage;
+  emotion_update: EmotionUpdateMessage;
   project_report: ProjectReportMessage;
   avatar_state: AvatarStateMessage;
   connection: ConnectionEvent;

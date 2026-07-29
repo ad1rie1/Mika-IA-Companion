@@ -113,6 +113,16 @@ CONFIG_SCHEMA = [
         default=30, min=5, max=600, hot_reload=True,
     ),
     ConfigItem(
+        key="emotion.sync_interval", type="float", section="emotion",
+        group="Dynamique", label="Rafraîchissement frontend (s)",
+        description=(
+            "Cadence à laquelle l'état émotionnel courant est poussé vers "
+            "l'avatar entre deux répliques. Une trame ne part que si "
+            "l'émotion a réellement bougé."
+        ),
+        default=3.0, min=0.5, max=60.0,
+    ),
+    ConfigItem(
         key="emotion.snapshot_retention_days", type="int", section="emotion",
         group="Dynamique", label="Rétention snapshots (jours)",
         default=2, min=1, max=90,

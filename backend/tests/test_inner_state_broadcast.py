@@ -252,6 +252,17 @@ class TestBroadcastCarriesInnerState:
         mock_layer = MagicMock()
         mock_layer.group_send = AsyncMock()
 
+        # A live client has to exist: an identifiable person with no presence
+        # entry is deliberately NOT broadcast any more (their payload carries
+        # their own profile), so without this the frame never leaves.
+        from communication.presence import person_group, presence_registry
+
+        presence_registry.register(
+            person_id="web_u1", channel="web", kind="consumer",
+            delivery_ref=person_group("web_u1"),
+        )
+        self.addCleanup = None  # not a unittest.TestCase; unregister below
+
         with patch("pipeline.broadcast.get_channel_layer", return_value=mock_layer), \
              patch("pipeline.broadcast._collect_inner_state",
                    new_callable=AsyncMock, return_value={"drives": {}, "ruminations": []}):
@@ -265,3 +276,4 @@ class TestBroadcastCarriesInnerState:
         assert data["person_id"] == "web_u1"
         assert "inner_state" in data
         assert "drives" in data["inner_state"]
+        presence_registry.unregister("web_u1", "web")

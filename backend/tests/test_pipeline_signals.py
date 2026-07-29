@@ -138,8 +138,10 @@ class TestProcessorPublishes:
                        new_callable=AsyncMock, return_value=ctx), \
                  patch("pipeline.processor.broadcast_to_websocket",
                        new_callable=AsyncMock), \
-                 patch("pipeline.processor.persist_to_memory",
-                       new_callable=AsyncMock), \
+                 patch("pipeline.processor.persist_user_message",
+                       new=AsyncMock(return_value=1)), \
+                 patch("pipeline.processor.persist_assistant_message",
+                       new=AsyncMock(return_value=2)), \
                  patch("pipeline.processor.emit_communication_event",
                        new_callable=AsyncMock), \
                  patch("pipeline.processor.publish_turn_completed", _capture), \
@@ -376,8 +378,10 @@ class TestEndToEnd:
                    new_callable=AsyncMock, return_value=ctx), \
              patch("pipeline.processor.broadcast_to_websocket",
                    new_callable=AsyncMock), \
-             patch("pipeline.processor.persist_to_memory",
-                   new_callable=AsyncMock), \
+             patch("pipeline.processor.persist_user_message",
+                   new=AsyncMock(return_value=1)), \
+             patch("pipeline.processor.persist_assistant_message",
+                   new=AsyncMock(return_value=2)), \
              patch("pipeline.processor.emit_communication_event",
                    new_callable=AsyncMock), \
              patch("pipeline.response.ai_client") as client:

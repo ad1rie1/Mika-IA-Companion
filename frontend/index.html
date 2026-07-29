@@ -278,6 +278,35 @@
       }
       .chat-bubble.no-anim { animation: none; }
 
+      /* Delivery state of a message the user sent. A bubble the server has
+         never seen must not look like one it answered — that ambiguity is
+         what let three messages sit on screen looking delivered while the
+         socket was dead. Faded = still in the outbox; struck through with a
+         red edge = refused, no reply is coming. */
+      .chat-bubble.user.status-pending {
+        opacity: 0.55;
+        border-right: 2px solid rgba(255, 255, 255, 0.5);
+      }
+      .chat-bubble.user.status-failed {
+        opacity: 0.7;
+        border-right: 2px solid rgba(248, 113, 113, 0.9);
+        text-decoration: line-through;
+        text-decoration-color: rgba(248, 113, 113, 0.6);
+      }
+
+      /* Said out loud rather than hidden: the catch-up dropped its oldest
+         part, so the thread above this line is not continuous. */
+      .chat-note {
+        align-self: center;
+        max-width: 85%;
+        padding: 4px 10px;
+        border-radius: 10px;
+        font-size: 11px;
+        font-style: italic;
+        color: rgba(255, 255, 255, 0.6);
+        background: rgba(255, 255, 255, 0.08);
+      }
+
       /* Typing indicator — three pulsing dots inside a vtuber bubble */
       .typing-indicator {
         display: flex;

@@ -109,15 +109,39 @@ class TestTargetedDeliveryNeverLeaks:
         mock_layer.group_send.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_unknown_person_still_broadcasts(self):
-        # No presence entry at all → nothing was composed for a specific
-        # reachable person, so the legacy broadcast stays valid.
+    async def test_an_identifiable_person_offline_is_not_broadcast(self):
+        """No presence entry is "they are not connected", not "no recipient".
+
+        This used to fall through to the global group, which is the same
+        mistake the branch below already refuses: the payload carries that
+        person's inner_state — profile, commitments, per-person affect — so
+        a proactive message composed for someone offline landed in every
+        other open browser. Nothing is lost by staying silent; the turn is
+        persisted and their client pulls it by cursor on reconnect.
+        """
         mock_layer = MagicMock()
         mock_layer.group_send = AsyncMock()
         with patch("pipeline.broadcast.get_channel_layer", return_value=mock_layer):
             from pipeline.broadcast import broadcast_to_websocket
             await broadcast_to_websocket(
                 _output(), source="conscience", person_id="nobody_here",
+            )
+        mock_layer.group_send.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_message_belonging_to_no_one_still_broadcasts(self):
+        """Mika thinking out loud has no recipient to be private from.
+
+        For `conscience_mika` — and for a throwaway `anon_*` socket, which
+        has no durable thread to be caught up from — "whoever is watching"
+        IS the intended audience.
+        """
+        mock_layer = MagicMock()
+        mock_layer.group_send = AsyncMock()
+        with patch("pipeline.broadcast.get_channel_layer", return_value=mock_layer):
+            from pipeline.broadcast import broadcast_to_websocket
+            await broadcast_to_websocket(
+                _output(), source="conscience", person_id="conscience_mika",
             )
         mock_layer.group_send.assert_called_once()
 

@@ -75,6 +75,14 @@ export interface GestureDecisionInput {
   sleepPhase: SleepPhase;
   nowMs: number;
   lastOneshotAtMs: number | null;
+  /**
+   * The emotion drifted on its own (backend emotion_update) rather than
+   * being what Mika just said. Postures still follow — a mood that settles
+   * into sadness should slump — but one-shots do not: a gesture is a
+   * reaction, and a sustained emotion above threshold would otherwise fire
+   * one every cooldown, forever, at nothing.
+   */
+  ambient?: boolean;
 }
 
 export type GestureDecision =
@@ -83,7 +91,7 @@ export type GestureDecision =
   | { action: "idleVariant"; clip: string };
 
 /** Pure gating logic — the order of the gates is the contract:
- * sleep → persona → ambivalence → mapping → threshold → cooldown. */
+ * sleep → persona → ambivalence → mapping → ambient → threshold → cooldown. */
 export function decideGesture(input: GestureDecisionInput): GestureDecision {
   if (input.sleepPhase !== "awake") {
     return { action: "none", reason: "asleep" };
@@ -104,6 +112,10 @@ export function decideGesture(input: GestureDecisionInput): GestureDecision {
   const mapping: GestureMapping = EMOTION_GESTURE[input.emotion];
   if (mapping.kind === "none" || !mapping.clip) {
     return { action: "none", reason: "unmapped" };
+  }
+  // Drift changes how she holds herself, never what she does.
+  if (input.ambient && mapping.kind === "oneshot") {
+    return { action: "none", reason: "ambient_drift" };
   }
   if (input.intensity < (mapping.minIntensity ?? DEFAULT_MIN_INTENSITY)) {
     return { action: "none", reason: "below_threshold" };

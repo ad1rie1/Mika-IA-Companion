@@ -33,6 +33,13 @@ class Message(models.Model):
     # consolidator must not mine them for souvenirs or connaissances — her
     # *reply* (role=assistant) is a real memory and stays included.
     is_internal = models.BooleanField(default=False)
+    # True between "this question was written down" and "its reply was
+    # written down". The turn is processed by a worker detached from the
+    # socket, so the process can die mid-turn: this is what lets startup
+    # find the questions nobody ever answered and put them back in the
+    # queue, instead of leaving someone with a message marked delivered
+    # and no reply, forever.
+    awaiting_reply = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

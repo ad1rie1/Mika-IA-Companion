@@ -159,10 +159,13 @@ export class AnimationSystem {
     emotion: EmotionName,
     intensity: number,
     blend: EmotionBlend = [],
-    persona?: VoicePersona
+    persona?: VoicePersona,
+    opts: { ambient?: boolean } = {}
   ): void {
     const clamped = Math.max(0, Math.min(1, intensity));
-    this.lastPersona = persona;
+    // Ambient drift says nothing about how she is speaking, so it must not
+    // clear the persona a reply set — playCue reads it after the fact.
+    if (!opts.ambient) this.lastPersona = persona;
     if (this.ctx) {
       this.ctx.emotion = emotion;
       this.ctx.intensity = clamped;
@@ -175,10 +178,14 @@ export class AnimationSystem {
       emotion,
       intensity: clamped,
       blend,
-      persona,
+      // No persona on drift: the persona gate exists to keep a murmured
+      // thought from getting a body beat, and `ambient` already blocks
+      // every one-shot. Passing it on would also veto the postures.
+      persona: opts.ambient ? undefined : persona,
       sleepPhase: this.sleepPhase,
       nowMs: performance.now(),
       lastOneshotAtMs: this.lastOneshotAt,
+      ambient: opts.ambient,
     });
 
     if (decision.action === "idleVariant") {

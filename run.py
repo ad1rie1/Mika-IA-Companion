@@ -35,7 +35,7 @@ def main():
     logger.info("API: http://localhost:%d", settings.API_PORT)
     logger.info("WebSocket: ws://localhost:%d/ws", settings.API_PORT)
     logger.info("Admin: http://localhost:%d/admin/", settings.API_PORT)
-    logger.info("Dashboard: http://localhost:%d/dashboard/", settings.API_PORT)
+    logger.info("Dashboard: http://localhost:%d/gestion/", settings.API_PORT)
 
     # The dashboard can read the whole conversation history and rewrite the
     # config (including provider API keys). Binding it to every interface

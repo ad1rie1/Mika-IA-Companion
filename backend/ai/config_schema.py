@@ -67,6 +67,30 @@ CONFIG_SCHEMA = [
         hot_reload=True,
         hint="URL du serveur Ollama (le SDK ne la découvre pas tout seul).",
     ),
+    ConfigItem(
+        key="ai.ollama.thinking", type="bool", section="ai_providers", group="Ollama",
+        label="Raisonnement visible (thinking)", default=False,
+        hot_reload=True,
+        hint=(
+            "Les modèles à raisonnement (gemma4, qwen3, deepseek-r1…) "
+            "réfléchissent par défaut, et le raisonnement est facturé en "
+            "temps de génération avant le premier mot de la réponse. Mesuré "
+            "sur gemma4:12b, un simple « coucou » passe de 1,5 s à 27 s. "
+            "Laisser désactivé pour une conversation ; à activer seulement "
+            "si la qualité le justifie et que le timeout suit."
+        ),
+    ),
+    ConfigItem(
+        key="ai.ollama.max_reply_tokens", type="int", section="ai_providers",
+        group="Ollama", label="Longueur max d'une réponse (tokens)",
+        default=768, min=64, max=8192,
+        hot_reload=True,
+        hint=(
+            "Plafond de génération par tour. Sans lui, un modèle qui ne "
+            "s'arrête pas génère jusqu'à 4096 tokens : à 19 tokens/s c'est "
+            "219 s, soit bien au-delà du timeout, et le tour échoue toujours."
+        ),
+    ),
 
     # ── Déclaration des modèles ──────────────────────────────────
     ConfigSection(
@@ -170,6 +194,49 @@ CONFIG_SCHEMA = [
     ConfigItem(
         key="ai.call_timeout_seconds", type="int", section="ai_quota",
         label="Timeout appel IA (s)",
-        default=60, min=5, max=600, hot_reload=True,
+        description=(
+            "Au-delà, le tour rend un texte de repli. Un modèle local paie "
+            "l'intégralité du prompt à chaque tour d'outils : 60 s suffisent "
+            "à une API distante, pas à un 12B qui réfléchit avant de parler."
+        ),
+        default=120, min=5, max=600, hot_reload=True,
+    ),
+    ConfigItem(
+        key="pipeline.turn_workers", type="int", section="ai_quota",
+        label="Tours de conversation en parallèle",
+        description=(
+            "Nombre de tours traités simultanément par la file. Garder 1 "
+            "devant un modèle local : un serveur à un seul emplacement "
+            "d'exécution ne les traite pas en parallèle, il les met en "
+            "attente, et chacun bloque celui qui l'attend. Au-delà de 1, "
+            "deux personnes peuvent être servies en même temps — utile "
+            "seulement derrière une API distante."
+        ),
+        default=1, min=1, max=8, restart_required=True,
+    ),
+
+    ConfigSection(
+        key="ai_tools", label="IA · Outils", icon="⚒", order=24,
+        description=(
+            "Quels modules exposent leurs outils dans une conversation. "
+            "Chaque schéma d'outil est renvoyé au modèle à chaque tour : "
+            "c'est du prompt payé en entier, à chaque fois."
+        ),
+    ),
+    ConfigItem(
+        key="ai.conversation_tool_modules", type="list", section="ai_tools",
+        label="Modules outillés en conversation",
+        description=(
+            "Vide = tous les modules démarrés. Sinon, liste blanche de noms "
+            "de modules. Les outils des autres restent utilisables ailleurs "
+            "(conscience, projets, tâches de fond) — seule la conversation "
+            "est allégée."
+        ),
+        hint=(
+            "Un modèle local pousse à réduire : la déclaration des 47 outils "
+            "pèse ~6 500 tokens, soit plus de 80 % du prompt d'un simple "
+            "« coucou », réévalués à chaque tour de la boucle d'outils."
+        ),
+        default=(), hot_reload=True,
     ),
 ]

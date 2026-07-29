@@ -87,8 +87,10 @@ class TestProcessMessage:
                    new_callable=AsyncMock, return_value=ctx), \
              patch("pipeline.processor.broadcast_to_websocket",
                    new_callable=AsyncMock), \
-             patch("pipeline.processor.persist_to_memory",
-                   new_callable=AsyncMock), \
+             patch("pipeline.processor.persist_user_message",
+                   new=AsyncMock(return_value=1)), \
+             patch("pipeline.processor.persist_assistant_message",
+                   new=AsyncMock(return_value=2)), \
              patch("pipeline.processor.emit_communication_event",
                    new_callable=AsyncMock), \
              patch("pipeline.response.ai_client") as mock_client:
@@ -107,8 +109,10 @@ class TestProcessMessage:
                    new_callable=AsyncMock, return_value=ctx), \
              patch("pipeline.processor.broadcast_to_websocket",
                    new_callable=AsyncMock) as mock_broadcast, \
-             patch("pipeline.processor.persist_to_memory",
-                   new_callable=AsyncMock), \
+             patch("pipeline.processor.persist_user_message",
+                   new=AsyncMock(return_value=1)), \
+             patch("pipeline.processor.persist_assistant_message",
+                   new=AsyncMock(return_value=2)), \
              patch("pipeline.processor.emit_communication_event",
                    new_callable=AsyncMock), \
              patch("pipeline.response.ai_client") as mock_client:
@@ -125,8 +129,10 @@ class TestProcessMessage:
                    new_callable=AsyncMock, return_value=ctx), \
              patch("pipeline.processor.broadcast_to_websocket",
                    new_callable=AsyncMock), \
-             patch("pipeline.processor.persist_to_memory",
-                   new_callable=AsyncMock) as mock_persist, \
+             patch("pipeline.processor.persist_user_message",
+                   new=AsyncMock(return_value=1)), \
+             patch("pipeline.processor.persist_assistant_message",
+                   new=AsyncMock(return_value=2)) as mock_persist, \
              patch("pipeline.processor.emit_communication_event",
                    new_callable=AsyncMock), \
              patch("pipeline.response.ai_client") as mock_client:
@@ -138,7 +144,7 @@ class TestProcessMessage:
 
     @pytest.mark.asyncio
     async def test_attachments_meta_passed_to_persist(self):
-        """The descriptor list for non-text parts must reach persist_to_memory."""
+        """The descriptor list for non-text parts must reach the persisted user Message."""
         ctx = _fake_context()
         perception = Perception.from_mixed(
             text="look",
@@ -152,14 +158,18 @@ class TestProcessMessage:
                    new_callable=AsyncMock, return_value=ctx), \
              patch("pipeline.processor.broadcast_to_websocket",
                    new_callable=AsyncMock), \
-             patch("pipeline.processor.persist_to_memory",
-                   new_callable=AsyncMock) as mock_persist, \
+             patch("pipeline.processor.persist_user_message",
+                   new=AsyncMock(return_value=1)) as mock_persist, \
+             patch("pipeline.processor.persist_assistant_message",
+                   new=AsyncMock(return_value=2)), \
              patch("pipeline.processor.emit_communication_event",
                    new_callable=AsyncMock), \
              patch("pipeline.response.ai_client") as mock_client:
             mock_client.complete = AsyncMock(return_value=AI_RESPONSES["greeting"])
             await process_message(perception, context=ctx)
 
+        # The descriptors ride on the *user* message — the only side that has
+        # attachments — which is now written before the AI call.
         kw = mock_persist.call_args.kwargs
         meta = kw["attachments_meta"]
         assert len(meta) == 1

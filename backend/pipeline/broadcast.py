@@ -59,6 +59,15 @@ async def broadcast_to_websocket(
             "source": source,
             "person_id": person_id,
             "inner_state": inner_state,
+            # Synchronisation cursors. `message_id` is this reply's row;
+            # a client stores the highest one it has seen and asks for
+            # everything after it when the socket comes back, which is the
+            # only way a frame emitted while it was disconnected is ever
+            # recovered — a WebSocket send to an empty group is silently
+            # lost, and nothing replayed it before.
+            "message_id": getattr(output, "message_id", None),
+            "user_message_id": getattr(output, "user_message_id", None),
+            "client_msg_id": getattr(output, "client_msg_id", None),
         },
     }
 
@@ -91,7 +100,29 @@ async def broadcast_to_websocket(
     }
 
     if not targets:
-        # No known recipient → legacy broadcast to all connected clients.
+        # Nobody reachable *right now*. Two very different cases hide here,
+        # and treating them alike leaked one person's context to another.
+        #
+        # An identifiable person who is simply not connected must NOT be
+        # broadcast: the payload carries their inner_state — profile,
+        # commitments, per-person affect — so a proactive message composed
+        # for Adrien while he is offline landed in every other open browser.
+        # The rule three lines below ("never dumped on the global group as a
+        # consolation prize") was already stated for the failed-delivery
+        # branch and simply not applied here. Nothing is lost by staying
+        # silent: the turn is persisted, and their client pulls it by cursor
+        # on reconnect (communication/history.py).
+        #
+        # The global group remains right for everything that belongs to no
+        # one — an anonymous socket, `conscience_mika` thinking out loud —
+        # where "whoever is watching" IS the intended audience.
+        if person_id and is_identifiable_person(person_id):
+            logger.info(
+                "No live client for %s — reply persisted, will be delivered "
+                "on reconnect rather than broadcast to everyone",
+                person_id,
+            )
+            return
         await channel_layer.group_send(BROADCAST_GROUP, payload)
         return
 
@@ -236,12 +267,25 @@ async def broadcast_inner_state_update(person_id: str | None = None) -> None:
     changes outside of a conversation turn (e.g. sleep phase transitions
     during the night). The frontend merges this into its InnerLifePanel +
     scene/animation state without invoking TTS.
+
+    Every current caller passes nothing, which is what "Mika's own state
+    changed" means, and that goes to the global group. A ``person_id``
+    makes ``_collect_inner_state`` add that person's profile and
+    commitments — so it must go to *their* group, not to everyone's. The
+    parameter has always existed and the send was always global: unused,
+    but a loaded gun pointing at the same leak ``broadcast_to_websocket``
+    was fixed for.
     """
     channel_layer = get_channel_layer()
     inner_state = await _collect_inner_state(person_id)
+    group = (
+        _person_group(person_id)
+        if person_id and is_identifiable_person(person_id)
+        else BROADCAST_GROUP
+    )
     try:
         await channel_layer.group_send(
-            BROADCAST_GROUP,
+            group,
             {
                 "type": "communication.broadcast",
                 "data": {
@@ -252,6 +296,41 @@ async def broadcast_inner_state_update(person_id: str | None = None) -> None:
         )
     except Exception as exc:
         degradations.record("broadcast: inner state push", exc)
+
+
+async def broadcast_emotion_update(person_id: str, group: str = "") -> None:
+    """Push a standalone ``emotion_update`` frame to one person's client(s).
+
+    Same emotion fields a ``speech`` frame carries, minus everything else:
+    no text, no inner state, no voice decision — the client applies the
+    face/gaze/hand mood and refreshes the readout without speaking. This is
+    what makes the avatar's expression follow the oscillator between turns
+    instead of freezing on the last reply (see ``emotion.sync``).
+
+    Targeted at the person's own group, never the global one: the emotion
+    here is Mika's stance *toward this person*, so it is theirs to see.
+    """
+    from emotion.engine import emotion_engine
+
+    msg = emotion_engine.compute_message_emotion(person_id)
+    payload = {
+        "type": "communication.broadcast",
+        "data": {
+            "type": "emotion_update",
+            "person_id": person_id,
+            "emotion": msg.emotion.value,
+            "emotion_intensity": msg.intensity,
+            "emotion_blend": [
+                {"emotion": e.value, "weight": round(w, 2)} for e, w in msg.blend
+            ],
+            "emotion_state": emotion_engine.get_state_dict(person_id),
+        },
+    }
+    try:
+        channel_layer = get_channel_layer()
+        await channel_layer.group_send(group or _person_group(person_id), payload)
+    except Exception as exc:
+        degradations.record("broadcast: emotion update push", exc)
 
 
 async def _collect_inner_state(person_id: str | None) -> dict:
@@ -282,7 +361,16 @@ async def _collect_inner_state(person_id: str | None) -> dict:
     # Mika's own plumbing, not a throwaway socket). The panel is a window
     # onto the same private memory the prompt gates, so it answers to the
     # same rule — see identity.trust.may_disclose_private_context.
-    if is_identifiable_person(person_id):
+    #
+    # ``person_scope`` states which question this payload answers, because
+    # the client cannot tell otherwise: a section with nothing to report is
+    # *omitted*, so "she knows nothing about you" and "this frame is not
+    # about anyone" arrived identically. The panel clears a section it is
+    # handed nothing for — correct for the first reading, and it meant every
+    # sleep-phase transition wiped the identity block from every open
+    # browser until the next reply.
+    state["person_scope"] = bool(is_identifiable_person(person_id))
+    if state["person_scope"]:
         await _merge_section(
             state, "person profile", lambda: _snapshot_person(person_id),
         )
@@ -582,24 +670,104 @@ async def persist_to_memory(
     person_id: str,
     attachments_meta: list[dict] | None = None,
     user_is_internal: bool = False,
-) -> None:
-    """Save the user message (with any attachment descriptors) and the
-    assistant response to memory.
+    response_is_internal: bool = False,
+) -> tuple[int | None, int | None]:
+    """Save a whole exchange at once — question then reply.
 
-    ``attachments_meta`` is attached to the user Message only, so later
-    retrieval can see what was sent without keeping binary bytes in the
-    conversation store.
+    Kept for callers that genuinely have both halves in hand. The
+    conversation pipeline does **not**: it writes the question before the
+    AI call and the reply after (see :func:`persist_user_message`), because
+    the interval between the two is where the process is most likely to
+    die.
 
-    ``user_is_internal`` marks the "user" message as scaffolding Mika wrote
-    to herself (greeting brief, module notify_ai prompt) rather than
-    something a person said. The consolidator skips those so instructions
-    never become souvenirs; her reply stays a real memory.
+    Returns ``(user_message_id, assistant_message_id)``.
     """
-    await memory_manager.add_message(
+    user_id = await persist_user_message(
+        message=message, source=source, person_id=person_id,
+        attachments_meta=attachments_meta,
+        is_internal=user_is_internal,
+        awaiting_reply=False,
+    )
+    assistant_id = await persist_assistant_message(
+        response=response, person_id=person_id,
+        is_internal=response_is_internal,
+        replying_to=user_id,
+    )
+    return user_id, assistant_id
+
+
+async def persist_user_message(
+    *,
+    message: str,
+    source: str,
+    person_id: str,
+    attachments_meta: list[dict] | None = None,
+    is_internal: bool = False,
+    awaiting_reply: bool = True,
+) -> int | None:
+    """Write down what was said, before trying to answer it.
+
+    Order matters and it is the whole point. The AI call is the long,
+    fragile part of a turn — up to ``ai.call_timeout_seconds``, on a local
+    model often all of it. Persisting afterwards meant a restart during
+    that window erased the question itself: the client had been told
+    "received", showed the message as sent, and the server had no record
+    that anyone had spoken. Writing first turns that into a question that
+    is merely unanswered, which ``awaiting_reply`` makes recoverable.
+
+    ``attachments_meta`` rides on the user Message only, so retrieval can
+    see what came with the turn without keeping bytes in the conversation
+    store.
+
+    ``is_internal`` marks scaffolding Mika wrote to herself (a greeting
+    brief, a module's notify_ai prompt) rather than something a person
+    said. The consolidator skips those so instructions never become
+    souvenirs; her reply stays a real memory.
+    """
+    return await memory_manager.add_message(
         "user", message, source=source, person_id=person_id,
         attachments_meta=attachments_meta or [],
-        is_internal=user_is_internal,
+        is_internal=is_internal,
+        awaiting_reply=awaiting_reply,
     )
-    await memory_manager.add_message(
+
+
+async def persist_assistant_message(
+    *,
+    response: str,
+    person_id: str,
+    is_internal: bool = False,
+    replying_to: int | None = None,
+) -> int | None:
+    """Write down the answer, and close the question it answers.
+
+    ``is_internal`` marks the *reply* as machinery rather than speech —
+    the fallback text a failed turn returns. What the person said is a real
+    fact and is kept as one; "Hmm, je réfléchis plus lentement que prévu"
+    is the engine talking about itself, and it must reach neither the
+    extractor nor the rehydrated history.
+
+    ``replying_to`` clears that question's ``awaiting_reply`` flag. A
+    failed turn still clears it: it produced a fallback, so it is answered
+    — badly, but answered. Re-queuing it at every boot would replay the
+    same failure forever.
+    """
+    assistant_id = await memory_manager.add_message(
         "assistant", response, person_id=person_id,
+        is_internal=is_internal,
     )
+    # `int` and not just "not None": a caller whose memory layer is stubbed
+    # hands back whatever the stub returns, and filtering a pk on it raises
+    # inside a handler that would then report a real persistence failure.
+    if isinstance(replying_to, int):
+        try:
+            from memory.models import Message
+
+            await Message.objects.filter(pk=replying_to).aupdate(
+                awaiting_reply=False,
+            )
+        except Exception as exc:
+            # A flag left set costs one redundant re-queue at the next
+            # boot; failing the turn over it would cost the answer.
+            degradations.record("persist: clear awaiting_reply", exc)
+    return assistant_id

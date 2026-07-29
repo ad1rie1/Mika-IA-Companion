@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -42,6 +43,32 @@ from django.utils import timezone
 from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
+
+
+# ── Async-context safety ─────────────────────────────────────────
+#
+# ``check()`` and ``record()`` are called from ``AIRouter.complete``,
+# which is a coroutine: every one of their ORM touches ran on the ASGI
+# loop thread, where Django refuses them (``SynchronousOnlyOperation``).
+# Both were wrapped in ``except Exception`` — so the failure was silent
+# and the *feature* was silently absent:
+#
+#   - ``_persist`` never wrote a row outside tests, so ``AIQuotaUsage``
+#     stayed empty and ``hydrate()`` re-populated nothing on restart:
+#     every process boot started the month at zero.
+#   - ``_project_monthly_limit`` fell into its handler and returned 0,
+#     which means *unlimited* — a project's ``monthly_token_budget``
+#     could never fire.
+#
+# The read is handed to the shared config worker and waited on (one
+# indexed row on a WAL database, microseconds — and ``check`` must
+# decide *before* the call). The write goes to its own single worker and
+# is **not** waited on: it is a write, it contends with six background
+# loops, and blocking the loop for up to ``DB_LOCK_TIMEOUT`` to bookkeep
+# a call that already happened is a far worse trade than a late row.
+# A single worker also keeps concurrent get_or_create/UPDATE pairs on
+# the same row serialised.
+_write_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="quota-db")
 
 
 # ── Context variables ────────────────────────────────────────────
@@ -222,6 +249,7 @@ class QuotaTracker:
         self._projects: dict[int, QuotaCounters] = {}
         self._global = QuotaCounters()
         self._hydrated = False
+        self._pending: set[Future] = set()
 
     # -- Limit lookups (read from settings each call so env changes bite) --
 
@@ -243,10 +271,24 @@ class QuotaTracker:
         return int(getattr(settings, key, 0) or 0)
 
     def _project_monthly_limit(self, project_id: int) -> int:
-        """Read from the Project model, 0 means unlimited."""
+        """Read from the Project model, 0 means unlimited.
+
+        Goes through ``db_read`` so it works from the ASGI loop as well as
+        from a sync view — otherwise the handler below turns every budget
+        into "unlimited" the moment the caller is a coroutine.
+        """
         try:
+            from configs.service import db_read
             from projects.models import Project
-            p = Project.objects.only("monthly_token_budget").filter(pk=project_id).first()
+
+            def _fetch():
+                return (
+                    Project.objects.only("monthly_token_budget")
+                    .filter(pk=project_id)
+                    .first()
+                )
+
+            p = db_read(_fetch)
             if p is None:
                 return 0
             return int(getattr(p, "monthly_token_budget", 0) or 0)
@@ -358,22 +400,65 @@ class QuotaTracker:
                 proj_ctr.add(total, cost)
 
         # DB persistence — best-effort, never fail an LLM call because of it
-        try:
-            self._persist(
-                role=role,
-                provider=provider,
-                model=model,
-                project_id=project_id,
-                tokens_in=tokens_in,
-                tokens_out=tokens_out,
-                cost_usd=cost,
-                today=today,
-            )
-        except Exception as exc:
-            degradations.record("ai.quota.record", exc)
-            logger.debug("Quota DB persistence failed", exc_info=True)
+        self._dispatch_persist(
+            role=role,
+            provider=provider,
+            model=model,
+            project_id=project_id,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            cost_usd=cost,
+            today=today,
+        )
 
         return cost
+
+    def _dispatch_persist(self, **kwargs) -> None:
+        """Persist inline from a sync caller, off-loop from an async one.
+
+        Fire-and-forget in the async case: the counters that matter for
+        limiting are already updated in RAM, and this row is bookkeeping.
+        """
+        from configs.service import in_async_context
+
+        if not in_async_context():
+            try:
+                self._persist(**kwargs)
+            except Exception as exc:
+                degradations.record("ai.quota.persist_inline", exc)
+                logger.debug("Quota DB persistence failed", exc_info=True)
+            return
+
+        def _call():
+            from django.db import close_old_connections
+            close_old_connections()
+            self._persist(**kwargs)
+
+        try:
+            future = _write_pool.submit(_call)
+        except Exception as exc:          # pool shut down (interpreter exit)
+            degradations.record("ai.quota.persist_submit", exc)
+            return
+
+        self._pending.add(future)
+        future.add_done_callback(self._on_persisted)
+
+    def _on_persisted(self, future: Future) -> None:
+        self._pending.discard(future)
+        try:
+            # Nothing awaits this future — without reading it here the
+            # failure would stay inside the executor and surface nowhere.
+            future.result()
+        except Exception as exc:
+            degradations.record("ai.quota.persist_offloop", exc)
+            logger.debug("Quota DB persistence failed", exc_info=True)
+
+    def flush(self, timeout: float = 5.0) -> None:
+        """Wait for in-flight persistence writes. Used by tests and shutdown."""
+        from concurrent.futures import wait
+        pending = list(self._pending)
+        if pending:
+            wait(pending, timeout=timeout)
 
     def _persist(
         self,
@@ -532,6 +617,7 @@ class QuotaTracker:
 
     def reset(self) -> None:
         """Wipe in-RAM state. Used by tests between cases."""
+        self.flush()
         with self._lock:
             self._roles.clear()
             self._projects.clear()

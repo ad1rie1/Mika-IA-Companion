@@ -214,9 +214,16 @@ export class InnerLifePanel {
     this.renderDrives(state.drives);
     this.renderNarrative(state.self_narrative);
     this.renderRuminations(state.ruminations);
-    this.renderProfile(
-      state.person_profile, state.pending_commitments, state.identity,
-    );
+    // Only when the payload is actually about someone. A frame that says
+    // nothing about any person — a sleep-phase transition, a project
+    // queueing an action — must not be read as "she no longer knows who
+    // you are": these renderers clear what they are handed nothing for,
+    // which is right for an empty section and wrong for an absent scope.
+    if (state.person_scope !== false) {
+      this.renderProfile(
+        state.person_profile, state.pending_commitments, state.identity,
+      );
+    }
   }
 
   /** Subscribe to sleep-phase transitions (drives avatar + scene visuals). */

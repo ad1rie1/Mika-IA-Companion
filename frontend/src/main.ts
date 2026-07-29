@@ -159,13 +159,19 @@ async function init() {
   // connection to user_{pk} and ignores any client claim, so sending the
   // locally generated web_* one would just describe an identity that the
   // backend already overrode.
+  const effectivePersonId = auth.authenticated
+    ? auth.person_id ?? identity.personId
+    : identity.personId;
   ws.setIdentity(
-    auth.authenticated ? auth.person_id ?? identity.personId : identity.personId,
+    effectivePersonId,
     auth.authenticated
       ? auth.display_name ?? auth.username ?? identity.displayName
       : identity.displayName
   );
-  const chatOverlay = new ChatOverlay(ws);
+  // The cached thread is scoped to that id. Without it, resetting the
+  // identity — or a second account on the same browser — kept the previous
+  // person's conversation on screen under a new name.
+  const chatOverlay = new ChatOverlay(ws, effectivePersonId);
   // The identity bar lets an anonymous visitor pick a name. Authenticated
   // users have one already, and letting them edit it here would suggest they
   // can change who Mika thinks they are — which is exactly what the session
@@ -233,10 +239,11 @@ async function init() {
     emotion: EmotionName,
     intensity: number,
     blend: SpeechMessage["emotion_blend"] = [],
-    persona?: SpeechMessage["voice_persona"]
+    persona?: SpeechMessage["voice_persona"],
+    opts: { ambient?: boolean } = {}
   ) => {
     emotionController.setEmotion(emotion, intensity);
-    animationSystem.setEmotion(emotion, intensity, blend ?? [], persona);
+    animationSystem.setEmotion(emotion, intensity, blend ?? [], persona, opts);
     emotionDisplay.setEmotion(emotion, intensity);
   };
 
@@ -289,14 +296,36 @@ async function init() {
     innerLifePanel.applyInnerState(data.inner_state);
   });
 
+  // Emotional state between turns. The backend oscillators keep moving
+  // while Mika is silent — relaxing toward a home vector that itself
+  // drifts with the time of day, tinted by whatever she's ruminating on —
+  // and this is the only frame that carries that. Without it the face and
+  // the readout stayed on the last reply for as long as nobody spoke.
+  // Applied as drift: expression, gaze and hand mood follow, postures
+  // follow, body one-shots don't (see decideGesture's `ambient` gate).
+  ws.on("emotion_update", (data) => {
+    if (!isEmotionName(data.emotion)) return;
+    const intensity =
+      typeof data.emotion_intensity === "number" ? data.emotion_intensity : 0;
+    applyEmotion(data.emotion, intensity, data.emotion_blend, undefined, {
+      ambient: true,
+    });
+    innerLifePanel.setEmotionBlend(data.emotion_blend ?? [], intensity);
+  });
+
   // Project reports — silent by default (no TTS). Show as a message
   // in the chat overlay so the user sees what Mika wrapped up. Prefixed
   // to distinguish from regular conversation.
   ws.on("project_report", (data) => {
     try {
+      // Not a `Message` row, so it will never get a server id. Marked as
+      // such, or the merge's "no id means not written yet, therefore
+      // newest" rule pinned it to the bottom of the thread for the rest of
+      // the session, below every reply that came after it.
       chatOverlay.addMessage(
         `[Projet · ${data.project_title}] ${data.text}`,
         "vtuber",
+        { localOnly: true },
       );
     } catch {
       console.log(`[project_report ${data.project_title}] ${data.text}`);

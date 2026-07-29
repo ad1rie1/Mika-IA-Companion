@@ -391,6 +391,63 @@ class TestQuotaPersistence:
         assert row.call_count == 1
 
     @pytest.mark.django_db(transaction=True)
+    @pytest.mark.asyncio
+    async def test_record_persists_from_async_context(self):
+        """The real caller is a coroutine (``AIRouter.complete``).
+
+        Persisting inline there raised SynchronousOnlyOperation into a
+        handler that swallowed it, so no row was ever written outside
+        tests — and ``hydrate()`` had nothing to restore on restart.
+        """
+        from asgiref.sync import sync_to_async
+
+        from ai.models import AIQuotaUsage
+        from utils.degradation import degradations
+
+        degradations.reset()
+        tracker = QuotaTracker()
+        tracker.record(
+            role="conversation", provider="claude", model="claude-opus-4-7",
+            tokens_in=100, tokens_out=50,
+        )
+        tracker.flush()
+
+        row = await sync_to_async(AIQuotaUsage.objects.get)(role="conversation")
+        assert row.tokens_in == 100
+        assert row.tokens_out == 50
+        assert degradations.count_for("ai.quota.persist_offloop") == 0
+
+    @pytest.mark.django_db(transaction=True)
+    @pytest.mark.asyncio
+    async def test_project_budget_enforced_from_async_context(self):
+        """``check`` reads ``monthly_token_budget`` before deciding.
+
+        On the loop that read used to fail into a handler returning 0,
+        which means *unlimited*: the budget could never fire in the one
+        context that actually runs — the project runner's own tick.
+        """
+        from asgiref.sync import sync_to_async
+
+        from projects.models import Project
+
+        project = await sync_to_async(Project.objects.create)(
+            title="Async budget",
+            status=Project.Status.ACTIVE,
+            monthly_token_budget=500,
+        )
+        tracker = QuotaTracker()
+        tracker.record(
+            role="memory_extraction", provider="claude", model="claude-haiku-4-5",
+            tokens_in=300, tokens_out=150, project_id=project.id,
+        )
+        with pytest.raises(QuotaExceeded) as exc:
+            tracker.check(
+                role="memory_extraction", project_id=project.id, expected_tokens=100,
+            )
+        assert exc.value.scope == f"project:{project.id}:monthly"
+        tracker.flush()
+
+    @pytest.mark.django_db(transaction=True)
     def test_record_increments_existing_row(self):
         from ai.models import AIQuotaUsage
         tracker = QuotaTracker()

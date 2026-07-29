@@ -57,7 +57,16 @@ class _patched_router:
         self._config_patch = patch.object(config_service, "get", side_effect=_fake_get)
         self._declared_patch.start()
         self._config_patch.start()
-        self.router = AIRouter()
+        # Anything raising past this point skips ``__exit__`` entirely, and
+        # the patch on ``config_service.get`` then survives for the rest of
+        # the session — where the next user of this helper captures the mock
+        # as its own ``real_get`` and the chain recurses. That is how one
+        # failing test here turned a dozen unrelated ones red.
+        try:
+            self.router = AIRouter()
+        except BaseException:
+            self.__exit__()
+            raise
         return self.router
 
     def __exit__(self, *a):

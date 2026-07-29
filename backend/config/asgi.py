@@ -1,3 +1,4 @@
+import asyncio
 import os
 import logging
 
@@ -14,6 +15,11 @@ from memory.manager import memory_manager
 from modules.manager import module_manager
 
 logger = logging.getLogger(__name__)
+
+# How long shutdown waits for an in-flight turn to finish writing its reply.
+# Above a normal turn, below any patience a restart has: past this the turn
+# is cancelled and picked up again on the next boot via ``awaiting_reply``.
+DRAIN_TIMEOUT_S = 10
 
 
 class LifespanWrapper:
@@ -41,6 +47,7 @@ class LifespanWrapper:
         from asgiref.sync import sync_to_async
         from conscience.engine import conscience_engine
         from emotion.engine import emotion_engine
+        from emotion.sync import emotion_sync
         from memory.sleep import sleep_cycle
         from projects.runner import project_runner
 
@@ -53,6 +60,23 @@ class LifespanWrapper:
 
         await memory_manager.initialize()
         logger.info("Memory system initialized")
+
+        # The pool that actually answers people. Started before anything can
+        # submit to it, and before the sockets are served: a turn queued by a
+        # connection arriving during startup must find a worker, not a
+        # lazily-created one racing the lifespan.
+        from pipeline.turns import resume_interrupted_turns, turn_queue
+
+        await turn_queue.start()
+
+        # Questions written down but never answered — the process died
+        # mid-turn. Put them back before opening for business, so someone
+        # who was mid-conversation when the server went down gets their
+        # answer instead of silence.
+        try:
+            await resume_interrupted_turns()
+        except Exception:
+            logger.exception("Could not resume interrupted turns")
 
         await emotion_engine.initialize()
         logger.info("Emotion engine initialized")
@@ -70,6 +94,11 @@ class LifespanWrapper:
         await sleep_cycle.start()
         await project_runner.start()
 
+        # The oscillators move all day; the frontend only ever heard about
+        # them when Mika spoke. This loop pushes the current emotion to each
+        # connected client when it actually changes.
+        await emotion_sync.start()
+
         # Communication channels (not plugins) — started here on the
         # same footing as the WebSocket consumer, which is wired via
         # ``communication.routing``.
@@ -82,6 +111,7 @@ class LifespanWrapper:
     async def _shutdown(self):
         from communication.channels import telegram_channel
         from emotion.engine import emotion_engine
+        from emotion.sync import emotion_sync
         from conscience.engine import conscience_engine
         from memory.sleep import sleep_cycle
         from projects.runner import project_runner
@@ -91,9 +121,28 @@ class LifespanWrapper:
         except Exception:
             logger.exception("Telegram channel failed to stop cleanly")
 
+        # Stop accepting turns, but let the in-flight one finish writing: a
+        # reply cut off between the AI call and its persistence would come
+        # back as an "interrupted turn" and be replayed on the next boot.
+        from pipeline.turns import turn_queue
+
+        try:
+            await asyncio.wait_for(turn_queue.drain(), timeout=DRAIN_TIMEOUT_S)
+        except (asyncio.TimeoutError, Exception):
+            logger.warning("Turn queue did not drain in time — cancelling")
+        try:
+            await turn_queue.stop()
+        except Exception:
+            logger.exception("Turn queue failed to stop cleanly")
+
         # Stop dedicated loops first — they only call into sleep_cycle /
         # project_runner state and don't own DB connections, so they shut
         # down quickly and cannot starve the managers below.
+        try:
+            await emotion_sync.stop()
+        except Exception:
+            logger.exception("Emotion sync loop failed to stop cleanly")
+
         try:
             await project_runner.stop()
         except Exception:

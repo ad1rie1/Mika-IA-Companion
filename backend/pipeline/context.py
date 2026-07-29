@@ -199,10 +199,22 @@ async def gather_context(
             degradations.record("prompt: project detection", exc)
 
     # Tools (generic ModuleTool list — the provider does the translation)
+    #
+    # ``ai.conversation_tool_modules`` narrows the set to an allow-list of
+    # modules. Empty = every running module, which is right for a hosted API
+    # and wrong for a local model: a tool declaration is prompt, re-sent and
+    # re-evaluated on every turn of the tool loop, and the nine modules
+    # together weigh ~6 500 tokens — more than four times the system prompt.
+    # The knob lives in config rather than in code because the sensible
+    # answer is a property of the model behind the role, not of the pipeline.
     tools: list = []
     tool_names: list[str] = []
     if include_tools:
-        tools = module_manager.collect_tools()
+        allowed = _conversation_tool_modules()
+        tools = (
+            module_manager.get_tools_for_modules(allowed) if allowed
+            else module_manager.collect_tools()
+        )
         tool_names = [t.name for t in tools]
 
     return ConversationContext(
@@ -225,6 +237,26 @@ async def gather_context(
         project_id=project_id,
         identity_context=identity_context,
     )
+
+
+def _conversation_tool_modules() -> list[str]:
+    """Module allow-list for conversation tools — empty means "all of them".
+
+    Read per turn rather than cached: the setting is ``hot_reload``, and the
+    point of the knob is to try a narrower set against a live conversation
+    without a restart. Never raises — an unreadable config must cost a
+    lighter tool set at worst, never the answer itself.
+    """
+    from configs.service import config_service
+
+    try:
+        raw = config_service.get("ai.conversation_tool_modules") or []
+    except Exception as exc:
+        degradations.record("prompt: conversation tool allow-list", exc)
+        return []
+    if isinstance(raw, str):
+        raw = [part.strip() for part in raw.split(",")]
+    return [name for name in (str(n).strip() for n in raw) if name]
 
 
 def _format_identity_block(ctx) -> str:

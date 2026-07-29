@@ -112,3 +112,34 @@ describe("decideGesture gates (in contract order)", () => {
     expect(d).toEqual({ action: "oneshot", clip: "gesture_excited" });
   });
 });
+
+/**
+ * Ambient = the backend's emotion_update, i.e. the mood drifting on its own
+ * between two replies. Without this gate a sustained emotion above threshold
+ * fires a body clip every cooldown for as long as it lasts, at nothing.
+ */
+describe("ambient drift", () => {
+  it("blocks a oneshot that would otherwise fire", () => {
+    const speaking = decideGesture(base({ emotion: "excited", intensity: 0.9 }));
+    expect(speaking.action).toBe("oneshot");
+
+    const drifting = decideGesture(
+      base({ emotion: "excited", intensity: 0.9, ambient: true })
+    );
+    expect(drifting).toEqual({ action: "none", reason: "ambient_drift" });
+  });
+
+  it("still allows a posture — a mood that settles into sadness slumps", () => {
+    const d = decideGesture(
+      base({ emotion: "sad", intensity: 0.8, ambient: true })
+    );
+    expect(d).toEqual({ action: "idleVariant", clip: "idle_sad" });
+  });
+
+  it("never overrides the sleep gate", () => {
+    const d = decideGesture(
+      base({ emotion: "sad", intensity: 0.8, ambient: true, sleepPhase: "rem" })
+    );
+    expect(d).toEqual({ action: "none", reason: "asleep" });
+  });
+});

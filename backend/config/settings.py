@@ -1,4 +1,5 @@
 import os
+import warnings
 from pathlib import Path
 
 import environ
@@ -364,3 +365,18 @@ LOGGING = {
         "ai": {"level": "DEBUG", "propagate": True},
     },
 }
+
+# Django's own ``FileResponse`` always wraps the file in a *synchronous*
+# iterator (``iter(lambda: filelike.read(block_size), b"")``), so served under
+# ASGI every static file trips ``StreamingHttpResponse.__aiter__``'s warning
+# about consuming a sync iterator asynchronously. Nothing in this codebase
+# returns a streaming response, so the warning can only ever come from Django
+# serving a file, where the sync read is what the class does by design and
+# there is no async alternative to switch to. Filtered on the exact message so
+# the mirror-image warning (an async iterator consumed synchronously, which
+# *would* be our bug) still surfaces.
+warnings.filterwarnings(
+    "ignore",
+    message="StreamingHttpResponse must consume synchronous iterators",
+    category=Warning,
+)

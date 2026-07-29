@@ -22,7 +22,12 @@ from ai.router import UnconfiguredRoleError
 from emotion.engine import emotion_engine
 from emotion.types import Emotion, EmotionData
 from identity.resolver import identity_resolver
-from pipeline.broadcast import broadcast_to_websocket, emit_communication_event, persist_to_memory
+from pipeline.broadcast import (
+    broadcast_to_websocket,
+    emit_communication_event,
+    persist_assistant_message,
+    persist_user_message,
+)
 from pipeline.context import ConversationContext, gather_context
 from pipeline.perception import Intent, Perception
 from pipeline.response import call_ai_and_parse
@@ -87,6 +92,18 @@ class SpeechOutput:
     # Downstream: never spoken via TTS, and callers (conscience) must not
     # count it as a successful act.
     ai_failed: bool = False
+    # Persistence cursors, carried into the broadcast so a client can tell
+    # "this is the reply I was waiting for" from "this is a message I have
+    # already displayed", and can ask for everything after it on reconnect.
+    # None when the turn was not persisted (persist=False, or a write that
+    # failed — a message the server did not record must not advance the
+    # client's cursor past it).
+    message_id: int | None = None
+    user_message_id: int | None = None
+    # Echo of the client-generated id the browser attached to its own bubble,
+    # so a locally-painted message can be reconciled with its server row
+    # instead of appearing twice after a history merge.
+    client_msg_id: str | None = None
 
 
 # -- Main entry point ---------------------------------------------------------
@@ -144,6 +161,8 @@ async def process_message(
     await emotion_engine.ensure_person_loaded(person_id)
 
     ai_failed = False
+    user_message_id: int | None = None
+    assistant_message_id: int | None = None
     from configs.service import config_service
     timeout_seconds = config_service.get("ai.call_timeout_seconds")
 
@@ -154,6 +173,44 @@ async def process_message(
                 message, person_id, channel=source,
                 authenticated=authenticated, is_public=is_public,
             )
+
+        # 1b. Write the question down, before attempting to answer it.
+        #
+        #     Deliberately *after* gather_context and *before* the AI call.
+        #     After, because add_message also appends to the short-term
+        #     buffer that gather_context just read — persisting first would
+        #     hand the model the current message twice, once as history and
+        #     once as the prompt. Before, because the AI call is the long
+        #     fragile part: a restart during it used to erase the question
+        #     itself, leaving someone with a bubble marked delivered and no
+        #     trace on the server that they had spoken at all.
+        if persist:
+            # A turn replayed after a restart already has its question in the
+            # database — that row is precisely how it was found (see
+            # pipeline/turns.py::resume_interrupted_turns). Writing it again
+            # produced a second row with the same text: duplicated in the
+            # person's fiche, duplicated for the consolidator, and displayed
+            # twice in the browser, since the merge only adopts bubbles that
+            # have no id yet and the original already had one.
+            #
+            # The rehydrated short-term buffer still holds that question, so
+            # the replayed turn shows it to the model once as history and
+            # once as the prompt. That is the cheaper of the two artefacts:
+            # dropping it from the buffer would leave the answer standing
+            # alone, without the question, for every turn that follows.
+            replayed_id = perception.metadata.get("original_message_id")
+            if isinstance(replayed_id, int):
+                user_message_id = replayed_id
+            else:
+                user_message_id = await persist_user_message(
+                    message=message,
+                    source=source,
+                    person_id=person_id,
+                    attachments_meta=_serialize_attachments_meta(perception),
+                    # The "user" side of an internal trigger is scaffolding
+                    # Mika wrote to herself, not something anyone said.
+                    is_internal=perception.intent is Intent.INTERNAL_TRIGGER,
+                )
 
         # 2. Prompt -> AI call -> emotion extraction (bounded by timeout)
         response_text, emotion_data, tool_calls = await asyncio.wait_for(
@@ -228,18 +285,29 @@ async def process_message(
                 "is unaffected", person_id,
             )
 
-    # 4. Persist to memory — skip on failure to avoid pollution.
-    if persist and not ai_failed:
-        attachments_meta = _serialize_attachments_meta(perception)
-        await persist_to_memory(
-            message=message,
+    # 4. Persist the reply — including a failed turn's fallback.
+    #
+    #    A failure used to drop the whole exchange, on the grounds that a
+    #    fallback is not a real answer. True of the *answer*; false of the
+    #    question. What someone actually said to Mika happened whether or not
+    #    the model replied in time, and losing it means the message exists
+    #    nowhere — not in the history, not on the person's fiche, not for the
+    #    consolidator — which reads as "you never wrote to me". The question
+    #    is therefore already written down, at step 1b.
+    #
+    #    Only the *reply* is demoted: marked internal, so the extractor never
+    #    turns "j'ai eu un petit bug" into a souvenir and a restart doesn't
+    #    rehydrate it as something Mika said. Everything else a failure
+    #    withholds still is: no emotional impulse, no chat.message event, no
+    #    turn signal. She keeps the trace without pretending she answered.
+    if persist:
+        assistant_message_id = await persist_assistant_message(
             response=response_text,
-            source=source,
             person_id=person_id,
-            attachments_meta=attachments_meta,
-            # The "user" side of an internal trigger is scaffolding Mika
-            # wrote to herself, not something anyone said to her.
-            user_is_internal=perception.intent is Intent.INTERNAL_TRIGGER,
+            is_internal=ai_failed,
+            # Closes the question: answered, well or badly. A fallback still
+            # counts, or every boot would replay the same failing turn.
+            replying_to=user_message_id,
         )
 
     # 5. Emit module event — also skipped on failure.
@@ -293,6 +361,9 @@ async def process_message(
             for e, w in msg_emotion.blend
         ],
         ai_failed=ai_failed,
+        message_id=assistant_message_id,
+        user_message_id=user_message_id,
+        client_msg_id=_client_msg_id(perception),
     )
 
     # 7. Broadcast to WebSocket (inner state attached so UI panels refresh).
@@ -327,21 +398,52 @@ async def process_message(
     return output
 
 
+def _client_msg_id(perception: Perception) -> str | None:
+    """The browser-generated id of the message that triggered this turn.
+
+    Opaque to the pipeline — it is minted by the client and only ever
+    handed back, so it is length-capped and coerced to str rather than
+    validated: it indexes nothing server-side, and the one thing it must
+    not do is grow a payload without bound.
+    """
+    raw = perception.metadata.get("client_msg_id")
+    if not isinstance(raw, str) or not raw:
+        return None
+    return raw[:64]
+
+
 def _serialize_attachments_meta(perception: Perception) -> list[dict]:
-    """Extract a JSON-friendly descriptor for each non-text part.
+    """Extract a JSON-friendly descriptor for each attached, non-text part.
 
     Binary content is not stored here — the router has already saved
     raw media to disk/DB via pipeline.media. This is purely structural
     metadata (kind, mime_type, name, ...) that lives alongside the
     persisted user Message so later retrieval knows what was attached.
+
+    The subtlety is that by the time this runs there are **no non-text
+    parts left**. Preprocessing happens in the router, before the
+    processor is ever called, and it does not annotate a part — it
+    *replaces* it: an image Part becomes ``Part(kind="text",
+    content="[image: un chat roux dort sur un canapé]")``. So a filter on
+    ``kind != "text"`` matched nothing and every upload was persisted with
+    an empty ``attachments_meta``, which is the field the history frame
+    ships as ``attachments``. A reloaded thread had no idea a file had
+    ever been sent, and the documented promise that "the structured parts
+    are preserved" was never once true for a web upload.
+
+    What survives the substitution is ``metadata["original_kind"]``, which
+    every preprocessor sets (including on its failure placeholder). That
+    is what identifies a part as an attachment here.
     """
     meta: list[dict] = []
     for p in perception.parts:
-        if p.kind == "text":
+        original_kind = p.metadata.get("original_kind")
+        if p.kind == "text" and not original_kind:
             continue
         meta.append({
-            "kind": p.kind,
-            "mime_type": p.mime_type,
-            **p.metadata,
+            "kind": original_kind or p.kind,
+            "mime_type": p.metadata.get("original_mime_type") or p.mime_type,
+            **{k: v for k, v in p.metadata.items()
+               if k not in ("original_kind", "original_mime_type")},
         })
     return meta

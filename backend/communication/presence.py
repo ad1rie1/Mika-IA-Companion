@@ -50,6 +50,11 @@ class Interlocutor:
     last_inbound_at: float | None = None
     last_outbound_at: float | None = None
     meta: dict = field(default_factory=dict)
+    # Live connections backing this entry, by opaque connection id (a
+    # consumer's ``channel_name``). One entry can have several: two browser
+    # tabs, or the overlap between a dying socket and its replacement. Empty
+    # for module handles, which are not backed by a connection at all.
+    connections: set[str] = field(default_factory=set)
 
     @property
     def is_consumer(self) -> bool:
@@ -81,12 +86,19 @@ class PresenceRegistry:
         delivery_ref: str = "",
         display_name: str = "",
         reachable: bool = True,
+        connection_id: str = "",
         **meta,
     ) -> Interlocutor:
         """Register (or refresh) a reachable interlocutor.
 
         Called by consumers on connect and by modules when they see a user.
         Refreshing keeps the entry's timestamps but updates the handle.
+
+        ``connection_id`` identifies the socket behind this registration. It
+        is what makes a second tab additive rather than a no-op, and what
+        stops the first tab's disconnect from erasing it — see
+        :meth:`unregister`. Modules pass nothing: their reachability is not
+        backed by a connection.
         """
         key = (person_id, channel)
         with self._lock:
@@ -109,12 +121,42 @@ class PresenceRegistry:
                     meta=dict(meta),
                 )
                 self._by_key[key] = interlocutor
+            if connection_id:
+                interlocutor.connections.add(connection_id)
         logger.debug("Presence register: %s on %s (%s)", person_id, channel, kind)
         return interlocutor
 
-    def unregister(self, person_id: str, channel: str) -> None:
-        """Remove an interlocutor (consumer disconnect)."""
+    def unregister(
+        self, person_id: str, channel: str, connection_id: str = "",
+    ) -> None:
+        """Drop one connection's claim on an interlocutor.
+
+        The entry itself survives while *any* other connection still backs
+        it. This is not a refinement, it is the difference between working
+        and not: the registry is keyed by ``(person_id, channel)``, so two
+        browser tabs share one entry, and an unconditional removal on the
+        first disconnect left the second tab connected, in its group, and
+        never sent anything again — ``broadcast_to_websocket`` deliberately
+        stays silent when a person resolves to nothing. The same race
+        happens with a single tab: ``reconnectNow()`` opens the replacement
+        socket before the old one's ``disconnect`` is dispatched, so the
+        late arrival would have erased a live connection's presence.
+
+        Called without a ``connection_id`` — modules, tests, forced eviction
+        — it removes the entry outright, which is the old behaviour.
+        """
         with self._lock:
+            entry = self._by_key.get((person_id, channel))
+            if entry is None:
+                return
+            if connection_id and entry.connections:
+                entry.connections.discard(connection_id)
+                if entry.connections:
+                    logger.debug(
+                        "Presence keep: %s on %s (%d connection(s) left)",
+                        person_id, channel, len(entry.connections),
+                    )
+                    return
             self._by_key.pop((person_id, channel), None)
         logger.debug("Presence unregister: %s on %s", person_id, channel)
 

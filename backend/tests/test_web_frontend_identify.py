@@ -26,7 +26,27 @@ def _make_consumer():
     c.channel_name = "test_ch"
     c.channel_layer = AsyncMock()
     c.send = AsyncMock()
+    # Rebinding re-ships the thread for the newly declared identity, which
+    # is a real ORM read. These tests are about the handshake, not about
+    # what it then sends — see test_ws_sync_protocol.py for that half.
+    c._send_history = AsyncMock()
+    c._push_emotion_now = AsyncMock()
     return c
+
+
+async def _settle_greeting(c=None):
+    """Wait for the queued greeting turn to be processed.
+
+    The greeting is no longer awaited inside the handler: Channels
+    serialises a consumer's callbacks, so awaiting an LLM call there froze
+    the socket — history, ping and the first thing the user typed all
+    waited behind it, for up to ``ai.call_timeout_seconds``. It goes
+    through the shared turn queue, so tests drain it explicitly; that they
+    *must* is the property.
+    """
+    from pipeline.turns import turn_queue
+
+    await turn_queue.drain()
 
 
 @pytest.mark.asyncio
@@ -39,7 +59,7 @@ class TestIdentifyHandshake:
             "person_id": "web_abc123",
             "display_name": "Alice",
         })
-        with patch("communication.channels.web_frontend.perceive",
+        with patch("pipeline.router.perceive",
                    new_callable=AsyncMock), \
              patch.object(c, "_refresh_handle", new=AsyncMock()):
             await c.receive(text_data=payload)
@@ -50,7 +70,7 @@ class TestIdentifyHandshake:
     async def test_identify_without_display_name_still_binds(self):
         c = _make_consumer()
         payload = json.dumps({"type": "identify", "person_id": "web_xyz"})
-        with patch("communication.channels.web_frontend.perceive",
+        with patch("pipeline.router.perceive",
                    new_callable=AsyncMock), \
              patch.object(c, "_refresh_handle", new=AsyncMock()):
             await c.receive(text_data=payload)
@@ -61,7 +81,7 @@ class TestIdentifyHandshake:
         c = _make_consumer()
         c.person_id = "anon_orig"
         payload = json.dumps({"type": "identify", "person_id": "   "})
-        with patch("communication.channels.web_frontend.perceive",
+        with patch("pipeline.router.perceive",
                    new_callable=AsyncMock), \
              patch.object(c, "_refresh_handle", new=AsyncMock()):
             await c.receive(text_data=payload)
@@ -70,13 +90,43 @@ class TestIdentifyHandshake:
     async def test_identify_triggers_greeting_once(self):
         c = _make_consumer()
         payload = json.dumps({"type": "identify", "person_id": "web_1"})
-        with patch("communication.channels.web_frontend.perceive",
+        with patch("pipeline.router.perceive",
                    new_callable=AsyncMock) as mock_perceive, \
              patch.object(c, "_refresh_handle", new=AsyncMock()):
             await c.receive(text_data=payload)
             await c.receive(text_data=payload)  # second identify must not re-greet
+            await _settle_greeting(c)
         # First identify → greeting perception; second is a no-op on greeting.
         assert mock_perceive.call_count == 1
+
+    async def test_greeting_does_not_block_the_handler(self):
+        """The handler returns while the greeting is still running.
+
+        This is what stops a slow model from making the socket unusable:
+        `connect()` and `receive()` must stay free to ship history, answer a
+        ping and read the next frame while Mika is still composing hello.
+        """
+        import asyncio
+
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def slow_perceive(_perception):
+            started.set()
+            await release.wait()
+
+        c = _make_consumer()
+        payload = json.dumps({"type": "identify", "person_id": "web_slow"})
+        with patch("pipeline.router.perceive", new=slow_perceive), \
+             patch.object(c, "_refresh_handle", new=AsyncMock()):
+            await c.receive(text_data=payload)
+
+            # The handler has already returned while the turn is still
+            # running — that is the whole property.
+            await asyncio.wait_for(started.wait(), timeout=2)
+
+            release.set()
+            await _settle_greeting(c)
 
     async def test_identify_refreshes_the_persisted_handle(self):
         """Identify re-persists the handle (picking up the display name).
@@ -89,7 +139,7 @@ class TestIdentifyHandshake:
         payload = json.dumps({
             "type": "identify", "person_id": "web_1", "display_name": "Bob",
         })
-        with patch("communication.channels.web_frontend.perceive",
+        with patch("pipeline.router.perceive",
                    new_callable=AsyncMock), \
              patch.object(c, "_refresh_handle", new=AsyncMock()) as mock_handle:
             await c.receive(text_data=payload)
@@ -98,7 +148,7 @@ class TestIdentifyHandshake:
     async def test_identify_refreshes_handle_without_display_name(self):
         c = _make_consumer()
         payload = json.dumps({"type": "identify", "person_id": "web_nodisplay"})
-        with patch("communication.channels.web_frontend.perceive",
+        with patch("pipeline.router.perceive",
                    new_callable=AsyncMock), \
              patch.object(c, "_refresh_handle", new=AsyncMock()) as mock_handle:
             await c.receive(text_data=payload)
@@ -120,11 +170,12 @@ class TestChatBeforeIdentify:
         async def fake_perceive(perception):
             greeted_with.append(perception.source)
 
-        with patch("communication.channels.web_frontend.perceive",
+        with patch("pipeline.router.perceive",
                    new=fake_perceive), \
              patch("communication.channels.web_frontend.validate_attachments",
                    side_effect=lambda x: x):
             await c.receive(text_data=payload)
+            await _settle_greeting(c)
 
         # First source is the greeting, second is the actual chat.
         assert "web_connect" in greeted_with
