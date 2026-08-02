@@ -238,11 +238,18 @@ class MemoryExtractor:
 
     async def check_connaissance_validity(
         self, connaissance_content: str, recent_context: str
-    ) -> tuple[bool, float]:
+    ) -> tuple[bool, float | None]:
         """Check if a knowledge fact is contradicted by new context.
 
         Returns (still_valid, new_confidence).
         Conservative: requires explicit contradiction to invalidate.
+
+        `new_confidence` vaut `None` quand aucun modèle n'a réellement répondu
+        (rôle non mappé, réponse vide, JSON illisible, timeout) ou quand la
+        réponse ne chiffre pas la confiance. Garder le fait valide reste le bon
+        repli ; remettre sa confiance au maximum ne l'est pas — les appelants
+        persistent cette valeur, ce qui annulerait la décroissance et les
+        baisses décidées par la Conscience.
         """
         prompt = VALIDITY_CHECK_PROMPT.format(
             connaissance=connaissance_content,
@@ -252,12 +259,12 @@ class MemoryExtractor:
         try:
             raw = await self._query_model(prompt, AIRole.VALIDITY_CHECK)
             if raw is None:
-                return True, 1.0
+                return True, None
 
             text = strip_markdown_json(raw)
             data = json.loads(text)
             still_valid = data.get("still_valid", True)
-            confidence = float(data.get("new_confidence", 1.0))
+            raw_confidence = data.get("new_confidence")
             reason = data.get("reason", "")
             if not still_valid:
                 logger.info(
@@ -265,10 +272,12 @@ class MemoryExtractor:
                     connaissance_content[:60],
                     reason,
                 )
-            return still_valid, max(0.0, min(1.0, confidence))
+            if raw_confidence is None:
+                return still_valid, None
+            return still_valid, max(0.0, min(1.0, float(raw_confidence)))
         except UnconfiguredRoleError as exc:
             logger.warning("Validity check ignoré — IA non configurée: %s", exc)
-            return True, 1.0
+            return True, None
         except Exception:
             logger.exception("Validity check error")
-            return True, 1.0  # Conservative: keep valid on error
+            return True, None  # Conservative: keep valid on error
