@@ -76,11 +76,18 @@ check_existing_issue_pr() {
 _module_has_open_pr() {
     local profile="$1" mod="$2"
     local count
-    count=$(gh pr list --state open --limit 1 \
+    # Une requête en échec renvoyait "0", c'est-à-dire « aucune PR ouverte » :
+    # le pipeline repartait alors travailler sur un module déjà couvert et
+    # ouvrait un doublon. En cas d'échec on considère le module comme couvert —
+    # sauter un module est rattrapable au tour suivant, une PR en double non.
+    if ! count=$(gh_query gh pr list --state open --limit 1 \
         --label "$PR_LABEL" \
         --label "ai-${profile}" \
         --label "module:${mod}" \
-        --json number --jq 'length' 2>/dev/null || echo "0")
+        --json number --jq 'length'); then
+        warn "Dédup PR impossible pour ${profile}/${mod} - module sauté par précaution" >&2
+        return 0
+    fi
     [[ "$count" -gt 0 ]]
 }
 
@@ -137,11 +144,16 @@ get_existing_issues() {
 _module_has_open_audit_issue() {
     local profile="$1" mod="$2"
     local count
-    count=$(gh issue list --state open --limit 1 \
+    # Même raisonnement que _module_has_open_pr : en cas d'échec de requête, on
+    # considère le module comme déjà audité plutôt que de créer des doublons.
+    if ! count=$(gh_query gh issue list --state open --limit 1 \
         --label "ai-audit" \
         --label "ai-${profile}" \
         --label "module:${mod}" \
-        --json number --jq 'length' 2>/dev/null || echo "0")
+        --json number --jq 'length'); then
+        warn "Dédup issues impossible pour ${profile}/${mod} - module sauté par précaution" >&2
+        return 0
+    fi
     [[ "$count" -gt 0 ]]
 }
 

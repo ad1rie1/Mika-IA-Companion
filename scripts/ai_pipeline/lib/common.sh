@@ -317,6 +317,28 @@ Exception unique : si l'issue traitée demande EXPLICITEMENT d'ajouter ou de cor
 POLICY
 }
 
+# Exécute une requête `gh` en distinguant « zéro résultat » de « la requête a
+# échoué ».
+#
+# Le `2>/dev/null || echo ""` employé partout confondait les deux, et ça s'est
+# vu en vrai : le dépôt a été renommé, l'API Search de GitHub ne suit pas les
+# renommages (422) alors que REST et GraphQL les redirigent — donc la création
+# d'issues fonctionnait pendant que `gh issue list --label`, qui passe par
+# Search, renvoyait vide. Le worker annonçait « Aucune issue Propose_AI_PR en
+# attente » avec 193 issues ouvertes, la boucle se déclarait stable et dormait
+# 30 minutes. Faux, silencieux, et indiscernable du succès.
+gh_query() {
+    local out rc=0
+    out=$("$@" 2>&1) || rc=$?
+    if [[ $rc -ne 0 ]]; then
+        err "Requête GitHub échouée (exit ${rc}) : $*" >&2
+        echo "$out" | tail -3 >&2
+        err "Pistes : 'gh auth status', et vérifier que le remote pointe sur le dépôt actuel (renommé ?)" >&2
+        return "$rc"
+    fi
+    printf '%s' "$out"
+}
+
 # Vérifie les prérequis système
 check_prerequisites() {
     local missing=()

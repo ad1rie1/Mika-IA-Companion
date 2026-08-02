@@ -120,11 +120,12 @@ task_limit_reached() {
     return 1
 }
 
+# Renvoie le nombre d'issues Propose_AI_PR ouvertes, ou sort en échec si la
+# requête n'a pas abouti — l'appelant ne doit surtout pas lire ça comme un zéro.
 count_pending_propose_ai_pr() {
     local pending
-    pending=$(gh issue list --state open --limit 1000 --label "Propose_AI_PR" \
-        --json number --template '{{range .}}{{.number}}{{"\n"}}{{end}}' \
-        2>/dev/null || echo "")
+    pending=$(gh_query gh issue list --state open --limit 1000 --label "Propose_AI_PR" \
+        --json number --template '{{range .}}{{.number}}{{"\n"}}{{end}}') || return 1
     if [[ -z "$pending" ]]; then
         echo 0
     else
@@ -210,9 +211,11 @@ run_workers() {
     echo -e "${CYAN}══════════════════════════════════════════${NC}\n"
 
     local pending
-    pending=$(gh issue list --state open --limit 1000 --label "Propose_AI_PR" \
-        --json number --template '{{range .}}{{.number}}{{"\n"}}{{end}}' \
-        2>/dev/null || echo "")
+    if ! pending=$(gh_query gh issue list --state open --limit 1000 --label "Propose_AI_PR" \
+        --json number --template '{{range .}}{{.number}}{{"\n"}}{{end}}'); then
+        echo -e "${RED}[STOP]${NC} Impossible de lister les issues Propose_AI_PR - étape worker sautée"
+        return 1
+    fi
 
     if [[ -z "$pending" ]]; then
         echo -e "${GREEN}[OK]${NC} Aucune issue Propose_AI_PR en attente"
@@ -461,7 +464,10 @@ run_pipeline_loop() {
 
             # Étape 3 : on est stable si plus aucune issue Propose_AI_PR n'est ouverte
             local pending
-            pending=$(count_pending_propose_ai_pr)
+            if ! pending=$(count_pending_propose_ai_pr); then
+                echo -e "${RED}[STOP]${NC} Décompte des issues impossible - on ne conclut PAS à la stabilité"
+                break
+            fi
 
             if [[ "$pending" -eq 0 ]]; then
                 echo -e "${GREEN}[STABLE]${NC} Aucune issue Propose_AI_PR en attente et tous les audits clean"
