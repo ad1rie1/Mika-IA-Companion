@@ -24,8 +24,9 @@ Design choices:
     never delays memory consolidation.
   - Triple-gated: night phase AND idle AND REST drive above threshold.
     Sleep only happens when Mika has actually been living that day.
-  - Budget-capped: at most 4 LLM calls per night (1 journal + up to
-    2 dreams + optional digestion summary).
+  - Budget-capped: 1 journal (retried at most
+    ``JOURNAL_MAX_ATTEMPTS_PER_NIGHT`` times if the call fails) + up to
+    2 dreams + optional digestion summary.
   - Fail-soft: every phase wrapped in try/except. A crashed sleep phase
     never corrupts the main consolidator.
 """
@@ -67,6 +68,16 @@ REST_DRIVE_THRESHOLD = 0.5    # Mika must have earned her rest
 # The REST eligibility gate only applies to *falling* asleep (entry);
 # once asleep for the night, draining tension doesn't wake her up.
 SLEEP_REST_RECOVERY = 0.1
+
+# Journal (light sleep)
+# `_write_journal_if_due` ne marque la nuit comme faite que sur ses chemins de
+# succès : un timeout LLM, un JSON illisible ou un rôle IA non configuré la
+# laisse intacte. Sans espacement, la boucle dédiée (60 s) rejouerait la phase
+# à chaque tick de 23h à 6h — ~420 tentatives par nuit, et deux transitions de
+# phase par minute côté frontend, exactement le clignotement que le settle en
+# DEEP_SLEEP existe pour éviter. Même idiome que DREAM_ATTEMPT_INTERVAL_S.
+JOURNAL_ATTEMPT_INTERVAL_S = 30 * 60
+JOURNAL_MAX_ATTEMPTS_PER_NIGHT = 3
 
 # Dream generation
 DREAM_PROBABILITY = 0.6              # per-check chance of producing a dream
@@ -192,6 +203,12 @@ class SleepCycle:
 
     def __init__(self) -> None:
         self._last_journal_date: date | None = None
+        # Tentatives de journal pour la nuit en cours — un échec ne marque pas
+        # `_last_journal_date`, ce sont ces deux compteurs qui espacent puis
+        # arrêtent les reprises.
+        self._journal_attempts_night: date | None = None
+        self._journal_attempts: int = 0
+        self._last_journal_attempt: float = 0.0  # monotonic()
         self._dreams_this_night: int = 0
         self._last_dream_night: date | None = None
         self._last_dream_attempt: float = 0.0  # monotonic()
@@ -280,7 +297,16 @@ class SleepCycle:
 
         # Phase 1: light sleep — write the day's journal (once per date)
         try:
-            if self._last_journal_date != current_night:
+            if self._journal_attempts_night != current_night:
+                self._journal_attempts_night = current_night
+                self._journal_attempts = 0
+                self._last_journal_attempt = 0.0
+            if self._last_journal_date != current_night and self._journal_is_due():
+                # Compté et daté AVANT la transition de phase : une tentative
+                # qui échoue ne doit pas coûter un aller-retour LIGHT_SLEEP →
+                # DEEP_SLEEP à chaque tick.
+                self._journal_attempts += 1
+                self._last_journal_attempt = monotonic()
                 await self._set_phase(SleepPhase.LIGHT_SLEEP)
                 await self._write_journal_if_due(current_night)
         except Exception:
@@ -330,6 +356,22 @@ class SleepCycle:
     @staticmethod
     def _is_enabled() -> bool:
         return bool(getattr(settings, "SLEEP_CYCLE_ENABLED", True))
+
+    def _journal_is_due(self) -> bool:
+        """Espace, puis abandonne, les reprises d'un journal qui a échoué.
+
+        Le drapeau `_last_journal_date` n'avance que sur succès : sans ce
+        garde, une seule cause d'échec (timeout de 45 s, JSON illisible,
+        rôle IA non configuré) suffit à relancer l'appel LLM toutes les
+        60 s jusqu'au matin. Au-delà de JOURNAL_MAX_ATTEMPTS_PER_NIGHT on
+        renonce jusqu'à la nuit suivante — un modèle qui a échoué trois
+        fois de suite ne réussira pas la quatrième.
+        """
+        if self._journal_attempts >= JOURNAL_MAX_ATTEMPTS_PER_NIGHT:
+            return False
+        if not self._last_journal_attempt:
+            return True
+        return (monotonic() - self._last_journal_attempt) >= JOURNAL_ATTEMPT_INTERVAL_S
 
     def _rem_is_due(self) -> bool:
         """Space REM episodes out instead of retrying on every tick."""
