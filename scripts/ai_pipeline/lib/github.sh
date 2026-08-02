@@ -258,6 +258,10 @@ PRBODY
     fi
 
     # Labels : ai-suggestion + ai-<profile> + module:<module> + ai-agent:<agent>
+    # PR_LABEL doit exister AVANT le `gh pr create` : un label inconnu fait
+    # échouer la création entière, et c'était le seul des quatre à ne pas passer
+    # par ensure_label — donc la toute première PR sur un dépôt neuf échouait.
+    ensure_label "$PR_LABEL" "0e8a16" "PR proposée par AI Pipeline"
     local label_args="--label ${PR_LABEL}"
     local agent_label
     agent_label=$(ensure_ai_agent_pr_label)
@@ -336,7 +340,20 @@ create_github_issues() {
     ensure_label "ai-audit" "1d76db" "Issue créée par AI Pipeline (audit)"
     ensure_label "ai-${profile}" "d73a4a" "Audit IA - ${profile}"
     ensure_label "module:${module}" "bfdadc" "Module ${module}"
-    ensure_label "Propose_AI_PR" "5319e7" "Demande de PR automatique par IA"
+
+    # Propose_AI_PR déclenche la reprise automatique par le worker. Certains
+    # profils ne doivent pas l'obtenir : une idée de fonctionnalité se décide
+    # avant d'être codée. Le label s'ajoute alors à la main sur l'issue retenue.
+    local auto_pr=true
+    for _skip in "${AUDIT_NO_AUTO_PR_PROFILES[@]}"; do
+        [[ "$profile" == "$_skip" ]] && auto_pr=false && break
+    done
+    if [[ "$auto_pr" == true ]]; then
+        ensure_label "Propose_AI_PR" "5319e7" "Demande de PR automatique par IA"
+    else
+        ensure_label "idee" "c2e0c6" "Proposition à arbitrer avant implémentation"
+        log "Profil '${profile}' : issues créées SANS Propose_AI_PR (arbitrage humain)" >&2
+    fi
 
     for issue_file in "${issues_dir}"/issue_*.txt; do
         [[ ! -f "$issue_file" ]] && continue
@@ -362,13 +379,24 @@ create_github_issues() {
 
         ensure_label "${severity_label}" "fbca04" "Sévérité ${severity}"
 
+        # Une proposition de fonctionnalité n'est pas un « problème détecté »
+        # de « sévérité » donnée : même gabarit, vocabulaire adapté.
+        local body_heading="## Problème détecté par AI Pipeline"
+        local weight_field="**Sévérité**"
+        local body_footer="Détecté automatiquement par AI Pipeline ($(ai_agent_label)) - Vérification humaine recommandée avant correction"
+        if [[ "$auto_pr" == false ]]; then
+            body_heading="## Proposition issue de l'audit AI Pipeline"
+            weight_field="**Impact estimé**"
+            body_footer="Proposé automatiquement par AI Pipeline ($(ai_agent_label)) - à arbitrer. Pour lancer l'implémentation, ajouter le label \`Propose_AI_PR\`."
+        fi
+
         local issue_body
         issue_body=$(cat <<ISSUEBODY
-## Problème détecté par AI Pipeline
+${body_heading}
 
 **Profil d'analyse** : \`${profile}\`
 **Module** : \`${module}\`
-**Sévérité** : \`${severity}\`
+${weight_field} : \`${severity}\`
 **Fichiers concernés** : \`${files}\`
 
 ## Description
@@ -376,19 +404,27 @@ create_github_issues() {
 ${description}
 
 ---
-> Détecté automatiquement par AI Pipeline ($(ai_agent_label)) - Vérification humaine recommandée avant correction
+> ${body_footer}
 ISSUEBODY
 )
+
+        local -a issue_labels=(
+            --label "ai-audit"
+            --label "ai-${profile}"
+            --label "module:${module}"
+            --label "${severity_label}"
+        )
+        if [[ "$auto_pr" == true ]]; then
+            issue_labels+=(--label "Propose_AI_PR")
+        else
+            issue_labels+=(--label "idee")
+        fi
 
         local issue_url
         issue_url=$(gh issue create \
             --title "[AI][${profile}] ${title}" \
             --body "$issue_body" \
-            --label "ai-audit" \
-            --label "ai-${profile}" \
-            --label "module:${module}" \
-            --label "${severity_label}" \
-            --label "Propose_AI_PR" \
+            "${issue_labels[@]}" \
             2>&1) || {
             err "Échec création issue: $issue_url" >&2
             continue

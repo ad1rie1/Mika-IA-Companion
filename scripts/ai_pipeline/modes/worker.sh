@@ -104,13 +104,15 @@ _worker_process_issue() {
     prompt=$(cat <<PROMPT
 ${worker_profile}
 
+$(ai_project_context)
+
 ## Contexte : Issue GitHub à corriger
 
 ${issue_full}
 
 ## Périmètre
 
-Tu travailles sur l'ensemble du projet. Lis le fichier AGENTS.md à la racine pour comprendre l'architecture.
+Tu travailles sur l'ensemble du projet. Lis le fichier CLAUDE.md à la racine pour comprendre l'architecture.
 Corrige le problème décrit dans l'issue ci-dessus. Prends en compte les commentaires des reviewers s'il y en a.
 
 ## Contraintes ABSOLUES
@@ -121,11 +123,11 @@ Corrige le problème décrit dans l'issue ci-dessus. Prends en compte les commen
    - Message de commit en français
 3. Tu ne dois JAMAIS exécuter : git push, git branch, git checkout, git merge, git rebase, git reset, git stash
 4. Tu ne dois JAMAIS exécuter de commandes système dangereuses (rm -rf, etc.)
-5. Tu ne dois JAMAIS modifier les fichiers protégés : settings.py, manage.py, migrations/*, *.env
+5. Tu ne dois JAMAIS modifier les fichiers protégés : settings.py, manage.py, */migrations/*, *.env, personality.yaml, data/*, uploads/*, pytest.ini, requirements.txt, package.json
 6. Tu ne dois JAMAIS ajouter d'alias ou renommer des fonctions existantes
 7. Chaque modification doit être minimale et ciblée
-8. Lis TOUJOURS le fichier AGENTS.md à la racine du projet et respecte ses règles
-9. Respecte la politique de tests ci-dessous : pas de nouveaux tests, pas de suite de tests lancée
+8. Lis TOUJOURS le fichier CLAUDE.md à la racine du projet et respecte ses règles
+9. Respecte la politique de tests ci-dessous : pas de nouveaux tests, pas de suite complète, vérification ciblée uniquement
 
 $(ai_test_policy write)
 PROMPT

@@ -14,6 +14,10 @@
 #   ./run.sh --agent codex    # Utiliser Codex CLI au lieu de Claude Code
 #   ./run.sh --max-tasks 3    # Limiter à 3 tâches max
 #   ./run.sh --dry-run        # Simuler sans rien exécuter
+#
+# Surcharges par variable d'environnement : AI_PIPELINE_AGENT,
+# AI_PIPELINE_EFFORT, AI_PIPELINE_THINKING_TOKENS (et non AI_AGENT /
+# CLAUDE_EFFORT, que le CLI Claude Code exporte déjà pour son propre compte).
 # ============================================================================
 set -euo pipefail
 
@@ -71,7 +75,12 @@ TASKS_DONE=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --agent)      AI_AGENT="$2"; shift 2 ;;
+        --agent)
+            case "$2" in
+                claude|codex) AI_AGENT="$2" ;;
+                *) echo "Agent inconnu: '$2' (attendu: claude ou codex)"; exit 1 ;;
+            esac
+            shift 2 ;;
         --max-tasks)  MAX_TASKS="$2"; shift 2 ;;
         --effort)     AI_EFFORT="$2"; CLAUDE_EFFORT="$2"; CODEX_EFFORT="$2"; shift 2 ;;
         --thinking-tokens) CLAUDE_MAX_THINKING_TOKENS="$2"; shift 2 ;;
@@ -80,12 +89,11 @@ while [[ $# -gt 0 ]]; do
             cat <<EOF
 Usage: $(basename "$0") [options]
 
-  --agent claude|codex     Agent IA à utiliser (défaut: \$AI_AGENT ou claude)
+  --agent claude|codex     Agent IA à utiliser (défaut: \$AI_PIPELINE_AGENT ou claude)
   --max-tasks N            Limiter à N tâches (0 = illimité)
   --effort LEVEL           Budget de réflexion de l'agent
-                           claude: low|medium|high|xhigh|max
-                           codex : minimal|low|medium|high
-                           (vide = défaut du CLI / ~/.claude/settings.json)
+                           claude: low|medium|high|xhigh|max  (défaut: xhigh)
+                           codex : minimal|low|medium|high    (défaut: celui du CLI)
   --thinking-tokens N      Plafond dur du thinking Claude (MAX_THINKING_TOKENS)
   --dry-run                Simuler sans rien exécuter
 EOF
@@ -94,9 +102,13 @@ EOF
         *)  echo "Option inconnue: $1"; exit 1 ;;
     esac
 done
-export AI_AGENT
-# Transmis à orchestrator.sh (processus fils qui re-source config.sh)
-export AI_EFFORT CLAUDE_EFFORT CODEX_EFFORT CLAUDE_MAX_THINKING_TOKENS
+# Transmis à orchestrator.sh (processus fils qui re-source config.sh) sous les
+# noms cloisonnés AI_PIPELINE_* : `AI_AGENT` et `CLAUDE_EFFORT` sont exportés
+# par le CLI Claude Code lui-même, cf. le commentaire dans config.sh.
+AI_PIPELINE_AGENT="$AI_AGENT"
+AI_PIPELINE_EFFORT="${AI_EFFORT:-}"
+AI_PIPELINE_THINKING_TOKENS="${CLAUDE_MAX_THINKING_TOKENS:-}"
+export AI_AGENT AI_PIPELINE_AGENT AI_PIPELINE_EFFORT AI_PIPELINE_THINKING_TOKENS
 
 # ============================================================================
 # Helpers
@@ -302,7 +314,10 @@ run_audits() {
     echo -e "${CYAN}  PRIORITÉ 3 : Audit (tous les modules)${NC}"
     echo -e "${CYAN}══════════════════════════════════════════${NC}\n"
     #local profiles=("bugs")
-    local profiles=("bugs" "quality" "security")
+    # "features" produit des propositions de fonctionnalités. Ses issues ne sont
+    # PAS taguées Propose_AI_PR (cf. AUDIT_NO_AUTO_PR_PROFILES) : elles ne
+    # partent donc jamais toutes seules en PR, elles attendent un arbitrage.
+    local profiles=("bugs" "quality" "security" "features")
     #local profiles=("security" "bugs" "quality")
     for profile in "${profiles[@]}"; do
         echo -e "\n${BLUE}[INFO]${NC} Audit profil: ${profile} - parcours des modules"
@@ -474,7 +489,7 @@ echo -e "${CYAN}  AI Pipeline - Runner$([ "$DRY_RUN" == true ] && echo ' (DRY-RU
 echo -e "${CYAN}  $(date '+%Y-%m-%d %H:%M')${NC}"
 echo -e "${CYAN}  Agent IA: $(ai_agent_label)${NC}"
 if [[ "$AI_AGENT" == "claude" ]]; then
-    echo -e "${CYAN}  Effort/réflexion: ${CLAUDE_EFFORT:-défaut settings.json}${CLAUDE_MAX_THINKING_TOKENS:+ (max ${CLAUDE_MAX_THINKING_TOKENS} tokens)}${NC}"
+    echo -e "${CYAN}  Effort/réflexion: ${CLAUDE_EFFORT}${CLAUDE_MAX_THINKING_TOKENS:+ (max ${CLAUDE_MAX_THINKING_TOKENS} tokens)}${NC}"
 else
     echo -e "${CYAN}  Effort/réflexion: ${CODEX_EFFORT:-défaut CLI}${NC}"
 fi

@@ -1,0 +1,4 @@
+# Les journaux d'exécution du pipeline restent locaux ; le dossier, lui, doit
+# exister avant le premier `tee` de common.sh.
+*
+!.gitignore

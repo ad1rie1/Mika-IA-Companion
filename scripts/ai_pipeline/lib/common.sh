@@ -217,11 +217,70 @@ check_ai_tokens() {
 }
 
 # ============================================================================
+# Contexte projet injecté dans TOUS les prompts IA
+# ============================================================================
+# Sans ce bloc, chaque audit redécouvre le projet de zéro et re-signale les
+# mêmes décisions d'architecture délibérées comme si c'étaient des bugs. Elles
+# sont toutes documentées et justifiées dans CLAUDE.md — l'agent doit l'avoir lu
+# avant d'ouvrir la moindre issue.
+ai_project_context() {
+    cat <<'CONTEXT'
+## Le projet
+
+Moteur VTuber : un avatar 3D animé par une IA conversationnelle, avec émotions
+temps réel (espace PAD), mémoire à long terme, conscience autonome, cycle de
+sommeil, pulsions intrinsèques et projets de travail.
+
+- `backend/` — Django + Channels servi par Uvicorn. Apps : `ai` (routage
+  multi-provider), `communication` (WebSocket, Telegram), `pipeline`
+  (perception → routeur → processeur), `memory`, `emotion`, `drives`,
+  `conscience`, `identity`, `projects`, `modules` (système de plugins, dont la
+  Forge où l'IA écrit ses propres modules à l'exécution), `GestionSysteme`
+  (admin rendu côté serveur), `configs` (registre de configuration).
+- `frontend/` — Vite + TypeScript + Three.js + VRM. Rendu 3D, retarget
+  d'animations Mixamo, TTS navigateur, lip-sync.
+- Base SQLite en WAL, sous écriture concurrente permanente (six boucles de fond).
+- Langue du produit : français. Code et commentaires en français.
+
+**Lis `CLAUDE.md` à la racine AVANT toute analyse.** Il documente l'architecture
+et, surtout, le POURQUOI de choix qui ont l'air d'erreurs vus de loin.
+
+## Choix DÉLIBÉRÉS — ne les signale jamais comme des défauts
+
+Chacun est documenté dans CLAUDE.md avec sa justification. Les re-signaler fait
+perdre un cycle complet à chaque passage :
+
+- **Exceptions avalées en masse** (`logger.debug`, `except: pass`, replis
+  silencieux). Une boucle de fond n'a pas de superviseur : une exception qui
+  s'échappe la tue pour la durée du processus. Elles sont comptées par
+  `utils/degradation.py`, c'est le compromis assumé.
+- **Le tampon court-terme de la mémoire n'est pas filtré par `person_id`.** Ce
+  n'est pas une fuite : c'est la prémisse du moteur (« quelqu'un dans une pièce
+  entend ce qui s'y dit »). L'arbitrage est confié au prompt, pas à un `WHERE`.
+- **`DASHBOARD_REQUIRE_AUTH=False` par défaut**, compensé par une écoute sur
+  loopback : une installation neuve n'a pas encore de superuser.
+- **Le sandbox de la Forge s'exécute in-process.** Le modèle de menace est la
+  prévention d'accident et l'injection de prompt, pas l'isolation OS.
+- **SQLite en WAL avec `synchronous=NORMAL`**, et le PRAGMA est invisible en
+  test (base en mémoire) : c'est l'`init_command` déclaré qui est testé.
+- **Les pieds de bloc du prompt système sont volontairement inconsistants**
+  (`--- FIN PROJET ---`, `--- FIN ---`) : les unifier change ce que le modèle lit.
+- **`emotion_policy` par défaut à OFF sur les projets**, **les émotions sont
+  stockées en anglais et affichées en français**, **une seule horloge naïve
+  locale** (`date.today()`, jamais `timezone.localdate()`).
+
+Si tu crois vraiment tenir un problème sur l'un de ces points, il te faut un
+scénario de défaillance concret et reproductible — sinon, passe.
+CONTEXT
+}
+
+# ============================================================================
 # Politique de tests injectée dans TOUS les prompts IA
 # ============================================================================
-# Les tests sont délégués au CI/CD GitHub (RUN_TESTS=false). Sans consigne
-# explicite, l'agent IA écrit des tests et lance des suites complètes : c'est
-# la principale source de temps et de tokens gaspillés sur chaque tâche.
+# Aucun workflow GitHub Actions n'existe sur ce dépôt : rien ne validera la PR
+# après coup. Mais la suite complète (~1000 tests pytest + tsc) est trop longue
+# et trop coûteuse pour tourner à chaque tâche. D'où le compromis : vérification
+# CIBLÉE obligatoire sur ce qu'on a touché, suite complète interdite.
 #   ai_test_policy write  → modes fix / worker (l'agent peut modifier le code)
 #   ai_test_policy read   → mode audit (lecture seule)
 ai_test_policy() {
@@ -231,7 +290,7 @@ ai_test_policy() {
         cat <<'POLICY'
 ## Politique de TESTS (règle ABSOLUE)
 
-- N'exécute AUCUN test : ni `manage.py test`, ni `pytest`, ni script de reproduction.
+- N'exécute AUCUN test : ni `pytest`, ni `manage.py test`, ni `npm test`, ni script de reproduction.
 - Ne signale JAMAIS "tests manquants", "couverture insuffisante" ou "il faudrait un test de non-régression" : c'est hors périmètre de cet audit et ce type d'issue est systématiquement rejeté.
 - La correction suggérée dans une issue doit porter sur le CODE, jamais sur l'ajout de tests.
 POLICY
@@ -241,13 +300,18 @@ POLICY
     cat <<'POLICY'
 ## Politique de TESTS (règle ABSOLUE - coût et durée)
 
-Les tests sont exécutés par le CI/CD GitHub après la PR, PAS par toi.
+Aucun CI ne relira ton travail : la vérification, c'est toi, puis un humain.
+Mais la suite complète est hors de question (≈1000 tests pytest, plusieurs
+minutes de `tsc`). Tu vérifies donc CIBLÉ, et seulement ce que tu as touché.
 
-- N'exécute JAMAIS de suite de tests : ni `python manage.py test`, ni `pytest`, ni `tox`, ni un runner complet. C'est trop long et trop coûteux, et ça n'apporte rien ici.
-- N'écris AUCUN nouveau fichier ni fonction de test, même "pour valider" ta correction. Aucune PR de ce pipeline n'a pour objet d'ajouter de la couverture de tests.
+- N'exécute JAMAIS la suite complète : ni `pytest` nu, ni `pytest backend/tests/`, ni `python manage.py test`, ni `npm test`, ni `tox`.
+- N'écris AUCUN nouveau fichier ni fonction de test, même "pour valider" ta correction. Aucune PR de ce pipeline n'a pour objet d'ajouter de la couverture.
 - Ne crée PAS de script jetable de reproduction : relis le code à la place.
 - Ne modifie un test existant QUE si ta correction le casse mécaniquement (signature ou API changée). Dans ce cas : adaptation minimale, jamais de réécriture.
-- Pour vérifier ton travail, tu te limites à : relecture du code, `grep` ciblé, et au plus un `python -m py_compile <fichier_modifié>`. Rien de plus.
+- Vérification autorisée, et une seule fois, à la fin :
+  - Python : `python -m py_compile <fichiers modifiés>`, puis AU PLUS UN fichier de test ciblé s'il en existe un qui couvre la zone touchée, par exemple `python -m pytest backend/tests/test_pipeline_signals.py -x -q`.
+  - TypeScript : `cd frontend && npx tsc --noEmit` — c'est le garde-fou dur du frontend, ne le saute pas si tu as modifié `frontend/src/`.
+- Si un test ciblé échoue à cause de ta modification, corrige ta modification. S'il échouait déjà avant, ne le touche pas et signale-le dans le corps de la PR.
 
 Exception unique : si l'issue traitée demande EXPLICITEMENT d'ajouter ou de corriger un test, fais uniquement ce qui est demandé.
 POLICY

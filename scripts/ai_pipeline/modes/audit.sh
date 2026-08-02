@@ -7,11 +7,33 @@ build_audit_prompt() {
     local module_paths="$1"
     local existing_issues="$2"
 
+    # Un profil de proposition (features) ne constate pas des « problèmes » : le
+    # gabarit de sortie est le même, le vocabulaire ne peut pas l'être, sinon on
+    # demande des idées de fonctionnalités dans un formulaire de rapport de bug.
+    local objet="problème" objets="problèmes" verbe="signale"
+    local severity_line="severity: critical|high|medium|low"
+    local body_hint="- Où se situe le problème (fichier, fonction, ligne approximative)
+- Quel est le risque ou l'impact
+- Une suggestion de correction"
+    for _p in "${AUDIT_NO_AUTO_PR_PROFILES[@]}"; do
+        if [[ "$PROFILE" == "$_p" ]]; then
+            objet="proposition"; objets="propositions"; verbe="propose"
+            severity_line="severity: high|medium|low   (= impact attendu, jamais critical)"
+            body_hint="- Le constat, avec les fichiers concernés
+- La proposition, du point de vue de l'usage
+- Pourquoi ça a du sens pour ce projet
+- L'esquisse d'implémentation (fichiers, couture empruntée, migrations, impact prompt/protocole)
+- Le coût : petit / moyen / gros
+- Ce que ce n'est pas"
+            break
+        fi
+    done
+
     local existing_section=""
     if [[ -n "$existing_issues" ]]; then
-        existing_section="## Issues DÉJÀ ouvertes (NE PAS signaler ces problèmes)
+        existing_section="## Issues DÉJÀ ouvertes (NE PAS ${verbe}r à nouveau)
 
-Les issues suivantes existent déjà pour ce module. Ne les signale PAS à nouveau :
+Les issues suivantes existent déjà pour ce module. Ne les reprends PAS :
 
 ${existing_issues}
 "
@@ -20,10 +42,12 @@ ${existing_issues}
     cat <<PROMPT
 ${PROFILE_CONTENT}
 
+$(ai_project_context)
+
 ## Mode : AUDIT UNIQUEMENT
 
 Tu es en mode audit. Tu ne dois PAS modifier de fichiers.
-Tu dois UNIQUEMENT analyser le code et lister les problèmes trouvés.
+Tu dois UNIQUEMENT analyser le code et lister les ${objets} que tu retiens.
 
 ## Périmètre d'analyse
 
@@ -42,21 +66,19 @@ $(ai_test_policy read)
 
 ## Format de sortie OBLIGATOIRE
 
-Pour chaque problème trouvé, utilise EXACTEMENT ce format (un bloc par problème) :
+Pour chaque ${objet}, utilise EXACTEMENT ce format (un bloc par ${objet}) :
 
 ISSUE_START
-title: Description courte et claire du problème en français
-severity: critical|high|medium|low
+title: Titre court et clair en français
+${severity_line}
 files: fichier1.py, fichier2.py
 description:
-Description détaillée du problème en français.
+Description détaillée en français.
 Inclure :
-- Où se situe le problème (fichier, fonction, ligne approximative)
-- Quel est le risque ou l'impact
-- Une suggestion de correction
+${body_hint}
 ISSUE_END
 
-Ne signale que les vrais problèmes, pas les améliorations cosmétiques.
+Si tu n'as rien à ${verbe}r sur ce module, n'émets aucun bloc et dis-le en une phrase.
 Réponds TOUJOURS en français.
 PROMPT
 }

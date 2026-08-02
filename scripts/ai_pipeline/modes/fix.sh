@@ -25,6 +25,8 @@ build_fix_prompt() {
     cat <<PROMPT
 ${PROFILE_CONTENT}
 
+$(ai_project_context)
+
 ${issue_context:+## Contexte Issue GitHub
 
 ${issue_context}
@@ -40,14 +42,14 @@ Tu peux lire n'importe quel fichier du projet si nécessaire (imports, dépendan
 2. Pour chaque correction, fais un commit séparé avec : git add <fichiers> && git commit -m "prefix: description"
    - Préfixes obligatoires : bug: / security: / feat: selon le type de correction
    - Message de commit en français
-   - Exemple : git commit -m "bug: correction du NoneType sur equipment.site dans views.py"
+   - Exemple : git commit -m "bug: correction du NoneType sur person_id dans le résolveur d'identité"
 3. Tu ne dois JAMAIS exécuter : git push, git branch, git checkout, git merge, git rebase, git reset, git stash
 4. Tu ne dois JAMAIS exécuter de commandes système dangereuses (rm -rf, etc.)
-5. Tu ne dois JAMAIS modifier les fichiers protégés : settings.py, manage.py, migrations/*, *.env
+5. Tu ne dois JAMAIS modifier les fichiers protégés : settings.py, manage.py, */migrations/*, *.env, personality.yaml, data/*, uploads/*, pytest.ini, requirements.txt, package.json
 6. Tu ne dois JAMAIS ajouter d'alias ou renommer des fonctions existantes
 7. Chaque modification doit être minimale et ciblée
-8. Lis TOUJOURS le fichier AGENTS.md à la racine du projet et respecte ses règles
-9. Respecte la politique de tests ci-dessous : pas de nouveaux tests, pas de suite de tests lancée
+8. Lis TOUJOURS le fichier CLAUDE.md à la racine du projet et respecte ses règles
+9. Respecte la politique de tests ci-dessous : pas de nouveaux tests, pas de suite complète, vérification ciblée uniquement
 
 $(ai_test_policy write)
 PROMPT
