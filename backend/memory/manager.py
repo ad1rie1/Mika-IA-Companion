@@ -355,6 +355,25 @@ class MemoryManager:
             conn = await sync_to_async(Connaissance.objects.get)(pk=connaissance_id)
             conn.is_valid = False
             await sync_to_async(conn.save)(update_fields=["is_valid"])
+            # Le filtrage de validite de la recherche semantique se fait sur la
+            # metadonnee ChromaDB (`where={"is_valid": True}`), pas sur la ligne
+            # ORM : sans reindexation la connaissance continuerait d'etre servie
+            # au prompt a chaque tour. Meme geste que le consolidateur.
+            if self.vector_store:
+                try:
+                    await sync_to_async(self.vector_store.add_connaissance)(
+                        connaissance_id=conn.pk,
+                        content=conn.content,
+                        metadata={
+                            "confidence": conn.confidence,
+                            "is_valid": False,
+                        },
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to update ChromaDB for invalidated connaissance #%d",
+                        connaissance_id, exc_info=True,
+                    )
             logger.info(
                 "Invalidated connaissance #%d: %s (reason: %s)",
                 connaissance_id, conn.content[:60], reason,
