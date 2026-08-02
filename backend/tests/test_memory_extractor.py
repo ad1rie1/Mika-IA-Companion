@@ -134,7 +134,7 @@ class TestCheckConnaissanceValidity:
         with patch.object(e, "_query_model", new_callable=AsyncMock, side_effect=Exception("err")):
             valid, conf = await e.check_connaissance_validity("fact", "context")
         assert valid is True
-        assert conf == pytest.approx(1.0)
+        assert conf is None
 
     @pytest.mark.asyncio
     async def test_confidence_clamped(self):
