@@ -222,7 +222,7 @@ class MemoryBridge:
                         "still_valid": False,
                         "new_confidence": new_confidence,
                     })
-                elif new_confidence != conn.confidence:
+                elif new_confidence is not None and new_confidence != conn.confidence:
                     await memory_manager.update_connaissance_confidence(
                         conn.pk, new_confidence
                     )
