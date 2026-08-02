@@ -246,20 +246,22 @@ class MemoryRetriever:
         """Build a short French text block describing the emotional history with a person.
 
         Returns empty string if no data or person is unknown.
+
+        Lit **les résumés du jour uniquement**, via la couche de lecture. Le
+        consolidateur écrit aussi une ligne ``weekly`` par personne, qui est
+        déjà la moyenne pondérée de ses lignes ``daily`` : la ramasser ici
+        comptait la semaine deux fois dans le climat général, évinçait les
+        journées les plus anciennes de la fenêtre de sept lignes, et pouvait
+        présenter l'agrégat hebdomadaire comme le « récemment » (le lundi, les
+        deux types partagent le même ``period_start``).
         """
-        from memory.models import EmotionalSummary
+        from memory import read
 
         if not person_id or person_id in ("anonymous", "__global__"):
             return ""
 
         try:
-            summaries = await sync_to_async(
-                lambda: list(
-                    EmotionalSummary.objects.filter(
-                        person_id=person_id,
-                    ).order_by("-period_start")[:7]
-                )
-            )()
+            summaries = await read.recent_daily_summaries(person_id, days=7)
         except Exception:
             return ""
 
