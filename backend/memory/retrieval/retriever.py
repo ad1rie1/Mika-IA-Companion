@@ -156,8 +156,13 @@ class MemoryRetriever:
         for r in raw_results:
             try:
                 pk = int(r["id"])
+                # `is_valid=True` en ceinture-bretelles : ChromaDB filtre sur sa
+                # propre metadonnee, donc une ligne invalidee entre l'indexation
+                # et cette lecture doit disparaitre du bloc, pas etre servie.
                 conn = await sync_to_async(
-                    lambda pk=pk: Connaissance.objects.prefetch_related("themes", "entities").get(pk=pk)
+                    lambda pk=pk: Connaissance.objects.prefetch_related("themes", "entities").get(
+                        pk=pk, is_valid=True
+                    )
                 )()
                 themes = await sync_to_async(lambda c=conn: list(c.themes.values_list("name", flat=True)))()
                 entities = await sync_to_async(lambda c=conn: list(c.entities.values_list("name", flat=True)))()
@@ -168,6 +173,10 @@ class MemoryRetriever:
                     "themes": themes,
                     "entities": entities,
                 })
+            except Connaissance.DoesNotExist:
+                # Invalidee ou effacee : le repli ChromaDB la reservirait telle
+                # quelle, ce qui annulerait le filtre ci-dessus.
+                continue
             except Exception:
                 enriched.append({
                     "content": r["content"],
