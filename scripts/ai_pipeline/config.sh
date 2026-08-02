@@ -129,21 +129,47 @@ EMAIL_FROM="ai-pipeline@vtuber.local"
 #   backend/tests       → la politique de tests interdit d'y écrire
 #   backend/staticfiles → généré
 AVAILABLE_MODULES=(
+    # Cœur backend
+    "backend/pipeline"
+    "backend/memory"
+    "backend/conscience"
+    "backend/emotion"
+    "backend/drives"
+    "backend/identity"
+    "backend/projects"
     "backend/ai"
     "backend/communication"
-    "backend/configs"
-    "backend/conscience"
-    "backend/drives"
-    "backend/emotion"
     "backend/files"
-    "backend/GestionSysteme"
-    "backend/identity"
-    "backend/memory"
-    "backend/modules"
-    "backend/pipeline"
-    "backend/projects"
+    "backend/configs"
     "backend/utils"
+    "backend/GestionSysteme"
+
+    # Système de plugins : le cœur d'un côté, chaque plugin de l'autre.
+    # backend/modules pèse ~10 000 lignes d'un bloc — une seule tâche d'audit
+    # pour l'ensemble ne fait que survoler, et la Forge (sandbox, validateur
+    # AST, exécution de code écrit à l'exécution) mérite un passage à elle.
+    "backend/modules"
+    "backend/modules/plugins/forge"
+    "backend/modules/plugins/email"
+    "backend/modules/plugins/rss"
+    "backend/modules/plugins/camera"
+    "backend/modules/plugins/wake"
+
+    # Frontend : le 3D et l'UI sont deux métiers distincts, le reste
+    # (scène, audio, réseau, types, main.ts) fait un troisième lot cohérent.
+    "frontend/src/vtuber"
+    "frontend/src/ui"
     "frontend/src"
+)
+
+# Périmètres à retrancher d'un module, quand un sous-dossier est lui-même un
+# module de la liste ci-dessus. Sans ça les deux se recouvrent : la Forge serait
+# auditée une fois pour elle-même et une fois dans le balayage de
+# `backend/modules`, avec deux issues pour un même constat et aucune
+# déduplication possible (elle est indexée par label de module).
+declare -A MODULE_SCOPE_EXCLUDES=(
+    ["backend/modules"]="backend/modules/plugins/ — chaque plugin (forge, email, rss, camera, wake) est un module à part entière du pipeline"
+    ["frontend/src"]="frontend/src/vtuber/ et frontend/src/ui/"
 )
 
 # -- Profils d'analyse --------------------------------------------------------

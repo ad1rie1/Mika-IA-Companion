@@ -35,6 +35,7 @@ ${issue_context}
 
 Concentre ton analyse sur les modules suivants : ${module_paths}
 Tu peux lire n'importe quel fichier du projet si nécessaire (imports, dépendances, modèles partagés, etc.), mais ne corrige que le code des modules ci-dessus.
+$(module_scope_note "$module_paths")
 
 ## Contraintes ABSOLUES
 

@@ -364,6 +364,15 @@ check_prerequisites_light() {
     ok "Prérequis validés"
 }
 
+# Retranche du périmètre les sous-dossiers qui sont eux-mêmes des modules du
+# pipeline (cf. MODULE_SCOPE_EXCLUDES). Silencieux si le module n'en a aucun.
+module_scope_note() {
+    local mod="$1"
+    local excl="${MODULE_SCOPE_EXCLUDES[$mod]:-}"
+    [[ -z "$excl" ]] && return 0
+    echo "Hors périmètre pour ce module : ${excl}. Tu peux LIRE ces fichiers pour comprendre les interactions, mais tu n'y signales ni n'y corriges rien : ils ont leur propre passage."
+}
+
 # Résout les modules ciblés en liste de chemins
 resolve_modules() {
     local modules_arg="$1"
