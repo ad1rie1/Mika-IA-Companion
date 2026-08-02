@@ -52,6 +52,7 @@ class TestProviderEviction:
         ("ai.gemini.", "gemini"),
         ("ai.glm.", "glm"),
         ("ai.ollama.", "ollama"),
+        ("ai.ollama_cloud.", "ollama_cloud"),
     ])
     def test_every_declared_prefix_maps_to_a_known_provider(self, prefix, expected):
         from ai.router import _PROVIDER_CLASSES, _PROVIDER_CONFIG_PREFIXES

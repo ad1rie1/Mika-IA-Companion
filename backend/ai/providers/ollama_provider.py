@@ -16,9 +16,22 @@ logger = logging.getLogger(__name__)
 class OllamaProvider:
     """Local model provider via the official ``ollama.AsyncClient``.
 
-    Set ``OLLAMA_BASE_URL`` in .env to change the Ollama server address
+    The server address comes from ``ai.ollama.base_url`` in the dashboard
     (default: http://localhost:11434).
+
+    Three class attributes are the whole seam ``OllamaCloudProvider``
+    needs: the protocol is identical on both sides — same SDK, same
+    ``/api/tags``, same tool shape — only the endpoint, the credentials
+    and the generation budget differ. Subclassing keeps one tool loop
+    rather than two that drift.
     """
+
+    #: Config-key namespace holding this provider's endpoint + policy.
+    CONFIG_PREFIX = "ai.ollama"
+    DEFAULT_HOST = "http://localhost:11434"
+    #: Cap applied when the config is unreadable — a config read can precede
+    #: a reachable database, and the unbounded default is what this prevents.
+    FALLBACK_MAX_REPLY_TOKENS = 768
 
     def __init__(self):
         try:
@@ -30,14 +43,20 @@ class OllamaProvider:
             )
 
         from configs.service import config_service
-        host = config_service.get("ai.ollama.base_url", default="http://localhost:11434")
+        host = config_service.get(
+            f"{self.CONFIG_PREFIX}.base_url", default=self.DEFAULT_HOST
+        )
         if not host:
-            host = "http://localhost:11434"
+            host = self.DEFAULT_HOST
 
         self._host = host
-        self._client = AsyncClient(host=host)
+        self._client = AsyncClient(host=host, headers=self._headers())
 
-        logger.info("OllamaProvider initialisé (host=%s)", host)
+        logger.info("%s initialisé (host=%s)", type(self).__name__, host)
+
+    def _headers(self) -> dict:
+        """Extra HTTP headers for every call. A local server needs none."""
+        return {}
 
     # -- Generation policy ---------------------------------------------------
     #
@@ -62,18 +81,20 @@ class OllamaProvider:
 
         cap = max_tokens
         try:
-            cap = min(max_tokens, int(config_service.get("ai.ollama.max_reply_tokens")))
+            cap = min(max_tokens, int(
+                config_service.get(f"{self.CONFIG_PREFIX}.max_reply_tokens")
+            ))
         except Exception:
             # An unreadable config must not silently restore the unbounded
             # behaviour this cap exists to prevent.
-            cap = min(max_tokens, 768)
+            cap = min(max_tokens, self.FALLBACK_MAX_REPLY_TOKENS)
         return {"num_predict": cap, "temperature": temperature}
 
     def _thinking(self) -> bool:
         from configs.service import config_service
 
         try:
-            return bool(config_service.get("ai.ollama.thinking"))
+            return bool(config_service.get(f"{self.CONFIG_PREFIX}.thinking"))
         except Exception:
             return False
 
@@ -146,7 +167,7 @@ class OllamaProvider:
         """
         import httpx
         url = f"{self._host.rstrip('/')}/api/tags"
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, headers=self._headers()) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             data = resp.json()

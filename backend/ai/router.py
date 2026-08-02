@@ -19,6 +19,7 @@ from ai.providers import AIProvider
 from ai.providers.claude import ClaudeProvider
 from ai.providers.gemini_provider import GeminiProvider
 from ai.providers.glm_provider import GLMProvider
+from ai.providers.ollama_cloud_provider import OllamaCloudProvider
 from ai.providers.ollama_provider import OllamaProvider
 from ai.providers.openai_provider import OpenAIProvider
 from ai.quota import (
@@ -54,6 +55,10 @@ class AIRole(str, Enum):
 # of these evicts that provider's cached instance (see _invalidate_provider).
 _PROVIDER_CONFIG_PREFIXES = (
     "ai.claude.", "ai.openai.", "ai.gemini.", "ai.glm.", "ai.ollama.",
+    # Distinct from "ai.ollama." — prefix matching is a plain startswith and
+    # "ai.ollama_cloud.api_key" does not begin with "ai.ollama.", so the two
+    # providers are evicted independently rather than in lockstep.
+    "ai.ollama_cloud.",
 )
 
 # Maps provider name → class
@@ -63,6 +68,7 @@ _PROVIDER_CLASSES: dict[str, type] = {
     "gemini": GeminiProvider,
     "glm": GLMProvider,
     "ollama": OllamaProvider,
+    "ollama_cloud": OllamaCloudProvider,
 }
 
 

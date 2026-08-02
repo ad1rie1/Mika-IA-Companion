@@ -159,8 +159,14 @@ def _lookup_pricing(provider: str, model: str) -> tuple[float, float]:
     Exact model match first, then progressively shorter prefix match
     (claude-opus-4-7 → claude-opus-4 → claude-opus). Ollama / unknown
     providers are free.
+
+    Both Ollama variants are $0-per-token: local costs electricity, and the
+    hosted one is billed by subscription, not by usage. The token *counters*
+    still run — they are what a quota is made of — only the USD column is
+    zero. Matched on the prefix so a future ``ollama_*`` variant cannot
+    silently fall through to the pricing table.
     """
-    if provider == "ollama":
+    if provider.startswith("ollama"):
         return (0.0, 0.0)
 
     norm = model.lower().strip()

@@ -16,15 +16,25 @@ from __future__ import annotations
 
 from configs.types import ConfigItem, ConfigRecord, ConfigSection, record_item
 
-PROVIDERS = ("claude", "openai", "gemini", "glm", "ollama")
+# Valeurs = clés de ``ai.router._PROVIDER_CLASSES``. Forme (valeur, libellé) :
+# « ollama_cloud » dans une liste déroulante ne dit pas de quoi il s'agit.
+PROVIDERS = (
+    ("claude", "Claude (Anthropic)"),
+    ("openai", "OpenAI"),
+    ("gemini", "Gemini (Google)"),
+    ("glm", "GLM (Zhipu)"),
+    ("ollama", "Ollama (local)"),
+    ("ollama_cloud", "Ollama Cloud"),
+)
 
 CONFIG_SCHEMA = [
     ConfigSection(
         key="ai_providers", label="IA · Providers", icon="⟠", order=20,
         description=(
             "Clés d'authentification des fournisseurs LLM. "
-            "Seul Ollama demande une URL — les SDK officiels "
-            "(Anthropic, OpenAI, Gemini) gèrent eux-mêmes leur endpoint."
+            "Seules les deux variantes d'Ollama demandent une URL — les SDK "
+            "officiels (Anthropic, OpenAI, Gemini) gèrent eux-mêmes leur "
+            "endpoint."
         ),
     ),
     # Claude
@@ -89,6 +99,50 @@ CONFIG_SCHEMA = [
             "Plafond de génération par tour. Sans lui, un modèle qui ne "
             "s'arrête pas génère jusqu'à 4096 tokens : à 19 tokens/s c'est "
             "219 s, soit bien au-delà du timeout, et le tour échoue toujours."
+        ),
+    ),
+
+    # Ollama Cloud — même protocole, autre machine, autres identifiants.
+    # Provider distinct plutôt que clé greffée sur le local : les deux se
+    # déclarent en même temps (un petit modèle local sur « voix intérieure »,
+    # un gros modèle hébergé sur « conversation »), et les plafonds du local
+    # sont calibrés pour une carte graphique, pas pour un serveur.
+    ConfigItem(
+        key="ai.ollama_cloud.api_key", type="secret", section="ai_providers",
+        group="Ollama Cloud", label="API key", sensitive=True,
+        hot_reload=True,
+        hint="À créer sur ollama.com/settings/keys.",
+    ),
+    ConfigItem(
+        key="ai.ollama_cloud.base_url", type="str", section="ai_providers",
+        group="Ollama Cloud", label="Base URL", default="https://ollama.com",
+        hot_reload=True,
+        hint=(
+            "Endpoint hébergé. Les identifiants de modèles y sont sans "
+            "suffixe (gpt-oss:120b, kimi-k3, glm-5.2) : le suffixe « -cloud » "
+            "appartient à l'autre montage, celui où un Ollama local relaie "
+            "vers le cloud."
+        ),
+    ),
+    ConfigItem(
+        key="ai.ollama_cloud.thinking", type="bool", section="ai_providers",
+        group="Ollama Cloud", label="Raisonnement visible (thinking)",
+        default=False, hot_reload=True,
+        hint=(
+            "Désactivé par défaut comme en local, mais pour une autre raison : "
+            "ici le raisonnement coûte du quota plutôt que des secondes. "
+            "L'activer est jouable si la qualité le justifie."
+        ),
+    ),
+    ConfigItem(
+        key="ai.ollama_cloud.max_reply_tokens", type="int", section="ai_providers",
+        group="Ollama Cloud", label="Longueur max d'une réponse (tokens)",
+        default=2048, min=64, max=8192,
+        hot_reload=True,
+        hint=(
+            "Plus haut qu'en local (768) : le plafond local est une ceinture "
+            "contre un modèle qui génère à 19 tokens/s et ne finit jamais "
+            "dans le timeout — contrainte qui n'existe pas côté hébergé."
         ),
     ),
 
