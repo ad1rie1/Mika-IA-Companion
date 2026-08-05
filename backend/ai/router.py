@@ -26,6 +26,7 @@ from ai.quota import (
     current_project_id,
     estimate_tokens_from_chars,
     quota_tracker,
+    _reset_usage,
     _take_usage,
 )
 
@@ -249,23 +250,27 @@ class AIRouter:
 
     # ── Completion ───────────────────────────────────────────────
 
-    async def complete(
+    async def _metered_call(
         self,
         role: AIRole,
         system_prompt: str,
         user_prompt: str,
-        **kwargs,
-    ) -> str:
-        """Route a completion request to the configured provider+model.
+        invoke,
+    ):
+        """Séquence commune à TOUT appel routé, outillé ou non.
 
-        Wraps every call with unified logging: timing, role, provider,
-        model, prompt size, and response size.
+        Résolution du rôle → contrôle de quota → appel → relevé d'usage →
+        comptabilisation → log unifié. ``invoke(provider, model, temperature)``
+        exécute l'appel réel et renvoie ``(valeur_rendue, texte_produit)`` ;
+        le texte ne sert qu'à estimer les tokens de sortie quand le provider
+        n'a pas remonté son usage réel.
+
+        Factorisé plutôt que recopié : le chemin outillé contournait le
+        routeur, donc ni les plafonds, ni la température déclarée, ni la
+        trace ne s'appliquaient au plus gros consommateur du système.
         """
         provider_name, model, temperature, internal_name = self._resolve(role)
         provider = self._get_provider(provider_name)
-
-        # Role-configured temperature wins unless the caller overrides it.
-        kwargs.setdefault("temperature", temperature)
 
         prompt_chars = len(system_prompt) + len(user_prompt)
         t0 = time.monotonic()
@@ -285,13 +290,12 @@ class AIRouter:
             role.value, internal_name, provider_name, model, prompt_chars, project_id,
         )
 
+        # L'usage se cumule d'un tour d'outils à l'autre : on part de zéro
+        # pour ne pas facturer le reliquat d'un appel précédent.
+        _reset_usage()
+
         try:
-            result = await provider.complete(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                model=model,
-                **kwargs,
-            )
+            result, text = await invoke(provider, model, temperature)
             elapsed_ms = (time.monotonic() - t0) * 1000
 
             usage = _take_usage()
@@ -300,7 +304,7 @@ class AIRouter:
                 tokens_out = int(usage.get("out", 0))
             else:
                 tokens_in = expected_in
-                tokens_out = estimate_tokens_from_chars(len(result))
+                tokens_out = estimate_tokens_from_chars(len(text))
 
             cost_usd = quota_tracker.record(
                 role=role.value,
@@ -315,7 +319,7 @@ class AIRouter:
                 "AI call OK     role=%-22s internal=%-18s provider=%-7s model=%-30s "
                 "prompt=%5d chars  response=%5d chars  tok=%d/%d  $%.5f  %7.0f ms",
                 role.value, internal_name, provider_name, model,
-                prompt_chars, len(result),
+                prompt_chars, len(text),
                 tokens_in, tokens_out, cost_usd, elapsed_ms,
             )
             return result
@@ -329,6 +333,60 @@ class AIRouter:
                 prompt_chars, elapsed_ms,
             )
             raise
+
+    async def complete(
+        self,
+        role: AIRole,
+        system_prompt: str,
+        user_prompt: str,
+        **kwargs,
+    ) -> str:
+        """Route a completion request to the configured provider+model.
+
+        Wraps every call with unified logging: timing, role, provider,
+        model, prompt size, and response size.
+        """
+        async def _invoke(provider, model, temperature):
+            # Role-configured temperature wins unless the caller overrides it.
+            kwargs.setdefault("temperature", temperature)
+            text = await provider.complete(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                model=model,
+                **kwargs,
+            )
+            return text, text
+
+        return await self._metered_call(role, system_prompt, user_prompt, _invoke)
+
+    async def complete_with_tools(
+        self,
+        role: AIRole,
+        system_prompt: str,
+        user_prompt: str,
+        tools: list,
+        **kwargs,
+    ) -> tuple[str, list[str]]:
+        """Route a tool-enabled completion, metered exactly like ``complete``.
+
+        Renvoie ``(texte, noms_des_outils_appelés)``. La boucle d'outils est
+        interne au provider ; ce qui compte ici est qu'elle soit encadrée par
+        le quota et comptabilisée dans son intégralité.
+        """
+        async def _invoke(provider, model, temperature):
+            # Même règle que ``complete`` : la température du modèle déclaré
+            # s'applique, sauf si l'appelant en impose une.
+            kwargs.setdefault("temperature", temperature)
+            text, called = await provider.complete_with_tools(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                model=model,
+                tools=tools or [],
+                **kwargs,
+            )
+            return (text, called), text
+
+        return await self._metered_call(role, system_prompt, user_prompt, _invoke)
 
 
 ai_router = AIRouter()
