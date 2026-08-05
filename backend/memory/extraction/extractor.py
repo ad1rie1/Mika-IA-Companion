@@ -101,11 +101,14 @@ Cette connaissance est-elle remise en question par le nouveau contexte?
 nouveau contexte contredit CLAIREMENT l'ancienne information.
 - Une simple mention du sujet ne suffit pas a invalider.
 - Il faut une contradiction explicite ou une correction directe.
+- "new_confidence" reste null sauf si le nouveau contexte donne vraiment de quoi \
+rechiffrer la confiance. Ne recopie pas la valeur de l'exemple: une connaissance \
+simplement non contredite n'est pas une connaissance reconfirmee.
 
 Retourne UNIQUEMENT du JSON valide:
 {{
   "still_valid": true,
-  "new_confidence": 1.0,
+  "new_confidence": null,
   "reason": "explication courte"
 }}
 """

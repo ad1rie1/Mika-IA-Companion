@@ -1025,7 +1025,10 @@ class MemoryConsolidator:
                         "Consolidator invalidated connaissance #%d: %s (contradicted by: %s)",
                         conn.pk, conn.content[:80], new_content[:80],
                     )
-                elif new_confidence is not None and abs(new_confidence - conn.confidence) > 0.05:
+                # Seulement a la baisse, comme le bridge : remonter la confiance
+                # ici annulerait la decroissance que ce meme consolidateur
+                # applique par ailleurs.
+                elif new_confidence is not None and conn.confidence - new_confidence > 0.05:
                     conn.confidence = new_confidence
                     await sync_to_async(conn.save)(update_fields=["confidence"])
 

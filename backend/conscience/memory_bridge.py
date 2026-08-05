@@ -229,7 +229,13 @@ class MemoryBridge:
                         "still_valid": False,
                         "new_confidence": new_confidence,
                     })
-                elif new_confidence is not None and new_confidence != conn.confidence:
+                # Seulement a la baisse : un controle qui ne contredit rien
+                # n'est pas une reconfirmation, et le modele recopie volontiers
+                # la valeur haute de l'exemple. Une remontee effacerait la
+                # decroissance lente (`_decay_connaissances`) et les baisses
+                # decidees ailleurs, sans laisser de trace dans les resultats.
+                # La hausse deliberee, elle, passe par `reinforce_connaissance`.
+                elif new_confidence is not None and new_confidence < conn.confidence:
                     await memory_manager.update_connaissance_confidence(
                         conn.pk, new_confidence
                     )
