@@ -149,6 +149,9 @@ export class TTSService {
    * actor studio grade — the point is prosodic presence, not realism.
    */
   private async playSfx(kind: "sigh" | "laugh" | "breath"): Promise<void> {
+    // Le mute passe par speechSynthesis.cancel(), qui n'a aucune prise sur
+    // WebAudio : sans cette garde le soupir sortait après le clic sur 🔇.
+    if (this.muted) return;
     const ctx = this.ensureAudioContext();
     if (ctx.state === "suspended") {
       // Awaited: a suspended context never fires `onended`, and the queue
@@ -340,6 +343,7 @@ export class TTSService {
     if (muted) {
       this.speechQueue.length = 0;
       this.nextPreDelayMs = 0;
+      this.interruptEpoch++;
       if ("speechSynthesis" in window) {
         speechSynthesis.cancel();
       }
@@ -351,6 +355,12 @@ export class TTSService {
   }
 
   private muted = false;
+
+  // Jeton d'interruption, incrémenté par `setMuted(true)` et par `stop()`.
+  // `speechSynthesis.cancel()` ne tue que l'énoncé en cours, jamais la boucle
+  // qui enchaîne les segments : le chemin segmenté capture donc cette valeur
+  // et abandonne les segments restants dès qu'elle change.
+  private interruptEpoch = 0;
 
   async speak(
     text: string,
@@ -413,6 +423,7 @@ export class TTSService {
   ): Promise<void> {
     const segments = this.parseSegments(text);
     if (segments.length === 0) return;
+    const epoch = this.interruptEpoch;
 
     // Emit "start" on the first segment that actually makes sound.
     let started = false;
@@ -423,6 +434,11 @@ export class TTSService {
     };
 
     for (const seg of segments) {
+      // Un mute ou un stop arrivé pendant le segment précédent doit couper
+      // net. Sans cette garde, le `cancel()` ne tuait que l'énoncé en cours
+      // et la boucle jouait quand même le soupir puis la fin de la réponse.
+      if (this.muted || epoch !== this.interruptEpoch) break;
+
       if (seg.type === "speech") {
         emitStart();
         await this.speakTextChunk(seg.text, emotion, /*suppressEvents*/ true);
@@ -452,7 +468,9 @@ export class TTSService {
     suppressEvents = false
   ): Promise<void> {
     return new Promise((resolve) => {
-      if (!text.trim()) {
+      // Muet : ne jamais relancer la synthèse. Couvre la course entre le
+      // `cancel()` du mute et le segment suivant, déjà en vol ici.
+      if (this.muted || !text.trim()) {
         resolve();
         return;
       }
@@ -522,6 +540,7 @@ export class TTSService {
 
   stop() {
     this.speechQueue = [];
+    this.interruptEpoch++;
     speechSynthesis.cancel();
     if (this.isSpeaking) {
       this.isSpeaking = false;
