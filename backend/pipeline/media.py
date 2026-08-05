@@ -35,6 +35,15 @@ ALLOWED_TEXT_TYPES = {
 MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024  # 5 Mo décodé
 MAX_ATTACHMENTS = 5
 
+# Le nom d'un fichier est fourni par l'émetteur (payload WebSocket,
+# `file_name` Telegram) et finit dans le prompt système du propriétaire via
+# files_service.list_today_context(). Multi-ligne et sans plafond, il s'y lit
+# comme une consigne. On le ramène donc à une ligne unique et bornée avant
+# toute persistance — même convention que MAX_CAPTION_CHARS côté vision.
+# Le max_length=255 du modèle ne protège pas : SQLite n'applique pas les
+# longueurs de varchar et objects.create() ne passe pas par full_clean().
+MAX_FILENAME_CHARS = 80
+
 
 @dataclass
 class MediaAttachment:
@@ -69,6 +78,20 @@ def _categorize(media_type: str) -> str:
     if media_type in ALLOWED_TEXT_TYPES or media_type.startswith("text/"):
         return "text"
     return "unknown"
+
+
+def sanitize_filename(raw: str) -> str:
+    """Ramène un nom de fichier tiers à une ligne unique, imprimable et bornée.
+
+    Les caractères de contrôle (dont les sauts de ligne) et les marques de
+    direction Unicode deviennent des espaces, les blancs consécutifs sont
+    fusionnés, et le résultat est tronqué à MAX_FILENAME_CHARS.
+    """
+    name = "".join(c if c.isprintable() else " " for c in str(raw))
+    name = " ".join(name.split())
+    if len(name) > MAX_FILENAME_CHARS:
+        name = name[: MAX_FILENAME_CHARS - 3].rstrip() + "..."
+    return name or "fichier"
 
 
 def _ext_for(media_type: str, original_name: str) -> str:
@@ -126,8 +149,11 @@ async def save_attachments(
 
     saved = []
     for att in attachments:
+        # Assaini ici, au point de convergence de tous les canaux : c'est ce
+        # nom-là qui est persisté puis injecté dans le prompt système.
+        safe_name = sanitize_filename(att.name)
         file_uuid = uuid.uuid4()
-        ext = _ext_for(att.media_type, att.name)
+        ext = _ext_for(att.media_type, safe_name)
         disk_path = uploads_root / f"{file_uuid}{ext}"
         data_bytes = att.decoded_bytes()
 
@@ -141,7 +167,7 @@ async def save_attachments(
             try:
                 db_record = await sync_to_async(_create_db_record)(
                     file_id=file_uuid,
-                    original_name=att.name,
+                    original_name=safe_name,
                     media_type=att.media_type,
                     category=att.category,
                     file_size=len(data_bytes),
@@ -155,10 +181,10 @@ async def save_attachments(
             # 3. Mémoire module
             _register_in_module(db_record)
             saved.append(db_record)
-            logger.info("Fichier sauvegardé : %s → %s (id=%s)", att.name, disk_path.name, file_uuid)
+            logger.info("Fichier sauvegardé : %s → %s (id=%s)", safe_name, disk_path.name, file_uuid)
 
         except Exception:
-            logger.exception("Erreur lors de la sauvegarde de %s", att.name)
+            logger.exception("Erreur lors de la sauvegarde de %s", safe_name)
 
     return saved
 
