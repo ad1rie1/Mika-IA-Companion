@@ -721,8 +721,11 @@ class EmotionEngine:
             ):
                 expired_persons.append(pid)
 
-        for pid in expired_persons:
-            del self.person_moods[pid]
+        if expired_persons:
+            try:
+                self._evict_persons(expired_persons)
+            except Exception as exc:
+                degradations.record("emotion.engine._apply_decay", exc)
 
         # Step global mood
         dt = max(0.0, now - self.global_mood.last_update)
@@ -757,6 +760,40 @@ class EmotionEngine:
                     pad.add(self.global_mood.dynamic.position, nudge),
                     limit=1.0,
                 )
+
+    def _evict_persons(self, person_ids: list[str]) -> None:
+        """Sortir de la RAM les humeurs inactives — sauf celles encore lues.
+
+        ``last_interaction`` ne date que le dernier *message*, jamais une
+        lecture : quelqu'un qui laisse son onglet ouvert sans plus parler
+        franchit le seuil d'inactivité alors qu'``emotion_sync`` lit son
+        humeur toutes les quelques secondes. L'évincer là est doublement
+        faux — la lecture suivante recrée l'oscillateur à l'origine (chute
+        d'intensité visible à l'écran, une fois par heure de silence), et
+        ``ensure_person_loaded`` redevenant un no-op, le ``EmotionSnapshot``
+        qui portait le sentiment accumulé n'est plus jamais relu.
+
+        Seules les connexions vivantes protègent : un handle de module
+        (Telegram) est joignable à vie, l'oscillateur associé ne l'est pas.
+        """
+        from communication.presence import presence_registry
+        from emotion.sync import emotion_sync
+
+        connectes = {
+            i.person_id for i in presence_registry.reachable() if i.is_consumer
+        }
+        for pid in person_ids:
+            if pid in connectes:
+                continue
+            del self.person_moods[pid]
+            # Deux caches indexés par person_id survivaient à l'oscillateur
+            # qu'ils décrivent : ``_last_snapshot_time`` n'était purgé nulle
+            # part, et ``emotion_sync._hydrated`` marque « déjà hydratée »
+            # une personne dont l'humeur vient de quitter la RAM — la
+            # prochaine lecture sauterait l'hydratation et repartirait de
+            # l'origine.
+            self._last_snapshot_time.pop(pid, None)
+            emotion_sync.forget(pid)
 
     # ------------------------------------------------------------------
     # Analytics
