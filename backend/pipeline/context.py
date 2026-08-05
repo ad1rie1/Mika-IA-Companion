@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from drives.engine import drive_engine
 from emotion.engine import emotion_engine
 from identity.resolver import identity_resolver
-from identity.trust import is_internal_person
+from identity.trust import ChannelTrust, is_internal_person
 from memory.manager import memory_manager
 from modules.manager import module_manager
 
@@ -269,6 +269,12 @@ def _format_identity_block(ctx) -> str:
     certain would only invite the model to talk about certainty.
     """
     if ctx.is_internal:
+        return ""
+
+    # Session authentifiee et rien en attente : la question ne se pose pas.
+    # `describe_fr` rendrait « Aucun doute a avoir », ce qui n'apprend rien de
+    # plus que le bloc suivant et invite le modele a parler de sa certitude.
+    if ctx.trust is ChannelTrust.AUTHENTICATED and not ctx.pending_claims:
         return ""
 
     lines = [ctx.description] if ctx.description else []
