@@ -7,6 +7,12 @@ Consumers:
     tool handler.
   - Any plugin module can import ``files_service`` directly to query
     or manipulate uploaded files — no reaching into ModuleManager.
+
+Les ``op_*`` sont la surface *outil* : elles filtrent sur la personne du
+tour en cours (``pipeline.tracing.current_person_id``) et ne rendent que
+ses propres fichiers, sauf pour le propriétaire. Un consommateur interne
+qui doit ignorer ce filtre passe par ``get()`` / le registre, pas par un
+``op_*``.
 """
 
 from __future__ import annotations
@@ -91,10 +97,41 @@ class FilesService:
         lines.append("Pour les fichiers plus anciens, utilise files_list.")
         return "\n".join(lines)
 
+    # ── Contrôle d'accès ──────────────────────────────────────────
+
+    def _may_access(self, record: dict) -> bool:
+        """Le tour en cours a-t-il le droit de toucher ce fichier ?
+
+        Les outils files_* sont exposés à *toutes* les conversations, alors
+        que le bloc de contexte du module, lui, est réservé au propriétaire
+        (``ModuleCollectors.context`` saute les modules ``CONTEXT_VISIBILITY
+        == "owner"``). Sans ce filtre, un contact Telegram ou un invité web
+        atteint par les outils ce que le prompt lui refuse.
+
+        Un ``person_id`` vide (boucle de fond, tick cron) signifie « aucune
+        personne en portée » : pas de propriétaire, pas de possesseur, donc
+        aucun accès — jamais « accès total ».
+
+        Un refus se dit « Fichier introuvable. », comme un ID inexistant :
+        confirmer l'existence de l'ID serait déjà une fuite.
+        """
+        from modules.collectors import is_owner
+        from pipeline.tracing import current_person_id
+
+        person_id = current_person_id()
+        if is_owner(person_id):
+            return True
+        if not person_id:
+            return False
+        return (record.get("person_id") or "") == person_id
+
     # ── Tool-facing operations (async) ────────────────────────────
 
     async def op_list(self, date_filter: str = "", category: str = "") -> dict:
-        files = [r for r in self._registry.values() if not r.get("deleted")]
+        files = [
+            r for r in self._registry.values()
+            if not r.get("deleted") and self._may_access(r)
+        ]
         if date_filter:
             files = [r for r in files if r.get("uploaded_at", "").startswith(date_filter)]
         if category:
@@ -118,7 +155,7 @@ class FilesService:
 
     async def op_read(self, file_id: str) -> dict:
         record = self.get(file_id)
-        if not record:
+        if not record or not self._may_access(record):
             return {"error": "Fichier introuvable."}
         if record.get("deleted"):
             return {"error": "Fichier supprimé."}
@@ -137,7 +174,7 @@ class FilesService:
 
     async def op_analyze_image(self, file_id: str, question: str = "") -> dict:
         record = self.get(file_id)
-        if not record:
+        if not record or not self._may_access(record):
             return {"error": "Fichier introuvable."}
         if record["category"] != "image":
             return {"error": f"Ce fichier n'est pas une image (catégorie: {record['category']})."}
@@ -168,7 +205,7 @@ class FilesService:
 
     async def op_transcribe(self, file_id: str) -> dict:
         record = self.get(file_id)
-        if not record:
+        if not record or not self._may_access(record):
             return {"error": "Fichier introuvable."}
         if record["category"] != "audio":
             return {"error": f"Ce fichier n'est pas un audio (catégorie: {record['category']})."}
@@ -189,7 +226,7 @@ class FilesService:
 
     async def op_move(self, file_id: str, destination: str) -> dict:
         record = self.get(file_id)
-        if not record:
+        if not record or not self._may_access(record):
             return {"error": "Fichier introuvable."}
         if record.get("deleted"):
             return {"error": "Fichier supprimé."}
@@ -219,7 +256,7 @@ class FilesService:
 
     async def op_delete(self, file_id: str) -> dict:
         record = self.get(file_id)
-        if not record:
+        if not record or not self._may_access(record):
             return {"error": "Fichier introuvable."}
         try:
             path = Path(record["path"])
