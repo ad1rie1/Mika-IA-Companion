@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import timedelta
 
 from asgiref.sync import sync_to_async
 from django.utils import timezone
@@ -44,6 +45,11 @@ logger = logging.getLogger(__name__)
 #: Facts pulled from memory to test a claim against. Small on purpose — this
 #: runs inside a conversation turn.
 MAX_CORROBORATION_FACTS = 12
+
+#: Revendications presentees simultanement dans le prompt. Au-dela, la liste
+#: n'aide plus Mika a trancher : elle noie le bloc identite (chaque ligne
+#: coute ~50 tokens, renvoyes a chaque tour).
+MAX_PENDING_CLAIMS_SHOWN = 3
 
 
 @dataclass
@@ -364,6 +370,14 @@ class IdentityResolver:
             trust_policy.floor_for(resolved_trust),
         )
 
+        # Une revendication qu'on n'a pas tranchee finit par se perimer : elle
+        # cesse d'etre presentee au-dela de PENDING_CLAIM_TTL_DAYS, et le
+        # balayage de retention la classe alors « rejetee ». Sans cette borne
+        # elle revenait dans le prompt a chaque tour indefiniment, et faisait
+        # basculer la description en niveau CLAIMED avec elle.
+        cutoff = timezone.now() - timedelta(
+            days=trust_policy.PENDING_CLAIM_TTL_DAYS,
+        )
         ctx.pending_claims = [
             {
                 "id": c.pk,
@@ -374,7 +388,8 @@ class IdentityResolver:
             }
             for c in IdentityClaim.objects.filter(
                 identity=identity, status=IdentityClaim.Status.PENDING,
-            ).order_by("-created_at")[:5]
+                created_at__gte=cutoff,
+            ).order_by("-created_at")[:MAX_PENDING_CLAIMS_SHOWN]
         ]
 
         # Name her the person by the strongest label available: the binding

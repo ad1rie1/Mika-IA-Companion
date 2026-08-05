@@ -137,6 +137,20 @@ EVIDENCE_WEIGHTS: dict[str, float] = {
     "authenticated": 1.0,
 }
 
+#: Duree de vie d'une revendication laissee en attente, en jours.
+#:
+#: Ne pas trancher est un choix legitime — le prompt le dit explicitement a
+#: Mika — mais une revendication n'avait aucun autre chemin de sortie : elle
+#: repartait dans le prompt a chaque tour, indefiniment. Le detecteur passif
+#: produisant des faux positifs par construction (« je suis vegetarien »
+#: donne une revendication au nom de « Vegetarien »), l'absence de decision
+#: finissait par couter plus de contexte qu'elle n'en apportait.
+#:
+#: Une seule valeur, lue par le resolveur (ce qu'il montre) et par le
+#: balayage de retention (ce qu'il perime) : les deux doivent tomber
+#: d'accord, sinon une revendication invisible reste comptee comme pendante.
+PENDING_CLAIM_TTL_DAYS = 7
+
 #: Evidence that *lowers* certainty. Doubt is evidence too.
 COUNTER_EVIDENCE_WEIGHTS: dict[str, float] = {
     # They got a shared fact wrong.

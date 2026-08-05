@@ -11,7 +11,9 @@ The policies here are deliberately generous: this is Mika's audit trail and
 her past, not a cache. The point is a ceiling, not aggressive cleanup.
 
 Called once per consolidator tick; each table is swept independently so one
-failure never blocks the others.
+failure never blocks the others. Une passe ne fait pas que supprimer : elle
+perime aussi les revendications d'identite laissees sans decision, seule
+categorie de ligne « en attente » que rien d'autre ne vient jamais fermer.
 """
 from __future__ import annotations
 
@@ -72,7 +74,10 @@ POLICIES: tuple[Policy, ...] = (
            protect={"is_ephemeral": False},
            note="anonymous per-connection handles"),
     # Resolved claims are the identity ledger. Kept long enough to explain a
-    # binding, not forever; pending ones are still awaiting Mika's judgement.
+    # binding, not forever. Les revendications en attente restent protegees
+    # de la suppression — elles attendent le jugement de Mika — mais plus
+    # inconditionnellement : `_expire_pending_claims` les perime au-dela de
+    # PENDING_CLAIM_TTL_DAYS, apres quoi elles retombent sous cette regle.
     Policy("identity", "IdentityClaim", keep_days=180, keep_rows=10_000,
            protect={"status": "pending"},
            note="identity evidence ledger"),
@@ -80,8 +85,20 @@ POLICIES: tuple[Policy, ...] = (
 
 
 async def run_sweep() -> dict[str, int]:
-    """Apply every policy. Returns {label: rows_deleted} for what it touched."""
+    """Apply every policy. Returns {label: rows_touched} for what it changed."""
     deleted: dict[str, int] = {}
+
+    # Avant les suppressions : une revendication perimee ici et deja hors
+    # fenetre repart dans la meme passe, plutot que d'attendre la suivante.
+    try:
+        expired = await _expire_pending_claims()
+    except Exception as exc:
+        degradations.record("memory.retention.run_sweep", exc)
+        logger.debug("Pending identity claim expiry failed", exc_info=True)
+    else:
+        if expired:
+            deleted["identity.IdentityClaim (perimees)"] = expired
+
     for policy in POLICIES:
         try:
             count = await _sweep_one(policy)
@@ -104,8 +121,47 @@ async def run_sweep() -> dict[str, int]:
             deleted["identity.Identity"] = orphans
 
     if deleted:
-        logger.info("Retention sweep removed %s", deleted)
+        logger.info("Retention sweep touched %s", deleted)
     return deleted
+
+
+async def _expire_pending_claims() -> int:
+    """Perime les revendications d'identite laissees sans decision.
+
+    Une ``IdentityClaim`` en attente n'avait aucun chemin de sortie
+    automatique : seule une decision de Mika la retirait, alors que le bloc
+    de prompt lui dit precisement que rien ne l'oblige a trancher. Chaque
+    revendication trainante — et le detecteur passif en produit de fausses
+    par construction — repartait donc dans le prompt a chaque tour.
+
+    Le passage en ``rejected`` ne touche pas a la certitude : une
+    revendication en attente n'a jamais ete comptee, donc l'abandonner ne
+    retire rien. Elle reste dans le registre avec la raison de sa sortie,
+    puis retombe sous la politique des 180 jours.
+    """
+    from django.apps import apps
+
+    from identity.trust import PENDING_CLAIM_TTL_DAYS
+
+    IdentityClaim = apps.get_model("identity", "IdentityClaim")
+
+    def _expire() -> int:
+        cutoff = timezone.now() - timedelta(days=PENDING_CLAIM_TTL_DAYS)
+        ids = list(
+            IdentityClaim.objects.filter(
+                status=IdentityClaim.Status.PENDING,
+                created_at__lt=cutoff,
+            ).values_list("pk", flat=True)[:10_000]
+        )
+        if not ids:
+            return 0
+        return IdentityClaim.objects.filter(pk__in=ids).update(
+            status=IdentityClaim.Status.REJECTED,
+            resolution_note="expiree sans decision",
+            resolved_at=timezone.now(),
+        )
+
+    return await sync_to_async(_expire)()
 
 
 async def _sweep_orphan_identities() -> int:
