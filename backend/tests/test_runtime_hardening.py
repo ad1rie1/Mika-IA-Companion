@@ -346,5 +346,8 @@ class _NullVectorStore:
     def add_souvenir(self, **kwargs):
         return None
 
+    def add_souvenirs(self, entries):
+        return None
+
     def remove_souvenir(self, souvenir_id):
         return None

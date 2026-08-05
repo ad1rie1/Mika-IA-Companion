@@ -9,7 +9,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from memory.extraction.extractor import MemoryExtractor
-from memory.storage.vector_store import VectorStore
+from memory.storage.vector_store import VectorStore, vector_call
 from utils.periodic import PeriodicLoop
 from utils.degradation import degradations
 
@@ -437,7 +437,7 @@ class MemoryConsolidator:
         truth, and losing a vector entry costs recall, not the memory itself.
         """
         try:
-            await sync_to_async(fn)(**kwargs)
+            await vector_call(fn)(**kwargs)
         except Exception:
             logger.warning("ChromaDB indexing failed for %s #%d", kind, pk)
 
@@ -609,8 +609,14 @@ class MemoryConsolidator:
         Only rows whose anchor is older than ``DECAY_MIN_AGE`` are read: a
         souvenir touched minutes ago cannot move by more than the write
         threshold, so loading it just to skip it was the bulk of the work.
-        The rest of the loop stays row-by-row because each write also
-        re-indexes into ChromaDB, which no bulk UPDATE can do.
+        The rest of the loop stays row-by-row because each row decays from
+        its own anchor, which no bulk UPDATE can express.
+
+        Les ré-indexations, elles, sont regroupées en un seul upsert de fin de
+        passe : un encode par ligne coûtait jusqu'à ``DECAY_BATCH`` encodes
+        consécutifs, là où SentenceTransformer traite un lot en une fois. La
+        ligne ORM reste la source de vérité, donc un lot perdu coûte du rappel
+        jusqu'à la passe suivante, jamais le souvenir lui-même.
         """
         from django.db.models import Q
         from memory.models import Souvenir
@@ -629,6 +635,7 @@ class MemoryConsolidator:
         if not souvenirs:
             return
 
+        reindex: list[dict] = []
         for souvenir in souvenirs:
             # Use occurred_at (when it happened) not created_at (when it was stored)
             ref_date = souvenir.occurred_at or souvenir.created_at
@@ -640,7 +647,7 @@ class MemoryConsolidator:
             new_importance = souvenir.importance * (decay_rate ** days_since)
             if new_importance < min_importance:
                 try:
-                    await sync_to_async(self.vector_store.remove_souvenir)(souvenir.pk)
+                    await vector_call(self.vector_store.remove_souvenir)(souvenir.pk)
                 except Exception as exc:
                     degradations.record("consolidator: chromadb remove failed for souvenir #", exc)
                 await sync_to_async(souvenir.delete)()
@@ -652,17 +659,20 @@ class MemoryConsolidator:
                 souvenir.decayed_at = now
                 await sync_to_async(souvenir.save)(
                     update_fields=["importance", "decayed_at"])
-                try:
-                    await sync_to_async(self.vector_store.add_souvenir)(
-                        souvenir_id=souvenir.pk,
-                        content=souvenir.content,
-                        metadata={
-                            "importance": souvenir.importance,
-                            "occurred_at": ref_date.isoformat(),
-                        },
-                    )
-                except Exception as exc:
-                    degradations.record("consolidator: chromadb update failed for souvenir #", exc)
+                reindex.append({
+                    "souvenir_id": souvenir.pk,
+                    "content": souvenir.content,
+                    "metadata": {
+                        "importance": souvenir.importance,
+                        "occurred_at": ref_date.isoformat(),
+                    },
+                })
+
+        if reindex:
+            try:
+                await vector_call(self.vector_store.add_souvenirs)(reindex)
+            except Exception as exc:
+                degradations.record("consolidator: chromadb update failed for souvenir #", exc)
 
     async def _decay_connaissances(self):
         """Slowly reduce confidence of old connaissances that haven't been reinforced.
@@ -989,7 +999,7 @@ class MemoryConsolidator:
         from memory.models import Connaissance
 
         try:
-            raw = await sync_to_async(self.vector_store.search_connaissances)(
+            raw = await vector_call(self.vector_store.search_connaissances)(
                 new_content, n=5
             )
             if not raw:
@@ -1029,7 +1039,7 @@ class MemoryConsolidator:
                     conn.is_valid = False
                     await sync_to_async(conn.save)(update_fields=["is_valid"])
                     try:
-                        await sync_to_async(self.vector_store.add_connaissance)(
+                        await vector_call(self.vector_store.add_connaissance)(
                             connaissance_id=conn.pk,
                             content=conn.content,
                             metadata={
@@ -1060,7 +1070,7 @@ class MemoryConsolidator:
         """Check if a similar connaissance already exists via vector search."""
         from memory.models import Connaissance
 
-        results = await sync_to_async(self.vector_store.search_connaissances)(content, n=1)
+        results = await vector_call(self.vector_store.search_connaissances)(content, n=1)
         if results and results[0]["distance"] is not None and results[0]["distance"] < 0.15:
             # Very similar — treat as duplicate
             try:

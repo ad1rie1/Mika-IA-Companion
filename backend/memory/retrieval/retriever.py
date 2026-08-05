@@ -5,7 +5,7 @@ from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.utils import timezone
 
-from memory.storage.vector_store import VectorStore
+from memory.storage.vector_store import VectorStore, vector_call
 
 logger = logging.getLogger(__name__)
 
@@ -37,14 +37,16 @@ class MemoryRetriever:
         # Fetch more than needed so we can rerank.
         # ChromaDB search runs a CPU-heavy embedding encode — offload it to a
         # thread so it never blocks the ASGI event loop (this runs on the hot
-        # path of every conversation turn).
+        # path of every conversation turn). `vector_call` la sort en plus du
+        # thread ORM partagé, où elle attendait derrière la passe de
+        # décroissance du consolidateur.
         fetch_multiplier = 2
-        souvenirs_raw = await sync_to_async(self.vector_store.search_souvenirs)(
+        souvenirs_raw = await vector_call(self.vector_store.search_souvenirs)(
             query,
             n=n_souvenirs * fetch_multiplier,
             min_importance=config_service.get("memory.min_importance"),
         )
-        connaissances_raw = await sync_to_async(self.vector_store.search_connaissances)(
+        connaissances_raw = await vector_call(self.vector_store.search_connaissances)(
             query, n=n_connaissances
         )
 
