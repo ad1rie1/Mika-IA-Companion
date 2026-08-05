@@ -155,7 +155,7 @@ class TelegramChannel:
         from identity.resolver import identity_resolver
         from identity.trust import ChannelTrust
 
-        await identity_resolver.link_handle(
+        identity = await identity_resolver.link_handle(
             person_id=person_id,
             channel="telegram",
             kind="module",
@@ -163,6 +163,15 @@ class TelegramChannel:
             display_name=display_name,
             trust=ChannelTrust.PUBLIC if is_public else ChannelTrust.ACCOUNT,
         )
+        # Sans handle, rien ne rattache ce compte a une Identity : la
+        # deliberation ne pourra jamais le lier a une Entity memoire et la
+        # personne restera indiscernable d'un inconnu, tour apres tour.
+        if identity is None:
+            logger.warning(
+                "Handle non enregistre pour %s@telegram — la personne restera "
+                "anonyme pour la memoire par personne",
+                person_id,
+            )
         return person_id, is_public
 
     async def _handle_message(

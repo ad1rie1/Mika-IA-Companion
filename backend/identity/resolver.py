@@ -164,7 +164,8 @@ class IdentityResolver:
                 is_ephemeral=ephemeral,
             )
             return identity
-        except Exception:
+        except Exception as exc:
+            degradations.record("identity.resolver.link_handle", exc)
             logger.warning(
                 "link_handle failed for %s@%s", person_id, channel, exc_info=True
             )
@@ -231,7 +232,8 @@ class IdentityResolver:
                 },
             )
             return identity
-        except Exception:
+        except Exception as exc:
+            degradations.record("identity.resolver.bind_authenticated", exc)
             logger.warning(
                 "bind_authenticated failed for %s@%s", person_id, channel,
                 exc_info=True,
@@ -279,7 +281,8 @@ class IdentityResolver:
                 "binding_reason", "display_name", "last_seen",
             ])
             return identity
-        except Exception:
+        except Exception as exc:
+            degradations.record("identity.resolver.link_entity", exc)
             logger.warning(
                 "link_entity failed for %s/%s", person_id, entity_name,
                 exc_info=True,
