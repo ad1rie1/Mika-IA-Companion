@@ -2,6 +2,7 @@ import asyncio
 import logging
 import random
 import time
+from datetime import date
 
 from django.conf import settings
 
@@ -347,10 +348,38 @@ class EmotionEngine:
             logger.debug("Failed to restore from summaries", exc_info=True)
             return 0
 
+    def _faded_mood(
+        self,
+        period_start: date,
+        dominant_emotion: str,
+        dominant_intensity: float,
+    ) -> tuple[Emotion, float] | None:
+        """Return (emotion, intensity) faded by the age of a daily summary row.
+
+        La seule formulation du seuil ``_SUMMARY_DECAY_DAYS`` : la restauration
+        au démarrage et le chargement paresseux par personne lisent la même
+        règle, et ne peuvent donc plus en garder deux versions.
+        """
+        age_days = (date.today() - period_start).days
+        if age_days >= self._SUMMARY_DECAY_DAYS:
+            return None
+
+        time_factor = max(0.0, 1.0 - age_days / self._SUMMARY_DECAY_DAYS)
+        intensity = dominant_intensity * time_factor
+
+        if intensity < 0.05:
+            return None
+
+        try:
+            emotion = Emotion(dominant_emotion)
+        except ValueError:
+            return None
+
+        return emotion, intensity
+
     async def _mood_from_summary(self, person_id: str) -> tuple[Emotion, float] | None:
         """Return (emotion, intensity) seeded from the most recent EmotionalSummary."""
         from asgiref.sync import sync_to_async
-        from datetime import date
         from memory.models import EmotionalSummary
 
         try:
@@ -364,22 +393,11 @@ class EmotionEngine:
             if not summary:
                 return None
 
-            age_days = (date.today() - summary.period_start).days
-            if age_days >= self._SUMMARY_DECAY_DAYS:
-                return None
-
-            time_factor = max(0.0, 1.0 - age_days / self._SUMMARY_DECAY_DAYS)
-            intensity = summary.dominant_intensity * time_factor
-
-            if intensity < 0.05:
-                return None
-
-            try:
-                emotion = Emotion(summary.dominant_emotion)
-            except ValueError:
-                return None
-
-            return emotion, intensity
+            return self._faded_mood(
+                summary.period_start,
+                summary.dominant_emotion,
+                summary.dominant_intensity,
+            )
 
         except Exception as exc:
             degradations.record("emotion.engine._mood_from_summary", exc)
