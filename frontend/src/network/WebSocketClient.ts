@@ -58,6 +58,12 @@ interface OutboxEntry {
   chars: number;
 }
 
+/** The ack key a chat frame carries, when it carries one. */
+function clientMsgIdOf(frame: object): string | null {
+  const cid = (frame as { client_msg_id?: unknown }).client_msg_id;
+  return typeof cid === "string" && cid ? cid : null;
+}
+
 export class WebSocketClient {
   private ws: WebSocket | null = null;
   private url: string;
@@ -82,6 +88,17 @@ export class WebSocketClient {
    * garde une bulle « en attente d'envoi » que plus rien ne fera avancer.
    */
   private static readonly MAX_OUTBOX_ATTEMPTS = 5;
+  // Frames handed to a socket that said OPEN, and which the server has not
+  // acknowledged yet. `readyState === OPEN` is not proof of delivery — the
+  // keepalive block below exists precisely because a dead socket keeps
+  // reading OPEN and swallows everything written to it. The `ack` is the
+  // only real receipt, so a chat frame waits here until it arrives (whatever
+  // its status) and is put back in the outbox when the socket is abandoned.
+  // Entries carry the same `chars` as in the outbox: they are the *same*
+  // frames, and they go back there — so they answer to the same two bounds.
+  private unacked: Map<string, OutboxEntry> = new Map();
+  /** Cumul de `chars` sur les frames en vol, tenu comme `outboxChars`. */
+  private unackedChars = 0;
 
   // Keepalive state.
   private heartbeatTimer: number | null = null;
@@ -204,6 +221,12 @@ export class WebSocketClient {
           return;
         }
         if (!data || typeof data.type !== "string") return;
+        // The receipt: the server has this message, whatever it decided to
+        // do with it. Purged before the handlers run, so a throwing handler
+        // can never make us re-send something already delivered.
+        if (data.type === "ack" && typeof data.client_msg_id === "string") {
+          this.forgetUnacked(data.client_msg_id);
+        }
         this.emit(data.type, data);
       };
 
@@ -221,6 +244,8 @@ export class WebSocketClient {
           // silently ride a *future* session if the page ever reconnects.
           this.outbox = [];
           this.outboxChars = 0;
+          this.unacked.clear();
+          this.unackedChars = 0;
           this.emit("connection", { status: "unauthorized" });
           return;
         }
@@ -230,6 +255,8 @@ export class WebSocketClient {
         // (l'incrément se fait dans son callback), donc le délai annoncé
         // reste bien celui du timer qui vient d'être armé.
         this.scheduleReconnect();
+        // Whatever this socket swallowed is only recoverable on the next one.
+        this.requeueUnacked();
         this.emit("connection", {
           status: "disconnected",
           retryInMs: this.currentDelay,
@@ -267,6 +294,9 @@ export class WebSocketClient {
       this.reconnectTimer = null;
     }
     this.stopHeartbeat();
+    // Same reason as in `onclose`: this socket may have accepted frames it
+    // never carried anywhere. Idempotent, so both paths can call it.
+    this.requeueUnacked();
     const dying = this.ws;
     this.ws = null;
     if (dying) {
@@ -336,12 +366,83 @@ export class WebSocketClient {
       this.refuseFrame(data, "frame_too_large");
       return false;
     }
+    const entry: OutboxEntry = {
+      frame: data,
+      attempts: 0,
+      chars: payload.length,
+    };
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(payload);
+      this.holdUntilAck(entry);
       return true;
     }
-    this.enqueue({ frame: data, attempts: 0, chars: payload.length });
+    this.enqueue(entry);
     return false;
+  }
+
+  /**
+   * Remember a frame that left the browser but has not been acknowledged.
+   * Only frames carrying a `client_msg_id` can be tracked — the ack is keyed
+   * on it, so without one there is nothing that could ever clear the entry.
+   *
+   * Bornée comme la file d'attente, en nombre et en octets, et pour la même
+   * raison : ce sont les mêmes frames, pièces jointes comprises. Une éviction
+   * ici ne passe pas par `refuseFrame` — le frame est *parti*, il a pu être
+   * reçu, et l'annoncer refusé mentirait sur une bulle qu'un `ack` peut
+   * encore résoudre. On renonce seulement à pouvoir le rejouer.
+   */
+  private holdUntilAck(entry: OutboxEntry) {
+    const cid = clientMsgIdOf(entry.frame);
+    if (!cid) return;
+    this.forgetUnacked(cid);
+    while (
+      this.unacked.size &&
+      (this.unacked.size >= WebSocketClient.MAX_OUTBOX ||
+        this.unackedChars + entry.chars > MAX_OUTBOX_CHARS)
+    ) {
+      const oldest = this.unacked.keys().next();
+      if (oldest.done) break;
+      this.forgetUnacked(oldest.value);
+    }
+    this.unacked.set(cid, entry);
+    this.unackedChars += entry.chars;
+  }
+
+  /** Stop tracking a frame in flight, en tenant le cumul à jour. */
+  private forgetUnacked(cid: string) {
+    const entry = this.unacked.get(cid);
+    if (!entry) return;
+    this.unacked.delete(cid);
+    this.unackedChars -= entry.chars;
+  }
+
+  /**
+   * Put unacknowledged frames back in the outbox, ahead of anything typed
+   * since — they were handed over first.
+   *
+   * A frame the server actually received, but whose ack died with the same
+   * socket, comes back twice. That is the deliberate trade: a duplicate is
+   * visible and the user can see what happened, whereas the question that
+   * vanishes leaves the bubble "en attente d'envoi" forever with nothing,
+   * anywhere, to replay it — `sync` only ever asks for what the server
+   * already holds.
+   *
+   * La remise en file repasse par `enqueue`, donc par les deux bornes et par
+   * l'annonce des évictions : ce qui revient est de la file d'attente comme
+   * le reste, et l'ordre — en vol d'abord, tapé ensuite — décide seulement
+   * de qui est évincé en premier si le budget ne suffit pas.
+   */
+  private requeueUnacked() {
+    if (!this.unacked.size) return;
+    const pending = [...this.unacked.values()];
+    this.unacked.clear();
+    this.unackedChars = 0;
+    const queued = this.outbox;
+    this.outbox = [];
+    this.outboxChars = 0;
+    for (const entry of [...pending, ...queued]) {
+      this.enqueue(entry);
+    }
   }
 
   /**
@@ -423,6 +524,7 @@ export class WebSocketClient {
         continue;
       }
       this.ws.send(JSON.stringify(entry.frame));
+      this.holdUntilAck(entry);
     }
   }
 
