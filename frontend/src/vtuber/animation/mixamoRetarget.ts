@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { VRM } from "@pixiv/three-vrm";
 import type { VRMHumanBoneName } from "@pixiv/three-vrm";
+import { isVRM0 } from "../vrmVersion";
 
 /**
  * Runtime retargeting of a Mixamo FBX AnimationClip onto the VRM's
@@ -193,7 +194,8 @@ export function retargetMixamoClip(
       : null;
 
   // VRM 0.x internal rest faces −Z (vs Mixamo's +Z): conjugate by Ry(π).
-  const flip = vrm.meta?.metaVersion === "0";
+  // Same predicate as the AvatarRoot's turn — see vrmVersion.ts.
+  const flip = isVRM0(vrm);
 
   const tracks: THREE.KeyframeTrack[] = [];
   const dropped: string[] = [];

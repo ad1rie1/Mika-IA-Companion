@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { VRM, VRMLoaderPlugin, VRMUtils } from "@pixiv/three-vrm";
+import { isVRM0 } from "./vrmVersion";
 
 export class VTuberModel {
   public vrm: VRM | null = null;
@@ -42,11 +43,14 @@ export class VTuberModel {
           });
 
           // Position in room via the AvatarRoot. The Y-π turn is the
-          // VRM0 face-the-camera flip (equivalent to VRMUtils.rotateVRM0).
+          // VRM0 face-the-camera flip — condition included, exactly like
+          // VRMUtils.rotateVRM0: a VRM 1.0 already faces the camera and
+          // must keep the identity rotation, or it plays every clip
+          // correctly while standing with its back to the viewer.
           this.root = new THREE.Group();
           this.root.name = "AvatarRoot";
           this.root.position.set(0, 0, -0.5);
-          this.root.rotation.y = Math.PI;
+          this.root.rotation.y = isVRM0(vrm) ? Math.PI : 0;
           this.root.add(vrm.scene);
           this.scene.add(this.root);
           this.vrm = vrm;
