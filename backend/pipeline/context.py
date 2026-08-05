@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 
 from drives.engine import drive_engine
 from emotion.engine import emotion_engine
-from identity.resolver import identity_resolver
+from identity.resolver import IdentityContext, identity_resolver
 from identity.trust import ChannelTrust, is_internal_person
 from memory.manager import memory_manager
 from modules.manager import module_manager
@@ -77,6 +77,13 @@ class ConversationContext:
     # `--- QUI TU AS EN FACE ---`. Also gates `person_context`: below the
     # disclosure threshold, private per-person memory is withheld entirely.
     identity_context: str = ""
+    # The verdict behind that block, kept whole. Not a prompt layer: it is
+    # carried so everything else in the turn answers to the *same* verdict.
+    # The broadcast re-resolved it on its own, without the channel, the
+    # authentication or the "this is a public room" flag — only the
+    # perception knows those — so the two could disagree on may_disclose for
+    # one and the same turn.
+    identity: IdentityContext | None = None
 
 
 async def gather_context(
@@ -244,6 +251,7 @@ async def gather_context(
         project_suppresses_emotion=project_suppresses_emotion,
         project_id=project_id,
         identity_context=identity_context,
+        identity=identity_ctx,
     )
 
 
