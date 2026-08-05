@@ -441,11 +441,44 @@ class MemoryManager:
         if not self.vector_store:
             return []
         try:
-            return await sync_to_async(self.vector_store.search_connaissances)(text, n=n)
+            raw = await sync_to_async(self.vector_store.search_connaissances)(text, n=n)
+            return await self._keep_valid_connaissances(raw)
         except Exception as exc:
             degradations.record("memory.manager.search_related_connaissances", exc)
             logger.debug("search_related_connaissances failed", exc_info=True)
             return []
+
+    async def _keep_valid_connaissances(self, rows: list[dict]) -> list[dict]:
+        """Ecarte les lignes dont l'ORM dit qu'elles ne sont plus valides.
+
+        ChromaDB filtre sur sa propre metadonnee : une connaissance invalidee
+        avant que l'invalidation ne reindexe (ou dont la reindexation a echoue)
+        y reste marquee valide pour toujours, et le contenu brut du vecteur est
+        servi tel quel a `memory_search` comme a `who_is_concerned`. Une seule
+        requete groupee, l'ordre de pertinence est preserve.
+        """
+        from memory.models import Connaissance
+
+        if not rows:
+            return rows
+
+        pks = []
+        for r in rows:
+            try:
+                pks.append(int(r["id"]))
+            except (ValueError, KeyError, TypeError):
+                continue
+        if not pks:
+            return rows
+
+        valid_pks = await sync_to_async(
+            lambda: list(
+                Connaissance.objects.filter(pk__in=pks, is_valid=True)
+                .values_list("pk", flat=True)
+            )
+        )()
+        valid = {str(pk) for pk in valid_pks}
+        return [r for r in rows if str(r.get("id")) in valid]
 
     async def search_related_souvenirs(self, text: str, n: int = 5) -> list[dict]:
         """Semantic search for souvenirs related to text via ChromaDB."""
