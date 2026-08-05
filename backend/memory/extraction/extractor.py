@@ -260,7 +260,14 @@ class MemoryExtractor:
         )
 
         try:
-            raw = await self._query_model(prompt, AIRole.VALIDITY_CHECK)
+            # Même garde que l'extraction : `ai_router.complete` n'impose aucun
+            # timeout, et cet appel est fait depuis la boucle de consolidation,
+            # qui n'a pas de superviseur — un provider qui pend la tuerait pour
+            # la durée du processus.
+            raw = await asyncio.wait_for(
+                self._query_model(prompt, AIRole.VALIDITY_CHECK),
+                timeout=EXTRACTION_TIMEOUT,
+            )
             if raw is None:
                 return True, None
 
@@ -278,6 +285,12 @@ class MemoryExtractor:
             if raw_confidence is None:
                 return still_valid, None
             return still_valid, max(0.0, min(1.0, float(raw_confidence)))
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Validity check timed out after %ds (role=%s)",
+                EXTRACTION_TIMEOUT, AIRole.VALIDITY_CHECK.value,
+            )
+            return True, None
         except UnconfiguredRoleError as exc:
             logger.warning("Validity check ignoré — IA non configurée: %s", exc)
             return True, None

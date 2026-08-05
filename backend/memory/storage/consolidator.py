@@ -41,6 +41,14 @@ WEEKLY_VOLATILE_SPREAD = 0.4
 # simply keeps its anchor, and its elapsed time accumulates for the next pass.
 DECAY_MIN_AGE = timedelta(hours=1)
 
+# Nombre maximum de candidats confrontés au LLM par connaissance créée. La
+# recherche vectorielle en remonte 5, triés par distance croissante : au-delà
+# des deux plus proches, la contradiction devient improbable et chaque
+# vérification est un appel LLM séquentiel de plus dans un tick de 60 s — sur
+# un backend à un créneau, ils entrent en concurrence avec le tour de
+# conversation en cours.
+MAX_CONTRADICTION_CHECKS = 2
+
 # Ceiling on rows rewritten per pass. Each write also re-indexes into
 # ChromaDB (an embedding call), so a first run over a large backlog stays
 # bounded instead of stalling the consolidator; the rest is picked up next
@@ -320,8 +328,13 @@ class MemoryConsolidator:
         from memory.models import Connaissance
 
         content = extraction["content"]
-        await self._check_contradictions(content)
 
+        # Le doublon d'abord : en régime établi c'est le cas courant (un fait
+        # déjà connu re-extrait), et la vérification de contradiction coûte un
+        # appel LLM par candidat. Les dépenser avant de découvrir qu'aucune
+        # ligne ne sera créée, c'est les dépenser pour rien — les
+        # contradictions autour de ce contenu ont déjà été vérifiées quand il
+        # a été enregistré la première fois.
         existing = await self._find_similar_connaissance(content)
         if existing:
             # Saying the same thing twice is evidence, not a duplicate row.
@@ -341,6 +354,8 @@ class MemoryConsolidator:
                 existing.confidence, existing.content[:120],
             )
             return None
+
+        await self._check_contradictions(content)
 
         connaissance = await sync_to_async(Connaissance.objects.create)(
             content=content, confidence=1.0, is_valid=True,
@@ -968,7 +983,8 @@ class MemoryConsolidator:
         """Check if new connaissance contradicts existing ones.
 
         Uses vector search to find semantically related connaissances,
-        then validates each with LLM. Invalidates contradicted ones.
+        then validates the closest ones with LLM (at most
+        MAX_CONTRADICTION_CHECKS). Invalidates contradicted ones.
         """
         from memory.models import Connaissance
 
@@ -979,7 +995,11 @@ class MemoryConsolidator:
             if not raw:
                 return
 
+            checked = 0
             for r in raw:
+                if checked >= MAX_CONTRADICTION_CHECKS:
+                    break
+
                 try:
                     pk = int(r["id"])
                     conn = await sync_to_async(Connaissance.objects.get)(
@@ -992,6 +1012,7 @@ class MemoryConsolidator:
                 if r.get("distance") is not None and r["distance"] < 0.15:
                     continue
 
+                checked += 1
                 try:
                     still_valid, new_confidence = (
                         await self.extractor.check_connaissance_validity(
