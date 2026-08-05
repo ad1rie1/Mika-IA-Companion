@@ -148,22 +148,45 @@ def pad_to_blend(
     position: Vec3,
     top_k: int = 2,
     similarity_floor: float = 0.35,
+    residual_floor: float = 0.15,
 ) -> list[tuple[Emotion, float]]:
-    """Project a PAD point onto the top-K *compatible* anchors.
+    """Décompose un point PAD sur les top-K ancres, par poursuite du résidu.
 
-    This exposes emotional ambivalence: a position can be read as
-    "mostly grateful, a bit nostalgic" instead of forcing a single label.
+    Le blend expose l'ambivalence : une position se lit "surtout grateful,
+    un peu nostalgic" au lieu d'être forcée sur un seul libellé.
 
-    Each returned weight is (cosine_similarity × normalized_magnitude),
-    clamped to [0, 1]. Returned list is length 0..top_k, sorted by weight
-    descending. Anchors below `similarity_floor` cosine similarity are
-    excluded — they'd be misleading (orthogonal emotions shouldn't
-    appear in a blend).
+    **Le classement par cosinus décroissant ne convient pas pour ça.** La
+    table des 29 ancres est dense (happy↔hopeful : 0.999, sad↔lonely : 0.995,
+    anxious↔scared : 0.996), donc la deuxième meilleure ancre est par
+    construction la voisine la plus proche de la première — un quasi-synonyme,
+    pas une couleur différente. Une position posée *exactement* sur son ancre
+    ressortait alors avec un second à ~0.95 de la dominante, et tout ce qui
+    lit ce ratio (`_format_blend_phrase`, `MessageEmotion.is_ambivalent`,
+    la porte d'ambivalence des gestes côté frontend) déclarait un tiraillement
+    permanent là où l'état est parfaitement mono-couleur.
 
-    Behavior:
-      - zero vector  → empty list
-      - pure single-anchor direction → list of length 1 (others filtered out)
-      - mixed direction (e.g. 0.6*HAPPY + 0.4*NOSTALGIC) → two entries
+    On mesure donc ce que la dominante **n'explique pas** : après avoir retenu
+    l'ancre la plus proche en direction, on retranche sa projection et on
+    cherche l'ancre suivante sur le résidu. Le poids d'une entrée secondaire
+    est son coefficient rapporté à celui de la dominante — nul sur une
+    position pure (le résidu est nul), il ne monte que quand la position
+    s'écarte réellement de sa dominante. Les seuils qui le lisent (0.4 pour la
+    prose, 0.85 pour les gestes) gardent ainsi leur valeur et retrouvent leur
+    sens.
+
+    Le poids de la dominante reste son intensité pleine ("pure happy at 0.8"
+    reste "happy 0.8"), et chaque entrée suivante est bornée par la
+    précédente : la liste est toujours triée par poids décroissant.
+
+    Les ancres sous `similarity_floor` de similarité cosinus avec la position
+    sont écartées d'emblée — une émotion orthogonale ne décrit rien de ce
+    point. `residual_floor` est la part minimale du résidu (relative à la
+    dominante) sous laquelle une seconde entrée n'est que du bruit.
+
+    Comportement :
+      - vecteur nul                    → liste vide
+      - direction d'ancre pure         → une seule entrée
+      - direction mixte (0.6*HAPPY + 0.4*NOSTALGIC) → deux entrées
     """
     if top_k <= 0:
         return []
@@ -174,25 +197,52 @@ def pad_to_blend(
 
     intensity = min(1.0, mag / _MAX_ANCHOR_NORM)
 
-    similarities: list[tuple[Emotion, float]] = []
+    # Ancres compatibles avec la position, gardées sous forme unitaire :
+    # la décomposition qui suit projette sur des directions, pas sur des
+    # ancres de normes disparates.
+    candidates: list[tuple[Emotion, Vec3, float]] = []
     for emotion, anchor in EMOTION_ANCHORS.items():
         anchor_mag = norm(anchor)
         if anchor_mag < 1e-6:
-            continue
-        cos = dot(position, anchor) / (mag * anchor_mag)
+            continue  # NEUTRAL — pas de direction
+        unit = scale(anchor, 1.0 / anchor_mag)
+        cos = dot(position, unit) / mag
         if cos < similarity_floor:
             continue
-        similarities.append((emotion, cos))
+        candidates.append((emotion, unit, cos))
 
-    similarities.sort(key=lambda x: -x[1])
-    top = similarities[:top_k]
-    if not top:
+    if not candidates:
         return []
 
-    # Weight = similarity × intensity, rescaled so the top match always
-    # equals its full intensity (so "pure happy at 0.8" stays "happy 0.8").
-    max_cos = top[0][1]
-    return [
-        (emotion, round((cos / max_cos) * intensity, 3))
-        for emotion, cos in top
-    ]
+    # Dominante : l'ancre la plus proche en direction, comme pad_to_label.
+    candidates.sort(key=lambda c: -c[2])
+    primary, primary_unit, _ = candidates.pop(0)
+    primary_coeff = dot(position, primary_unit)
+
+    blend: list[tuple[Emotion, float]] = [(primary, round(intensity, 3))]
+    if primary_coeff <= 1e-6:
+        return blend
+
+    residual = sub(position, scale(primary_unit, primary_coeff))
+    previous_weight = intensity
+
+    while candidates and len(blend) < top_k:
+        best_index = -1
+        best_coeff = 0.0
+        for index, (_, unit, _) in enumerate(candidates):
+            coeff = dot(residual, unit)
+            if coeff > best_coeff:
+                best_coeff = coeff
+                best_index = index
+        if best_index < 0:
+            break
+        ratio = best_coeff / primary_coeff
+        if ratio < residual_floor:
+            break
+        emotion, unit, _ = candidates.pop(best_index)
+        weight = min(previous_weight, ratio * intensity)
+        blend.append((emotion, round(weight, 3)))
+        residual = sub(residual, scale(unit, best_coeff))
+        previous_weight = weight
+
+    return blend
