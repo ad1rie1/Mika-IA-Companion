@@ -268,7 +268,12 @@ class MemoryRetriever:
         if not summaries:
             return ""
 
-        lines = [f"\n[Ton historique emotionnel avec {person_id}]"]
+        # Sans le handle : `person_id` est une poignee de transport
+        # (`web_6f3e22ccb0ae`), pas un nom. L'imprimer donnait au modele une
+        # chaine qu'il pouvait recracher a l'ecran, et le nom resolu se dit
+        # deja plus haut dans le prompt (--- QUI TU AS EN FACE ---), la ou la
+        # couche identite decide s'il peut etre divulgue.
+        lines = ["\n[Ton historique emotionnel avec cette personne]"]
 
         # Most recent summary
         latest = summaries[0]
