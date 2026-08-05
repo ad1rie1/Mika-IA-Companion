@@ -81,6 +81,20 @@ class LifespanWrapper:
         await emotion_engine.initialize()
         logger.info("Emotion engine initialized")
 
+        # Les handles durables (Telegram & co) vivent en base, la presence
+        # vit en RAM : sans cette remontee, tout contact qui n'avait pas
+        # ecrit depuis le boot etait declare joignable par le routage par
+        # concernement et introuvable au moment de livrer. Avant la
+        # conscience, dont le premier cycle de decision peut deja choisir un
+        # destinataire.
+        from identity.resolver import identity_resolver
+
+        try:
+            restored = await identity_resolver.restore_module_presence()
+            logger.info("Presence restored for %d durable handle(s)", restored)
+        except Exception:
+            logger.exception("Could not restore durable module presence")
+
         await conscience_engine.initialize()
         module_manager.set_conscience(conscience_engine.observe)
         logger.info("Conscience initialized and wired to event bus")

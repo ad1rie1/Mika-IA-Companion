@@ -824,6 +824,49 @@ class IdentityResolver:
             return None
         return handle.identity.entity
 
+    # ── Presence (restauration au demarrage) ──────────────────────
+
+    async def restore_module_presence(self) -> int:
+        """Reinscrit les handles durables de type module dans la presence.
+
+        Deux definitions de « joignable » cohabitaient et divergeaient apres
+        chaque redemarrage : le routage par concernement lit la couche
+        durable (« external API : joignable tant qu'on tient le chat_id »),
+        la livraison lit le registre de presence, qui est en RAM et
+        process-local et n'etait alimente qu'a la reception d'un message
+        entrant. Resultat : un message proactif compose pour un contact
+        Telegram qui n'avait pas ecrit depuis le boot etait persiste puis
+        abandonne, sans rattrapage possible — le curseur ``sync`` est un
+        mecanisme WebSocket, Telegram ne le rejoue jamais.
+
+        Les consumers ne sont deliberement pas restaures : un WebSocket
+        n'est joignable que tant qu'il est connecte, et son handle ne prouve
+        rien apres un redemarrage.
+
+        Retourne le nombre de handles reinscrits.
+        """
+        return await sync_to_async(self._restore_module_presence_sync)()
+
+    @staticmethod
+    def _restore_module_presence_sync() -> int:
+        from communication.presence import presence_registry
+        from identity.models import IdentityHandle
+
+        restored = 0
+        handles = IdentityHandle.objects.filter(
+            kind="module", is_ephemeral=False,
+        ).order_by("last_seen")
+        for handle in handles:
+            presence_registry.register(
+                person_id=handle.person_id,
+                channel=handle.channel,
+                kind="module",
+                delivery_ref=handle.delivery_ref,
+                display_name=handle.display_name,
+            )
+            restored += 1
+        return restored
+
 
 def _as_trust(value: str | ChannelTrust | None) -> ChannelTrust:
     """Coerce a stored trust string into the enum, defaulting to PUBLIC."""
