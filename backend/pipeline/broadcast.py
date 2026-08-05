@@ -16,6 +16,7 @@ from pipeline import voice
 from utils.degradation import degradations
 
 if TYPE_CHECKING:
+    from identity.resolver import IdentityContext
     from pipeline.processor import SpeechOutput
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ BROADCAST_GROUP = "vtuber_broadcast"
 
 async def broadcast_to_websocket(
     output: SpeechOutput, source: str, person_id: str | None = None,
+    *, identity: IdentityContext | None = None,
 ) -> None:
     """Deliver the response (per-recipient) + a snapshot of Mika's inner life.
 
@@ -42,10 +44,17 @@ async def broadcast_to_websocket(
       reply is already echoed by the channel itself, so we avoid double-sending.
     - **unresolved** (proactive with no recipient yet, anonymous, ``conscience_*``)
       → fall back to the legacy global broadcast so existing clients still hear it.
+
+    ``identity`` is the verdict the turn already reached. It is threaded in
+    rather than re-resolved because the payload carries the same private
+    material the prompt gates, and only the perception knows the channel,
+    the session and whether the turn happened in public. A caller with
+    nothing to hand over (a proactive murmur) leaves it None and the
+    snapshot resolves what it can on its own.
     """
     channel_layer = get_channel_layer()
 
-    inner_state = await _collect_inner_state(person_id)
+    inner_state = await _collect_inner_state(person_id, identity=identity)
 
     payload = {
         "type": "communication.broadcast",
@@ -342,7 +351,9 @@ async def broadcast_emotion_update(person_id: str, group: str = "") -> None:
         degradations.record("broadcast: emotion update push", exc)
 
 
-async def _collect_inner_state(person_id: str | None) -> dict:
+async def _collect_inner_state(
+    person_id: str | None, *, identity: IdentityContext | None = None,
+) -> dict:
     """Assemble a JSON-safe snapshot of Mika's inner life for the frontend.
 
     Each section is gathered independently and merged in: if a sub-system
@@ -381,7 +392,8 @@ async def _collect_inner_state(person_id: str | None) -> dict:
     state["person_scope"] = bool(is_identifiable_person(person_id))
     if state["person_scope"]:
         await _merge_section(
-            state, "person profile", lambda: _snapshot_person(person_id),
+            state, "person profile",
+            lambda: _snapshot_person(person_id, identity),
         )
     return state
 
@@ -615,17 +627,32 @@ async def _snapshot_pending_actions() -> dict:
     }
 
 
-async def _snapshot_person(person_id: str) -> dict:
+async def _snapshot_person(
+    person_id: str, ident: IdentityContext | None = None,
+) -> dict:
     """Who Mika thinks this is, and — only if she may — what she knows of them.
 
     ``identity`` is always reported (it is about the connection, not about
     the person's private life); the profile and commitments are gated on
     ``may_disclose``, exactly as the prompt is.
+
+    "Exactly as the prompt is" was a claim, not a fact: ``ident`` used to be
+    re-resolved here with no ``channel``, no ``authenticated`` and no
+    ``is_public``, while ``gather_context`` receives the three from the
+    perception. A Telegram handle established in DMs (``trust=account``)
+    writing in a group therefore yielded PUBLIC → ``may_disclose=False`` for
+    the prompt and ACCOUNT → ``may_disclose=True`` here, which assembled the
+    fiche and the commitments the prompt had just withheld. The turn's own
+    verdict is now passed in; resolving is only the fallback for a caller
+    that has none (``broadcast_inner_state_update``).
     """
     from identity.resolver import identity_resolver
     from memory import read
 
-    ident = await identity_resolver.resolve_context(person_id)
+    # A verdict about somebody else answers another question entirely — it
+    # is refused rather than trusted, since what it unlocks is private.
+    if ident is None or ident.person_id != person_id:
+        ident = await identity_resolver.resolve_context(person_id)
     out: dict = {
         "identity": {
             "known_as": ident.known_as,
@@ -638,7 +665,9 @@ async def _snapshot_person(person_id: str) -> dict:
     if not ident.may_disclose:
         return out
 
-    entity = await identity_resolver.entity_for_person(person_id)
+    # Already loaded by the resolver (select_related), whether the context
+    # comes from the turn or from the fallback above.
+    entity = ident.entity
     if entity is None:
         return out
 

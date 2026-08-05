@@ -393,7 +393,16 @@ async def process_message(
                     thinking_delay, len(response_text.split()), energy,
                 )
                 await asyncio.sleep(thinking_delay)
-        await broadcast_to_websocket(output, source, person_id=person_id)
+        # Le verdict d'identite du tour part avec la reponse : la diffusion
+        # embarque la fiche et les engagements, gardes par la meme regle que
+        # le prompt, et elle ne connait ni le canal ni le caractere public du
+        # tour pour le rendre elle-meme. `getattr` parce que `context` reste
+        # None quand `gather_context` a echoue — meme lecture defensive que
+        # `project_suppresses_emotion` plus haut.
+        await broadcast_to_websocket(
+            output, source, person_id=person_id,
+            identity=getattr(context, "identity", None),
+        )
 
     return output
 
