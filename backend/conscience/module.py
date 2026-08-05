@@ -23,8 +23,6 @@ conscience reste une app cœur, seule sa surface d'outils passe par le bus.
 
 from __future__ import annotations
 
-import logging
-
 from modules.base import BaseModule
 from modules.types import (
     ModuleCapability,
@@ -34,16 +32,43 @@ from modules.types import (
 )
 from utils.degradation import degradations
 
-logger = logging.getLogger(__name__)
-
 
 class ConscienceToolsModule(BaseModule):
     """Façade MCP au-dessus de ``ScheduledAction``."""
 
     SYSTEM = True
 
+    # Le compte des actions en attente change hors du module : la conscience
+    # sonde et exécute les siennes toutes les 30s. Même cadence ici, sinon
+    # l'invite annonce une action déjà partie.
+    CRON_INTERVAL = 30
+
     def __init__(self) -> None:
         super().__init__("conscience_tools")
+        # Instantané pour l'invite système. Tenu en RAM et rafraîchi par le
+        # cron, pas relu en base au moment de bâtir l'invite :
+        # ``collect_context`` est appelé depuis une coroutine, où toute requête
+        # ORM lève ``SynchronousOnlyOperation`` — que le collecteur avale, si
+        # bien que le bloc disparaissait de chaque invite sans que rien ne le
+        # signale. Même raison que les compteurs des modules RSS et email.
+        self._pending_actions: int = 0
+
+    # ── Cycle de vie ──────────────────────────────────────────────
+
+    async def instantiate(self) -> None:
+        from asgiref.sync import sync_to_async
+
+        # Sans ça, le bloc n'apparaît qu'après le premier tick de cron, soit
+        # trente secondes de « aucune action programmée » au redémarrage alors
+        # que la base en contient.
+        await sync_to_async(self._refresh_pending_actions)()
+
+    # ── Cron ──────────────────────────────────────────────────────
+
+    async def worker_cron(self) -> None:
+        from asgiref.sync import sync_to_async
+
+        await sync_to_async(self._refresh_pending_actions)()
 
     # ── Capabilities & Tools ────────────────────────────────────────
 
@@ -196,14 +221,27 @@ class ConscienceToolsModule(BaseModule):
 
     # ── Context ───────────────────────────────────────────────────
 
-    def get_context(self, person_id: str = "") -> str:
+    def _refresh_pending_actions(self) -> None:
+        """Recompte les actions en attente. Appelé sous ``sync_to_async``.
+
+        Un échec garde le dernier compte connu plutôt que de remonter : au
+        démarrage il ferait échouer ``instantiate()``, donc emporterait les
+        trois outils — perdre ``schedule_action`` parce qu'un compteur
+        d'invite n'a pas pu se lire est hors de proportion. Compté au registre
+        pour que l'écart ne passe pas inaperçu.
+        """
         from conscience.models import ScheduledAction
 
         try:
-            count = ScheduledAction.objects.filter(status="pending").count()
-            if count:
-                return f"Tu as {count} action(s) programmee(s) en attente."
+            self._pending_actions = ScheduledAction.objects.filter(
+                status="pending"
+            ).count()
         except Exception as exc:
-            degradations.record("conscience.module.get_context", exc)
-            logger.debug("conscience get_context query failed", exc_info=True)
-        return ""
+            degradations.record("conscience.module._refresh_pending_actions", exc)
+            self.logger.debug("conscience pending-actions refresh failed", exc_info=True)
+
+    def get_context(self, person_id: str = "") -> str:
+        """Lecture RAM uniquement (voir ``_pending_actions``)."""
+        if not self._pending_actions:
+            return ""
+        return f"Tu as {self._pending_actions} action(s) programmee(s) en attente."
