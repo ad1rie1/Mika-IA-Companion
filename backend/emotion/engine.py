@@ -777,6 +777,7 @@ class EmotionEngine:
         (Telegram) est joignable à vie, l'oscillateur associé ne l'est pas.
         """
         from communication.presence import presence_registry
+        from emotion.sync import emotion_sync
 
         connectes = {
             i.person_id for i in presence_registry.reachable() if i.is_consumer
@@ -785,6 +786,14 @@ class EmotionEngine:
             if pid in connectes:
                 continue
             del self.person_moods[pid]
+            # Deux caches indexés par person_id survivaient à l'oscillateur
+            # qu'ils décrivent : ``_last_snapshot_time`` n'était purgé nulle
+            # part, et ``emotion_sync._hydrated`` marque « déjà hydratée »
+            # une personne dont l'humeur vient de quitter la RAM — la
+            # prochaine lecture sauterait l'hydratation et repartirait de
+            # l'origine.
+            self._last_snapshot_time.pop(pid, None)
+            emotion_sync.forget(pid)
 
     # ------------------------------------------------------------------
     # Analytics

@@ -76,6 +76,11 @@ class EmotionSync:
         drops and comes back inside one interval would keep its stale memo
         and receive nothing until the mood next moved. Making it explicit
         turns "usually resynced" into "resynced".
+
+        Also called by ``emotion_engine`` when it evicts an idle oscillator:
+        ``_hydrated`` describes a mood that is no longer in RAM, and leaving
+        it set would make the next read skip ``ensure_person_loaded`` and
+        start again from the origin.
         """
         self._last_sent.pop(person_id, None)
         self._hydrated.discard(person_id)
