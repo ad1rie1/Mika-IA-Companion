@@ -692,6 +692,13 @@ async def _fetch_person_context(identity_ctx) -> str:
     entities after what people are *called* ("Thomas") while handles are
     ``web_6f3e22ccb0ae``. Every profile lookup silently missed.
 
+    The Entity comes from ``identity_ctx``, which already holds it: the
+    resolver loads it with ``select_related`` and used to keep only its id
+    and its name. Calling ``entity_for_person`` here re-ran that identical
+    SELECT behind a second ``sync_to_async`` hop — and a hop is serialised
+    on the one shared executor thread, in competition with six background
+    loops writing to SQLite.
+
     Empty string when internal/system person_id, when nothing is known, or
     when certainty is too low to justify reading out someone's private
     history to whoever is currently holding the handle.
@@ -708,13 +715,12 @@ async def _fetch_person_context(identity_ctx) -> str:
     if not identity_ctx.may_disclose:
         return affect
 
-    entity = None
+    entity = identity_ctx.entity
+    if entity is None:
+        return affect
+
     try:
         from memory import read
-
-        entity = await identity_resolver.entity_for_person(person_id)
-        if entity is None:
-            return affect
 
         profile = await read.person_profile_for(entity)
         commitments = await read.pending_commitments_for(entity)

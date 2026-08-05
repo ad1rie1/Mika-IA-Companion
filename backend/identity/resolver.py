@@ -27,6 +27,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import timedelta
+from typing import TYPE_CHECKING
 
 from asgiref.sync import sync_to_async
 from django.utils import timezone
@@ -39,6 +40,9 @@ from identity.trust import (
     is_internal_person,
 )
 from utils.degradation import degradations
+
+if TYPE_CHECKING:
+    from memory.models import Entity
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +71,12 @@ class IdentityContext:
     #: Memory entity this handle is bound to, when Mika has settled on one.
     entity_id: int | None = None
     entity_name: str = ""
+    #: The row itself, already loaded by ``_resolve_context_sync`` through
+    #: ``select_related``. Carried rather than dropped: a consumer needing
+    #: the Entity was re-issuing ``entity_for_person``, which is the very
+    #: same SELECT plus one more ``sync_to_async`` hop on the single shared
+    #: executor thread — the cost that actually matters here.
+    entity: "Entity | None" = None
     #: Best display name available, bound or merely claimed.
     display_name: str = ""
     identity_id: int | None = None
@@ -367,6 +377,7 @@ class IdentityResolver:
         if entity is not None:
             ctx.entity_id = entity.pk
             ctx.entity_name = entity.name
+            ctx.entity = entity
 
         certainty = max(
             float(identity.certainty or 0.0),
