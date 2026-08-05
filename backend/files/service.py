@@ -23,6 +23,28 @@ from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
+# Plafond de rendu du nom de fichier dans le prompt système. pipeline.media
+# borne déjà le nom à l'écriture ; ce plafond couvre les enregistrements
+# antérieurs à cette borne (le max_length du modèle n'est pas appliqué par
+# SQLite). Volontairement pas importé de pipeline.media : le rendu se défend
+# seul, même si l'écriture change.
+MAX_NAME_CHARS = 80
+
+
+def _as_data(raw: Any) -> str:
+    """Neutralise une valeur tierce destinée à une ligne du prompt système.
+
+    Le nom vient de l'émetteur du fichier, pas du propriétaire : collé nu au
+    milieu d'une ligne d'instructions, un nom multi-ligne se lit comme une
+    consigne. On le ramène à une ligne unique, bornée, sans guillemet double
+    pour qu'il reste enfermé dans son encadrement.
+    """
+    text = "".join(c if c.isprintable() else " " for c in str(raw or ""))
+    text = " ".join(text.split()).replace('"', "'")
+    if len(text) > MAX_NAME_CHARS:
+        text = text[: MAX_NAME_CHARS - 3].rstrip() + "..."
+    return text
+
 
 class FilesService:
     """Singleton. All file handling lives here."""
@@ -83,7 +105,8 @@ class FilesService:
         lines = [f"Fichiers uploadés aujourd'hui ({len(today_files)}) :"]
         for r in sorted(today_files, key=lambda x: x["uploaded_at"], reverse=True):
             lines.append(
-                f"  - ID={r['id']}  nom={r['name']}  type={r['category']}  taille={r['size_label']}"
+                f'  - ID={r["id"]}  nom="{_as_data(r.get("name"))}"'
+                f"  type={r['category']}  taille={r['size_label']}"
             )
         lines.append(
             "Utilise les outils files_* pour lire, analyser, déplacer ou supprimer ces fichiers."
