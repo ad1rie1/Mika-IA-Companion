@@ -405,11 +405,9 @@ class EmailModule(BaseModule):
     async def _store_memories(self, memories: list[dict]):
         """Store AI-extracted memories from email into the memory system."""
         from asgiref.sync import sync_to_async
-        from django.utils import timezone
 
-        from memory.models import Connaissance, Entity, Souvenir, Theme
-
-        now = timezone.now()
+        from memory.manager import memory_manager
+        from memory.models import Entity, Theme
 
         for mem in memories:
             try:
@@ -428,27 +426,28 @@ class EmailModule(BaseModule):
                     )
                     entity_objs.append(entity)
 
+                # Passe par le manager : il cree *et* indexe dans ChromaDB.
+                # Ecrite directement en base, la memoire issue du triage
+                # d'e-mails serait inerte — la remémoration part du vectoriel.
                 if mem["type"] == "souvenir":
-                    souvenir = await sync_to_async(Souvenir.objects.create)(
+                    souvenir = await memory_manager.create_souvenir(
                         content=mem["content"],
                         emotion=mem.get("emotion", "neutral"),
                         importance=1.0,
-                        occurred_at=now,
                     )
-                    if theme_objs:
+                    if souvenir and theme_objs:
                         await sync_to_async(souvenir.themes.set)(theme_objs)
-                    if entity_objs:
+                    if souvenir and entity_objs:
                         await sync_to_async(souvenir.entities.set)(entity_objs)
 
                 elif mem["type"] == "connaissance":
-                    connaissance = await sync_to_async(Connaissance.objects.create)(
+                    connaissance = await memory_manager.create_connaissance(
                         content=mem["content"],
                         confidence=1.0,
-                        is_valid=True,
                     )
-                    if theme_objs:
+                    if connaissance and theme_objs:
                         await sync_to_async(connaissance.themes.set)(theme_objs)
-                    if entity_objs:
+                    if connaissance and entity_objs:
                         await sync_to_async(connaissance.entities.set)(entity_objs)
 
                 self.logger.info("Stored email memory: %s", mem["type"])
