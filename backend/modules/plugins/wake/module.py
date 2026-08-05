@@ -22,6 +22,13 @@ DEFAULT_WAKE_PROMPT = (
     "comme si tu revenais d'une pause. Sois toi-même."
 )
 
+# Le prompt part tel quel dans l'appel LLM via notify_ai, et la source dans le
+# résumé qui l'accompagne : sans plafond, un corps de quelques centaines de Ko
+# sature le contexte du modèle. Même valeur que MAX_MESSAGE_LENGTH côté
+# WebSocket, qui refuse au lieu de tronquer pour la même raison.
+MAX_PROMPT_LENGTH = 2000
+MAX_SOURCE_LENGTH = 50  # = WakeRequest.source.max_length
+
 
 class WakeModule(BaseModule):
     """Polls for wake requests and triggers AI responses."""
@@ -193,12 +200,49 @@ class WakeModule(BaseModule):
             ),
         ]
 
+    def _read_body(self, request) -> tuple[dict, JsonResponse | None]:
+        """Décode et borne le corps JSON, ou renvoie le refus à retourner.
+
+        Un JSON malformé remontait en 500 ; un prompt sans plafond ni type
+        partait tel quel dans l'appel LLM. Le refus est explicite plutôt
+        qu'une troncature : l'appelant doit savoir que ce qu'il a envoyé
+        n'est pas ce qui sera dit.
+        """
+        try:
+            body = json.loads(request.body) if request.body else {}
+        except ValueError:
+            return {}, JsonResponse({"error": "JSON invalide"}, status=400)
+        if not isinstance(body, dict):
+            return {}, JsonResponse({"error": "objet JSON attendu"}, status=400)
+
+        prompt = body.get("prompt")
+        if prompt is not None and not isinstance(prompt, str):
+            return {}, JsonResponse(
+                {"error": "prompt doit être une chaîne"}, status=400
+            )
+        if prompt is not None and len(prompt) > MAX_PROMPT_LENGTH:
+            return {}, JsonResponse(
+                {"error": f"prompt trop long ({MAX_PROMPT_LENGTH} caractères max)"},
+                status=400,
+            )
+
+        source = body.get("source", "api")
+        if not isinstance(source, str) or len(source) > MAX_SOURCE_LENGTH:
+            return {}, JsonResponse(
+                {"error": f"source invalide ({MAX_SOURCE_LENGTH} caractères max)"},
+                status=400,
+            )
+
+        return {"source": source, "prompt": prompt}, None
+
     async def _view_wake(self, request):
         """Queue a wake request. Processed on next cron tick."""
-        body = json.loads(request.body) if request.body else {}
+        body, refus = self._read_body(request)
+        if refus is not None:
+            return refus
         wake_id = await self.trigger_wake(
-            source=body.get("source", "api"),
-            prompt=body.get("prompt"),
+            source=body["source"],
+            prompt=body["prompt"],
         )
         return JsonResponse({"status": "queued", "wake_id": wake_id})
 
@@ -206,10 +250,12 @@ class WakeModule(BaseModule):
         """Create AND process a wake request immediately."""
         from modules.plugins.wake.models import WakeRequest
 
-        body = json.loads(request.body) if request.body else {}
+        body, refus = self._read_body(request)
+        if refus is not None:
+            return refus
         wake_id = await self.trigger_wake(
-            source=body.get("source", "api"),
-            prompt=body.get("prompt"),
+            source=body["source"],
+            prompt=body["prompt"],
         )
         # Seulement la requete qu'on vient de creer : traiter tout le backlog
         # ici bloquerait la reponse HTTP pendant N appels LLM. Le reste reste
