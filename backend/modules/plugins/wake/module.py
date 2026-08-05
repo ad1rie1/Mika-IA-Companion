@@ -191,13 +191,22 @@ class WakeModule(BaseModule):
 
     async def _view_wake_now(self, request):
         """Create AND process a wake request immediately."""
+        from modules.plugins.wake.models import WakeRequest
+
         body = json.loads(request.body) if request.body else {}
         wake_id = await self.trigger_wake(
             source=body.get("source", "api"),
             prompt=body.get("prompt"),
         )
-        await self._process_pending()
-        return JsonResponse({"status": "processed", "wake_id": wake_id})
+        # Seulement la requete qu'on vient de creer : traiter tout le backlog
+        # ici bloquerait la reponse HTTP pendant N appels LLM. Le reste reste
+        # PENDING et part au prochain tick cron.
+        req = await WakeRequest.objects.aget(pk=wake_id)
+        claimed = await self._process_request(req)
+        return JsonResponse({
+            "status": "processed" if claimed else "already_processed",
+            "wake_id": wake_id,
+        })
 
     # ── Status ────────────────────────────────────────────────────
 
