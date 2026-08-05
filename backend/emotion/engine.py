@@ -270,9 +270,18 @@ class EmotionEngine:
                         self.global_mood.dynamic.position = position
                         self.global_mood.dynamic.velocity = pad.zero()
                     else:
-                        persons_from_snapshots.add(snap.person_id)
+                        # L'ensemble sert a NE PAS ecraser depuis un resume ce
+                        # qu'un releve vient de charger : n'y inscrire que ce
+                        # qui est effectivement charge. Un releve trop vieux
+                        # (au-dela de _SNAPSHOT_DECAY_DAYS, 2 jours) tombe ici
+                        # a une intensite nulle ; l'y inscrire quand meme
+                        # excluait la personne de _restore_from_summaries,
+                        # alors que son EmotionalSummary reste exploitable
+                        # 30 jours — c'est exactement le repli que fait
+                        # ensure_person_loaded dans le meme cas.
                         if intensity < 0.05:
                             continue
+                        persons_from_snapshots.add(snap.person_id)
                         mood = PersonMood(person_id=snap.person_id)
                         mood.dynamic.position = position
                         self.person_moods[snap.person_id] = mood
