@@ -763,13 +763,22 @@ class MemoryConsolidator:
         today = now.date()
 
         # Get distinct person_ids with snapshots from today (exclude __global__)
+        #
+        # ``order_by()`` vide avant ``distinct()`` : le modèle déclare un
+        # ``Meta.ordering`` sur ``created_at``, que Django ajoute alors au
+        # SELECT — la colonne de tri entre dans la clé de dédoublonnage et
+        # chaque relevé ressort comme une personne distincte. La boucle
+        # ci-dessous, et l'agrégation hebdomadaire qui reçoit la même liste,
+        # réécrivaient donc la même ligne quotidienne autant de fois qu'il y
+        # avait eu de réponses dans la journée. Même piège qu'à
+        # ``GestionSysteme/views/inner.py``.
         person_ids = await sync_to_async(
             lambda: list(
                 EmotionSnapshot.objects.filter(
                     created_at__date=today,
                 ).exclude(
                     person_id="__global__",
-                ).values_list("person_id", flat=True).distinct()
+                ).order_by().values_list("person_id", flat=True).distinct()
             )
         )()
 
