@@ -65,7 +65,6 @@ export class AnimationStateMachine {
   private holdDuration = 10;
 
   // Gesture bookkeeping
-  private stateBeforeGesture: "idle" | "talking" = "idle";
   private gestureFadeOut = FADE.gestureOut;
   /** For looping "gestures" (e.g. thinking): seconds left before return. */
   private gestureHoldRemaining: number | null = null;
@@ -146,8 +145,8 @@ export class AnimationStateMachine {
     if (!this.started || this.debugPinned) return;
     if (this._state === "sleeping") return;
     if (this._state === "gesture") {
-      // Remember where to land once the gesture fades back.
-      this.stateBeforeGesture = speaking ? "talking" : "idle";
+      // A gesture owns the base layer until it fades back; finishGesture
+      // re-reads this.speaking, so the flip needs nothing but the flag.
       return;
     }
     this.enterBase(
@@ -208,7 +207,6 @@ export class AnimationStateMachine {
       return true;
     }
 
-    this.stateBeforeGesture = this._state === "talking" ? "talking" : "idle";
     this.startGesture(loaded, loaded.meta.fadeIn ?? FADE.gestureIn);
     return true;
   }
@@ -292,9 +290,8 @@ export class AnimationStateMachine {
       this.startGesture(queued, queued.meta.fadeIn ?? FADE.gestureIn);
       return;
     }
-    // Speaking may have flipped mid-gesture — trust the live flag first.
-    const target = this.speaking ? "talking" : this.stateBeforeGesture;
-    this.enterBase(target === "talking" && this.speaking ? "talking" : "idle", this.gestureFadeOut);
+    // Speaking may have flipped mid-gesture — the live flag decides.
+    this.enterBase(this.speaking ? "talking" : "idle", this.gestureFadeOut);
   }
 
   private startGesture(loaded: LoadedClip, fadeIn: number): void {
