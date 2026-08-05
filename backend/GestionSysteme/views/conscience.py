@@ -75,7 +75,8 @@ def _decisions(request) -> dict:
 
     fs = tables.FilterSet(per_page=tables.read_per_page(request))
     decision = fs.add(tables.select_filter(
-        request, "decision", "Décision", [("act", "agir"), ("wait", "attendre")],
+        request, "decision", "Décision",
+        [("act", "agir"), ("wait", "attendre"), ("failed", "échouée")],
     ))
 
     qs = ConscienceLog.objects.order_by("-created_at")

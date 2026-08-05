@@ -77,7 +77,9 @@ class ConscienceLog(models.Model):
     global_mood = models.CharField(max_length=30, blank=True, default="")
     global_intensity = models.FloatField(default=0.0)
     idle_seconds = models.IntegerField(default=0)
-    decision = models.CharField(max_length=30)  # "act" | "wait" | "skip"
+    # "failed" = elle a decide de parler mais l'appel IA a echoue : rien n'a
+    # ete dit, donc la ligne ne doit pas etre relue comme une prise de parole.
+    decision = models.CharField(max_length=30)  # "act" | "wait" | "skip" | "failed"
     reason = models.CharField(max_length=200, blank=True, default="")
     memory_actions = models.JSONField(default=list)
     created_at = models.DateTimeField(auto_now_add=True)

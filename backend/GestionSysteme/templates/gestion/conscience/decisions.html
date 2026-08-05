@@ -51,7 +51,7 @@
               <tr>
                 <td class="fit muted" title="{{ l.created_at|dt_full }}">{{ l.created_at|ago }}</td>
                 <td class="fit">
-                  <span class="badge {% if l.decision == 'act' %}badge-ok{% endif %}">{{ l.decision }}</span>
+                  <span class="badge {% if l.decision == 'act' %}badge-ok{% elif l.decision == 'failed' %}badge-danger{% endif %}">{{ l.decision }}</span>
                 </td>
                 <td><div class="cell-clamp">{{ l.reason }}</div></td>
                 <td class="num">{{ l.observations_count }}</td>

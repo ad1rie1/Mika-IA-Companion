@@ -349,23 +349,35 @@ class ConscienceEngine:
         else:
             decision = "wait"
 
-        # Update consecutive wait counter
+        # Update consecutive wait counter. An "act" only clears the
+        # accumulated pressure once it has actually been delivered — see below.
         if decision == "wait":
             self._consecutive_waits += 1
-        else:
+        elif decision == "skip":
             self._consecutive_waits = 0
 
-        # Log the decision
-        await self._log_decision(ctx, decision, reason, score, memory_actions)
-
         if decision == "act":
-            # The greeting is spent only now that Mika really speaks.
-            self._commit_greeting()
-            await self._act(ctx, reason)
+            spoke = await self._act(ctx, reason)
+            if spoke:
+                # The greeting is spent only now that Mika really speaks.
+                self._commit_greeting()
+                self._consecutive_waits = 0
+            else:
+                # L'appel IA a echoue : rien n'a ete dit, donc rien n'est
+                # committe. Journalise "failed" plutot que "act", sans quoi
+                # un acte jamais delivre gonfle acts_today et, ne pouvant
+                # recevoir aucune reponse, compte comme un acte ignore — trois
+                # pannes suffisaient alors a brider la Conscience (scoring.py)
+                # pour le reste de la journee.
+                decision = "failed"
         elif decision == "skip" or decision == "wait":
             # Mark old pending observations as skipped (older than 30 min
             # won't be picked up again anyway)
             await self._mark_stale_observations()
+
+        # Log the decision — written after the act, whose outcome is part of
+        # what the cycle decided (and what _introspect / _restore_cooldown read).
+        await self._log_decision(ctx, decision, reason, score, memory_actions)
 
         # Periodic cleanup of old observations
         await self._cleanup_old_observations()
@@ -887,13 +899,16 @@ class ConscienceEngine:
 
     # ── 4. ACT ────────────────────────────────────────────────────
 
-    async def _act(self, ctx: DecisionContext, reason: str) -> None:
+    async def _act(self, ctx: DecisionContext, reason: str) -> bool:
         """Generate a spontaneous response using accumulated context.
 
         Builds an INTERNAL_TRIGGER Perception and hands it to the pipeline
         processor directly (context is pre-assembled with relevant-module
         tools, so we bypass the router's dispatch logic here — the intent
-        is already "Mika acts, no event to loop back")."""
+        is already "Mika acts, no event to loop back").
+
+        Returns True only if something was actually said: the caller commits
+        the day's greeting and the decision log from that answer."""
         from modules.manager import module_manager
         from pipeline.context import ConversationContext, gather_context
         from pipeline.perception import Perception
@@ -970,7 +985,7 @@ class ConscienceEngine:
                     "Conscience act aborted [%s]: AI call failed — will retry "
                     "after cooldown", reason,
                 )
-                return
+                return False
 
             # Mark observations as acted
             for obs in ctx.pending_observations:
@@ -1014,6 +1029,7 @@ class ConscienceEngine:
                 reason, relevant_modules, len(output.tool_calls),
                 output.text[:80],
             )
+            return True
 
         except Exception:
             logger.exception("Conscience act failed")
@@ -1027,6 +1043,7 @@ class ConscienceEngine:
                         "Could not mark observation #%s as failed",
                         getattr(obs, "pk", "?"), exc_info=True,
                     )
+            return False
 
     async def _select_recipient(self, ctx: DecisionContext) -> str | None:
         """Pass 1 of proactive speech: pick whom to address, or no one.
