@@ -27,6 +27,11 @@ class WakeModule(BaseModule):
     """Polls for wake requests and triggers AI responses."""
 
     CRON_INTERVAL = 30  # Check every 30 seconds
+    # Chaque requete traitee = un tour de pipeline complet, en serie. Un
+    # backlog non borne monopoliserait le provider pendant N appels LLM
+    # (jusqu'a 120s chacun) au detriment de la conversation en cours. Le
+    # reste du lot repart au tick suivant : rien n'est perdu.
+    MAX_WAKES_PER_TICK = 3
 
     def __init__(self):
         super().__init__("wake")
@@ -49,37 +54,56 @@ class WakeModule(BaseModule):
         await self._process_pending()
 
     async def _process_pending(self) -> None:
-        from django.utils import timezone
-
         from modules.plugins.wake.models import WakeRequest
 
         pending = WakeRequest.objects.filter(
             status=WakeRequest.Status.PENDING
-        ).order_by("created_at")
+        ).order_by("created_at")[: self.MAX_WAKES_PER_TICK]
 
         async for req in pending:
-            prompt = req.prompt or DEFAULT_WAKE_PROMPT
-            self.logger.info(
-                "Processing wake request #%d from %s", req.pk, req.source
-            )
+            await self._process_request(req)
 
-            if self._notify_ai:
-                try:
-                    await self._notify_ai(
-                        ModuleNotification(
-                            source_module=self.name,
-                            summary=f"Wake request from {req.source}",
-                            details=prompt,
-                            urgency="normal",
-                            metadata={"person_id": f"wake_{req.source}"},
-                        )
+    async def _process_request(self, req) -> bool:
+        """Traite une requete de reveil. Retourne False si un autre appelant
+        l'avait deja prise."""
+        from django.utils import timezone
+
+        from modules.plugins.wake.models import WakeRequest
+
+        # Reservation atomique AVANT l'appel LLM. Le scheduler garantit qu'un
+        # tick cron ne se superpose pas a lui-meme, mais /now traite en ligne
+        # depuis la requete HTTP, hors de cette garantie : une ligne laissee
+        # PENDING pendant l'appel serait reprise par l'autre appelant, soit
+        # deux appels LLM et deux messages spontanes pour une seule requete.
+        claimed = await WakeRequest.objects.filter(
+            pk=req.pk, status=WakeRequest.Status.PENDING
+        ).aupdate(
+            status=WakeRequest.Status.PROCESSED,
+            processed_at=timezone.now(),
+        )
+        if claimed != 1:
+            return False
+
+        prompt = req.prompt or DEFAULT_WAKE_PROMPT
+        self.logger.info(
+            "Processing wake request #%d from %s", req.pk, req.source
+        )
+
+        if self._notify_ai:
+            try:
+                await self._notify_ai(
+                    ModuleNotification(
+                        source_module=self.name,
+                        summary=f"Wake request from {req.source}",
+                        details=prompt,
+                        urgency="normal",
+                        metadata={"person_id": f"wake_{req.source}"},
                     )
-                except Exception:
-                    self.logger.exception("Failed to process wake #%d", req.pk)
+                )
+            except Exception:
+                self.logger.exception("Failed to process wake #%d", req.pk)
 
-            req.status = WakeRequest.Status.PROCESSED
-            req.processed_at = timezone.now()
-            await req.asave()
+        return True
 
     async def trigger_wake(
         self, source: str = "api", prompt: str | None = None
@@ -167,13 +191,22 @@ class WakeModule(BaseModule):
 
     async def _view_wake_now(self, request):
         """Create AND process a wake request immediately."""
+        from modules.plugins.wake.models import WakeRequest
+
         body = json.loads(request.body) if request.body else {}
         wake_id = await self.trigger_wake(
             source=body.get("source", "api"),
             prompt=body.get("prompt"),
         )
-        await self._process_pending()
-        return JsonResponse({"status": "processed", "wake_id": wake_id})
+        # Seulement la requete qu'on vient de creer : traiter tout le backlog
+        # ici bloquerait la reponse HTTP pendant N appels LLM. Le reste reste
+        # PENDING et part au prochain tick cron.
+        req = await WakeRequest.objects.aget(pk=wake_id)
+        claimed = await self._process_request(req)
+        return JsonResponse({
+            "status": "processed" if claimed else "already_processed",
+            "wake_id": wake_id,
+        })
 
     # ── Status ────────────────────────────────────────────────────
 
