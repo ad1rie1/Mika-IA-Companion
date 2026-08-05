@@ -345,6 +345,47 @@ class MemoryManager:
 
     # ── Connaissance operations (used by Conscience) ─────────────
 
+    async def create_connaissance(
+        self, content: str, confidence: float = 1.0
+    ):
+        """Cree une Connaissance et l'indexe dans ChromaDB.
+
+        Pendant de `create_souvenir`. La remémoration (retriever du prompt,
+        outil `memory_search`) part exclusivement du vectoriel : une ligne
+        ecrite en base sans indexation est definitivement irrecuperable.
+
+        Retourne la Connaissance creee ou None en cas d'echec.
+        """
+        from memory.models import Connaissance
+
+        try:
+            connaissance = await sync_to_async(Connaissance.objects.create)(
+                content=content,
+                confidence=confidence,
+                is_valid=True,
+            )
+
+            if self.vector_store:
+                # `search_connaissances` filtre sur `is_valid` cote ChromaDB :
+                # sans cette metadonnee la ligne ne serait jamais servie.
+                await sync_to_async(self.vector_store.add_connaissance)(
+                    connaissance_id=connaissance.pk,
+                    content=connaissance.content,
+                    metadata={
+                        "confidence": connaissance.confidence,
+                        "is_valid": True,
+                    },
+                )
+
+            logger.info(
+                "Created connaissance #%d (confidence=%.1f)",
+                connaissance.pk, connaissance.confidence,
+            )
+            return connaissance
+        except Exception:
+            logger.exception("Failed to create connaissance")
+            return None
+
     async def invalidate_connaissance(
         self, connaissance_id: int, reason: str = ""
     ) -> None:
