@@ -57,7 +57,7 @@ CONFIG_SCHEMA = [
     ConfigSection(
         key="emotion", label="Émotion", icon="❋", order=40,
         description=(
-            "Tempérament du personnage, décroissance PAD, snapshots, rétention."
+            "Tempérament du personnage, snapshots, rétention."
         ),
     ),
     ConfigItem(
@@ -102,11 +102,11 @@ CONFIG_SCHEMA = [
         ),
         default=0.3, min=0.0, max=1.0, hot_reload=True,
     ),
-    ConfigItem(
-        key="emotion.decay_rate", type="float", section="emotion",
-        group="Dynamique", label="Décroissance/seconde",
-        default=0.02, min=0.001, max=0.5, hot_reload=True,
-    ),
+    # Pas de curseur « décroissance/seconde » ici : la décroissance émotionnelle
+    # n'est pas un taux, c'est la physique de l'oscillateur. Masse, raideur et
+    # amortissement sont dérivés du tempérament par ``_recompute_params`` et
+    # intégrés par ``dynamics.py`` — c'est « Vitesse de récupération » qu'on
+    # règle pour la faire revenir plus ou moins vite à son humeur de fond.
     ConfigItem(
         key="emotion.snapshot_interval", type="int", section="emotion",
         group="Dynamique", label="Intervalle snapshot (s)",
