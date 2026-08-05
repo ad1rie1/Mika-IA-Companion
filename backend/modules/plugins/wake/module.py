@@ -97,7 +97,20 @@ class WakeModule(BaseModule):
                         summary=f"Wake request from {req.source}",
                         details=prompt,
                         urgency="normal",
-                        metadata={"person_id": f"wake_{req.source}"},
+                        # Un reveil, c'est Mika qui parle seule : l'id reserve a
+                        # cela est `conscience_mika`, comme dans
+                        # ConscienceEngine._act(). Un id derive de la source
+                        # (`wake_api`, `wake_cron`) serait vu comme une personne
+                        # identifiable : aucun consumer ne s'enregistre sous ce
+                        # nom, donc broadcast_to_websocket se tait au lieu de
+                        # diffuser au groupe global, et l'historique par curseur
+                        # (filtre sur person_id) ne rattrape rien non plus. Le
+                        # message etait genere, paye, puis jete. La source reste
+                        # une metadonnee, pas une identite d'interlocuteur.
+                        metadata={
+                            "person_id": "conscience_mika",
+                            "wake_source": req.source,
+                        },
                     )
                 )
             except Exception:
