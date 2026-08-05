@@ -320,8 +320,13 @@ class MemoryConsolidator:
         from memory.models import Connaissance
 
         content = extraction["content"]
-        await self._check_contradictions(content)
 
+        # Le doublon d'abord : en régime établi c'est le cas courant (un fait
+        # déjà connu re-extrait), et la vérification de contradiction coûte un
+        # appel LLM par candidat. Les dépenser avant de découvrir qu'aucune
+        # ligne ne sera créée, c'est les dépenser pour rien — les
+        # contradictions autour de ce contenu ont déjà été vérifiées quand il
+        # a été enregistré la première fois.
         existing = await self._find_similar_connaissance(content)
         if existing:
             # Saying the same thing twice is evidence, not a duplicate row.
@@ -341,6 +346,8 @@ class MemoryConsolidator:
                 existing.confidence, existing.content[:120],
             )
             return None
+
+        await self._check_contradictions(content)
 
         connaissance = await sync_to_async(Connaissance.objects.create)(
             content=content, confidence=1.0, is_valid=True,
