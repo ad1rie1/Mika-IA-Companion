@@ -14,6 +14,18 @@ import django
 django.setup()
 
 from django.conf import settings
+from pipeline.media import MAX_ATTACHMENTS, MAX_FILE_SIZE_BYTES
+
+# Taille maximale d'un frame WebSocket entrant.
+#
+# Le défaut d'uvicorn (16 Mio) est plus bas que ce que les limites
+# applicatives autorisent : 5 pièces jointes de 5 Mo encodées en base64 dans
+# un frame JSON pèsent ~35 Mio. Le frame était alors refusé *au niveau du
+# transport* — connexion fermée en 1009 avant d'atteindre le consumer, donc
+# sans ack ni la moindre trace applicative. On l'aligne sur ce que
+# validate_attachments accepte déjà : base64 = 4/3 des octets décodés, plus
+# 1 Mio pour la légende et l'enveloppe JSON.
+WS_MAX_FRAME_BYTES = MAX_ATTACHMENTS * MAX_FILE_SIZE_BYTES * 4 // 3 + 1024 * 1024
 
 
 def main():
@@ -58,6 +70,7 @@ def main():
         port=settings.API_PORT,
         lifespan="on",
         app_dir=str(backend_dir),
+        ws_max_size=WS_MAX_FRAME_BYTES,
     )
 
 

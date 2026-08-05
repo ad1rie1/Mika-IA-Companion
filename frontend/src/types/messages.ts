@@ -205,7 +205,14 @@ export interface AckMessage {
     | "empty"
     | "overloaded"
     | "too_long"
-    | "attachments_rejected";
+    | "attachments_rejected"
+    // Refus émis par le client lui-même (WebSocketClient), jamais reçus du
+    // serveur : un frame trop gros est rejeté par le transport avant
+    // d'atteindre le consumer (fermeture 1009, donc aucun ack), et un frame
+    // que la file a fini par abandonner n'est jamais parti. Ils empruntent le
+    // même chemin d'affichage — un refus reste un refus.
+    | "frame_too_large"
+    | "send_abandoned";
 }
 
 /** Answer to the client's keepalive; `t` is echoed back verbatim. */

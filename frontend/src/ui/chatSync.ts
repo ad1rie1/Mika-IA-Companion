@@ -67,9 +67,13 @@ export interface StoredMessage {
 }
 
 /**
- * Why the server refused a message. Anything not listed is still refused —
- * the client must not assume an unknown status means success — it just gets
- * the generic wording.
+ * Why a message was refused. Anything not listed is still refused — the
+ * client must not assume an unknown status means success — it just gets the
+ * generic wording.
+ *
+ * Les deux derniers viennent du client, pas du serveur : un frame trop gros
+ * pour le transport n'atteint jamais le consumer, donc personne d'autre ne
+ * peut le dire.
  */
 const ACK_REASONS: Record<string, string> = {
   rate_limited: "trop de messages d'affilée",
@@ -77,6 +81,8 @@ const ACK_REASONS: Record<string, string> = {
   overloaded: "Mika est saturée, réessaie dans un instant",
   too_long: "message trop long",
   attachments_rejected: "pièces jointes refusées (format ou taille)",
+  frame_too_large: "envoi trop volumineux — retire une pièce jointe",
+  send_abandoned: "envoi abandonné après plusieurs tentatives",
 };
 
 /** French wording for a refusal status, for display. */
