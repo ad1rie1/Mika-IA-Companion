@@ -186,6 +186,10 @@ export class AnimationSystem {
       nowMs: performance.now(),
       lastOneshotAtMs: this.lastOneshotAt,
       ambient: opts.ambient,
+      // Ce que la machine tient déjà : sans lui, la décroissance de
+      // l'oscillateur retraverse le seuil dans les deux sens toutes les
+      // quelques secondes et chaque sortie re-tire un idle au hasard.
+      activeVariant: this.machine.idleVariantName,
     });
 
     if (decision.action === "idleVariant") {
