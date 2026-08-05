@@ -91,8 +91,11 @@ class RSSEntry(models.Model):
     seen_at = models.DateTimeField(auto_now_add=True)
 
     is_read = models.BooleanField(default=False)
-    # A déclenché un mot-clé : ce qui a réellement été signalé à Mika, par
-    # opposition au bruit de fond auquel elle est abonnée.
+    # Contient un mot-clé d'alerte. C'est un fait sur l'article, pas une trace
+    # de livraison : un flux muet, le filtre de mots-clés du flux ou le plafond
+    # d'alertes par tour peuvent l'avoir empêché d'interrompre Mika. C'est
+    # justement ce qui rend la colonne utile — elle montre ce qu'on manquerait
+    # en rallumant le flux.
     is_notable = models.BooleanField(default=False)
 
     class Meta:
