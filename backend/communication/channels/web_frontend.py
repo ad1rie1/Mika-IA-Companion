@@ -249,7 +249,7 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
             connection_id=self.channel_name,
         )
         ephemeral = self.person_id.startswith("anon_")
-        await identity_resolver.link_handle(
+        identity = await identity_resolver.link_handle(
             person_id=self.person_id,
             channel="web",
             kind="consumer",
@@ -261,16 +261,37 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
             ),
             ephemeral=ephemeral,
         )
+        # Le handle est la seule chose qui rattache cette connexion a une
+        # Identity : sans lui la liaison ci-dessous ne trouvera rien, et la
+        # personne restera anonyme pour toute la session. On ne peut rien
+        # reparer ici, mais on refuse que ce soit indiscernable d'un visiteur
+        # reellement inconnu.
+        if identity is None:
+            logger.warning(
+                "Handle non enregistre pour %s@web — la personne restera "
+                "anonyme pour toute la session",
+                self.person_id,
+            )
         # An authenticated session *proves* who this is. Bind the handle to a
         # memory Entity right away so the theory-of-mind layer (profile,
         # commitments, shared history) resolves from the first turn instead
         # of waiting for a name to be claimed and believed.
         if self.authenticated:
-            await identity_resolver.bind_authenticated(
+            bound = await identity_resolver.bind_authenticated(
                 person_id=self.person_id,
                 channel="web",
                 entity_name=self.display_name or self.person_id,
             )
+            # Session valide mais memoire par personne cassee : profil,
+            # engagements, tendance emotionnelle et rattachement des
+            # souvenirs rendront tous vide, exactement comme pour un inconnu.
+            if bound is None:
+                logger.warning(
+                    "Session authentifiee %s non liee a une Entity memoire — "
+                    "profil, engagements et souvenirs par personne resteront "
+                    "vides pour toute la session",
+                    self.person_id,
+                )
 
     async def receive(self, text_data=None, bytes_data=None):
         try:
