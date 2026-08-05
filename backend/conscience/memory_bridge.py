@@ -55,6 +55,13 @@ class MemoryBridge:
         4. keep only the reachable ones (consumers connected now; modules are
            reachable whenever a durable handle exists — external API is push-capable)
 
+        Ce que ce quatrieme point suppose — qu'un handle module durable a
+        toujours son entree de presence — est rendu vrai au demarrage par
+        ``identity_resolver.restore_module_presence()`` : sans elle la
+        livraison, elle, ne voyait que la presence en RAM et abandonnait
+        silencieusement le message compose pour un contact qui n'avait pas
+        ecrit depuis le boot.
+
         Returns ``[{"name", "score", "handles": [...]}]`` sorted by score, or [].
         The inclusive (interest) vs exclusive (attribution) decision is left to the
         caller — this returns the candidate field, not the final pick.
