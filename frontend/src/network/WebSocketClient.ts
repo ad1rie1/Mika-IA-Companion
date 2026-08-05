@@ -157,7 +157,21 @@ export class WebSocketClient {
   private ensureAlive() {
     if (this.stopped) return;
     if (this.ws?.readyState === WebSocket.OPEN) {
-      // Open is not the same as alive. Poke it and let the watchdog judge.
+      // Silent past the timeout *and* something we handed it was never
+      // acknowledged: that is a corpse, not a quiet connection. Don't wait
+      // for the watchdog's next tick — in a throttled tab that tick is
+      // exactly what stopped firing, and a message is sitting in it.
+      // Without an outstanding frame the same silence proves nothing (a
+      // healthy idle socket receives nothing between two pings), so we poke
+      // it and let the watchdog judge, as before.
+      if (
+        this.unacked.size &&
+        Date.now() - this.lastFrameAt > HEARTBEAT_TIMEOUT_MS
+      ) {
+        console.warn("WebSocket silent with a message in flight — reconnecting");
+        this.reconnectNow();
+        return;
+      }
       this.ping();
       return;
     }
