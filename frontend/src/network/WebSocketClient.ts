@@ -19,6 +19,23 @@ const HEARTBEAT_INTERVAL_MS = 20000;
  */
 const HEARTBEAT_TIMEOUT_MS = 50000;
 
+/**
+ * Taille sérialisée maximale d'un frame sortant.
+ *
+ * Au-delà, c'est le *transport* qui refuse : uvicorn ferme la connexion en
+ * 1009 avant que le frame n'atteigne le consumer, donc sans `ack`, sans trace
+ * applicative, et la bulle reste « en attente d'envoi » pour toujours. Le
+ * seuil doit donc rester sous le `ws_max_size` déclaré dans run.py, lui-même
+ * aligné sur MAX_ATTACHMENTS × MAX_FILE_SIZE (5 × 5 Mo, soit ~34,95 Mio une
+ * fois encodés en base64) : un envoi légitime passe, un envoi impossible est
+ * refusé ici, à voix haute.
+ *
+ * Compté en unités UTF-16 et non en octets : le terme dominant est du base64,
+ * donc de l'ASCII, et la marge laissée par le seuil couvre largement l'écart
+ * sur les 2000 caractères de légende que le consumer accepte.
+ */
+const MAX_FRAME_CHARS = 34 * 1024 * 1024;
+
 export class WebSocketClient {
   private ws: WebSocket | null = null;
   private url: string;
@@ -265,8 +282,16 @@ export class WebSocketClient {
 
   /** Returns false when the frame was queued instead of sent. */
   send(data: object): boolean {
+    const payload = JSON.stringify(data);
+    // Un frame que le transport refusera n'est pas un frame à mettre en file :
+    // le mettre en attente le fait rejouer à chaque réouverture, et chaque
+    // rejeu referme la connexion sans que rien ne le dise.
+    if (payload.length > MAX_FRAME_CHARS) {
+      this.refuseFrame(data, "frame_too_large");
+      return false;
+    }
     if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(data));
+      this.ws.send(payload);
       return true;
     }
     if (this.outbox.length >= WebSocketClient.MAX_OUTBOX) {
@@ -274,6 +299,20 @@ export class WebSocketClient {
     }
     this.outbox.push(data);
     return false;
+  }
+
+  /**
+   * Refuser un frame à voix haute plutôt que de le laisser disparaître.
+   *
+   * Passe par le même `ack` que le serveur : c'est déjà ce que le chat écoute
+   * pour faire passer une bulle de « en attente » à « refusé », avec sa
+   * raison. Un frame sans `client_msg_id` n'a rien à corréler côté UI (les
+   * frames de contrôle ne passent pas par la file), donc rien à annoncer.
+   */
+  private refuseFrame(frame: object, status: string) {
+    const cid = (frame as { client_msg_id?: string }).client_msg_id;
+    if (!cid) return;
+    this.emit("ack", { type: "ack", client_msg_id: cid, status });
   }
 
   /**
