@@ -107,34 +107,67 @@ class MemoryRetriever:
         souvenirs.sort(key=lambda s: s.get("_score", 0), reverse=True)
         return souvenirs
 
+    @staticmethod
+    def _pk_of(raw: dict) -> int | None:
+        """Identifiant ChromaDB -> pk ORM, ou None si la ligne n'en porte pas."""
+        try:
+            return int(raw["id"])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    @staticmethod
+    async def _load_by_pk(queryset, pks: list[int]) -> dict | None:
+        """Charge en UNE requete les lignes demandees, avec leurs M2M.
+
+        Retourne ``{pk: (ligne, themes, entities)}``, ou ``None`` si le
+        chargement lui-meme a echoue (base verrouillee, table absente) — le
+        cas ou l'appelant doit replier *toute* la page sur ChromaDB, a
+        distinguer d'une ligne simplement absente du resultat.
+
+        Les M2M se lisent via ``.all()``, la seule forme qui consomme le cache
+        de ``prefetch_related`` : ``values_list()`` rechaine le queryset
+        (``_result_cache`` remis a None) et refait la requete, ce qui rendait
+        le prefetch purement decoratif.
+        """
+        if not pks:
+            return {}
+
+        def _charger() -> dict:
+            rows = queryset.filter(pk__in=pks).prefetch_related("themes", "entities")
+            return {
+                row.pk: (
+                    row,
+                    [t.name for t in row.themes.all()],
+                    [e.name for e in row.entities.all()],
+                )
+                for row in rows
+            }
+
+        try:
+            return await sync_to_async(_charger)()
+        except Exception:
+            return None
+
     async def _enrich_souvenirs(self, raw_results: list[dict]) -> list[dict]:
-        """Load full Souvenir data from ORM."""
+        """Load full Souvenir data from ORM.
+
+        Une seule requete pour toute la page ChromaDB, dans un seul saut
+        ``sync_to_async``. Ligne par ligne, cela coutait cinq requetes et trois
+        sauts de thread par souvenir — serialises sur l'unique executeur
+        partage avec les six boucles de fond — soit une centaine de requetes
+        par tour de conversation avant meme l'appel LLM.
+        """
         from memory.models import Souvenir
 
+        pks = [pk for pk in (self._pk_of(r) for r in raw_results) if pk is not None]
+        loaded = await self._load_by_pk(Souvenir.objects.all(), pks)
+
+        # L'ordre ChromaDB est l'ordre de pertinence : on le reconstitue en
+        # Python plutot que de le demander a la base.
         enriched = []
         for r in raw_results:
-            try:
-                pk = int(r["id"])
-                souvenir = await sync_to_async(
-                    lambda pk=pk: Souvenir.objects.prefetch_related("themes", "entities").get(pk=pk)
-                )()
-                themes = await sync_to_async(lambda s=souvenir: list(s.themes.values_list("name", flat=True)))()
-                entities = await sync_to_async(lambda s=souvenir: list(s.entities.values_list("name", flat=True)))()
-
-                # Compute base relevance from vector distance (lower = more relevant)
-                distance = r.get("distance")
-                relevance = max(0, 1.0 - (distance or 0.5)) if distance is not None else 0.5
-
-                enriched.append({
-                    "content": souvenir.content,
-                    "emotion": souvenir.emotion,
-                    "importance": souvenir.importance,
-                    "occurred_at": souvenir.occurred_at,
-                    "themes": themes,
-                    "entities": entities,
-                    "relevance": relevance,
-                })
-            except Exception:
+            row = loaded.get(self._pk_of(r)) if loaded is not None else None
+            if row is None:
                 # Fallback: use ChromaDB data only
                 meta = r.get("metadata", {})
                 enriched.append({
@@ -146,44 +179,65 @@ class MemoryRetriever:
                     "entities": [],
                     "relevance": 0.5,
                 })
+                continue
+
+            souvenir, themes, entities = row
+
+            # Compute base relevance from vector distance (lower = more relevant)
+            distance = r.get("distance")
+            relevance = max(0, 1.0 - (distance or 0.5)) if distance is not None else 0.5
+
+            enriched.append({
+                "content": souvenir.content,
+                "emotion": souvenir.emotion,
+                "importance": souvenir.importance,
+                "occurred_at": souvenir.occurred_at,
+                "themes": themes,
+                "entities": entities,
+                "relevance": relevance,
+            })
         return enriched
 
     async def _enrich_connaissances(self, raw_results: list[dict]) -> list[dict]:
-        """Load full Connaissance data from ORM."""
+        """Load full Connaissance data from ORM.
+
+        Meme regroupement que pour les souvenirs (cf. `_enrich_souvenirs`).
+        """
         from memory.models import Connaissance
+
+        pks = [pk for pk in (self._pk_of(r) for r in raw_results) if pk is not None]
+        # `is_valid=True` en ceinture-bretelles : ChromaDB filtre sur sa propre
+        # metadonnee, donc une ligne invalidee entre l'indexation et cette
+        # lecture doit disparaitre du bloc, pas etre servie.
+        loaded = await self._load_by_pk(Connaissance.objects.filter(is_valid=True), pks)
 
         enriched = []
         for r in raw_results:
-            try:
-                pk = int(r["id"])
-                # `is_valid=True` en ceinture-bretelles : ChromaDB filtre sur sa
-                # propre metadonnee, donc une ligne invalidee entre l'indexation
-                # et cette lecture doit disparaitre du bloc, pas etre servie.
-                conn = await sync_to_async(
-                    lambda pk=pk: Connaissance.objects.prefetch_related("themes", "entities").get(
-                        pk=pk, is_valid=True
-                    )
-                )()
-                themes = await sync_to_async(lambda c=conn: list(c.themes.values_list("name", flat=True)))()
-                entities = await sync_to_async(lambda c=conn: list(c.entities.values_list("name", flat=True)))()
-
+            pk = self._pk_of(r)
+            if loaded is not None and pk is not None:
+                row = loaded.get(pk)
+                if row is None:
+                    # Invalidee ou effacee : le repli ChromaDB la reservirait
+                    # telle quelle, ce qui annulerait le filtre ci-dessus.
+                    continue
+                conn, themes, entities = row
                 enriched.append({
                     "content": conn.content,
                     "confidence": conn.confidence,
                     "themes": themes,
                     "entities": entities,
                 })
-            except Connaissance.DoesNotExist:
-                # Invalidee ou effacee : le repli ChromaDB la reservirait telle
-                # quelle, ce qui annulerait le filtre ci-dessus.
                 continue
-            except Exception:
-                enriched.append({
-                    "content": r["content"],
-                    "confidence": r.get("metadata", {}).get("confidence", 0.5),
-                    "themes": [],
-                    "entities": [],
-                })
+
+            # Chargement en echec, ou identifiant inexploitable : repli
+            # ChromaDB, comme le faisait chaque ligne quand la requete etait
+            # posee ligne par ligne.
+            enriched.append({
+                "content": r["content"],
+                "confidence": r.get("metadata", {}).get("confidence", 0.5),
+                "themes": [],
+                "entities": [],
+            })
         return enriched
 
     # Max characters for the entire memory context block injected into the prompt.
