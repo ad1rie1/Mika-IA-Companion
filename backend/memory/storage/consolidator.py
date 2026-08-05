@@ -9,7 +9,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from memory.extraction.extractor import MemoryExtractor
-from memory.storage.vector_store import VectorStore
+from memory.storage.vector_store import VectorStore, vector_call
 from utils.periodic import PeriodicLoop
 from utils.degradation import degradations
 
@@ -422,7 +422,7 @@ class MemoryConsolidator:
         truth, and losing a vector entry costs recall, not the memory itself.
         """
         try:
-            await sync_to_async(fn)(**kwargs)
+            await vector_call(fn)(**kwargs)
         except Exception:
             logger.warning("ChromaDB indexing failed for %s #%d", kind, pk)
 
@@ -625,7 +625,7 @@ class MemoryConsolidator:
             new_importance = souvenir.importance * (decay_rate ** days_since)
             if new_importance < min_importance:
                 try:
-                    await sync_to_async(self.vector_store.remove_souvenir)(souvenir.pk)
+                    await vector_call(self.vector_store.remove_souvenir)(souvenir.pk)
                 except Exception as exc:
                     degradations.record("consolidator: chromadb remove failed for souvenir #", exc)
                 await sync_to_async(souvenir.delete)()
@@ -638,7 +638,7 @@ class MemoryConsolidator:
                 await sync_to_async(souvenir.save)(
                     update_fields=["importance", "decayed_at"])
                 try:
-                    await sync_to_async(self.vector_store.add_souvenir)(
+                    await vector_call(self.vector_store.add_souvenir)(
                         souvenir_id=souvenir.pk,
                         content=souvenir.content,
                         metadata={
@@ -973,7 +973,7 @@ class MemoryConsolidator:
         from memory.models import Connaissance
 
         try:
-            raw = await sync_to_async(self.vector_store.search_connaissances)(
+            raw = await vector_call(self.vector_store.search_connaissances)(
                 new_content, n=5
             )
             if not raw:
@@ -1008,7 +1008,7 @@ class MemoryConsolidator:
                     conn.is_valid = False
                     await sync_to_async(conn.save)(update_fields=["is_valid"])
                     try:
-                        await sync_to_async(self.vector_store.add_connaissance)(
+                        await vector_call(self.vector_store.add_connaissance)(
                             connaissance_id=conn.pk,
                             content=conn.content,
                             metadata={
@@ -1039,7 +1039,7 @@ class MemoryConsolidator:
         """Check if a similar connaissance already exists via vector search."""
         from memory.models import Connaissance
 
-        results = await sync_to_async(self.vector_store.search_connaissances)(content, n=1)
+        results = await vector_call(self.vector_store.search_connaissances)(content, n=1)
         if results and results[0]["distance"] is not None and results[0]["distance"] < 0.15:
             # Very similar — treat as duplicate
             try:

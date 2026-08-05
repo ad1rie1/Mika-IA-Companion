@@ -247,7 +247,8 @@ class MemoryManager:
             )
 
             if self.vector_store:
-                await sync_to_async(self.vector_store.add_souvenir)(
+                from memory.storage.vector_store import vector_call
+                await vector_call(self.vector_store.add_souvenir)(
                     souvenir_id=souvenir.pk,
                     content=souvenir.content,
                     metadata={
@@ -360,8 +361,9 @@ class MemoryManager:
             # ORM : sans reindexation la connaissance continuerait d'etre servie
             # au prompt a chaque tour. Meme geste que le consolidateur.
             if self.vector_store:
+                from memory.storage.vector_store import vector_call
                 try:
-                    await sync_to_async(self.vector_store.add_connaissance)(
+                    await vector_call(self.vector_store.add_connaissance)(
                         connaissance_id=conn.pk,
                         content=conn.content,
                         metadata={
@@ -440,8 +442,9 @@ class MemoryManager:
         """Semantic search for connaissances related to text via ChromaDB."""
         if not self.vector_store:
             return []
+        from memory.storage.vector_store import vector_call
         try:
-            raw = await sync_to_async(self.vector_store.search_connaissances)(text, n=n)
+            raw = await vector_call(self.vector_store.search_connaissances)(text, n=n)
             return await self._keep_valid_connaissances(raw)
         except Exception as exc:
             degradations.record("memory.manager.search_related_connaissances", exc)
@@ -484,8 +487,9 @@ class MemoryManager:
         """Semantic search for souvenirs related to text via ChromaDB."""
         if not self.vector_store:
             return []
+        from memory.storage.vector_store import vector_call
         try:
-            return await sync_to_async(self.vector_store.search_souvenirs)(text, n=n)
+            return await vector_call(self.vector_store.search_souvenirs)(text, n=n)
         except Exception as exc:
             degradations.record("memory.manager.search_related_souvenirs", exc)
             logger.debug("search_related_souvenirs failed", exc_info=True)

@@ -1,10 +1,28 @@
 import logging
 
 import chromadb
+from asgiref.sync import sync_to_async
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+
+def vector_call(fn):
+    """Enveloppe asynchrone d'un appel ChromaDB, **hors du thread partagé**.
+
+    `sync_to_async` en mode par défaut (`thread_sensitive=True`) exécute tout
+    sur l'unique thread exécuteur du processus — celui que se partagent les six
+    boucles de fond et chaque requête ORM d'un tour de conversation. Or aucune
+    méthode de `VectorStore` n'ouvre de connexion Django : c'est du ChromaDB
+    pur, dont chaque `upsert`/`query` déclenche un encode SentenceTransformer
+    (~10-30 ms). La contrainte de thread ne s'y applique donc pas, et l'y
+    laisser faisait attendre `gather_context()` derrière la passe de
+    décroissance, qui ré-indexe jusqu'à `DECAY_BATCH` lignes d'affilée.
+
+    Tout appel au `VectorStore` depuis un contexte async passe par ici.
+    """
+    return sync_to_async(fn, thread_sensitive=False)
 
 
 class VectorStore:
