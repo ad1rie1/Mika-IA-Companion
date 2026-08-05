@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 
 from drives.engine import drive_engine
 from emotion.engine import emotion_engine
-from identity.resolver import identity_resolver
+from identity.resolver import IdentityContext, identity_resolver
 from identity.trust import is_internal_person
 from memory.manager import memory_manager
 from modules.manager import module_manager
@@ -77,6 +77,13 @@ class ConversationContext:
     # `--- QUI TU AS EN FACE ---`. Also gates `person_context`: below the
     # disclosure threshold, private per-person memory is withheld entirely.
     identity_context: str = ""
+    # The verdict behind that block, kept whole. Not a prompt layer: it is
+    # carried so everything else in the turn answers to the *same* verdict.
+    # The broadcast re-resolved it on its own, without the channel, the
+    # authentication or the "this is a public room" flag — only the
+    # perception knows those — so the two could disagree on may_disclose for
+    # one and the same turn.
+    identity: IdentityContext | None = None
 
 
 async def gather_context(
@@ -236,6 +243,7 @@ async def gather_context(
         project_suppresses_emotion=project_suppresses_emotion,
         project_id=project_id,
         identity_context=identity_context,
+        identity=identity_ctx,
     )
 
 
@@ -678,6 +686,13 @@ async def _fetch_person_context(identity_ctx) -> str:
     entities after what people are *called* ("Thomas") while handles are
     ``web_6f3e22ccb0ae``. Every profile lookup silently missed.
 
+    The Entity comes from ``identity_ctx``, which already holds it: the
+    resolver loads it with ``select_related`` and used to keep only its id
+    and its name. Calling ``entity_for_person`` here re-ran that identical
+    SELECT behind a second ``sync_to_async`` hop — and a hop is serialised
+    on the one shared executor thread, in competition with six background
+    loops writing to SQLite.
+
     Empty string when internal/system person_id, when nothing is known, or
     when certainty is too low to justify reading out someone's private
     history to whoever is currently holding the handle.
@@ -694,13 +709,12 @@ async def _fetch_person_context(identity_ctx) -> str:
     if not identity_ctx.may_disclose:
         return affect
 
-    entity = None
+    entity = identity_ctx.entity
+    if entity is None:
+        return affect
+
     try:
         from memory import read
-
-        entity = await identity_resolver.entity_for_person(person_id)
-        if entity is None:
-            return affect
 
         profile = await read.person_profile_for(entity)
         commitments = await read.pending_commitments_for(entity)
