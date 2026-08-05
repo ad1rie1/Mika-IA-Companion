@@ -49,8 +49,14 @@ export class WebSocketClient {
   // bubble before send() is called, so dropping them made messages look
   // delivered when they never left the browser. Bounded so a long outage
   // can't grow unbounded with 5MB attachment payloads.
-  private outbox: object[] = [];
+  private outbox: Array<{ frame: object; attempts: number }> = [];
   private static readonly MAX_OUTBOX = 20;
+  /**
+   * Réouvertures qu'un frame en file peut traverser sans réussir à partir.
+   * Au-delà il est abandonné et signalé : le remettre en file indéfiniment
+   * garde une bulle « en attente d'envoi » que plus rien ne fera avancer.
+   */
+  private static readonly MAX_OUTBOX_ATTEMPTS = 5;
 
   // Keepalive state.
   private heartbeatTimer: number | null = null;
@@ -295,9 +301,10 @@ export class WebSocketClient {
       return true;
     }
     if (this.outbox.length >= WebSocketClient.MAX_OUTBOX) {
-      this.outbox.shift();
+      const evicted = this.outbox.shift();
+      if (evicted) this.refuseFrame(evicted.frame, "send_abandoned");
     }
-    this.outbox.push(data);
+    this.outbox.push({ frame: data, attempts: 0 });
     return false;
   }
 
@@ -338,13 +345,21 @@ export class WebSocketClient {
     if (!this.outbox.length) return;
     const pending = this.outbox;
     this.outbox = [];
-    for (const frame of pending) {
+    for (const entry of pending) {
       if (this.ws?.readyState !== WebSocket.OPEN) {
-        // Socket died again mid-flush — keep what's left for the next open.
-        this.outbox.push(frame);
+        // Socket died again mid-flush — keep what's left for the next open,
+        // mais pas éternellement : un frame que MAX_OUTBOX_ATTEMPTS
+        // réouvertures n'ont pas réussi à faire partir ne partira pas, et le
+        // garder en file laisse sa bulle « en attente » sans issue.
+        entry.attempts += 1;
+        if (entry.attempts > WebSocketClient.MAX_OUTBOX_ATTEMPTS) {
+          this.refuseFrame(entry.frame, "send_abandoned");
+          continue;
+        }
+        this.outbox.push(entry);
         continue;
       }
-      this.ws.send(JSON.stringify(frame));
+      this.ws.send(JSON.stringify(entry.frame));
     }
   }
 
