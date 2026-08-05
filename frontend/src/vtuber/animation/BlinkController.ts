@@ -54,6 +54,8 @@ export class BlinkController implements ProceduralOverlay {
   private shape: BlinkShape = QUICK;
   /** A second quick blink follows this one (human double-blink). */
   private doublePending = false;
+  /** The blink about to start IS that second beat — it never re-rolls. */
+  private secondBeatArmed = false;
 
   update(dt: number, ctx: OverlayContext): void {
     const manager = ctx.vrm.expressionManager;
@@ -116,10 +118,13 @@ export class BlinkController implements ProceduralOverlay {
       this.blinking = false;
       this.blinkTimer = 0;
       if (this.doublePending) {
-        // Second beat of a double blink: a short gap, then another quick one.
+        // Second beat of a double blink: a short gap, then another quick
+        // one. The flag hands over to secondBeatArmed rather than being
+        // simply consumed — startBlink runs 70ms later and has to know
+        // that this next blink is the beat, not a new draw.
         this.doublePending = false;
+        this.secondBeatArmed = true;
         this.nextBlinkAt = 0.07;
-        this.shape = QUICK;
       } else {
         this.nextBlinkAt = this.sampleInterval(ctx);
       }
@@ -131,7 +136,14 @@ export class BlinkController implements ProceduralOverlay {
     this.blinking = true;
     this.elapsed = 0;
     this.blinkTimer = 0;
-    if (this.shape === QUICK && this.doublePending) return; // second beat armed
+    if (this.secondBeatArmed) {
+      // Forced quick, and deliberately no re-roll: a draw here would let
+      // the beat come out SOFT (a slow blink 70ms after a quick one reads
+      // as a glitch, not as a tic) and could arm yet another double.
+      this.secondBeatArmed = false;
+      this.shape = QUICK;
+      return;
+    }
 
     const heavy = HEAVY.has(ctx.emotion);
     const roll = Math.random();
