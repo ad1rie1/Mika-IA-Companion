@@ -17,6 +17,7 @@ import dataclasses
 import logging
 
 from django.urls import path
+from django.views.decorators.http import require_http_methods
 
 from modules.registry import ModuleRegistry
 from modules.types import ModuleCapability, ModuleTool
@@ -178,7 +179,16 @@ class ModuleCollectors:
     # ── HTTP routes ───────────────────────────────────────────────
 
     def routes(self) -> list:
-        """Django URL patterns under ``/api/modules/{module}/{route.path}``."""
+        """Django URL patterns under ``/api/modules/{module}/{route.path}``.
+
+        ``ModuleRoute.method`` est appliqué ici, une fois pour tous les
+        modules. Le handler était monté tel quel, si bien qu'un ``GET``
+        atteignait une route déclarée ``POST`` — et Django ne protège pas les
+        GET par CSRF, puisqu'ils sont présumés sans effet de bord. Une simple
+        balise ``<img src=…>`` sur une page visitée suffisait donc à déclencher
+        un effet de bord sur un endpoint monté hors du préfixe ``/gestion/``.
+        Un module qui déclare autre chose que la méthode montée reçoit un 405.
+        """
         patterns = []
         for module in self._registry.active():
             try:
@@ -193,7 +203,12 @@ class ModuleCollectors:
                 url_name = (
                     route.name or f"module_{module.name}_{route.path or 'index'}"
                 )
-                patterns.append(path(url_path, route.handler, name=url_name))
+                handler = route.handler
+                if route.method:
+                    handler = require_http_methods(
+                        [route.method.upper()]
+                    )(handler)
+                patterns.append(path(url_path, handler, name=url_name))
         return patterns
 
     # ── Dashboard views ───────────────────────────────────────────
