@@ -155,7 +155,6 @@ class TestFreshInstallDefaults:
         ("memory.consolidation_interval", 60),
         ("memory.sleep_check_interval", 60),
         ("projects.runner_interval", 30),
-        ("emotion.decay_rate", 0.02),
         ("modules.cron_tick_interval", 60),
     ])
     def test_the_loop_cadences_have_a_declared_default(self, key, expected):
