@@ -104,8 +104,9 @@ CONFIG_SCHEMA = [
         group="Attention", label="Signaler les nouveaux articles",
         default=True, hot_reload=True,
         description=(
-            "Interrupteur global. Décoché, aucun flux n'émet d'événement : "
-            "le module devient une revue de presse silencieuse."
+            "Interrupteur global. Décoché, aucun flux n'émet d'événement ni "
+            "n'interrompt Mika sur un mot-clé d'alerte : le module devient "
+            "une revue de presse silencieuse."
         ),
     ),
     ConfigItem(
@@ -115,7 +116,8 @@ CONFIG_SCHEMA = [
         description=(
             "Un article qui en contient un interrompt Mika directement "
             "(notify_ai) au lieu d'attendre qu'elle y prête attention. "
-            "À garder très court."
+            "À garder très court. Ne s'applique qu'aux articles qu'un flux a "
+            "le droit de signaler : un flux décoché reste muet, alerte comprise."
         ),
     ),
     ConfigItem(
