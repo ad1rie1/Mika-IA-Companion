@@ -178,8 +178,17 @@ def journal_panel(host):
     def handler(request):
         from modules.plugins.forge.models import ForgeLog
 
+        # ``order_by()`` vide avant ``distinct()`` : le modèle déclare un
+        # ``Meta.ordering`` sur ``created_at``, que Django ajoute alors au
+        # SELECT — la colonne de tri entre dans la clé de dédoublonnage et
+        # chaque ligne de journal ressort comme un module distinct. Le plafond
+        # de 100 ne gardait donc que les modules ayant écrit le plus
+        # récemment : les autres disparaissaient du filtre.
         noms = sorted(
-            ForgeLog.objects.values_list("module_name", flat=True).distinct()[:100]
+            ForgeLog.objects
+            .order_by()
+            .values_list("module_name", flat=True)
+            .distinct()[:100]
         )
 
         fs = tables.FilterSet(per_page=tables.read_per_page(request, default=50))
