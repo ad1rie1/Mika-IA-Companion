@@ -28,7 +28,9 @@ centaines d'événements d'un coup.
 que la conscience interprète par heuristique (pas d'appel LLM — voir
 ``conscience/interpreter.py``). Un article qui contient un *mot-clé d'alerte*
 l'interrompt directement via ``notify_ai``. Les deux sont réglables, et
-désactivables jusqu'au silence complet.
+désactivables jusqu'au silence complet — l'alerte incluse : un mot-clé
+change le canal par lequel un article parle, jamais le droit du flux à
+parler.
 """
 
 from __future__ import annotations
@@ -430,6 +432,13 @@ class RSSModule(BaseModule):
             # doit interrompre Mika.
             retenu = (not mots_flux) or any(m in texte for m in mots_flux)
             notable = bool(mots_alerte) and any(m in texte for m in mots_alerte)
+            # Les interrupteurs et le filtre du flux décident du *droit de
+            # parler* ; les mots d'alerte, seulement du *canal*. Un mot
+            # d'alerte ne rend donc pas la parole à un flux mis en sourdine :
+            # ``notify_ai`` coûte un tour de pipeline complet, là où
+            # l'événement se laisse ignorer — ce serait rendre un canal plus
+            # intrusif que celui qu'on vient justement de retirer.
+            signalable = emettre and retenu
 
             lignes.append(RSSEntry(
                 feed=feed,
@@ -448,8 +457,8 @@ class RSSModule(BaseModule):
                 "summary": entry.summary,
                 "author": entry.author,
                 "published": entry.published_raw,
-                "emit": emettre and retenu,
-                "notable": notable,
+                "emit": signalable,
+                "notable": notable and signalable,
                 "alerted": False,
             })
 
@@ -547,7 +556,10 @@ class RSSModule(BaseModule):
         Volontairement distinct de l'événement : ``emit_event`` dit « ceci est
         arrivé » et personne n'est tenu d'y répondre ; ``notify_ai`` demande
         une réponse et coûte un tour de pipeline complet. Un mot-clé d'alerte
-        est une déclaration explicite que ce sujet vaut l'interruption.
+        est une déclaration explicite que ce sujet vaut l'interruption — mais
+        seulement parmi les articles qu'un flux a déjà le droit de signaler
+        (voir ``_store``), sinon la mise en sourdine d'un flux lui rendrait
+        le canal le plus intrusif des deux.
         """
         if self._notify_ai is None:
             return False
