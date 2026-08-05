@@ -373,7 +373,14 @@ class RSSModule(BaseModule):
             await sync_to_async(self._record_success)(feed, None, etag, modified)
             return [], True
 
-        parsed = parser.parse(raw)
+        # L'analyse quitte la boucle pour la même raison que le
+        # téléchargement. ``parser.parse`` est du Python pur — SAX, désinfection
+        # HTML de chaque résumé, deux regex et un ``unescape`` par article — sur
+        # une entrée bornée seulement par ``MAX_FEED_BYTES`` (5 Mo) : un flux à
+        # contenu intégral tient la boucle plusieurs centaines de millisecondes,
+        # et cette boucle sert tous les WebSocket, la conscience et le
+        # ``TurnQueue``. Un ``pong`` manqué suffit à faire reconnecter un client.
+        parsed = await asyncio.to_thread(parser.parse, raw)
         if parsed.error and not parsed.entries:
             raise ValueError(parsed.error)
 
