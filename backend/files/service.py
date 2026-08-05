@@ -260,13 +260,20 @@ class FilesService:
         if not destination:
             return {"error": "Destination vide."}
 
+        # Relation de chemin, pas préfixe de chaîne : "../uploads_sauvegarde"
+        # se résout hors de uploads/ tout en commençant par la même chaîne.
+        uploads_resolved = uploads_root.resolve()
         dest_dir = (uploads_root / destination).resolve()
-        if not str(dest_dir).startswith(str(uploads_root.resolve())):
+        if not dest_dir.is_relative_to(uploads_resolved):
             return {"error": "Destination non autorisée (hors de uploads/)."}
 
         dest_dir.mkdir(parents=True, exist_ok=True)
         src_path = Path(record["path"])
         new_path = dest_dir / src_path.name
+        # Un lien symbolique déjà présent sous ce nom sortirait encore du
+        # confinement : shutil.move suit la cible sur un autre système de fichiers.
+        if not new_path.resolve().is_relative_to(uploads_resolved):
+            return {"error": "Destination non autorisée (hors de uploads/)."}
 
         try:
             await asyncio.to_thread(shutil.move, str(src_path), str(new_path))
