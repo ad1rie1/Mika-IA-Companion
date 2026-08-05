@@ -1115,13 +1115,16 @@ class ConscienceEngine:
         # Always include modules whose events triggered this decision
         relevant = list(sources)
 
-        # Add wake if we might want to self-schedule or have scheduled actions
+        # Add wake if we might want to self-schedule or have scheduled actions.
+        # ``conscience_tools`` va avec : programmer, lister ou annuler une
+        # action differee se fait par ses outils, pas par ceux du wake.
         if (
             ctx.scheduled_actions
             or any(obs.pertinence > 0.6 for obs in ctx.pending_observations)
         ):
-            if "wake" not in relevant:
-                relevant.append("wake")
+            for name in ("wake", "conscience_tools"):
+                if name not in relevant:
+                    relevant.append(name)
 
         return relevant
 
