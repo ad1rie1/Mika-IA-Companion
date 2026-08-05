@@ -847,7 +847,7 @@ class SleepCycle:
         if not aging:
             return 0
 
-        from memory.models import Souvenir
+        from memory.manager import memory_manager
 
         processed = 0
         for r in aging:
@@ -863,18 +863,22 @@ class SleepCycle:
             # 3. Heavy ones: convert to a reflective Souvenir
             if old_intensity >= DIGESTION_TO_SOUVENIR_THRESHOLD:
                 try:
-                    souvenir = await sync_to_async(Souvenir.objects.create)(
+                    # Passe par le manager, qui cree *et* indexe dans ChromaDB.
+                    # C'est l'insight avec lequel on se reveille : ecrit
+                    # seulement en base, il n'atteindrait jamais un prompt,
+                    # la remémoration partant exclusivement du vectoriel.
+                    souvenir = await memory_manager.create_souvenir(
                         content=(
                             f"Apres y avoir repense cette nuit: {r.summary[:200]}"
                         ),
                         emotion=r.emotion or "thinking",
                         importance=min(0.85, old_intensity + 0.1),
-                        occurred_at=tz.now(),
                     )
-                    logger.debug(
-                        "Sleep: digested rumination #%s -> reflective souvenir #%s",
-                        r.pk, souvenir.pk,
-                    )
+                    if souvenir:
+                        logger.debug(
+                            "Sleep: digested rumination #%s -> reflective souvenir #%s",
+                            r.pk, souvenir.pk,
+                        )
                 except Exception as exc:
                     degradations.record("sleep: sleep: reflective souvenir creation", exc)
 
