@@ -594,8 +594,14 @@ class MemoryConsolidator:
         Only rows whose anchor is older than ``DECAY_MIN_AGE`` are read: a
         souvenir touched minutes ago cannot move by more than the write
         threshold, so loading it just to skip it was the bulk of the work.
-        The rest of the loop stays row-by-row because each write also
-        re-indexes into ChromaDB, which no bulk UPDATE can do.
+        The rest of the loop stays row-by-row because each row decays from
+        its own anchor, which no bulk UPDATE can express.
+
+        Les ré-indexations, elles, sont regroupées en un seul upsert de fin de
+        passe : un encode par ligne coûtait jusqu'à ``DECAY_BATCH`` encodes
+        consécutifs, là où SentenceTransformer traite un lot en une fois. La
+        ligne ORM reste la source de vérité, donc un lot perdu coûte du rappel
+        jusqu'à la passe suivante, jamais le souvenir lui-même.
         """
         from django.db.models import Q
         from memory.models import Souvenir
@@ -614,6 +620,7 @@ class MemoryConsolidator:
         if not souvenirs:
             return
 
+        reindex: list[dict] = []
         for souvenir in souvenirs:
             # Use occurred_at (when it happened) not created_at (when it was stored)
             ref_date = souvenir.occurred_at or souvenir.created_at
@@ -637,17 +644,20 @@ class MemoryConsolidator:
                 souvenir.decayed_at = now
                 await sync_to_async(souvenir.save)(
                     update_fields=["importance", "decayed_at"])
-                try:
-                    await vector_call(self.vector_store.add_souvenir)(
-                        souvenir_id=souvenir.pk,
-                        content=souvenir.content,
-                        metadata={
-                            "importance": souvenir.importance,
-                            "occurred_at": ref_date.isoformat(),
-                        },
-                    )
-                except Exception as exc:
-                    degradations.record("consolidator: chromadb update failed for souvenir #", exc)
+                reindex.append({
+                    "souvenir_id": souvenir.pk,
+                    "content": souvenir.content,
+                    "metadata": {
+                        "importance": souvenir.importance,
+                        "occurred_at": ref_date.isoformat(),
+                    },
+                })
+
+        if reindex:
+            try:
+                await vector_call(self.vector_store.add_souvenirs)(reindex)
+            except Exception as exc:
+                degradations.record("consolidator: chromadb update failed for souvenir #", exc)
 
     async def _decay_connaissances(self):
         """Slowly reduce confidence of old connaissances that haven't been reinforced.

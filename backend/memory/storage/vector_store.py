@@ -74,6 +74,22 @@ class VectorStore:
             metadatas=[meta],
         )
 
+    def add_souvenirs(self, entries: list[dict]):
+        """Upsert plusieurs souvenirs en un seul appel.
+
+        Chaque entrée est ``{"souvenir_id", "content", "metadata"}``. Chroma
+        accepte des listes, et SentenceTransformer encode un lot bien plus vite
+        que les mêmes textes un par un — ce que la passe de décroissance fait
+        par centaines.
+        """
+        if not entries:
+            return
+        self._souvenirs.upsert(
+            ids=[str(e["souvenir_id"]) for e in entries],
+            documents=[e["content"] for e in entries],
+            metadatas=[e.get("metadata") or {} for e in entries],
+        )
+
     def add_connaissance(
         self,
         connaissance_id: int,
