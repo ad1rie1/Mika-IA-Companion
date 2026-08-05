@@ -312,6 +312,15 @@ async def broadcast_emotion_update(person_id: str, group: str = "") -> None:
     """
     from emotion.engine import emotion_engine
 
+    # Hydrater avant de lire, ici et pas seulement dans `emotion.sync` :
+    # `compute_message_emotion` CREE l'oscillateur a l'origine quand la
+    # personne n'est pas en RAM, et `ensure_person_loaded` ne fait plus rien
+    # une fois qu'elle y est. Lire d'abord perdait donc definitivement
+    # l'humeur enregistree (EmotionSnapshot, puis EmotionalSummary) de
+    # quelqu'un qui revient sans avoir parle — cas nominal du frontend, qui
+    # pousse une frame des la connexion et des chaque `identify`.
+    await emotion_engine.ensure_person_loaded(person_id)
+
     msg = emotion_engine.compute_message_emotion(person_id)
     payload = {
         "type": "communication.broadcast",
