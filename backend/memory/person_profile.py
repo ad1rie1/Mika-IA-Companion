@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 from asgiref.sync import sync_to_async
+from django.db.models import Count, F, Q
 from django.utils import timezone
 
 from ai.router import AIRole, UnconfiguredRoleError, ai_router
@@ -138,42 +139,57 @@ class PersonProfileGenerator:
           - either has no profile yet, OR profile is >24h old AND has ≥N new
             mentioning souvenirs since last generation.
         """
-        from memory.models import Entity, PersonProfile, Souvenir
+        from memory.models import Entity
 
         now = timezone.now()
         activity_cutoff = now - timedelta(days=PROFILE_ACTIVITY_WINDOW_DAYS)
         regen_cutoff = now - timedelta(hours=PROFILE_MIN_AGE_HOURS)
 
         def _collect():
-            active = list(
-                Entity.objects.filter(
-                    entity_type="person",
-                    souvenirs__occurred_at__gte=activity_cutoff,
-                ).distinct()
+            # Une seule requête agrégée. La boucle précédente faisait deux
+            # requêtes par entité active, à chaque cycle de consolidation —
+            # toutes les 60 s pendant une conversation — pour un résultat vide
+            # la plupart du temps, la porte de régénération étant à 24 h.
+            #
+            # `annotate` AVANT `filter` est délibéré : contraindre d'abord la
+            # jointure sur les souvenirs par la fenêtre d'activité amputerait
+            # `new_count`, qui compte tout souvenir postérieur à la dernière
+            # génération, qu'il tombe dans la fenêtre ou non.
+            candidates = list(
+                Entity.objects.filter(entity_type="person")
+                .select_related("profile")
+                .annotate(
+                    recent_count=Count(
+                        "souvenirs",
+                        filter=Q(souvenirs__occurred_at__gte=activity_cutoff),
+                        distinct=True,
+                    ),
+                    new_count=Count(
+                        "souvenirs",
+                        filter=Q(souvenirs__id__gt=F("profile__last_souvenir_id")),
+                        distinct=True,
+                    ),
+                )
+                .filter(recent_count__gt=0)
             )
 
             due = []
-            for e in active:
-                profile = PersonProfile.objects.filter(entity=e).first()
+            for e in candidates:
+                # Relation inverse OneToOne : quand elle est absente, l'accès
+                # lève une exception qui hérite d'AttributeError, donc getattr
+                # avec défaut suffit.
+                profile = getattr(e, "profile", None)
                 if profile is None:
                     # New profile — needs at least N souvenirs to bootstrap
-                    count = Souvenir.objects.filter(
-                        entities=e,
-                        occurred_at__gte=activity_cutoff,
-                    ).count()
-                    if count >= PROFILE_MIN_NEW_SOUVENIRS:
-                        due.append((e, None, count))
+                    if e.recent_count >= PROFILE_MIN_NEW_SOUVENIRS:
+                        due.append((e, None, e.recent_count))
                     continue
 
                 if profile.generated_at and profile.generated_at > regen_cutoff:
                     continue  # too recent
 
-                new_count = Souvenir.objects.filter(
-                    entities=e,
-                    id__gt=profile.last_souvenir_id,
-                ).count()
-                if new_count >= PROFILE_MIN_NEW_SOUVENIRS:
-                    due.append((e, profile, new_count))
+                if e.new_count >= PROFILE_MIN_NEW_SOUVENIRS:
+                    due.append((e, profile, e.new_count))
 
             # Highest new-material count first
             due.sort(key=lambda x: -x[2])
