@@ -1,6 +1,7 @@
 """AI quota tracking + limiter.
 
-Every call routed through ``ai.router.AIRouter.complete`` is metered:
+Every call routed through ``ai.router.AIRouter`` (``complete`` as well as
+``complete_with_tools``) is metered:
   - token counts (provider-native when available, char-based fallback)
   - USD cost (pricing table; $0 for local Ollama)
   - attributed to a role (AIRole) and, when set, to a project id
@@ -88,9 +89,20 @@ _usage_ctx: ContextVar[Optional[dict]] = ContextVar(
 
 def set_usage(input_tokens: int, output_tokens: int) -> None:
     """Providers call this right after the API round-trip to hand real
-    token counts to the router. No-op when not running under the router."""
+    token counts to the router. No-op when not running under the router.
+
+    Les compteurs se **cumulent** : une boucle d'outils appelle le provider
+    une fois par tour, et écraser à chaque tour ne facturerait que le dernier
+    — soit une fraction du poste le plus lourd du système. Le routeur remet
+    le contexte à zéro avant chaque appel (``_reset_usage``), donc un appel
+    simple retrouve exactement ses propres chiffres.
+    """
     try:
-        _usage_ctx.set({"in": int(input_tokens), "out": int(output_tokens)})
+        current = _usage_ctx.get() or {}
+        _usage_ctx.set({
+            "in": int(current.get("in", 0)) + int(input_tokens),
+            "out": int(current.get("out", 0)) + int(output_tokens),
+        })
     except Exception as exc:
         degradations.record("ai.quota.set_usage", exc)
 
