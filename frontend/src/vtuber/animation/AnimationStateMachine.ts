@@ -105,6 +105,13 @@ export class AnimationStateMachine {
     return this.currentClip?.clip.duration ?? 0;
   }
 
+  /** Posture d'émotion en cours, telle qu'elle a été RÉSOLUE (un clip
+   * absent de la librairie vaut null) — c'est cette valeur-là, pas celle
+   * demandée, qui alimente l'hystérésis de `decideGesture`. */
+  get idleVariantName(): string | null {
+    return this.idleVariant;
+  }
+
   start(): void {
     if (this.started) return;
     this.started = true;

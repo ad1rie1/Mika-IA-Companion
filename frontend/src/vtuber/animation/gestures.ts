@@ -63,6 +63,19 @@ export const CUE_GESTURE: Record<string, string | null> = {
 
 export const GESTURE_COOLDOWN_S = 8;
 export const DEFAULT_MIN_INTENSITY = 0.6;
+/**
+ * Marge d'hystérésis sur le seuil des postures (idleVariant).
+ *
+ * L'oscillateur PAD du backend est sous-amorti : après une impulsion,
+ * l'intensité repasse plusieurs fois au-dessus puis en dessous de sa
+ * valeur d'équilibre pendant une vingtaine de secondes, et `emotion/sync`
+ * pousse une frame dès qu'elle bouge de 0,04. Un seuil sans marge fait
+ * donc entrer et sortir de la posture à chaque anneau de la décroissance
+ * — et chaque sortie re-tire un idle au hasard avec 0,6 s de fondu, sur
+ * un avatar qui n'a rien dit entre-temps. Une posture déjà tenue ne se
+ * relâche qu'en dessous du seuil d'entrée moins cette marge.
+ */
+export const VARIANT_HYSTERESIS = 0.08;
 /** blend[1] within this ratio of blend[0] = strong ambivalence → the
  * body stays still (stillness reads ambivalent; a clip picks a side). */
 export const AMBIVALENCE_RATIO = 0.85;
@@ -83,6 +96,13 @@ export interface GestureDecisionInput {
    * one every cooldown, forever, at nothing.
    */
   ambient?: boolean;
+  /**
+   * La posture que la machine d'état tient déjà (nom de clip), ou null.
+   * Seule entrée de l'hystérésis : le seuil de SORTIE d'une posture en
+   * place est abaissé de `VARIANT_HYSTERESIS`. La fonction reste pure —
+   * l'état est passé, jamais mémorisé ici.
+   */
+  activeVariant?: string | null;
 }
 
 export type GestureDecision =
@@ -117,7 +137,15 @@ export function decideGesture(input: GestureDecisionInput): GestureDecision {
   if (input.ambient && mapping.kind === "oneshot") {
     return { action: "none", reason: "ambient_drift" };
   }
-  if (input.intensity < (mapping.minIntensity ?? DEFAULT_MIN_INTENSITY)) {
+  const minIntensity = mapping.minIntensity ?? DEFAULT_MIN_INTENSITY;
+  // Seuil d'entrée plein, seuil de sortie abaissé quand la posture
+  // demandée est déjà celle qui tourne : c'est l'absence de marge, pas
+  // la valeur du seuil, qui produit le battement.
+  const threshold =
+    mapping.kind === "idleVariant" && input.activeVariant === mapping.clip
+      ? minIntensity - VARIANT_HYSTERESIS
+      : minIntensity;
+  if (input.intensity < threshold) {
     return { action: "none", reason: "below_threshold" };
   }
   if (
