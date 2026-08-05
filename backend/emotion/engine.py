@@ -18,6 +18,7 @@ from emotion.state import (
     Temperament,
     load_temperament,
 )
+from identity.trust import is_identifiable_person
 from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
@@ -388,8 +389,16 @@ class EmotionEngine:
             return None
 
     async def ensure_person_loaded(self, person_id: str) -> None:
-        """Hydrate a person's mood from DB if they are not currently in RAM."""
-        if person_id in self.person_moods or person_id in ("__global__", "anonymous"):
+        """Hydrate a person's mood from DB if they are not currently in RAM.
+
+        La question « est-ce une vraie personne ? » a un seul domicile,
+        ``identity/trust.py`` : la redire ici l'avait déjà fait diverger
+        (``conscience_mika``, ``""`` et tout le préfixe ``anon_*`` passaient
+        au travers). Un handle éphémère est un uuid frappé quelques secondes
+        plus tôt : il ne peut par construction porter ni relevé ni résumé, et
+        chaque socket anonyme payait deux requêtes garanties vides.
+        """
+        if person_id in self.person_moods or not is_identifiable_person(person_id):
             return
 
         max_age_seconds = self._SNAPSHOT_DECAY_DAYS * 86400
