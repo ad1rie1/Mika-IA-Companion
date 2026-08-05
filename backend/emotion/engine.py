@@ -2,7 +2,7 @@ import asyncio
 import logging
 import random
 import time
-from datetime import date
+from datetime import date, timedelta
 
 from django.conf import settings
 
@@ -305,33 +305,48 @@ class EmotionEngine:
     async def _restore_from_summaries(self, exclude_persons: set[str]) -> int:
         """Seed person moods from EmotionalSummary for persons not already loaded."""
         from asgiref.sync import sync_to_async
-        from datetime import date
-        from django.db.models import Max
         from memory.models import EmotionalSummary
 
         try:
-            latest_rows = await sync_to_async(
+            # Au-delà du seuil, une ligne ne produit plus aucune humeur : la
+            # borne appartient au WHERE, pas à une boucle Python qui aurait
+            # d'abord fait grouper tout l'historique de la table.
+            cutoff = date.today() - timedelta(days=self._SUMMARY_DECAY_DAYS)
+
+            # Une seule requête, servie par l'index (person_id, -period_start) :
+            # les lignes arrivent groupées par personne, la plus récente en
+            # tête, donc la première rencontrée est celle qu'on veut. La version
+            # groupée redemandait ces mêmes colonnes personne par personne —
+            # 1 + N allers-retours sérialisés sur le thread partagé de
+            # sync_to_async, pendant que le lifespan ASGI démarre le reste.
+            rows = await sync_to_async(
                 lambda: list(
                     EmotionalSummary.objects
-                    .filter(period_type="daily")
+                    .filter(period_type="daily", period_start__gt=cutoff)
                     .exclude(person_id__in=exclude_persons)
-                    .values("person_id")
-                    .annotate(latest_date=Max("period_start"))
+                    .order_by("person_id", "-period_start")
+                    .values(
+                        "person_id",
+                        "period_start",
+                        "dominant_emotion",
+                        "dominant_intensity",
+                    )
                 )
             )()
 
-            if not latest_rows:
-                return 0
-
-            today = date.today()
             restored = 0
-            for row in latest_rows:
+            seen: set[str] = set()
+            for row in rows:
                 pid = row["person_id"]
-                age_days = (today - row["latest_date"]).days
-                if age_days >= self._SUMMARY_DECAY_DAYS:
+                if pid in seen:
                     continue
+                seen.add(pid)
 
-                result = await self._mood_from_summary(pid)
+                result = self._faded_mood(
+                    row["period_start"],
+                    row["dominant_emotion"],
+                    row["dominant_intensity"],
+                )
                 if result is None:
                     continue
 
