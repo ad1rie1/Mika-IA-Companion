@@ -258,10 +258,18 @@ class ConscienceEngine:
         from conscience.models import Observation
 
         try:
+            # Les themes produits par l'interpretation n'ont pas de champ
+            # dedie : ils sont fusionnes dans raw_data, seul endroit ou
+            # _memory_maintenance et _promote_stale_to_ruminations vont les
+            # relire. Aucun emetteur d'evenement ne pose de cle "themes",
+            # donc sans cette fusion les deux lectures renvoient toujours [].
+            raw_data = dict(event.data or {})
+            raw_data["themes"] = signal.themes
+
             return await sync_to_async(Observation.objects.create)(
                 source=event.source_module,
                 event_type=event.event_type,
-                raw_data=event.data,
+                raw_data=raw_data,
                 summary=signal.summary,
                 category=signal.category,
                 pertinence=signal.pertinence,
