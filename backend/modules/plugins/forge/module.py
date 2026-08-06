@@ -50,6 +50,8 @@ CONTEXT_TOTAL_BUDGET = 900
 # En dessous, une part ne dit plus rien d'utile : mieux vaut détailler moins
 # de modules et nommer ceux qu'on a laissés de côté.
 CONTEXT_MIN_PART = 120
+# Fenêtre de rappel d'une panne de chargement dans le prompt (15 min).
+BROKEN_NOTICE_TTL_S = 900.0
 
 
 def _ecourter(texte: str, limite: int) -> str:
@@ -96,6 +98,7 @@ class ForgeModule(BaseModule):
         self._tick_task: asyncio.Task | None = None
         self._event_tasks: set[asyncio.Task] = set()
         self._breaker_notified: set[str] = set()
+        self._broken_notice: dict[str, float] = {}
         self._ops_lock: asyncio.Lock = asyncio.Lock()
         # Autant de jetons que de fils : voir _submit().
         self._pool_slots: asyncio.Semaphore = asyncio.Semaphore(POOL_WORKERS)
@@ -929,14 +932,32 @@ class ForgeModule(BaseModule):
             ))
         return fragments
 
+    def _broken_a_signaler(self) -> list[str]:
+        """Les pannes ne sont rappelées que pendant ``BROKEN_NOTICE_TTL_S``.
+
+        Passé ce délai la panne reste un fait du dashboard et de
+        ``forge_list_modules`` ; la répéter à chaque tour la fait payer
+        aussi longtemps que le module n'est pas réparé. Un module réparé
+        puis re-cassé rouvre une fenêtre.
+        """
+        maintenant = time.monotonic()
+        for name in list(self._broken_notice):
+            if name not in self._load_errors:
+                del self._broken_notice[name]
+        return [
+            name for name in sorted(self._load_errors)
+            if maintenant - self._broken_notice.setdefault(name, maintenant)
+            <= BROKEN_NOTICE_TTL_S
+        ]
+
     def get_context(self, person_id: str = "") -> str:
         parts = self._context_fragments()
-        broken = [n for n in self._load_errors]
+        broken = self._broken_a_signaler()
         if broken:
-            parts.append(
-                "modules forgés en panne: " + ", ".join(sorted(broken))
-                + " — tu peux les inspecter avec forge_read_module"
-            )
+            parts.append(_ecourter(
+                "modules forgés en panne: " + ", ".join(broken),
+                CONTEXT_MIN_PART,
+            ) + " — tu peux les inspecter avec forge_read_module")
         # Un compteur seul n'apprend rien au modèle : sans fragment à
         # porter, le bloc ne vaut pas ses tokens (elle a forge_list_modules).
         if not parts:
