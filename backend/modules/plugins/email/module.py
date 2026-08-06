@@ -427,7 +427,7 @@ class EmailModule(BaseModule):
 
         if analysis and analysis.should_reply and analysis.reply_text:
             smtp = entry.get("smtp")
-            if smtp:
+            if smtp and self._may_auto_reply(email_msg):
                 await self._send_reply(smtp, email_msg, analysis, account)
 
         await entry["imap"].mark_as_seen(email_msg.uid)
@@ -612,6 +612,26 @@ class EmailModule(BaseModule):
                 self.logger.info("Stored email memory: %s", mem["type"])
             except Exception:
                 self.logger.exception("Failed to store email memory: %s", mem)
+
+    def _may_auto_reply(self, email_msg) -> bool:
+        """Le triage a-t-il le droit de repondre a ce message ?
+
+        La decision d'envoi vient du modele, qui l'a prise en ayant le corps
+        de l'e-mail dans son contexte : la consigne de prompt qui l'encadre
+        est du meme cote que la donnee dont il faut se mefier. Ce controle-ci
+        n'en depend pas.
+        """
+        from modules.plugins.email.autoreply import loop_risk_reason
+
+        reason = loop_risk_reason(email_msg)
+        if reason:
+            self.logger.info(
+                "Reponse automatique refusee (%s) a %s: %s",
+                reason, email_msg.from_addr, email_msg.subject,
+            )
+            return False
+
+        return True
 
     async def _send_reply(self, smtp, email_msg, analysis, account):
         """Send an email reply via SMTP."""
