@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 import logging
 
-import yaml
 from asgiref.sync import sync_to_async
 from django.http import JsonResponse
 
