@@ -96,7 +96,10 @@ class ProjectForm(forms.ModelForm):
         required=False, label="Modules autorisés",
         choices=_modules_disponibles,
         widget=forms.SelectMultiple(attrs={"size": 8}),
-        help_text="Liste blanche stricte : ne rien sélectionner signifie « aucun outil ».",
+        help_text="Périmètre annoncé au lanceur : son passage est texte seul, "
+                  "il ne les appelle pas lui-même — il peut seulement proposer "
+                  "une action qui les utilise. Ne rien sélectionner signifie "
+                  "« aucun outil ».",
     )
 
     class Meta:
