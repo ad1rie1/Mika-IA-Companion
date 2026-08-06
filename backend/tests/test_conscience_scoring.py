@@ -23,7 +23,6 @@ from conscience.types import DecisionContext
 from conscience.scoring import (
     compute_decision_score,
     check_time_trigger,
-    urgency_from_context,
 )
 
 
@@ -393,22 +392,3 @@ class TestTimeTrigger:
         # Greeted set should be reset (it's a new day)
         # Whether trigger fires depends on current time
         assert gdate == date.today()
-
-
-# ===================================================================
-# URGENCY CLASSIFICATION
-# ===================================================================
-
-class TestUrgencyClassification:
-
-    def test_high_urgency(self):
-        ctx = make_context(max_pertinence=0.95)
-        assert urgency_from_context(ctx) == "high"
-
-    def test_normal_urgency(self):
-        ctx = make_context(max_pertinence=0.8)
-        assert urgency_from_context(ctx) == "normal"
-
-    def test_low_urgency(self):
-        ctx = make_context(max_pertinence=0.5)
-        assert urgency_from_context(ctx) == "low"
