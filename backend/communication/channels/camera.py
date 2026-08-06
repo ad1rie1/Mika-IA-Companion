@@ -55,6 +55,35 @@ MAX_FRAME_BYTES_LEN = 1536 * 1024
 RATE_LIMIT_MAX_FRAMES = 20
 RATE_LIMIT_WINDOW_SECONDS = 10.0
 
+# Plancher d'espacement partagé par *device*, en plus de la fenêtre ci-dessus.
+# Deux trous que celle-ci ne bouche pas, parce qu'elle est portée par
+# l'instance du consumer : dix sockets ouvertes sur le même `device=bureau`
+# donnent dix budgets, et une moyenne n'interdit pas la rafale — ses vingt
+# frames peuvent tenir dans deux cents millisecondes, soit vingt décodages
+# d'image lancés d'un coup dans le pool de threads (CPU pur, donc le GIL les
+# sert en série pendant que la boucle attend). Le plafond moyen reste la
+# fenêtre ; ce plancher n'impose que l'espacement, avec une marge de gigue
+# pour ne pas refuser un device réglé pile sur la cadence nominale.
+MIN_FRAME_INTERVAL_SECONDS = 0.4
+
+# device_id → temps monotone de la dernière frame acceptée pour lui. Au niveau
+# module et non de l'instance : c'est exactement ce qui doit survivre à la
+# fermeture d'une socket, sinon reconnecter à chaque frame contourne le
+# plancher.
+_last_frame_at: dict[str, float] = {}
+
+# Au-delà, on jette les entrées que le plancher ne protège plus : un device qui
+# ne revient jamais laisserait sinon son horodatage pour la vie du processus.
+_FRAME_MAX_TRACKED = 500
+
+
+def _prune_frame_times(now: float) -> None:
+    if len(_last_frame_at) <= _FRAME_MAX_TRACKED:
+        return
+    cutoff = now - MIN_FRAME_INTERVAL_SECONDS
+    for device_id in [d for d, t in _last_frame_at.items() if t < cutoff]:
+        _last_frame_at.pop(device_id, None)
+
 
 class CameraConsumer(AsyncWebsocketConsumer):
     """Consumer WebSocket dédié au flux caméra."""
@@ -140,7 +169,7 @@ class CameraConsumer(AsyncWebsocketConsumer):
             await self._send_error("Frame trop volumineuse (max ~1.5 MB).")
             return
 
-        if self._is_rate_limited():
+        if self._is_device_flooding() or self._is_rate_limited():
             await self.send(json.dumps({
                 "type": "ack", "changed": False, "status": "rate_limited",
             }))
@@ -153,7 +182,7 @@ class CameraConsumer(AsyncWebsocketConsumer):
         if len(bytes_data) > MAX_FRAME_BYTES_LEN:
             return
         # Chemin binaire : aucun ack n'est prévu, un refus n'a rien à répondre.
-        if self._is_rate_limited():
+        if self._is_device_flooding() or self._is_rate_limited():
             return
         frame_b64 = base64.b64encode(bytes_data).decode()
         await self._push_frame(frame_b64, "image/jpeg")
@@ -211,6 +240,26 @@ class CameraConsumer(AsyncWebsocketConsumer):
                 "CameraConsumer: erreur lors de l'enregistrement de la frame (device=%s)",
                 self.device_id,
             )
+        return False
+
+    def _is_device_flooding(self) -> bool:
+        """Plancher d'espacement : borne la cadence par device, sockets confondues.
+
+        Vérifié avant la fenêtre glissante, et sans la consommer : une frame
+        refusée ici n'a rien coûté, elle n'a donc pas à dépenser un jeton du
+        budget de la connexion.
+        """
+        now = time.monotonic()
+        last = _last_frame_at.get(self.device_id)
+        if last is not None and now - last < MIN_FRAME_INTERVAL_SECONDS:
+            # debug et non warning, même raison que la fenêtre glissante.
+            logger.debug(
+                "CameraConsumer: cadence trop rapide (device=%s) — frame ignoree",
+                self.device_id,
+            )
+            return True
+        _prune_frame_times(now)
+        _last_frame_at[self.device_id] = now
         return False
 
     def _is_rate_limited(self) -> bool:
