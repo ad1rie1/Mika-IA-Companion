@@ -168,12 +168,18 @@ export class WebSocketClient {
       this.ws.onmessage = (event) => {
         // Any frame is proof of life, including one we fail to parse.
         this.lastFrameAt = Date.now();
+        // Le `try` ne couvre que le décodage : une exception applicative n'a
+        // rien d'un défaut de transport, et la journaliser comme tel désigne
+        // le mauvais coupable. La diffusion, elle, ne lève pas (cf. `emit`).
+        let data: any;
         try {
-          const data = JSON.parse(event.data);
-          this.emit(data.type, data);
+          data = JSON.parse(event.data);
         } catch (e) {
           console.error("Failed to parse WebSocket message:", e);
+          return;
         }
+        if (!data || typeof data.type !== "string") return;
+        this.emit(data.type, data);
       };
 
       this.ws.onclose = (event) => {
@@ -410,11 +416,27 @@ export class WebSocketClient {
     this.handlers.get(type)!.push(handler);
   }
 
+  /**
+   * Diffuser un frame à ses abonnés, chacun isolé du suivant.
+   *
+   * `emit` ne lève pas, par construction. C'est ce qui le rend appelable
+   * depuis les chemins qui maintiennent la connexion en vie : un handler qui
+   * touche au DOM ou au localStorage (ChatOverlay purge sa file d'attente sur
+   * « disconnected ») transformait sinon une coupure réseau banale en état
+   * hors-ligne définitif, aucun timer n'étant plus armé derrière lui.
+   *
+   * Et sur une réponse, un abonné qui lève ne doit pas emporter les suivants :
+   * l'ordre d'inscription n'est qu'un détail de câblage de main.ts, il ne dit
+   * rien sur qui a le droit de faire taire qui.
+   */
   private emit(type: string, data: any) {
     const handlers = this.handlers.get(type);
-    if (handlers) {
-      for (const handler of handlers) {
+    if (!handlers) return;
+    for (const handler of handlers) {
+      try {
         handler(data);
+      } catch (e) {
+        console.error(`WebSocket handler failed on "${type}":`, e);
       }
     }
   }
