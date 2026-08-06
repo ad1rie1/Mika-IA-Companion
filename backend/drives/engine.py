@@ -31,7 +31,18 @@ logger = logging.getLogger(__name__)
 # REST grows proportionally to "activity density" in the last window.
 _ACTIVITY_WINDOW_SECONDS = 600.0   # 10 min rolling window
 _REST_PRESSURE_PER_EVENT = 0.04    # each act/observation adds this to rest
-_REST_NATURAL_DECAY = 0.0008       # rest tension naturally decays per second
+# Décroissance naturelle de REST, par seconde. Calibrée CONTRE le gate
+# d'entrée du cycle de sommeil (`memory/sleep.py`), qui exige 900 s sans
+# interaction PUIS `rest_tension >= 0.5` : pendant ces 900 s la tension ne
+# fait que baisser, donc ce coefficient borne mécaniquement ce qu'elle peut
+# encore valoir quand le gate s'ouvre. À 0.0008 elle perdait 0.72 sur la
+# fenêtre — une tension pleine retombait à 0.28, le seuil de 0.5 était
+# inatteignable et le cycle de sommeil entier ne s'exécutait jamais (aucun
+# journal, aucun rêve, aucune digestion de ruminations). À 0.0001 la perte
+# tombe à 0.09 sur la fenêtre (~2 h 45 pour vider une tension pleine) et le
+# sommeil redevient la voie principale de récupération, ce que le
+# commentaire de `SLEEP_REST_RECOVERY` affirmait déjà.
+_REST_NATURAL_DECAY = 0.0001
 
 
 class DriveEngine:
