@@ -1026,6 +1026,7 @@ class ConscienceEngine:
 
         Returns True only if something was actually said: the caller commits
         the day's greeting and the decision log from that answer."""
+        from conscience.models import Observation, ScheduledAction
         from modules.manager import module_manager
         from pipeline.context import ConversationContext, gather_context
         from pipeline.perception import Perception
@@ -1112,12 +1113,16 @@ class ConscienceEngine:
                 )
                 return False
 
-            # Mark observations as acted
-            for obs in ctx.pending_observations:
-                obs.status = "acted"
-                obs.action_response = output.text[:200]
-                await sync_to_async(obs.save)(
-                    update_fields=["status", "action_response"]
+            # Mark observations as acted — un seul lot, la reponse etant la
+            # meme pour toutes et le statut un scalaire.
+            if ctx.pending_observations:
+                for obs in ctx.pending_observations:
+                    obs.status = "acted"
+                    obs.action_response = output.text[:200]
+                await sync_to_async(Observation.objects.bulk_update)(
+                    ctx.pending_observations,
+                    ["status", "action_response"],
+                    batch_size=50,
                 )
 
             # Mark scheduled actions as executed
@@ -1127,9 +1132,11 @@ class ConscienceEngine:
                 for action in ctx.scheduled_actions:
                     action.status = "executed"
                     action.executed_at = now_tz
-                    await sync_to_async(action.save)(
-                        update_fields=["status", "executed_at"]
-                    )
+                await sync_to_async(ScheduledAction.objects.bulk_update)(
+                    ctx.scheduled_actions,
+                    ["status", "executed_at"],
+                    batch_size=50,
+                )
                 logger.info(
                     "Executed %d scheduled action(s)", len(ctx.scheduled_actions)
                 )
@@ -1159,14 +1166,17 @@ class ConscienceEngine:
         except Exception:
             logger.exception("Conscience act failed")
             # Mark observations as failed so they don't retry indefinitely
-            for obs in ctx.pending_observations:
-                try:
+            if ctx.pending_observations:
+                for obs in ctx.pending_observations:
                     obs.status = "failed"
-                    await sync_to_async(obs.save)(update_fields=["status"])
+                try:
+                    await sync_to_async(Observation.objects.bulk_update)(
+                        ctx.pending_observations, ["status"], batch_size=50,
+                    )
                 except Exception:
                     logger.warning(
-                        "Could not mark observation #%s as failed",
-                        getattr(obs, "pk", "?"), exc_info=True,
+                        "Could not mark %d observation(s) as failed",
+                        len(ctx.pending_observations), exc_info=True,
                     )
             return False
 
