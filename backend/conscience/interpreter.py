@@ -48,9 +48,6 @@ REGLES:
 """
 # fmt: on
 
-# Heuristic fast-path for common events (no LLM call needed)
-HEURISTIC_EVENTS: dict[str, callable] = {}
-
 
 def _extract_themes_from_text(text: str) -> list[str]:
     """Extract basic themes from message text via keyword matching.
@@ -194,7 +191,8 @@ def _heuristic_forge_event(data: dict) -> InterpretedSignal:
 # whose importance cannot be read off a keyword table, and there are few
 # enough of them that the call is worth it.
 
-HEURISTIC_EVENTS = {
+#: Heuristic fast-path for common events (no LLM call needed).
+HEURISTIC_EVENTS: dict[str, callable] = {
     "chat.message": _heuristic_chat_message,
     "chat.connect": _heuristic_chat_connect,
     "chat.disconnect": _heuristic_chat_disconnect,
