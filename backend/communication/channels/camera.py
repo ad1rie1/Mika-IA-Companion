@@ -92,24 +92,24 @@ class CameraConsumer(AsyncWebsocketConsumer):
             await self._send_error("Frame trop volumineuse (max ~1.5 MB).")
             return
 
-        changed = self._push_frame(frame_b64, mime)
+        changed = await self._push_frame(frame_b64, mime)
         await self.send(json.dumps({"type": "ack", "changed": changed}))
 
     async def _handle_binary(self, bytes_data: bytes) -> None:
         if len(bytes_data) > MAX_FRAME_BYTES_LEN:
             return
         frame_b64 = base64.b64encode(bytes_data).decode()
-        self._push_frame(frame_b64, "image/jpeg")
+        await self._push_frame(frame_b64, "image/jpeg")
 
     # ── Helpers ───────────────────────────────────────────────────
 
-    def _push_frame(self, data: str, mime: str) -> bool:
+    async def _push_frame(self, data: str, mime: str) -> bool:
         """Transmet la frame au CameraModule. Retourne True si la frame a changé."""
         try:
             from modules.manager import module_manager
             cam = module_manager.get_module("camera")
             if cam is not None:
-                return cam.register_frame(self.device_id, self.label, data, mime)
+                return await cam.register_frame(self.device_id, self.label, data, mime)
         except Exception:
             logger.exception(
                 "CameraConsumer: erreur lors de l'enregistrement de la frame (device=%s)",

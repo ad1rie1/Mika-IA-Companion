@@ -98,15 +98,23 @@ class CameraModule(BaseModule):
 
     # ── Public API (appelée par CameraConsumer) ────────────────────
 
-    def register_frame(
+    async def register_frame(
         self,
         device_id: str,
         label: str,
         data: str,
         mime: str = "image/jpeg",
     ) -> bool:
-        """Enregistre une frame. Retourne True si la frame a changé."""
-        new_hash = _perceptual_hash(data)
+        """Enregistre une frame. Retourne True si la frame a changé.
+
+        Le hash perceptuel décode l'image : il part dans un thread, sinon il
+        s'exécute sur l'unique boucle d'événements du processus, appelé depuis
+        `receive()` du socket caméra. Même arbitrage que les écritures disque de
+        pipeline/media.py — quelques dizaines de millisecondes par frame gèlent
+        tout le trafic WS (donc le keepalive), la TurnQueue, l'ordonnancement
+        des `sync_to_async` et les six boucles de fond.
+        """
+        new_hash = await asyncio.to_thread(_perceptual_hash, data)
 
         existing = self._devices.get(device_id)
         if existing:
