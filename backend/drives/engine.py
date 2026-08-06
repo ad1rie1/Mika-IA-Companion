@@ -187,20 +187,43 @@ class DriveEngine:
             if state.tension < params.satisfy_threshold:
                 continue
 
-            # How much "above threshold" are we? 0..1
-            above = (state.tension - params.satisfy_threshold) / (
-                1.0 - params.satisfy_threshold
-            )
-            contribution = params.weight * above
-
             if kind is DriveKind.REST:
                 # Fatigue pulls away from action — negative contribution.
-                contribution = -contribution
+                contribution = self.rest_penalty()
+            else:
+                # How much "above threshold" are we? 0..1
+                above = (state.tension - params.satisfy_threshold) / (
+                    1.0 - params.satisfy_threshold
+                )
+                contribution = params.weight * above
+
             bonus += contribution
             parts.append(f"{kind.value}:{state.tension:.2f}")
 
         label = ",".join(parts) if parts else ""
         return bonus, label
+
+    def rest_penalty(self) -> float:
+        """Ce que la fatigue REST retire au score de conscience — toujours ≤ 0.
+
+        Exposé à part de la somme signée que renvoie
+        `conscience_contribution()` parce que le facteur 9 du scoring
+        plafonne à +0.5 : les trois pulsions positives montent ensemble
+        jusqu'à +0.90, donc une fois soustraite *avant* ce plafond la
+        fatigue disparaissait entièrement — +0.90 et +0.70 étaient tous
+        deux ramenés à exactement +0.50, et REST à 0.0 valait REST à 1.0.
+        Le scoring l'applique donc après avoir plafonné les positives.
+        """
+        self.update()
+        params = DEFAULT_PARAMS[DriveKind.REST]
+        tension = self.states[DriveKind.REST].tension
+        if tension < params.satisfy_threshold:
+            return 0.0
+
+        above = (tension - params.satisfy_threshold) / (
+            1.0 - params.satisfy_threshold
+        )
+        return -(params.weight * above)
 
     # ── Prompt context ────────────────────────────────────────────
 
