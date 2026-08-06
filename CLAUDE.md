@@ -558,10 +558,12 @@ A `.vrm` file at [frontend/public/models/default.vrm](frontend/public/models/def
 
 Provider credentials are **configured in the dashboard**, not in `.env`. `/gestion/` → Configuration → *IA · Claude*:
 
-1. **OAuth Token** (recommended): `ai.claude.oauth_token`. Exported as `CLAUDE_CODE_OAUTH_TOKEN` for the Claude Agent SDK at call time.
+1. **OAuth Token** (recommended): `ai.claude.oauth_token`. Handed to the Claude Agent SDK as `CLAUDE_CODE_OAUTH_TOKEN` at call time.
 2. **API Key**: `ai.claude.api_key` (requires a paid Anthropic account).
 
 OAuth tried first, API key as fallback. OAuth tokens start with `sk-ant-oat01-`; API keys with `sk-ant-api`. Values are encrypted at rest (`configs/secrets.py`) and redacted in every read path.
+
+**The credential never touches `os.environ`.** `claude_agent_sdk` reads it only from the environment it hands its CLI subprocess, built as `{**os.environ, **options.env, …}` — so `ClaudeProvider` carries it in `ClaudeAgentOptions(env=…)` and *pops* both variables from the process environment at `__init__`. A variable set there is global and outlives the instance, so the credential-change eviction (`_PROVIDER_CONFIG_PREFIXES`) did not reach it: after a rotation OAuth → API key, the revoked `CLAUDE_CODE_OAUTH_TOKEN` stayed and kept priority CLI-side. Every tool-enabled turn 401'd while `test()` — which uses the freshly-built `AsyncAnthropic` client — answered `{"ok": true}` and the config page showed green. The pop also means a secret deleted from the database stops existing in clear in the process and in every subprocess it spawns.
 
 A credential alone is not enough: declare a model under *IA · Modèles* and map the roles under *IA · Rôles*, or every turn answers "Mon IA n'a pas de modèle associé".
 
