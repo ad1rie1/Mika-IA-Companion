@@ -41,4 +41,17 @@ CONFIG_SCHEMA = [
             ),
         ),
     ),
+    ConfigItem(
+        key="email.max_per_tick", type="int", section="module_email",
+        group="Relevé", label="Messages traités par tour et par compte",
+        default=15, min=1, max=500, hot_reload=True,
+        description=(
+            "Le reste est repris au tour suivant. Un message neuf coûte deux "
+            "appels LLM en série (triage puis interprétation par la "
+            "conscience) : au-delà d'une quinzaine, le tour dépasse son délai "
+            "maximum de 180 s. Pendant la synchro initiale aucun appel LLM "
+            "n'a lieu, donc une valeur élevée y est sans risque — la monter "
+            "le temps d'importer une grosse boîte, puis la redescendre."
+        ),
+    ),
 ]
