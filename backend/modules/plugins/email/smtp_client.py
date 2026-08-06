@@ -4,6 +4,8 @@ from email.mime.text import MIMEText
 
 import aiosmtplib
 
+from configs import secrets
+
 logger = logging.getLogger(__name__)
 
 
@@ -18,7 +20,10 @@ class SMTPClient:
 
     @classmethod
     def from_account(cls, account) -> "SMTPClient":
-        return cls(account.smtp_host, account.smtp_port, account.smtp_user, account.smtp_password)
+        # Même règle que côté IMAP : déchiffrement au point d'usage, tolérant
+        # aux lignes stockées en clair avant le chiffrement.
+        password = secrets.decrypt(account.smtp_password) if account.smtp_password else ""
+        return cls(account.smtp_host, account.smtp_port, account.smtp_user, password)
 
     async def send_reply(
         self,

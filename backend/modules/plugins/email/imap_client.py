@@ -5,6 +5,8 @@ from email.parser import BytesParser
 
 from aioimaplib import IMAP4_SSL
 
+from configs import secrets
+
 logger = logging.getLogger(__name__)
 
 
@@ -36,7 +38,11 @@ class IMAPClient:
 
     @classmethod
     def from_account(cls, account) -> "IMAPClient":
-        return cls(account.imap_host, account.imap_port, account.imap_user, account.imap_password)
+        # Le mot de passe est chiffré au repos, comme tout champ ``sensitive``
+        # du registre de configuration. ``decrypt`` rend la valeur telle quelle
+        # si la ligne est antérieure au chiffrement.
+        password = secrets.decrypt(account.imap_password) if account.imap_password else ""
+        return cls(account.imap_host, account.imap_port, account.imap_user, password)
 
     async def connect(self):
         self._client = IMAP4_SSL(host=self.host, port=self.port)
