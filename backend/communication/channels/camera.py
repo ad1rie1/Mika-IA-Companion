@@ -124,6 +124,27 @@ class CameraConsumer(AsyncWebsocketConsumer):
             await self.close(code=4401)
             return
 
+        # Le module caméra est opt-in (Configuration → Modules · Caméra).
+        # Éteint, une frame poussée ici n'irait nulle part et le device
+        # recevrait un ack indiscernable d'une image inchangée : le dire une
+        # fois à la connexion vaut mieux qu'un silence par frame. Vérifié
+        # après l'admission : un appelant non admis n'a pas à apprendre dans
+        # quel état est le module.
+        if self._camera_module() is None:
+            logger.warning(
+                "CameraConsumer: connexion refusée — module caméra désactivé (device=%s)",
+                self.device_id,
+            )
+            # Même garde que ci-dessus : une frame peut arriver entre l'accept
+            # et le close, et receive() se sert de device_id pour la jeter.
+            self.device_id = ""
+            await self.accept()
+            await self._send_error(
+                "Module caméra désactivé (Configuration → Modules · Caméra)."
+            )
+            await self.close(code=4003)
+            return
+
         await self.accept()
         logger.info(
             "CameraConsumer: device='%s' label='%s' connecté",
@@ -228,13 +249,27 @@ class CameraConsumer(AsyncWebsocketConsumer):
 
     # ── Helpers ───────────────────────────────────────────────────
 
-    async def _push_frame(self, data: str, mime: str) -> bool:
-        """Transmet la frame au CameraModule. Retourne True si la frame a changé."""
+    @staticmethod
+    def _camera_module():
+        """Le CameraModule s'il est actif, None sinon (module éteint ou absent).
+
+        Lecture en RAM du registre des modules : aucun accès ORM, donc
+        appelable depuis la coroutine de connexion sans ``sync_to_async``.
+        """
         try:
             from modules.manager import module_manager
-            cam = module_manager.get_module("camera")
-            if cam is not None:
-                return await cam.register_frame(self.device_id, self.label, data, mime)
+            return module_manager.get_module("camera")
+        except Exception:
+            logger.exception("CameraConsumer: accès au module caméra impossible")
+            return None
+
+    async def _push_frame(self, data: str, mime: str) -> bool:
+        """Transmet la frame au CameraModule. Retourne True si la frame a changé."""
+        cam = self._camera_module()
+        if cam is None:
+            return False
+        try:
+            return await cam.register_frame(self.device_id, self.label, data, mime)
         except Exception:
             logger.exception(
                 "CameraConsumer: erreur lors de l'enregistrement de la frame (device=%s)",
