@@ -191,6 +191,22 @@ class EmotionSnapshot(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            # The most swept table of the engine: one row per reply, plus one
+            # per person at every shutdown, kept for two days.
+            #
+            # "The latest reading for this person" is the shape of nearly
+            # every read — ensure_person_loaded on the conversation hot path,
+            # the consolidator's per-person daily aggregation, the global
+            # timeline of the dashboard. The sort is part of the question,
+            # hence the composite rather than a bare db_index on person_id.
+            models.Index(fields=["person_id", "-created_at"]),
+            # Date alone covers the hourly-ish purge (created_at__lt=cutoff)
+            # and the unfiltered listings, which person_id cannot serve as a
+            # leading column. It also backs Meta.ordering, which applies even
+            # when the caller does not sort.
+            models.Index(fields=["-created_at"]),
+        ]
 
     def __str__(self):
         return (
