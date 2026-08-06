@@ -704,6 +704,17 @@ class EmailModule(BaseModule):
                 "isError": True,
             }
 
+        if email.direction == Email.Direction.INBOUND and not email.is_read:
+            # Lire un message, c'est l'avoir lu : l'invite ne doit pas
+            # continuer à l'annoncer comme en attente. Le compteur RAM est
+            # décrémenté dans la foulée, sinon elle le reverrait dans son
+            # contexte jusqu'au relevé suivant.
+            email.is_read = True
+            await sync_to_async(email.save)(update_fields=["is_read"])
+            nom = email.account.name
+            if nom in self._unread_counts:
+                self._unread_counts[nom] = max(0, self._unread_counts[nom] - 1)
+
         text = (
             f"Account: {email.account.name}\n"
             f"From: {email.from_address}\n"
