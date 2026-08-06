@@ -6,8 +6,9 @@ Design:
   - This adapter maps those field names 1:1 to ``EmailAccount`` columns.
   - ``row_id`` surfaced to the UI is the model's integer PK stringified —
     we don't need a UUID since the adapter owns the lookup.
-  - Passwords: redacted in read path; new value (non-empty) overwrites;
-    empty input preserves existing (standard secret semantics).
+  - Passwords: encrypted at rest via ``configs.secrets``; redacted in read
+    path; new value (non-empty) overwrites; empty input preserves existing
+    (standard secret semantics).
   - ``is_active`` maps to ``enabled`` on the wire.
 
 Registration happens once at import time (imported from the schema).
@@ -47,14 +48,16 @@ class EmailAccountBackend:
 
     def _serialize(self, obj, *, decrypt_secrets: bool):
         payload = {f: getattr(obj, f) for f in _FIELDS}
-        # Secrets: plain text at rest on this model today; we still
-        # present them redacted so the UI never echoes them.
+        # Secrets : chiffrés au repos comme dans le backend générique, donc
+        # déchiffrés ici avant d'être rendus — et rédigés par défaut pour que
+        # l'UI ne les réémette jamais.
         for f in _SECRETS:
             raw = payload.get(f) or ""
+            clair = secrets.decrypt(raw) if raw else ""
             if decrypt_secrets:
-                payload[f] = raw
+                payload[f] = clair
             else:
-                payload[f] = secrets.redact(raw)
+                payload[f] = secrets.redact(clair)
         return {
             "row_id": str(obj.pk),
             "payload": payload,
@@ -76,7 +79,10 @@ class EmailAccountBackend:
                 # secret semantics). Replace only when a new value is typed.
                 if incoming in (None, ""):
                     continue
-                setattr(obj, key, str(incoming))
+                # Chiffré au repos, comme tout champ sensible du registre
+                # (cf. configs/backends.py::_clean_payload) : la redaction en
+                # lecture ne protège que l'affichage, pas data/vtuber.db.
+                setattr(obj, key, secrets.encrypt(str(incoming)))
                 continue
             if incoming is None:
                 continue

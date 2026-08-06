@@ -118,6 +118,7 @@ class EmailModule(BaseModule):
         """If no accounts in DB and env vars are set, create one automatically."""
         from asgiref.sync import sync_to_async
 
+        from configs import secrets
         from modules.plugins.email.models import EmailAccount
 
         count = await sync_to_async(EmailAccount.objects.count)()
@@ -129,17 +130,22 @@ class EmailModule(BaseModule):
             return
 
         self.logger.info("Migrating email account from env vars")
+        # Même stockage que via le formulaire de configuration : chiffré au
+        # repos. Un mot de passe vide reste vide (chiffrer "" donnerait un
+        # jeton non vide, donc un secret là où il n'y en a pas).
+        imap_password = getattr(settings, "IMAP_PASSWORD", "") or ""
+        smtp_password = getattr(settings, "SMTP_PASSWORD", "") or ""
         await sync_to_async(EmailAccount.objects.create)(
             name="Default",
             email_address=getattr(settings, "IMAP_USER", ""),
             imap_host=imap_host,
             imap_port=getattr(settings, "IMAP_PORT", 993),
             imap_user=getattr(settings, "IMAP_USER", ""),
-            imap_password=getattr(settings, "IMAP_PASSWORD", ""),
+            imap_password=secrets.encrypt(imap_password) if imap_password else "",
             smtp_host=getattr(settings, "SMTP_HOST", ""),
             smtp_port=getattr(settings, "SMTP_PORT", 587),
             smtp_user=getattr(settings, "SMTP_USER", ""),
-            smtp_password=getattr(settings, "SMTP_PASSWORD", ""),
+            smtp_password=secrets.encrypt(smtp_password) if smtp_password else "",
         )
 
     # ── Cron ──────────────────────────────────────────────────────
