@@ -19,6 +19,11 @@ Trois questions distinctes, donc trois groupes :
   et visible dans l'invite même quand il n'a pas le droit d'ouvrir un tour.
 - **Regard actif** — la fréquence maximale de l'outil, que seul « pas deux
   analyses en parallèle » bornait jusqu'ici.
+- **Accès** — qui a le droit de pousser des frames. Ce que la socket injecte
+  n'est pas anonyme : la description produite par le modèle vision entre dans
+  ``--- CONTEXTE MODULES ---`` à chaque tour pendant dix minutes, et un
+  changement notable ouvre un tour complet. Un device n'a pas de session
+  Django, d'où un jeton plutôt que la session du consumer principal.
 """
 from __future__ import annotations
 
@@ -30,7 +35,23 @@ CONFIG_SCHEMA = [
         description=(
             "Perception visuelle : ce que Mika regarde d'elle-même, à quelle "
             "cadence, et ce qui a le droit de l'interrompre. Les devices se "
-            "connectent sur ws/camera?device=<id>&label=<nom>."
+            "connectent sur ws/camera?device=<id>&label=<nom>&token=<jeton>."
+        ),
+    ),
+
+    # ── Accès ──────────────────────────────────────────────────────────
+    ConfigItem(
+        key="camera.device_token", type="secret", section="module_camera",
+        group="Accès", label="Jeton des devices caméra",
+        default="", sensitive=True, hot_reload=True,
+        description=(
+            "Comparé au paramètre token= de l'URL de connexion. Une frame "
+            "devient du texte réinjecté dans l'invite système à chaque tour "
+            "pendant 10 min, et un changement notable ouvre un tour complet : "
+            "la socket dépense donc des tokens et écrit dans le prompt. Vide, "
+            "seule une session Django authentifiée est admise — et si "
+            "CONSUMER_REQUIRE_AUTH est désactivé, la socket reste ouverte à "
+            "tous, comme le consumer principal."
         ),
     ),
 
