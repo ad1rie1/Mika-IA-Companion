@@ -13,6 +13,7 @@ frontend channel.
 from __future__ import annotations
 
 import logging
+import time
 
 from telegram import Update
 from telegram.ext import (
@@ -28,6 +29,48 @@ from pipeline.voice import VoiceSink
 from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
+
+# Mêmes bornes que le consumer web (``communication/channels/web_frontend.py``),
+# volontairement : c'est le même coût de l'autre côté. La différence est la
+# clé — le web compte par *connexion*, ici il n'y en a pas, alors on compte
+# par compte Telegram.
+RATE_LIMIT_MAX_MESSAGES = 20
+RATE_LIMIT_WINDOW_SECONDS = 10.0
+
+# Au-delà, on oublie les expéditeurs dont la fenêtre est vide. Le compteur est
+# indexé par compte, et un compte n'a aucun coût à créer : sans purge, un flot
+# d'inconnus ferait grossir le dictionnaire pour la durée du processus.
+_RATE_MAX_TRACKED = 500
+
+# person_id -> horodatages (monotones) des messages reçus dans la fenêtre.
+_msg_timestamps: dict[str, list[float]] = {}
+
+
+def _is_rate_limited(person_id: str) -> bool:
+    """Fenêtre glissante par expéditeur.
+
+    Le chemin Telegram n'avait aucune borne alors que le chemin web en a
+    trois, et c'est celui des deux qu'un tiers peut atteindre sans rien
+    connaître de l'installation : chaque message reçu déclenche un tour de
+    pipeline complet.
+    """
+    now = time.monotonic()
+    window_start = now - RATE_LIMIT_WINDOW_SECONDS
+    stamps = [t for t in _msg_timestamps.get(person_id, ()) if t >= window_start]
+    _msg_timestamps[person_id] = stamps
+    if len(stamps) >= RATE_LIMIT_MAX_MESSAGES:
+        return True
+    stamps.append(now)
+    _prune_rate_window(window_start)
+    return False
+
+
+def _prune_rate_window(window_start: float) -> None:
+    if len(_msg_timestamps) <= _RATE_MAX_TRACKED:
+        return
+    for person_id, stamps in list(_msg_timestamps.items()):
+        if not stamps or stamps[-1] < window_start:
+            _msg_timestamps.pop(person_id, None)
 
 
 def _allowed_senders() -> set[str]:
@@ -135,8 +178,7 @@ class TelegramChannel:
     ):
         if not update.message:
             return
-        if not self._is_authorized(update.message):
-            await self._refuse(update.message)
+        if not await self._accepts(update.message):
             return
         await update.message.reply_text(personality.greeting)
 
@@ -166,6 +208,27 @@ class TelegramChannel:
         user_id = str(getattr(getattr(message, "from_user", None), "id", "") or "")
         chat_id = str(getattr(message, "chat_id", "") or "")
         return user_id in allowed or chat_id in allowed
+
+    async def _accepts(self, message) -> bool:
+        """Les deux bornes d'entrée du canal, dans cet ordre.
+
+        Le débit passe avant l'autorisation pour que le refus poli ne
+        devienne pas lui-même un écho automatique à un flot de messages :
+        au-delà de la fenêtre, on ne répond plus rien du tout.
+        """
+        person_id = f"tg_{getattr(getattr(message, 'from_user', None), 'id', '')}"
+        if _is_rate_limited(person_id):
+            logger.warning(
+                "Débit Telegram dépassé pour %s — message ignoré", person_id,
+            )
+            return False
+        if not self._is_authorized(message):
+            logger.info(
+                "Message Telegram refusé: %s hors liste blanche", person_id,
+            )
+            await self._refuse(message)
+            return False
+        return True
 
     async def _refuse(self, message) -> None:
         """Refuser à voix haute, avant d'avoir rien enregistré.
@@ -238,8 +301,7 @@ class TelegramChannel:
         if not update.message or not update.message.text:
             return
 
-        if not self._is_authorized(update.message):
-            await self._refuse(update.message)
+        if not await self._accepts(update.message):
             return
 
         person_id, is_public = await self._register_interlocutor(update.message)
@@ -273,8 +335,7 @@ class TelegramChannel:
         if not message:
             return
 
-        if not self._is_authorized(message):
-            await self._refuse(message)
+        if not await self._accepts(message):
             return
 
         person_id, is_public = await self._register_interlocutor(message)
