@@ -406,10 +406,22 @@ class CameraModule(BaseModule):
             "Analyse cette image."
         )
 
+        # VISION_CAPTION, et pas SIGNAL_INTERPRETATION : ce dernier est le rôle
+        # que la Conscience mappe pour interpréter du *texte* d'événement, donc
+        # en pratique le modèle le moins cher déclaré, typiquement aveugle. Or
+        # un modèle sans capacité vision n'échoue pas — Ollama ignore purement
+        # et simplement le champ `images` — il lit l'invite système, l'ancienne
+        # observation injectée dans `previous`, et rend un JSON parfaitement
+        # formé décrivant une scène qu'il n'a jamais vue. `_parse_observation`
+        # l'accepte, get_context() la porte dans le prompt de chaque tour et un
+        # `notable` déclenche un tour de pipeline entier, sans une trace
+        # d'erreur nulle part. VISION_CAPTION est le rôle que l'opérateur mappe
+        # déjà sur un modèle multimodal, et le seul dont l'absence se voit
+        # (UnconfiguredRoleError) au lieu de se deviner.
         raw = await ai_client.complete(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            role=AIRole.SIGNAL_INTERPRETATION,
+            role=AIRole.VISION_CAPTION,
             attachments=[att],
         )
 
