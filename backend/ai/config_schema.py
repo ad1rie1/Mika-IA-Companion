@@ -101,6 +101,22 @@ CONFIG_SCHEMA = [
             "219 s, soit bien au-delà du timeout, et le tour échoue toujours."
         ),
     ),
+    ConfigItem(
+        key="ai.ollama.max_concurrent_calls", type="int", section="ai_providers",
+        group="Ollama", label="Appels simultanés autorisés",
+        default=1, min=1, max=8, restart_required=True,
+        hint=(
+            "Un serveur local n'a qu'un seul emplacement d'exécution : deux "
+            "appels n'y tournent pas en parallèle, ils font la queue, et ce "
+            "temps de queue est compté dans le timeout de chacun. Les boucles "
+            "de fond (conscience, consolidateur, sommeil, projets, cron des "
+            "modules, voix intérieure) appellent le modèle sur leur propre "
+            "cadence sans passer par la file des tours : garder 1 pour qu'un "
+            "tour de conversation n'attende pas derrière deux générations de "
+            "fond. À monter seulement si le serveur sert plusieurs requêtes "
+            "de front."
+        ),
+    ),
 
     # Ollama Cloud — même protocole, autre machine, autres identifiants.
     # Provider distinct plutôt que clé greffée sur le local : les deux se
