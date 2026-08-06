@@ -55,6 +55,8 @@ NOTIFY_COOLDOWN_S = 300
 IDLE_PAUSE_S = 900
 # Délai minimum entre deux regards actifs (camera_see) sur un même device (s)
 SEE_MIN_INTERVAL_S = 10
+# Délai maximum d'un appel vision, au-delà duquel l'analyse est abandonnée (s)
+VISION_TIMEOUT_S = 60
 # Âge max d'une observation pour qu'elle soit injectée dans le contexte (secondes)
 MAX_OBSERVATION_AGE = 600  # 10 min
 # Âge max d'une frame pour déclencher une analyse (secondes)
@@ -112,6 +114,7 @@ class CameraSettings:
     notify_enabled: bool = True
     notify_cooldown: int = NOTIFY_COOLDOWN_S
     see_min_interval: int = SEE_MIN_INTERVAL_S
+    vision_timeout: int = VISION_TIMEOUT_S
 
 
 class CameraModule(BaseModule):
@@ -171,6 +174,7 @@ class CameraModule(BaseModule):
             notify_enabled=bool(lire("camera.notify_enabled", True)),
             notify_cooldown=int(lire("camera.notify_cooldown_s", NOTIFY_COOLDOWN_S)),
             see_min_interval=int(lire("camera.see_min_interval_s", SEE_MIN_INTERVAL_S)),
+            vision_timeout=int(lire("camera.vision_timeout_seconds", VISION_TIMEOUT_S)),
         )
 
     # ── Public API (appelée par CameraConsumer) ────────────────────
@@ -302,7 +306,7 @@ class CameraModule(BaseModule):
         frame_mime = state.frame_mime
 
         try:
-            obs = await self._run_vision(state, frame_data, frame_mime)
+            obs = await self._run_vision(state, frame_data, frame_mime, conf)
             state.observation = obs.description
             state.observation_ts = time.time()
             state.notable_reason = obs.reason if obs.notable else ""
@@ -320,6 +324,14 @@ class CameraModule(BaseModule):
             if obs.notable:
                 await self._maybe_notify(state, obs, conf)
 
+        except asyncio.TimeoutError:
+            # Marquer la tentative : sans ça, `worker_cron` relance une analyse
+            # au tick suivant (10s) et le fournisseur reste occupé en permanence
+            # par des appels condamnés à expirer.
+            state.last_analysis_ts = time.time()
+            self.logger.warning(
+                "Analyse vision abandonnée (délai dépassé) pour device %s", device_id
+            )
         except Exception:
             self.logger.exception("Analyse vision échouée pour device %s", device_id)
         finally:
@@ -377,6 +389,7 @@ class CameraModule(BaseModule):
         state: DeviceState,
         frame_data: str,   # FIX #6 : snapshot passé explicitement, pas lu depuis state
         frame_mime: str,
+        conf: CameraSettings,
     ) -> CameraObservation:
         from ai.client import ai_client
         from ai.router import AIRole
@@ -418,11 +431,19 @@ class CameraModule(BaseModule):
         # d'erreur nulle part. VISION_CAPTION est le rôle que l'opérateur mappe
         # déjà sur un modèle multimodal, et le seul dont l'absence se voit
         # (UnconfiguredRoleError) au lieu de se deviner.
-        raw = await ai_client.complete(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            role=AIRole.VISION_CAPTION,
-            attachments=[att],
+        #
+        # Ni AIRouter.complete() ni les providers ne posent de délai sur la
+        # génération : sans ce wait_for, un fournisseur qui ne rend jamais la
+        # main laisse `analysis_pending` à True pour la durée du processus, et
+        # le device n'est plus jamais analysé ni interrogeable.
+        raw = await asyncio.wait_for(
+            ai_client.complete(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                role=AIRole.VISION_CAPTION,
+                attachments=[att],
+            ),
+            timeout=conf.vision_timeout,
         )
 
         return self._parse_observation(raw)
@@ -555,7 +576,13 @@ class CameraModule(BaseModule):
         frame_mime = state.frame_mime
 
         try:
-            obs = await self._run_vision(state, frame_data, frame_mime)
+            obs = await self._run_vision(state, frame_data, frame_mime, conf)
+        except asyncio.TimeoutError:
+            state.last_analysis_ts = time.time()
+            self.logger.warning(
+                "camera_see : délai dépassé sur le device %s", state.device_id
+            )
+            return {"error": f"L'analyse de '{state.label}' a pris trop de temps."}
         finally:
             state.analysis_pending = False
 
