@@ -88,27 +88,35 @@ async function init() {
   // work across sessions on the web.
   const identity = new IdentityService();
 
-  // Try loading VRM model
-  try {
-    const vrm = await vtuberModel.load("/models/default.vrm");
-    emotionController.setVRM(vrm);
-    lipSyncController.setVRM(vrm);
-    const root = vtuberModel.getRoot();
-    if (root) cameraController.setFollowTarget(root);
-    // Starts animating synchronously on the rest pose, then streams the
-    // Mixamo clips in — not awaited so the app boots without waiting for
-    // FBX downloads.
-    void animationSystem
-      .init(vrm, { root })
-      .catch((e) => console.warn("AnimationSystem init failed:", e));
-    console.log("VTuber model ready");
-  } catch (e) {
-    console.warn(
-      "No VRM model found at /models/default.vrm - running without model.",
-      "Place a .vrm file in frontend/public/models/default.vrm"
-    );
-    createPlaceholder(sceneManager);
-  }
+  // Try loading VRM model — deliberately NOT awaited, for the same reason
+  // the Mixamo clips aren't: it's the heaviest asset of the two (tens of
+  // MB to download AND parse), and nothing downstream of it depends on it.
+  // Awaiting here kept the page blank — no login form, no chat, no socket,
+  // so no history catch-up either — for the whole download. Every consumer
+  // already handles "not loaded yet", so the avatar simply shows up when
+  // it's ready.
+  void vtuberModel
+    .load("/models/default.vrm")
+    .then((vrm) => {
+      emotionController.setVRM(vrm);
+      lipSyncController.setVRM(vrm);
+      const root = vtuberModel.getRoot();
+      if (root) cameraController.setFollowTarget(root);
+      // Starts animating synchronously on the rest pose, then streams the
+      // Mixamo clips in — not awaited so the app boots without waiting for
+      // FBX downloads.
+      void animationSystem
+        .init(vrm, { root })
+        .catch((e) => console.warn("AnimationSystem init failed:", e));
+      console.log("VTuber model ready");
+    })
+    .catch(() => {
+      console.warn(
+        "No VRM model found at /models/default.vrm - running without model.",
+        "Place a .vrm file in frontend/public/models/default.vrm"
+      );
+      createPlaceholder(sceneManager);
+    });
 
   // TTS with lip-sync + body-animation integration
   const tts = new TTSService({
@@ -340,7 +348,11 @@ async function init() {
   new AnimationDebugger({
     system: animationSystem,
     scene: sceneManager.scene,
-    avatarScene: vtuberModel.vrm?.scene ?? null,
+    // Read when the skeleton helper is toggled, not here: the VRM loads in
+    // the background and is usually still missing at this point.
+    get avatarScene() {
+      return vtuberModel.vrm?.scene ?? null;
+    },
     applySleepPhase,
     applyEmotion: (emotion, intensity) => applyEmotion(emotion, intensity),
   });
