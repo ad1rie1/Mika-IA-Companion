@@ -115,6 +115,12 @@ class FilesService:
         for f in files:
             self._register_in_memory(f)
         logger.info("FilesService: %d file(s) loaded from DB", len(files))
+        if len(files) >= MAX_REGISTRY_LOAD:
+            logger.warning(
+                "FilesService: registre plafonné à %d entrées — les fichiers plus "
+                "anciens ne sont plus résolus par leur ID.",
+                MAX_REGISTRY_LOAD,
+            )
         self._loaded = True
 
     def shutdown(self) -> None:
@@ -380,7 +386,9 @@ class FilesService:
     @staticmethod
     def _load_from_db():
         from files.models import UploadedFile
-        return list(UploadedFile.objects.filter(is_deleted=False))
+        # ``Meta.ordering`` trie déjà du plus récent au plus ancien : la borne
+        # garde les N derniers, les seuls qu'une conversation cite encore.
+        return list(UploadedFile.objects.filter(is_deleted=False)[:MAX_REGISTRY_LOAD])
 
     def _register_in_memory(self, db_obj: Any) -> None:
         self._registry[str(db_obj.file_id)] = {
