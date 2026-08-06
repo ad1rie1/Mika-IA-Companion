@@ -135,6 +135,10 @@ class CameraModule(BaseModule):
         from modules.plugins.camera.config_schema import CONFIG_SCHEMA
         return CONFIG_SCHEMA
 
+    def get_panels(self) -> list:
+        from modules.plugins.camera.panels import get_panels
+        return get_panels()
+
     # ── Réglages ───────────────────────────────────────────────────
 
     async def _settings(self) -> CameraSettings:
