@@ -588,16 +588,39 @@ class ForgeModule(BaseModule):
             return {"ok": False, "message": str(exc)}
         deleted = await sync_to_async(self._wipe_records,
                                       thread_sensitive=False)(name)
-        await self._log(name, "warning", "system",
-                        f"effacé → {dest} ({deleted} lignes de stockage supprimées)")
+        # Le journal part avec le module : `prune_logs` n'est déclenché que par
+        # une insertion, or un module effacé n'écrit plus jamais — ses lignes
+        # resteraient là indéfiniment, et son nom dans le filtre du journal
+        # avec elles. C'est aussi pourquoi la trace de l'effacement va au
+        # logger du processus et non dans `ForgeLog` : une ligne écrite ici
+        # ferait réapparaître un module qui n'existe plus.
+        purged = await sync_to_async(self._wipe_logs,
+                                     thread_sensitive=False)(name)
+        self.logger.warning(
+            "%s effacé → %s (%d lignes de stockage, %d de journal supprimées)",
+            name, dest, deleted, purged,
+        )
         return {"ok": True,
                 "message": f"{name} effacé (archivé dans _trash, "
-                           f"{deleted} lignes de stockage supprimées)"}
+                           f"{deleted} lignes de stockage et {purged} lignes "
+                           f"de journal supprimées)"}
 
     @staticmethod
     def _wipe_records(name: str) -> int:
         from modules.plugins.forge.models import ForgeRecord
         deleted, _ = ForgeRecord.objects.filter(module_name=name).delete()
+        return int(deleted)
+
+    @staticmethod
+    def _wipe_logs(name: str) -> int:
+        """Journal d'un module effacé — voir la branche ``erase``.
+
+        Délibérément séparé de ``_wipe_records`` : ``reset_storage`` vide les
+        données d'un module vivant et doit lui laisser son journal, qui est
+        justement ce qu'on relit pour comprendre ce qu'il a fait.
+        """
+        from modules.plugins.forge.models import ForgeLog
+        deleted, _ = ForgeLog.objects.filter(module_name=name).delete()
         return int(deleted)
 
     async def write_module(self, name: str, *, code: str | None,

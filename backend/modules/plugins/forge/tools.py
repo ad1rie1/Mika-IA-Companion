@@ -281,7 +281,8 @@ def build_tools(host) -> list[ModuleTool]:
                 "recharge), disable (stoppe, garde tout), reload (recharge "
                 "depuis le disque), rollback (restaure la version "
                 "précédente), erase (efface — archivé dans _trash, stockage "
-                "supprimé), reset_storage (vide les données). À utiliser "
+                "et journal supprimés), reset_storage (vide les données). "
+                "À utiliser "
                 "sans hésiter si un module te bloque."
             ),
             parameters=[

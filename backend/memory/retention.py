@@ -1,8 +1,10 @@
 """Retention sweep — keeps append-only tables from growing forever.
 
 Some tables already prune themselves (``Observation`` at 48h, ``ForgeLog``
-at 300 rows/module, ``RSSEntry`` at 200/feed, ``ProjectPromptHistory`` as a
-ring buffer). Several did not, and one of them grows *independently of
+at 300 rows/module, et entierement quand le module est efface — l'elagage ne
+tournant que sur une insertion, un module efface ne se nettoierait jamais —,
+``RSSEntry`` at 200/feed, ``ProjectPromptHistory`` as a ring buffer). Several
+did not, and one of them grows *independently of
 usage*: ``ConscienceLog`` gets a row on every decision cycle regardless of
 outcome — at the default 30s interval that is ~2 880 rows/day, over a
 million a year, on an install nobody ever talks to.
