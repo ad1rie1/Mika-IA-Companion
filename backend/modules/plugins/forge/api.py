@@ -91,12 +91,47 @@ class ForgeStorage:
 
     def __init__(self, module_name: str):
         self._module = module_name
+        self._rows_cached: int | None = None   # nb de lignes du module, en RAM
 
     def _check_names(self, collection: str, key: str = "k") -> None:
         if not collection or len(collection) > MAX_COLLECTION_LEN:
             raise ForgeAPIError(f"nom de collection invalide: {collection!r}")
         if not key or len(key) > MAX_KEY_LEN:
             raise ForgeAPIError(f"clé invalide: {key!r}")
+
+    def _assert_quota(self, collection: str, key: str) -> None:
+        """Refuse une clé NOUVELLE au-delà du plafond de lignes du module.
+
+        Le compte est tenu en RAM : loin du plafond — le cas normal, un
+        module qui indexe un flux écrit des centaines de clés par tick —
+        une écriture ne coûte plus que le SELECT + INSERT d'
+        ``update_or_create``. Le vrai COUNT n'est repayé qu'au premier
+        appel et à l'approche du plafond, ce qui rattrape au passage un
+        compteur périmé (``reset_storage`` et ``erase`` effacent les
+        lignes sans passer par ici). Le ``exists()`` ne se paie qu'à
+        saturation, pour laisser une clé DÉJÀ stockée modifiable.
+        """
+        from modules.plugins.forge.models import ForgeRecord
+        max_records = int(_limit("forge.max_records_per_module", 5000))
+        if self._rows_cached is None:
+            self._rows_cached = ForgeRecord.objects.filter(
+                module_name=self._module,
+            ).count()
+        if self._rows_cached < max_records:
+            return
+        self._rows_cached = ForgeRecord.objects.filter(
+            module_name=self._module,
+        ).count()
+        if self._rows_cached < max_records:
+            return
+        exists = ForgeRecord.objects.filter(
+            module_name=self._module, collection=collection, key=key,
+        ).exists()
+        if not exists:
+            raise ForgeAPIError(
+                f"quota de stockage atteint ({max_records} lignes) — "
+                "supprime des entrées avant d'en créer"
+            )
 
     def set(self, collection: str, key: str, value) -> None:
         """Écrit une valeur JSON-sérialisable. Quotas: nb de lignes + taille."""
@@ -109,21 +144,13 @@ class ForgeStorage:
         max_kb = int(_limit("forge.max_value_kb", 32))
         if len(encoded.encode("utf-8", errors="replace")) > max_kb * 1024:
             raise ForgeAPIError(f"valeur trop grosse (max {max_kb} Ko)")
-        max_records = int(_limit("forge.max_records_per_module", 5000))
-        exists = ForgeRecord.objects.filter(
-            module_name=self._module, collection=collection, key=key,
-        ).exists()
-        if not exists:
-            count = ForgeRecord.objects.filter(module_name=self._module).count()
-            if count >= max_records:
-                raise ForgeAPIError(
-                    f"quota de stockage atteint ({max_records} lignes) — "
-                    "supprime des entrées avant d'en créer"
-                )
-        ForgeRecord.objects.update_or_create(
+        self._assert_quota(collection, key)
+        _, created = ForgeRecord.objects.update_or_create(
             module_name=self._module, collection=collection, key=key,
             defaults={"value": json.loads(encoded)},
         )
+        if created and self._rows_cached is not None:
+            self._rows_cached += 1
 
     def get(self, collection: str, key: str, default=None):
         from modules.plugins.forge.models import ForgeRecord
@@ -139,6 +166,8 @@ class ForgeStorage:
         deleted, _ = ForgeRecord.objects.filter(
             module_name=self._module, collection=collection, key=key,
         ).delete()
+        if deleted and self._rows_cached is not None:
+            self._rows_cached = max(0, self._rows_cached - deleted)
         return bool(deleted)
 
     def find(self, collection: str, limit: int = 50, offset: int = 0,
@@ -173,8 +202,9 @@ class ForgeStorage:
         qs = ForgeRecord.objects.filter(module_name=self._module)
         if collection:
             self._check_names(collection)
-            qs = qs.filter(collection=collection)
-        return qs.count()
+            return qs.filter(collection=collection).count()
+        self._rows_cached = qs.count()   # mesure exacte du module: on la garde
+        return self._rows_cached
 
     def clear(self, collection: str) -> int:
         from modules.plugins.forge.models import ForgeRecord
@@ -182,6 +212,8 @@ class ForgeStorage:
         deleted, _ = ForgeRecord.objects.filter(
             module_name=self._module, collection=collection,
         ).delete()
+        if deleted and self._rows_cached is not None:
+            self._rows_cached = max(0, self._rows_cached - deleted)
         return int(deleted)
 
 
