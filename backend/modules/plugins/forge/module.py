@@ -937,10 +937,12 @@ class ForgeModule(BaseModule):
                 "modules forgés en panne: " + ", ".join(sorted(broken))
                 + " — tu peux les inspecter avec forge_read_module"
             )
-        if not parts and not self._loaded:
+        # Un compteur seul n'apprend rien au modèle : sans fragment à
+        # porter, le bloc ne vaut pas ses tokens (elle a forge_list_modules).
+        if not parts:
             return ""
         summary = f"{len(self._loaded)} module(s) forgé(s) actif(s)"
-        return summary + (" | " + " | ".join(parts) if parts else "")
+        return summary + " | " + " | ".join(parts)
 
     def get_status(self) -> ModuleStatus:
         status = super().get_status()
