@@ -216,7 +216,7 @@ def _register_in_module(db_obj) -> None:
             "size_label": db_obj.size_label,
             "path": db_obj.disk_path,
             "person_id": db_obj.person_id,
-            "uploaded_at": db_obj.uploaded_at.isoformat() if db_obj.uploaded_at else "",
+            "uploaded_at": db_obj.uploaded_at_local_iso,
             "deleted": False,
         })
     except Exception:
