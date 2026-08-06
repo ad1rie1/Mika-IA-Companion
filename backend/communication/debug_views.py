@@ -94,10 +94,12 @@ def force_journal(request):
         logger.exception("Debug journal failed")
         return JsonResponse({"error": str(e)}, status=500)
 
-    # Report what we got
-    from memory.models import DailyJournal
+    # Report what we got. La question est bien "le journal de ce jour
+    # précis" — celui qu'on vient de forcer — et non "le plus récent" :
+    # c'est journal_for(), pas latest_journal().
+    from memory import read
 
-    journal = DailyJournal.objects.filter(date=date.today()).first()
+    journal = async_to_sync(read.journal_for)(date.today())
     return JsonResponse(
         {
             "ok": True,
