@@ -43,6 +43,22 @@ MAX_NAME_CHARS = 80
 # exactement comme pour les fichiers plus anciens.
 MAX_TODAY_LINES = 6
 
+# Plafonds de la réponse de files_list. Un résultat d'outil ne coûte pas un
+# tour : il reste dans l'historique de la boucle d'outils et repart au modèle
+# à *chaque* itération suivante du même tour. Une entrée pèse ~60 tokens (UUID
+# et horodatage ISO se tokenisent très mal), donc « tous les fichiers » finit
+# par peser plus lourd que le prompt système lui-même. La troncature est dite,
+# pas subie : la réponse porte `total` à côté de `shown` et la façon d'aller
+# chercher la suite.
+DEFAULT_LIST_LIMIT = 25
+MAX_LIST_LIMIT = 50
+
+# Plafond de chargement du registre en mémoire au démarrage. Le registre sert
+# aussi de table de résolution à files_read / analyze / move / delete : la
+# borne est donc large — elle empêche une base pathologique de tout charger en
+# RAM, pas l'usage normal.
+MAX_REGISTRY_LOAD = 2000
+
 
 def _as_data(raw: Any) -> str:
     """Neutralise une valeur tierce destinée à une ligne du prompt système.
@@ -57,6 +73,19 @@ def _as_data(raw: Any) -> str:
     if len(text) > MAX_NAME_CHARS:
         text = text[: MAX_NAME_CHARS - 3].rstrip() + "..."
     return text
+
+
+def _as_int(raw: Any, default: int, minimum: int, maximum: int) -> int:
+    """Ramène dans ses bornes un argument numérique fourni par le modèle.
+
+    Un LLM envoie aussi bien ``50`` que ``"50"`` ou ``"toutes"`` : une valeur
+    illisible vaut le défaut, jamais une exception au milieu d'un tour.
+    """
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(maximum, value))
 
 
 class FilesService:
@@ -168,7 +197,13 @@ class FilesService:
 
     # ── Tool-facing operations (async) ────────────────────────────
 
-    async def op_list(self, date_filter: str = "", category: str = "") -> dict:
+    async def op_list(
+        self,
+        date_filter: str = "",
+        category: str = "",
+        limit: Any = None,
+        offset: Any = None,
+    ) -> dict:
         files = [
             r for r in self._registry.values()
             if not r.get("deleted") and self._may_access(r)
@@ -179,7 +214,15 @@ class FilesService:
             files = [r for r in files if r.get("category") == category]
         if not files:
             return {"files": [], "message": "Aucun fichier correspondant."}
-        return {
+
+        total = len(files)
+        limit = _as_int(limit, DEFAULT_LIST_LIMIT, 1, MAX_LIST_LIMIT)
+        offset = _as_int(offset, 0, 0, total)
+        page = sorted(files, key=lambda x: x["uploaded_at"], reverse=True)[
+            offset : offset + limit
+        ]
+
+        resultat: dict = {
             "files": [
                 {
                     "id": r["id"],
@@ -189,10 +232,26 @@ class FilesService:
                     "size": r["size_label"],
                     "uploaded_at": r["uploaded_at"],
                 }
-                for r in sorted(files, key=lambda x: x["uploaded_at"], reverse=True)
+                for r in page
             ],
-            "total": len(files),
+            "shown": len(page),
+            "offset": offset,
+            "total": total,
         }
+        if len(page) < total:
+            pluriel = "s" if len(page) > 1 else ""
+            suite = offset + len(page)
+            message = (
+                f"{len(page)} fichier{pluriel} affiché{pluriel} sur {total}"
+                f" (du plus récent au plus ancien, à partir du rang {offset})"
+                " — affine avec date ou category"
+            )
+            message += (
+                f", ou rappelle files_list avec offset={suite} pour la suite."
+                if suite < total else "."
+            )
+            resultat["message"] = message
+        return resultat
 
     async def op_read(self, file_id: str) -> dict:
         record = self.get(file_id)
