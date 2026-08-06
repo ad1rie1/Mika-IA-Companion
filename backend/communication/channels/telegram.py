@@ -30,6 +30,29 @@ from utils.degradation import degradations
 logger = logging.getLogger(__name__)
 
 
+def _allowed_senders() -> set[str]:
+    """Liste blanche des comptes et salons autorisés — vide = aucun filtre.
+
+    Relue à chaque message plutôt que mise en cache : le réglage est
+    ``hot_reload``, et on ferme la porte au moment où on s'aperçoit qu'elle
+    était ouverte, pas au prochain redémarrage. Une configuration illisible
+    rend un ensemble vide, donc le comportement d'avant ce réglage : la
+    borne qui reste alors est la fenêtre glissante, et couper la
+    conversation de l'unique personne légitime parce que la base est
+    verrouillée coûterait plus que ça ne protège.
+    """
+    from configs.service import config_service
+
+    try:
+        raw = config_service.get("telegram.allowed_chats") or []
+    except Exception as exc:
+        degradations.record("communication.channels.telegram._allowed_senders", exc)
+        return set()
+    if isinstance(raw, str):
+        raw = raw.split(",")
+    return {str(value).strip() for value in raw if str(value).strip()}
+
+
 class TelegramChannel:
     """Bot lifecycle + message-to-perception bridge."""
 
@@ -110,6 +133,11 @@ class TelegramChannel:
     async def _handle_start(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ):
+        if not update.message:
+            return
+        if not self._is_authorized(update.message):
+            await self._refuse(update.message)
+            return
         await update.message.reply_text(personality.greeting)
 
     @staticmethod
@@ -123,6 +151,36 @@ class TelegramChannel:
         """
         chat_type = getattr(getattr(message, "chat", None), "type", "") or ""
         return chat_type in ("group", "supergroup", "channel")
+
+    @staticmethod
+    def _is_authorized(message) -> bool:
+        """Cet expéditeur a-t-il le droit de faire parler Mika ?
+
+        Le compte ET le salon sont comparés à la liste : autoriser un groupe
+        entier est une décision légitime (« ce salon me parle »), autoriser
+        un compte aussi (« Thomas me parle, d'où qu'il écrive »).
+        """
+        allowed = _allowed_senders()
+        if not allowed:
+            return True
+        user_id = str(getattr(getattr(message, "from_user", None), "id", "") or "")
+        chat_id = str(getattr(message, "chat_id", "") or "")
+        return user_id in allowed or chat_id in allowed
+
+    async def _refuse(self, message) -> None:
+        """Refuser à voix haute, avant d'avoir rien enregistré.
+
+        Le contrôle passe *avant* ``_register_interlocutor`` : un inconnu ne
+        doit laisser derrière lui ni entrée de présence, ni
+        ``IdentityHandle``, ni ligne ``Message``. Et un silence se lit comme
+        une panne — l'expéditeur réessaie, donc recompte.
+        """
+        try:
+            await message.reply_text(
+                "Désolée, je ne suis pas configurée pour discuter avec ce compte."
+            )
+        except Exception as exc:
+            degradations.record("communication.channels.telegram._refuse", exc)
 
     async def _register_interlocutor(self, message) -> tuple[str, bool]:
         """Register presence + identity for the sender.
@@ -180,6 +238,10 @@ class TelegramChannel:
         if not update.message or not update.message.text:
             return
 
+        if not self._is_authorized(update.message):
+            await self._refuse(update.message)
+            return
+
         person_id, is_public = await self._register_interlocutor(update.message)
 
         from pipeline.perception import Perception
@@ -209,6 +271,10 @@ class TelegramChannel:
         """
         message = update.message
         if not message:
+            return
+
+        if not self._is_authorized(message):
+            await self._refuse(message)
             return
 
         person_id, is_public = await self._register_interlocutor(message)
