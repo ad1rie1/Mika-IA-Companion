@@ -21,12 +21,8 @@ interface PhonemeFrame {
 export class LipSyncController {
   private vrm: VRM | null = null;
 
-  // Audio-driven state
-  private analyser: AnalyserNode | null = null;
-  private dataArray: Uint8Array<ArrayBuffer> | null = null;
-  private isAudioDriven = false;
-
-  // Text-driven fallback state
+  // Estimation texte : la Web Speech API ne donne aucun accès à son flux
+  // audio, la bouche est donc pilotée depuis le texte prononcé.
   private phonemeFrames: PhonemeFrame[] = [];
   private frameIndex = 0;
   private frameTimer = 0;
@@ -47,16 +43,7 @@ export class LipSyncController {
     this.vrm = vrm;
   }
 
-  /** Start audio-driven lip sync with a Web Audio analyser node */
-  startAudioDriven(analyser: AnalyserNode) {
-    this.analyser = analyser;
-    this.dataArray = new Uint8Array(analyser.frequencyBinCount);
-    this.isAudioDriven = true;
-    this.isTextDriven = false;
-    this.speaking = true;
-  }
-
-  /** Start text-driven lip sync (fallback when no audio stream available) */
+  /** Start text-driven lip sync (the only path: no audio stream is available) */
   startTextDriven(text: string, durationMs: number) {
     this.beginFrames(this.textToPhonemes(text, durationMs));
   }
@@ -86,16 +73,12 @@ export class LipSyncController {
     this.frameIndex = 0;
     this.frameTimer = 0;
     this.isTextDriven = true;
-    this.isAudioDriven = false;
     this.speaking = true;
   }
 
   stop() {
     this.speaking = false;
-    this.isAudioDriven = false;
     this.isTextDriven = false;
-    this.analyser = null;
-    this.dataArray = null;
     this.phonemeFrames = [];
   }
 
@@ -108,16 +91,8 @@ export class LipSyncController {
     let targetEe = 0;
 
     if (this.speaking) {
-      if (this.isAudioDriven && this.analyser && this.dataArray) {
-        // Audio-driven: analyze frequency data for mouth shapes
-        this.analyser.getByteFrequencyData(this.dataArray);
-        const result = this.analyzeFrequencies(this.dataArray);
-        targetAa = result.aa;
-        targetIh = result.ih;
-        targetOu = result.ou;
-        targetEe = result.ee;
-      } else if (this.isTextDriven && this.phonemeFrames.length > 0) {
-        // Text-driven fallback
+      if (this.isTextDriven && this.phonemeFrames.length > 0) {
+        // Text-driven estimation
         this.frameTimer += delta * 1000;
         while (
           this.frameIndex < this.phonemeFrames.length &&
@@ -157,35 +132,6 @@ export class LipSyncController {
     this.vrm.expressionManager.setValue("oh", Math.min(1, this.currentMouth.ou * 0.5));
     this.vrm.expressionManager.setValue("ih", Math.min(1, this.currentMouth.ih * 0.3));
     this.vrm.expressionManager.setValue("ee", Math.min(1, this.currentMouth.ee * 0.3));
-  }
-
-  /** Analyze frequency bins to map to mouth shapes */
-  private analyzeFrequencies(data: Uint8Array<ArrayBuffer>): Record<MouthShape, number> {
-    const len = data.length;
-
-    // Split frequency range into bands
-    const lowEnd = Math.floor(len * 0.1);
-    const midLow = Math.floor(len * 0.25);
-    const midHigh = Math.floor(len * 0.5);
-
-    let lowEnergy = 0;
-    let midEnergy = 0;
-    let highEnergy = 0;
-
-    for (let i = 0; i < lowEnd; i++) lowEnergy += data[i];
-    for (let i = lowEnd; i < midLow; i++) midEnergy += data[i];
-    for (let i = midLow; i < midHigh; i++) highEnergy += data[i];
-
-    lowEnergy /= lowEnd * 255;
-    midEnergy /= (midLow - lowEnd) * 255;
-    highEnergy /= (midHigh - midLow) * 255;
-
-    return {
-      aa: Math.min(1, lowEnergy * 2.5),
-      ou: Math.min(1, lowEnergy * 1.5),
-      ih: Math.min(1, midEnergy * 2.0),
-      ee: Math.min(1, highEnergy * 2.0),
-    };
   }
 
   /** Convert French text to approximate phoneme frames for lip sync */
