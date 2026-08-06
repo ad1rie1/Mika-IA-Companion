@@ -803,6 +803,7 @@ class ConscienceEngine:
             )()
             return [(a, int((a.scheduled_at - now).total_seconds() / 60)) for a in actions]
         except Exception as exc:
+            degradations.record("conscience: upcoming scheduled actions", exc)
             return []
 
     def _compute_score(self, ctx: DecisionContext) -> tuple[float, str]:
