@@ -446,6 +446,19 @@ export class WebSocketClient {
     );
   }
 
+  /**
+   * Les pièces jointes sont projetées sur les trois champs du protocole.
+   *
+   * L'appelant passe ses propres objets, et TypeScript ne refuse les champs
+   * en trop que sur un littéral : ceux de ChatOverlay portent en plus un
+   * `preview`, data-URI complet donc *seconde copie base64* de l'image.
+   * Sérialisé tel quel, il doublait le poids d'un envoi d'images pour un
+   * champ que le consumer ne lit jamais (`MediaAttachment.from_ws_dict` ne
+   * lit que name/type/data) — assez pour franchir MAX_FRAME_CHARS, et donc
+   * pour faire refuser un envoi que MAX_ATTACHMENTS × MAX_FILE_SIZE
+   * autorisent pourtant, alors que ce seuil et le `ws_max_size` de run.py
+   * sont dimensionnés exactement dessus.
+   */
   sendChatWithAttachments(
     message: string,
     attachments: Array<{ name: string; type: string; data: string }>,
@@ -455,7 +468,11 @@ export class WebSocketClient {
       this.withIdentity({
         type: "chat",
         message,
-        attachments,
+        attachments: attachments.map(({ name, type, data }) => ({
+          name,
+          type,
+          data,
+        })),
         client_msg_id: clientMsgId,
       })
     );
