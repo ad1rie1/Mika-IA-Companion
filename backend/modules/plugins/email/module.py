@@ -73,38 +73,12 @@ class EmailModule(BaseModule):
         return [EmailAccount, Contact, Email]
 
     async def instantiate(self) -> None:
-        from asgiref.sync import sync_to_async
-
         from modules.plugins.email.analyzer import EmailAnalyzer
-        from modules.plugins.email.imap_client import IMAPClient
-        from modules.plugins.email.models import EmailAccount
-        from modules.plugins.email.smtp_client import SMTPClient
 
         self._analyzer = EmailAnalyzer()
 
         await self._migrate_env_account()
-
-        accounts = await sync_to_async(
-            lambda: list(EmailAccount.objects.filter(is_active=True))
-        )()
-        self._accounts_configured = len(accounts)
-
-        for account in accounts:
-            imap = IMAPClient.from_account(account)
-            smtp = SMTPClient.from_account(account) if account.smtp_configured else None
-
-            try:
-                await imap.connect()
-                self.logger.info("IMAP connected for account %s", account.name)
-            except Exception:
-                self.logger.exception("Failed to connect IMAP for %s", account.name)
-                continue
-
-            self._accounts[account.pk] = {
-                "imap": imap,
-                "smtp": smtp,
-                "account": account,
-            }
+        await self._reconcile_accounts()
 
         self.logger.info("Email module started (%d account(s))", len(self._accounts))
 
@@ -116,6 +90,111 @@ class EmailModule(BaseModule):
         self._accounts.clear()
         self._accounts_configured = 0
         self.logger.info("Email module stopped")
+
+    # ── Réconciliation des comptes ────────────────────────────────
+
+    @staticmethod
+    def _imap_signature(account) -> tuple:
+        """Ce qui, en changeant, oblige à refaire la connexion IMAP."""
+        return (
+            account.imap_host, account.imap_port,
+            account.imap_user, account.imap_password,
+        )
+
+    async def _close_entry(self, entry: dict) -> None:
+        """Ferme la connexion IMAP d'une entrée sans jamais faire échouer l'appelant."""
+        imap = entry.get("imap")
+        if not imap:
+            return
+        try:
+            await asyncio.wait_for(imap.disconnect(), timeout=5)
+        except Exception as exc:
+            degradations.record("modules.plugins.email.module._close_entry", exc)
+            self.logger.debug("IMAP disconnect failed", exc_info=True)
+
+    async def _reconcile_accounts(self) -> None:
+        """Réaligne les connexions ouvertes sur les comptes actifs en base.
+
+        Relu à chaque tour plutôt que mémorisé au démarrage : les comptes
+        s'éditent depuis la Configuration de l'espace du module, et
+        ``EmailAccountBackend`` écrit dans la table sans prévenir personne.
+        Figée, la table en RAM ne relevait jamais un compte ajouté, continuait
+        d'interroger un compte désactivé ou supprimé, et surtout gardait
+        l'``IMAPClient`` construit avec l'ancien identifiant après une rotation
+        de mot de passe — la même invalidation que le routeur IA fait pour ses
+        providers. Une requête par tour de 60 s, contre les dizaines de FETCH
+        du même tour.
+
+        C'est aussi ici qu'est tenu ``_accounts_configured``, qui décide si le
+        module déclare ses outils au modèle : compté au démarrage seulement, un
+        premier compte ajouté depuis le tableau de bord laissait les six outils
+        muets jusqu'au redémarrage suivant.
+        """
+        from asgiref.sync import sync_to_async
+
+        from modules.plugins.email.imap_client import IMAPClient
+        from modules.plugins.email.models import EmailAccount
+        from modules.plugins.email.smtp_client import SMTPClient
+
+        try:
+            accounts = await sync_to_async(
+                lambda: list(EmailAccount.objects.filter(is_active=True))
+            )()
+        except Exception as exc:
+            # Base momentanément indisponible : on garde les connexions en
+            # place plutôt que de conclure que tous les comptes ont disparu.
+            degradations.record("modules.plugins.email.module._reconcile_accounts", exc)
+            self.logger.debug("Reading email accounts failed", exc_info=True)
+            return
+
+        # Les comptes déclarés, pas les connexions obtenues plus bas.
+        self._accounts_configured = len(accounts)
+
+        vus: set[int] = set()
+        for account in accounts:
+            vus.add(account.pk)
+            entry = self._accounts.get(account.pk)
+
+            if entry is not None:
+                if self._imap_signature(entry["account"]) == self._imap_signature(account):
+                    # Mêmes identifiants : la connexion tient, seul l'état
+                    # porté par la base est rafraîchi (synchro initiale, SMTP).
+                    entry["account"] = account
+                    entry["smtp"] = (
+                        SMTPClient.from_account(account) if account.smtp_configured else None
+                    )
+                    continue
+
+                self.logger.info(
+                    "IMAP credentials changed for %s — reconnecting", account.name
+                )
+                await self._close_entry(entry)
+                self._accounts.pop(account.pk, None)
+
+            imap = IMAPClient.from_account(account)
+            try:
+                await imap.connect()
+                self.logger.info("IMAP connected for account %s", account.name)
+            except Exception:
+                # Rien n'est enregistré : le tour suivant réessaiera.
+                self.logger.exception("Failed to connect IMAP for %s", account.name)
+                continue
+
+            self._accounts[account.pk] = {
+                "imap": imap,
+                "smtp": SMTPClient.from_account(account) if account.smtp_configured else None,
+                "account": account,
+            }
+
+        for account_id in [pk for pk in self._accounts if pk not in vus]:
+            entry = self._accounts.pop(account_id)
+            name = entry["account"].name
+            self.logger.info(
+                "Email account #%s removed or deactivated — closing connection", account_id
+            )
+            await self._close_entry(entry)
+            # Sans ça, son dernier compteur resterait annoncé dans le prompt.
+            self._unread_counts.pop(name, None)
 
     # ── Env migration ──────────────────────────────────────────────
 
@@ -164,7 +243,12 @@ class EmailModule(BaseModule):
         flow) left the fetch awaiting forever. Nothing above would have
         recovered it: the tick never returned, and this module never polled
         again for the lifetime of the process.
+
+        Les comptes sont relus en base avant le relevé : ce qui a été édité
+        dans le tableau de bord depuis le tour précédent prend effet ici.
         """
+        await self._reconcile_accounts()
+
         self.logger.debug("Email cron tick — checking %d account(s)", len(self._accounts))
         for account_id, entry in list(self._accounts.items()):
             try:
