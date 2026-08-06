@@ -294,27 +294,32 @@ class MemoryManager:
         """Boost importance of souvenirs linked to given themes.
 
         Returns the number of souvenirs affected.
+
+        Selection et ecritures tiennent dans un **seul** aller-retour de
+        thread : `sync_to_async` est `thread_sensitive` par defaut, donc un
+        appel par ligne faisait jusqu'a 21 passages serialises sur l'unique
+        executeur que se partagent les six boucles de fond et tout le
+        chemin WebSocket. Le SQL emis est le meme, ligne par ligne.
         """
         from memory.models import Souvenir
 
         if not themes:
             return 0
 
-        try:
-            souvenirs = await sync_to_async(
-                lambda: list(
-                    Souvenir.objects.filter(
-                        themes__name__in=themes,
-                        importance__lt=1.0,
-                    ).distinct()[:20]
-                )
-            )()
-
-            count = 0
+        def _booster() -> int:
+            souvenirs = list(
+                Souvenir.objects.filter(
+                    themes__name__in=themes,
+                    importance__lt=1.0,
+                ).distinct()[:20]
+            )
             for s in souvenirs:
                 s.importance = min(1.0, s.importance + boost)
-                await sync_to_async(s.save)(update_fields=["importance"])
-                count += 1
+                s.save(update_fields=["importance"])
+            return len(souvenirs)
+
+        try:
+            count = await sync_to_async(_booster)()
 
             if count:
                 logger.info(
