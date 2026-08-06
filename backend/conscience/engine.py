@@ -545,21 +545,22 @@ class ConscienceEngine:
         return min(1.0, total), len(active)
 
     async def _recent_ruminations_prompt(self) -> str:
-        """Return prompt text describing top active ruminations, or ''."""
-        try:
-            from conscience.models import Rumination
-        except ImportError:
-            return ""
+        """Return prompt text describing top active ruminations, or ''.
+
+        Meme question, meme domicile que le bloc de prompt conversationnel :
+        top 3 au-dessus du plancher d'intensite. Une pensee trop faible pour
+        etre remarquee ne doit pas etre narree — surtout pas ici, le seul
+        contexte ou elle peut declencher une prise de parole. Seule la
+        formulation reste locale.
+        """
+        from conscience import read as conscience_read
 
         try:
-            items = await sync_to_async(
-                lambda: list(
-                    Rumination.objects
-                    .filter(status="active")
-                    .order_by("-intensity")[:3]
-                )
-            )()
-        except Exception:
+            items = await conscience_read.active_ruminations(
+                limit=3, min_intensity=0.2,
+            )
+        except Exception as exc:
+            degradations.record("conscience: recent ruminations prompt", exc)
             return ""
 
         if not items:
