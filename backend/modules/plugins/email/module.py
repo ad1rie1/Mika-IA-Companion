@@ -40,7 +40,10 @@ class EmailModule(BaseModule):
         super().__init__("email")
         self._accounts: dict[int, dict] = {}  # account_id -> {imap, smtp, account}
         self._analyzer = None
-        self._unread_counts: dict[str, int] = {}  # account_name -> count
+        # account_name -> nombre de messages reçus non lus. Instantané RAM du
+        # courrier *en attente*, pas des nouveautés du dernier relevé : c'est
+        # à cette question que répond le bloc de contexte de l'invite.
+        self._unread_counts: dict[str, int] = {}
 
     # ── Lifecycle ─────────────────────────────────────────────────
 
@@ -94,6 +97,11 @@ class EmailModule(BaseModule):
                 "smtp": smtp,
                 "account": account,
             }
+
+            # Sans ça, le courrier déjà en attente reste invisible dans
+            # l'invite jusqu'au premier relevé, soit une minute après le
+            # démarrage.
+            await self._refresh_unread_count(account)
 
         self.logger.info("Email module started (%d account(s))", len(self._accounts))
 
@@ -227,13 +235,38 @@ class EmailModule(BaseModule):
         )(**update_fields)
         account.last_fetch = now
 
-        self._unread_counts[account.name] = new_count
-
         if new_count > 0:
             self.logger.info("[%s] %d new email(s) processed", account.name, new_count)
             await self._prune_emails(account)
         else:
             self.logger.debug("[%s] No new emails", account.name)
+
+        # Après l'élagage : un message supprimé ne doit pas être compté comme
+        # en attente.
+        await self._refresh_unread_count(account)
+
+    async def _refresh_unread_count(self, account) -> None:
+        """Recompte le courrier reçu non lu d'un compte.
+
+        Un ``COUNT`` par compte et par tour de cron (60 s) : négligeable, et
+        c'est la seule façon d'avoir un compteur qui reste juste entre deux
+        relevés. L'ancienne valeur — le nombre de nouveautés du dernier tour —
+        retombait à zéro au tour suivant, si bien que « j'ai des mails ? »
+        posé 90 s après leur arrivée trouvait un bloc d'invite vide.
+        """
+        from asgiref.sync import sync_to_async
+
+        from modules.plugins.email.models import Email
+
+        try:
+            self._unread_counts[account.name] = await sync_to_async(
+                Email.objects.filter(
+                    account=account, direction="inbound", is_read=False,
+                ).count
+            )()
+        except Exception as exc:
+            degradations.record("modules.plugins.email.module._refresh_unread_count", exc)
+            self.logger.debug("Recomptage des non-lus indisponible", exc_info=True)
 
     async def _process_email(self, email_msg, account, entry, *, allow_actions: bool = True) -> bool:
         """Process a single email. Returns True if it was new.
@@ -274,7 +307,7 @@ class EmailModule(BaseModule):
             analysis = None
             priority = "low"
 
-        await sync_to_async(Email.objects.create)(
+        stored = await sync_to_async(Email.objects.create)(
             account=account,
             message_id=email_msg.message_id,
             uid=email_msg.uid,
@@ -327,11 +360,19 @@ class EmailModule(BaseModule):
                     },
                 )
             )
+            # « Annoncé » est un fait sur le message, pas sur le tour de cron :
+            # après un élagage puis une re-synchro IMAP, une ligne ré-insérée
+            # serait sinon ré-annoncée sans que rien ne le signale.
+            stored.notified = True
+            await sync_to_async(stored.save)(update_fields=["notified"])
 
         if analysis and analysis.should_reply and analysis.reply_text:
             smtp = entry.get("smtp")
-            if smtp:
-                await self._send_reply(smtp, email_msg, analysis, account)
+            if smtp and await self._send_reply(smtp, email_msg, analysis, account):
+                # Seulement si le SMTP a accepté : un envoi en échec laisse un
+                # message auquel il reste à répondre.
+                stored.replied = True
+                await sync_to_async(stored.save)(update_fields=["replied"])
 
         await entry["imap"].mark_as_seen(email_msg.uid)
         return True
@@ -454,8 +495,8 @@ class EmailModule(BaseModule):
             except Exception:
                 self.logger.exception("Failed to store email memory: %s", mem)
 
-    async def _send_reply(self, smtp, email_msg, analysis, account):
-        """Send an email reply via SMTP."""
+    async def _send_reply(self, smtp, email_msg, analysis, account) -> bool:
+        """Send an email reply via SMTP. Returns True if it left."""
         try:
             subject = email_msg.subject
             if not subject.lower().startswith("re:"):
@@ -482,8 +523,10 @@ class EmailModule(BaseModule):
                 direction="outbound",
                 email_date=None,
             )
+            return True
         except Exception:
             self.logger.exception("Failed to send email reply")
+            return False
 
     # ── Capabilities & Tools ────────────────────────────────────────
 
@@ -660,6 +703,17 @@ class EmailModule(BaseModule):
                 "content": [{"type": "text", "text": f"Email #{email_id} not found."}],
                 "isError": True,
             }
+
+        if email.direction == Email.Direction.INBOUND and not email.is_read:
+            # Lire un message, c'est l'avoir lu : l'invite ne doit pas
+            # continuer à l'annoncer comme en attente. Le compteur RAM est
+            # décrémenté dans la foulée, sinon elle le reverrait dans son
+            # contexte jusqu'au relevé suivant.
+            email.is_read = True
+            await sync_to_async(email.save)(update_fields=["is_read"])
+            nom = email.account.name
+            if nom in self._unread_counts:
+                self._unread_counts[nom] = max(0, self._unread_counts[nom] - 1)
 
         text = (
             f"Account: {email.account.name}\n"
@@ -852,10 +906,15 @@ class EmailModule(BaseModule):
     # ── Context ───────────────────────────────────────────────────
 
     def get_context(self, person_id: str = "") -> str:
+        """Le courrier reçu qui attend, pas les arrivées du dernier relevé.
+
+        Lecture RAM uniquement : l'instantané est rafraîchi par le cron et
+        par ``read_email``.
+        """
         parts = []
         for account_name, count in self._unread_counts.items():
             if count > 0:
-                parts.append(f"{account_name}: {count} nouveau(x) email(s)")
+                parts.append(f"{account_name}: {count} email(s) non lu(s)")
         return "\n".join(parts) if parts else ""
 
     # ── Status ────────────────────────────────────────────────────
@@ -864,6 +923,6 @@ class EmailModule(BaseModule):
         status = super().get_status()
         status.details = {
             "accounts_connected": len(self._accounts),
-            "accounts": {name: count for name, count in self._unread_counts.items()},
+            "emails_non_lus": {name: count for name, count in self._unread_counts.items()},
         }
         return status
