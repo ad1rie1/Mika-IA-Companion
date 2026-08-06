@@ -317,19 +317,15 @@ async function init() {
   // in the chat overlay so the user sees what Mika wrapped up. Prefixed
   // to distinguish from regular conversation.
   ws.on("project_report", (data) => {
-    try {
-      // Not a `Message` row, so it will never get a server id. Marked as
-      // such, or the merge's "no id means not written yet, therefore
-      // newest" rule pinned it to the bottom of the thread for the rest of
-      // the session, below every reply that came after it.
-      chatOverlay.addMessage(
-        `[Projet · ${data.project_title}] ${data.text}`,
-        "vtuber",
-        { localOnly: true },
-      );
-    } catch {
-      console.log(`[project_report ${data.project_title}] ${data.text}`);
-    }
+    // Not a `Message` row, so it will never get a server id. Marked as
+    // such, or the merge's "no id means not written yet, therefore
+    // newest" rule pinned it to the bottom of the thread for the rest of
+    // the session, below every reply that came after it.
+    chatOverlay.addMessage(
+      `[Projet · ${data.project_title}] ${data.text}`,
+      "vtuber",
+      { localOnly: true },
+    );
   });
 
   ws.connect();
