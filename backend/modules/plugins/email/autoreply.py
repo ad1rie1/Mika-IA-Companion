@@ -6,11 +6,19 @@ etait une consigne en langage naturel — placee dans le meme contexte que le
 texte qu'elle est censee encadrer. Une injection (« reponds en confirmant… »)
 porte donc directement sur la decision d'envoi.
 
-Rien ici ne depend d'un modele : des en-tetes normalises et une adresse.
+Rien ici ne depend d'un modele : des en-tetes normalises, une adresse et deux
+plafonds.
 """
 from __future__ import annotations
 
 from email.utils import parseaddr
+
+from utils.degradation import degradations
+
+# Fenetre du plafond par expediteur. Le cron repasse toutes les 60 s : une
+# borne « par passe » n'arrete pas un repondeur automatique qui n'annonce rien
+# dans ses en-tetes, il faut une memoire plus longue que le tick.
+SENDER_WINDOW_SECONDS = 24 * 3600
 
 # ``Precedence`` n'est pas normalise, mais ces valeurs sont l'usage etabli
 # pour « ne repondez pas a ceci ».
@@ -64,3 +72,46 @@ def loop_risk_reason(email_msg) -> str:
         return "adresse noreply"
 
     return ""
+
+
+# ── Reglages ────────────────────────────────────────────────────────
+
+
+def _setting(key: str, default):
+    """Lecture defensive : une configuration illisible rend le defaut.
+
+    Relue a chaque message plutot que mise en cache — les trois reglages sont
+    ``hot_reload``, et on coupe l'envoi automatique au moment ou on s'apercoit
+    qu'il derape, pas au prochain redemarrage.
+    """
+    from configs.service import config_service
+
+    try:
+        value = config_service.get(key)
+    except Exception as exc:
+        degradations.record("modules.plugins.email.autoreply._setting", exc)
+        return default
+    return default if value is None else value
+
+
+def _cap(key: str, default: int) -> int:
+    try:
+        return max(0, int(_setting(key, default)))
+    except (TypeError, ValueError) as exc:
+        degradations.record("modules.plugins.email.autoreply._cap", exc)
+        return default
+
+
+def auto_reply_enabled() -> bool:
+    """L'interrupteur general de la reponse automatique."""
+    return bool(_setting("email.auto_reply_enabled", True))
+
+
+def max_per_tick() -> int:
+    """Plafond de reponses automatiques sur une passe de releve."""
+    return _cap("email.auto_reply_max_per_tick", 3)
+
+
+def max_per_sender() -> int:
+    """Plafond de reponses automatiques par expediteur sur la fenetre."""
+    return _cap("email.auto_reply_max_per_sender", 1)

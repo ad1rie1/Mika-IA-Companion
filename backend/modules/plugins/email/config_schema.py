@@ -16,7 +16,10 @@ from configs.types import ConfigItem, ConfigRecord, ConfigSection, record_item
 CONFIG_SCHEMA = [
     ConfigSection(
         key="module_email", label="Modules · Email", icon="✉", order=71,
-        description="Comptes IMAP/SMTP (table EmailAccount).",
+        description=(
+            "Comptes IMAP/SMTP (table EmailAccount) et garde-fous de la "
+            "réponse automatique."
+        ),
     ),
     ConfigItem(
         key="email.accounts", type="record_list", section="module_email",
@@ -52,6 +55,39 @@ CONFIG_SCHEMA = [
             "maximum de 180 s. Pendant la synchro initiale aucun appel LLM "
             "n'a lieu, donc une valeur élevée y est sans risque — la monter "
             "le temps d'importer une grosse boîte, puis la redescendre."
+        ),
+    ),
+    ConfigItem(
+        key="email.auto_reply_enabled", type="bool", section="module_email",
+        group="Réponse automatique", label="Réponse automatique au triage",
+        default=True, hot_reload=True,
+        description=(
+            "Le triage peut répondre seul à un e-mail. La décision est prise "
+            "par le modèle avec le corps du message dans son contexte : une "
+            "injection y porte directement. Décocher coupe l'envoi sans "
+            "toucher au reste du triage — notification, mémoire, priorité."
+        ),
+    ),
+    ConfigItem(
+        key="email.auto_reply_max_per_tick", type="int", section="module_email",
+        group="Réponse automatique", label="Réponses auto max par relève",
+        default=3, min=0, max=50, hot_reload=True,
+        description=(
+            "Une relève traite tout ce qui est arrivé depuis la précédente ; "
+            "sans plafond, un lot de rattrapage envoie autant de réponses "
+            "qu'il lit de messages."
+        ),
+        hint="0 = aucune réponse automatique.",
+    ),
+    ConfigItem(
+        key="email.auto_reply_max_per_sender", type="int", section="module_email",
+        group="Réponse automatique",
+        label="Réponses auto max par expéditeur (24 h)",
+        default=1, min=0, max=50, hot_reload=True,
+        description=(
+            "Ce qu'un plafond par relève ne peut pas arrêter : un répondeur "
+            "automatique qui n'annonce rien dans ses en-têtes réécrit à "
+            "chaque passage, soit toutes les 60 secondes."
         ),
     ),
 ]
