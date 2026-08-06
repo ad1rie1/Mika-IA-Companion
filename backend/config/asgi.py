@@ -50,6 +50,7 @@ class LifespanWrapper:
         from emotion.sync import emotion_sync
         from memory.sleep import sleep_cycle
         from projects.runner import project_runner
+        from utils.degradation import degradations
 
         # Hydrate the quota tracker from DB so counters survive restart.
         try:
@@ -83,8 +84,13 @@ class LifespanWrapper:
         try:
             restored = await identity_resolver.restore_module_presence()
             logger.info("Presence restored for %d durable handle(s)", restored)
-        except Exception:
+        except Exception as exc:
+            # Comptee, pas seulement journalisee : quand cette remontee echoue,
+            # le routage par concernement continue de declarer joignable tout
+            # handle module et la livraison ne trouve plus personne — chaque
+            # message proactif de ce run est perdu, et rien d'autre ne le dit.
             logger.exception("Could not restore durable module presence")
+            degradations.record("presence: durable handle restore", exc)
 
         await conscience_engine.initialize()
         module_manager.set_conscience(conscience_engine.observe)
