@@ -397,7 +397,7 @@ class EmailModule(BaseModule):
             analysis = None
             priority = "low"
 
-        await sync_to_async(Email.objects.create)(
+        stored = await sync_to_async(Email.objects.create)(
             account=account,
             message_id=email_msg.message_id,
             uid=email_msg.uid,
@@ -457,6 +457,11 @@ class EmailModule(BaseModule):
                     },
                 )
             )
+            # « Annoncé » est un fait sur le message, pas sur le tour de cron :
+            # après un élagage puis une re-synchro IMAP, une ligne ré-insérée
+            # serait sinon ré-annoncée sans que rien ne le signale.
+            stored.notified = True
+            await sync_to_async(stored.save)(update_fields=["notified"])
 
         if analysis and analysis.should_reply and analysis.reply_text:
             smtp = entry.get("smtp")
