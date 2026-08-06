@@ -249,9 +249,12 @@ CONFIG_SCHEMA = [
         key="ai.call_timeout_seconds", type="int", section="ai_quota",
         label="Timeout appel IA (s)",
         description=(
-            "Au-delà, le tour rend un texte de repli. Un modèle local paie "
-            "l'intégralité du prompt à chaque tour d'outils : 60 s suffisent "
-            "à une API distante, pas à un 12B qui réfléchit avant de parler."
+            "Borne de TOUT appel IA routé — conversation, triage email, "
+            "extraction mémoire, vision, boucles de fond. Au-delà, l'appel "
+            "est abandonné (le tour de conversation rend un texte de repli). "
+            "Un modèle local paie l'intégralité du prompt à chaque tour "
+            "d'outils : 60 s suffisent à une API distante, pas à un 12B qui "
+            "réfléchit avant de parler."
         ),
         default=120, min=5, max=600, hot_reload=True,
     ),

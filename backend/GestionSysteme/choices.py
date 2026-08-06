@@ -21,6 +21,7 @@ précisément le moment où on vient la corriger.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Callable
@@ -80,6 +81,20 @@ def load(parent_key: str, payload: dict) -> tuple[list[tuple[str, str]], str]:
 
 # ── Modèles d'un fournisseur IA ─────────────────────────────────────────
 
+# Le chargement tourne dans le thread qui sert la requête HTTP, pas dans une
+# boucle de fond : un fournisseur injoignable doit rendre la main tout de
+# suite. Les SDK Anthropic et OpenAI ont un défaut de 600 s, celui d'Ollama
+# n'en a aucun — dix minutes de page qui tourne pour une case à cocher.
+DELAI_CHARGEMENT_MODELES_S = 15.0
+
+
+async def _lister_modeles(instance) -> list[dict]:
+    """Catalogue d'un fournisseur, l'attente bornée."""
+    return await asyncio.wait_for(
+        instance.list_models(), timeout=DELAI_CHARGEMENT_MODELES_S,
+    )
+
+
 def _load_provider_models(payload: dict) -> tuple[list[tuple[str, str]], str]:
     """Interroge le fournisseur sélectionné avec les identifiants enregistrés.
 
@@ -101,9 +116,14 @@ def _load_provider_models(payload: dict) -> tuple[list[tuple[str, str]], str]:
 
     try:
         instance = _PROVIDER_CLASSES[nom]()
-        modeles = async_to_sync(instance.list_models)()
+        modeles = async_to_sync(_lister_modeles)(instance)
     except ImportError as exc:
         return [], f"SDK manquant pour {nom} : {exc}"
+    except asyncio.TimeoutError:
+        return [], (
+            f"{nom} n'a pas répondu en {DELAI_CHARGEMENT_MODELES_S:.0f} s. "
+            "Vérifie l'adresse du serveur et la clé d'API dans « IA · Providers »."
+        )
 
     options = [
         (str(m.get("id", "")), str(m.get("label") or m.get("id", "")))
