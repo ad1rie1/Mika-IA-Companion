@@ -86,6 +86,7 @@ async def gather_context(
     channel: str = "",
     authenticated: bool = False,
     is_public: bool = False,
+    include_memory: bool = True,
 ) -> ConversationContext:
     """Assemble all context needed for an AI conversation turn.
 
@@ -97,15 +98,22 @@ async def gather_context(
             to decide how much the channel itself proves about the sender.
         authenticated: The transport verified this session's credentials.
         is_public: The turn happened in a shared room, not a 1:1 exchange.
+        include_memory: Whether to run the semantic retrieval. False for a
+            caller that already holds the souvenirs it wants injected — the
+            conscience recalls on the observations themselves, then overrode
+            this field, so the embedding + ChromaDB query paid here was
+            thrown away on every spontaneous act.
     """
     # Memory context (graceful degradation)
-    try:
-        memory_context = await memory_manager.get_memory_context(
-            message, person_id=person_id
-        )
-    except Exception:
-        logger.warning("Memory retrieval failed, continuing without context")
-        memory_context = ""
+    memory_context = ""
+    if include_memory:
+        try:
+            memory_context = await memory_manager.get_memory_context(
+                message, person_id=person_id
+            )
+        except Exception:
+            logger.warning("Memory retrieval failed, continuing without context")
+            memory_context = ""
 
     # Self-concept: latest autobiographical narrative from the consolidator.
     # Best-effort — if the table hasn't been populated yet (no narrative

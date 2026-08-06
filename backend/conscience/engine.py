@@ -552,34 +552,6 @@ class ConscienceEngine:
         total = sum(active)
         return min(1.0, total), len(active)
 
-    async def _recent_ruminations_prompt(self) -> str:
-        """Return prompt text describing top active ruminations, or ''.
-
-        Meme question, meme domicile que le bloc de prompt conversationnel :
-        top 3 au-dessus du plancher d'intensite. Une pensee trop faible pour
-        etre remarquee ne doit pas etre narree — surtout pas ici, le seul
-        contexte ou elle peut declencher une prise de parole. Seule la
-        formulation reste locale.
-        """
-        from conscience import read as conscience_read
-
-        try:
-            items = await conscience_read.active_ruminations(
-                limit=3, min_intensity=0.2,
-            )
-        except Exception as exc:
-            degradations.record("conscience: recent ruminations prompt", exc)
-            return ""
-
-        if not items:
-            return ""
-
-        lines = []
-        for r in items:
-            label = "fortement" if r.intensity > 0.7 else "encore"
-            lines.append(f"- Tu repenses {label} a: {r.summary[:120]}")
-        return "Ces pensees te trottent dans la tete:\n" + "\n".join(lines)
-
     async def _resolve_ruminations_after_act(self) -> None:
         """When Mika speaks up, every active rumination loses half its charge.
 
@@ -1048,7 +1020,7 @@ class ConscienceEngine:
 
         # Build prompt with capabilities summary
         capabilities_summary = module_manager.collect_capabilities_summary()
-        prompt = await self._build_action_prompt(ctx, reason, memory_context, capabilities_summary)
+        prompt = await self._build_action_prompt(ctx, reason, capabilities_summary)
 
         # Decide WHOM to address (pass 1). If a concerned, reachable person is
         # chosen, the response is composed with THEIR context and delivered to
@@ -1057,8 +1029,16 @@ class ConscienceEngine:
         person_id = target or "conscience_mika"
 
         try:
-            # Build filtered context with only relevant modules' tools
-            base_context = await gather_context(prompt, person_id, include_tools=False)
+            # Build filtered context with only relevant modules' tools.
+            # La memoire n'est demandee ici que si le rappel sur les
+            # observations n'a rien donne : sinon `memory_context` ecrase le
+            # champ juste en dessous, et l'embedding + la requete ChromaDB
+            # faits sur le prompt d'action etaient payes pour rien.
+            base_context = await gather_context(
+                prompt, person_id,
+                include_tools=False,
+                include_memory=not memory_context,
+            )
 
             # Override with relevant-only tools
             if relevant_modules:
@@ -1276,10 +1256,24 @@ class ConscienceEngine:
         self,
         ctx: DecisionContext,
         reason: str,
-        memory_context: str,
         capabilities_summary: str = "",
     ) -> str:
-        """Build a rich prompt from accumulated observations + memory + capabilities."""
+        """Construire le prompt de ce qui est propre a CETTE decision.
+
+        Volontairement muet sur l'humeur, les pulsions, les ruminations et le
+        contexte memoire : le `ConversationContext` monte par `_act()` porte
+        deja les quatre dans le prompt systeme
+        (`--- TON ETAT EMOTIONNEL ACTUEL ---` contient l'humeur globale suivie
+        de `drive_engine.get_context()`, `--- CE QUI TE TROTTE DANS LA TETE ---`
+        les memes trois ruminations, et la memoire est ajoutee brute en fin de
+        prompt). Les redire ici envoyait plusieurs centaines de tokens en
+        double a chaque acte — le chemin le plus cher du moteur, repaye a
+        chaque tour de la boucle d'outils.
+
+        Ce qui reste est ce que rien d'autre ne sait : les actions programmees
+        dues, les observations, la raison du declenchement, l'auto-evaluation
+        et les actions futures.
+        """
         import json as _json
 
         parts = []
@@ -1307,21 +1301,6 @@ class ConscienceEngine:
             parts.append(
                 "Ce que tu as observe recemment:\n" + "\n".join(obs_lines)
             )
-
-        # Current mood
-        parts.append(
-            f"Tu te sens {ctx.global_mood} (intensite {ctx.global_intensity:.1f})."
-        )
-
-        # Intrinsic drives (curiosity / social / expression / rest)
-        drive_ctx = drive_engine.get_context()
-        if drive_ctx:
-            parts.append(drive_ctx)
-
-        # Ruminations — unresolved thoughts still on Mika's mind
-        rumination_text = await self._recent_ruminations_prompt()
-        if rumination_text:
-            parts.append(rumination_text)
 
         # Idle time
         idle_minutes = int(ctx.idle_seconds / 60)
@@ -1365,10 +1344,6 @@ class ConscienceEngine:
                 "Tu as deja programme ces actions futures:\n"
                 + "\n".join(upcoming_lines)
             )
-
-        # Memory context
-        if memory_context:
-            parts.append(f"\n{memory_context}")
 
         # Instructions
         parts.append(
