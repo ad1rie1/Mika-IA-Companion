@@ -41,6 +41,22 @@ from modules.plugins.forge.api import ForgeAPI, write_log
 HANDLER_TIMEOUT_DEFAULT = 10
 CONTEXT_TIMEOUT_S = 5.0
 POOL_WORKERS = 2
+# Ce que le contexte forgé pèse dans le prompt système, à chaque tour. Le
+# cache d'un module est déjà borné à 500 caractères (``_refresh_context``),
+# mais leur somme ne l'était pas : ``forge.max_modules`` monte jusqu'à 50,
+# soit 25 000 caractères renvoyés à chaque tour face à un prompt système
+# d'environ 6 000 — et écrits par du code que Mika écrit elle-même.
+CONTEXT_TOTAL_BUDGET = 900
+# En dessous, une part ne dit plus rien d'utile : mieux vaut détailler moins
+# de modules et nommer ceux qu'on a laissés de côté.
+CONTEXT_MIN_PART = 120
+
+
+def _ecourter(texte: str, limite: int) -> str:
+    """Coupe à ``limite`` caractères en laissant la coupe visible."""
+    if len(texte) <= limite:
+        return texte
+    return texte[: max(1, limite - 1)].rstrip() + "…"
 
 
 def _cfg(key: str, default):
@@ -888,12 +904,34 @@ class ForgeModule(BaseModule):
         from modules.plugins.forge.config_schema import CONFIG_SCHEMA
         return CONFIG_SCHEMA
 
+    def _context_fragments(self) -> list[str]:
+        """Le contexte des modules forgés, plafonné en agrégat.
+
+        La part est égale plutôt que premier arrivé premier servi : sans ça
+        un module en fin de dict ne serait jamais entendu. Quand elle tombe
+        sous ``CONTEXT_MIN_PART`` elle ne dit plus rien, alors on détaille
+        moins de modules et on nomme ceux qui n'ont pas eu la parole.
+        """
+        parlants = [lm for lm in self._loaded.values() if lm.context_cache]
+        if not parlants:
+            return []
+        part = max(CONTEXT_MIN_PART, CONTEXT_TOTAL_BUDGET // len(parlants))
+        detailles = parlants[: max(1, CONTEXT_TOTAL_BUDGET // part)]
+        fragments = [
+            _ecourter(f"({lm.name}) {lm.context_cache}", part)
+            for lm in detailles
+        ]
+        muets = [lm.name for lm in parlants[len(detailles):]]
+        if muets:
+            fragments.append(_ecourter(
+                "non détaillés faute de place: " + ", ".join(muets),
+                CONTEXT_MIN_PART,
+            ))
+        return fragments
+
     def get_context(self, person_id: str = "") -> str:
-        parts: list[str] = []
+        parts = self._context_fragments()
         broken = [n for n in self._load_errors]
-        for lm in self._loaded.values():
-            if lm.context_cache:
-                parts.append(f"({lm.name}) {lm.context_cache}")
         if broken:
             parts.append(
                 "modules forgés en panne: " + ", ".join(sorted(broken))
