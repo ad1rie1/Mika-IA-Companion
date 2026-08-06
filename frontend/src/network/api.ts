@@ -145,6 +145,14 @@ export async function login(
           `que ${location.origin} est dans CSRF_TRUSTED_ORIGINS.`
       );
     }
+    // Le backend plafonne les échecs par fenêtre glissante : réessayer tout
+    // de suite ne fait que prolonger le blocage, il faut le dire.
+    if (resp.status === 429) {
+      throw new LoginRefusedError(
+        429,
+        "Trop de tentatives de connexion. Attends une minute avant de réessayer."
+      );
+    }
     throw new LoginRefusedError(
       resp.status,
       `Le serveur a refusé la connexion (HTTP ${resp.status}).`
