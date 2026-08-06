@@ -26,10 +26,11 @@ makes this cheap: **a turn never needed the connection that started it.**
 
 What this deliberately does NOT do: serialise every LLM call in the
 process. The conscience, the project runner and the sleep cycle call the
-model from their own loops and do not pass through here. If the goal is
-"never two calls at once on a one-slot backend", that belongs to the AI
-router as a per-provider semaphore — a different problem with a different
-home.
+model from their own loops and do not pass through here. "Never two calls
+at once on a one-slot backend" is a different problem with a different
+home, and it lives there now: ``AIRouter`` holds a per-provider semaphore
+(``ai.<provider>.max_concurrent_calls``, 1 for ollama) around every routed
+call. This queue orders the *turns*; that semaphore orders the *calls*.
 """
 
 from __future__ import annotations
