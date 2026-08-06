@@ -465,8 +465,11 @@ class EmailModule(BaseModule):
 
         if analysis and analysis.should_reply and analysis.reply_text:
             smtp = entry.get("smtp")
-            if smtp:
-                await self._send_reply(smtp, email_msg, analysis, account)
+            if smtp and await self._send_reply(smtp, email_msg, analysis, account):
+                # Seulement si le SMTP a accepté : un envoi en échec laisse un
+                # message auquel il reste à répondre.
+                stored.replied = True
+                await sync_to_async(stored.save)(update_fields=["replied"])
 
         await entry["imap"].mark_as_seen(email_msg.uid)
         return True
@@ -651,8 +654,8 @@ class EmailModule(BaseModule):
             except Exception:
                 self.logger.exception("Failed to store email memory: %s", mem)
 
-    async def _send_reply(self, smtp, email_msg, analysis, account):
-        """Send an email reply via SMTP."""
+    async def _send_reply(self, smtp, email_msg, analysis, account) -> bool:
+        """Send an email reply via SMTP. Returns True if it left."""
         try:
             subject = email_msg.subject
             if not subject.lower().startswith("re:"):
@@ -684,8 +687,10 @@ class EmailModule(BaseModule):
             await self._upsert_contacts(
                 self._adresses_de(email_msg.from_addr), account, "outbound",
             )
+            return True
         except Exception:
             self.logger.exception("Failed to send email reply")
+            return False
 
     # ── Capabilities & Tools ────────────────────────────────────────
 
