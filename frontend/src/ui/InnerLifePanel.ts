@@ -9,8 +9,11 @@
  *   - ruminations actives
  *   - profil de la personne courante + engagements pendants
  *
- * Ne fait AUCUN appel réseau : tout passe par le WebSocket. Le panneau
- * peut être replié (clic sur le header) pour libérer l'écran.
+ * L'affichage ne fait aucun appel réseau : tout arrive par le WebSocket.
+ * Seule exception, l'approbation/refus d'une action en attente, qui est un
+ * POST HTTP (via ``postJson``) — le backend répond par un
+ * ``inner_state_update`` qui repeint la section. Le panneau peut être replié
+ * (clic sur le header) pour libérer l'écran.
  */
 
 import type {
@@ -20,6 +23,7 @@ import type {
   ProjectSummary,
   SleepPhase,
 } from "../types";
+import { postJson } from "../network/api";
 
 const PHASE_META: Record<
   "morning" | "afternoon" | "evening" | "night",
@@ -406,17 +410,21 @@ export class InnerLifePanel {
     const note = decision === "reject"
       ? prompt("Note optionnelle pour le refus :") || ""
       : "";
-    const resp = await fetch(
+    const resp = await postJson(
       `/api/projects/pending/${actionId}/${decision}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ note }),
-      },
+      { note },
     );
     if (!resp.ok) {
-      const msg = await resp.text();
+      const detail = await resp
+        .json()
+        .then((body) => body?.error as string | undefined)
+        .catch(() => undefined);
+      const msg = detail || `HTTP ${resp.status}`;
       alert(`Échec : ${msg}`);
+      // Lever, sinon le `catch` du gestionnaire de clic ne s'exécute pas et
+      // le bouton reste désactivé alors que rien n'a bougé côté serveur :
+      // l'action attend jusqu'au rechargement de la page.
+      throw new Error(msg);
     }
     // Server pushes an inner_state_update on success, which will re-render
   }
