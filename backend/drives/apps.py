@@ -21,7 +21,20 @@ class DrivesConfig(AppConfig):
             if event.data.get("intent") == "INTERNAL_TRIGGER":
                 return
             from drives.engine import drive_engine
+            from identity.trust import is_internal_person
             drive_engine.on_reply(word_count=event.data.get("word_count", 0))
+
+            # Quelqu'un lui a parlé : SOCIAL est comblé, CURIOSITY un peu.
+            # La règle vivait dans conscience.observe(), énoncée par une
+            # liste littérale de types d'événements — c'était le SEUL
+            # appelant de on_conversation(), donc la seule voie
+            # d'assouvissement de SOCIAL, et elle dépendait du nom que le
+            # canal d'entrée donnait à son événement. Un canal qui n'émet
+            # pas exactement ce nom laissait SOCIAL bloqué à 1.0 pendant
+            # que la conversation battait son plein. Ici elle suit le tour,
+            # quel que soit le canal.
+            if not is_internal_person(event.data.get("person_id")):
+                drive_engine.on_conversation(from_person=True)
 
         event_bus.subscribe(
             _on_turn_completed,
