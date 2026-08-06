@@ -146,8 +146,14 @@ class TestDispatchRouting:
         sent_groups = [c.args[0] for c in self.layer.group_send.await_args_list]
         assert BROADCAST_GROUP not in sent_groups
 
-    async def test_module_reactive_skips_deliver_and_broadcast(self, clean_global_registry):
-        """A reactive Telegram turn echoes itself; dispatch must not double-send."""
+    async def test_module_reactive_is_delivered_by_the_channel(self, clean_global_registry):
+        """A reactive Telegram turn is delivered here, not echoed by the handler.
+
+        The handler used to await the pipeline and reply itself, so dispatch
+        skipped the originating module to avoid a double-send. It now hands
+        the turn to ``turn_queue`` and returns: nothing else sends, and the
+        skip would drop the answer.
+        """
         clean_global_registry.register(
             "tg_1", "telegram", "module", delivery_ref="555"
         )
@@ -156,8 +162,8 @@ class TestDispatchRouting:
         fake_module.deliver = AsyncMock(return_value=True)
 
         with patch("modules.manager.module_manager.get_module", return_value=fake_module):
-            # source == target channel → reactive → no module deliver, no broadcast
             await broadcast_to_websocket(make_output(), "telegram", "tg_1")
 
-        fake_module.deliver.assert_not_awaited()
+        fake_module.deliver.assert_awaited_once()
+        # Toujours pas de fuite vers le groupe global.
         assert self.layer.group_send.await_count == 0

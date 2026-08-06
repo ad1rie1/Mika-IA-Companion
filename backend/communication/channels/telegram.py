@@ -5,9 +5,9 @@ on the same footing as the WebSocket frontend. The channel is started
 and stopped by the ASGI lifespan alongside memory, emotion, and the
 plugin bus.
 
-Incoming Telegram messages are lifted into a ``Perception`` and pushed
-through ``pipeline.router.perceive()`` — identical flow to the web
-frontend channel.
+Incoming Telegram messages are lifted into a ``Perception`` and handed to
+``pipeline.turns.turn_queue`` — identical flow to the web frontend
+channel, down to the queue that keeps turns ordered and off the read loop.
 """
 
 from __future__ import annotations
@@ -248,11 +248,13 @@ class TelegramChannel:
     async def _register_interlocutor(self, message) -> tuple[str, bool]:
         """Register presence + identity for the sender.
 
-        Returns ``(person_id, is_public)``. Registering makes this user
+        Returns ``(person_id, is_public)``. Registering is what makes the
+        reply findable: ``broadcast_to_websocket`` resolves this entry and
+        delivers through ``deliver()`` — reactive turn included, since the
+        handler no longer echoes anything itself. It also makes this user
         PROACTIVELY reachable later (the external API is push-capable any
-        time we hold the chat_id) and stops a telegram turn from leaking to
-        the global websocket broadcast: the recipient is resolvable, and
-        broadcast skips the originating module's echo.
+        time we hold the chat_id), and stops a telegram turn from leaking to
+        the global websocket broadcast.
 
         Trust is the platform account, never more: ``tg_<id>`` proves the
         same account came back, not who is holding it. In a group it drops
@@ -307,7 +309,6 @@ class TelegramChannel:
         person_id, is_public = await self._register_interlocutor(update.message)
 
         from pipeline.perception import Perception
-        from pipeline.router import perceive
 
         perception = Perception.from_text(
             update.message.text,
@@ -315,11 +316,7 @@ class TelegramChannel:
             person_id=person_id,
             metadata={"authenticated": False, "is_public": is_public},
         )
-        # Reactive reply: we echo here. The pipeline's broadcast routing skips
-        # the originating module on a reactive turn, so there is no double-send.
-        output = await perceive(perception)
-        if output and output.text:
-            await update.message.reply_text(output.text)
+        await self._submit(perception, update.message)
 
     async def _handle_media(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -345,7 +342,6 @@ class TelegramChannel:
             return
 
         from pipeline.perception import Perception
-        from pipeline.router import perceive
 
         perception = Perception.from_mixed(
             text=message.caption or "",
@@ -354,9 +350,38 @@ class TelegramChannel:
             person_id=person_id,
             metadata={"authenticated": False, "is_public": is_public},
         )
-        output = await perceive(perception)
-        if output and output.text:
-            await message.reply_text(output.text)
+        await self._submit(perception, message)
+
+    async def _submit(self, perception, message) -> None:
+        """Confier le tour à la file plutôt que l'attendre ici.
+
+        ``python-telegram-bot`` dépile les updates en série : awaiter le
+        pipeline dans le handler rendait le bot muet pour toute la durée du
+        tour — jusqu'à ``ai.call_timeout_seconds``, et sur un modèle local
+        souvent la totalité — ``/start`` compris. Et ça court-circuitait
+        ``turn_queue`` : un message Telegram et un message web partaient en
+        parallèle, deux appels LLM concurrents contre un serveur local qui
+        n'a qu'un créneau. Telegram est un canal de conversation au même
+        titre que le frontend ; il passe par la même file.
+
+        La réponse n'a plus besoin d'être renvoyée d'ici : elle est adressée
+        à ``tg_<id>``, que ``broadcast_to_websocket`` résout dans le registre
+        de présence et livre par ``deliver()`` — le chemin déjà utilisé
+        quand Mika écrit la première.
+        """
+        from pipeline.turns import turn_queue
+
+        if turn_queue.submit(perception):
+            return
+        # File pleine : dit à voix haute, comme l'``ack: overloaded`` du
+        # frontend. Un message avalé en silence laisse quelqu'un attendre
+        # une réponse qui n'arrivera jamais.
+        try:
+            await message.reply_text(
+                "Je suis débordée là — redemande-moi dans un instant."
+            )
+        except Exception as exc:
+            degradations.record("communication.channels.telegram._submit", exc)
 
     async def _download_media(self, message):
         """Pick the richest media on the message and download it.
