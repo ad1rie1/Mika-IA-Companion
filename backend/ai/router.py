@@ -123,6 +123,12 @@ class AIRouter:
     def __init__(self):
         self._providers: dict[str, AIProvider] = {}
         self._role_to_internal: dict[AIRole, str] = {}
+        # Table des modèles déclarés, mémorisée. ``list_rows`` est la seule
+        # lecture de configuration sans cache, et ``_resolve`` est sur le
+        # chemin de TOUT appel IA : un SELECT par appel, confié depuis un
+        # contexte async au pool mono-worker de ``configs.service``, boucle
+        # ASGI en attente. Invalidée par ``on_change("ai.models")``.
+        self._declared_models: dict[str, dict] | None = None
         self._load_config()
 
     # ── Configuration loading ───────────────────────────────────
@@ -147,6 +153,10 @@ class AIRouter:
                 self._role_to_internal[role] = name
 
         config_service.on_change("ai.role.", lambda k, v: self._reload_role(k, v))
+        # ``add_row`` / ``update_row`` / ``delete_row`` invalident puis
+        # notifient, dans cet ordre : une relecture déclenchée ici voit bien
+        # la table d'après.
+        config_service.on_change("ai.models", lambda k, v: self._invalidate_declared_models())
         # Providers read their credentials once, in __init__, and were cached
         # forever: rotating a leaked API key in the admin returned
         # {"ok": true} while the process kept authenticating with the old one.
@@ -164,6 +174,30 @@ class AIRouter:
                 "Provider '%s' evicted after %s changed — credentials will be "
                 "re-read on the next call", provider_name, key,
             )
+
+    def _invalidate_declared_models(self) -> None:
+        """Oublie la table mémorisée — la prochaine résolution la relit."""
+        self._declared_models = None
+        logger.info(
+            "Modèles déclarés invalidés — ai.models sera relu à la prochaine résolution"
+        )
+
+    def _get_declared_models(self) -> dict[str, dict]:
+        """Modèles déclarés, relus au plus une fois par changement de config.
+
+        Un résultat vide n'est délibérément pas mémorisé : il vaut aussi bien
+        « rien n'est encore déclaré » (installation neuve — l'appelant lèvera
+        ``UnconfiguredRoleError`` de toute façon) qu'une base momentanément
+        illisible, et figer ce second cas condamnerait tous les appels
+        suivants jusqu'à la prochaine écriture de configuration.
+        """
+        cached = self._declared_models
+        if cached is not None:
+            return cached
+        loaded = _load_declared_models()
+        if loaded:
+            self._declared_models = loaded
+        return loaded
 
     def _reload_role(self, key: str, value):
         role_key = key.split("ai.role.", 1)[-1]
@@ -192,7 +226,7 @@ class AIRouter:
                 "Déclare un modèle dans Configuration > Déclaration des modèles "
                 "puis mappe-le dans IA · Rôles."
             )
-        declared = _load_declared_models()
+        declared = self._get_declared_models()
         entry = declared.get(internal_name)
         if entry is None:
             raise UnconfiguredRoleError(
