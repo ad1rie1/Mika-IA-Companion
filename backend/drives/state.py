@@ -32,24 +32,30 @@ class DriveParams:
     satisfy_threshold: float = 0.4     # below this, drive doesn't contribute
 
 
-# Default per-kind parameters. Calibrated so that in ~5 minutes of idle
-# a drive reaches notable tension (~0.6), and after ~15 minutes it's
-# pushing strongly (~0.9).
+# Default per-kind parameters. Calibrated so that a drive devient notable
+# (~0.5) apres une dizaine de minutes d'inactivite et ne pousse fortement
+# (~0.9) qu'au bout de 20 a 25 minutes.
+#
+# Les taux precedents (0.0030 / 0.0025 / 0.0020) saturaient les trois
+# pulsions positives en 8 min 20 au plus tard, cycle de decision tournant
+# toutes les 30 s : leur somme restait donc collee a +0.90, le facteur 9
+# valait la constante +0.50, et le bloc de prompt repetait indefiniment les
+# trois memes phrases en « fortement » sans rien apprendre au modele.
 DEFAULT_PARAMS: dict[DriveKind, DriveParams] = {
     DriveKind.CURIOSITY: DriveParams(
-        growth_rate=0.0025,
+        growth_rate=0.0008,
         decay_on_satisfy=0.6,
         weight=0.30,
         satisfy_threshold=0.35,
     ),
     DriveKind.SOCIAL: DriveParams(
-        growth_rate=0.0030,
+        growth_rate=0.0010,
         decay_on_satisfy=0.7,
         weight=0.35,
         satisfy_threshold=0.40,
     ),
     DriveKind.EXPRESSION: DriveParams(
-        growth_rate=0.0020,
+        growth_rate=0.0007,
         decay_on_satisfy=0.8,
         weight=0.25,
         satisfy_threshold=0.45,

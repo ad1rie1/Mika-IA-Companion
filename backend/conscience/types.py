@@ -37,6 +37,10 @@ class DecisionContext:
     # Drives: intrinsic motivation. Signed — REST drive contributes negatively.
     drive_bonus: float = 0.0
     drive_summary: str = ""
+    # Part REST de `drive_bonus` (≤ 0), isolée pour que le scoring puisse
+    # l'appliquer après avoir plafonné les pulsions positives : noyée dans
+    # la somme, elle était mangée par le plafond du facteur 9.
+    drive_rest_penalty: float = 0.0
     # Rumination: unresolved thoughts that persist beyond observations.
     rumination_pressure: float = 0.0   # 0..1, sum of active rumination intensities
     rumination_count: int = 0

@@ -55,8 +55,8 @@ class TestTensionGrowth:
             assert engine.states[kind].tension == 0.0
 
     def test_curiosity_grows_linearly_with_time(self, engine):
-        """After 100s at 0.0025/s, curiosity should be ~0.25."""
-        _backdate(engine, 100.0)
+        """After 300s at 0.0008/s, curiosity should be ~0.24."""
+        _backdate(engine, 300.0)
         engine.update()
         tension = engine.states[DriveKind.CURIOSITY].tension
         assert 0.20 < tension < 0.30
@@ -98,7 +98,7 @@ class TestTensionGrowth:
 class TestSatisfaction:
 
     def test_satisfy_reduces_tension(self, engine):
-        _backdate(engine, 300.0)
+        _backdate(engine, 600.0)
         engine.update()
         before = engine.states[DriveKind.SOCIAL].tension
         assert before > 0.3

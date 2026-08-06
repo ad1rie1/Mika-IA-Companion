@@ -484,6 +484,7 @@ class ConscienceEngine:
 
         # Drives: intrinsic motivation pressure
         drive_bonus, drive_summary = drive_engine.conscience_contribution()
+        drive_rest_penalty = drive_engine.rest_penalty()
 
         # Rumination: persistent unresolved thoughts
         rum_pressure, rum_count = await self._rumination_snapshot()
@@ -506,6 +507,7 @@ class ConscienceEngine:
             consecutive_ignored_acts=consecutive_ignored_acts,
             drive_bonus=drive_bonus,
             drive_summary=drive_summary,
+            drive_rest_penalty=drive_rest_penalty,
             rumination_pressure=rum_pressure,
             rumination_count=rum_count,
             energy=energy,

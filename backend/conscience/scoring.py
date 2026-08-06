@@ -84,8 +84,16 @@ def compute_decision_score(
 
     # Factor 9: Intrinsic drives (curiosity / social / expression / rest).
     # drive_bonus is signed: REST subtracts, others add. Clamp to [-0.4, +0.5].
-    if abs(ctx.drive_bonus) >= 0.02:
-        drive_contribution = max(-0.4, min(0.5, ctx.drive_bonus))
+    # La fatigue est retirée *après* le plafond des positives, pas avant :
+    # celles-ci somment jusqu'a +0.90, donc le plafond +0.5 avalait la
+    # soustraction et REST a 0.0 rendait exactement le meme score que REST a
+    # 1.0. `drive_rest_penalty` vaut 0.0 quand personne ne la renseigne, ce
+    # qui redonne mot pour mot l'ancien calcul.
+    drive_positive = ctx.drive_bonus - ctx.drive_rest_penalty
+    drive_contribution = max(
+        -0.4, min(0.5, drive_positive) + ctx.drive_rest_penalty
+    )
+    if abs(drive_contribution) >= 0.02:
         score += drive_contribution
         parts.append(f"drives({ctx.drive_summary or 'mixed'}:{drive_contribution:+.2f})")
 
