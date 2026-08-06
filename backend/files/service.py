@@ -202,16 +202,35 @@ class FilesService:
             return {"error": "Fichier supprimé."}
         if record["category"] not in ("text", "unknown"):
             return {"error": f"Ce fichier est de type '{record['category']}' — non lisible comme texte."}
+
+        # Même extracteur que le préprocesseur : la catégorie "unknown" couvre
+        # application/pdf et les .docx, et décoder leurs octets en utf-8 rendait
+        # le flux compressé du PDF — des milliers de U+FFFD ayant la forme d'un
+        # succès, que le modèle enchaînait à « résumer ». Un fichier lu par
+        # l'outil et le même fichier arrivé en pièce jointe doivent donner le
+        # même texte. Extraction en thread : parser un PDF de 5 Mo est du CPU
+        # synchrone qui ne doit pas figer la boucle WebSocket.
+        from pipeline.preprocessors.files import _extract
+
+        name = record.get("name") or "fichier"
+        mime = (record.get("type") or "application/octet-stream").lower().split(";")[0].strip()
+        ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
         try:
-            def _read():
-                return Path(record["path"]).read_bytes().decode("utf-8", errors="replace")
-            content = await asyncio.to_thread(_read)
-            if len(content) > 10_000:
-                content = content[:10_000] + "\n[...tronqué]"
-            return {"content": content, "name": record["name"]}
+            def _read_and_extract():
+                data = Path(record["path"]).read_bytes()
+                return _extract(data, name=name, mime=mime, ext=ext)
+            content, method = await asyncio.to_thread(_read_and_extract)
         except Exception as e:
             degradations.record("files.service.op_read", e)
             return {"error": f"Erreur de lecture : {e}"}
+        if not content:
+            # La raison est nommée par l'extracteur ("pypdf non installé",
+            # "PDF sans texte extractible (scanné ?)", "format non supporté") :
+            # un échec dit pourquoi plutôt que de rendre du bruit.
+            return {"error": f"Contenu non extractible ({method})."}
+        if len(content) > 10_000:
+            content = content[:10_000] + "\n[...tronqué]"
+        return {"content": content, "name": record["name"]}
 
     async def op_analyze_image(self, file_id: str, question: str = "") -> dict:
         record = self.get(file_id)

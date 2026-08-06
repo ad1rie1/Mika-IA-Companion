@@ -87,7 +87,7 @@ class FilesModule(BaseModule):
             ModuleTool(
                 name="files_read",
                 description=(
-                    "Lit le contenu texte d'un fichier (text/plain, JSON, CSV…). "
+                    "Lit le contenu texte d'un fichier (text/plain, JSON, CSV, HTML, PDF, DOCX…). "
                     "Ne fonctionne pas pour les images ou l'audio — utilise files_analyze_image pour les images."
                 ),
                 parameters=[
