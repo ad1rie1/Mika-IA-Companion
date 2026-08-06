@@ -30,6 +30,11 @@ MAX_EMAILS_PER_ACCOUNT = 200
 # not to be tight, it is to have a bound at all — aioimaplib has none.
 IMAP_TICK_TIMEOUT = 180
 
+# Messages traités par tour et par compte, à défaut de réglage. Un message
+# neuf coûte deux appels LLM en série (triage puis interprétation par la
+# conscience) : au-delà d'une quinzaine, le tour dépasse IMAP_TICK_TIMEOUT.
+DEFAULT_MAX_PER_TICK = 15
+
 
 class EmailModule(BaseModule):
     """Multi-account IMAP/SMTP module with email storage, contacts, and AI triage."""
@@ -181,19 +186,71 @@ class EmailModule(BaseModule):
                     self.logger.debug("IMAP disconnect after timeout failed",
                                       exc_info=True)
 
+    @staticmethod
+    def _max_per_tick() -> int:
+        """Plafond de messages traités par tour et par compte.
+
+        Lecture ORM : appelée sous ``sync_to_async`` uniquement. Depuis une
+        coroutine, ``config_service.get`` avale l'erreur d'accès synchrone et
+        rend silencieusement la valeur d'usine — le réglage de l'utilisateur
+        serait ignoré sans que rien ne le dise.
+        """
+        from configs.service import config_service
+
+        try:
+            value = config_service.get("email.max_per_tick", default=DEFAULT_MAX_PER_TICK)
+            return max(1, int(value))
+        except Exception as exc:
+            degradations.record("modules.plugins.email.module._max_per_tick", exc)
+            return DEFAULT_MAX_PER_TICK
+
     async def _check_account(self, account_id: int, entry: dict) -> None:
+        """Relève un compte, par lots bornés et reprenables.
+
+        Le tour est borné par ``IMAP_TICK_TIMEOUT`` en amont, et ``wait_for``
+        annule la coroutine sans rien exécuter de ce qui suit la boucle. Un
+        marqueur de progression écrit *après* la boucle était donc perdu à
+        chaque dépassement : une boîte de cinq mille messages était
+        retéléchargée intégralement toutes les soixante secondes, sans que
+        ``initial_sync_done`` passe jamais à ``True`` — donc sans qu'aucun
+        email ne soit jamais analysé ni signalé.
+
+        Deux choses le rendent reprenable, dans cet ordre :
+
+        1. **Le curseur, c'est la base elle-même.** Chaque message importé est
+           une ligne ``Email``, donc le travail déjà fait est acquis au
+           message près, y compris au milieu d'un lot annulé. Le filtre est
+           posé *avant* le FETCH — c'est le téléchargement qui coûte, pas la
+           déduplication par ``message_id`` qui, elle, arrive après.
+        2. **Le lot est plafonné** (``email.max_per_tick``), le reste étant
+           repris au tour suivant, comme le module RSS borne ses articles.
+        """
+        from asgiref.sync import sync_to_async
+        from django.utils import timezone
+        from modules.plugins.email.models import Email, EmailAccount
+
         imap = entry["imap"]
         account = entry["account"]
 
         is_initial_sync = not account.initial_sync_done
+        max_per_tick = await sync_to_async(self._max_per_tick)()
+        known = await sync_to_async(
+            lambda: set(
+                Email.objects.filter(account=account)
+                .exclude(uid="")
+                .values_list("uid", flat=True)
+            )
+        )()
 
         try:
-            if is_initial_sync:
-                emails = await imap.fetch_all()
-            elif account.last_fetch:
-                emails = await imap.fetch_since(account.last_fetch)
+            if is_initial_sync or not account.last_fetch:
+                uids = await imap.list_uids("ALL")
             else:
-                emails = await imap.fetch_all()
+                uids = await imap.list_uids_since(account.last_fetch)
+
+            pending = [uid for uid in uids if uid not in known]
+            batch = pending[:max_per_tick]
+            emails = await imap.fetch_uids(batch)
         except Exception:
             self.logger.exception("IMAP fetch error for %s, attempting reconnect", account.name)
             try:
@@ -204,10 +261,22 @@ class EmailModule(BaseModule):
                 self.logger.exception("IMAP reconnect failed for %s", account.name)
             return
 
+        # Compté sur le lot demandé, pas sur ce que le FETCH a rendu : un
+        # message illisible resterait sinon éternellement « en attente » et
+        # la synchro initiale ne s'achèverait jamais.
+        remaining = len(pending) - len(batch)
+
         if is_initial_sync:
-            self.logger.info("[%s] Initial sync — importing %d email(s) (replies/notifications disabled)", account.name, len(emails))
+            self.logger.info(
+                "[%s] Initial sync — importing %d email(s), %d left after this tick "
+                "(replies/notifications disabled)",
+                account.name, len(emails), remaining,
+            )
         else:
-            self.logger.debug("[%s] Fetched %d email(s) since last sync", account.name, len(emails))
+            self.logger.debug(
+                "[%s] Fetched %d email(s) since last sync, %d left after this tick",
+                account.name, len(emails), remaining,
+            )
 
         new_count = 0
         errors = 0
@@ -220,20 +289,23 @@ class EmailModule(BaseModule):
                 errors += 1
                 self.logger.exception("[%s] Failed to process email: %s", account.name, email_msg.subject)
 
-        from asgiref.sync import sync_to_async
-        from django.utils import timezone
-        from modules.plugins.email.models import EmailAccount
-
         now = timezone.now()
         update_fields = {"last_fetch": now}
 
-        if is_initial_sync:
-            if errors == 0:
-                update_fields["initial_sync_done"] = True
-                account.initial_sync_done = True
-                self.logger.info("[%s] Initial sync complete — %d email(s) imported, replies now enabled", account.name, new_count)
-            else:
-                self.logger.warning("[%s] Initial sync incomplete — %d error(s), will retry next tick", account.name, errors)
+        if is_initial_sync and remaining <= 0:
+            # Achevée dès que la boîte a été parcourue, échecs compris. La
+            # subordonner à `errors == 0` la laissait inachevée pour toujours
+            # sur un seul message qui échoue de façon déterministe : la boîte
+            # repartait de zéro à chaque tour et, `allow_actions` restant
+            # faux, plus rien n'était jamais signalé. Ce qui a échoué reste
+            # journalisé et repasse par le relevé incrémental.
+            update_fields["initial_sync_done"] = True
+            account.initial_sync_done = True
+            self.logger.info(
+                "[%s] Initial sync complete — %d email(s) imported this tick, "
+                "%d error(s), replies now enabled",
+                account.name, new_count, errors,
+            )
 
         await sync_to_async(
             EmailAccount.objects.filter(pk=account_id).update
@@ -244,7 +316,12 @@ class EmailModule(BaseModule):
 
         if new_count > 0:
             self.logger.info("[%s] %d new email(s) processed", account.name, new_count)
-            await self._prune_emails(account)
+            # Jamais pendant la synchro initiale : l'élagage supprimerait les
+            # lignes qui servent de curseur, et tout ce qui dépasse les 200
+            # plus récents reviendrait au tour suivant comme « nouveau » —
+            # une boucle d'écriture/suppression permanente sur SQLite.
+            if account.initial_sync_done:
+                await self._prune_emails(account)
         else:
             self.logger.debug("[%s] No new emails", account.name)
 
