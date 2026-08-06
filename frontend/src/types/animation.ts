@@ -18,6 +18,14 @@ export type AnimationStateName =
 // the TTS — mirrored into body animation cues.
 export type ProsodicCue = "sigh" | "laugh" | "breath";
 
+// Découpage de la restitution tel que le TTS va réellement la jouer
+// (TTSService.lipSyncPlan) : ce qui est prononcé, et le temps que les
+// tokens de prosodie réservent sans qu'un mot soit dit. Le lip-sync en a
+// besoin pour articuler la bonne chaîne et se taire pendant les silences.
+export type SpeechPlanSegment =
+  | { type: "speech"; text: string }
+  | { type: "silence"; ms: number };
+
 // ── Emotion → body gesture mapping ──────────────────────────────────
 
 export type GestureKind = "oneshot" | "idleVariant" | "none";
