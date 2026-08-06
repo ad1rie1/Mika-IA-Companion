@@ -36,6 +36,28 @@ const HEARTBEAT_TIMEOUT_MS = 50000;
  */
 const MAX_FRAME_CHARS = 34 * 1024 * 1024;
 
+/**
+ * Budget mémoire de la file d'attente, en unités UTF-16 sérialisées.
+ *
+ * MAX_OUTBOX borne le *nombre* de frames, jamais leur taille : un frame de
+ * chat porte jusqu'à MAX_ATTACHMENTS × MAX_FILE_SIZE en base64 (~35 Mio, cf.
+ * ChatOverlay), donc vingt frames retenus font des centaines de Mo de chaînes
+ * vivantes dans l'onglet — le navigateur tue la page avant la reconnexion et
+ * emporte les messages que la file existait précisément pour sauver.
+ *
+ * 48 Mio laisse passer un envoi lourd plus sa suite immédiate, ou des
+ * centaines de messages texte : la borne en nombre reste la contraignante
+ * dans une conversation normale, celle-ci ne mord que sur les pièces jointes.
+ */
+const MAX_OUTBOX_CHARS = 48 * 1024 * 1024;
+
+interface OutboxEntry {
+  frame: object;
+  attempts: number;
+  /** Taille sérialisée mesurée à la mise en file, pour tenir le cumul. */
+  chars: number;
+}
+
 export class WebSocketClient {
   private ws: WebSocket | null = null;
   private url: string;
@@ -47,10 +69,13 @@ export class WebSocketClient {
   private displayName: string | null = null;
   // Frames typed while the socket is down. The chat UI paints the user's
   // bubble before send() is called, so dropping them made messages look
-  // delivered when they never left the browser. Bounded so a long outage
-  // can't grow unbounded with 5MB attachment payloads.
-  private outbox: Array<{ frame: object; attempts: number }> = [];
+  // delivered when they never left the browser. Bornée deux fois — en nombre
+  // de frames et en octets retenus — parce qu'une borne en nombre seule laisse
+  // une coupure accumuler autant de mémoire que 20 × MAX_FRAME_CHARS.
+  private outbox: OutboxEntry[] = [];
   private static readonly MAX_OUTBOX = 20;
+  /** Cumul de `chars` sur la file, tenu à jour à chaque entrée/sortie. */
+  private outboxChars = 0;
   /**
    * Réouvertures qu'un frame en file peut traverser sans réussir à partir.
    * Au-delà il est abandonné et signalé : le remettre en file indéfiniment
@@ -189,6 +214,7 @@ export class WebSocketClient {
           // frames would otherwise keep their bubbles looking queued, and
           // silently ride a *future* session if the page ever reconnects.
           this.outbox = [];
+          this.outboxChars = 0;
           this.emit("connection", { status: "unauthorized" });
           return;
         }
@@ -300,12 +326,31 @@ export class WebSocketClient {
       this.ws.send(payload);
       return true;
     }
-    if (this.outbox.length >= WebSocketClient.MAX_OUTBOX) {
-      const evicted = this.outbox.shift();
-      if (evicted) this.refuseFrame(evicted.frame, "send_abandoned");
-    }
-    this.outbox.push({ frame: data, attempts: 0 });
+    this.enqueue({ frame: data, attempts: 0, chars: payload.length });
     return false;
+  }
+
+  /**
+   * Mettre un frame en file en respectant les deux bornes.
+   *
+   * L'éviction se fait par la tête — le plus ancien part le premier — et passe
+   * par `refuseFrame` : un frame évincé ne partira jamais, et le taire laisse
+   * sa bulle « en attente d'envoi » sans issue. La garde sur `length` fait le
+   * reste : un frame seul tient toujours (MAX_FRAME_CHARS < MAX_OUTBOX_CHARS),
+   * et vider la file ne peut pas tourner en boucle si ce n'était pas le cas.
+   */
+  private enqueue(entry: OutboxEntry) {
+    while (
+      this.outbox.length &&
+      (this.outbox.length >= WebSocketClient.MAX_OUTBOX ||
+        this.outboxChars + entry.chars > MAX_OUTBOX_CHARS)
+    ) {
+      const evicted = this.outbox.shift()!;
+      this.outboxChars -= evicted.chars;
+      this.refuseFrame(evicted.frame, "send_abandoned");
+    }
+    this.outbox.push(entry);
+    this.outboxChars += entry.chars;
   }
 
   /**
@@ -345,6 +390,7 @@ export class WebSocketClient {
     if (!this.outbox.length) return;
     const pending = this.outbox;
     this.outbox = [];
+    this.outboxChars = 0;
     for (const entry of pending) {
       if (this.ws?.readyState !== WebSocket.OPEN) {
         // Socket died again mid-flush — keep what's left for the next open,
@@ -356,7 +402,10 @@ export class WebSocketClient {
           this.refuseFrame(entry.frame, "send_abandoned");
           continue;
         }
+        // Remise en file directe : on ne réévince pas ce que la file portait
+        // déjà, et le cumul suit l'entrée conservée.
         this.outbox.push(entry);
+        this.outboxChars += entry.chars;
         continue;
       }
       this.ws.send(JSON.stringify(entry.frame));
