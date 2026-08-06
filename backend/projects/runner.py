@@ -433,8 +433,10 @@ class ProjectRunner:
                 degradations.record("projects: create task", exc)
 
         # 3. Proposed action (if the LLM output includes one) → pending queue
-        # Projects using `requires_approval=True` should route proposals through
-        # a dedicated structure. We accept `proposed_action` in the JSON too.
+        # `proposed_action` is the *only* channel a text-only runner has to
+        # reach ProjectPendingAction, and the prompt declares it on projects
+        # requiring approval. Anywhere else there is no queue to land in, so
+        # the proposal is logged rather than silently dropped.
         proposed = data.get("proposed_action")
         if isinstance(proposed, dict) and ctx.requires_approval:
             try:
@@ -451,6 +453,21 @@ class ProjectRunner:
                 await self._broadcast_pending_action()
             except Exception as exc:
                 degradations.record("projects: queue pending action", exc)
+        elif proposed:
+            # Pas de file d'attente (projet sans validation requise) ou forme
+            # inattendue : le lanceur n'exécute aucun effet de bord, donc la
+            # proposition ne mène nulle part. Elle est journalisée — visible
+            # au tableau de bord et réinjectée dans « DERNIÈRES ACTIONS ».
+            libelle = (
+                str(proposed.get("proposal") or summary)
+                if isinstance(proposed, dict)
+                else str(proposed)
+            )
+            await self._record_log(
+                ctx.project_id,
+                action=ProjectLog.Action.BLOCKED,
+                summary=f"Action proposée non traitée : {libelle[:300]}",
+            )
 
         # 4. Report to user (optional — broadcast as speech)
         report = data.get("report_to_user")
