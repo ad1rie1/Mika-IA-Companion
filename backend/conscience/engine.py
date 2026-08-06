@@ -581,12 +581,17 @@ class ConscienceEngine:
             r.intensity *= 0.5
             if r.intensity < 0.1:
                 r.status = "resolved"
-            try:
-                await sync_to_async(r.save)(
-                    update_fields=["intensity", "status"]
-                )
-            except Exception as exc:
-                degradations.record("conscience: rumination relief save", exc)
+
+        # Une seule ecriture pour le lot : ce sont deux champs scalaires
+        # calcules en memoire, sans logique par ligne. Vingt save() separes,
+        # c'etaient vingt sync_to_async serialises sur l'unique thread
+        # d'executeur partage avec les autres boucles de fond.
+        try:
+            await sync_to_async(Rumination.objects.bulk_update)(
+                active, ["intensity", "status"], batch_size=50,
+            )
+        except Exception as exc:
+            degradations.record("conscience: rumination relief write", exc)
 
     # Emotional drift map for aging ruminations. A thought doesn't stay
     # the same shape forever — frustration that lingers becomes anxiety,
