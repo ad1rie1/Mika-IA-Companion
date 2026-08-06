@@ -55,29 +55,49 @@ class IMAPClient:
 
     async def fetch_all(self) -> list[EmailMessage]:
         """Fetch all emails from inbox."""
-        return await self._fetch_by_criteria("ALL")
+        return await self.fetch_uids(await self.list_uids("ALL"))
 
     async def fetch_since(self, since_date) -> list[EmailMessage]:
         """Fetch all emails since a given date (datetime or date object)."""
-        date_str = since_date.strftime("%d-%b-%Y")
-        return await self._fetch_by_criteria(f"SINCE {date_str}")
+        return await self.fetch_uids(await self.list_uids_since(since_date))
 
-    async def _fetch_by_criteria(self, criteria: str) -> list[EmailMessage]:
-        """Fetch emails matching IMAP search criteria."""
+    async def list_uids(self, criteria: str = "ALL") -> list[str]:
+        """Liste les identifiants correspondant au critère, sans rien télécharger.
+
+        Séparé du téléchargement parce que c'est lui qui coûte : un SEARCH
+        rend cinq mille identifiants en un aller-retour, là où le FETCH
+        correspondant en demande cinq mille. L'appelant peut donc décider
+        *avant* de payer ce qu'il va vraiment chercher.
+        """
         if not self._client:
             await self.connect()
 
         result, data = await self._client.search(criteria)
-        if result != "OK" or not data[0]:
+        if result != "OK" or not data or not data[0]:
             return []
 
-        uids = data[0].split()
+        return [
+            uid.decode() if isinstance(uid, bytes) else uid
+            for uid in data[0].split()
+        ]
+
+    async def list_uids_since(self, since_date) -> list[str]:
+        """Identifiants des messages reçus depuis une date (jour près, IMAP)."""
+        date_str = since_date.strftime("%d-%b-%Y")
+        return await self.list_uids(f"SINCE {date_str}")
+
+    async def fetch_uids(self, uids: list[str]) -> list[EmailMessage]:
+        """Télécharge et analyse les messages désignés."""
+        if not uids:
+            return []
+        if not self._client:
+            await self.connect()
+
         emails = []
         parser = BytesParser(policy=policy.default)
 
-        for uid in uids:
+        for uid_str in uids:
             try:
-                uid_str = uid.decode() if isinstance(uid, bytes) else uid
                 result, msg_data = await self._client.fetch(uid_str, "(RFC822)")
                 if result != "OK":
                     continue
@@ -128,7 +148,7 @@ class IMAPClient:
                 )
                 emails.append(email_msg)
             except Exception:
-                logger.exception("Error fetching email UID %s", uid)
+                logger.exception("Error fetching email UID %s", uid_str)
 
         return emails
 
