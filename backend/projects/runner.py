@@ -467,11 +467,21 @@ class ProjectRunner:
 
         # 6. Think out loud about it. Generated from the intended action +
         #    what came back, by a small dedicated call — never the raw
-        #    summary, which reads like a report, not a thought.
+        #    summary, which reads like a report, not a thought. Muet en mode
+        #    professionnel, ce qui supprime l'appel dans le cas par défaut.
         await self._murmur(ctx, summary, data)
 
     async def _murmur(self, ctx, summary: str, data: dict) -> None:
-        """Voice a short inner thought about this tick. Silence is fine."""
+        """Voice a short inner thought about this tick. Silence is fine.
+
+        Rien à dire quand le projet tourne en `emotion_policy=off` — le
+        défaut, mode professionnel, « aucun raisonnement affectif ». Sans
+        cette porte, chaque avance d'un projet pro diffusait un marmonnement
+        affectif au groupe global et coûtait un second appel LLM.
+        """
+        if ctx.emotion_policy == "off":
+            return
+
         from pipeline.inner_voice import generate_inner_thought
 
         try:
