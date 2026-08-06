@@ -36,6 +36,13 @@ logger = logging.getLogger(__name__)
 # seul, même si l'écriture change.
 MAX_NAME_CHARS = 80
 
+# Plafond d'entrées listées inline dans le prompt système. Le bloc repart à
+# chaque tour — et à chaque itération de la boucle d'outils : sans plafond,
+# une journée de tri de documents y ajoutait une ligne par fichier déposé,
+# de façon permanente. Le détail complet reste joignable par files_list,
+# exactement comme pour les fichiers plus anciens.
+MAX_TODAY_LINES = 6
+
 
 def _as_data(raw: Any) -> str:
     """Neutralise une valeur tierce destinée à une ligne du prompt système.
@@ -97,8 +104,8 @@ class FilesService:
     def list_today_context(self) -> str:
         """Text block injected into the system prompt.
 
-        Only today's uploads are listed inline; anything older is
-        surfaced via the files_list tool.
+        Only today's most recent uploads are listed inline; the rest,
+        like anything older, is surfaced via the files_list tool.
         """
         from datetime import date
         today = date.today().isoformat()
@@ -108,11 +115,22 @@ class FilesService:
         ]
         if not today_files:
             return ""
+        recents = sorted(today_files, key=lambda x: x["uploaded_at"], reverse=True)
         lines = [f"Fichiers uploadés aujourd'hui ({len(today_files)}) :"]
-        for r in sorted(today_files, key=lambda x: x["uploaded_at"], reverse=True):
+        # L'UUID est indispensable pour appeler les outils, la catégorie dit
+        # lequel appeler ; la taille ne sert à aucune décision et coûte un
+        # tiers de la ligne.
+        for r in recents[:MAX_TODAY_LINES]:
             lines.append(
                 f'  - ID={r["id"]}  nom="{_as_data(r.get("name"))}"'
-                f"  type={r['category']}  taille={r['size_label']}"
+                f"  type={r['category']}"
+            )
+        reste = len(recents) - MAX_TODAY_LINES
+        if reste > 0:
+            pluriel = "s" if reste > 1 else ""
+            lines.append(
+                f"  … et {reste} autre{pluriel} fichier{pluriel} aujourd'hui"
+                " — utilise files_list pour les voir."
             )
         lines.append(
             "Utilise les outils files_* pour lire, analyser, déplacer ou supprimer ces fichiers."
