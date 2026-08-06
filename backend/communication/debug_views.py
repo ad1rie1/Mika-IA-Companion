@@ -207,21 +207,24 @@ def wake_up(request):
 
 @require_http_methods(["GET"])
 def sleep_status(request):
-    """Snapshot of sleep state: current phase + today's journal + last
+    """Snapshot of sleep state: current phase + latest journal + last
     night's dream. Cheap, no LLM, safe in prod (but we gate anyway)."""
     err = _forbidden_if_not_debug()
     if err:
         return err
 
-    from datetime import timedelta
-    from memory.models import DailyJournal, Dream
+    from memory import read
     from memory.sleep import sleep_cycle
 
-    journal = DailyJournal.objects.filter(date=date.today()).first()
-    last_night = date.today() - timedelta(days=1)
-    dream = (
-        Dream.objects.filter(night_of=last_night).order_by("-vividness").first()
-    )
+    # Mêmes questions que celles posées par l'InnerLifePanel, et via la même
+    # couche de lecture. Écrites ici à la main, elles avaient déjà divergé :
+    # un journal est daté du jour qu'il *couvre* et la phase de sommeil léger
+    # l'écrit tard ce soir-là, donc un filtre strict sur aujourd'hui rendait
+    # l'endpoint muet de minuit à 23h pendant que le panneau, lui, affichait
+    # le journal. Un endpoint de diagnostic qui ment sur l'état est le seul
+    # défaut qui lui coûte vraiment.
+    journal = async_to_sync(read.latest_journal)()
+    dream = async_to_sync(read.dream_of_last_night)()
 
     return JsonResponse(
         {
