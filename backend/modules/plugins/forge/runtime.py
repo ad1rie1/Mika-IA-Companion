@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any, Callable
 
 from modules.plugins.forge import sandbox
-from modules.plugins.forge.api import ForgeAPI, write_log
+from modules.plugins.forge.api import ForgeAPI
 from modules.plugins.forge.store import ForgeManifest
 
 LOAD_TIMEOUT_S = 10.0
@@ -72,11 +72,16 @@ def load_module(manifest: ForgeManifest, code: str, api: ForgeAPI) -> LoadedForg
     def _print(*args, **kwargs):
         message = " ".join(str(a) for a in args)
         if message.strip():
-            write_log(manifest.name, "info", "print", message)
+            # Passe par l'API et non par write_log : c'est là que vit le
+            # plafond de lignes par invocation.
+            api.log(message)
 
     env = sandbox.build_globals(api, _print)
     compiled = compile(code, f"<forge:{manifest.name}>", "exec")
-    sandbox.run_with_deadline(_exec_in, (compiled, env), LOAD_TIMEOUT_S)
+    try:
+        sandbox.run_with_deadline(_exec_in, (compiled, env), LOAD_TIMEOUT_S)
+    finally:
+        api._end_run()
 
     for key, value in env.items():
         if callable(value) and key.startswith(sandbox.HANDLER_PREFIXES):
@@ -96,4 +101,7 @@ def call_handler(lm: LoadedForgeModule, handler_name: str,
     l'hôte les formate et les journalise.
     """
     fn = lm.handlers[handler_name]
-    return sandbox.run_with_deadline(fn, (lm.api, *extra_args), timeout_s)
+    try:
+        return sandbox.run_with_deadline(fn, (lm.api, *extra_args), timeout_s)
+    finally:
+        lm.api._end_run()
