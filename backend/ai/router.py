@@ -11,6 +11,7 @@ SDKs, and roles pick only among declared internal names.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from enum import Enum
@@ -31,6 +32,11 @@ from ai.quota import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Borne appliquée quand ``ai.call_timeout_seconds`` est illisible — une lecture
+# de configuration peut précéder une base accessible. Jamais « pas de borne » :
+# l'absence de borne est exactement ce que ce réglage existe pour empêcher.
+FALLBACK_CALL_TIMEOUT_S = 120.0
 
 
 class AIRole(str, Enum):
@@ -284,12 +290,40 @@ class AIRouter:
 
     # ── Completion ───────────────────────────────────────────────
 
+    def _call_timeout(self, override: float | None) -> float:
+        """Borne temporelle d'un appel routé, en secondes.
+
+        La borne appartient au routeur, pas à la discipline de l'appelant :
+        la moitié des sites d'appel l'oubliaient, et tous vivaient dans une
+        boucle de fond sans superviseur. Le SDK Ollama construit son client
+        httpx avec ``timeout=None`` — un serveur qui accepte la connexion et
+        ne répond jamais (modèle en cours de chargement en VRAM, GPU bloqué,
+        conteneur suspendu) laissait la coroutine en attente pour la durée du
+        processus. Le tick cron qui la portait ne revenait alors jamais, et
+        comme un tick qui en chevauche un autre est *sauté*, le module cessait
+        définitivement de travailler — sans exception, sans trace.
+
+        ``ai.call_timeout_seconds`` (« Timeout appel IA » dans la
+        configuration) n'était lu qu'au tour de conversation : c'est ici qu'il
+        vaut pour tous. Un appelant qui passe ``timeout=`` garde la main, et
+        ceux qui gardent leur propre ``wait_for`` plus court gagnent toujours.
+        """
+        if override is not None:
+            return float(override)
+        from configs.service import config_service
+        try:
+            value = float(config_service.get("ai.call_timeout_seconds"))
+        except Exception:
+            return FALLBACK_CALL_TIMEOUT_S
+        return value if value > 0 else FALLBACK_CALL_TIMEOUT_S
+
     async def _metered_call(
         self,
         role: AIRole,
         system_prompt: str,
         user_prompt: str,
         invoke,
+        timeout: float | None = None,
     ):
         """Séquence commune à TOUT appel routé, outillé ou non.
 
@@ -307,6 +341,7 @@ class AIRouter:
         provider = self._get_provider(provider_name)
 
         prompt_chars = len(system_prompt) + len(user_prompt)
+        timeout_s = self._call_timeout(timeout)
         t0 = time.monotonic()
 
         project_id = current_project_id.get()
@@ -329,7 +364,9 @@ class AIRouter:
         _reset_usage()
 
         try:
-            result, text = await invoke(provider, model, temperature)
+            result, text = await asyncio.wait_for(
+                invoke(provider, model, temperature), timeout=timeout_s,
+            )
             elapsed_ms = (time.monotonic() - t0) * 1000
 
             usage = _take_usage()
@@ -358,6 +395,18 @@ class AIRouter:
             )
             return result
 
+        except asyncio.TimeoutError:
+            # Dit à voix haute : une boucle de fond qui se fige silencieusement
+            # est indiscernable d'une boucle qui n'a rien à faire.
+            elapsed_ms = (time.monotonic() - t0) * 1000
+            logger.warning(
+                "AI call TIMEOUT role=%-22s internal=%-18s provider=%-7s model=%-30s "
+                "prompt=%5d chars  %7.0f ms  (borne %.0f s)",
+                role.value, internal_name, provider_name, model,
+                prompt_chars, elapsed_ms, timeout_s,
+            )
+            raise
+
         except Exception:
             elapsed_ms = (time.monotonic() - t0) * 1000
             logger.error(
@@ -378,8 +427,11 @@ class AIRouter:
         """Route a completion request to the configured provider+model.
 
         Wraps every call with unified logging: timing, role, provider,
-        model, prompt size, and response size.
+        model, prompt size, and response size — et une borne temporelle
+        (``timeout=`` explicite, sinon ``ai.call_timeout_seconds``).
         """
+        timeout = kwargs.pop("timeout", None)
+
         async def _invoke(provider, model, temperature):
             # Role-configured temperature wins unless the caller overrides it.
             kwargs.setdefault("temperature", temperature)
@@ -391,7 +443,9 @@ class AIRouter:
             )
             return text, text
 
-        return await self._metered_call(role, system_prompt, user_prompt, _invoke)
+        return await self._metered_call(
+            role, system_prompt, user_prompt, _invoke, timeout=timeout,
+        )
 
     async def complete_with_tools(
         self,
@@ -405,8 +459,10 @@ class AIRouter:
 
         Renvoie ``(texte, noms_des_outils_appelés)``. La boucle d'outils est
         interne au provider ; ce qui compte ici est qu'elle soit encadrée par
-        le quota et comptabilisée dans son intégralité.
+        le quota, comptabilisée dans son intégralité, et bornée dans le temps.
         """
+        timeout = kwargs.pop("timeout", None)
+
         async def _invoke(provider, model, temperature):
             # Même règle que ``complete`` : la température du modèle déclaré
             # s'applique, sauf si l'appelant en impose une.
@@ -420,7 +476,9 @@ class AIRouter:
             )
             return (text, called), text
 
-        return await self._metered_call(role, system_prompt, user_prompt, _invoke)
+        return await self._metered_call(
+            role, system_prompt, user_prompt, _invoke, timeout=timeout,
+        )
 
 
 ai_router = AIRouter()
