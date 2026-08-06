@@ -71,6 +71,7 @@ urlpatterns = [
     path("projets/<int:project_id>/", projects.project_detail, name="project-detail"),
     path("projets/<int:project_id>/modifier/", projects.project_edit, name="project-edit"),
     path("projets/<int:project_id>/supprimer/", projects.project_delete, name="project-delete"),
+    path("projets/<int:project_id>/reprendre/", projects.project_resume, name="project-resume"),
     path("projets/<int:project_id>/taches/", projects.task_create, name="task-create"),
     path(
         "projets/<int:project_id>/taches/<int:task_id>/",
