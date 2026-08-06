@@ -45,7 +45,10 @@ class EmailModule(BaseModule):
         super().__init__("email")
         self._accounts: dict[int, dict] = {}  # account_id -> {imap, smtp, account}
         self._analyzer = None
-        self._unread_counts: dict[str, int] = {}  # account_name -> count
+        # account_name -> nombre de messages reçus non lus. Instantané RAM du
+        # courrier *en attente*, pas des nouveautés du dernier relevé : c'est
+        # à cette question que répond le bloc de contexte de l'invite.
+        self._unread_counts: dict[str, int] = {}
         # Comptes actifs déclarés en base, connectés ou non : c'est ce
         # compteur qui décide si le module se déclare au modèle. On ne compte
         # pas les connexions IMAP vivantes, sinon un serveur momentanément
@@ -105,6 +108,11 @@ class EmailModule(BaseModule):
                 "smtp": smtp,
                 "account": account,
             }
+
+            # Sans ça, le courrier déjà en attente reste invisible dans
+            # l'invite jusqu'au premier relevé, soit une minute après le
+            # démarrage.
+            await self._refresh_unread_count(account)
 
         self.logger.info("Email module started (%d account(s))", len(self._accounts))
 
@@ -312,8 +320,6 @@ class EmailModule(BaseModule):
         )(**update_fields)
         account.last_fetch = now
 
-        self._unread_counts[account.name] = new_count
-
         if new_count > 0:
             self.logger.info("[%s] %d new email(s) processed", account.name, new_count)
             # Jamais pendant la synchro initiale : l'élagage supprimerait les
@@ -324,6 +330,33 @@ class EmailModule(BaseModule):
                 await self._prune_emails(account)
         else:
             self.logger.debug("[%s] No new emails", account.name)
+
+        # Après l'élagage : un message supprimé ne doit pas être compté comme
+        # en attente.
+        await self._refresh_unread_count(account)
+
+    async def _refresh_unread_count(self, account) -> None:
+        """Recompte le courrier reçu non lu d'un compte.
+
+        Un ``COUNT`` par compte et par tour de cron (60 s) : négligeable, et
+        c'est la seule façon d'avoir un compteur qui reste juste entre deux
+        relevés. L'ancienne valeur — le nombre de nouveautés du dernier tour —
+        retombait à zéro au tour suivant, si bien que « j'ai des mails ? »
+        posé 90 s après leur arrivée trouvait un bloc d'invite vide.
+        """
+        from asgiref.sync import sync_to_async
+
+        from modules.plugins.email.models import Email
+
+        try:
+            self._unread_counts[account.name] = await sync_to_async(
+                Email.objects.filter(
+                    account=account, direction="inbound", is_read=False,
+                ).count
+            )()
+        except Exception as exc:
+            degradations.record("modules.plugins.email.module._refresh_unread_count", exc)
+            self.logger.debug("Recomptage des non-lus indisponible", exc_info=True)
 
     async def _process_email(self, email_msg, account, entry, *, allow_actions: bool = True) -> bool:
         """Process a single email. Returns True if it was new.
@@ -1031,10 +1064,15 @@ class EmailModule(BaseModule):
     # ── Context ───────────────────────────────────────────────────
 
     def get_context(self, person_id: str = "") -> str:
+        """Le courrier reçu qui attend, pas les arrivées du dernier relevé.
+
+        Lecture RAM uniquement : l'instantané est rafraîchi par le cron et
+        par ``read_email``.
+        """
         parts = []
         for account_name, count in self._unread_counts.items():
             if count > 0:
-                parts.append(f"{account_name}: {count} nouveau(x) email(s)")
+                parts.append(f"{account_name}: {count} email(s) non lu(s)")
         return "\n".join(parts) if parts else ""
 
     # ── Status ────────────────────────────────────────────────────
@@ -1043,6 +1081,6 @@ class EmailModule(BaseModule):
         status = super().get_status()
         status.details = {
             "accounts_connected": len(self._accounts),
-            "accounts": {name: count for name, count in self._unread_counts.items()},
+            "emails_non_lus": {name: count for name, count in self._unread_counts.items()},
         }
         return status
