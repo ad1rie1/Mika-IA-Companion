@@ -535,8 +535,11 @@ class ConscienceEngine:
                     .values_list("intensity", flat=True)[:20]
                 )
             )()
-        except Exception:
-            # Table may not exist yet (migration pending) — silent.
+        except Exception as exc:
+            # Table may not exist yet (migration pending) — silencieux, mais
+            # compté : sans ça le Facteur 10 du scoring tombe a 0.0 et une
+            # panne totale ressemble a "elle n'a rien qui lui trotte en tete".
+            degradations.record("conscience: rumination pressure snapshot", exc)
             return 0.0, 0
 
         if not active:
@@ -592,7 +595,8 @@ class ConscienceEngine:
             active = await sync_to_async(
                 lambda: list(Rumination.objects.filter(status="active")[:20])
             )()
-        except Exception:
+        except Exception as exc:
+            degradations.record("conscience: ruminations to relieve", exc)
             return
 
         for r in active:
@@ -603,8 +607,8 @@ class ConscienceEngine:
                 await sync_to_async(r.save)(
                     update_fields=["intensity", "status"]
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                degradations.record("conscience: rumination relief save", exc)
 
     # Emotional drift map for aging ruminations. A thought doesn't stay
     # the same shape forever — frustration that lingers becomes anxiety,
@@ -653,6 +657,7 @@ class ConscienceEngine:
                 lambda: list(Rumination.objects.filter(status="active")[:30])
             )()
         except Exception as exc:
+            degradations.record("conscience: ruminations to decay", exc)
             return
 
         if not active:
@@ -706,8 +711,8 @@ class ConscienceEngine:
 
             try:
                 await sync_to_async(r.save)(update_fields=update_fields)
-            except Exception:
-                pass
+            except Exception as exc:
+                degradations.record("conscience: rumination decay save", exc)
 
     async def _promote_stale_to_ruminations(self) -> None:
         """Convert recent skipped/stale pertinent observations into ruminations.
@@ -743,6 +748,7 @@ class ConscienceEngine:
                 )
             )()
         except Exception as exc:
+            degradations.record("conscience: stale observations to promote", exc)
             return
 
         for obs in pertinent_stale:
