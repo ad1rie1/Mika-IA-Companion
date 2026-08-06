@@ -199,11 +199,15 @@ export class WebSocketClient {
           return;
         }
         console.log("WebSocket disconnected, reconnecting...");
+        // Armer le timer AVANT de prévenir : la relance ne doit dépendre
+        // d'aucun abonné. `scheduleReconnect` ne touche pas à `currentDelay`
+        // (l'incrément se fait dans son callback), donc le délai annoncé
+        // reste bien celui du timer qui vient d'être armé.
+        this.scheduleReconnect();
         this.emit("connection", {
           status: "disconnected",
           retryInMs: this.currentDelay,
         });
-        this.scheduleReconnect();
       };
 
       this.ws.onerror = (error) => {
@@ -223,8 +227,9 @@ export class WebSocketClient {
         this.currentDelay * 1.5,
         this.maxReconnectDelay
       );
-      this.emit("connection", { status: "reconnecting" });
+      // Rouvrir d'abord, annoncer ensuite : même règle qu'à la fermeture.
       this.connect();
+      this.emit("connection", { status: "reconnecting" });
     }, this.currentDelay);
   }
 
@@ -253,8 +258,11 @@ export class WebSocketClient {
       }
     }
     this.currentDelay = this.reconnectDelay;
-    this.emit("connection", { status: "reconnecting" });
+    // Idem : l'ouverture du nouveau socket passe avant la notification. Elle
+    // reste synchrone vis-à-vis de l'annonce, `onopen` ne pouvant se déclencher
+    // que sur un tour de boucle ultérieur — « connected » suit donc toujours.
     this.connect();
+    this.emit("connection", { status: "reconnecting" });
   }
 
   // ── Keepalive ─────────────────────────────────────────────────────
