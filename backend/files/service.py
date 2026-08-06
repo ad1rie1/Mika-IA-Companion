@@ -288,6 +288,11 @@ class FilesService:
         record = self.get(file_id)
         if not record or not self._may_access(record):
             return {"error": "Fichier introuvable."}
+        # Même réponse que op_read / op_move : un succès rendu sur un fichier
+        # déjà supprimé se lit comme « je viens de le supprimer », et le modèle
+        # l'annonce une seconde fois à l'interlocuteur.
+        if record.get("deleted"):
+            return {"error": "Fichier supprimé."}
         try:
             path = Path(record["path"])
             await asyncio.to_thread(lambda: path.unlink(missing_ok=True))
