@@ -98,15 +98,23 @@ class CameraModule(BaseModule):
 
     # ── Public API (appelée par CameraConsumer) ────────────────────
 
-    def register_frame(
+    async def register_frame(
         self,
         device_id: str,
         label: str,
         data: str,
         mime: str = "image/jpeg",
     ) -> bool:
-        """Enregistre une frame. Retourne True si la frame a changé."""
-        new_hash = _perceptual_hash(data)
+        """Enregistre une frame. Retourne True si la frame a changé.
+
+        Le hash perceptuel décode l'image : il part dans un thread, sinon il
+        s'exécute sur l'unique boucle d'événements du processus, appelé depuis
+        `receive()` du socket caméra. Même arbitrage que les écritures disque de
+        pipeline/media.py — quelques dizaines de millisecondes par frame gèlent
+        tout le trafic WS (donc le keepalive), la TurnQueue, l'ordonnancement
+        des `sync_to_async` et les six boucles de fond.
+        """
+        new_hash = await asyncio.to_thread(_perceptual_hash, data)
 
         existing = self._devices.get(device_id)
         if existing:
@@ -408,10 +416,14 @@ def _perceptual_hash(b64_data: str) -> str:
 
     Algorithme :
       1. Décode la frame base64
-      2. Resize à 16×16 px en niveaux de gris (LANCZOS — moyennage, lisse le bruit)
-      3. Quantifie chaque pixel au multiple de 16 le plus proche
+      2. draft() demande à libjpeg de décoder au 1/8 de résolution : la cible
+         étant 16×16, charger un 1080p en pleine résolution coûtait 20 à 40 ms
+         de CPU pour rien. Sans effet sur la stabilité du hash, et no-op sur
+         les formats qui ne savent pas décoder à l'échelle (PNG…).
+      3. Resize à 16×16 px en niveaux de gris (LANCZOS — moyennage, lisse le bruit)
+      4. Quantifie chaque pixel au multiple de 16 le plus proche
          → absorbe les variations d'exposition/balance des blancs (±8 niveaux)
-      4. MD5 des 256 bytes quantifiés
+      5. MD5 des 256 bytes quantifiés
 
     Résultat : stable pour une scène statique même avec bruit capteur,
     mais change significativement si quelqu'un bouge ou entre dans le champ.
@@ -419,9 +431,9 @@ def _perceptual_hash(b64_data: str) -> str:
     from PIL import Image
 
     raw = base64.b64decode(b64_data + "==")
-    img = Image.open(io.BytesIO(raw)).convert("L").resize(
-        (_THUMB_SIZE, _THUMB_SIZE), Image.LANCZOS
-    )
+    img = Image.open(io.BytesIO(raw))
+    img.draft("L", (_THUMB_SIZE, _THUMB_SIZE))
+    img = img.convert("L").resize((_THUMB_SIZE, _THUMB_SIZE), Image.LANCZOS)
     quantized = bytes((p // _QUANTIZE_STEP) * _QUANTIZE_STEP for p in img.tobytes())
     return hashlib.md5(quantized).hexdigest()
 
