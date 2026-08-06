@@ -201,6 +201,7 @@ class ClaudeProvider:
     ) -> tuple[str, list[str]]:
         from claude_agent_sdk import (
             AssistantMessage,
+            ResultMessage,
             TextBlock,
             ToolUseBlock,
             query,
@@ -249,6 +250,39 @@ class ClaudeProvider:
                             block.name, str(block.input)[:200],
                         )
                         calls.append(block.name)
+            elif isinstance(msg, ResultMessage):
+                _record_claude_usage(msg)
         if calls:
             logger.info("Tools used in this turn: %s", calls)
         return raw_text, calls
+
+
+def _record_claude_usage(result) -> None:
+    """Remonte au compteur de quota l'usage de la boucle d'outils.
+
+    ``ResultMessage`` clôt la session du CLI et porte le **cumul** de tous
+    les tours. Sans cette remontée, le routeur ne trouvait rien dans le
+    contexte d'usage et retombait sur son estimation de repli — la seule
+    taille des prompts système et utilisateur. Or c'est de très loin le
+    chemin le plus cher : les déclarations d'outils pèsent quelques
+    milliers de tokens et sont renvoyées à *chaque* itération, jusqu'à
+    ``max_turns``. Le poste dominant se comptait donc pour une fraction de
+    lui-même, et le plafond se vérifiait contre ce chiffre minoré.
+
+    Les tokens de cache sont comptés en entrée : ce sont bien des tokens
+    consommés, et c'est par eux que passe l'essentiel d'un prompt outillé
+    (prompt système + outils, réutilisés tour après tour).
+    """
+    try:
+        from ai.quota import set_usage
+        usage = getattr(result, "usage", None) or {}
+        tokens_in = (
+            int(usage.get("input_tokens", 0) or 0)
+            + int(usage.get("cache_creation_input_tokens", 0) or 0)
+            + int(usage.get("cache_read_input_tokens", 0) or 0)
+        )
+        tokens_out = int(usage.get("output_tokens", 0) or 0)
+        if tokens_in or tokens_out:
+            set_usage(input_tokens=tokens_in, output_tokens=tokens_out)
+    except Exception:
+        pass
