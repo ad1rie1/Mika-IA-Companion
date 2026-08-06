@@ -22,6 +22,9 @@ class ProjectRunContext:
     title: str
     description: str
     tone_directive: str
+    # "off" (le défaut) = mode professionnel : aucun raisonnement affectif,
+    # donc pas de murmure intérieur à la fin de l'avance.
+    emotion_policy: str
     instructions: list[str]
     out_of_scope: list[str]
     allowed_modules: list[str]
@@ -108,6 +111,7 @@ async def build(project_id: int) -> ProjectRunContext | None:
         title=p.title,
         description=p.description,
         tone_directive=p.tone_directive,
+        emotion_policy=p.emotion_policy,
         instructions=list(p.instructions or []),
         out_of_scope=list(p.out_of_scope or []),
         allowed_modules=list(p.allowed_modules or []),

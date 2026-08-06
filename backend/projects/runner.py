@@ -467,13 +467,27 @@ class ProjectRunner:
 
         # 6. Think out loud about it. Generated from the intended action +
         #    what came back, by a small dedicated call — never the raw
-        #    summary, which reads like a report, not a thought.
+        #    summary, which reads like a report, not a thought. Muet en mode
+        #    professionnel, ce qui supprime l'appel dans le cas par défaut.
         await self._murmur(ctx, summary, data)
 
     async def _murmur(self, ctx, summary: str, data: dict) -> None:
-        """Voice a short inner thought about this tick. Silence is fine."""
+        """Voice a short inner thought about this tick. Silence is fine.
+
+        Rien à dire quand le projet tourne en `emotion_policy=off` — le
+        défaut, mode professionnel, « aucun raisonnement affectif ». Sans
+        cette porte, chaque avance d'un projet pro diffusait un marmonnement
+        affectif au groupe global et coûtait un second appel LLM.
+        """
+        if ctx.emotion_policy == "off":
+            return
+
         from pipeline.inner_voice import generate_inner_thought
 
+        # Le murmure part APRÈS le `reset` du ContextVar de `_advance` : sans
+        # cette repose, l'appel INNER_VOICE sort avec project_id=None et
+        # n'est jamais facturé à `Project.monthly_token_budget`.
+        token = current_project_id.set(ctx.project_id)
         try:
             intended = str(
                 (data.get("proposed_action") or {}).get("proposal")
@@ -486,6 +500,8 @@ class ProjectRunner:
             await self._broadcast_inner_thought(ctx, thought)
         except Exception as exc:
             degradations.record("projects: inner thought failed (non-fatal)", exc)
+        finally:
+            current_project_id.reset(token)
 
     async def _broadcast_inner_thought(self, ctx, thought: str) -> None:
         """Push the murmur out through the normal speech routing.
