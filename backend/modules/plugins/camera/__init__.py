@@ -496,9 +496,30 @@ class CameraModule(BaseModule):
             available = list(self._devices.keys())
             return {"error": "Aucune caméra disponible.", "available": available}
 
-        age = time.time() - state.frame_ts
+        now = time.time()
+        age = now - state.frame_ts
         if age > MAX_FRAME_AGE_FOR_ANALYSIS:
             return {"error": f"La frame de '{state.label}' est trop ancienne ({int(age)}s)."}
+
+        # Un regard demandé n'était borné que par « pas deux analyses en
+        # parallèle » : rien n'empêchait le modèle d'enchaîner les appels
+        # vision dans une même boucle d'outils. Le plancher est bien plus
+        # court que l'intervalle de l'analyse de fond — regarder parce qu'on
+        # le lui demande vaut plus qu'un balayage périodique — mais il existe.
+        conf = await self._settings()
+        depuis = now - state.last_analysis_ts
+        if conf.see_min_interval > 0 and depuis < conf.see_min_interval:
+            refus = {
+                "error": (
+                    f"'{state.label}' vient d'être analysée il y a {int(depuis)}s. "
+                    f"Réessaie dans {int(conf.see_min_interval - depuis) + 1}s."
+                ),
+            }
+            # La dernière description reste utile : elle date de quelques
+            # secondes et évite un « je ne peux pas regarder » stérile.
+            if state.observation:
+                refus["derniere_observation"] = state.observation
+            return refus
 
         # FIX #4 : protéger contre l'analyse parallèle avec _analyze_device
         if state.analysis_pending:
