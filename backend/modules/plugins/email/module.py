@@ -41,6 +41,11 @@ class EmailModule(BaseModule):
         self._accounts: dict[int, dict] = {}  # account_id -> {imap, smtp, account}
         self._analyzer = None
         self._unread_counts: dict[str, int] = {}  # account_name -> count
+        # Comptes actifs déclarés en base, connectés ou non : c'est ce
+        # compteur qui décide si le module se déclare au modèle. On ne compte
+        # pas les connexions IMAP vivantes, sinon un serveur momentanément
+        # injoignable retirerait aussi la lecture des mails déjà stockés.
+        self._accounts_configured = 0
 
     # ── Lifecycle ─────────────────────────────────────────────────
 
@@ -77,6 +82,7 @@ class EmailModule(BaseModule):
         accounts = await sync_to_async(
             lambda: list(EmailAccount.objects.filter(is_active=True))
         )()
+        self._accounts_configured = len(accounts)
 
         for account in accounts:
             imap = IMAPClient.from_account(account)
@@ -103,6 +109,7 @@ class EmailModule(BaseModule):
             if imap:
                 await imap.disconnect()
         self._accounts.clear()
+        self._accounts_configured = 0
         self.logger.info("Email module stopped")
 
     # ── Env migration ──────────────────────────────────────────────
@@ -488,6 +495,8 @@ class EmailModule(BaseModule):
     # ── Capabilities & Tools ────────────────────────────────────────
 
     def get_capabilities(self) -> list[ModuleCapability]:
+        if not self._accounts_configured:
+            return []
         return [
             ModuleCapability(
                 description="Lire, lister et chercher dans les emails recus",
@@ -508,6 +517,14 @@ class EmailModule(BaseModule):
         ]
 
     def return_tools(self) -> list[ModuleTool]:
+        # Sans aucun compte, ces six outils ne peuvent que répondre « aucun
+        # compte configuré » : leur déclaration est du prompt ré-émis à chaque
+        # itération de la boucle d'outils, pour rien. `is_available()` ne peut
+        # pas trancher (elle s'exécute depuis `AppConfig.ready()`, hors ORM),
+        # mais ici oui — et le cache d'outils est invalidé après
+        # `instantiate()`, donc la déclaration suit l'état réel du module.
+        if not self._accounts_configured:
+            return []
         return [
             ModuleTool(
                 name="list_recent_emails",
