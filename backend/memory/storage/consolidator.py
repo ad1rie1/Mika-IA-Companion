@@ -28,6 +28,16 @@ COMMITMENT_MAX_AGE_DAYS = 30
 # Memory decay is measured in days; sweeping for it every 60s was pure load.
 DECAY_INTERVAL_S = 3600
 
+# L'agrégat émotionnel a le *jour* pour granularité : le recalculer à chaque
+# tick de 60 s réécrivait la même ligne quotidienne et la même ligne
+# hebdomadaire ~1440 fois par jour et par personne, chacune précédée d'un
+# balayage complet d'``EmotionSnapshot`` (``created_at__date`` n'est pas
+# indexable, et la table ne porte aucun index). Cinq minutes restent
+# invisibles pour ses deux lecteurs — l'onglet Affect d'une fiche personne et
+# la tendance hebdomadaire du prompt — et divisent la charge par cinq. Rien
+# n'est perdu : la passe recalcule la journée entière, pas un delta.
+EMOTION_AGGREGATION_INTERVAL_S = 300
+
 # Écart de valence entre le meilleur et le pire jour au-delà duquel une
 # semaine est dite « instable ». 0.4 sépare une semaine régulière d'une
 # semaine qui est passée du clairement négatif au clairement positif — la
@@ -753,11 +763,23 @@ class MemoryConsolidator:
     async def _aggregate_emotion_snapshots(self) -> None:
         """Aggregate raw EmotionSnapshots into EmotionalSummary records.
 
-        Runs after each consolidation cycle. Groups today's snapshots
-        by person_id, computes weighted emotion distribution, dominant
-        emotion, and trend vs yesterday. Then prunes old snapshots.
+        Groups today's snapshots by person_id, computes weighted emotion
+        distribution, dominant emotion, and trend vs yesterday. Then prunes
+        old snapshots.
+
+        Étranglée à ``EMOTION_AGGREGATION_INTERVAL_S``, comme la décroissance
+        et le balayage de rétention juste à côté : la passe reconstruit la
+        journée entière à chaque fois, donc l'espacer ne change que la
+        fraîcheur de la ligne — jamais sa valeur. L'élagage des relevés qui la
+        termine se mesure en jours et s'en accommode de même.
         """
         from memory.models import EmotionalSummary, EmotionSnapshot
+
+        monotonic = _time.monotonic()
+        last = getattr(self, "_last_aggregation", 0.0)
+        if last and (monotonic - last) < EMOTION_AGGREGATION_INTERVAL_S:
+            return
+        self._last_aggregation = monotonic
 
         now = timezone.now()
         today = now.date()
