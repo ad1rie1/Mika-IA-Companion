@@ -122,6 +122,8 @@ class CameraModule(BaseModule):
     def __init__(self):
         super().__init__("camera")
         self._devices: dict[str, DeviceState] = {}
+        # Analyses détachées en vol. Référence forte gardée jusqu'à la fin.
+        self._analyses: set[asyncio.Task] = set()
 
     # ── Lifecycle ──────────────────────────────────────────────────
 
@@ -129,6 +131,15 @@ class CameraModule(BaseModule):
         self.logger.info("CameraModule prêt — ws/camera?device=<id>&label=<nom>")
 
     async def shutdown(self) -> None:
+        # Annuler les analyses en vol AVANT de vider l'état : une analyse qui
+        # survit à l'arrêt se termine sur un DeviceState détaché et peut
+        # pousser une Perception dans un pipeline en cours d'extinction.
+        inflight = [t for t in self._analyses if not t.done()]
+        for task in inflight:
+            task.cancel()
+        if inflight:
+            await asyncio.gather(*inflight, return_exceptions=True)
+        self._analyses.clear()
         self._devices.clear()
 
     def config_schema(self):
@@ -254,7 +265,22 @@ class CameraModule(BaseModule):
                 continue
 
             state.analysis_pending = True
-            asyncio.create_task(self._analyze_device(device_id, conf))
+            self._spawn_analysis(device_id, conf)
+
+    def _spawn_analysis(self, device_id: str, conf: CameraSettings) -> None:
+        """Détache une analyse en gardant une référence forte jusqu'à la fin.
+
+        asyncio ne garde qu'une référence faible sur une tâche : un
+        ``create_task`` nu peut être collecté en plein vol. Le ``finally`` de
+        ``_analyze_device`` ne s'exécute alors jamais — ``analysis_pending``
+        reste à True et le device est gelé définitivement — et l'exception
+        d'une tâche abandonnée disparaît sans trace.
+        """
+        task = asyncio.create_task(
+            self._analyze_device(device_id, conf), name=f"camera:{device_id}",
+        )
+        self._analyses.add(task)
+        task.add_done_callback(self._analyses.discard)
 
     def _analysis_allowed(self, conf: CameraSettings) -> bool:
         """L'analyse de fond a-t-elle une raison de tourner maintenant ?
