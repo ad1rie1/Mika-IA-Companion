@@ -282,7 +282,11 @@ async function init() {
     if (data.speak === false || typeof data.text !== "string" || !data.text) {
       return;
     }
-    const estimatedDuration = Math.min(data.text.length * 60, 15000);
+    // Pas de plafond sur l'estimation : la borne réelle est la fin de
+    // l'utterance, signalée par onSpeakEnd qui appelle stop(). Un plafond
+    // épuisait les frames en pleine phrase (dès ~250 caractères à 60 ms/car)
+    // et refermait la bouche pendant que la synthèse continuait de parler.
+    const estimatedDuration = data.text.length * 60;
     lipSyncController.startTextDriven(data.text, estimatedDuration);
     tts.speak(data.text, emotion, data.voice_profile);
   };
