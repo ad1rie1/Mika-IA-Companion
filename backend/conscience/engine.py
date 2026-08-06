@@ -818,15 +818,40 @@ class ConscienceEngine:
 
     # ── 3. MEMORY MAINTENANCE ─────────────────────────────────────
 
+    # Marque posee dans raw_data une fois l'observation passee par la
+    # maintenance. Observation n'a pas de champ dedie, et raw_data porte
+    # deja les themes de l'interpretation (voir _store_observation) : la
+    # meme convention evite une migration pour un drapeau interne.
+    _MAINTENANCE_FLAG = "maintenance_done"
+
     async def _memory_maintenance(self, ctx: DecisionContext) -> list[str]:
         """Modify memory based on accumulated observations.
 
         Runs every decision cycle — the Conscience can reshape memory
         even without speaking.
+
+        Une observation n'est maintenue **qu'une fois**. Elle reste
+        `pending` jusqu'a un acte ou sa peremption (30 min), et
+        `_build_context` la reselectionne a chaque cycle : sans cette
+        marque, un signal pertinent repayait a chaque tour une recherche
+        vectorielle plus jusqu'a cinq appels IA de validation — soit une
+        soixantaine de fois a l'intervalle par defaut, en serie et
+        `_decision_lock` tenu, ce qui court-circuitait aussi bien les
+        ticks periodiques que le fast-path haute pertinence. Le boost
+        d'importance, lui, se cumulait a chaque passage.
         """
         actions = []
 
         for obs in ctx.pending_observations:
+            if obs.raw_data.get(self._MAINTENANCE_FLAG):
+                continue
+
+            # Marquee avant le travail, pas apres : la marque dit "cette
+            # observation est passee par la maintenance", pas "la
+            # maintenance a reussi". La poser apres laisserait une panne
+            # transitoire rejouer exactement la boucle qu'on supprime ici.
+            await self._mark_maintained(obs)
+
             # Boost related souvenirs for pertinent signals
             if obs.pertinence > 0.7:
                 themes = obs.raw_data.get("themes", [])
@@ -845,6 +870,20 @@ class ConscienceEngine:
                         )
 
         return actions
+
+    async def _mark_maintained(self, obs) -> None:
+        """Poser durablement la marque de maintenance sur une observation.
+
+        En base, pas en RAM : les observations sont relues a chaque cycle
+        et un redemarrage relancerait sinon la meme maintenance. Si
+        l'ecriture echoue, la marque n'existe pas et l'observation
+        repassera au cycle suivant — degradation comptee, pas de blocage.
+        """
+        try:
+            obs.raw_data[self._MAINTENANCE_FLAG] = True
+            await sync_to_async(obs.save)(update_fields=["raw_data"])
+        except Exception as exc:
+            degradations.record("conscience: mark observation maintained", exc)
 
     async def _mark_stale_observations(self) -> None:
         """Mark pending observations older than 30 min as skipped.
