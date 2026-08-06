@@ -252,10 +252,17 @@ class FilesService:
             )
 
             q = question or "Décris cette image en détail."
+            # Même rôle que le préprocesseur vision : le rôle CONVERSATION peut
+            # pointer un modèle texte-seul, et une pièce jointe image envoyée à
+            # un modèle non-vision est ignorée *sans erreur* (Ollama). Le modèle
+            # ne recevrait que « Décris cette image en détail. » et rendrait une
+            # description entièrement inventée, servie ici comme un succès.
             from ai.client import ai_client
+            from ai.router import AIRole
             description = await ai_client.complete(
                 system_prompt="Tu es un assistant qui analyse des images avec précision et détail.",
                 user_prompt=q,
+                role=AIRole.VISION_CAPTION,
                 attachments=[att],
             )
             return {"description": description, "file_id": record["id"], "name": record["name"]}
