@@ -36,14 +36,28 @@ class ClaudeProvider:
 
         # The anthropic SDK supports both api_key and auth_token kwargs.
         # auth_token is used for OAuth-based access (Claude.ai sessions).
-        # claude_agent_sdk (used by complete_with_tools) only reads
-        # credentials from env, so we mirror whichever path we took.
+        # claude_agent_sdk (used by complete_with_tools) ne lit ses
+        # identifiants que dans l'environnement du sous-processus CLI, qu'il
+        # construit par ``{**os.environ, **options.env, ...}``. On porte donc
+        # l'identifiant dans ``options.env`` (voir _run_tool_loop), jamais
+        # dans os.environ.
         if auth_token:
-            os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = auth_token
+            self._agent_env = {"CLAUDE_CODE_OAUTH_TOKEN": auth_token}
             self._client = AsyncAnthropic(auth_token=auth_token)
         else:
-            os.environ["ANTHROPIC_API_KEY"] = api_key
+            self._agent_env = {"ANTHROPIC_API_KEY": api_key}
             self._client = AsyncAnthropic(api_key=api_key)
+
+        # Une variable posée dans os.environ est globale au processus et
+        # survit à l'éviction de l'instance : après une rotation OAuth → clé
+        # d'API, CLAUDE_CODE_OAUTH_TOKEN gardait le jeton révoqué et restait
+        # prioritaire côté CLI (tous les tours outillés en 401 pendant que
+        # test() répondait ok). On purge les deux variables pour que
+        # l'environnement ne contredise jamais la configuration courante —
+        # et qu'un secret retiré de la base ne subsiste pas en clair dans
+        # chaque sous-processus engendré.
+        for var in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"):
+            os.environ.pop(var, None)
 
         logger.info("ClaudeProvider initialisé (auth=%s)", "oauth" if auth_token else "api_key")
 
@@ -146,6 +160,7 @@ class ClaudeProvider:
             mcp_server=mcp_server,
             tool_names=[t.name for t in tools],
             max_turns=max_turns,
+            env=self._agent_env,
         )
 
     @staticmethod
@@ -182,6 +197,7 @@ class ClaudeProvider:
         mcp_server,
         tool_names: list[str],
         max_turns: int,
+        env: dict[str, str],
     ) -> tuple[str, list[str]]:
         from claude_agent_sdk import (
             AssistantMessage,
@@ -204,6 +220,10 @@ class ClaudeProvider:
             mcp_servers=mcp_servers,
             allowed_tools=allowed_tools,
             permission_mode="bypassPermissions",
+            # Écrase os.environ dans la fusion faite par le transport, donc
+            # l'identifiant transmis au CLI est toujours celui que la
+            # configuration déclare à cet instant.
+            env=dict(env),
         )
 
         async def _prompt_stream():
