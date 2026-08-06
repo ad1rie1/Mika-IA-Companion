@@ -62,17 +62,25 @@ class IMAPClient:
         return await self.fetch_uids(await self.list_uids_since(since_date))
 
     async def list_uids(self, criteria: str = "ALL") -> list[str]:
-        """Liste les identifiants correspondant au critère, sans rien télécharger.
+        """Liste les UID correspondant au critère, sans rien télécharger.
 
         Séparé du téléchargement parce que c'est lui qui coûte : un SEARCH
         rend cinq mille identifiants en un aller-retour, là où le FETCH
         correspondant en demande cinq mille. L'appelant peut donc décider
         *avant* de payer ce qu'il va vraiment chercher.
+
+        ``UID SEARCH`` et non ``SEARCH`` : ce dernier rend des **numéros de
+        séquence**, qui se décalent dès qu'un message est supprimé ailleurs
+        (le client de messagerie de l'utilisateur, une règle serveur). Le
+        module s'en sert pour savoir ce qu'il a déjà importé — sur un numéro
+        qui glisse, ce repère désigne le tour suivant un autre message, et
+        un courrier jamais importé serait sauté silencieusement. Un UID est
+        stable et jamais réattribué.
         """
         if not self._client:
             await self.connect()
 
-        result, data = await self._client.search(criteria)
+        result, data = await self._client.uid_search(criteria)
         if result != "OK" or not data or not data[0]:
             return []
 
@@ -98,7 +106,7 @@ class IMAPClient:
 
         for uid_str in uids:
             try:
-                result, msg_data = await self._client.fetch(uid_str, "(RFC822)")
+                result, msg_data = await self._client.uid("fetch", uid_str, "(RFC822)")
                 if result != "OK":
                     continue
 
@@ -173,4 +181,7 @@ class IMAPClient:
     async def mark_as_seen(self, uid: str):
         """Mark a specific email as seen/read."""
         if self._client:
-            await self._client.store(uid, "+FLAGS", "\\Seen")
+            # UID STORE : l'identifiant vient de `list_uids`, donc d'un UID
+            # SEARCH. Un STORE simple le lirait comme un numéro de séquence
+            # et marquerait un autre message.
+            await self._client.uid("store", uid, "+FLAGS", "\\Seen")
