@@ -38,7 +38,6 @@ def on_tick(api): ...               # selon schedule
 def on_event(api, event): ...       # event = {"type", "source", "data"}
 def get_context(api): return "..."  # injecté dans le prompt (si context: true)
 def view_stats(api, params): return {"columns": [...], "rows": [...]}
-def view_stats_detail(api, item_id): return {"fields": [...]}
 ```
 
 Modules sûrs déjà disponibles (pas d'`import`) : `math, json, re, datetime,

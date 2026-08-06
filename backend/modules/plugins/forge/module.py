@@ -691,8 +691,6 @@ class ForgeModule(BaseModule):
         if handler == "on_event":
             args = (self._event_payload("forge.test", "test",
                                         payload or {}),)
-        elif handler.startswith("view_") and handler.endswith("_detail"):
-            args = (str((payload or {}).get("item_id", "")),)
         elif handler.startswith("view_") or handler.startswith("action_"):
             args = (payload or {},)
 
