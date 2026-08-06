@@ -4,9 +4,10 @@ Simple completion via the router (any provider).
 Tool-enabled completion is delegated to ai.tool_client (Claude-only, MCP).
 
 This module carries **no** SDK-specific setup — every credential /
-environment concern (including the ``CLAUDE_CODE_OAUTH_TOKEN`` env var
-that the Claude Agent SDK picks up) is handled inside
-``ClaudeProvider.__init__``. The client is a thin facade.
+environment concern (including the ``CLAUDE_CODE_OAUTH_TOKEN`` the Claude
+Agent SDK picks up, passé par ``ClaudeAgentOptions.env`` et non par
+``os.environ``) is handled inside ``ClaudeProvider``. The client is a
+thin facade.
 """
 
 import logging
