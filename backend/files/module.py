@@ -41,12 +41,14 @@ class FilesModule(BaseModule):
         return files_service.list_today_context()
 
     def return_tools(self) -> list[ModuleTool]:
-        from files.service import files_service
+        from files.service import DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT, files_service
 
         async def _list(params: dict) -> dict:
             return await files_service.op_list(
                 date_filter=(params.get("date") or "").strip(),
                 category=(params.get("category") or "").strip().lower(),
+                limit=params.get("limit"),
+                offset=params.get("offset"),
             )
 
         async def _read(params: dict) -> dict:
@@ -74,13 +76,26 @@ class FilesModule(BaseModule):
             ModuleTool(
                 name="files_list",
                 description=(
-                    "Liste les fichiers disponibles sur le serveur. "
-                    "Par défaut liste tous les fichiers. "
+                    "Liste les fichiers disponibles sur le serveur, du plus récent "
+                    f"au plus ancien, par pages de {DEFAULT_LIST_LIMIT} "
+                    f"({MAX_LIST_LIMIT} au maximum). La réponse dit combien de "
+                    "fichiers correspondent au total : préfère affiner avec date ou "
+                    "catégorie plutôt que de dérouler les pages avec offset. "
                     "Filtre optionnel par date (ex: '2024-01-15') ou catégorie ('image', 'audio', 'text')."
                 ),
                 parameters=[
                     ToolParameter("date", ToolParameterType.STRING, "Filtrer par date YYYY-MM-DD (optionnel)", required=False, default=""),
                     ToolParameter("category", ToolParameterType.STRING, "Filtrer par catégorie: image|audio|text|unknown (optionnel)", required=False, default=""),
+                    ToolParameter(
+                        "limit", ToolParameterType.INTEGER,
+                        f"Nombre de fichiers à retourner (défaut {DEFAULT_LIST_LIMIT}, max {MAX_LIST_LIMIT})",
+                        required=False, default=DEFAULT_LIST_LIMIT,
+                    ),
+                    ToolParameter(
+                        "offset", ToolParameterType.INTEGER,
+                        "Rang du premier fichier retourné, pour la page suivante (défaut 0)",
+                        required=False, default=0,
+                    ),
                 ],
                 handler=_list,
             ),
