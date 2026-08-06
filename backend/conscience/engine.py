@@ -958,8 +958,16 @@ class ConscienceEngine:
         person_id = target or "conscience_mika"
 
         try:
-            # Build filtered context with only relevant modules' tools
-            base_context = await gather_context(prompt, person_id, include_tools=False)
+            # Build filtered context with only relevant modules' tools.
+            # La memoire n'est demandee ici que si le rappel sur les
+            # observations n'a rien donne : sinon `memory_context` ecrase le
+            # champ juste en dessous, et l'embedding + la requete ChromaDB
+            # faits sur le prompt d'action etaient payes pour rien.
+            base_context = await gather_context(
+                prompt, person_id,
+                include_tools=False,
+                include_memory=not memory_context,
+            )
 
             # Override with relevant-only tools
             if relevant_modules:
