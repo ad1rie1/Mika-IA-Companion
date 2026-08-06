@@ -1168,6 +1168,16 @@ class ConscienceEngine:
                     )
             return False
 
+    # Budget de la passe 1, alignee sur les 15 s de l'interpreteur : meme role
+    # (SIGNAL_INTERPRETATION), meme travail — classer un signal court — et le
+    # meme cadre, une boucle sans superviseur. La borne routee
+    # (`ai.call_timeout_seconds`, 120 s) est celle d'un tour de conversation :
+    # la depenser ici immobilise `_decision_lock` pour quatre cycles avant
+    # meme que `_act` n'ait commence a composer sa reponse. Ne rien dire a
+    # personne est un resultat valide, donc l'expiration se replie sur le
+    # broadcast interne plutot que d'annuler l'acte.
+    _RECIPIENT_TIMEOUT_S = 15
+
     async def _select_recipient(self, ctx: DecisionContext) -> str | None:
         """Pass 1 of proactive speech: pick whom to address, or no one.
 
@@ -1215,12 +1225,23 @@ class ConscienceEngine:
             from ai.client import ai_client
             from ai.router import AIRole
 
-            raw = await ai_client.complete(
-                system_prompt="Tu choisis a qui t'adresser. Reponds uniquement avec un tag [TO:...].",
-                user_prompt=prompt,
-                role=AIRole.SIGNAL_INTERPRETATION,
+            raw = await asyncio.wait_for(
+                ai_client.complete(
+                    system_prompt="Tu choisis a qui t'adresser. Reponds uniquement avec un tag [TO:...].",
+                    user_prompt=prompt,
+                    role=AIRole.SIGNAL_INTERPRETATION,
+                ),
+                timeout=self._RECIPIENT_TIMEOUT_S,
             )
-        except Exception:
+        except asyncio.TimeoutError as exc:
+            degradations.record("conscience: choix du destinataire expire", exc)
+            logger.warning(
+                "Recipient selection timed out after %ds; staying internal",
+                self._RECIPIENT_TIMEOUT_S,
+            )
+            return None
+        except Exception as exc:
+            degradations.record("conscience: choix du destinataire", exc)
             logger.exception("Recipient selection failed; staying internal")
             return None
 

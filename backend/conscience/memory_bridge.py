@@ -6,9 +6,11 @@ uniform guarantees (vector indexing, logging, error handling).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from conscience.types import InterpretedSignal
+from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
@@ -189,11 +191,21 @@ class MemoryBridge:
         from memory.manager import memory_manager
         await memory_manager.reinforce_connaissance(connaissance_id, boost)
 
+    # Budget par appel de validation, et non par lot. `check_connaissance_validity`
+    # porte deja `EXTRACTION_TIMEOUT` (45 s), taille pour le consolidateur ; la
+    # boucle de decision, elle, valide jusqu'a cinq candidats en serie et le fait
+    # `_decision_lock` tenu. Au budget du consolidateur, une seule observation
+    # pouvait retenir le verrou pres de quatre minutes, pendant lesquelles tous
+    # les cycles suivants — fast-path haute pertinence compris — retombent sur le
+    # `return` silencieux de `_decide()`. Un appelant qui borne plus court que la
+    # borne routee (`ai.call_timeout_seconds`) gagne toujours.
+    _VALIDITY_TIMEOUT_S = 15
+
     async def check_contradictions(self, new_info: str) -> list[dict]:
         """Check if new information contradicts existing connaissances.
 
         Uses vector search to find only RELEVANT connaissances (max 5),
-        then validates each with an LLM call.
+        then validates each with an LLM call, bornee a `_VALIDITY_TIMEOUT_S`.
 
         Returns list of {connaissance_id, content, still_valid, new_confidence}.
         """
@@ -220,10 +232,23 @@ class MemoryBridge:
 
             for conn in candidates:
                 try:
-                    still_valid, new_confidence = await extractor.check_connaissance_validity(
-                        conn.content, new_info
+                    still_valid, new_confidence = await asyncio.wait_for(
+                        extractor.check_connaissance_validity(
+                            conn.content, new_info
+                        ),
+                        timeout=self._VALIDITY_TIMEOUT_S,
                     )
-                except Exception:
+                except asyncio.TimeoutError as exc:
+                    degradations.record(
+                        "conscience: validation de connaissance expiree", exc
+                    )
+                    logger.warning(
+                        "Validity check timed out after %ds for connaissance #%d",
+                        self._VALIDITY_TIMEOUT_S, conn.pk,
+                    )
+                    continue
+                except Exception as exc:
+                    degradations.record("conscience: validation de connaissance", exc)
                     logger.warning(
                         "Validity check failed for connaissance #%d", conn.pk
                     )
