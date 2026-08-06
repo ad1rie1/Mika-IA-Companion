@@ -168,12 +168,18 @@ export class WebSocketClient {
       this.ws.onmessage = (event) => {
         // Any frame is proof of life, including one we fail to parse.
         this.lastFrameAt = Date.now();
+        // Le `try` ne couvre que le décodage : une exception applicative n'a
+        // rien d'un défaut de transport, et la journaliser comme tel désigne
+        // le mauvais coupable. La diffusion, elle, ne lève pas (cf. `emit`).
+        let data: any;
         try {
-          const data = JSON.parse(event.data);
-          this.emit(data.type, data);
+          data = JSON.parse(event.data);
         } catch (e) {
           console.error("Failed to parse WebSocket message:", e);
+          return;
         }
+        if (!data || typeof data.type !== "string") return;
+        this.emit(data.type, data);
       };
 
       this.ws.onclose = (event) => {
@@ -193,11 +199,15 @@ export class WebSocketClient {
           return;
         }
         console.log("WebSocket disconnected, reconnecting...");
+        // Armer le timer AVANT de prévenir : la relance ne doit dépendre
+        // d'aucun abonné. `scheduleReconnect` ne touche pas à `currentDelay`
+        // (l'incrément se fait dans son callback), donc le délai annoncé
+        // reste bien celui du timer qui vient d'être armé.
+        this.scheduleReconnect();
         this.emit("connection", {
           status: "disconnected",
           retryInMs: this.currentDelay,
         });
-        this.scheduleReconnect();
       };
 
       this.ws.onerror = (error) => {
@@ -217,8 +227,9 @@ export class WebSocketClient {
         this.currentDelay * 1.5,
         this.maxReconnectDelay
       );
-      this.emit("connection", { status: "reconnecting" });
+      // Rouvrir d'abord, annoncer ensuite : même règle qu'à la fermeture.
       this.connect();
+      this.emit("connection", { status: "reconnecting" });
     }, this.currentDelay);
   }
 
@@ -247,8 +258,11 @@ export class WebSocketClient {
       }
     }
     this.currentDelay = this.reconnectDelay;
-    this.emit("connection", { status: "reconnecting" });
+    // Idem : l'ouverture du nouveau socket passe avant la notification. Elle
+    // reste synchrone vis-à-vis de l'annonce, `onopen` ne pouvant se déclencher
+    // que sur un tour de boucle ultérieur — « connected » suit donc toujours.
     this.connect();
+    this.emit("connection", { status: "reconnecting" });
   }
 
   // ── Keepalive ─────────────────────────────────────────────────────
@@ -410,11 +424,27 @@ export class WebSocketClient {
     this.handlers.get(type)!.push(handler);
   }
 
+  /**
+   * Diffuser un frame à ses abonnés, chacun isolé du suivant.
+   *
+   * `emit` ne lève pas, par construction. C'est ce qui le rend appelable
+   * depuis les chemins qui maintiennent la connexion en vie : un handler qui
+   * touche au DOM ou au localStorage (ChatOverlay purge sa file d'attente sur
+   * « disconnected ») transformait sinon une coupure réseau banale en état
+   * hors-ligne définitif, aucun timer n'étant plus armé derrière lui.
+   *
+   * Et sur une réponse, un abonné qui lève ne doit pas emporter les suivants :
+   * l'ordre d'inscription n'est qu'un détail de câblage de main.ts, il ne dit
+   * rien sur qui a le droit de faire taire qui.
+   */
   private emit(type: string, data: any) {
     const handlers = this.handlers.get(type);
-    if (handlers) {
-      for (const handler of handlers) {
+    if (!handlers) return;
+    for (const handler of handlers) {
+      try {
         handler(data);
+      } catch (e) {
+        console.error(`WebSocket handler failed on "${type}":`, e);
       }
     }
   }
