@@ -26,6 +26,7 @@ from datetime import datetime
 logger = logging.getLogger("module.forge")
 
 MAX_HTTP_CALLS_PER_RUN = 10
+MAX_LOG_CALLS_PER_RUN = 200
 MAX_KEY_LEN = 128
 MAX_COLLECTION_LEN = 64
 LOG_KEEP_PER_MODULE = 300
@@ -238,6 +239,8 @@ class ForgeAPI:
         self._last_notify_mono: float = 0.0
         self._emit_window: deque = deque()
         self._http_calls_this_run = 0
+        self._log_calls_this_run = 0
+        self._logs_dropped_this_run = 0
         self.storage = ForgeStorage(module_name)
         self.config = ForgeConfig(module_name, manifest.config)
         self.state: dict = {}                 # RAM, vidé au reload
@@ -254,13 +257,30 @@ class ForgeAPI:
     # ── Journal ──────────────────────────────────────────────────
 
     def log(self, message, source: str = "print") -> None:
-        write_log(self._module, "info", source, message)
+        self._write_log_budgeted("info", source, message)
 
     def warn(self, message) -> None:
-        write_log(self._module, "warning", "print", message)
+        self._write_log_budgeted("warning", "print", message)
 
     def error(self, message) -> None:
-        write_log(self._module, "error", "print", message)
+        self._write_log_budgeted("error", "print", message)
+
+    def _write_log_budgeted(self, level: str, source: str, message) -> None:
+        """Journalise sous plafond par invocation de handler.
+
+        C'était le seul canal d'effet de bord du bac à sable sans borne, et
+        chaque ligne est un INSERT synchrone sur la base partagée : un
+        ``for x in items: print(x)`` sur 500 éléments prend 500 fois le
+        verrou d'écriture WAL en concurrence avec les six boucles de fond,
+        à chaque tick, sans que le disjoncteur ne voie rien — la boucle
+        réussit, elle est seulement bavarde. Le surplus est compté et dit
+        par ``_end_run``, jamais silencieux.
+        """
+        if self._log_calls_this_run >= MAX_LOG_CALLS_PER_RUN:
+            self._logs_dropped_this_run += 1
+            return
+        self._log_calls_this_run += 1
+        write_log(self._module, level, source, message)
 
     # ── Signaux vers Mika / le bus ───────────────────────────────
 
@@ -275,8 +295,8 @@ class ForgeAPI:
         cooldown = float(_limit("forge.notify_cooldown_s", 300))
         now = time.monotonic()
         if now - self._last_notify_mono < cooldown:
-            write_log(self._module, "warning", "system",
-                      f"notify_ai ignoré (cooldown {cooldown:.0f}s)")
+            self._write_log_budgeted("warning", "system",
+                                     f"notify_ai ignoré (cooldown {cooldown:.0f}s)")
             return False
         self._last_notify_mono = now
         if urgency not in ("low", "normal", "high", "critical"):
@@ -300,8 +320,8 @@ class ForgeAPI:
         while self._emit_window and now - self._emit_window[0] > 60.0:
             self._emit_window.popleft()
         if len(self._emit_window) >= rate:
-            write_log(self._module, "warning", "system",
-                      f"emit ignoré (limite {rate}/min)")
+            self._write_log_budgeted("warning", "system",
+                                     f"emit ignoré (limite {rate}/min)")
             return False
         self._emit_window.append(now)
         try:
@@ -379,6 +399,29 @@ class ForgeAPI:
         """Appelé par le runtime avant chaque invocation de handler."""
         self._loop = loop
         self._http_calls_this_run = 0
+        self._log_calls_this_run = 0
+        self._logs_dropped_this_run = 0
+
+    def _end_run(self) -> None:
+        """Appelé par le runtime après chaque invocation : dit la troncature.
+
+        Une seule ligne, écrite hors budget — sinon la troncature serait
+        elle-même tronquée. Jamais fatale : elle s'exécute dans un
+        ``finally`` qui ne doit masquer ni le résultat ni l'erreur du
+        handler.
+        """
+        dropped = self._logs_dropped_this_run
+        if not dropped:
+            return
+        self._logs_dropped_this_run = 0
+        try:
+            write_log(
+                self._module, "warning", "system",
+                f"journal tronqué : {dropped} appel(s) ignoré(s) au-delà de "
+                f"{MAX_LOG_CALLS_PER_RUN} lignes pour cette exécution",
+            )
+        except Exception:
+            logger.debug("ligne de troncature non écrite pour %s", self._module)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
