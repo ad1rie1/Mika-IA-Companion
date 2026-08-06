@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 import logging
 
-import yaml
 from asgiref.sync import sync_to_async
 from django.http import JsonResponse
 
@@ -140,8 +139,8 @@ def build_routes(host) -> list[ModuleRoute]:
             limit = min(int(request.GET.get("limit", 50)), 300)
         except ValueError:
             limit = 50
-        logs = await sync_to_async(_recent_logs,
-                                   thread_sensitive=False)(limit, name)
+        logs = await sync_to_async(host._logs_since_all,
+                                   thread_sensitive=False)(name, limit)
         return JsonResponse({"logs": logs})
 
     return [
