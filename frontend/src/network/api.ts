@@ -47,8 +47,15 @@ function csrfToken(): string {
   return match ? decodeURIComponent(match[1]) : "";
 }
 
-/** POST JSON with credentials + the CSRF token. */
-async function postJson(path: string, body: unknown): Promise<Response> {
+/**
+ * POST JSON with credentials + the CSRF token.
+ *
+ * Exporté : c'est le *seul* chemin correct pour un POST vers le backend.
+ * Un `fetch` écrit sur place repart en 404 (URL relative → serveur Vite), en
+ * 403 (`CsrfViewMiddleware` est installé et aucune vue n'est exemptée) ou
+ * anonyme (cookie de session non joint sans `credentials`).
+ */
+export async function postJson(path: string, body: unknown): Promise<Response> {
   try {
     return await fetch(`${API_BASE}${path}`, {
       method: "POST",
