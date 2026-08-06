@@ -5,14 +5,15 @@ on the same footing as the WebSocket frontend. The channel is started
 and stopped by the ASGI lifespan alongside memory, emotion, and the
 plugin bus.
 
-Incoming Telegram messages are lifted into a ``Perception`` and pushed
-through ``pipeline.router.perceive()`` — identical flow to the web
-frontend channel.
+Incoming Telegram messages are lifted into a ``Perception`` and handed to
+``pipeline.turns.turn_queue`` — identical flow to the web frontend
+channel, down to the queue that keeps turns ordered and off the read loop.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 
 from telegram import Update
 from telegram.ext import (
@@ -28,6 +29,71 @@ from pipeline.voice import VoiceSink
 from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
+
+# Mêmes bornes que le consumer web (``communication/channels/web_frontend.py``),
+# volontairement : c'est le même coût de l'autre côté. La différence est la
+# clé — le web compte par *connexion*, ici il n'y en a pas, alors on compte
+# par compte Telegram.
+RATE_LIMIT_MAX_MESSAGES = 20
+RATE_LIMIT_WINDOW_SECONDS = 10.0
+
+# Au-delà, on oublie les expéditeurs dont la fenêtre est vide. Le compteur est
+# indexé par compte, et un compte n'a aucun coût à créer : sans purge, un flot
+# d'inconnus ferait grossir le dictionnaire pour la durée du processus.
+_RATE_MAX_TRACKED = 500
+
+# person_id -> horodatages (monotones) des messages reçus dans la fenêtre.
+_msg_timestamps: dict[str, list[float]] = {}
+
+
+def _is_rate_limited(person_id: str) -> bool:
+    """Fenêtre glissante par expéditeur.
+
+    Le chemin Telegram n'avait aucune borne alors que le chemin web en a
+    trois, et c'est celui des deux qu'un tiers peut atteindre sans rien
+    connaître de l'installation : chaque message reçu déclenche un tour de
+    pipeline complet.
+    """
+    now = time.monotonic()
+    window_start = now - RATE_LIMIT_WINDOW_SECONDS
+    stamps = [t for t in _msg_timestamps.get(person_id, ()) if t >= window_start]
+    _msg_timestamps[person_id] = stamps
+    if len(stamps) >= RATE_LIMIT_MAX_MESSAGES:
+        return True
+    stamps.append(now)
+    _prune_rate_window(window_start)
+    return False
+
+
+def _prune_rate_window(window_start: float) -> None:
+    if len(_msg_timestamps) <= _RATE_MAX_TRACKED:
+        return
+    for person_id, stamps in list(_msg_timestamps.items()):
+        if not stamps or stamps[-1] < window_start:
+            _msg_timestamps.pop(person_id, None)
+
+
+def _allowed_senders() -> set[str]:
+    """Liste blanche des comptes et salons autorisés — vide = aucun filtre.
+
+    Relue à chaque message plutôt que mise en cache : le réglage est
+    ``hot_reload``, et on ferme la porte au moment où on s'aperçoit qu'elle
+    était ouverte, pas au prochain redémarrage. Une configuration illisible
+    rend un ensemble vide, donc le comportement d'avant ce réglage : la
+    borne qui reste alors est la fenêtre glissante, et couper la
+    conversation de l'unique personne légitime parce que la base est
+    verrouillée coûterait plus que ça ne protège.
+    """
+    from configs.service import config_service
+
+    try:
+        raw = config_service.get("telegram.allowed_chats") or []
+    except Exception as exc:
+        degradations.record("communication.channels.telegram._allowed_senders", exc)
+        return set()
+    if isinstance(raw, str):
+        raw = raw.split(",")
+    return {str(value).strip() for value in raw if str(value).strip()}
 
 
 class TelegramChannel:
@@ -110,6 +176,10 @@ class TelegramChannel:
     async def _handle_start(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ):
+        if not update.message:
+            return
+        if not await self._accepts(update.message):
+            return
         await update.message.reply_text(personality.greeting)
 
     @staticmethod
@@ -124,14 +194,67 @@ class TelegramChannel:
         chat_type = getattr(getattr(message, "chat", None), "type", "") or ""
         return chat_type in ("group", "supergroup", "channel")
 
+    @staticmethod
+    def _is_authorized(message) -> bool:
+        """Cet expéditeur a-t-il le droit de faire parler Mika ?
+
+        Le compte ET le salon sont comparés à la liste : autoriser un groupe
+        entier est une décision légitime (« ce salon me parle »), autoriser
+        un compte aussi (« Thomas me parle, d'où qu'il écrive »).
+        """
+        allowed = _allowed_senders()
+        if not allowed:
+            return True
+        user_id = str(getattr(getattr(message, "from_user", None), "id", "") or "")
+        chat_id = str(getattr(message, "chat_id", "") or "")
+        return user_id in allowed or chat_id in allowed
+
+    async def _accepts(self, message) -> bool:
+        """Les deux bornes d'entrée du canal, dans cet ordre.
+
+        Le débit passe avant l'autorisation pour que le refus poli ne
+        devienne pas lui-même un écho automatique à un flot de messages :
+        au-delà de la fenêtre, on ne répond plus rien du tout.
+        """
+        person_id = f"tg_{getattr(getattr(message, 'from_user', None), 'id', '')}"
+        if _is_rate_limited(person_id):
+            logger.warning(
+                "Débit Telegram dépassé pour %s — message ignoré", person_id,
+            )
+            return False
+        if not self._is_authorized(message):
+            logger.info(
+                "Message Telegram refusé: %s hors liste blanche", person_id,
+            )
+            await self._refuse(message)
+            return False
+        return True
+
+    async def _refuse(self, message) -> None:
+        """Refuser à voix haute, avant d'avoir rien enregistré.
+
+        Le contrôle passe *avant* ``_register_interlocutor`` : un inconnu ne
+        doit laisser derrière lui ni entrée de présence, ni
+        ``IdentityHandle``, ni ligne ``Message``. Et un silence se lit comme
+        une panne — l'expéditeur réessaie, donc recompte.
+        """
+        try:
+            await message.reply_text(
+                "Désolée, je ne suis pas configurée pour discuter avec ce compte."
+            )
+        except Exception as exc:
+            degradations.record("communication.channels.telegram._refuse", exc)
+
     async def _register_interlocutor(self, message) -> tuple[str, bool]:
         """Register presence + identity for the sender.
 
-        Returns ``(person_id, is_public)``. Registering makes this user
+        Returns ``(person_id, is_public)``. Registering is what makes the
+        reply findable: ``broadcast_to_websocket`` resolves this entry and
+        delivers through ``deliver()`` — reactive turn included, since the
+        handler no longer echoes anything itself. It also makes this user
         PROACTIVELY reachable later (the external API is push-capable any
-        time we hold the chat_id) and stops a telegram turn from leaking to
-        the global websocket broadcast: the recipient is resolvable, and
-        broadcast skips the originating module's echo.
+        time we hold the chat_id), and stops a telegram turn from leaking to
+        the global websocket broadcast.
 
         Trust is the platform account, never more: ``tg_<id>`` proves the
         same account came back, not who is holding it. In a group it drops
@@ -180,10 +303,12 @@ class TelegramChannel:
         if not update.message or not update.message.text:
             return
 
+        if not await self._accepts(update.message):
+            return
+
         person_id, is_public = await self._register_interlocutor(update.message)
 
         from pipeline.perception import Perception
-        from pipeline.router import perceive
 
         perception = Perception.from_text(
             update.message.text,
@@ -191,11 +316,7 @@ class TelegramChannel:
             person_id=person_id,
             metadata={"authenticated": False, "is_public": is_public},
         )
-        # Reactive reply: we echo here. The pipeline's broadcast routing skips
-        # the originating module on a reactive turn, so there is no double-send.
-        output = await perceive(perception)
-        if output and output.text:
-            await update.message.reply_text(output.text)
+        await self._submit(perception, update.message)
 
     async def _handle_media(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -211,6 +332,9 @@ class TelegramChannel:
         if not message:
             return
 
+        if not await self._accepts(message):
+            return
+
         person_id, is_public = await self._register_interlocutor(message)
 
         attachment = await self._download_media(message)
@@ -218,7 +342,6 @@ class TelegramChannel:
             return
 
         from pipeline.perception import Perception
-        from pipeline.router import perceive
 
         perception = Perception.from_mixed(
             text=message.caption or "",
@@ -227,9 +350,38 @@ class TelegramChannel:
             person_id=person_id,
             metadata={"authenticated": False, "is_public": is_public},
         )
-        output = await perceive(perception)
-        if output and output.text:
-            await message.reply_text(output.text)
+        await self._submit(perception, message)
+
+    async def _submit(self, perception, message) -> None:
+        """Confier le tour à la file plutôt que l'attendre ici.
+
+        ``python-telegram-bot`` dépile les updates en série : awaiter le
+        pipeline dans le handler rendait le bot muet pour toute la durée du
+        tour — jusqu'à ``ai.call_timeout_seconds``, et sur un modèle local
+        souvent la totalité — ``/start`` compris. Et ça court-circuitait
+        ``turn_queue`` : un message Telegram et un message web partaient en
+        parallèle, deux appels LLM concurrents contre un serveur local qui
+        n'a qu'un créneau. Telegram est un canal de conversation au même
+        titre que le frontend ; il passe par la même file.
+
+        La réponse n'a plus besoin d'être renvoyée d'ici : elle est adressée
+        à ``tg_<id>``, que ``broadcast_to_websocket`` résout dans le registre
+        de présence et livre par ``deliver()`` — le chemin déjà utilisé
+        quand Mika écrit la première.
+        """
+        from pipeline.turns import turn_queue
+
+        if turn_queue.submit(perception):
+            return
+        # File pleine : dit à voix haute, comme l'``ack: overloaded`` du
+        # frontend. Un message avalé en silence laisse quelqu'un attendre
+        # une réponse qui n'arrivera jamais.
+        try:
+            await message.reply_text(
+                "Je suis débordée là — redemande-moi dans un instant."
+            )
+        except Exception as exc:
+            degradations.record("communication.channels.telegram._submit", exc)
 
     async def _download_media(self, message):
         """Pick the richest media on the message and download it.

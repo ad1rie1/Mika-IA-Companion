@@ -37,9 +37,12 @@ async def broadcast_to_websocket(
 
     Routing, by recipient reachability (presence registry):
     - **consumer** target  → the person's own WebSocket group (no cross-client leak)
-    - **module** target    → the module's ``deliver()`` (external API push), but
-      only when the message did NOT originate from that same module — a reactive
-      reply is already echoed by the channel itself, so we avoid double-sending.
+    - **module** target    → the module's ``deliver()`` (external API push),
+      whether the turn was reactive or proactive. It used to skip the
+      originating module, because the only such channel — Telegram — awaited
+      the pipeline inside its own handler and echoed the reply itself. That
+      handler now hands the turn to ``turn_queue`` and returns, so nothing
+      else sends: the skip would silently drop every answer.
     - **unresolved** (proactive with no recipient yet, anonymous, ``conscience_*``)
       → fall back to the legacy global broadcast so existing clients still hear it.
     """
@@ -133,10 +136,6 @@ async def broadcast_to_websocket(
             await channel_layer.group_send(group, payload)
             delivered = True
         elif target.is_module:
-            # Skip the originating module on a reactive turn (it echoes itself).
-            if target.channel == source:
-                delivered = True
-                continue
             delivered = (
                 await _deliver_via_module(target, output, source) or delivered
             )

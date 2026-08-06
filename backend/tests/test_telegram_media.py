@@ -133,14 +133,14 @@ class TestHandleMedia:
 
         captured = {}
 
-        async def fake_perceive(perception):
+        def fake_submit(perception):
             captured["p"] = perception
-            return SimpleNamespace(text="jolie photo !")
+            return True
 
         with patch.object(
             TelegramChannel, "_register_interlocutor",
             new=AsyncMock(return_value=("tg_99", False)),
-        ), patch("pipeline.router.perceive", new=fake_perceive):
+        ), patch("pipeline.turns.turn_queue.submit", new=fake_submit):
             await channel._handle_media(update, context=None)
 
         p = captured["p"]
@@ -149,9 +149,10 @@ class TestHandleMedia:
         kinds = {part.kind for part in p.parts}
         assert kinds == {"text", "image"}
         assert "regarde ça !" in p.text
-        msg.reply_text.assert_awaited_with("jolie photo !")
+        # La réponse revient par broadcast_to_websocket → deliver(), pas ici.
+        msg.reply_text.assert_not_awaited()
 
-    async def test_no_reply_when_pipeline_returns_none(self):
+    async def test_a_full_queue_is_refused_out_loud(self):
         channel = TelegramChannel()
         msg = _fake_message(voice=_fake_media(b"OggS", mime="audio/ogg"))
         update = SimpleNamespace(message=msg)
@@ -159,7 +160,7 @@ class TestHandleMedia:
         with patch.object(
             TelegramChannel, "_register_interlocutor",
             new=AsyncMock(return_value=("tg_99", False)),
-        ), patch("pipeline.router.perceive", new=AsyncMock(return_value=None)):
+        ), patch("pipeline.turns.turn_queue.submit", return_value=False):
             await channel._handle_media(update, context=None)
 
-        msg.reply_text.assert_not_awaited()
+        msg.reply_text.assert_awaited()
