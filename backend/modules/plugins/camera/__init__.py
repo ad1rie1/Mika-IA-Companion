@@ -11,6 +11,12 @@ Flux :
   3. _analyze_device() → CameraObservation { description, notable }
   4a. get_context()  → texte injecté dans le prompt système
   4b. si notable    → notify_ai() → Conscience → réaction spontanée
+
+Ce que ça coûte, et ce qui le borne : chaque analyse transporte une frame
+complète vers le modèle vision, et chaque notification ouvre un tour de
+pipeline entier. Les deux cadences sont donc réglables depuis le tableau de
+bord (``config_schema.py``) et relues à chaque tour — tous les réglages sont
+marqués « à chaud ».
 """
 
 from __future__ import annotations
@@ -35,8 +41,19 @@ from modules.types import (
 
 logger = logging.getLogger(__name__)
 
+# Valeurs de repli, identiques aux défauts déclarés dans config_schema.py.
+# Elles ne servent que si la configuration est illisible — jamais comme
+# réglage en dur : ce sont ces trois nombres qui faisaient du module le seul
+# poste de dépense LLM du moteur qu'on ne pouvait ni voir ni borner.
+#
 # Intervalle minimum entre deux analyses vision pour un même device (secondes)
-MIN_ANALYSIS_INTERVAL = 30
+MIN_ANALYSIS_INTERVAL = 120
+# Délai minimum entre deux interruptions déclenchées par un même device (s)
+NOTIFY_COOLDOWN_S = 300
+# Silence au-delà duquel l'analyse de fond s'arrête (secondes)
+IDLE_PAUSE_S = 900
+# Délai minimum entre deux regards actifs (camera_see) sur un même device (s)
+SEE_MIN_INTERVAL_S = 10
 # Âge max d'une observation pour qu'elle soit injectée dans le contexte (secondes)
 MAX_OBSERVATION_AGE = 600  # 10 min
 # Âge max d'une frame pour déclencher une analyse (secondes)
@@ -69,6 +86,7 @@ class DeviceState:
 
     last_analysis_ts: float = 0.0         # timestamp de la dernière analyse vision
     analysis_pending: bool = False        # évite les analyses parallèles sur le même device
+    last_notify_ts: float = 0.0           # timestamp de la dernière interruption émise
 
 
 @dataclass
@@ -77,6 +95,22 @@ class CameraObservation:
     description: str
     notable: bool
     reason: str = ""
+
+
+@dataclass
+class CameraSettings:
+    """Les réglages d'un tour de boucle, lus en une fois.
+
+    Relus à chaque tour plutôt que mémorisés au démarrage : tous les réglages
+    sont marqués « à chaud » dans le tableau de bord, ce qui doit vouloir dire
+    quelque chose.
+    """
+    proactive_enabled: bool = True
+    analysis_interval: int = MIN_ANALYSIS_INTERVAL
+    idle_pause: int = IDLE_PAUSE_S
+    notify_enabled: bool = True
+    notify_cooldown: int = NOTIFY_COOLDOWN_S
+    see_min_interval: int = SEE_MIN_INTERVAL_S
 
 
 class CameraModule(BaseModule):
@@ -95,6 +129,44 @@ class CameraModule(BaseModule):
 
     async def shutdown(self) -> None:
         self._devices.clear()
+
+    def config_schema(self):
+        from modules.plugins.camera.config_schema import CONFIG_SCHEMA
+        return CONFIG_SCHEMA
+
+    # ── Réglages ───────────────────────────────────────────────────
+
+    async def _settings(self) -> CameraSettings:
+        from asgiref.sync import sync_to_async
+        return await sync_to_async(self._settings_sync)()
+
+    @staticmethod
+    def _settings_sync() -> CameraSettings:
+        """Lecture groupée. Passe par l'ORM, donc jamais depuis une coroutine.
+
+        ``config_service.get`` avale l'erreur d'accès synchrone à l'ORM et
+        retombe silencieusement sur le défaut du schéma : appelé directement
+        depuis le cron asynchrone, il rendrait donc la valeur d'usine en
+        ignorant ce que l'utilisateur a réglé. D'où le passage obligé par
+        ``sync_to_async``.
+        """
+        from configs.service import config_service
+
+        def lire(key, default):
+            try:
+                value = config_service.get(key, default=default)
+            except Exception:
+                return default
+            return default if value is None else value
+
+        return CameraSettings(
+            proactive_enabled=bool(lire("camera.proactive_enabled", True)),
+            analysis_interval=int(lire("camera.analysis_interval_s", MIN_ANALYSIS_INTERVAL)),
+            idle_pause=int(lire("camera.idle_pause_s", IDLE_PAUSE_S)),
+            notify_enabled=bool(lire("camera.notify_enabled", True)),
+            notify_cooldown=int(lire("camera.notify_cooldown_s", NOTIFY_COOLDOWN_S)),
+            see_min_interval=int(lire("camera.see_min_interval_s", SEE_MIN_INTERVAL_S)),
+        )
 
     # ── Public API (appelée par CameraConsumer) ────────────────────
 
@@ -143,6 +215,15 @@ class CameraModule(BaseModule):
             del self._devices[device_id]
             self.logger.info("Device caméra supprimé (inactif) : %s", device_id)
 
+        # Rien à regarder : pas la peine de payer une lecture de configuration
+        # toutes les 10 s pour un module enregistré sur toutes les installations.
+        if not self._devices:
+            return
+
+        conf = await self._settings()
+        if not conf.proactive_enabled:
+            return
+
         for device_id, state in list(self._devices.items()):
             # Ne pas analyser une frame trop ancienne (device en pause)
             if now - state.frame_ts > MAX_FRAME_AGE_FOR_ANALYSIS:
@@ -151,18 +232,18 @@ class CameraModule(BaseModule):
             if not state.frame_changed_since_analysis:
                 continue
             # Respecter l'intervalle minimum entre analyses
-            if now - state.last_analysis_ts < MIN_ANALYSIS_INTERVAL:
+            if now - state.last_analysis_ts < conf.analysis_interval:
                 continue
             # Pas d'analyse parallèle sur le même device
             if state.analysis_pending:
                 continue
 
             state.analysis_pending = True
-            asyncio.create_task(self._analyze_device(device_id))
+            asyncio.create_task(self._analyze_device(device_id, conf))
 
     # ── Pipeline d'analyse vision ──────────────────────────────────
 
-    async def _analyze_device(self, device_id: str) -> None:
+    async def _analyze_device(self, device_id: str, conf: CameraSettings) -> None:
         state = self._devices.get(device_id)
         if not state:
             return
@@ -187,24 +268,60 @@ class CameraModule(BaseModule):
                 f" — NOTABLE: {obs.reason}" if obs.notable else "",
             )
 
-            if obs.notable and self._notify_ai:
-                await self._notify_ai(ModuleNotification(
-                    source_module="camera",
-                    summary=f"Changement notable détecté sur la caméra '{state.label}'",
-                    details=(
-                        f"Device: {state.label} ({device_id})\n"
-                        f"Observation: {obs.description}\n"
-                        f"Raison: {obs.reason}"
-                    ),
-                    urgency="normal",
-                    suggested_action="Réagis naturellement si pertinent pour la conversation.",
-                ))
+            if obs.notable:
+                await self._maybe_notify(state, obs, conf)
 
         except Exception:
             self.logger.exception("Analyse vision échouée pour device %s", device_id)
         finally:
             if device_id in self._devices:
                 self._devices[device_id].analysis_pending = False
+
+    async def _maybe_notify(
+        self,
+        state: DeviceState,
+        obs: CameraObservation,
+        conf: CameraSettings,
+    ) -> None:
+        """Interrompt Mika, si le droit et le délai de garde le permettent.
+
+        Une interruption est un tour de pipeline complet — invite système,
+        déclaration de tous les outils, historique, persistance, impulsion
+        émotionnelle, extraction mémoire en aval. Or le modèle vision juge
+        « notable » un simple changement d'attitude : sur une webcam pointée
+        vers quelqu'un qui travaille, le critère se déclenchait plusieurs fois
+        par minute. Même borne que la Forge (``forge.notify_cooldown_s``),
+        appliquée par device.
+
+        L'observation, elle, reste enregistrée dans tous les cas : se taire
+        n'est pas oublier, et ``get_context()`` la portera au prochain tour.
+        """
+        if not conf.notify_enabled or not self._notify_ai:
+            return
+
+        now = time.time()
+        if conf.notify_cooldown > 0 and now - state.last_notify_ts < conf.notify_cooldown:
+            self.logger.debug(
+                "[%s] Interruption supprimée (délai de garde, %ds restants)",
+                state.device_id,
+                int(conf.notify_cooldown - (now - state.last_notify_ts)),
+            )
+            return
+
+        # Daté avant l'appel : un tour lent ne doit pas laisser passer un
+        # second déclenchement pendant qu'il se déroule.
+        state.last_notify_ts = now
+        await self._notify_ai(ModuleNotification(
+            source_module="camera",
+            summary=f"Changement notable détecté sur la caméra '{state.label}'",
+            details=(
+                f"Device: {state.label} ({state.device_id})\n"
+                f"Observation: {obs.description}\n"
+                f"Raison: {obs.reason}"
+            ),
+            urgency="normal",
+            suggested_action="Réagis naturellement si pertinent pour la conversation.",
+        ))
 
     async def _run_vision(
         self,
