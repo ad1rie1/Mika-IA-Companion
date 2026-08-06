@@ -59,6 +59,11 @@ class ConscienceEngine:
         self._pending_greeted: tuple[set[str], object] | None = None
         self._initialized = False
         self._consecutive_waits: int = 0
+        # Horodatages monotones des balayages d'entretien etrangles (voir
+        # _CLEANUP_INTERVAL_S). En RAM : perdre la cadence au redemarrage ne
+        # coute qu'un passage supplementaire.
+        self._last_cleanup: float = 0.0
+        self._last_stale_sweep: float = 0.0
 
         # Config (loaded from settings on initialize)
         self._decision_interval: int = 30
@@ -898,56 +903,122 @@ class ConscienceEngine:
         except Exception as exc:
             degradations.record("conscience: mark observation maintained", exc)
 
+    # Meme decalage d'echelle que la purge, en plus court : le seuil est a 30
+    # minutes et le seul lecteur du statut "skipped" est la promotion en
+    # rumination, qui lit une fenetre de 2h. Une granularite de 5 minutes ne
+    # change donc rien d'observable — le scoring, lui, ne voit jamais ces
+    # lignes, `_build_context` bornant sa selection aux 30 dernieres minutes.
+    _STALE_SWEEP_INTERVAL_S = 300
+    _STALE_SWEEP_BATCH = 1000
+
     async def _mark_stale_observations(self) -> None:
         """Mark pending observations older than 30 min as skipped.
 
         Pertinent stale observations are promoted to Ruminations — Mika
         keeps thinking about them even after the short-term buffer empties.
+
+        L'UPDATE est etrangle a `_STALE_SWEEP_INTERVAL_S` et borne a
+        `_STALE_SWEEP_BATCH` lignes ; la promotion et la decroissance des
+        ruminations, elles, restent a chaque cycle (5% par cycle est leur
+        definition).
         """
         from conscience.models import Observation
         from django.utils import timezone as tz
         from datetime import timedelta
 
-        cutoff = tz.now() - timedelta(minutes=30)
-        try:
-            count = await sync_to_async(
-                lambda: Observation.objects.filter(
-                    status="pending",
-                    created_at__lt=cutoff,
-                ).update(status="skipped")
-            )()
-            if count:
-                logger.debug("Marked %d stale observations as skipped", count)
-        except Exception as exc:
-            degradations.record("conscience: mark stale observations", exc)
+        now = time.monotonic()
+        if (not self._last_stale_sweep
+                or (now - self._last_stale_sweep) >= self._STALE_SWEEP_INTERVAL_S):
+            self._last_stale_sweep = now
+            cutoff = tz.now() - timedelta(minutes=30)
+
+            def _perimer() -> int:
+                ids = list(
+                    Observation.objects.filter(
+                        status="pending",
+                        created_at__lt=cutoff,
+                    ).values_list("pk", flat=True)[:self._STALE_SWEEP_BATCH]
+                )
+                if not ids:
+                    return 0
+                return Observation.objects.filter(pk__in=ids).update(
+                    status="skipped")
+
+            try:
+                count = await sync_to_async(_perimer)()
+                if count:
+                    logger.debug("Marked %d stale observations as skipped", count)
+                if count >= self._STALE_SWEEP_BATCH:
+                    self._last_stale_sweep = 0.0
+            except Exception as exc:
+                degradations.record("conscience: mark stale observations", exc)
 
         # Promote pertinent skipped observations to ruminations.
         await self._promote_stale_to_ruminations()
         # Decay existing ruminations over each cycle.
         await self._decay_ruminations()
 
+    # Cadence et taille de lot de la purge. La donnee visee a 48h, le cycle de
+    # decision tourne toutes les 30s : un passage par heure suffit, sur la
+    # forme deja retenue par `_apply_decay` du consolidateur. Le lot borne la
+    # transaction d'ecriture — `Rumination.observation` est une FK SET_NULL,
+    # donc chaque suppression traine ses UPDATE, et sur SQLite un ecrivain
+    # bloque tous les lecteurs le temps de la transaction.
+    _CLEANUP_INTERVAL_S = 3600
+    _CLEANUP_BATCH = 1000
+
     async def _cleanup_old_observations(self) -> None:
         """Delete observations older than 48h that are no longer pending.
 
-        Runs every decision cycle but the query is cheap (indexed).
-        Keeps the Observation table from growing unbounded.
+        Etranglee a `_CLEANUP_INTERVAL_S` et bornee a `_CLEANUP_BATCH` lignes
+        par passage. Rien n'est perdu : ce qui deborde du lot reste eligible,
+        et un lot plein reprogramme le passage suivant au cycle d'apres plutot
+        que dans une heure — sans quoi un pic (premier polling RSS, module
+        forge bavard) mettrait des heures a se resorber.
         """
         from conscience.models import Observation
         from django.utils import timezone as tz
         from datetime import timedelta
 
+        now = time.monotonic()
+        if self._last_cleanup and (now - self._last_cleanup) < self._CLEANUP_INTERVAL_S:
+            return
+        self._last_cleanup = now
+
         cutoff = tz.now() - timedelta(hours=48)
-        try:
-            count = await sync_to_async(
-                lambda: Observation.objects.filter(
+        # `status__in` plutot que `exclude(status="pending")` : l'index
+        # ["status", "-created_at"] a sa colonne de tete filtree par `!=`
+        # dans la seconde forme, donc inexploitable — c'etait un balayage
+        # complet de la table a chaque passage. La liste est derivee des
+        # choix du modele, pour ne pas oublier un statut ajoute plus tard.
+        closed = [s for s in Observation.Status.values
+                  if s != Observation.Status.PENDING]
+
+        def _purger() -> int:
+            # Suppression par liste de pk (motif de memory/retention.py) :
+            # `.delete()` sur un queryset tranche n'est pas portable, et cela
+            # garde l'instruction bornee.
+            ids = list(
+                Observation.objects.filter(
+                    status__in=closed,
                     created_at__lt=cutoff,
-                ).exclude(status="pending").delete()
-            )()
+                ).values_list("pk", flat=True)[:self._CLEANUP_BATCH]
+            )
+            if not ids:
+                return 0
             # .delete() returns (total, {model: count}) tuple
-            if count and count[0]:
-                logger.info("Cleaned up %d old observations", count[0])
+            return Observation.objects.filter(pk__in=ids).delete()[0]
+
+        try:
+            count = await sync_to_async(_purger)()
         except Exception as exc:
             degradations.record("conscience: observation cleanup", exc)
+            return
+
+        if count:
+            logger.info("Cleaned up %d old observations", count)
+        if count >= self._CLEANUP_BATCH:
+            self._last_cleanup = 0.0
 
     # ── 4. ACT ────────────────────────────────────────────────────
 
