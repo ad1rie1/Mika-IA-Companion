@@ -40,6 +40,7 @@ from modules.plugins.forge.api import ForgeAPI, write_log
 
 HANDLER_TIMEOUT_DEFAULT = 10
 CONTEXT_TIMEOUT_S = 5.0
+POOL_WORKERS = 2
 
 
 def _cfg(key: str, default):
@@ -80,6 +81,8 @@ class ForgeModule(BaseModule):
         self._event_tasks: set[asyncio.Task] = set()
         self._breaker_notified: set[str] = set()
         self._ops_lock: asyncio.Lock = asyncio.Lock()
+        # Autant de jetons que de fils : voir _submit().
+        self._pool_slots: asyncio.Semaphore = asyncio.Semaphore(POOL_WORKERS)
 
     # ══ Lifecycle ═════════════════════════════════════════════════
 
@@ -89,7 +92,7 @@ class ForgeModule(BaseModule):
     async def instantiate(self) -> None:
         self._loop = asyncio.get_running_loop()
         self._executor = ThreadPoolExecutor(
-            max_workers=2, thread_name_prefix="forge",
+            max_workers=POOL_WORKERS, thread_name_prefix="forge",
         )
         await sync_to_async(self._ensure_dir, thread_sensitive=False)()
         names = await sync_to_async(store.list_module_names,
@@ -166,10 +169,9 @@ class ForgeModule(BaseModule):
             return runtime.load_module(manifest, data["code"], api)
 
         try:
-            lm = await asyncio.wait_for(
-                self._loop.run_in_executor(self._executor, _do_load),
-                timeout=runtime.LOAD_TIMEOUT_S + 5,
-            )
+            # Même pool que les handlers : le chargement passe par le même
+            # sémaphore, sinon un jeton ne garantirait plus un fil libre.
+            lm, _ = await self._submit(_do_load, runtime.LOAD_TIMEOUT_S + 5)
         except sandbox.SandboxViolation as exc:
             self._load_errors[name] = str(exc)
             await self._log(name, "error", "system", str(exc))
@@ -279,6 +281,48 @@ class ForgeModule(BaseModule):
 
     # ══ Exécution de handlers (timeout + disjoncteur) ═════════════
 
+    async def _submit(self, fn, deadline_s: float) -> tuple[object, float]:
+        """Soumet ``fn`` au pool sous deadline. Retourne (résultat, durée).
+
+        Le jeton est pris AVANT la soumission, et il n'y a jamais plus de
+        jetons que de fils : la deadline ne peut donc pas courir pendant une
+        attente en file. C'est toute la raison d'être du sémaphore — le pool
+        est délibérément sur-souscrit (un ``gather`` sur tous les modules
+        dus, une tâche de fan-out par événement du bus), et un chrono démarré
+        à la soumission déclarait « bloqué au-delà de Xs » un handler qui
+        n'avait pas encore commencé : cinq rounds de ce genre et le
+        disjoncteur désactivait un module parfaitement sain — en réveillant
+        Mika au passage. Même remarque pour l'avertissement « handler lent ».
+
+        Un fil qui survit à sa deadline (appel C non interruptible) garde son
+        jeton jusqu'à sa fin RÉELLE : le compte doit décrire les fils libres,
+        pas les appels qu'on a cessé d'attendre.
+
+        Lève ``asyncio.TimeoutError`` au dépassement ; propage telle quelle
+        l'exception levée dans le thread.
+        """
+        await self._pool_slots.acquire()
+        started = time.monotonic()
+        try:
+            future = self._loop.run_in_executor(self._executor, fn)
+        except RuntimeError:  # pool déjà fermé (arrêt en cours)
+            self._pool_slots.release()
+            raise
+        future.add_done_callback(self._release_slot)
+        done, _ = await asyncio.wait({future}, timeout=deadline_s)
+        if not done:
+            raise asyncio.TimeoutError
+        return future.result(), time.monotonic() - started
+
+    def _release_slot(self, future: asyncio.Future) -> None:
+        """Rend le jeton quand le fil se termine vraiment, et consomme au
+        passage l'exception d'un futur abandonné sur deadline — personne ne
+        lira plus son résultat et asyncio la journaliserait en
+        « never retrieved »."""
+        self._pool_slots.release()
+        if not future.cancelled():
+            future.exception()
+
     async def _run_handler(
         self,
         lm: runtime.LoadedForgeModule,
@@ -310,12 +354,8 @@ class ForgeModule(BaseModule):
             finally:
                 close_old_connections()
 
-        started = time.monotonic()
         try:
-            result = await asyncio.wait_for(
-                self._loop.run_in_executor(self._executor, _runner),
-                timeout=timeout + 5,
-            )
+            result, elapsed = await self._submit(_runner, timeout + 5)
         except asyncio.TimeoutError:
             error = (f"{handler}: thread bloqué au-delà de {timeout:.0f}s "
                      "(appel C non interruptible ?)")
@@ -333,7 +373,6 @@ class ForgeModule(BaseModule):
         if count_failure:
             lm.consecutive_failures = 0
             lm.last_error = None
-        elapsed = time.monotonic() - started
         if elapsed > timeout * 0.8:
             await self._log(lm.name, "warning", source,
                             f"{handler} lent: {elapsed:.1f}s")
