@@ -63,6 +63,7 @@ class ConscienceEngine:
         # _CLEANUP_INTERVAL_S). En RAM : perdre la cadence au redemarrage ne
         # coute qu'un passage supplementaire.
         self._last_cleanup: float = 0.0
+        self._last_stale_sweep: float = 0.0
 
         # Config (loaded from settings on initialize)
         self._decision_interval: int = 30
@@ -902,28 +903,55 @@ class ConscienceEngine:
         except Exception as exc:
             degradations.record("conscience: mark observation maintained", exc)
 
+    # Meme decalage d'echelle que la purge, en plus court : le seuil est a 30
+    # minutes et le seul lecteur du statut "skipped" est la promotion en
+    # rumination, qui lit une fenetre de 2h. Une granularite de 5 minutes ne
+    # change donc rien d'observable — le scoring, lui, ne voit jamais ces
+    # lignes, `_build_context` bornant sa selection aux 30 dernieres minutes.
+    _STALE_SWEEP_INTERVAL_S = 300
+    _STALE_SWEEP_BATCH = 1000
+
     async def _mark_stale_observations(self) -> None:
         """Mark pending observations older than 30 min as skipped.
 
         Pertinent stale observations are promoted to Ruminations — Mika
         keeps thinking about them even after the short-term buffer empties.
+
+        L'UPDATE est etrangle a `_STALE_SWEEP_INTERVAL_S` et borne a
+        `_STALE_SWEEP_BATCH` lignes ; la promotion et la decroissance des
+        ruminations, elles, restent a chaque cycle (5% par cycle est leur
+        definition).
         """
         from conscience.models import Observation
         from django.utils import timezone as tz
         from datetime import timedelta
 
-        cutoff = tz.now() - timedelta(minutes=30)
-        try:
-            count = await sync_to_async(
-                lambda: Observation.objects.filter(
-                    status="pending",
-                    created_at__lt=cutoff,
-                ).update(status="skipped")
-            )()
-            if count:
-                logger.debug("Marked %d stale observations as skipped", count)
-        except Exception as exc:
-            degradations.record("conscience: mark stale observations", exc)
+        now = time.monotonic()
+        if (not self._last_stale_sweep
+                or (now - self._last_stale_sweep) >= self._STALE_SWEEP_INTERVAL_S):
+            self._last_stale_sweep = now
+            cutoff = tz.now() - timedelta(minutes=30)
+
+            def _perimer() -> int:
+                ids = list(
+                    Observation.objects.filter(
+                        status="pending",
+                        created_at__lt=cutoff,
+                    ).values_list("pk", flat=True)[:self._STALE_SWEEP_BATCH]
+                )
+                if not ids:
+                    return 0
+                return Observation.objects.filter(pk__in=ids).update(
+                    status="skipped")
+
+            try:
+                count = await sync_to_async(_perimer)()
+                if count:
+                    logger.debug("Marked %d stale observations as skipped", count)
+                if count >= self._STALE_SWEEP_BATCH:
+                    self._last_stale_sweep = 0.0
+            except Exception as exc:
+                degradations.record("conscience: mark stale observations", exc)
 
         # Promote pertinent skipped observations to ruminations.
         await self._promote_stale_to_ruminations()
