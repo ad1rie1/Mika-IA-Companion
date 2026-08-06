@@ -4,6 +4,10 @@ Connexion : ws://host/ws/camera?device=bureau&label=Bureau
   - device : identifiant technique unique du device (requis)
   - label  : nom lisible pour le contexte IA (optionnel, défaut = device)
 
+Comme le consumer frontend, ce socket refuse les connexions anonymes en 4401
+quand ``CONSUMER_REQUIRE_AUTH`` est actif (défaut) : la description produite
+par la vision est injectée telle quelle dans le prompt système du propriétaire.
+
 Protocole (frames JSON) :
   Client → Serveur :
     {"type": "frame", "data": "<base64>", "mime": "image/jpeg"}
@@ -21,6 +25,7 @@ import logging
 from urllib.parse import parse_qs  # FIX #10 : URL-decoding correct
 
 from channels.generic.websocket import AsyncWebsocketConsumer
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +37,18 @@ class CameraConsumer(AsyncWebsocketConsumer):
     """Consumer WebSocket dédié au flux caméra."""
 
     async def connect(self):
+        # Même règle que WebSocketConsumer : une connexion non authentifiée est
+        # refusée en 4401 quand la politique l'exige. AuthMiddlewareStack est déjà
+        # dans la pile ASGI, donc scope["user"] est peuplé ici aussi.
+        # Sans ce contrôle, n'importe qui pousse une image dont la description
+        # produite par la vision atterrit dans le prompt système du propriétaire
+        # (injection de prompt indirecte), et fait tourner un appel vision par
+        # identifiant `device` inventé.
+        if not self._is_authenticated() and getattr(settings, "CONSUMER_REQUIRE_AUTH", False):
+            logger.warning("CameraConsumer: connexion non authentifiée refusée (4401)")
+            await self.close(code=4401)
+            return
+
         # FIX #10 : parse_qs gère le URL-decoding (label=Mon%20Bureau → "Mon Bureau")
         query = self.scope.get("query_string", b"").decode()
         params = {k: v[0] for k, v in parse_qs(query).items()}
@@ -102,6 +119,11 @@ class CameraConsumer(AsyncWebsocketConsumer):
         self._push_frame(frame_b64, "image/jpeg")
 
     # ── Helpers ───────────────────────────────────────────────────
+
+    def _is_authenticated(self) -> bool:
+        """Vrai si la session Django résolue par AuthMiddlewareStack est ouverte."""
+        user = self.scope.get("user")
+        return user is not None and getattr(user, "is_authenticated", False)
 
     def _push_frame(self, data: str, mime: str) -> bool:
         """Transmet la frame au CameraModule. Retourne True si la frame a changé."""
