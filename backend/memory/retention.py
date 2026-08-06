@@ -83,6 +83,16 @@ POLICIES: tuple[Policy, ...] = (
     Policy("identity", "IdentityClaim", keep_days=180, keep_rows=10_000,
            protect={"status": "pending"},
            note="identity evidence ledger"),
+    # Une ligne par adresse croisee dans le trafic e-mail : un fil de
+    # discussion a quarante destinataires, une lettre d'information mille.
+    # ``Email`` est deja plafonne a 200 lignes par compte, ``Contact`` ne
+    # redescendait jamais. Les adresses qui ont reellement ecrit sont
+    # protegees — c'est le carnet d'adresses, pas un cache ; les autres
+    # sortent apres un an sans le moindre contact.
+    Policy("modules", "Contact", date_field="last_seen", keep_days=365,
+           keep_rows=5_000,
+           protect={"emails_received__gt": 0},
+           note="adresses croisees sans echange"),
 )
 
 
