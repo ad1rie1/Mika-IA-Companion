@@ -12,7 +12,6 @@ const clampRate = (v: number) => Math.max(0.5, Math.min(2, v));
 export interface TTSEvents {
   onSpeakStart: () => void;
   onSpeakEnd: () => void;
-  onAudioData: (analyser: AnalyserNode) => void;
   /** Fired when a [SIGH]/[LAUGH]/[BREATH] token is reached, right
    * before its synthetic audio plays — so a body gesture can start in
    * sync with the sound. */
@@ -57,7 +56,6 @@ const EMOTION_VOICE: Record<
 
 export class TTSService {
   private audioContext: AudioContext | null = null;
-  private analyser: AnalyserNode | null = null;
   private events: TTSEvents;
   private preferredVoice: SpeechSynthesisVoice | null = null;
   private isSpeaking = false;
@@ -318,18 +316,17 @@ export class TTSService {
     }
   }
 
+  /**
+   * Le contexte WebAudio ne sert qu'aux effets [SIGH]/[LAUGH]/[BREATH] :
+   * la Web Speech API ne donne aucun accès à son flux audio, donc rien
+   * d'analysable n'y transite. Une synthèse future rendant de vrais buffers
+   * les jouerait ici et pourrait alors piloter le lip-sync depuis l'audio.
+   */
   private ensureAudioContext(): AudioContext {
     if (!this.audioContext) {
       this.audioContext = new AudioContext();
-      this.analyser = this.audioContext.createAnalyser();
-      this.analyser.fftSize = 256;
-      this.analyser.smoothingTimeConstant = 0.8;
     }
     return this.audioContext;
-  }
-
-  getAnalyser(): AnalyserNode | null {
-    return this.analyser;
   }
 
   /**
@@ -493,7 +490,8 @@ export class TTSService {
       utterance.rate = clampRate(voiceMod.rate * profile.rate);
       utterance.volume = Math.max(0, Math.min(1, profile.gain));
 
-      // Connect to Web Audio API for analysis
+      // Réveille le contexte WebAudio pendant qu'un geste utilisateur est
+      // encore proche, pour qu'un [SIGH] plus loin dans la réponse sorte.
       const ctx = this.ensureAudioContext();
       if (ctx.state === "suspended") {
         ctx.resume();
@@ -504,14 +502,6 @@ export class TTSService {
         if (!suppressEvents) {
           this.events.onSpeakStart();
         }
-
-        // NOTE: do NOT emit onAudioData here. The Web Speech API gives no
-        // access to its audio stream, so nothing is ever connected into
-        // `this.analyser` — handing it out switched the LipSyncController to
-        // its audio-driven branch, where getByteFrequencyData() returns
-        // silence and the mouth never moved at all. The text-driven
-        // estimation started by the caller is the working path; onAudioData
-        // is reserved for a future TTS that returns real audio buffers.
       };
 
       utterance.onend = () => {

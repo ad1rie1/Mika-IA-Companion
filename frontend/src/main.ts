@@ -119,9 +119,6 @@ async function init() {
       animationSystem.setSpeaking(false);
       lipSyncController.stop();
     },
-    onAudioData: (analyser) => {
-      lipSyncController.startAudioDriven(analyser);
-    },
     // [SIGH]/[LAUGH] tokens fire a body beat in sync with their audio.
     onProsodicCue: (cue) => {
       animationSystem.playCue(cue);
