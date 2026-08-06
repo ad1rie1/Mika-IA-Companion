@@ -113,6 +113,11 @@ class MemoryBridge:
         scores: dict[str, float] = {}
 
         def accumulate(matches, model):
+            # Une seule requete par modele, pas une par resultat : `n` est un
+            # parametre d'appel qui peut grandir, et un `prefetch_related` sur
+            # un `get()` unitaire ajoute un aller-retour au lieu d'en
+            # economiser. Les pk disparus sont simplement absents du filtre.
+            relevances: dict[int, float] = {}
             for r in matches:
                 try:
                     pk = int(r["id"])
@@ -120,10 +125,15 @@ class MemoryBridge:
                     continue
                 distance = r.get("distance")
                 relevance = max(0.0, 1.0 - distance) if distance is not None else 0.5
-                try:
-                    obj = model.objects.prefetch_related("entities").get(pk=pk)
-                except model.DoesNotExist:
-                    continue
+                relevances[pk] = relevances.get(pk, 0.0) + relevance
+
+            if not relevances:
+                return
+
+            for obj in model.objects.filter(
+                pk__in=list(relevances)
+            ).prefetch_related("entities"):
+                relevance = relevances[obj.pk]
                 for entity in obj.entities.all():
                     if entity.entity_type == "person":
                         scores[entity.name] = scores.get(entity.name, 0.0) + relevance
