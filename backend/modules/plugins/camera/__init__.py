@@ -61,6 +61,11 @@ MAX_OBSERVATION_AGE = 600  # 10 min
 MAX_FRAME_AGE_FOR_ANALYSIS = 60
 # Délai avant de supprimer un device inactif (secondes)
 DEVICE_STALE_TIMEOUT = 600  # 10 min
+# Nombre maximum de devices retenus simultanément.
+# Chaque DeviceState garde sa dernière frame en base64 (jusqu'à ~2 Mo) pendant
+# DEVICE_STALE_TIMEOUT : sans plafond, des identifiants inventés font grossir
+# la RAM sans borne (100 identifiants en 10 min ≈ 200 Mo retenus).
+MAX_DEVICES = 8
 
 # Hash perceptuel — taille de la miniature et pas de quantification
 _THUMB_SIZE = 16    # 16×16 px après resize
@@ -205,6 +210,17 @@ class CameraModule(BaseModule):
                 existing.frame_changed_since_analysis = True
             return changed
 
+        # Plafond de cardinalité : on purge d'abord les devices muets (le cron
+        # le fait déjà, mais seulement toutes les 10s), puis on refuse le
+        # nouveau plutôt que d'évincer un device légitime en cours d'usage.
+        if len(self._devices) >= MAX_DEVICES:
+            self._purge_stale()
+        if len(self._devices) >= MAX_DEVICES:
+            self.logger.warning(
+                "Device caméra refusé (plafond %d atteint) : %s", MAX_DEVICES, device_id,
+            )
+            return False
+
         self._devices[device_id] = DeviceState(
             device_id=device_id,
             label=label,
@@ -223,10 +239,7 @@ class CameraModule(BaseModule):
         now = time.time()
 
         # FIX #7 : nettoyage des devices inactifs
-        stale = [d for d, s in self._devices.items() if now - s.frame_ts > DEVICE_STALE_TIMEOUT]
-        for device_id in stale:
-            del self._devices[device_id]
-            self.logger.info("Device caméra supprimé (inactif) : %s", device_id)
+        self._purge_stale()
 
         # Rien à regarder : pas la peine de payer une lecture de configuration
         # toutes les 10 s pour un module enregistré sur toutes les installations.
@@ -591,6 +604,14 @@ class CameraModule(BaseModule):
         return {"devices": devices, "count": len(devices)}
 
     # ── Helpers ────────────────────────────────────────────────────
+
+    def _purge_stale(self) -> None:
+        """Supprime les devices muets depuis DEVICE_STALE_TIMEOUT."""
+        now = time.time()
+        stale = [d for d, s in self._devices.items() if now - s.frame_ts > DEVICE_STALE_TIMEOUT]
+        for device_id in stale:
+            del self._devices[device_id]
+            self.logger.info("Device caméra supprimé (inactif) : %s", device_id)
 
     def _get_device(self, device_id: str) -> DeviceState | None:
         if device_id and device_id in self._devices:
