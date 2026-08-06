@@ -137,10 +137,10 @@ async def gather_context(
     emotion_context = emotion_engine.get_global_mood_context()
 
     # Intrinsic drives — still Mika-centric (curiosity / social need / rest),
-    # so they attach to the global mood layer.
-    # NOTE: drive satisfaction is triggered by conscience.observe() when the
-    # chat.message event bubbles up, so we deliberately don't call
-    # drive_engine.on_conversation() here to avoid double-counting.
+    # so they attach to the global mood layer. Lecture seule : assouvir une
+    # pulsion est la politique des pulsions, déclarée dans drives/apps.py sur
+    # `_turn.completed`. Appeler drive_engine.on_conversation() ici la
+    # compterait deux fois.
     drive_context = drive_engine.get_context()
     if drive_context:
         emotion_context = (

@@ -203,8 +203,11 @@ class ConscienceEngine:
         # Track activity for idle detection
         if event.event_type in ("chat.message", "telegram.message"):
             self._last_activity = time.time()
-            # A person talking to Mika satisfies the social drive.
-            drive_engine.on_conversation(from_person=True)
+            # L'assouvissement de SOCIAL/CURIOSITY par un message n'est plus
+            # décidé ici : c'est une politique des pulsions, déclarée dans
+            # drives/apps.py sur `_turn.completed`, donc valable pour tout
+            # canal d'entrée et non pour les seuls noms d'événements listés
+            # ci-dessus.
         else:
             # External signal (email, RSS, schedule) — feeds curiosity
             # proportionally to pertinence.
