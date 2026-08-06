@@ -484,6 +484,10 @@ class ProjectRunner:
 
         from pipeline.inner_voice import generate_inner_thought
 
+        # Le murmure part APRÈS le `reset` du ContextVar de `_advance` : sans
+        # cette repose, l'appel INNER_VOICE sort avec project_id=None et
+        # n'est jamais facturé à `Project.monthly_token_budget`.
+        token = current_project_id.set(ctx.project_id)
         try:
             intended = str(
                 (data.get("proposed_action") or {}).get("proposal")
@@ -496,6 +500,8 @@ class ProjectRunner:
             await self._broadcast_inner_thought(ctx, thought)
         except Exception as exc:
             degradations.record("projects: inner thought failed (non-fatal)", exc)
+        finally:
+            current_project_id.reset(token)
 
     async def _broadcast_inner_thought(self, ctx, thought: str) -> None:
         """Push the murmur out through the normal speech routing.
