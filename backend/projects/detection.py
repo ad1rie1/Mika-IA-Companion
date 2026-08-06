@@ -77,6 +77,23 @@ async def detect_project_for_message(
     if not tokens:
         return None
 
+    # Qui parle : un `person_id` est un handle de transport (`web_…`, `tg_…`),
+    # jamais le nom d'une Entity. La resolution passe par la couche identite —
+    # comparer le handle au nom du proprietaire est le motif que cette couche
+    # a justement ete ecrite pour supprimer. Une seule resolution pour tous
+    # les projets, et seulement s'il y a un proprietaire a comparer.
+    speaker_entity_id: int | None = None
+    if person_id and any(p.owner_id for p in projects):
+        try:
+            from identity.resolver import identity_resolver
+
+            entity = await identity_resolver.entity_for_person(person_id)
+            speaker_entity_id = entity.pk if entity else None
+        except Exception:
+            logger.debug(
+                "Identity resolution failed for %s", person_id, exc_info=True,
+            )
+
     best: ProjectMatch | None = None
 
     for p in projects:
@@ -112,7 +129,11 @@ async def detect_project_for_message(
 
         # Active person_id talking directly to owner's project gets a small
         # bump when there's any title or keyword signal at all.
-        if person_id and p.owner and person_id == p.owner.name and score > 0:
+        if (
+            speaker_entity_id is not None
+            and p.owner_id == speaker_entity_id
+            and score > 0
+        ):
             score += 0.1
 
         if score > 0 and (best is None or score > best.confidence):
