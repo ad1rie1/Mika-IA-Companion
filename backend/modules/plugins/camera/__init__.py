@@ -38,6 +38,7 @@ from modules.types import (
     ToolParameter,
     ToolParameterType,
 )
+from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
@@ -223,6 +224,8 @@ class CameraModule(BaseModule):
         conf = await self._settings()
         if not conf.proactive_enabled:
             return
+        if not self._analysis_allowed(conf):
+            return
 
         for device_id, state in list(self._devices.items()):
             # Ne pas analyser une frame trop ancienne (device en pause)
@@ -240,6 +243,40 @@ class CameraModule(BaseModule):
 
             state.analysis_pending = True
             asyncio.create_task(self._analyze_device(device_id, conf))
+
+    def _analysis_allowed(self, conf: CameraSettings) -> bool:
+        """L'analyse de fond a-t-elle une raison de tourner maintenant ?
+
+        Deux gardes du même ordre que celles du cycle de sommeil et de la
+        conscience, que la boucle ignorait : elle analysait à l'identique
+        pendant que Mika dormait et pendant les heures où personne ne lui
+        parlait. Or une observation expire au bout de MAX_OBSERVATION_AGE ;
+        produite après une heure de silence, elle est jetée sans qu'aucune
+        invite ne l'ait jamais lue — un appel vision par frame, pour rien.
+
+        Les deux gardes s'appliquent à l'analyse *de fond* seulement :
+        ``camera_see`` regarde quand on le lui demande, y compris la nuit.
+
+        Une lecture qui échoue n'interrompt pas la perception : c'est le
+        garde-fou qui est indisponible, pas la caméra.
+        """
+        try:
+            from memory.sleep import SleepPhase, sleep_cycle
+            if sleep_cycle.phase != SleepPhase.AWAKE:
+                return False
+        except Exception as exc:
+            degradations.record("camera: lecture de la phase de sommeil", exc)
+
+        # 0 : garde désactivée — une caméra de surveillance regarde une pièce
+        # vide, c'est un choix qui se règle et qui se paie.
+        if conf.idle_pause <= 0:
+            return True
+        try:
+            from conscience.engine import conscience_engine
+            return conscience_engine.get_idle_seconds() < conf.idle_pause
+        except Exception as exc:
+            degradations.record("camera: lecture du temps d'inactivité", exc)
+        return True
 
     # ── Pipeline d'analyse vision ──────────────────────────────────
 
