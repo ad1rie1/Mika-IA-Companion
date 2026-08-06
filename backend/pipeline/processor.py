@@ -336,6 +336,10 @@ async def process_message(
             project_suppresses_emotion=bool(
                 getattr(context, "project_suppresses_emotion", False)
             ),
+            # Quel projet la détection a reconnu dans ce tour. Le lanceur en
+            # a besoin pour savoir qu'un humain est repassé sur cet
+            # engagement ; ce qu'il en fait est sa politique, pas la nôtre.
+            project_id=getattr(context, "project_id", None),
         )
 
     # 6. Compute final blended emotion for the reply's display.

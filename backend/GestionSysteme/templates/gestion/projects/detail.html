@@ -57,8 +57,24 @@
         <dd>{% if project.next_run_at %}{{ project.next_run_at|dt_full }}{% else %}—{% endif %}</dd>
         <dt>Dernier passage</dt>
         <dd>{% if project.last_run_at %}{{ project.last_run_at|dt_full }}{% else %}—{% endif %}</dd>
-        <dt title="Plafond à 10 : au-delà, le projet n'avance plus sans retour humain">Passages sans retour</dt>
-        <dd class="tabular">{{ project.runs_since_user_input }} / 10</dd>
+        <dt title="Au-delà du plafond, le projet n'avance plus sans retour humain">Passages sans retour</dt>
+        <dd>
+          {% if project.runs_since_user_input >= runs_cap %}
+            <span class="badge badge-danger">{{ project.runs_since_user_input }} / {{ runs_cap }}</span>
+            <div class="field-hint">Plafond atteint : plus aucun passage tant qu'un humain n'est pas repassé dessus.</div>
+          {% else %}
+            <span class="tabular">{{ project.runs_since_user_input }} / {{ runs_cap }}</span>
+          {% endif %}
+          {% if project.runs_since_user_input %}
+            <form method="post" action="{% url 'gestionsysteme:project-resume' project.pk %}" class="mt-2">
+              {% csrf_token %}
+              <button class="btn btn-sm" type="submit"
+                      title="Signale une intervention humaine : le compteur repart de zéro">
+                Remettre le compteur à zéro
+              </button>
+            </form>
+          {% endif %}
+        </dd>
         {% if project.monthly_token_budget %}
           <dt>Budget mensuel</dt><dd class="tabular">{{ project.monthly_token_budget }} jetons</dd>
         {% endif %}

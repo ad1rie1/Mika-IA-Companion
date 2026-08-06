@@ -103,6 +103,14 @@ class ProjectRunner:
                 logger.exception("Manual advance failed for id=%s", project_id)
                 await self._log_error(project_id, "Exception during manual advance")
                 return False
+            finally:
+                # Une avance manuelle EST une intervention humaine. Le
+                # garde-fou compte les passages que personne n'a demandés, et
+                # `_bump_next_run` vient d'en compter un de plus : sans cette
+                # remise à zéro, appuyer sur le bouton rapprochait le projet
+                # du plafond au lieu de l'en éloigner. Inconditionnel — ce qui
+                # est constaté ici, c'est le clic, pas la réponse de l'IA.
+                await self.notify_user_input(project_id)
 
     async def _tick_inner(self) -> int:
         due = await self._list_due()

@@ -53,6 +53,7 @@ async def publish_turn_completed(
     emotion_name: str,
     emotion_intensity: float,
     project_suppresses_emotion: bool,
+    project_id: int | None = None,
 ) -> None:
     """Announce a completed turn. Never raises, never blocks on a listener.
 
@@ -61,6 +62,11 @@ async def publish_turn_completed(
     internal trigger counts as "answering someone", is each subsystem's own
     policy and belongs with the subsystem — which is precisely what the
     inline hooks got wrong by encoding both rules in the processor.
+
+    ``project_id`` is one of those facts: quel engagement la détection a
+    reconnu dans ce tour, ``None`` quand aucun. Ce qu'on en tire — que parler
+    d'un projet vaut retour humain et remet à zéro son compteur de passages —
+    est la politique du lanceur, déclarée dans ``projects/apps.py``.
     """
     from utils.eventbus import event_bus
 
@@ -77,6 +83,7 @@ async def publish_turn_completed(
                 "emotion_name": emotion_name,
                 "emotion_intensity": emotion_intensity,
                 "project_suppresses_emotion": project_suppresses_emotion,
+                "project_id": project_id,
             },
         ))
     except Exception as exc:

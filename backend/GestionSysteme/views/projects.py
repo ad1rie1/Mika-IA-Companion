@@ -137,6 +137,26 @@ def _render_project_form(request, form, *, projet):
 
 
 @require_POST
+def project_resume(request, project_id: int):
+    """Remet à zéro le compteur de passages sans retour humain.
+
+    C'était le seul cadenas sans clé de l'écran : au plafond, la fiche
+    affichait « le projet n'avance plus » et n'offrait aucune action, parce
+    que ``notify_user_input`` n'était appelée que sur résolution d'une action
+    en attente — or un projet ``requires_approval=False``, le défaut, n'en
+    produit jamais. Reprendre, c'est exactement ce que l'approbation faisait
+    déjà, sans avoir besoin d'une proposition à approuver.
+    """
+    projet = _project_or_404(project_id)
+    _after_user_input(projet.pk)
+    messages.success(
+        request,
+        f"Compteur remis à zéro : « {projet.title} » peut repartir.",
+    )
+    return redirect("gestionsysteme:project-detail", project_id=projet.pk)
+
+
+@require_POST
 def project_delete(request, project_id: int):
     projet = _project_or_404(project_id)
     titre = projet.title
@@ -207,6 +227,7 @@ def _premier_message(form) -> str:
 
 def project_detail(request, project_id: int):
     from projects.models import ProjectLog, ProjectPendingAction, ProjectTask
+    from projects.runner import RUNS_SINCE_INPUT_CAP
 
     from GestionSysteme.project_forms import ProjectTaskForm
 
@@ -236,6 +257,9 @@ def project_detail(request, project_id: int):
         ),
         "task_form": ProjectTaskForm(),
         "task_statuses": ProjectTask.Status.choices,
+        # Le plafond vient du lanceur : la fiche annonce « n / plafond » et
+        # décide d'afficher la reprise, elle n'a pas à en garder sa copie.
+        "runs_cap": RUNS_SINCE_INPUT_CAP,
     })
     return render(request, "gestion/projects/detail.html", ctx)
 
