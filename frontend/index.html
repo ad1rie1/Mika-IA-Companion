@@ -189,6 +189,16 @@
       .attachment-chip .chip-remove:hover {
         opacity: 1;
       }
+      /* Un fichier écarté par le navigateur n'atteint jamais le serveur : il
+         n'y a donc pas d'`ack` pour le refuser à voix haute, et cette ligne
+         est le seul endroit où le refus peut encore se dire. Pleine largeur
+         sous les pastilles, pour ne pas se lire comme une pastille de plus. */
+      .attachment-notice {
+        flex-basis: 100%;
+        font-size: 11px;
+        font-style: italic;
+        color: rgba(252, 165, 165, 0.85);
+      }
       #chat-container.drag-over::after {
         content: "Déposer ici";
         position: absolute;

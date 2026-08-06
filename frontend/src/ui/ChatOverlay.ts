@@ -58,6 +58,12 @@ function fileIcon(type: string): string {
   return "📄";
 }
 
+/** « 7,2 Mo » — un refus qui donne la taille dit du même coup pourquoi. */
+function formatSize(bytes: number): string {
+  const mo = bytes / (1024 * 1024);
+  return `${mo.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} Mo`;
+}
+
 async function readFileAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -90,6 +96,15 @@ export class ChatOverlay {
   private fileInput: HTMLInputElement;
   private ws: WebSocketClient;
   private pendingAttachments: PendingAttachment[] = [];
+  /**
+   * Ce que le dernier dépôt a écarté, dit en clair.
+   *
+   * Un fichier refusé ici ne quitte jamais le navigateur : les plafonds
+   * client sont ceux de `pipeline/media.py`, donc le serveur ne le verra
+   * jamais et aucun `ack` ne peut le refuser à voix haute. C'est le dernier
+   * endroit du trajet où l'information existe encore.
+   */
+  private attachmentNotices: string[] = [];
   private history: StoredMessage[] = [];
   private typingEl: HTMLElement | null = null;
   private typingTimer: number | null = null;
@@ -439,9 +454,23 @@ export class ChatOverlay {
   private async handleFiles(files: FileList | File[]) {
     const arr = Array.from(files);
     const remaining = MAX_ATTACHMENTS - this.pendingAttachments.length;
+    // Chaque dépôt raconte son propre sort : garder les refus du précédent
+    // ferait porter à des pastilles acceptées le reproche d'un autre lot.
+    this.attachmentNotices = [];
+    const dropped = arr.length - remaining;
+    if (dropped > 0) {
+      this.attachmentNotices.push(
+        dropped > 1
+          ? `${dropped} fichiers ignorés : maximum ${MAX_ATTACHMENTS} pièces jointes.`
+          : `1 fichier ignoré : maximum ${MAX_ATTACHMENTS} pièces jointes.`
+      );
+    }
     for (const file of arr.slice(0, remaining)) {
       if (file.size > MAX_FILE_SIZE) {
-        console.warn(`Fichier trop grand ignoré: ${file.name} (${file.size} bytes)`);
+        this.attachmentNotices.push(
+          `${file.name} ignoré : ${formatSize(file.size)} (maximum ` +
+            `${formatSize(MAX_FILE_SIZE)}).`
+        );
         continue;
       }
       try {
@@ -453,6 +482,7 @@ export class ChatOverlay {
         this.pendingAttachments.push(att);
       } catch (e) {
         console.error("Erreur lecture fichier:", file.name, e);
+        this.attachmentNotices.push(`${file.name} illisible : non joint.`);
       }
     }
     this.renderPreviews();
@@ -493,6 +523,16 @@ export class ChatOverlay {
 
       this.previewsEl.appendChild(chip);
     }
+
+    // Sous les pastilles, là où l'utilisateur regarde déjà pour compter ses
+    // fichiers : cinq pastilles pour huit fichiers déposés, sinon, ne se
+    // distingue pas d'un glisser-déposer réussi.
+    for (const notice of this.attachmentNotices) {
+      const note = document.createElement("div");
+      note.className = "attachment-notice";
+      note.textContent = notice;
+      this.previewsEl.appendChild(note);
+    }
   }
 
   private sendMessage() {
@@ -517,10 +557,17 @@ export class ChatOverlay {
         text, this.pendingAttachments, cid,
       );
       this.pendingAttachments = [];
+      this.attachmentNotices = [];
       this.renderPreviews();
     } else {
       this.addMessage(text, "user", { cid, status: "pending" });
       sent = this.ws.sendChat(text, cid);
+      // Le message parti, la note a fait son office : la laisser en ferait un
+      // reproche accroché au tour suivant, qui n'a rien écarté.
+      if (this.attachmentNotices.length) {
+        this.attachmentNotices = [];
+        this.renderPreviews();
+      }
     }
 
     this.inputEl.value = "";
