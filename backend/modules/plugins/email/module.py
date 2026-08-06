@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from email.utils import parseaddr
+from email.utils import getaddresses, parseaddr
 
 from django.conf import settings
 from django.db.models import F, Q
@@ -295,15 +295,22 @@ class EmailModule(BaseModule):
             email_date=email_date,
         )
 
-        # Upsert contacts
+        # Upsert contacts. Seul l'expediteur compte une reception ; les
+        # destinataires d'un message *recu* sont des adresses croisees, pas
+        # des envois. Les compter en "outbound" faisait dire au compteur
+        # d'envois « nombre de fois ou cette adresse est apparue en
+        # destinataire d'un mail que j'ai recu » — la propre adresse du compte
+        # arrivait donc en tete du classement des envois.
         _, from_email = parseaddr(email_msg.from_addr)
         if from_email:
             await self._upsert_contact(from_email, email_msg.from_addr, account, "inbound")
 
-        for addr_str in (email_msg.to_addr or "").split(","):
-            _, addr = parseaddr(addr_str.strip())
-            if addr:
-                await self._upsert_contact(addr, addr_str.strip(), account, "outbound")
+        destinataires = self._adresses_de(email_msg.to_addr)
+        destinataires.pop((from_email or "").lower().strip(), None)
+        # La boite elle-meme n'est pas un contact.
+        destinataires.pop((account.email_address or "").lower().strip(), None)
+        if destinataires:
+            await self._upsert_contacts(destinataires, account, "seen")
 
         if analysis and analysis.memories:
             await self._store_memories(analysis.memories)
@@ -348,34 +355,96 @@ class EmailModule(BaseModule):
             degradations.record("modules.plugins.email.module._parse_email_date", exc)
             return None
 
+    def _adresses_de(self, champ: str) -> dict[str, str]:
+        """Adresses normalisees d'un en-tete → nom affiche.
+
+        ``getaddresses`` plutot qu'un ``split(",")`` : un nom affiche entre
+        guillemets peut contenir une virgule.
+        """
+        trouvees: dict[str, str] = {}
+        for nom, adresse in getaddresses([champ or ""]):
+            adresse = adresse.lower().strip()
+            if not adresse or "@" not in adresse:
+                continue
+            trouvees.setdefault(adresse, nom.strip())
+        return trouvees
+
     async def _upsert_contact(self, email_address: str, display_raw: str, account, direction: str):
         """Create or update a contact from email traffic."""
-        from asgiref.sync import sync_to_async
-
-        from modules.plugins.email.models import Contact
-
-        email_address = email_address.lower().strip()
+        email_address = (email_address or "").lower().strip()
         if not email_address or "@" not in email_address:
             return
 
         # Extract display name from "Name <email>" format
-        name, _ = parseaddr(display_raw)
+        name, _ = parseaddr(display_raw or "")
 
-        contact, created = await sync_to_async(Contact.objects.get_or_create)(
-            email_address=email_address,
-            defaults={"display_name": name},
-        )
+        await self._upsert_contacts({email_address: name.strip()}, account, direction)
 
-        if not created and name and not contact.display_name:
-            contact.display_name = name
+    async def _upsert_contacts(self, adresses: dict[str, str], account, direction: str):
+        """Cree ou actualise en lot les contacts vus dans un message.
 
-        if direction == "inbound":
-            contact.emails_received = F("emails_received") + 1
-        else:
-            contact.emails_sent = F("emails_sent") + 1
+        ``direction`` vaut ``inbound`` (compte une reception), ``outbound``
+        (compte un envoi) ou ``seen`` (n'incremente rien : une adresse
+        simplement croisee en destinataire d'un mail recu).
 
-        await sync_to_async(contact.save)()
-        await sync_to_async(contact.accounts.add)(account)
+        Groupe, parce que la boucle par adresse faisait 3 a 4 allers-retours
+        ``sync_to_async`` chacun serialise sur le thread partage : un message
+        a vingt destinataires coutait ~80 requetes SQLite en concurrence avec
+        les six boucles de fond. Ici c'est un SELECT, un INSERT et un UPDATE.
+        """
+        from asgiref.sync import sync_to_async
+
+        from modules.plugins.email.models import Contact
+
+        if not adresses:
+            return
+
+        def _ecrire() -> None:
+            from django.utils import timezone
+
+            connues = list(adresses)
+            existants = dict(
+                Contact.objects.filter(email_address__in=connues).values_list(
+                    "email_address", "display_name",
+                )
+            )
+
+            manquants = [
+                Contact(email_address=adresse, display_name=adresses[adresse])
+                for adresse in connues if adresse not in existants
+            ]
+            if manquants:
+                # ignore_conflicts : une autre boucle a pu creer la meme
+                # adresse entre le SELECT et l'INSERT.
+                Contact.objects.bulk_create(manquants, ignore_conflicts=True)
+
+            # ``last_seen`` est un ``auto_now`` : Django ne le renseigne que
+            # sur ``save()``, jamais sur ``update()``. Sans cette ecriture
+            # explicite la date resterait figee — et la politique de retention
+            # finirait par supprimer des contacts encore actifs.
+            champs = {"last_seen": timezone.now()}
+            if direction == "inbound":
+                champs["emails_received"] = F("emails_received") + 1
+            elif direction == "outbound":
+                champs["emails_sent"] = F("emails_sent") + 1
+            Contact.objects.filter(email_address__in=connues).update(**champs)
+
+            # Un nom decouvert apres coup complete une fiche restee anonyme.
+            for adresse, nom in adresses.items():
+                if nom and existants.get(adresse, nom) == "":
+                    Contact.objects.filter(
+                        email_address=adresse, display_name="",
+                    ).update(display_name=nom)
+
+            pks = list(
+                Contact.objects.filter(email_address__in=connues).values_list(
+                    "pk", flat=True,
+                )
+            )
+            if pks:
+                account.contacts.add(*pks)
+
+        await sync_to_async(_ecrire)()
 
     async def _prune_emails(self, account, keep: int = MAX_EMAILS_PER_ACCOUNT):
         """Keep only the most recent emails per account."""
@@ -481,6 +550,11 @@ class EmailModule(BaseModule):
                 body_text=analysis.reply_text,
                 direction="outbound",
                 email_date=None,
+            )
+
+            # Un envoi reel, le seul evenement qui compte un "envoye".
+            await self._upsert_contacts(
+                self._adresses_de(email_msg.from_addr), account, "outbound",
             )
         except Exception:
             self.logger.exception("Failed to send email reply")
@@ -835,6 +909,11 @@ class EmailModule(BaseModule):
                 subject=args["subject"],
                 body_text=args["body"],
                 direction="outbound",
+            )
+
+            # Un envoi reel, le seul evenement qui compte un "envoye".
+            await self._upsert_contacts(
+                self._adresses_de(args["to"]), account, "outbound",
             )
 
             return {
