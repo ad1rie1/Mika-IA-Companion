@@ -175,10 +175,17 @@ class ProjectRunner:
             return False
 
         system_prompt = context_builder.to_system_prompt(ctx)
+        # Le rappel doit énumérer exactement les clés que le prompt système
+        # déclare : `proposed_action` n'existe que sur un projet qui exige
+        # une validation, sinon la proposition n'a pas de file où atterrir.
+        cles = (
+            "summary / task_updates / new_tasks / proposed_action / report_to_user"
+            if ctx.requires_approval
+            else "summary / task_updates / new_tasks / report_to_user"
+        )
         user_prompt = (
             "Fais avancer le projet d'une étape. Rappel du format de sortie "
-            "obligatoire : termine par un bloc JSON avec summary / task_updates "
-            "/ new_tasks / report_to_user."
+            f"obligatoire : termine par un bloc JSON avec {cles}."
         )
 
         raw = ""

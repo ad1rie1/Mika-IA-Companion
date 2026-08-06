@@ -149,6 +149,24 @@ def to_system_prompt(ctx: ProjectRunContext) -> str:
         lines += ["HORS DE PORTÉE (n'y touche JAMAIS) :"]
         lines += [f"  - {o}" for o in ctx.out_of_scope]
         lines += [""]
+    # Périmètre outillé du projet. L'appel du lanceur est une complétion
+    # texte pure : aucun outil ne lui est transmis. La liste borne donc ce
+    # qu'il peut *proposer*, et ne pas la rendre la laissait invisible du
+    # modèle — le champ ne cadrait rien.
+    if ctx.allowed_modules:
+        lines += [
+            "MODULES DANS LE PÉRIMÈTRE (tu ne les appelles pas toi-même ici : "
+            "tu peux seulement proposer une action qui les utilise) :",
+            "  " + ", ".join(ctx.allowed_modules),
+            "",
+        ]
+    else:
+        lines += [
+            "MODULES DANS LE PÉRIMÈTRE : aucun. Ce projet n'autorise aucun "
+            "outil — limite-toi à faire avancer les tâches.",
+            "",
+        ]
+
     if ctx.resource_paths:
         lines += [
             "RESSOURCES :",
@@ -197,18 +215,25 @@ def to_system_prompt(ctx: ProjectRunContext) -> str:
         ]
 
     if ctx.requires_approval:
+        # Aucun outil n'est transmis à cet appel : la file d'attente se
+        # remplit par la clé `proposed_action` du JSON de sortie, la seule
+        # que le lanceur sache lire (`runner._apply_structured`).
         lines += [
             "IMPORTANT : toute action à effet de bord (envoyer un mail, "
             "écrire un fichier, etc.) doit être soumise à l'utilisateur "
-            "via le tool `propose_action`. N'exécute RIEN directement.",
+            "via la clé `proposed_action` du JSON de sortie. "
+            "N'exécute RIEN directement.",
             "",
         ]
 
+    # « Proposer une action » n'est offert que si le projet exige une
+    # validation : ailleurs, la proposition n'a aucune file où atterrir.
     lines += [
         "CE QUE TU DOIS FAIRE MAINTENANT :",
         "  1. Avance d'UNE étape sur ce projet — au choix : marquer une "
-        "tâche terminée, en commencer une nouvelle, proposer une action "
-        "à valider, déclarer un blocage, ou créer de nouvelles tâches.",
+        "tâche terminée, en commencer une nouvelle, "
+        + ("proposer une action à valider, " if ctx.requires_approval else "")
+        + "déclarer un blocage, ou créer de nouvelles tâches.",
         "  2. Termine par un JSON structuré décrivant ce que tu as fait :",
         "",
         "FORMAT DE SORTIE OBLIGATOIRE (la dernière ligne de ta réponse) :",
@@ -217,6 +242,12 @@ def to_system_prompt(ctx: ProjectRunContext) -> str:
         '  "summary": "phrase courte décrivant l\'action prise",',
         '  "task_updates": [{"id": 12, "status": "done", "result": "..."}],',
         '  "new_tasks": [{"description": "...", "order": 5}],',
+    ]
+    if ctx.requires_approval:
+        lines += [
+            '  "proposed_action": {"proposal": "...", "payload": {...}} | null,',
+        ]
+    lines += [
         '  "report_to_user": "texte à envoyer à l\'utilisateur" | null',
         "}",
         "```",
