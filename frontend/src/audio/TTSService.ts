@@ -1,8 +1,22 @@
-import type { EmotionName, ProsodicCue, VoiceProfile } from "../types";
+import type {
+  EmotionName,
+  ProsodicCue,
+  SpeechPlanSegment,
+  VoiceProfile,
+} from "../types";
 
 export type { VoiceProfile } from "../types";
 
 const NEUTRAL_PROFILE: VoiceProfile = { pitch: 1.0, rate: 1.0, gain: 1.0 };
+
+// Temps que chaque effet non verbal occupe dans la restitution. Sert de
+// budget d'attente à playSfx et de durée de silence au plan de lip-sync :
+// deux valeurs distinctes se seraient désynchronisées de la bouche.
+const SFX_DURATION_MS: Record<ProsodicCue, number> = {
+  sigh: 600,
+  laugh: 900,
+  breath: 350,
+};
 
 // Web Speech API accepts pitch in [0,2] and rate in [0.1,10]; the product of
 // an emotion multiplier and a persona multiplier can leave that window.
@@ -144,6 +158,21 @@ export class TTSService {
   }
 
   /**
+   * Le même découpage, réduit à ce dont le lip-sync a besoin : ce qui est
+   * prononcé, et le temps réservé sans qu'un mot soit dit. Exposé parce que
+   * la chaîne brute n'est pas ce qui sort des haut-parleurs — sans lui la
+   * bouche articulait les caractères de « [PAUSE:400] » puis dérivait du
+   * reste de la phrase de toute la durée des silences.
+   */
+  lipSyncPlan(text: string): SpeechPlanSegment[] {
+    return this.parseSegments(text).map((seg) => {
+      if (seg.type === "speech") return { type: "speech", text: seg.text };
+      const ms = seg.type === "pause" ? seg.ms : SFX_DURATION_MS[seg.kind];
+      return { type: "silence", ms };
+    });
+  }
+
+  /**
    * Play a synthetic non-verbal effect. Uses raw WebAudio so we don't
    * need asset files. Quality is "good enough for a VTuber", not voice-
    * actor studio grade — the point is prosodic presence, not realism.
@@ -168,20 +197,17 @@ export class TTSService {
     }
     const now = ctx.currentTime;
 
+    const budgetMs = SFX_DURATION_MS[kind];
     let rendered: Promise<void>;
-    let budgetMs: number;
     switch (kind) {
       case "sigh":
         rendered = this.renderSigh(ctx, now);
-        budgetMs = 600;
         break;
       case "laugh":
         rendered = this.renderLaugh(ctx, now);
-        budgetMs = 900;
         break;
       case "breath":
         rendered = this.renderBreath(ctx, now);
-        budgetMs = 350;
         break;
     }
     // Belt and braces: a context suspended mid-render (tab backgrounded)

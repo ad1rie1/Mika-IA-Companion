@@ -290,8 +290,11 @@ async function init() {
     if (data.speak === false || typeof data.text !== "string" || !data.text) {
       return;
     }
-    const estimatedDuration = Math.min(data.text.length * 60, 15000);
-    lipSyncController.startTextDriven(data.text, estimatedDuration);
+    // La bouche suit ce que le TTS va réellement jouer, pas la chaîne brute :
+    // les tokens de prosodie ne sont pas prononcés, ils réservent du silence.
+    // Aucun plafond de durée non plus — la borne réelle est la fin de
+    // l'utterance, signalée par onSpeakEnd qui appelle stop().
+    lipSyncController.startFromPlan(tts.lipSyncPlan(data.text));
     tts.speak(data.text, emotion, data.voice_profile);
   };
 

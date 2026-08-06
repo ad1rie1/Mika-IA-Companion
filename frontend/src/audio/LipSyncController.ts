@@ -1,4 +1,8 @@
 import { VRM } from "@pixiv/three-vrm";
+import type { SpeechPlanSegment } from "../types";
+
+// Cadence par défaut de l'estimation texte, en ms par caractère prononcé.
+const DEFAULT_MS_PER_CHAR = 60;
 
 // Vowel patterns for French text-based lip sync fallback
 const VOWELS = /[aeiouyàâéèêëïîôùûüœæ]/gi;
@@ -54,7 +58,31 @@ export class LipSyncController {
 
   /** Start text-driven lip sync (fallback when no audio stream available) */
   startTextDriven(text: string, durationMs: number) {
-    this.phonemeFrames = this.textToPhonemes(text, durationMs);
+    this.beginFrames(this.textToPhonemes(text, durationMs));
+  }
+
+  /**
+   * Idem, mais à partir du découpage que le TTS va réellement jouer
+   * (TTSService.lipSyncPlan) : chaque silence réservé par un token de
+   * prosodie devient une frame bouche fermée de sa durée exacte, et seuls
+   * les caractères prononcés se voient attribuer du temps de parole.
+   */
+  startFromPlan(plan: SpeechPlanSegment[], msPerChar = DEFAULT_MS_PER_CHAR) {
+    const frames: PhonemeFrame[] = [];
+    for (const segment of plan) {
+      if (segment.type === "silence") {
+        frames.push({ shape: "aa", weight: 0, duration: segment.ms });
+      } else {
+        frames.push(
+          ...this.textToPhonemes(segment.text, segment.text.length * msPerChar)
+        );
+      }
+    }
+    this.beginFrames(frames);
+  }
+
+  private beginFrames(frames: PhonemeFrame[]) {
+    this.phonemeFrames = frames;
     this.frameIndex = 0;
     this.frameTimer = 0;
     this.isTextDriven = true;
