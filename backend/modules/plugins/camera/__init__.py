@@ -136,6 +136,11 @@ class CameraModule(BaseModule):
         ``ModuleCollectors.tools()`` met la liste en cache et ne l'invalide
         qu'au changement de cycle de vie. Ne pas démarrer du tout supprime
         aussi le tick de 10 s et l'appel ``get_context()`` à chaque tour.
+
+        Le registre appelle cette méthode depuis ``AppConfig.ready()``, donc
+        avant que Django ne se déclare prêt — il en signale l'accès ORM. C'est
+        le contexte que ``configs.service`` prend déjà en charge : une base non
+        migrée retombe sur le défaut du schéma (décoché) sans jamais lever.
         """
         from configs.service import config_service
 
