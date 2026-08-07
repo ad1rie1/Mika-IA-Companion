@@ -128,7 +128,12 @@ class MemoryManager:
                 # the history the model is handed after a restart.
                 .exclude(is_internal=True)
                 .order_by("-pk")
-                .values("role", "content")[: self.max_short_term]
+                # `person_id` voyage avec la ligne : le tampon est partage par
+                # tout le monde (« quelqu'un dans une piece entend ce qui s'y
+                # dit »), donc savoir qui a dit quoi est la seule chose qui
+                # permette au prompt d'arbitrer. Sans lui, apres un
+                # redemarrage comme avant, tout le monde redevient « User: ».
+                .values("role", "content", "person_id")[: self.max_short_term]
             )
             rows.reverse()
             return rows
@@ -179,7 +184,14 @@ class MemoryManager:
         said, and invite her to say them again.
         """
         if not is_internal:
-            self.short_term.append({"role": role, "content": content})
+            # `person_id` etait recu puis jete : le tampon ne gardait que le
+            # role, donc le prompt rendait chaque tour « User: » sans pouvoir
+            # dire lequel venait de qui. Il est conserve tel quel (un handle,
+            # pas un nom) — la traduction en libelle lisible appartient a la
+            # couche identite, pas a la memoire.
+            self.short_term.append(
+                {"role": role, "content": content, "person_id": person_id}
+            )
             if len(self.short_term) > self.max_short_term:
                 self.short_term = self.short_term[-self.max_short_term :]
 

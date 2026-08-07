@@ -29,7 +29,9 @@ class TestShortTermBuffer:
     async def test_add_message_appends(self):
         m = _make_manager()
         await m.add_message("user", "Salut !")
-        assert m.short_term == [{"role": "user", "content": "Salut !"}]
+        assert m.short_term == [
+            {"role": "user", "content": "Salut !", "person_id": ""}
+        ]
 
     @pytest.mark.asyncio
     async def test_add_message_caps_at_max(self):

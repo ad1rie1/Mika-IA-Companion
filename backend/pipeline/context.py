@@ -158,8 +158,14 @@ async def gather_context(
     # Module context for system prompt (scoped to this person)
     module_context = module_manager.collect_context(person_id)
 
-    # Conversation history
-    history = memory_manager.get_conversation_context()
+    # Conversation history — annotee de qui parle quand ce n'est pas la
+    # personne en face. Le tampon est partage par tout le monde et c'est
+    # voulu, mais l'arbitrage confie a Mika suppose qu'elle puisse distinguer
+    # les tours : sans marquage, la question posee par Alice il y a trois
+    # minutes se lit exactement comme celle que Thomas vient d'ecrire.
+    history = await _label_history_speakers(
+        memory_manager.get_conversation_context(), person_id
+    )
 
     # Fatigue fog — when energy is low, shape the cognitive tone
     fatigue_fog = _fatigue_fog_context()
@@ -265,6 +271,50 @@ def _conversation_tool_modules() -> list[str]:
     if isinstance(raw, str):
         raw = [part.strip() for part in raw.split(",")]
     return [name for name in (str(n).strip() for n in raw) if name]
+
+
+# Comment designer un tour venu de quelqu'un dont aucun nom n'est connu.
+# Vague exprès : « web_6f3e22ccb0ae » n'apprendrait rien au modele, alors
+# que « quelqu'un d'autre » dit tout ce qui compte — ce n'est pas la
+# personne en face.
+_UNKNOWN_SPEAKER = "quelqu'un d'autre"
+
+
+async def _label_history_speakers(history: list[dict], person_id: str) -> list[dict]:
+    """Marque les tours dits par quelqu'un d'autre que l'interlocuteur courant.
+
+    Seuls les tours ``user`` d'un autre ``person_id`` recoivent un
+    ``speaker`` : les reponses de Mika sont les siennes quel que soit le
+    destinataire, et un tour de la personne en face n'a rien a signaler. Le
+    prompt ne paie donc un nom que quand le locuteur change.
+
+    Une seule requete groupee, et uniquement s'il y a effectivement un autre
+    locuteur — le cas mono-interlocuteur, qui est le nominal, ne coute rien.
+    Les entrees non marquees sont renvoyees telles quelles (jamais mutees :
+    ``get_conversation_context`` ne copie que la liste, pas les dicts).
+    """
+    others = {
+        (msg.get("person_id") or "")
+        for msg in history
+        if msg.get("role") == "user"
+    } - {person_id, ""}
+    if not others:
+        return history
+
+    try:
+        names = await identity_resolver.display_names_for(sorted(others))
+    except Exception as exc:
+        degradations.record("prompt: history speakers", exc)
+        names = {}
+
+    labelled: list[dict] = []
+    for msg in history:
+        if msg.get("role") == "user" and (msg.get("person_id") or "") in others:
+            speaker = names.get(msg["person_id"]) or _UNKNOWN_SPEAKER
+            labelled.append({**msg, "speaker": speaker})
+        else:
+            labelled.append(msg)
+    return labelled
 
 
 def _format_identity_block(ctx) -> str:
