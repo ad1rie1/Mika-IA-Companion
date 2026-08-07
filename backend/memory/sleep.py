@@ -59,7 +59,15 @@ logger = logging.getLogger(__name__)
 NIGHT_START_HOUR = 23       # phase gate opens at 23h
 NIGHT_END_HOUR = 6          # closes at 6h
 IDLE_SECONDS_THRESHOLD = 900  # 15 min without interaction
-REST_DRIVE_THRESHOLD = 0.5    # Mika must have earned her rest
+# Mika must have earned her rest. Ces deux seuils sont COUPLÉS à
+# `drives.engine._REST_NATURAL_DECAY` : `_is_eligible_to_sleep` exige les
+# 900 s d'idle *puis* lit la tension, or pendant cette fenêtre REST ne fait
+# que décroître. Le gate n'est donc franchissable que si
+# `_REST_NATURAL_DECAY * IDLE_SECONDS_THRESHOLD` reste bien en dessous de
+# `1.0 - REST_DRIVE_THRESHOLD` — sinon le cycle entier sort par AWAKE à
+# chaque tick, silencieusement. Relever l'un des deux seuils sans revoir la
+# décroissance rend le sommeil inatteignable.
+REST_DRIVE_THRESHOLD = 0.5
 
 # Each sleeping tick relieves the REST drive by this `satisfy()` amount —
 # sleep is what rest tension is FOR. With REST's decay_on_satisfy (0.3),
