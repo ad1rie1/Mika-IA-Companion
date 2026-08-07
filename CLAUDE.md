@@ -573,16 +573,18 @@ A credential alone is not enough: declare a model under *IA · Modèles* and map
 
 **Everything applicative is configured in the dashboard** (`/gestion/` → Configuration), stored in `ConfigValue`, read at runtime through `config_service.get("<key>")`. `.env` holds infrastructure only — the things Django needs before a database exists.
 
-The `ConfigItem.env_fallback` bridge and `seed_from_env()` have been removed, along with ~31 `settings.py` constants that existed only to feed them. Reasons, in increasing severity:
+The `ConfigItem.env_fallback` **field** and `seed_from_env()` have been removed, along with ~31 `settings.py` constants that existed only to feed them. Reasons, in increasing severity:
 
 1. **Two declared defaults per knob.** The settings one always won at seed time, so the registry default — the one a reader looks at — was decorative and free to drift.
 2. **The bridge silently didn't work for seven keys** because it read a *settings attribute* nobody had declared: `GEMINI_API_KEY`, `GLM_API_KEY`, `AI_ROLE_VISION_CAPTION`, `AI_ROLE_INNER_VOICE`, `EMOTION_DECAY_RATE`, `SLEEP_CHECK_INTERVAL`, `PROJECT_RUNNER_INTERVAL`. Five were documented as supported.
 3. **`AI_ROLE_*` could only ever seed a broken value** — they carried the legacy `provider:model` string while `AIRouter._resolve` looks the value up as an **internal name** from the `ai.models` record list, so the seeded value raised `UnconfiguredRoleError`.
 4. Once seeded, `.env` was inert forever with no feedback.
 
+**The two seed-on-first-boot paths are gone with it**, for the same reason wearing a different hat. `IMAP_*`/`SMTP_*` created an `EmailAccount` row and `RSS_FEEDS` created `RSSFeed` rows — both only against an *empty* table, so after the first boot the variable was inert with no feedback, and a credential rotated in `.env` silently did nothing. Accounts and feeds are ORM rows edited in the dashboard; there is no second way to declare one. Nothing migrates: an install that had been seeded already holds its rows in the database and is unaffected.
+
 A fresh clone therefore starts **unconfigured, on purpose**. Every non-role knob carries a working registry default, so the background loops run regardless.
 
-Guarded by tests: no `ConfigItem` declares an `env_fallback`, no `settings.py` constant shadows a config key, no `AI_ROLE_*` constant survives, and every operational knob has a default.
+Guarded by tests: `ConfigItem` cannot even *declare* an `env_fallback` (the dataclass field is gone, so re-adding it is a deliberate edit rather than a line slipped into one schema), no `settings.py` constant shadows a config key, no `AI_ROLE_*` constant survives, no credential or module-config constant survives (asserted on prefixes — `POP3_USER` would be the same mistake under a new name), and every operational knob has a default.
 
 ### What `.env` still holds
 
@@ -608,11 +610,10 @@ Guarded by tests: no `ConfigItem` declares an `env_fallback`, no `settings.py` c
 | `CHROMA_PERSIST_DIR` | `data/chromadb` | ChromaDB on-disk location |
 | `EMBEDDING_MODEL` | `paraphrase-multilingual-MiniLM-L12-v2` | Sentence-transformer for ChromaDB |
 | `FORGE_DIR` | `data/forge_modules` | Confined directory for AI-forged modules |
+| `SESSION_COOKIE_SAMESITE` | `Lax` | Also the default for `CSRF_COOKIE_SAMESITE` |
 | `AI_QUOTA_ROLE_<ROLE>_DAILY` / `_MONTHLY` | `0` | Per-role token caps. Read by **computed name** in `ai/quota.py`, so they are settings constants rather than config keys |
-| `IMAP_*` / `SMTP_*` | `""` | Legacy single-account email config, read via `getattr` (the `email.accounts` record list supersedes it) |
-| `RSS_FEEDS` | `""` | Legacy `"name\|url"` pairs, read by the RSS module |
 
-Everything else — AI providers and keys, model declarations, role mapping, timeouts, all loop cadences, memory/emotion/conscience/project tuning — lives in the dashboard.
+That table is the whole list — `.env.example` reproduces it and declares nothing else. Everything else lives in the dashboard: AI providers and their credentials, model declarations, role mapping, timeouts, all loop cadences, memory/emotion/conscience/project tuning, the Telegram token, email accounts, RSS feeds.
 
 ## Testing notes
 

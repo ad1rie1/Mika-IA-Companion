@@ -75,7 +75,7 @@ class BaseModule(ABC):
     """
 
     # Override to set a custom cron interval in seconds.
-    # None = use the global CRON_TICK_INTERVAL from settings.
+    # None = use the global ``modules.cron_tick_interval`` config key.
     CRON_INTERVAL: int | None = None
 
     # Infrastructure modules (files, project_tools) piggyback on the

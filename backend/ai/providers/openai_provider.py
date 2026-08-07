@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 class OpenAIProvider:
     """OpenAI-compatible provider via the official ``openai.AsyncOpenAI`` client.
 
-    Set ``OPENAI_BASE_URL`` in .env to point to a custom endpoint
-    (Azure, Groq, Together, local vLLM, etc.).
+    Set ``ai.openai.base_url`` (Configuration > IA · Providers) to point at
+    a custom endpoint (Azure, Groq, Together, local vLLM, etc.).
     """
 
     def __init__(self):

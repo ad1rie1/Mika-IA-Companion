@@ -176,7 +176,6 @@ def _item_to_dict(i: ConfigItem) -> dict:
         "hot_reload": i.hot_reload,
         "restart_required": i.restart_required,
         "readonly": i.readonly,
-        "env_fallback": i.env_fallback or None,
         "min_items": i.min_items,
         "max_items": i.max_items,
     }
