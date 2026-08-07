@@ -15,9 +15,7 @@ import logging
 from collections import OrderedDict
 from typing import Iterable
 
-from configs.types import (
-    ConfigItem, ConfigRecord, ConfigSection, choice_options,
-)
+from configs.types import ConfigItem, ConfigSection
 
 logger = logging.getLogger(__name__)
 
@@ -138,56 +136,14 @@ class ConfigRegistry:
             out.setdefault(item.section, []).append(item)
         return out
 
-    # ── Serialization (for API) ─────────────────────────────────
-
-    def render_schema(self) -> list[dict]:
-        """Shape consumed by the Dashboard config page."""
-        sections_by_key = {s.key: s for s in self._sections.values()}
-        grouped = self.by_section()
-        out = []
-        for section_key, items in grouped.items():
-            section = sections_by_key.get(section_key) or ConfigSection(
-                key=section_key, label=section_key.capitalize(),
-            )
-            out.append({
-                "key": section.key,
-                "label": section.label,
-                "icon": section.icon,
-                "description": section.description,
-                "items": [_item_to_dict(i) for i in items],
-            })
-        out.sort(key=lambda s: sections_by_key.get(s["key"], ConfigSection("","",order=999)).order)
-        return out
-
-
-def _item_to_dict(i: ConfigItem) -> dict:
-    d = {
-        "key": i.key,
-        "type": i.type,
-        "label": i.label,
-        "group": i.group,
-        "description": i.description,
-        "hint": i.hint,
-        "default": i.default,
-        "choices": list(choice_options(i.choices)) if i.choices else [],
-        "min": i.min,
-        "max": i.max,
-        "sensitive": i.sensitive,
-        "hot_reload": i.hot_reload,
-        "restart_required": i.restart_required,
-        "readonly": i.readonly,
-        "env_fallback": i.env_fallback or None,
-        "min_items": i.min_items,
-        "max_items": i.max_items,
-    }
-    if i.record is not None:
-        d["record"] = {
-            "name": i.record.name,
-            "label": i.record.label,
-            "description": i.record.description,
-            "fields": [_item_to_dict(f) for f in i.record.fields],
-        }
-    return d
+    # ── Sérialisation ───────────────────────────────────────────
+    #
+    # Il n'y en a plus. ``render_schema()`` mettait le schéma à plat en JSON
+    # pour l'ancien dashboard rendu dans le navigateur ; GestionSystème lit
+    # le registre directement (``views/config.py``, ``forms.py``) et rend
+    # côté serveur. Rien ne doit revenir : sérialiser le schéma est la porte
+    # par laquelle un endpoint réexposerait ``sensitive`` et ``default``
+    # sans passer par ``snapshot_redacted()``.
 
 
 registry = ConfigRegistry()

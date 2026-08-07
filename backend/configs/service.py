@@ -1,7 +1,7 @@
 """ConfigService — the runtime accessor.
 
 Read path:
-    get(key) → user override in ConfigValue → env_fallback from settings → schema default
+    get(key) → user override in ConfigValue → schema default
 
 Write path:
     set(key, value) → validate → encrypt if sensitive → persist → audit → notify
@@ -18,7 +18,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
@@ -99,7 +98,7 @@ class ConfigService:
     # ── Read ────────────────────────────────────────────────────
 
     def get(self, key: str, *, default: Any = _UNSET) -> Any:
-        """Effective value. Order: DB override → env_fallback → schema default → provided default."""
+        """Effective value. Order: DB override → schema default → provided default."""
         with self._cache_lock:
             if key in self._cache:
                 return self._cache[key]
@@ -119,7 +118,7 @@ class ConfigService:
         return value
 
     def _resolve(self, key: str, item: ConfigItem | None) -> Any:
-        # 1. DB value (seeded from .env on first boot, see seed_from_env())
+        # 1. valeur en base — la seule écrite par le dashboard
         row = db_read(_fetch_value_row, key)
         if row is not None:
             raw = row.value_json
@@ -127,9 +126,8 @@ class ConfigService:
                 raw = secrets.decrypt(raw)
             return raw
 
-        # 2. schema default — ``env_fallback`` is never consulted at
-        # runtime, only during ``seed_from_env()`` to materialise an
-        # initial ConfigValue row on an empty database.
+        # 2. défaut du schéma — et il n'y a pas de troisième source : un
+        # réglage déclaré à deux endroits dérive.
         if item is not None:
             return item.default
         return _UNSET

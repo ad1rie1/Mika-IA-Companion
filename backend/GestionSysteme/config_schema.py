@@ -29,7 +29,7 @@ CONFIG_SCHEMA = [
     ),
     ConfigItem(
         key="accounts.users", type="record_list", section="accounts",
-        label="Comptes", min_items=0,
+        label="Comptes",
         description=(
             "Un compte = un login pour le frontend, et — si « Accès "
             "administration » est coché — pour /gestion/. Le mot de passe passe "
