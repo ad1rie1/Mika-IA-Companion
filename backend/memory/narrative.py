@@ -28,6 +28,7 @@ from asgiref.sync import sync_to_async
 from django.utils import timezone
 
 from ai.router import AIRole, UnconfiguredRoleError, ai_router
+from utils.degradation import degradations
 from utils.parsing import strip_markdown_json
 
 logger = logging.getLogger(__name__)
@@ -279,8 +280,9 @@ class NarrativeGenerator:
 
         try:
             data = json.loads(strip_markdown_json(raw.strip()))
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
             logger.warning("Narrative JSON parse failed: %.200s", raw)
+            degradations.record("narrative: JSON de l'auto-narratif illisible", exc)
             return None
 
         return NarrativeResult(

@@ -601,8 +601,11 @@ class SleepCycle:
             return None
         try:
             data = json.loads(strip_markdown_json(raw.strip()))
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
             logger.warning("Sleep: journal JSON parse failed: %.200s", raw)
+            # Une seule occasion par nuit : sans journal ecrit, le bloc
+            # `--- TON FIL D'HIER ---` reste vide toute la journee suivante.
+            degradations.record("sleep: JSON du journal illisible", exc)
             return None
 
         narrative = (data.get("narrative") or "").strip()
@@ -778,8 +781,9 @@ class SleepCycle:
             return None
         try:
             data = json.loads(strip_markdown_json(raw.strip()))
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
             logger.warning("Sleep: dream JSON parse failed: %.200s", raw)
+            degradations.record("sleep: JSON du reve illisible", exc)
             return None
 
         content = (data.get("content") or "").strip()
