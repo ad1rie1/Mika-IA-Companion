@@ -72,8 +72,13 @@ class ConfigItem:
     hint: str = ""
     readonly: bool = False
     # for record_list only:
+    #
+    # Pas de ``min_items`` : il était déclaré sans être appliqué nulle part
+    # — ni dans ``delete_row``, ni dans les gabarits — donc annoncer un
+    # plancher aurait donné l'illusion d'un garde-fou inexistant. Un
+    # plancher qui compte vraiment (ne pas supprimer le dernier admin) est
+    # une règle métier du backend concerné, pas un entier dans un schéma.
     record: "ConfigRecord | None" = None
-    min_items: int = 0
     max_items: int | None = None
 
 

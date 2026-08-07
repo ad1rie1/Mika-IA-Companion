@@ -33,7 +33,7 @@ CONFIG_SCHEMA = [
     # ── Les flux ───────────────────────────────────────────────────────
     ConfigItem(
         key="rss.feeds", type="record_list", section="module_rss",
-        label="Flux suivis", min_items=0, max_items=100,
+        label="Flux suivis", max_items=100,
         description=(
             "Chaque ligne est un flux RSS, Atom ou RDF. Une ligne désactivée "
             "n'est plus relevée mais garde ses articles."

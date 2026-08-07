@@ -20,7 +20,7 @@ CONFIG_SCHEMA = [
     ),
     ConfigItem(
         key="email.accounts", type="record_list", section="module_email",
-        label="Comptes email", min_items=0, max_items=50,
+        label="Comptes email", max_items=50,
         description=(
             "Chaque ligne est un compte autonome. Le polling visite tous "
             "les comptes activés."
