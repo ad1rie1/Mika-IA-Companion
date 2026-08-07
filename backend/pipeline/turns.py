@@ -29,8 +29,9 @@ process. The conscience, the project runner and the sleep cycle call the
 model from their own loops and do not pass through here. "Never two calls
 at once on a one-slot backend" is a different problem with a different
 home, and it lives there now: ``AIRouter`` holds a per-provider semaphore
-(``ai.<provider>.max_concurrent_calls``, 1 for ollama) around every routed
-call. This queue orders the *turns*; that semaphore orders the *calls*.
+(``ai.<provider>.max_concurrent_calls``, declared for every provider —
+default 1 for ollama, unbounded elsewhere) around every routed call. This
+queue orders the *turns*; that semaphore orders the *calls*.
 """
 
 from __future__ import annotations

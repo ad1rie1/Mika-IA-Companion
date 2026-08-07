@@ -81,11 +81,17 @@ _PROVIDER_CONFIG_PREFIXES = (
 # modules, voix intérieure) et aucun ne passe par la ``TurnQueue``, qui ne
 # sérialise que les tours de conversation entre eux.
 #
-# Les providers hébergés ne sont délibérément pas plafonnés : le
-# parallélisme y est réel. Le réglage effectif est
-# ``ai.<provider>.max_concurrent_calls`` ; ces valeurs-ci ne servent que de
-# ceinture, pour qu'une configuration illisible ne restaure pas le
-# comportement que le plafond existe pour empêcher.
+# Le réglage effectif est ``ai.<provider>.max_concurrent_calls``, déclaré
+# pour *tous* les providers (voir ai/config_schema.py) : chez un hébergé le
+# parallélisme est réel, mais il est facturé et contingenté, et une rafale
+# de boucles de fond suffit à dépasser une limite de débit. Seul le défaut
+# diffère — 1 pour ollama, illimité ailleurs.
+#
+# Ce qui suit n'est pas ce défaut-là : c'est la ceinture appliquée quand la
+# configuration est *illisible*, pour qu'une base momentanément inaccessible
+# ne restaure pas le comportement que le plafond existe pour empêcher. Un
+# provider absent d'ici retombe alors sur « illimité », c'est-à-dire sur ce
+# qu'il faisait avant l'existence du sémaphore.
 _PROVIDER_FALLBACK_CONCURRENCY: dict[str, int] = {
     "ollama": 1,
 }
