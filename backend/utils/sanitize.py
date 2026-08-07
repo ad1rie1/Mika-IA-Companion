@@ -16,6 +16,13 @@ that *look* like markup costs nothing and does not assume the renderer will
 never change. Its home moved to ``utils/`` when the ``dashboard`` app was
 deleted — the Forge was its last consumer, and a security helper should not
 live inside whichever UI happened to need it first.
+
+**There is no opt-out.** ``sanitize_view_result`` used to grant one through
+``ModuleView.allow_raw_html``, but that class went with the ``dashboard``
+app: the derogation had no object left to hang on, and an escape hatch no
+caller can reach is an invitation to rewire it. A panel that legitimately
+owns its markup declares a ``Template`` block instead; if an opt-in is ever
+needed again it belongs on ``ModulePanel``, not on a vanished ``view``.
 """
 from __future__ import annotations
 
@@ -36,10 +43,3 @@ def sanitize_payload(value, *, _depth: int = 0):
     if isinstance(value, (list, tuple)):
         return [sanitize_payload(v, _depth=_depth + 1) for v in value]
     return value
-
-
-def sanitize_view_result(result, view):
-    """Sanitize a handler result unless its view opted into raw HTML."""
-    if getattr(view, "allow_raw_html", False):
-        return result
-    return sanitize_payload(result)
