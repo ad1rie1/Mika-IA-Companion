@@ -318,12 +318,34 @@ class FilesService:
 
             q = question or "Décris cette image en détail."
             from ai.client import ai_client
-            description = await ai_client.complete(
-                system_prompt="Tu es un assistant qui analyse des images avec précision et détail.",
-                user_prompt=q,
-                attachments=[att],
+            from ai.router import AIRole
+            from pipeline.preprocessors.vision import VISION_TIMEOUT_SECONDS
+
+            # Même rôle que le préprocesseur vision : le rôle CONVERSATION peut
+            # pointer un modèle texte-seul, et une pièce jointe image envoyée à
+            # un modèle non-vision est ignorée *sans erreur* (Ollama). Le modèle
+            # ne recevrait que « Décris cette image en détail. » et rendrait une
+            # description entièrement inventée, servie ici comme un succès.
+            # Même borne que lui aussi : le routeur n'en pose aucune, donc un
+            # appel qui traîne consomme tout le budget du tour
+            # (ai.call_timeout_seconds) et fait échouer la conversation entière
+            # au lieu de rendre « analyse indisponible ».
+            description = await asyncio.wait_for(
+                ai_client.complete(
+                    system_prompt="Tu es un assistant qui analyse des images avec précision et détail.",
+                    user_prompt=q,
+                    role=AIRole.VISION_CAPTION,
+                    attachments=[att],
+                ),
+                timeout=VISION_TIMEOUT_SECONDS,
             )
             return {"description": description, "file_id": record["id"], "name": record["name"]}
+        # Avant le except large : depuis Python 3.11 asyncio.TimeoutError est
+        # TimeoutError, qui dérive d'Exception — sans cette clause le délai
+        # dépassé se rendrait « Analyse échouée :  », sans raison lisible.
+        except asyncio.TimeoutError:
+            logger.warning("analyze_image timed out for %s", record["id"])
+            return {"error": "Analyse indisponible — le modèle n'a pas répondu à temps."}
         except Exception as e:
             logger.exception("analyze_image failed for %s", record["id"])
             return {"error": f"Analyse échouée : {e}"}
@@ -343,8 +365,18 @@ class FilesService:
             except (ValueError, ImportError) as e:
                 return {"error": f"Transcription indisponible — {e}"}
             audio_bytes = await asyncio.to_thread(Path(record["path"]).read_bytes)
-            text = await provider.transcribe_audio(audio_bytes, record["name"])
+            # Même borne que le préprocesseur audio : rien en aval ne limite
+            # l'appel STT, et un tour bloqué jusqu'au timeout global échoue
+            # au lieu de rendre « transcription indisponible ».
+            from pipeline.preprocessors.audio import TRANSCRIBE_TIMEOUT_SECONDS
+            text = await asyncio.wait_for(
+                provider.transcribe_audio(audio_bytes, record["name"]),
+                timeout=TRANSCRIBE_TIMEOUT_SECONDS,
+            )
             return {"transcription": text, "file_id": record["id"], "name": record["name"]}
+        except asyncio.TimeoutError:
+            logger.warning("Transcription timed out for %s", record["id"])
+            return {"error": "Transcription indisponible — le service n'a pas répondu à temps."}
         except Exception as e:
             logger.exception("Transcription échouée pour %s", record["id"])
             return {"error": f"Transcription échouée : {e}"}
