@@ -8,6 +8,14 @@ from configs import secrets
 
 logger = logging.getLogger(__name__)
 
+# Le port décide du mode de chiffrement, et aiosmtplib expose les deux par
+# deux paramètres distincts : `use_tls` négocie le TLS sur la socket *avant*
+# le greeting (TLS implicite, port 465), `start_tls` l'obtient par la commande
+# ESMTP STARTTLS (port submission 587, en clair jusque-là). Forcer `use_tls`
+# sur 587 — le port que le formulaire de configuration propose par défaut —
+# fait échouer la poignée de main dès le greeting : aucun envoi ne passe.
+IMPLICIT_TLS_PORT = 465
+
 
 class SMTPClient:
     """Async SMTP client for sending email replies."""
@@ -42,6 +50,9 @@ class SMTPClient:
             msg["References"] = in_reply_to
         msg.attach(MIMEText(body, "plain", "utf-8"))
 
+        # STARTTLS est exigé, pas auto-détecté : un identifiant SMTP ne part
+        # jamais en clair, quitte à ce que l'envoi échoue franchement.
+        tls_implicite = self.port == IMPLICIT_TLS_PORT
         try:
             await aiosmtplib.send(
                 msg,
@@ -49,7 +60,8 @@ class SMTPClient:
                 port=self.port,
                 username=self.user,
                 password=self.password,
-                use_tls=True,
+                use_tls=tls_implicite,
+                start_tls=None if tls_implicite else True,
             )
             logger.info("Email sent to %s: %s", to_addr, subject)
         except Exception:

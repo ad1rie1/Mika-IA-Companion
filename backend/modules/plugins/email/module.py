@@ -646,7 +646,10 @@ class EmailModule(BaseModule):
             await self._upsert_contacts(
                 self._adresses_de(email_msg.from_addr), account, "outbound",
             )
-        except Exception:
+        except Exception as e:
+            # Mika croit avoir répondu et personne n'a rien reçu : sans compteur,
+            # un SMTP cassé depuis le démarrage ressemble à une boîte calme.
+            degradations.record("modules.plugins.email.module._send_reply", e)
             self.logger.exception("Failed to send email reply")
 
     # ── Capabilities & Tools ────────────────────────────────────────
