@@ -127,6 +127,27 @@ class CameraModule(BaseModule):
 
     # ── Lifecycle ──────────────────────────────────────────────────
 
+    def is_available(self) -> bool:
+        """Opt-in : sans interrupteur coché, le module ne démarre pas.
+
+        Le seul producteur de frames est un appareil externe branché sur
+        ``ws/camera`` ; sur une installation ordinaire il n'y en a aucun. Le
+        module déclarait pourtant ses deux outils à chaque tour, alors que
+        ``get_capabilities()`` savait déjà se taire sans device. Conditionner
+        ``return_tools()`` sur ``self._devices`` n'aurait pas suffi :
+        ``ModuleCollectors.tools()`` met la liste en cache et ne l'invalide
+        qu'au changement de cycle de vie. Ne pas démarrer du tout supprime
+        aussi le tick de 10 s et l'appel ``get_context()`` à chaque tour.
+
+        Le registre appelle cette méthode depuis ``AppConfig.ready()``, donc
+        avant que Django ne se déclare prêt — il en signale l'accès ORM. C'est
+        le contexte que ``configs.service`` prend déjà en charge : une base non
+        migrée retombe sur le défaut du schéma (décoché) sans jamais lever.
+        """
+        from configs.service import config_service
+
+        return bool(config_service.get("camera.enabled", default=False))
+
     async def instantiate(self) -> None:
         self.logger.info("CameraModule prêt — ws/camera?device=<id>&label=<nom>")
 

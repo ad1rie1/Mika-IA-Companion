@@ -1,13 +1,31 @@
 """Schéma de configuration du module caméra.
 
-Le module est, par construction, le plus gros consommateur de tokens du moteur
-— chaque analyse envoie une image complète au modèle vision — et c'était le
-seul à n'exposer aucun réglage : cadence, droit d'interrompre et existence même
-d'une analyse de fond étaient trois littéraux. Sur une scène vivante le hash
-perceptuel change en permanence, donc la boucle déclenchait une analyse toutes
-les 30 s (2 880 par jour et par device), et chaque verdict « notable » ouvrait
-un tour de pipeline complet sans le moindre délai de garde — là où la Forge
-borne son équivalent (``forge.notify_cooldown_s``).
+Le module est **opt-in**, et il ne l'était pas. Le seul producteur de frames
+est un appareil externe qui se connecte à ``ws/camera`` — aucun client n'est
+livré dans ``frontend/`` — donc « aucune caméra » est le cas nominal, pas le
+cas dégradé. Le module tournait quand même : ``camera_see`` et
+``camera_list_devices`` étaient déclarés à chaque itération de la boucle
+d'outils, à chaque tour, sur une installation où aucun device n'existera
+jamais, et le modèle était invité à appeler un outil qui répond « Aucune
+caméra disponible ».
+
+``get_capabilities()`` savait déjà se taire sans device ; ``return_tools()``
+ne pouvait pas faire pareil, parce que ``ModuleCollectors.tools()`` met la
+liste en cache et ne l'invalide qu'au changement de cycle de vie — le
+résultat aurait dépendu du moment où le cache a été bâti. Un interrupteur
+adossé à ``is_available()`` règle les trois d'un coup : ni déclaration
+d'outils, ni tick toutes les 10 s, ni appel ``get_context()`` à chaque tour.
+C'est le seul réglage de cette section qui n'est **pas** relu à chaud : il
+décide du démarrage du module, pas du contenu d'un tour de boucle.
+
+Une fois allumé, le module est, par construction, le plus gros consommateur de
+tokens du moteur — chaque analyse envoie une image complète au modèle vision —
+et c'était le seul à n'exposer aucun réglage : cadence, droit d'interrompre et
+existence même d'une analyse de fond étaient trois littéraux. Sur une scène
+vivante le hash perceptuel change en permanence, donc la boucle déclenchait une
+analyse toutes les 30 s (2 880 par jour et par device), et chaque verdict
+« notable » ouvrait un tour de pipeline complet sans le moindre délai de garde
+— là où la Forge borne son équivalent (``forge.notify_cooldown_s``).
 
 Trois questions distinctes, donc trois groupes :
 
@@ -36,6 +54,18 @@ CONFIG_SCHEMA = [
             "Perception visuelle : ce que Mika regarde d'elle-même, à quelle "
             "cadence, et ce qui a le droit de l'interrompre. Les devices se "
             "connectent sur ws/camera?device=<id>&label=<nom>&token=<jeton>."
+        ),
+    ),
+
+    ConfigItem(
+        key="camera.enabled", type="bool", section="module_camera",
+        label="Caméra activée", default=False,
+        description=(
+            "Décoché, le module ne démarre pas : ses deux outils ne sont pas "
+            "déclarés à Mika, aucune analyse vision n'est programmée et les "
+            "flux entrants sont refusés. Les réglages ci-dessous restent "
+            "modifiables. Après avoir coché, démarre le module avec le bouton "
+            "« Activer » de cet espace."
         ),
     ),
 
