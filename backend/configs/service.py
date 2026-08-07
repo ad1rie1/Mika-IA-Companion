@@ -25,11 +25,16 @@ from typing import Any, Callable
 from configs import secrets
 from configs.registry import registry
 from configs.types import ConfigItem, choice_values
+from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
 Subscriber = Callable[[str, Any], None]
 _UNSET = object()
+# « Base illisible » n'est pas « aucune ligne » : le premier est transitoire,
+# le second est une réponse. Les confondre revenait à mémoïser un défaut de
+# schéma pour la durée du processus au premier OperationalError venu.
+_UNREADABLE = object()
 
 
 class ValidationError(ValueError):
@@ -108,31 +113,39 @@ class ConfigService:
         if item is None and default is _UNSET:
             raise KeyError(f"Unknown config key: {key}")
 
-        value = self._resolve(key, item)
+        value, readable = self._resolve(key, item)
         if value is _UNSET:
             if default is not _UNSET:
                 return default
             return None
 
-        with self._cache_lock:
-            self._cache[key] = value
+        # Un repli sur le défaut de schéma parce que la base était illisible
+        # n'est pas une réponse : le mémoïser fige un échec transitoire
+        # jusqu'au redémarrage (une clé de provider pourtant configurée lue
+        # comme absente à chaque tour). On sert le repli, on ne le retient
+        # pas — la lecture suivante réessaiera.
+        if readable:
+            with self._cache_lock:
+                self._cache[key] = value
         return value
 
-    def _resolve(self, key: str, item: ConfigItem | None) -> Any:
+    def _resolve(self, key: str, item: ConfigItem | None) -> tuple[Any, bool]:
+        """Valeur effective, et si la base était lisible pour l'obtenir."""
         # 1. DB value (seeded from .env on first boot, see seed_from_env())
         row = db_read(_fetch_value_row, key)
-        if row is not None:
+        readable = row is not _UNREADABLE
+        if readable and row is not None:
             raw = row.value_json
             if row.encrypted and raw is not None:
                 raw = secrets.decrypt(raw)
-            return raw
+            return raw, True
 
         # 2. schema default — ``env_fallback`` is never consulted at
         # runtime, only during ``seed_from_env()`` to materialise an
         # initial ConfigValue row on an empty database.
         if item is not None:
-            return item.default
-        return _UNSET
+            return item.default, readable
+        return _UNSET, readable
 
     def snapshot(self) -> dict[str, Any]:
         """Effective value for every declared key (scalars only)."""
@@ -175,7 +188,7 @@ class ConfigService:
         _validate(item, coerced)
 
         from configs.models import ConfigValue, ConfigChangeLog
-        before = self._resolve(key, item)
+        before, _ = self._resolve(key, item)
 
         stored = coerced
         encrypted = False
@@ -213,7 +226,7 @@ class ConfigService:
         """Remove the DB override — falls back to env/default."""
         from configs.models import ConfigValue, ConfigChangeLog
         item = registry.get(key)
-        before = self._resolve(key, item)
+        before, _ = self._resolve(key, item)
         deleted, _ = ConfigValue.objects.filter(key=key).delete()
         if deleted:
             ConfigChangeLog.objects.create(
@@ -324,12 +337,21 @@ class ConfigService:
 # ── Helpers ─────────────────────────────────────────────────────
 
 def _fetch_value_row(key: str):
-    """The one ConfigValue read behind ``get()``. Returns None if unreadable.
+    """The one ConfigValue read behind ``get()``.
+
+    Returns the row, ``None`` when there is no override, and ``_UNREADABLE``
+    when the query failed — trois réponses distinctes, parce que l'appelant
+    en fait trois choses différentes. « Pas de ligne » est une réponse et se
+    met en cache ; « illisible » est un accident et ne doit surtout pas y
+    entrer, sinon un ``OperationalError`` d'une milliseconde fige le défaut
+    de schéma jusqu'au redémarrage.
 
     "Unreadable" stays broad on purpose — a config read legitimately
     precedes a usable database (module imports run before ``migrate``, and
     the test suite blocks DB access at collection time), and falling back to
-    the schema default is the right answer there.
+    the schema default is the right answer there. L'échec est compté plutôt
+    que seulement journalisé en DEBUG : la production tourne en INFO, donc
+    le ``logger.debug`` d'origine n'avait aucun témoin.
 
     ``SynchronousOnlyOperation`` is the one exception that must *not* be
     absorbed: it says the caller is on the event loop, not that the database
@@ -345,9 +367,9 @@ def _fetch_value_row(key: str):
         return ConfigValue.objects.filter(key=key).first()
     except SynchronousOnlyOperation:
         raise
-    except Exception:
-        logger.debug("Config key %s unreadable (database not ready)", key, exc_info=True)
-        return None
+    except Exception as exc:
+        degradations.record("configs.service._fetch_value_row", exc)
+        return _UNREADABLE
 
 
 def _coerce(item: ConfigItem, value):
