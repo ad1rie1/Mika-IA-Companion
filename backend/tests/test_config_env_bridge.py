@@ -30,6 +30,7 @@ import pytest
 
 from configs.registry import registry
 from configs.service import ConfigService
+from configs.types import ConfigItem
 
 
 def _settings_constants() -> set[str]:
@@ -53,15 +54,18 @@ def _settings_constants() -> set[str]:
 class TestNoEnvBridge:
 
     def test_no_config_item_declares_an_env_fallback(self):
-        """A knob reachable from two places drifts. This is the guard."""
-        declared = [
-            f"{i.key} <- {i.env_fallback}"
-            for i in registry.all_items() if i.env_fallback
+        """A knob reachable from two places drifts. This is the guard.
+
+        Le champ lui-meme a disparu de ``ConfigItem`` : plus rien a
+        declarer, donc plus rien a redeclarer. L'assertion porte sur le
+        schema plutot que sur les valeurs, ce qui la rend plus forte.
+        """
+        assert not hasattr(ConfigItem, "env_fallback")
+        assert "env_fallback" not in ConfigItem.__dataclass_fields__
+        assert not [
+            i.key for i in registry.all_items()
+            if hasattr(i, "env_fallback")
         ]
-        assert not declared, (
-            "la config applicative se parametre dans le dashboard, pas "
-            f"dans .env: {declared}"
-        )
 
     def test_the_seeding_machinery_is_gone(self):
         """It existed only to serve the bridge."""
