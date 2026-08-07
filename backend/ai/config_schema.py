@@ -27,6 +27,49 @@ PROVIDERS = (
     ("ollama_cloud", "Ollama Cloud"),
 )
 
+# Partie commune de l'explication du plafond de concurrence. Le « pourquoi »
+# diffère d'un provider à l'autre, le « quoi » non.
+_CONCURRENCY_HINT = (
+    "Nombre maximal d'appels IA simultanés vers ce provider ; 0 = illimité. "
+    "Le routeur réserve un créneau avant chaque appel, et l'attente est "
+    "comptée *dans* le timeout de l'appel plutôt qu'ajoutée à côté. Les "
+    "émetteurs sont nombreux et chacun sur sa propre cadence — conversation, "
+    "conscience, consolidateur, sommeil, projets, cron des modules, voix "
+    "intérieure — et seule la conversation passe par la file des tours. "
+)
+
+
+def _concurrency_item(provider: str, group: str, *, default: int,
+                      maximum: int, hint: str) -> ConfigItem:
+    """Plafond d'appels simultanés, déclaré pour *tous* les providers.
+
+    Le réglage n'appartient pas au seul Ollama : ce qui lui est propre,
+    c'est le défaut (1) et sa raison — un serveur local met les appels en
+    file au lieu de les paralléliser, donc la concurrence n'y achète rien
+    et transforme « lent » en « échoué ». Chez un hébergé le parallélisme
+    est réel, mais il est facturé et contingenté : sans ce champ il n'y
+    aurait aucun moyen de tenir la limite de débit d'un fournisseur, qu'une
+    rafale de boucles de fond peut dépasser à elle seule. D'où le même
+    champ partout, avec un défaut qui préserve le comportement existant.
+    """
+    return ConfigItem(
+        key=f"ai.{provider}.max_concurrent_calls", type="int",
+        section="ai_providers", group=group,
+        label="Appels simultanés autorisés",
+        default=default, min=0, max=maximum, restart_required=True,
+        hint=_CONCURRENCY_HINT + hint,
+    )
+
+
+_HOSTED_CONCURRENCY_HINT = (
+    "Illimité par défaut : le parallélisme y est réel, et rien ne gagne à "
+    "sérialiser des appels qui tournent vraiment de front. À plafonner pour "
+    "tenir la limite de débit du fournisseur ou lisser la dépense — 3 est "
+    "un point de départ raisonnable. Un appel qui attend un créneau "
+    "consomme son propre timeout : plafonner trop bas fait échouer des "
+    "tours au lieu de les ralentir."
+)
+
 CONFIG_SCHEMA = [
     ConfigSection(
         key="ai_providers", label="IA · Providers", icon="⟠", order=20,
@@ -50,12 +93,16 @@ CONFIG_SCHEMA = [
         hot_reload=True,
         hint="Requis uniquement si pas d'OAuth token.",
     ),
+    _concurrency_item("claude", "Claude", default=0, maximum=64,
+                      hint=_HOSTED_CONCURRENCY_HINT),
     # OpenAI
     ConfigItem(
         key="ai.openai.api_key", type="secret", section="ai_providers", group="OpenAI",
         label="API key", sensitive=True,
         hot_reload=True,
     ),
+    _concurrency_item("openai", "OpenAI", default=0, maximum=64,
+                      hint=_HOSTED_CONCURRENCY_HINT),
     # Gemini (Google)
     ConfigItem(
         key="ai.gemini.api_key", type="secret", section="ai_providers", group="Gemini",
@@ -63,6 +110,8 @@ CONFIG_SCHEMA = [
         hot_reload=True,
         hint="Obtenable depuis Google AI Studio.",
     ),
+    _concurrency_item("gemini", "Gemini", default=0, maximum=64,
+                      hint=_HOSTED_CONCURRENCY_HINT),
     # GLM (Zhipu AI)
     ConfigItem(
         key="ai.glm.api_key", type="secret", section="ai_providers", group="GLM",
@@ -70,6 +119,8 @@ CONFIG_SCHEMA = [
         hot_reload=True,
         hint="Obtenable depuis open.bigmodel.cn. Endpoint OpenAI-compatible.",
     ),
+    _concurrency_item("glm", "GLM", default=0, maximum=64,
+                      hint=_HOSTED_CONCURRENCY_HINT),
     # Ollama (seul provider qui a besoin d'une URL côté app)
     ConfigItem(
         key="ai.ollama.base_url", type="str", section="ai_providers", group="Ollama",
@@ -99,6 +150,19 @@ CONFIG_SCHEMA = [
             "Plafond de génération par tour. Sans lui, un modèle qui ne "
             "s'arrête pas génère jusqu'à 4096 tokens : à 19 tokens/s c'est "
             "219 s, soit bien au-delà du timeout, et le tour échoue toujours."
+        ),
+    ),
+    _concurrency_item(
+        "ollama", "Ollama", default=1, maximum=8,
+        hint=(
+            "Le seul provider plafonné par défaut, parce que le parallélisme "
+            "y est faux : un serveur local n'a qu'un emplacement d'exécution, "
+            "deux appels n'y tournent pas de front, ils font la queue — et "
+            "cette queue-là, personne ne la mesure. Garder 1 pour qu'un tour "
+            "de conversation n'attende pas derrière deux générations de fond. "
+            "À monter seulement si le serveur sert vraiment plusieurs "
+            "requêtes en parallèle (OLLAMA_NUM_PARALLEL, VRAM suffisante pour "
+            "garder le modèle chargé)."
         ),
     ),
 
@@ -143,6 +207,14 @@ CONFIG_SCHEMA = [
             "Plus haut qu'en local (768) : le plafond local est une ceinture "
             "contre un modèle qui génère à 19 tokens/s et ne finit jamais "
             "dans le timeout — contrainte qui n'existe pas côté hébergé."
+        ),
+    ),
+    _concurrency_item(
+        "ollama_cloud", "Ollama Cloud", default=0, maximum=64,
+        hint=(
+            _HOSTED_CONCURRENCY_HINT
+            + " Le plafond du local (1) n'a aucune raison de s'appliquer "
+              "ici : deux machines, deux catalogues, deux budgets."
         ),
     ),
 

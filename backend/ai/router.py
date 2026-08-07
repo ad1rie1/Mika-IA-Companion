@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from contextvars import ContextVar
 from enum import Enum
 
 from ai.providers import AIProvider
@@ -66,6 +67,42 @@ _PROVIDER_CONFIG_PREFIXES = (
     # "ai.ollama_cloud.api_key" does not begin with "ai.ollama.", so the two
     # providers are evicted independently rather than in lockstep.
     "ai.ollama_cloud.",
+)
+
+# Concurrence autorisée par provider quand la configuration est illisible.
+# 0 = illimité.
+#
+# Un serveur local n'a qu'un seul emplacement d'exécution : deux appels n'y
+# tournent pas en parallèle, ils font la queue, et ce temps de queue est
+# compté *à l'intérieur* du timeout de chacun — un tour utilisateur rend
+# alors le texte de repli sans que rien ne distingue « modèle trop lent » de
+# « modèle occupé ailleurs ». Les émetteurs sont nombreux et sur leur propre
+# cadence (conscience, consolidateur, sommeil, runner de projets, cron des
+# modules, voix intérieure) et aucun ne passe par la ``TurnQueue``, qui ne
+# sérialise que les tours de conversation entre eux.
+#
+# Le réglage effectif est ``ai.<provider>.max_concurrent_calls``, déclaré
+# pour *tous* les providers (voir ai/config_schema.py) : chez un hébergé le
+# parallélisme est réel, mais il est facturé et contingenté, et une rafale
+# de boucles de fond suffit à dépasser une limite de débit. Seul le défaut
+# diffère — 1 pour ollama, illimité ailleurs.
+#
+# Ce qui suit n'est pas ce défaut-là : c'est la ceinture appliquée quand la
+# configuration est *illisible*, pour qu'une base momentanément inaccessible
+# ne restaure pas le comportement que le plafond existe pour empêcher. Un
+# provider absent d'ici retombe alors sur « illimité », c'est-à-dire sur ce
+# qu'il faisait avant l'existence du sémaphore.
+_PROVIDER_FALLBACK_CONCURRENCY: dict[str, int] = {
+    "ollama": 1,
+}
+
+# Providers dont le créneau est déjà tenu par l'appel en cours. Un outil MCP
+# peut relancer le modèle depuis l'intérieur de la boucle d'outils
+# (``files_analyze_image`` décrit une image pendant que la conversation
+# attend) : sans cette garde, l'appel imbriqué attendrait un créneau que son
+# propre appelant détient, jusqu'au timeout.
+_held_providers: ContextVar[frozenset[str]] = ContextVar(
+    "ai_held_providers", default=frozenset()
 )
 
 # Maps provider name → class
@@ -135,6 +172,10 @@ class AIRouter:
         # contexte async au pool mono-worker de ``configs.service``, boucle
         # ASGI en attente. Invalidée par ``on_change("ai.models")``.
         self._declared_models: dict[str, dict] | None = None
+        # Créneaux d'exécution par provider, créés à la première demande :
+        # une primitive asyncio se lie à sa boucle, et aucune ne tourne ici.
+        self._semaphores: dict[str, asyncio.Semaphore | None] = {}
+        self._semaphore_loop: asyncio.AbstractEventLoop | None = None
         self._load_config()
 
     # ── Configuration loading ───────────────────────────────────
@@ -288,6 +329,42 @@ class AIRouter:
         provider, _, _, _ = self._resolve(role)
         return provider
 
+    # ── Sérialisation par provider ───────────────────────────────
+
+    def _concurrency_limit(self, provider_name: str) -> int:
+        """Appels simultanés autorisés pour ce provider (0 = illimité)."""
+        from configs.service import config_service
+
+        fallback = _PROVIDER_FALLBACK_CONCURRENCY.get(provider_name, 0)
+        try:
+            return max(0, int(config_service.get(
+                f"ai.{provider_name}.max_concurrent_calls", default=fallback
+            )))
+        except Exception:
+            return fallback
+
+    def _provider_semaphore(self, provider_name: str) -> asyncio.Semaphore | None:
+        """Le créneau du provider, ou None quand il n'est pas plafonné."""
+        loop = asyncio.get_running_loop()
+        if loop is not self._semaphore_loop:
+            # Un sémaphore asyncio s'attache à la boucle sur laquelle il
+            # attend : garder ceux d'une boucle disparue (tests, commande de
+            # gestion) lèverait « bound to a different event loop » à la
+            # première contention.
+            self._semaphores = {}
+            self._semaphore_loop = loop
+        if provider_name not in self._semaphores:
+            limit = self._concurrency_limit(provider_name)
+            self._semaphores[provider_name] = (
+                asyncio.Semaphore(limit) if limit > 0 else None
+            )
+            if limit > 0:
+                logger.info(
+                    "Provider '%s' plafonné à %d appel(s) simultané(s)",
+                    provider_name, limit,
+                )
+        return self._semaphores[provider_name]
+
     # ── Completion ───────────────────────────────────────────────
 
     def _call_timeout(self, override: float | None) -> float:
@@ -336,13 +413,19 @@ class AIRouter:
         Factorisé plutôt que recopié : le chemin outillé contournait le
         routeur, donc ni les plafonds, ni la température déclarée, ni la
         trace ne s'appliquaient au plus gros consommateur du système.
+
+        C'est aussi le point de passage unique où le créneau d'exécution du
+        provider est réservé : l'attente et la génération sont mesurées
+        séparément, faute de quoi un tour passé à faire la queue derrière
+        une génération de fond est indiscernable d'un modèle lent. Les deux
+        se partagent une seule borne, celle du routeur : attendre son tour
+        est du temps passé dans l'appel, pas du temps offert en plus.
         """
         provider_name, model, temperature, internal_name = self._resolve(role)
         provider = self._get_provider(provider_name)
 
         prompt_chars = len(system_prompt) + len(user_prompt)
         timeout_s = self._call_timeout(timeout)
-        t0 = time.monotonic()
 
         project_id = current_project_id.get()
 
@@ -363,11 +446,45 @@ class AIRouter:
         # pour ne pas facturer le reliquat d'un appel précédent.
         _reset_usage()
 
+        # Réservation du créneau. Un appel imbriqué réutilise celui de son
+        # appelant : il tourne déjà *dans* le créneau qu'il attendrait.
+        #
+        # L'attente entre dans la borne du routeur au lieu de s'y ajouter :
+        # un appel routé se termine dans ``ai.call_timeout_seconds``, qu'il
+        # ait passé ce temps à générer ou à faire la queue. C'est déjà ce que
+        # mesurait le tour de conversation, dont le ``wait_for`` englobe
+        # l'appel entier ; les boucles de fond, elles, n'auraient eu aucune
+        # borne sur cette attente-ci — celle-là même que la borne du routeur
+        # existe pour empêcher.
+        semaphore = self._provider_semaphore(provider_name)
+        held = _held_providers.get()
+        slot_token = None
+        t_wait = time.monotonic()
+        if semaphore is not None and provider_name not in held:
+            try:
+                await asyncio.wait_for(semaphore.acquire(), timeout=timeout_s)
+            except BaseException:
+                # Le timeout de l'appelant — ou celui du routeur — peut
+                # tomber pendant l'attente : sans cette trace, un tour mort
+                # en file est indiscernable d'un modèle qui n'a pas fini de
+                # générer.
+                logger.warning(
+                    "AI call ABANDON role=%s provider=%s — créneau jamais "
+                    "obtenu après %.0f ms d'attente (borne %.0f s)",
+                    role.value, provider_name,
+                    (time.monotonic() - t_wait) * 1000, timeout_s,
+                )
+                raise
+            slot_token = _held_providers.set(held | {provider_name})
+        t_call = time.monotonic()
+        wait_ms = (t_call - t_wait) * 1000
+        remaining_s = max(0.0, timeout_s - (t_call - t_wait))
+
         try:
             result, text = await asyncio.wait_for(
-                invoke(provider, model, temperature), timeout=timeout_s,
+                invoke(provider, model, temperature), timeout=remaining_s,
             )
-            elapsed_ms = (time.monotonic() - t0) * 1000
+            elapsed_ms = (time.monotonic() - t_call) * 1000
 
             usage = _take_usage()
             if usage:
@@ -388,34 +505,42 @@ class AIRouter:
 
             logger.info(
                 "AI call OK     role=%-22s internal=%-18s provider=%-7s model=%-30s "
-                "prompt=%5d chars  response=%5d chars  tok=%d/%d  $%.5f  %7.0f ms",
+                "prompt=%5d chars  response=%5d chars  tok=%d/%d  $%.5f  %7.0f ms "
+                "(attente %.0f ms)",
                 role.value, internal_name, provider_name, model,
                 prompt_chars, len(text),
-                tokens_in, tokens_out, cost_usd, elapsed_ms,
+                tokens_in, tokens_out, cost_usd, elapsed_ms, wait_ms,
             )
             return result
 
         except asyncio.TimeoutError:
             # Dit à voix haute : une boucle de fond qui se fige silencieusement
-            # est indiscernable d'une boucle qui n'a rien à faire.
-            elapsed_ms = (time.monotonic() - t0) * 1000
+            # est indiscernable d'une boucle qui n'a rien à faire. L'attente
+            # figure à part : une borne dépassée après avoir passé l'essentiel
+            # du budget en file ne se répare pas en allongeant la borne.
+            elapsed_ms = (time.monotonic() - t_call) * 1000
             logger.warning(
                 "AI call TIMEOUT role=%-22s internal=%-18s provider=%-7s model=%-30s "
-                "prompt=%5d chars  %7.0f ms  (borne %.0f s)",
+                "prompt=%5d chars  %7.0f ms  (borne %.0f s, attente %.0f ms)",
                 role.value, internal_name, provider_name, model,
-                prompt_chars, elapsed_ms, timeout_s,
+                prompt_chars, elapsed_ms, timeout_s, wait_ms,
             )
             raise
 
         except Exception:
-            elapsed_ms = (time.monotonic() - t0) * 1000
+            elapsed_ms = (time.monotonic() - t_call) * 1000
             logger.error(
                 "AI call FAILED role=%-22s internal=%-18s provider=%-7s model=%-30s "
-                "prompt=%5d chars  %7.0f ms",
+                "prompt=%5d chars  %7.0f ms (attente %.0f ms)",
                 role.value, internal_name, provider_name, model,
-                prompt_chars, elapsed_ms,
+                prompt_chars, elapsed_ms, wait_ms,
             )
             raise
+
+        finally:
+            if slot_token is not None:
+                _held_providers.reset(slot_token)
+                semaphore.release()
 
     async def complete(
         self,
