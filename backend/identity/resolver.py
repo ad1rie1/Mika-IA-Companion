@@ -821,6 +821,47 @@ class IdentityResolver:
             out.setdefault(key, []).extend(handles)
         return out
 
+    async def display_names_for(self, person_ids: list[str]) -> dict[str, str]:
+        """Nom lisible de chaque handle — « Alice », pas ``web_6f3e22ccb0ae``.
+
+        Pour l'historique conversationnel : le tampon court terme est
+        deliberement partage par tout le monde, donc un tour peut venir de
+        quelqu'un d'autre que l'interlocuteur courant, et le designer par son
+        handle n'apprend rien au modele.
+
+        Une seule requete pour tous les handles demandes. Un handle dont
+        personne ne connait le nom est simplement absent du resultat :
+        l'appelant decide quoi dire d'un inconnu, cette couche ne fabrique
+        pas de nom.
+        """
+        ids = [p for p in person_ids if p and not is_internal_person(p)]
+        if not ids:
+            return {}
+        return await sync_to_async(self._display_names_for_sync)(ids)
+
+    @staticmethod
+    def _display_names_for_sync(person_ids) -> dict[str, str]:
+        from identity.models import IdentityHandle
+
+        out: dict[str, str] = {}
+        # Ordre croissant sur `last_seen` : quand deux handles partagent un
+        # person_id, le plus recent ecrase le precedent — meme regle que
+        # `_entity_for_person_sync`, exprimee dans l'autre sens parce qu'ici
+        # on remplit un dictionnaire au lieu de prendre le premier.
+        handles = IdentityHandle.objects.select_related(
+            "identity", "identity__entity",
+        ).filter(person_id__in=person_ids).order_by("last_seen")
+        for handle in handles:
+            entity = handle.identity.entity
+            name = (
+                (entity.name if entity else "")
+                or handle.identity.display_name
+                or handle.display_name
+            )
+            if name:
+                out[handle.person_id] = name
+        return out
+
     async def entity_for_person(self, person_id: str):
         """The memory Entity bound to this handle, or None.
 
