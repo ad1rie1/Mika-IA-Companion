@@ -59,14 +59,17 @@ def _fernet():
         return None
 
     raw = _cle_declaree()
-    if raw:
-        key = raw.encode("ascii")
-    else:
-        # PBKDF2 from SECRET_KEY — 100k iterations is plenty for this use
-        seed = settings.SECRET_KEY.encode("utf-8")
-        dk = hashlib.pbkdf2_hmac("sha256", seed, b"configs.secrets", 100_000, dklen=32)
-        key = base64.urlsafe_b64encode(dk)
     try:
+        if raw:
+            # Encodage compris : un caractère non-ASCII venu d'un copier-coller
+            # doit produire le même message que n'importe quelle autre clé
+            # illisible, pas une trace d'encodage.
+            key = raw.encode("ascii")
+        else:
+            # PBKDF2 from SECRET_KEY — 100k iterations is plenty for this use
+            seed = settings.SECRET_KEY.encode("utf-8")
+            dk = hashlib.pbkdf2_hmac("sha256", seed, b"configs.secrets", 100_000, dklen=32)
+            key = base64.urlsafe_b64encode(dk)
         return Fernet(key)
     except Exception as exc:
         if not raw:
