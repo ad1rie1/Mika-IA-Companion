@@ -16,11 +16,34 @@ from __future__ import annotations
 import base64
 import hashlib
 import logging
+import os
 from functools import lru_cache
 
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 
 logger = logging.getLogger(__name__)
+
+# Un seul endroit nomme la variable : la clé n'était lue que comme attribut
+# de settings, qu'aucun module ne déclarait — le `getattr` renvoyait donc
+# toujours "" et le chemin PBKDF2 était le seul jamais emprunté. Une
+# déclaration manquante ailleurs ne doit plus pouvoir la rendre inerte.
+ENV_KEY_NAME = "CONFIG_ENCRYPTION_KEY"
+
+
+def _cle_declaree() -> str:
+    """Clé fournie par l'opérateur, ou ``""`` si elle n'est pas configurée.
+
+    Lue dans l'environnement plutôt que dans le registre de configuration :
+    c'est précisément ce registre qu'elle déchiffre. ``settings`` est
+    interrogé d'abord — il reste le point de surcharge d'un test — mais
+    l'environnement fait autorité, ``config/settings.py`` chargeant le
+    ``.env`` dans ``os.environ`` au démarrage.
+    """
+    raw = getattr(settings, ENV_KEY_NAME, "") or os.environ.get(ENV_KEY_NAME, "") or ""
+    if isinstance(raw, bytes):
+        raw = raw.decode("ascii", "ignore")
+    return raw.strip()
 
 
 @lru_cache(maxsize=1)
@@ -33,15 +56,40 @@ def _fernet():
         )
         return None
 
-    raw = getattr(settings, "CONFIG_ENCRYPTION_KEY", "") or ""
+    raw = _cle_declaree()
     if raw:
-        key = raw.encode() if isinstance(raw, str) else raw
+        key = raw.encode("ascii")
     else:
         # PBKDF2 from SECRET_KEY — 100k iterations is plenty for this use
         seed = settings.SECRET_KEY.encode("utf-8")
         dk = hashlib.pbkdf2_hmac("sha256", seed, b"configs.secrets", 100_000, dklen=32)
         key = base64.urlsafe_b64encode(dk)
-    return Fernet(key)
+    try:
+        return Fernet(key)
+    except Exception as exc:
+        if not raw:
+            raise
+        # Une clé mal formée ne se voit sinon qu'au premier `encrypt`, très
+        # loin de sa cause — et la retirer ne répare rien, les secrets déjà
+        # stockés attendent la vraie clé.
+        raise ImproperlyConfigured(
+            f"{ENV_KEY_NAME} n'est pas une cle Fernet valide : il faut 32 "
+            "octets encodes en base64 url-safe, tels que produits par "
+            "`python -c \"from cryptography.fernet import Fernet; "
+            "print(Fernet.generate_key().decode())\"`. Corrige la variable "
+            "plutot que de la supprimer : les secrets deja enregistres sont "
+            "chiffres avec elle."
+        ) from exc
+
+
+def verifier_cle() -> None:
+    """Construit la Fernet maintenant, au démarrage de l'app ``configs``.
+
+    Sans cet appel, une ``CONFIG_ENCRYPTION_KEY`` mal formée n'échoue qu'au
+    premier chiffrement — c'est-à-dire au premier enregistrement de la
+    configuration, plusieurs écrans après la faute de frappe.
+    """
+    _fernet()
 
 
 def encrypt(plaintext: str) -> str:
