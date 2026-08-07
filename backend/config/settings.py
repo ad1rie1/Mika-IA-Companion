@@ -282,18 +282,6 @@ AI_QUOTA_ROLE_VALIDITY_CHECK_MONTHLY = env.int("AI_QUOTA_ROLE_VALIDITY_CHECK_MON
 AI_QUOTA_ROLE_VISION_CAPTION_DAILY = env.int("AI_QUOTA_ROLE_VISION_CAPTION_DAILY", default=0)
 AI_QUOTA_ROLE_VISION_CAPTION_MONTHLY = env.int("AI_QUOTA_ROLE_VISION_CAPTION_MONTHLY", default=0)
 
-# --- Scheduler ---
-
-# --- Email Module ---
-IMAP_HOST = env("IMAP_HOST", default="")
-IMAP_PORT = env.int("IMAP_PORT", default=993)
-IMAP_USER = env("IMAP_USER", default="")
-IMAP_PASSWORD = env("IMAP_PASSWORD", default="")
-SMTP_HOST = env("SMTP_HOST", default="")
-SMTP_PORT = env.int("SMTP_PORT", default=587)
-SMTP_USER = env("SMTP_USER", default="")
-SMTP_PASSWORD = env("SMTP_PASSWORD", default="")
-
 # --- Forge (modules auto-gérés par l'IA, espace confiné) ---
 FORGE_DIR = env("FORGE_DIR", default=str(PROJECT_ROOT / "data" / "forge_modules"))
 
@@ -301,31 +289,16 @@ FORGE_DIR = env("FORGE_DIR", default=str(PROJECT_ROOT / "data" / "forge_modules"
 CHROMA_PERSIST_DIR = env("CHROMA_PERSIST_DIR", default=str(PROJECT_ROOT / "data" / "chromadb"))
 EMBEDDING_MODEL = env("EMBEDDING_MODEL", default="paraphrase-multilingual-MiniLM-L12-v2")
 
-# Emotional memory (snapshot aggregation)
-
-# --- Emotion Engine ---
-# Physics parameters (mass, stiffness, damping, impulse gain) are derived
-# at runtime from the `temperament` block in personality.yaml.
-
-# --- Conscience ---
-
-# --- Projects ---
-# How many (system_prompt, user_prompt, response) triples to keep per
-# project as a rolling buffer. Used for audit / debugging the runner's
-# LLM calls. Setting this to 0 disables history capture entirely.
-
-# RSS Observer
-# Format: comma-separated "name|url" pairs, e.g. "Tech|https://example.com/rss,Gaming|https://other.com/feed"
-_rss_raw = env("RSS_FEEDS", default="")
-RSS_FEEDS = []
-if _rss_raw:
-    for entry in _rss_raw.split(","):
-        entry = entry.strip()
-        if "|" in entry:
-            name, url = entry.split("|", 1)
-            RSS_FEEDS.append({"name": name.strip(), "url": url.strip()})
-        elif entry:
-            RSS_FEEDS.append({"name": entry, "url": entry})
+# Emotion physics (mass, stiffness, damping, impulse gain) are derived at
+# runtime from the temperament, five dashboard sliders read through
+# ``emotion.state.load_temperament()``.
+#
+# Everything else applicative — providers and their credentials, declared
+# models, role mapping, email accounts, RSS feeds, the Telegram token, every
+# loop cadence and every memory/emotion/conscience/project knob — is declared
+# in the config registry and stored in the database. Nothing is configured
+# twice: a constant here shadowing a registry key silently wins, and the
+# registry default (the one a reader looks at) becomes decorative.
 
 # --- Logging ---
 # Format: timestamp [request_id] level module: message

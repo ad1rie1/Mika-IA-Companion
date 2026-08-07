@@ -146,7 +146,8 @@ class FilesModule(BaseModule):
             ModuleTool(
                 name="files_transcribe",
                 description=(
-                    "Transcrit un fichier audio en texte via Whisper (nécessite OPENAI_API_KEY). "
+                    "Transcrit un fichier audio en texte via Whisper "
+                    "(nécessite le provider OpenAI configuré). "
                     "Fonctionne avec mp3, wav, ogg, webm."
                 ),
                 parameters=[

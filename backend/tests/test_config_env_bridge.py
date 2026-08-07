@@ -52,16 +52,21 @@ def _settings_constants() -> set[str]:
 
 class TestNoEnvBridge:
 
-    def test_no_config_item_declares_an_env_fallback(self):
-        """A knob reachable from two places drifts. This is the guard."""
-        declared = [
-            f"{i.key} <- {i.env_fallback}"
-            for i in registry.all_items() if i.env_fallback
-        ]
-        assert not declared, (
+    def test_a_config_item_cannot_even_declare_an_env_fallback(self):
+        """A knob reachable from two places drifts. The field itself is
+        gone, so the guard is on the dataclass rather than on its values:
+        re-adding it has to be a deliberate edit to `ConfigItem`, not a
+        line slipped into one schema."""
+        import dataclasses
+
+        from configs.types import ConfigItem
+
+        fields = {f.name for f in dataclasses.fields(ConfigItem)}
+        assert "env_fallback" not in fields, (
             "la config applicative se parametre dans le dashboard, pas "
-            f"dans .env: {declared}"
+            "dans .env"
         )
+        assert not any(hasattr(i, "env_fallback") for i in registry.all_items())
 
     def test_the_seeding_machinery_is_gone(self):
         """It existed only to serve the bridge."""
@@ -101,6 +106,26 @@ class TestSettingsScope:
         for name in ("API_HOST", "API_PORT", "DEBUG", "TIME_ZONE",
                      "CHROMA_PERSIST_DIR", "FORGE_DIR", "PERSONALITY_PATH"):
             assert hasattr(settings, name), name
+
+    def test_no_legacy_module_credential_survives(self):
+        """The email account and the RSS feed list are ORM rows edited in
+        the dashboard, and the provider credentials live encrypted in
+        `ConfigValue`. Their `.env` ancestors seeded those tables on first
+        boot from a *settings attribute*, which is the same two-sources
+        arrangement as `env_fallback` wearing a different hat: the seed ran
+        only against an empty table, so after the first boot the variable
+        was inert with no feedback, and a rotated credential in `.env`
+        silently did nothing.
+
+        Asserted on prefixes rather than a literal list — `POP3_USER` would
+        be the same mistake under a new name.
+        """
+        legacy = {
+            c for c in _settings_constants()
+            if c.startswith(("IMAP_", "SMTP_", "POP3_", "RSS_", "TELEGRAM_"))
+            or c.endswith(("_API_KEY", "_OAUTH_TOKEN", "_BASE_URL"))
+        }
+        assert legacy == set(), f"credential/module config hors dashboard: {legacy}"
 
     def test_per_role_quota_constants_are_kept(self):
         """`ai/quota.py` builds these names at runtime

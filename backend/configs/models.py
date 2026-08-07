@@ -2,8 +2,7 @@
 
 Three tables:
 
-  ConfigValue       one-row override per key. Absent row = use schema default
-                    (with ``env_fallback`` as legacy bridge).
+  ConfigValue       one-row override per key. Absent row = use schema default.
   ConfigRecordItem  rows of a ``record_list`` (one physical row per list
                     element — clean per-row audit + ordering).
   ConfigChangeLog   append-only audit trail. Sensitive diffs scrubbed.

@@ -11,9 +11,11 @@ Design notes:
   - **Extensible type enum.** The current UI handles scalar types; new
     structural types (record / record_list) can be declared now and
     consumed later.
-  - ``env_fallback`` bridges the existing ``.env``: until a subsystem
-    migrates to ``config_service.get(...)``, the effective value still
-    flows through Django settings; the registry just surfaces it.
+  - **One declared default per knob.** There is deliberately no bridge
+    back to ``.env``: a ``ConfigItem`` carrying an ``env_fallback`` meant
+    two declared defaults for one setting, the settings one silently
+    winning at seed time, so the ``default`` below — the one a reader
+    looks at — was decorative and free to drift.
 """
 from __future__ import annotations
 
@@ -62,7 +64,6 @@ class ConfigItem:
     group: str = ""
     description: str = ""
     default: Any = None
-    env_fallback: str = ""          # Django settings attribute name to read as legacy default
     choices: tuple = ()             # for select / multiselect
     min: float | None = None
     max: float | None = None

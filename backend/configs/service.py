@@ -1,7 +1,7 @@
 """ConfigService — the runtime accessor.
 
 Read path:
-    get(key) → user override in ConfigValue → env_fallback from settings → schema default
+    get(key) → user override in ConfigValue → schema default
 
 Write path:
     set(key, value) → validate → encrypt if sensitive → persist → audit → notify
@@ -104,7 +104,7 @@ class ConfigService:
     # ── Read ────────────────────────────────────────────────────
 
     def get(self, key: str, *, default: Any = _UNSET) -> Any:
-        """Effective value. Order: DB override → env_fallback → schema default → provided default."""
+        """Effective value. Order: DB override → schema default → provided default."""
         with self._cache_lock:
             if key in self._cache:
                 return self._cache[key]
@@ -131,7 +131,7 @@ class ConfigService:
 
     def _resolve(self, key: str, item: ConfigItem | None) -> tuple[Any, bool]:
         """Valeur effective, et si la base était lisible pour l'obtenir."""
-        # 1. DB value (seeded from .env on first boot, see seed_from_env())
+        # 1. DB value — written by the dashboard, never seeded from ``.env``.
         row = db_read(_fetch_value_row, key)
         readable = row is not _UNREADABLE
         if readable and row is not None:
@@ -140,9 +140,8 @@ class ConfigService:
                 raw = secrets.decrypt(raw)
             return raw, True
 
-        # 2. schema default — ``env_fallback`` is never consulted at
-        # runtime, only during ``seed_from_env()`` to materialise an
-        # initial ConfigValue row on an empty database.
+        # 2. schema default — the only other source. A fresh clone runs on
+        # these until someone edits the setting in the dashboard.
         if item is not None:
             return item.default, readable
         return _UNSET, readable

@@ -40,8 +40,6 @@ import logging
 from dataclasses import dataclass, field
 from functools import partial
 
-from django.conf import settings
-
 from modules.base import BaseModule
 from modules.plugins.rss import parser
 from modules.types import (
@@ -176,23 +174,12 @@ class RSSModule(BaseModule):
     # ── Amorçage des flux ─────────────────────────────────────────
 
     def _seed_feeds(self) -> None:
-        """Crée les flux d'environnement, puis la liste par défaut si vide.
+        """Installe la liste par défaut si la table est vide.
 
         Ne s'exécute qu'avec une table vide : supprimer tous ses flux est une
         décision, pas un état à corriger au redémarrage suivant.
         """
         from modules.plugins.rss.models import RSSFeed
-
-        for feed_cfg in getattr(settings, "RSS_FEEDS", []) or []:
-            url = (feed_cfg or {}).get("url", "")
-            if not url or RSSFeed.objects.filter(url=url).exists():
-                continue
-            RSSFeed.objects.create(
-                name=feed_cfg.get("name") or url,
-                url=url,
-                category=feed_cfg.get("category", ""),
-            )
-            self.logger.info("Flux repris de l'environnement : %s", url)
 
         if RSSFeed.objects.exists():
             return
