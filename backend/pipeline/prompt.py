@@ -122,14 +122,26 @@ def format_conversation(
     message: str,
     conversation_history: list[dict] | None = None,
 ) -> str:
-    """Format conversation history + current message into a single prompt string."""
+    """Format conversation history + current message into a single prompt string.
+
+    Un tour porte un ``speaker`` quand il a ete dit par quelqu'un d'autre que
+    l'interlocuteur du tour courant (pose par
+    ``context._label_history_speakers``). Le tampon court terme est partage
+    par tout le monde — c'est la premisse « quelqu'un dans une piece entend ce
+    qui s'y dit » — mais rendre chaque ligne « User: » rendait la phrase
+    d'Alice indiscernable de celle que Thomas vient d'ecrire : le modele
+    l'attribuait a son interlocuteur et pouvait y repondre. Le nom n'est paye
+    en tokens qu'au changement de locuteur.
+    """
     full_prompt = ""
     if conversation_history:
         for msg in conversation_history:
             role = msg["role"]
             content = msg["content"]
             if role == "user":
-                full_prompt += f"User: {content}\n\n"
+                speaker = msg.get("speaker") or ""
+                label = f"User ({speaker})" if speaker else "User"
+                full_prompt += f"{label}: {content}\n\n"
             elif role == "assistant":
                 full_prompt += f"Assistant: {content}\n\n"
     full_prompt += f"User: {message}"
