@@ -16,11 +16,36 @@ from __future__ import annotations
 import base64
 import hashlib
 import logging
+import os
 from functools import lru_cache
 
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
+
+from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
+
+# Un seul endroit nomme la variable : la clé n'était lue que comme attribut
+# de settings, qu'aucun module ne déclarait — le `getattr` renvoyait donc
+# toujours "" et le chemin PBKDF2 était le seul jamais emprunté. Une
+# déclaration manquante ailleurs ne doit plus pouvoir la rendre inerte.
+ENV_KEY_NAME = "CONFIG_ENCRYPTION_KEY"
+
+
+def _cle_declaree() -> str:
+    """Clé fournie par l'opérateur, ou ``""`` si elle n'est pas configurée.
+
+    Lue dans l'environnement plutôt que dans le registre de configuration :
+    c'est précisément ce registre qu'elle déchiffre. ``settings`` est
+    interrogé d'abord — il reste le point de surcharge d'un test — mais
+    l'environnement fait autorité, ``config/settings.py`` chargeant le
+    ``.env`` dans ``os.environ`` au démarrage.
+    """
+    raw = getattr(settings, ENV_KEY_NAME, "") or os.environ.get(ENV_KEY_NAME, "") or ""
+    if isinstance(raw, bytes):
+        raw = raw.decode("ascii", "ignore")
+    return raw.strip()
 
 
 @lru_cache(maxsize=1)
@@ -33,15 +58,43 @@ def _fernet():
         )
         return None
 
-    raw = getattr(settings, "CONFIG_ENCRYPTION_KEY", "") or ""
-    if raw:
-        key = raw.encode() if isinstance(raw, str) else raw
-    else:
-        # PBKDF2 from SECRET_KEY — 100k iterations is plenty for this use
-        seed = settings.SECRET_KEY.encode("utf-8")
-        dk = hashlib.pbkdf2_hmac("sha256", seed, b"configs.secrets", 100_000, dklen=32)
-        key = base64.urlsafe_b64encode(dk)
-    return Fernet(key)
+    raw = _cle_declaree()
+    try:
+        if raw:
+            # Encodage compris : un caractère non-ASCII venu d'un copier-coller
+            # doit produire le même message que n'importe quelle autre clé
+            # illisible, pas une trace d'encodage.
+            key = raw.encode("ascii")
+        else:
+            # PBKDF2 from SECRET_KEY — 100k iterations is plenty for this use
+            seed = settings.SECRET_KEY.encode("utf-8")
+            dk = hashlib.pbkdf2_hmac("sha256", seed, b"configs.secrets", 100_000, dklen=32)
+            key = base64.urlsafe_b64encode(dk)
+        return Fernet(key)
+    except Exception as exc:
+        if not raw:
+            raise
+        # Une clé mal formée ne se voit sinon qu'au premier `encrypt`, très
+        # loin de sa cause — et la retirer ne répare rien, les secrets déjà
+        # stockés attendent la vraie clé.
+        raise ImproperlyConfigured(
+            f"{ENV_KEY_NAME} n'est pas une cle Fernet valide : il faut 32 "
+            "octets encodes en base64 url-safe, tels que produits par "
+            "`python -c \"from cryptography.fernet import Fernet; "
+            "print(Fernet.generate_key().decode())\"`. Corrige la variable "
+            "plutot que de la supprimer : les secrets deja enregistres sont "
+            "chiffres avec elle."
+        ) from exc
+
+
+def verifier_cle() -> None:
+    """Construit la Fernet maintenant, au démarrage de l'app ``configs``.
+
+    Sans cet appel, une ``CONFIG_ENCRYPTION_KEY`` mal formée n'échoue qu'au
+    premier chiffrement — c'est-à-dire au premier enregistrement de la
+    configuration, plusieurs écrans après la faute de frappe.
+    """
+    _fernet()
 
 
 def encrypt(plaintext: str) -> str:
@@ -55,6 +108,30 @@ def encrypt(plaintext: str) -> str:
     return f.encrypt(str(plaintext).encode("utf-8")).decode("ascii")
 
 
+# Un token Fernet v1 : octet de version 0x80, 8 octets d'horodatage, un IV
+# de 16, au moins un bloc AES et un HMAC-SHA256 de 32 — soit 73 octets au
+# minimum, en base64 url-safe.
+_FERNET_VERSION = 0x80
+_FERNET_MIN_LEN = 73
+
+
+def _ressemble_a_un_token(token: str) -> bool:
+    """La valeur stockée a-t-elle la *forme* d'un token Fernet ?
+
+    Fernet lève le même ``InvalidToken`` pour « ce n'était pas chiffré » et
+    pour « la clé ne correspond pas », alors que les deux ne disent pas du
+    tout la même chose : le premier est une valeur en clair héritée d'une
+    installation antérieure au chiffrement, le second veut dire que tous les
+    secrets viennent de devenir illisibles. La structure du token les sépare
+    sans passer par la vérification HMAC, qui échoue dans les deux cas.
+    """
+    try:
+        brut = base64.urlsafe_b64decode(token.encode("ascii"))
+    except Exception:
+        return False
+    return len(brut) >= _FERNET_MIN_LEN and brut[0] == _FERNET_VERSION
+
+
 def decrypt(token: str) -> str:
     if token is None:
         return None
@@ -63,10 +140,21 @@ def decrypt(token: str) -> str:
         return token
     try:
         return f.decrypt(token.encode("ascii")).decode("utf-8")
-    except Exception:
-        # The stored value wasn't a valid Fernet token — either a
-        # legacy plaintext from a dev setup, or SECRET_KEY rotated.
-        logger.warning("Secret decrypt failed — returning raw value")
+    except Exception as exc:
+        if _ressemble_a_un_token(token):
+            # Chiffré, mais pas avec cette clé : SECRET_KEY a tourné sans
+            # CONFIG_ENCRYPTION_KEY pour l'en découpler. Rendre le chiffré
+            # tel quel reste le seul repli possible, mais il ne doit pas
+            # être muet : c'est lui qui fait répondre 401 au provider sans
+            # que rien, dans l'interface, n'accuse le déchiffrement.
+            degradations.record(
+                "configs: dechiffrement (cle non concordante)",
+                exc,
+                level=logging.ERROR,
+            )
+        else:
+            # Valeur enregistrée en clair : rien d'anormal à signaler.
+            logger.debug("Secret non chiffre — valeur retournee telle quelle")
         return token
 
 

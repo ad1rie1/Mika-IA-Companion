@@ -589,6 +589,7 @@ Guarded by tests: no `ConfigItem` declares an `env_fallback`, no `settings.py` c
 |----------|---------|-------------|
 | `DEBUG` | `True` | Django debug mode |
 | `DJANGO_SECRET_KEY` | `dev-secret-change-me` | Session/CSRF signing key |
+| `CONFIG_ENCRYPTION_KEY` | derived from `DJANGO_SECRET_KEY` | Fernet key (32 base64-urlsafe bytes) encrypting every `sensitive` config value. Read straight from `os.environ` by [configs/secrets.py](backend/configs/secrets.py), **not** through `settings` — it was declared nowhere, so the `getattr` always read `""` and the PBKDF2-on-`SECRET_KEY` path was the only one ever taken: on a default install the at-rest encryption reduced to a documented derivation of `dev-secret-change-me`. Set it to decouple the two, so rotating `DJANGO_SECRET_KEY` (ordinary session hygiene) doesn't make every stored secret undecryptable. A malformed value is refused at startup by `ConfigsConfig.ready()` rather than at the first `encrypt` |
 | `API_HOST` | `127.0.0.1` | Bind address. Loopback by default — the dashboard reads conversations and edits provider keys |
 | `API_PORT` | `8000` | Backend port |
 | `ALLOWED_HOSTS` | loopback names | Host-header allow-list. Not `*`; adds the machine's hostname/IP when `API_HOST` is not loopback |

@@ -11,3 +11,9 @@ class ConfigsConfig(AppConfig):
         # are registered later by ModuleManager when modules boot.
         from configs.registry import registry
         registry.autodiscover()
+
+        # Valide CONFIG_ENCRYPTION_KEY tant que la cause est encore lisible :
+        # sinon une clé mal formée n'échoue qu'au premier chiffrement, dans
+        # l'enregistrement d'un formulaire de configuration.
+        from configs import secrets
+        secrets.verifier_cle()
