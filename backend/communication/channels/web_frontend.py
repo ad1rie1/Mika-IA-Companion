@@ -33,6 +33,13 @@ MAX_MESSAGE_LENGTH = 2000
 MAX_PERSON_ID_LENGTH = 64
 MAX_CLIENT_MSG_ID_LENGTH = 64
 
+# Combien de pièces jointes écartées l'accusé peut nommer. Sans plafond,
+# cent entrées vides dans `attachments` — un frame minuscule — reviendraient
+# en cent noms de 80 caractères : l'accusé deviendrait lui-même un
+# amplificateur. Au-delà de MAX_ATTACHMENTS retenues, dix noms couvrent
+# largement un envoi légitime.
+MAX_REJECTED_REPORTED = 10
+
 # person_id prefixes owned by trusted server-side channels — a browser client
 # must not be able to impersonate them (they index per-person mood + memory).
 # "user_" is reserved for backend-authenticated identities.
@@ -376,11 +383,13 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
         # into the pipeline: the model was handed "User: " and answered
         # nothing, while the sender had been told "accepted" and never
         # learned their files had been dropped.
-        attachments = (
-            validate_attachments(raw_attachments) if has_attachments else None
+        attachments, rejected = (
+            validate_attachments(raw_attachments) if has_attachments else ([], [])
         )
         if has_attachments and not attachments and not clean_message:
-            await self._send_ack(client_msg_id, "attachments_rejected")
+            await self._send_ack(
+                client_msg_id, "attachments_rejected", rejected=rejected,
+            )
             return
 
         # The identity layer needs to know this turn arrived on a verified
@@ -426,6 +435,7 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
         accepted = turn_queue.submit(perception)
         await self._send_ack(
             client_msg_id, "accepted" if accepted else "overloaded",
+            rejected=rejected,
         )
 
     async def _handle_identify(self, data: dict) -> None:
@@ -503,19 +513,37 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
                 getattr(self, "person_id", "?"), exc_info=True,
             )
 
-    async def _send_ack(self, client_msg_id: str | None, status: str) -> None:
+    async def _send_ack(
+        self,
+        client_msg_id: str | None,
+        status: str,
+        *,
+        rejected: list | None = None,
+    ) -> None:
         """Tell the client what became of the frame it just sent.
 
         Skipped entirely when the client did not label its message: an ack
         with nothing to match it against is noise on the wire.
+
+        ``rejected`` nomme les pièces jointes écartées par la validation, y
+        compris sur un ``accepted`` : dès qu'il reste une légende ou un seul
+        fichier valide, le tour part et le statut à lui seul laissait croire
+        que tout était passé. Deux images décrites, la troisième nulle part,
+        et les deux côtés se croyant d'accord.
         """
         if not client_msg_id:
             return
-        await self._send_frame({
+        payload = {
             "type": "ack",
             "client_msg_id": client_msg_id,
             "status": status,
-        })
+        }
+        if rejected:
+            payload["rejected_attachments"] = [
+                {"name": r.name, "reason": r.reason}
+                for r in rejected[:MAX_REJECTED_REPORTED]
+            ]
+        await self._send_frame(payload)
 
     async def _send_initial_state(self) -> None:
         """Hand over the thread and the current mood, once per connection.
