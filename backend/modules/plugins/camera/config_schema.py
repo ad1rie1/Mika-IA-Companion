@@ -9,7 +9,7 @@ les 30 s (2 880 par jour et par device), et chaque verdict « notable » ouvrait
 un tour de pipeline complet sans le moindre délai de garde — là où la Forge
 borne son équivalent (``forge.notify_cooldown_s``).
 
-Trois questions distinctes, donc trois groupes :
+Cinq questions distinctes, donc cinq groupes :
 
 - **Analyse proactive** — est-ce qu'elle regarde d'elle-même, à quelle cadence,
   et jusqu'à quand après la dernière interaction. L'interrupteur est séparé de
@@ -24,6 +24,10 @@ Trois questions distinctes, donc trois groupes :
   ``--- CONTEXTE MODULES ---`` à chaque tour pendant dix minutes, et un
   changement notable ouvre un tour complet. Un device n'a pas de session
   Django, d'où un jeton plutôt que la session du consumer principal.
+- **Appel vision** — combien de temps on attend le modèle. Aucun délai n'existe
+  en aval : ni ``AIRouter.complete()`` ni les providers n'en posent sur la
+  génération. Sans borne ici, un fournisseur qui ne rend jamais la main laisse
+  ``analysis_pending`` à True pour la durée du processus.
 """
 from __future__ import annotations
 
@@ -126,6 +130,22 @@ CONFIG_SCHEMA = [
             "plancher est bien plus court que l'intervalle d'analyse — mais il "
             "existe : rien n'empêchait le modèle d'enchaîner les appels vision "
             "dans une même boucle d'outils. 0 : aucune limite."
+        ),
+    ),
+
+    # ── Appel vision ───────────────────────────────────────────────────
+    ConfigItem(
+        key="camera.vision_timeout_seconds", type="int", section="module_camera",
+        group="Appel vision", label="Délai maximum d'une analyse vision (s)",
+        default=60, min=5, max=300, hot_reload=True,
+        description=(
+            "Au-delà, l'analyse est abandonnée et le device redevient "
+            "analysable au tour suivant. Sans cette borne, un fournisseur qui "
+            "ne rend jamais la main laisse la caméra muette jusqu'au "
+            "redémarrage. La bonne valeur dépend entièrement du modèle câblé "
+            "sur VISION_CAPTION : une API hébergée répond en quelques "
+            "secondes, un Ollama local à qui l'on donne une frame de webcam "
+            "peut mettre plusieurs minutes."
         ),
     ),
 ]
