@@ -185,6 +185,16 @@ export interface HistoryMessage {
 }
 
 /**
+ * Une pièce jointe que la validation serveur a écartée
+ * (backend/pipeline/media.py::RejectedAttachment).
+ */
+export interface RejectedAttachment {
+  name: string;
+  /** `too_large` | `too_many` | `invalid` — libellé français dans chatSync. */
+  reason: string;
+}
+
+/**
  * What became of a frame the client sent. Emitted before the pipeline runs:
  * "the server has it" and "she answered" are different facts, and treating
  * them as one is what made a queued message look delivered.
@@ -192,6 +202,13 @@ export interface HistoryMessage {
 export interface AckMessage {
   type: "ack";
   client_msg_id: string;
+  /**
+   * Ce qui n'est pas passé, présent y compris sur un `accepted` : dès qu'il
+   * reste une légende ou un fichier valide, le tour part avec ce qui reste.
+   * Sans ce champ, l'expéditeur croit avoir envoyé trois captures et Mika
+   * répond sur deux en les croyant toutes.
+   */
+  rejected_attachments?: RejectedAttachment[];
   /**
    * Anything other than `accepted` means no reply is ever coming. The list
    * must stay in step with the consumer (`_send_ack` call sites in

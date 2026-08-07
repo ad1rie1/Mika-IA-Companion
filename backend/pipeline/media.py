@@ -1,7 +1,7 @@
 """Media attachment processing — validation, sauvegarde disque + BDD.
 
 Flux :
-  1. validate_attachments(raw_list)  → list[MediaAttachment]   (parse + garde-fous)
+  1. validate_attachments(raw_list)  → (retenues, écartées)      (parse + garde-fous)
   2. save_attachments(validated, person_id)  → list[UploadedFile]  (disque + BDD + module)
 
 Catégories :
@@ -70,6 +70,22 @@ class MediaAttachment:
         return len(self.data) * 3 // 4
 
 
+@dataclass
+class RejectedAttachment:
+    """Pièce jointe écartée à la validation — nom + raison, pour l'accusé.
+
+    La validation ne retournait que les survivants : au-delà de
+    MAX_ATTACHMENTS ou de MAX_FILE_SIZE_BYTES, un fichier disparaissait dans
+    un `logger.warning` et n'existait plus nulle part — ni dans
+    `attachments_meta`, ni dans l'historique, ni dans l'accusé. L'expéditeur
+    recevait `accepted` pour un envoi partiel et croyait avoir transmis ce
+    que Mika n'a jamais vu. C'est la même divergence que le message tronqué
+    en silence, refusée au même titre.
+    """
+    name: str
+    reason: str  # too_many | too_large | invalid
+
+
 def _categorize(media_type: str) -> str:
     if media_type in ALLOWED_IMAGE_TYPES:
         return "image"
@@ -110,23 +126,46 @@ def _ext_for(media_type: str, original_name: str) -> str:
     return suffix if suffix else ".bin"
 
 
-def validate_attachments(raw_list: list) -> list[MediaAttachment]:
-    """Parse et valide les pièces jointes du message WebSocket."""
+def _raw_name(raw) -> str:
+    """Nom déclaré par l'émetteur, assaini — il repart dans l'accusé."""
+    declared = raw.get("name", "fichier") if isinstance(raw, dict) else "fichier"
+    return sanitize_filename(declared)
+
+
+def validate_attachments(
+    raw_list: list,
+) -> tuple[list[MediaAttachment], list[RejectedAttachment]]:
+    """Parse et valide les pièces jointes du message WebSocket.
+
+    Retourne (retenues, écartées). Les écartées sont nommées et non
+    seulement journalisées : c'est la seule chose qui permet au canal de
+    dire à l'expéditeur ce qui n'est pas passé (cf. RejectedAttachment).
+    """
     if not raw_list or not isinstance(raw_list, list):
-        return []
-    result = []
+        return [], []
+    result: list[MediaAttachment] = []
+    rejected: list[RejectedAttachment] = []
     for raw in raw_list[:MAX_ATTACHMENTS]:
         if not isinstance(raw, dict):
+            rejected.append(RejectedAttachment(name="fichier", reason="invalid"))
             continue
         try:
             att = MediaAttachment.from_ws_dict(raw)
             if att.size_bytes() > MAX_FILE_SIZE_BYTES:
                 logger.warning("Pièce jointe ignorée (trop grande) : %s (%d o)", att.name, att.size_bytes())
+                rejected.append(
+                    RejectedAttachment(name=sanitize_filename(att.name), reason="too_large")
+                )
                 continue
             result.append(att)
         except Exception:
             logger.warning("Pièce jointe invalide ignorée", exc_info=True)
-    return result
+            rejected.append(RejectedAttachment(name=_raw_name(raw), reason="invalid"))
+    # Le surplus au-delà du plafond : `raw_list[:MAX_ATTACHMENTS]` le coupait
+    # sans que personne ne l'apprenne.
+    for raw in raw_list[MAX_ATTACHMENTS:]:
+        rejected.append(RejectedAttachment(name=_raw_name(raw), reason="too_many"))
+    return result, rejected
 
 
 async def save_attachments(

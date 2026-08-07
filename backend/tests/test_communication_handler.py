@@ -139,7 +139,7 @@ class TestWebSocketReceive:
             web_frontend.turn_queue, "submit", return_value=True,
         ) as mock_perceive, patch(
             "communication.channels.web_frontend.validate_attachments",
-            side_effect=lambda x: x,
+            side_effect=lambda x: (x, []),
         ):
             await c.receive(text_data=data)
         perception = mock_perceive.call_args[0][0]
