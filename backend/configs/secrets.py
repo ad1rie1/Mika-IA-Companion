@@ -22,6 +22,8 @@ from functools import lru_cache
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
+from utils.degradation import degradations
+
 logger = logging.getLogger(__name__)
 
 # Un seul endroit nomme la variable : la clé n'était lue que comme attribut
@@ -103,6 +105,30 @@ def encrypt(plaintext: str) -> str:
     return f.encrypt(str(plaintext).encode("utf-8")).decode("ascii")
 
 
+# Un token Fernet v1 : octet de version 0x80, 8 octets d'horodatage, un IV
+# de 16, au moins un bloc AES et un HMAC-SHA256 de 32 — soit 73 octets au
+# minimum, en base64 url-safe.
+_FERNET_VERSION = 0x80
+_FERNET_MIN_LEN = 73
+
+
+def _ressemble_a_un_token(token: str) -> bool:
+    """La valeur stockée a-t-elle la *forme* d'un token Fernet ?
+
+    Fernet lève le même ``InvalidToken`` pour « ce n'était pas chiffré » et
+    pour « la clé ne correspond pas », alors que les deux ne disent pas du
+    tout la même chose : le premier est une valeur en clair héritée d'une
+    installation antérieure au chiffrement, le second veut dire que tous les
+    secrets viennent de devenir illisibles. La structure du token les sépare
+    sans passer par la vérification HMAC, qui échoue dans les deux cas.
+    """
+    try:
+        brut = base64.urlsafe_b64decode(token.encode("ascii"))
+    except Exception:
+        return False
+    return len(brut) >= _FERNET_MIN_LEN and brut[0] == _FERNET_VERSION
+
+
 def decrypt(token: str) -> str:
     if token is None:
         return None
@@ -111,10 +137,21 @@ def decrypt(token: str) -> str:
         return token
     try:
         return f.decrypt(token.encode("ascii")).decode("utf-8")
-    except Exception:
-        # The stored value wasn't a valid Fernet token — either a
-        # legacy plaintext from a dev setup, or SECRET_KEY rotated.
-        logger.warning("Secret decrypt failed — returning raw value")
+    except Exception as exc:
+        if _ressemble_a_un_token(token):
+            # Chiffré, mais pas avec cette clé : SECRET_KEY a tourné sans
+            # CONFIG_ENCRYPTION_KEY pour l'en découpler. Rendre le chiffré
+            # tel quel reste le seul repli possible, mais il ne doit pas
+            # être muet : c'est lui qui fait répondre 401 au provider sans
+            # que rien, dans l'interface, n'accuse le déchiffrement.
+            degradations.record(
+                "configs: dechiffrement (cle non concordante)",
+                exc,
+                level=logging.ERROR,
+            )
+        else:
+            # Valeur enregistrée en clair : rien d'anormal à signaler.
+            logger.debug("Secret non chiffre — valeur retournee telle quelle")
         return token
 
 
