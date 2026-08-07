@@ -118,21 +118,28 @@ class ConfigService:
             self._cache[key] = value
         return value
 
-    def _resolve(self, key: str, item: ConfigItem | None) -> Any:
+    def _resolve(self, key: str, item: ConfigItem | None,
+                 *, with_origin: bool = False) -> Any:
+        """Valeur effective. ``with_origin`` renvoie ``(valeur, ligne_existe)``.
+
+        Le drapeau distingue « enregistré à cette valeur » de « laissé au
+        défaut du schéma » : les deux lisent la même valeur, et seule
+        l'existence d'une ligne ``ConfigValue`` épingle le réglage contre une
+        évolution future du défaut.
+        """
         # 1. DB value (seeded from .env on first boot, see seed_from_env())
         row = db_read(_fetch_value_row, key)
         if row is not None:
             raw = row.value_json
             if row.encrypted and raw is not None:
                 raw = secrets.decrypt(raw)
-            return raw
+            return (raw, True) if with_origin else raw
 
         # 2. schema default — ``env_fallback`` is never consulted at
         # runtime, only during ``seed_from_env()`` to materialise an
         # initial ConfigValue row on an empty database.
-        if item is not None:
-            return item.default
-        return _UNSET
+        value = item.default if item is not None else _UNSET
+        return (value, False) if with_origin else value
 
     def snapshot(self) -> dict[str, Any]:
         """Effective value for every declared key (scalars only)."""
@@ -175,7 +182,22 @@ class ConfigService:
         _validate(item, coerced)
 
         from configs.models import ConfigValue, ConfigChangeLog
-        before = self._resolve(key, item)
+        before, deja_enregistre = self._resolve(key, item, with_origin=True)
+
+        # Rien n'a bougé : ni écriture, ni ligne de journal, ni réveil des
+        # abonnés. Enregistrer une section soumet *tous* les champs qui
+        # étaient à l'écran, donc sans ce court-circuit déplacer un seul
+        # curseur d'« IA · Providers » évinçait les douze instances de
+        # providers en cache et ajoutait onze lignes de journal où
+        # ``before == after`` — dans la table même qu'on ouvre pour
+        # répondre à « qu'est-ce que j'ai changé ».
+        #
+        # La ligne doit *déjà* exister : soumettre explicitement la valeur
+        # du schéma la matérialise, et c'est ce qui épingle le réglage
+        # contre une évolution future du défaut — la distinction que
+        # ``BoundField.is_default`` affiche.
+        if deja_enregistre and before == coerced:
+            return coerced
 
         stored = coerced
         encrypted = False
