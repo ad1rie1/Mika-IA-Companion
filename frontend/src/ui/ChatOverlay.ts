@@ -1,5 +1,5 @@
 import { WebSocketClient } from "../network/WebSocketClient";
-import type { HistoryEntry } from "../types";
+import type { HistoryEntry, RejectedAttachment } from "../types";
 import {
   applyAck,
   bindServerId,
@@ -285,7 +285,7 @@ export class ChatOverlay {
     });
 
     this.ws.on("ack", (data) => {
-      this.applyAck(data.client_msg_id, data.status);
+      this.applyAck(data.client_msg_id, data.status, data.rejected_attachments);
     });
 
     this.ws.on("history", (data) => {
@@ -324,8 +324,12 @@ export class ChatOverlay {
   // ── Synchronisation ───────────────────────────────────────────────
 
   /** Record what the server said became of a message we sent. */
-  private applyAck(cid: string, status: string) {
-    const { changed, failed } = applyAck(this.history, cid, status);
+  private applyAck(
+    cid: string,
+    status: string,
+    rejected?: RejectedAttachment[]
+  ) {
+    const { changed, failed } = applyAck(this.history, cid, status, rejected);
     if (!changed) return;
     // A refused message is never answered, so the typing indicator has to go
     // with it — otherwise it spins until its own timeout and reads as "she
@@ -594,6 +598,15 @@ export class ChatOverlay {
 
     for (const msg of this.history) {
       this.insertBeforeTyping(this.buildBubble(msg, opts.animate));
+      // Ce que le serveur a écarté de cet envoi. Sous la bulle plutôt que
+      // dans son infobulle : l'envoi a été *accepté*, donc rien dans son
+      // apparence ne le distingue d'un envoi complet.
+      if (msg.note) {
+        const note = document.createElement("div");
+        note.className = "chat-note";
+        note.textContent = msg.note;
+        this.insertBeforeTyping(note);
+      }
     }
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
   }

@@ -15,7 +15,7 @@
  * while the database held both.
  */
 
-import type { HistoryEntry } from "../types";
+import type { HistoryEntry, RejectedAttachment } from "../types";
 
 /**
  * What happened to a message the user sent.
@@ -54,6 +54,14 @@ export interface StoredMessage {
   /** Why a message failed, in French, for the bubble's tooltip. */
   reason?: string;
   /**
+   * Ce que le serveur a écarté de cet envoi, en français, affiché sous la
+   * bulle. Un envoi partiel est *accepté* — le tour part avec ce qui reste —
+   * donc ni le statut ni le motif d'échec ne peuvent le porter, et une
+   * infobulle ne se survole pas : le fichier que Mika n'a jamais reçu doit
+   * se voir.
+   */
+  note?: string;
+  /**
    * Where a message that will *never* get a server id belongs in the order.
    *
    * A project report is shown in the thread but is not a `Message` row, so
@@ -88,6 +96,21 @@ const ACK_REASONS: Record<string, string> = {
 /** French wording for a refusal status, for display. */
 export function ackReason(status: string): string {
   return ACK_REASONS[status] ?? "refusé par le serveur";
+}
+
+/** Pourquoi une pièce jointe n'est pas passée (backend/pipeline/media.py). */
+const REJECT_REASONS: Record<string, string> = {
+  too_large: "trop volumineux",
+  too_many: "au-delà de la limite de pièces jointes",
+  invalid: "illisible",
+};
+
+/** Ce qui n'a pas été transmis, en français, pour la note sous la bulle. */
+export function rejectedNote(rejected: RejectedAttachment[]): string {
+  const noms = rejected
+    .map((r) => `${r.name} (${REJECT_REASONS[r.reason] ?? "refusé"})`)
+    .join(", ");
+  return `Non transmis à Mika : ${noms}`;
 }
 
 let cidCounter = 0;
@@ -174,13 +197,17 @@ export function coerceStatus(raw: unknown): MessageStatus | undefined {
 export function applyAck(
   history: StoredMessage[],
   cid: string,
-  status: string
+  status: string,
+  rejected?: RejectedAttachment[]
 ): { changed: boolean; failed: boolean } {
   const msg = history.find((m) => m.cid === cid);
   if (!msg) return { changed: false, failed: false };
   const failed = status !== "accepted";
   msg.status = failed ? "failed" : "sent";
   msg.reason = failed ? ackReason(status) : undefined;
+  // Un envoi partiel repart avec le statut `accepted` : sans cette note, la
+  // bulle affiche trois fichiers dont un que Mika n'a jamais reçu.
+  msg.note = rejected?.length ? rejectedNote(rejected) : undefined;
   return { changed: true, failed };
 }
 
