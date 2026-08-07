@@ -93,6 +93,12 @@ POLICIES: tuple[Policy, ...] = (
            keep_rows=5_000,
            protect={"emails_received__gt": 0},
            note="adresses croisees sans echange"),
+    # Une ligne par ecriture de reglage, jamais relue au-dela du panneau
+    # « Journal de configuration » qui n'en montre qu'une page. C'etait la
+    # seule table append-only de la configuration a n'avoir aucun plafond.
+    # Genereux : c'est la trace de qui a change quoi, pas un cache.
+    Policy("configs", "ConfigChangeLog", keep_days=365, keep_rows=20_000,
+           note="journal des ecritures de configuration"),
 )
 
 
