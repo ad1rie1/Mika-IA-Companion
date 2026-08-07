@@ -59,7 +59,6 @@ class ManifestView:
     key: str
     label: str
     icon: str = "▦"
-    id_field: str = "id"
     order: int = 100
 
 
@@ -160,7 +159,6 @@ def validate_manifest(data: dict, name: str) -> tuple[ForgeManifest | None, list
                 key=key,
                 label=str(v.get("label") or key)[:48],
                 icon=str(v.get("icon") or "▦")[:2],
-                id_field=str(v.get("id_field") or "id")[:32],
                 order=int(v.get("order") or 100),
             ))
 

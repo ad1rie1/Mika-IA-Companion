@@ -26,7 +26,6 @@ CONTRAT DU CODE (module.py) — fonctions top-level optionnelles, toutes synchro
   def on_event(api, event): ...         # event = {type, source, data} selon 'events'
   def get_context(api): return "..."    # injecté dans ton propre prompt (si context=true)
   def view_<key>(api, params): return {"columns": [{"key":..,"label":..}], "rows": [...]}
-  def view_<key>_detail(api, item_id): return {"fields": [{"label":..,"value":..}]}
 
 L'objet api: api.storage.set/get/delete/find/keys/count/clear(collection, ...) (BDD clé-valeur JSON, quotas),
 api.config.get(key) / api.config.rows(key) (valeurs éditées par l'utilisateur dans le dashboard),
@@ -239,8 +238,8 @@ def build_tools(host) -> list[ModuleTool]:
                 ),
                 ToolParameter(
                     name="views", type=ToolParameterType.ARRAY,
-                    description="Pages dashboard: [{key, label, icon?, "
-                                "id_field?}] — chaque key exige une fonction "
+                    description="Pages dashboard: [{key, label, icon?}] — "
+                                "chaque key exige une fonction "
                                 "view_<key>(api, params) dans le code",
                     required=False,
                 ),
@@ -317,8 +316,7 @@ def build_tools(host) -> list[ModuleTool]:
                 ToolParameter(
                     name="payload", type=ToolParameterType.STRING,
                     description="JSON optionnel: data de l'événement pour "
-                                "on_event, params pour view_*, "
-                                "{\"item_id\": ...} pour view_*_detail",
+                                "on_event, params pour view_*",
                     required=False,
                 ),
             ],

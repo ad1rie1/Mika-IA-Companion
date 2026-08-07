@@ -58,23 +58,6 @@ def _make_data_handler(host, module_name: str, view_key: str):
     return handler
 
 
-def _make_detail_handler(host, module_name: str, view_key: str):
-    async def handler(request, item_id: str):
-        lm = host._loaded.get(module_name)
-        if lm is None:
-            return {"error": f"module forgé '{module_name}' non chargé"}
-        ok, result, error = await host._run_handler(
-            lm, f"view_{view_key}_detail", (str(item_id)[:256],),
-            source="view", count_failure=False,
-        )
-        if not ok:
-            return {"error": error}
-        if result is None:
-            return None
-        return _normalize_view_result(result)
-    return handler
-
-
 def _normalize_view_result(result):
     if not isinstance(result, dict):
         result = {"value": result}
