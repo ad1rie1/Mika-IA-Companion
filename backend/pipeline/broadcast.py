@@ -230,8 +230,13 @@ async def _deliver_via_module(target, output, source: str = "") -> bool:
 
     try:
         return await channel.deliver(output, target)
-    except Exception:
+    except Exception as exc:
+        # Un canal push n'a pas de rattrapage par curseur : contrairement au
+        # frontend, personne ne redemandera ce message. Un envoi qui echoue le
+        # perd definitivement, donc il se compte au lieu de finir dans un log
+        # que personne ne suit.
         logger.exception("Channel '%s' deliver() failed", target.channel)
+        degradations.record("broadcast: channel delivery", exc)
         return False
 
 

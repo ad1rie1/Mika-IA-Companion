@@ -50,6 +50,7 @@ class LifespanWrapper:
         from emotion.sync import emotion_sync
         from memory.sleep import sleep_cycle
         from projects.runner import project_runner
+        from utils.degradation import degradations
 
         # Hydrate the quota tracker from DB so counters survive restart.
         try:
@@ -65,18 +66,9 @@ class LifespanWrapper:
         # submit to it, and before the sockets are served: a turn queued by a
         # connection arriving during startup must find a worker, not a
         # lazily-created one racing the lifespan.
-        from pipeline.turns import resume_interrupted_turns, turn_queue
+        from pipeline.turns import turn_queue
 
         await turn_queue.start()
-
-        # Questions written down but never answered — the process died
-        # mid-turn. Put them back before opening for business, so someone
-        # who was mid-conversation when the server went down gets their
-        # answer instead of silence.
-        try:
-            await resume_interrupted_turns()
-        except Exception:
-            logger.exception("Could not resume interrupted turns")
 
         await emotion_engine.initialize()
         logger.info("Emotion engine initialized")
@@ -92,8 +84,13 @@ class LifespanWrapper:
         try:
             restored = await identity_resolver.restore_module_presence()
             logger.info("Presence restored for %d durable handle(s)", restored)
-        except Exception:
+        except Exception as exc:
+            # Comptee, pas seulement journalisee : quand cette remontee echoue,
+            # le routage par concernement continue de declarer joignable tout
+            # handle module et la livraison ne trouve plus personne — chaque
+            # message proactif de ce run est perdu, et rien d'autre ne le dit.
             logger.exception("Could not restore durable module presence")
+            degradations.record("presence: durable handle restore", exc)
 
         await conscience_engine.initialize()
         module_manager.set_conscience(conscience_engine.observe)
@@ -121,6 +118,23 @@ class LifespanWrapper:
             await telegram_channel.start()
         except Exception:
             logger.exception("Telegram channel failed to start")
+
+        # Les questions ecrites mais jamais repondues — le processus est mort
+        # en plein tour. Remises en file *en dernier*, deliberement : ``submit``
+        # ne bloque pas, donc un tour rejoue plus tot courait contre la fin du
+        # demarrage. Sur un canal push comme Telegram, sa reponse partait alors
+        # vers une presence pas encore remontee ou vers un canal que
+        # ``communication.delivery.get_channel`` ne connait qu'apres
+        # ``telegram_channel.start()`` — abandonnee pour de bon, Telegram
+        # n'ayant aucun rattrapage par curseur. On reste malgre tout avant
+        # l'ouverture au public : rien n'est servi tant que ``_startup`` n'a
+        # pas rendu la main.
+        from pipeline.turns import resume_interrupted_turns
+
+        try:
+            await resume_interrupted_turns()
+        except Exception:
+            logger.exception("Could not resume interrupted turns")
 
     async def _shutdown(self):
         from communication.channels import telegram_channel
