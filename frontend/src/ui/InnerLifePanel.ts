@@ -23,6 +23,7 @@ import type {
   ProjectSummary,
   SleepPhase,
 } from "../types";
+import { emotionFr } from "../types";
 import { postJson } from "../network/api";
 
 const PHASE_META: Record<
@@ -194,16 +195,16 @@ export class InnerLifePanel {
     const primary = blend[0];
     if (blend.length === 1 || (blend[1] && blend[1].weight < primary.weight * 0.4)) {
       this.blendEl.innerHTML =
-        `<span class="il-emotion-primary">${escapeHtml(primary.emotion)}</span> ` +
+        `<span class="il-emotion-primary">${escapeHtml(emotionFr(primary.emotion))}</span> ` +
         `<span class="il-weight">(${Math.round(primary.weight * 100)}%)</span>`;
       return;
     }
     const secondary = blend[1];
     this.blendEl.innerHTML =
-      `<span class="il-emotion-primary">${escapeHtml(primary.emotion)}</span> ` +
+      `<span class="il-emotion-primary">${escapeHtml(emotionFr(primary.emotion))}</span> ` +
       `<span class="il-weight">(${Math.round(primary.weight * 100)}%)</span>` +
       `<span class="il-ambivalence"> mais aussi </span>` +
-      `<span class="il-emotion-secondary">${escapeHtml(secondary.emotion)}</span> ` +
+      `<span class="il-emotion-secondary">${escapeHtml(emotionFr(secondary.emotion))}</span> ` +
       `<span class="il-weight">(${Math.round(secondary.weight * 100)}%)</span>`;
   }
 
@@ -450,7 +451,7 @@ export class InnerLifePanel {
       ? `<span class="il-dream-recalled" title="Elle en a parlé">✓ évoqué</span>`
       : "";
     const emotionTag = dream.emotion
-      ? `<span class="il-dream-emotion">${escapeHtml(dream.emotion)}</span>`
+      ? `<span class="il-dream-emotion">${escapeHtml(emotionFr(dream.emotion))}</span>`
       : "";
     this.dreamEl.innerHTML = `
       <div class="il-dream-meta">
@@ -472,7 +473,7 @@ export class InnerLifePanel {
     }
     section.removeAttribute("hidden");
     const emotionTag = journal.dominant_emotion
-      ? `<span class="il-journal-emotion">${escapeHtml(journal.dominant_emotion)}</span>`
+      ? `<span class="il-journal-emotion">${escapeHtml(emotionFr(journal.dominant_emotion))}</span>`
       : "";
     const persons =
       journal.persons_interacted && journal.persons_interacted.length > 0
