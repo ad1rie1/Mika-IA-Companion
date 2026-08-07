@@ -12,6 +12,7 @@ import json
 import logging
 
 from ai.router import AIRole, UnconfiguredRoleError, ai_router
+from utils.degradation import degradations
 from utils.parsing import strip_markdown_json
 from conscience.types import InterpretedSignal
 from modules.types import ModuleEvent
@@ -313,8 +314,11 @@ class SignalInterpreter:
 
         try:
             data = json.loads(text)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
             logger.warning("Interpretation JSON parse failed: %.200s", repr(raw))
+            # L'appel Haiku est paye, mais la pertinence retombe au defaut :
+            # le signal est traite comme s'il n'avait jamais ete interprete.
+            degradations.record("conscience: JSON d'interpretation illisible", exc)
             return self._fallback_signal(event)
 
         return InterpretedSignal(

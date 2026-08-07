@@ -39,6 +39,7 @@ from modules.types import (
     ToolParameterType,
 )
 from utils.degradation import degradations
+from utils.parsing import strip_markdown_json
 
 logger = logging.getLogger(__name__)
 
@@ -476,19 +477,22 @@ class CameraModule(BaseModule):
 
     @staticmethod
     def _parse_observation(raw: str) -> CameraObservation:
-        """Parse la réponse JSON du modèle vision. Robuste aux artefacts."""
+        """Parse la réponse JSON du modèle vision. Robuste aux artefacts.
+
+        La découpe `find("{")` … `rfind("}")` écrite ici était la troisième
+        réponse du dépôt à la même question, robuste au texte de queue mais
+        pas à celui de tête ; `strip_markdown_json` couvre désormais les deux.
+        """
         try:
-            start = raw.find("{")
-            end = raw.rfind("}") + 1
-            if start >= 0 and end > start:
-                data = json.loads(raw[start:end])
-                return CameraObservation(
-                    description=str(data.get("description", raw.strip())),
-                    notable=bool(data.get("notable", False)),
-                    reason=str(data.get("reason", "")),
-                )
+            data = json.loads(strip_markdown_json(raw))
         except json.JSONDecodeError:  # FIX #8 : KeyError impossible avec .get()
-            pass
+            data = None
+        if isinstance(data, dict):
+            return CameraObservation(
+                description=str(data.get("description", raw.strip())),
+                notable=bool(data.get("notable", False)),
+                reason=str(data.get("reason", "")),
+            )
         return CameraObservation(description=raw.strip(), notable=False)
 
     # ── Context injection ──────────────────────────────────────────

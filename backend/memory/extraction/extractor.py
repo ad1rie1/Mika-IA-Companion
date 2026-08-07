@@ -5,6 +5,7 @@ import logging
 from django.conf import settings
 
 from ai.router import AIRole, UnconfiguredRoleError, ai_router
+from utils.degradation import degradations
 from utils.parsing import strip_markdown_json
 
 EXTRACTION_TIMEOUT = 45  # seconds — prevent hanging the consolidation loop
@@ -216,6 +217,9 @@ class MemoryExtractor:
                 "JSON parse failed (role=%s): %s | raw=%.300s",
                 AIRole.MEMORY_EXTRACTION.value, exc, repr(raw),
             )
+            # Un appel deja facture, jete : sans compteur, « l'extraction ne
+            # produit plus rien depuis le deploiement » n'a aucune trace.
+            degradations.record("extraction: JSON de l'extraction illisible", exc)
             return None
 
     async def _query_model(self, user_prompt: str, role: AIRole) -> str | None:

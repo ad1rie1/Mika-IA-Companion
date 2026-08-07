@@ -20,7 +20,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 import time
 from typing import Optional
 
@@ -42,12 +41,6 @@ logger = logging.getLogger(__name__)
 MAX_ADVANCES_PER_TICK = 3         # at most N advances in a single tick
 LLM_TIMEOUT_SECONDS = 90
 RUNS_SINCE_INPUT_CAP = 10         # beyond this, force a pause until user comes back
-
-
-# Regex to locate a JSON block at end of LLM response (fenced or bare).
-# Anchored to the LAST `{` via rfind before use; the regex itself is
-# kept as a defensive fallback for responses with trailing whitespace.
-_JSON_TAIL_RE = re.compile(r"(\{[\s\S]*\})\s*$")
 
 
 class ProjectRunner:
@@ -704,35 +697,19 @@ def _prune_history(project_id: int, keep: int) -> int:
 
 def _extract_json_tail(raw: str) -> Optional[dict]:
     """Pull the final JSON block out of an LLM response. Tolerates fences
-    and trailing text. Returns None if nothing parseable is found."""
+    and trailing text. Returns None if nothing parseable is found.
+
+    L'ancrage sur la derniere accolade ouvrante, ecrit ici parce que le
+    helper partage etait gourmand du premier ``{``, vit desormais dans
+    ``utils.parsing`` : les six autres appelants payaient le defaut.
+    """
     if not raw:
         return None
-    # First, try the cleanest case: whole string is JSON
-    candidate = strip_markdown_json(raw.strip())
     try:
-        return json.loads(candidate)
-    except Exception:
-        pass
-    # Anchor on the LAST opening brace — prose before the final JSON
-    # block (e.g. "Mes {reflexions}... voici: {real json}") would poison
-    # a greedy regex that spans from the first `{`.
-    stripped = raw.strip()
-    last_open = stripped.rfind("{")
-    if last_open != -1:
-        try:
-            return json.loads(stripped[last_open:])
-        except Exception:
-            pass
-    # Defensive fallback on the regex path (rarely useful now that rfind
-    # covers the common case, but harmless and keeps behavior if the
-    # trailing structure looks unusual).
-    m = _JSON_TAIL_RE.search(stripped)
-    if not m:
-        return None
-    try:
-        return json.loads(m.group(1))
+        data = json.loads(strip_markdown_json(raw))
     except Exception:
         return None
+    return data if isinstance(data, dict) else None
 
 
 # Singleton

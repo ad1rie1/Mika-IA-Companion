@@ -26,6 +26,7 @@ from django.db.models import Count, F, Q
 from django.utils import timezone
 
 from ai.router import AIRole, UnconfiguredRoleError, ai_router
+from utils.degradation import degradations
 from utils.parsing import strip_markdown_json
 
 logger = logging.getLogger(__name__)
@@ -289,8 +290,9 @@ class PersonProfileGenerator:
 
         try:
             data = json.loads(strip_markdown_json(raw.strip()))
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
             logger.warning("Profile JSON parse failed for %s: %.200s", pool.entity_name, raw)
+            degradations.record("person profile: JSON du profil illisible", exc)
             return None
 
         return ProfileResult(
