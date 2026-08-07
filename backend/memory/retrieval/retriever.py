@@ -63,10 +63,7 @@ class MemoryRetriever:
         # Take top N after reranking
         souvenirs = souvenirs[:n_souvenirs]
 
-        # Build emotional history block for this person
-        emotional_block = await self._get_emotional_history_block(person_id)
-
-        return self._format_context(connaissances, souvenirs, emotional_block)
+        return self._format_context(connaissances, souvenirs)
 
     def _rerank_souvenirs(
         self, souvenirs: list[dict], person_id: str
@@ -250,7 +247,6 @@ class MemoryRetriever:
         self,
         connaissances: list[dict],
         souvenirs: list[dict],
-        emotional_block: str = "",
     ) -> str:
         """Format memories as a readable text block for the system prompt.
 
@@ -258,12 +254,6 @@ class MemoryRetriever:
         """
         lines = ["--- TES SOUVENIRS ---"]
         current_len = len(lines[0])
-
-        # Emotional history (inserted first, before connaissances)
-        if emotional_block:
-            if current_len + len(emotional_block) < self.MAX_CONTEXT_CHARS:
-                lines.append(emotional_block)
-                current_len += len(emotional_block)
 
         if connaissances:
             lines.append("\n[Ce que tu sais]")
@@ -298,72 +288,14 @@ class MemoryRetriever:
         lines.append("\n--- FIN SOUVENIRS ---")
         return "\n".join(lines)
 
-    async def _get_emotional_history_block(self, person_id: str) -> str:
-        """Build a short French text block describing the emotional history with a person.
-
-        Returns empty string if no data or person is unknown.
-
-        Lit **les résumés du jour uniquement**, via la couche de lecture. Le
-        consolidateur écrit aussi une ligne ``weekly`` par personne, qui est
-        déjà la moyenne pondérée de ses lignes ``daily`` : la ramasser ici
-        comptait la semaine deux fois dans le climat général, évinçait les
-        journées les plus anciennes de la fenêtre de sept lignes, et pouvait
-        présenter l'agrégat hebdomadaire comme le « récemment » (le lundi, les
-        deux types partagent le même ``period_start``).
-        """
-        from memory import read
-
-        if not person_id or person_id in ("anonymous", "__global__"):
-            return ""
-
-        try:
-            summaries = await read.recent_daily_summaries(person_id, days=7)
-        except Exception:
-            return ""
-
-        if not summaries:
-            return ""
-
-        # Sans le handle : `person_id` est une poignee de transport
-        # (`web_6f3e22ccb0ae`), pas un nom. L'imprimer donnait au modele une
-        # chaine qu'il pouvait recracher a l'ecran, et le nom resolu se dit
-        # deja plus haut dans le prompt (--- QUI TU AS EN FACE ---), la ou la
-        # couche identite decide s'il peut etre divulgue.
-        lines = ["\n[Ton historique emotionnel avec cette personne]"]
-
-        # Most recent summary
-        latest = summaries[0]
-        trend_labels = {
-            "warming": "en amelioration",
-            "cooling": "en refroidissement",
-            "volatile": "instable",
-            "stable": "stable",
-        }
-        trend_str = trend_labels.get(latest.trend, latest.trend)
-        lines.append(
-            f"  - Recemment: emotion dominante = {latest.dominant_emotion} "
-            f"(intensite {latest.dominant_intensity:.1f}), tendance {trend_str}"
-        )
-
-        # Overall pattern from available summaries
-        if len(summaries) >= 3:
-            all_emotions: dict[str, float] = {}
-            for s in summaries:
-                for emotion, weight in s.emotion_distribution.items():
-                    all_emotions[emotion] = all_emotions.get(emotion, 0) + weight
-            total = sum(all_emotions.values()) or 1.0
-            top_3 = sorted(all_emotions.items(), key=lambda x: x[1], reverse=True)[:3]
-            pattern_str = ", ".join(f"{e} ({w / total:.0%})" for e, w in top_3)
-            lines.append(f"  - Climat general: {pattern_str}")
-
-            # Trend direction across summaries
-            trends = [s.trend for s in summaries]
-            if trends.count("warming") > len(trends) // 2:
-                lines.append("  - La relation se rechauffe avec le temps.")
-            elif trends.count("cooling") > len(trends) // 2:
-                lines.append("  - La relation se refroidit recemment.")
-
-        return "\n".join(lines)
+    # L'historique emotionnel avec une personne ne se lit plus ici. Il vivait
+    # en double : `context._fetch_person_context` pose deja la meme question a
+    # `read.recent_daily_summaries`, mais *derriere* la porte de divulgation
+    # (`may_disclose_private_context`). Cette copie-ci s'ecrivait dans
+    # `memory_context`, un bloc toujours injecte : dans un salon public, la
+    # stance affective seule sortait par la porte gardee pendant que le climat
+    # relationnel entrait par celle-ci. Le retriever revient a sa question
+    # propre : souvenirs + connaissances.
 
     @staticmethod
     def _confidence_label(confidence: float) -> str:
