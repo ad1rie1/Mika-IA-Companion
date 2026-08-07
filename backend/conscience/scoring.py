@@ -155,12 +155,3 @@ def check_time_trigger(
         return "night", greeted_periods, greeted_date
 
     return None, greeted_periods, greeted_date
-
-
-def urgency_from_context(ctx: DecisionContext) -> str:
-    """Classify urgency level from decision context."""
-    if ctx.max_pertinence > 0.9:
-        return "high"
-    if ctx.max_pertinence > 0.7:
-        return "normal"
-    return "low"

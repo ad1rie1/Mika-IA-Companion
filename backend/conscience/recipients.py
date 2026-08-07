@@ -6,6 +6,11 @@ Mika via a ``[TO:person_id]`` tag — mirroring the existing ``[EMOTION:...]`` i
 
 This module holds the pure, side-effect-free parsing so it is trivially testable;
 the orchestration (candidate gathering + AI call) lives on the engine.
+
+Il n'y a deliberement pas de nettoyage du tag : il n'est demande qu'a la passe 1
+(``_select_recipient``), dont la reponse brute n'est jamais livree — seul le
+``person_id`` en sort. Le message livre, lui, est compose par une seconde passe
+dont le prompt ne mentionne jamais ``[TO:...]``.
 """
 
 from __future__ import annotations
@@ -31,8 +36,3 @@ def parse_to_tag(text: str, allowed: list[str]) -> str | None:
     if person_id.lower() == "none":
         return None
     return person_id if person_id in allowed else None
-
-
-def strip_to_tag(text: str) -> str:
-    """Remove the ``[TO:...]`` tag from a message body before delivery."""
-    return _TO_RE.sub("", text).strip()

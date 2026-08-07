@@ -2,7 +2,9 @@
 Tests for the Conscience MemoryBridge and Django ORM memory operations.
 
 Uses Django's test database (pytest-django) for real DB operations.
-Tests souvenir creation, boost, reduce, and connaissance operations.
+Tests souvenir creation; boost/reduce et les operations sur les
+connaissances sont couverts au niveau du memory_manager
+(``test_memory_manager.py``), seul endroit ou elles existent.
 """
 
 import pytest
@@ -62,96 +64,6 @@ class TestSouvenirCreation:
 
         count = await sync_to_async(Souvenir.objects.count)()
         assert count >= 5
-
-
-@pytest.mark.django_db
-class TestSouvenirBoostReduce:
-
-    @pytest.mark.asyncio
-    async def test_boost_souvenir(self):
-        """Boosting should increase importance."""
-        from memory.models import Souvenir
-
-        bridge = MemoryBridge()
-        signal = InterpretedSignal(
-            summary="Un souvenir boostable",
-            category="memory",
-            pertinence=0.5,
-            emotional_reaction="",
-            emotional_intensity=0.0,
-            should_remember=True,
-        )
-        souvenir = await bridge.create_souvenir_from_signal(signal)
-        original_importance = souvenir.importance
-
-        await bridge.boost_importance(souvenir.pk, 0.2)
-
-        refreshed = await sync_to_async(Souvenir.objects.get)(pk=souvenir.pk)
-        assert refreshed.importance > original_importance
-
-    @pytest.mark.asyncio
-    async def test_reduce_souvenir(self):
-        """Reducing should decrease importance."""
-        from memory.models import Souvenir
-
-        bridge = MemoryBridge()
-        signal = InterpretedSignal(
-            summary="Un souvenir a reduire",
-            category="memory",
-            pertinence=0.8,
-            emotional_reaction="",
-            emotional_intensity=0.0,
-            should_remember=True,
-        )
-        souvenir = await bridge.create_souvenir_from_signal(signal)
-        original_importance = souvenir.importance
-
-        await bridge.reduce_importance(souvenir.pk, 0.3)
-
-        refreshed = await sync_to_async(Souvenir.objects.get)(pk=souvenir.pk)
-        assert refreshed.importance < original_importance
-
-
-# ===================================================================
-# CONNAISSANCE OPERATIONS
-# ===================================================================
-
-@pytest.mark.django_db
-class TestConnaissanceOperations:
-
-    @pytest.mark.asyncio
-    async def test_invalidate_connaissance(self):
-        """Invalidating should mark is_valid=False."""
-        from memory.models import Connaissance
-
-        conn = await sync_to_async(Connaissance.objects.create)(
-            content="Mika aime les sushis",
-            confidence=0.8,
-            is_valid=True,
-        )
-
-        bridge = MemoryBridge()
-        await bridge.invalidate_connaissance(conn.pk, reason="Elle a dit qu'elle n'aime plus")
-
-        refreshed = await sync_to_async(Connaissance.objects.get)(pk=conn.pk)
-        assert refreshed.is_valid is False
-
-    @pytest.mark.asyncio
-    async def test_reinforce_connaissance(self):
-        """Reinforcing should increase confidence."""
-        from memory.models import Connaissance
-
-        conn = await sync_to_async(Connaissance.objects.create)(
-            content="Bob est developpeur Python",
-            confidence=0.6,
-            is_valid=True,
-        )
-
-        bridge = MemoryBridge()
-        await bridge.reinforce_connaissance(conn.pk, boost=0.2)
-
-        refreshed = await sync_to_async(Connaissance.objects.get)(pk=conn.pk)
-        assert refreshed.confidence > 0.6
 
 
 # ===================================================================

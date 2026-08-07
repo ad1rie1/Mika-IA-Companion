@@ -40,13 +40,6 @@ class MemoryBridge:
             logger.exception("MemoryBridge: recall_for_context failed")
             return ""
 
-    async def get_important_souvenirs(
-        self, min_importance: float = 0.5, limit: int = 5
-    ) -> list:
-        """Get recent important souvenirs."""
-        from memory.manager import memory_manager
-        return await memory_manager.get_important_souvenirs(min_importance, limit)
-
     async def who_is_concerned(self, signal_text: str, n: int = 5) -> list[dict]:
         """Who does this signal concern, ranked, with reachable handles.
 
@@ -158,16 +151,6 @@ class MemoryBridge:
 
     # ── Write: Modify Importance ─────────────────────────────────
 
-    async def boost_importance(self, souvenir_id: int, boost: float) -> None:
-        """Increase a souvenir's importance."""
-        from memory.manager import memory_manager
-        await memory_manager.boost_souvenir(souvenir_id, boost)
-
-    async def reduce_importance(self, souvenir_id: int, reduction: float) -> None:
-        """Decrease a souvenir's importance."""
-        from memory.manager import memory_manager
-        await memory_manager.reduce_souvenir(souvenir_id, reduction)
-
     async def boost_related_souvenirs(
         self, themes: list[str], boost: float = 0.1
     ) -> int:
@@ -176,20 +159,6 @@ class MemoryBridge:
         return await memory_manager.boost_souvenirs_by_themes(themes, boost)
 
     # ── Write: Connaissances ─────────────────────────────────────
-
-    async def invalidate_connaissance(
-        self, connaissance_id: int, reason: str = ""
-    ) -> None:
-        """Mark a knowledge fact as invalid."""
-        from memory.manager import memory_manager
-        await memory_manager.invalidate_connaissance(connaissance_id, reason)
-
-    async def reinforce_connaissance(
-        self, connaissance_id: int, boost: float = 0.1
-    ) -> None:
-        """Increase confidence of a knowledge fact."""
-        from memory.manager import memory_manager
-        await memory_manager.reinforce_connaissance(connaissance_id, boost)
 
     # Budget par appel de validation, et non par lot. `check_connaissance_validity`
     # porte deja `EXTRACTION_TIMEOUT` (45 s), taille pour le consolidateur ; la
@@ -269,7 +238,8 @@ class MemoryBridge:
                 # la valeur haute de l'exemple. Une remontee effacerait la
                 # decroissance lente (`_decay_connaissances`) et les baisses
                 # decidees ailleurs, sans laisser de trace dans les resultats.
-                # La hausse deliberee, elle, passe par `reinforce_connaissance`.
+                # La hausse deliberee, elle, passe par
+                # `memory_manager.reinforce_connaissance`.
                 elif new_confidence is not None and new_confidence < conn.confidence:
                     await memory_manager.update_connaissance_confidence(
                         conn.pk, new_confidence

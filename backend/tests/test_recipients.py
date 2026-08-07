@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from conscience.recipients import parse_to_tag, strip_to_tag
+from conscience.recipients import parse_to_tag
 
 
 class TestParseToTag:
@@ -27,9 +27,6 @@ class TestParseToTag:
 
     def test_empty_text(self):
         assert parse_to_tag("", ["tg_bob"]) is None
-
-    def test_strip_tag(self):
-        assert strip_to_tag("[TO:tg_bob] Salut !") == "Salut !"
 
 
 def _ctx(*summaries):
