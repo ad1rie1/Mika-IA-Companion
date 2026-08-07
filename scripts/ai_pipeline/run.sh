@@ -438,7 +438,7 @@ run_pipeline_loop() {
             wait_for_ai_tokens
 
             # Étape 0 : Rebase auto des PRs en conflit + fermeture des PRs obsolètes
-            #run_rebase || true
+            run_rebase || true
 
             if task_limit_reached; then
                 echo -e "${YELLOW}[STOP]${NC} Limite de tâches atteinte"
