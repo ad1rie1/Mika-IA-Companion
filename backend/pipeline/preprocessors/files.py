@@ -30,6 +30,12 @@ logger = logging.getLogger(__name__)
 MAX_EXTRACT_CHARS = 8000
 # PDF pages beyond this are skipped (each page is an extraction pass).
 MAX_PDF_PAGES = 20
+# Échéance de l'extraction. `asyncio.to_thread` n'est pas annulable : un PDF
+# pathologique fait tourner pypdf dans un thread que plus rien ne reprend.
+# Le wait_for ne libère pas le thread, il libère le *tour* — c'est ce qui
+# comptait, sinon l'attente est indéfinie et aucune borne amont ne la couvre.
+# 20 s couvrent largement 20 pages d'un fichier plafonné à 5 Mo.
+EXTRACT_TIMEOUT_SECONDS = 20
 
 # Extensions decoded as plain text when the MIME type is generic.
 _TEXT_EXTENSIONS = {
@@ -52,9 +58,14 @@ async def process(part: Part) -> Part:
     ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
 
     data = _decode_bytes(part.content)
-    extracted, method = await asyncio.to_thread(
-        _extract, data, name=name, mime=mime, ext=ext
-    )
+    try:
+        extracted, method = await asyncio.wait_for(
+            asyncio.to_thread(_extract, data, name=name, mime=mime, ext=ext),
+            timeout=EXTRACT_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Extraction fichier trop longue (%s, %s)", name, mime)
+        extracted, method = "", "extraction trop longue"
 
     truncated = False
     if extracted:
