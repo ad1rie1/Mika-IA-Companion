@@ -581,12 +581,17 @@ class ConscienceEngine:
             r.intensity *= 0.5
             if r.intensity < 0.1:
                 r.status = "resolved"
-            try:
-                await sync_to_async(r.save)(
-                    update_fields=["intensity", "status"]
-                )
-            except Exception as exc:
-                degradations.record("conscience: rumination relief save", exc)
+
+        # Une seule ecriture pour le lot : ce sont deux champs scalaires
+        # calcules en memoire, sans logique par ligne. Vingt save() separes,
+        # c'etaient vingt sync_to_async serialises sur l'unique thread
+        # d'executeur partage avec les autres boucles de fond.
+        try:
+            await sync_to_async(Rumination.objects.bulk_update)(
+                active, ["intensity", "status"], batch_size=50,
+            )
+        except Exception as exc:
+            degradations.record("conscience: rumination relief write", exc)
 
     # Emotional drift map for aging ruminations. A thought doesn't stay
     # the same shape forever — frustration that lingers becomes anxiety,
@@ -646,10 +651,11 @@ class ConscienceEngine:
         from emotion.types import Emotion, EmotionData
 
         now_tz = tz.now()
+        # Ruminations dont l'etiquette emotionnelle a bouge pendant ce cycle.
+        derives: list = []
         for r in active:
             # 5% intensity decay per cycle
             r.intensity *= 0.95
-            update_fields = ["intensity", "status"]
 
             # Emotional drift: after several cycles, shift the label
             # toward a softer / more introspective neighbor.
@@ -669,7 +675,7 @@ class ConscienceEngine:
                         r.pk, r.emotion, drift_target,
                     )
                     r.emotion = drift_target
-                    update_fields.append("emotion")
+                    derives.append(r)
 
             # Emotional bleed: if rumination has an associated emotion,
             # re-inject a small fraction into the global mood.
@@ -687,10 +693,26 @@ class ConscienceEngine:
             if r.intensity < 0.1:
                 r.status = "faded"
 
-            try:
-                await sync_to_async(r.save)(update_fields=update_fields)
-            except Exception as exc:
-                degradations.record("conscience: rumination decay save", exc)
+        # Ecriture groupee : jusqu'a 30 UPDATE par cycle de decision — donc
+        # toutes les 30 s — devenaient autant de sync_to_async serialises sur
+        # l'unique thread d'executeur partage avec les cinq autres boucles de
+        # fond. Le bleed emotionnel ci-dessus reste en RAM et ne change pas.
+        # `emotion` s'ecrit a part, seulement pour les lignes qui ont derive :
+        # reecrire l'etiquette des autres avec une valeur lue un instant plus
+        # tot pietinerait la derive forcee de la digestion nocturne.
+        def _ecrire_lot() -> None:
+            Rumination.objects.bulk_update(
+                active, ["intensity", "status"], batch_size=50,
+            )
+            if derives:
+                Rumination.objects.bulk_update(
+                    derives, ["emotion"], batch_size=50,
+                )
+
+        try:
+            await sync_to_async(_ecrire_lot)()
+        except Exception as exc:
+            degradations.record("conscience: rumination decay write", exc)
 
     async def _promote_stale_to_ruminations(self) -> None:
         """Convert recent skipped/stale pertinent observations into ruminations.
@@ -1004,6 +1026,7 @@ class ConscienceEngine:
 
         Returns True only if something was actually said: the caller commits
         the day's greeting and the decision log from that answer."""
+        from conscience.models import Observation, ScheduledAction
         from modules.manager import module_manager
         from pipeline.context import ConversationContext, gather_context
         from pipeline.perception import Perception
@@ -1090,12 +1113,16 @@ class ConscienceEngine:
                 )
                 return False
 
-            # Mark observations as acted
-            for obs in ctx.pending_observations:
-                obs.status = "acted"
-                obs.action_response = output.text[:200]
-                await sync_to_async(obs.save)(
-                    update_fields=["status", "action_response"]
+            # Mark observations as acted — un seul lot, la reponse etant la
+            # meme pour toutes et le statut un scalaire.
+            if ctx.pending_observations:
+                for obs in ctx.pending_observations:
+                    obs.status = "acted"
+                    obs.action_response = output.text[:200]
+                await sync_to_async(Observation.objects.bulk_update)(
+                    ctx.pending_observations,
+                    ["status", "action_response"],
+                    batch_size=50,
                 )
 
             # Mark scheduled actions as executed
@@ -1105,9 +1132,11 @@ class ConscienceEngine:
                 for action in ctx.scheduled_actions:
                     action.status = "executed"
                     action.executed_at = now_tz
-                    await sync_to_async(action.save)(
-                        update_fields=["status", "executed_at"]
-                    )
+                await sync_to_async(ScheduledAction.objects.bulk_update)(
+                    ctx.scheduled_actions,
+                    ["status", "executed_at"],
+                    batch_size=50,
+                )
                 logger.info(
                     "Executed %d scheduled action(s)", len(ctx.scheduled_actions)
                 )
@@ -1137,14 +1166,17 @@ class ConscienceEngine:
         except Exception:
             logger.exception("Conscience act failed")
             # Mark observations as failed so they don't retry indefinitely
-            for obs in ctx.pending_observations:
-                try:
+            if ctx.pending_observations:
+                for obs in ctx.pending_observations:
                     obs.status = "failed"
-                    await sync_to_async(obs.save)(update_fields=["status"])
+                try:
+                    await sync_to_async(Observation.objects.bulk_update)(
+                        ctx.pending_observations, ["status"], batch_size=50,
+                    )
                 except Exception:
                     logger.warning(
-                        "Could not mark observation #%s as failed",
-                        getattr(obs, "pk", "?"), exc_info=True,
+                        "Could not mark %d observation(s) as failed",
+                        len(ctx.pending_observations), exc_info=True,
                     )
             return False
 
