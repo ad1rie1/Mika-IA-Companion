@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from email.utils import getaddresses, parseaddr
 
 from django.db.models import F, Q
@@ -34,6 +35,10 @@ IMAP_TICK_TIMEOUT = 180
 # conscience) : au-delà d'une quinzaine, le tour dépasse IMAP_TICK_TIMEOUT.
 DEFAULT_MAX_PER_TICK = 15
 
+# Au-dela, on oublie les expediteurs sortis de la fenetre du plafond : le
+# compteur est indexe par adresse, et une adresse n'a aucun cout a inventer.
+AUTO_REPLY_MAX_TRACKED = 500
+
 
 class EmailModule(BaseModule):
     """Multi-account IMAP/SMTP module with email storage, contacts, and AI triage."""
@@ -50,6 +55,9 @@ class EmailModule(BaseModule):
         # pas les connexions IMAP vivantes, sinon un serveur momentanément
         # injoignable retirerait aussi la lecture des mails déjà stockés.
         self._accounts_configured = 0
+        # adresse -> horodatages (monotones) des reponses automatiques envoyees
+        self._auto_reply_log: dict[str, list[float]] = {}
+        self._auto_replies_this_tick = 0
 
     # ── Lifecycle ─────────────────────────────────────────────────
 
@@ -192,6 +200,10 @@ class EmailModule(BaseModule):
 
         imap = entry["imap"]
         account = entry["account"]
+
+        # Le plafond « par releve » borne un lot de rattrapage : sans lui, une
+        # passe envoie autant de reponses automatiques qu'elle lit de messages.
+        self._auto_replies_this_tick = 0
 
         is_initial_sync = not account.initial_sync_done
         max_per_tick = await sync_to_async(self._max_per_tick)()
@@ -388,7 +400,7 @@ class EmailModule(BaseModule):
 
         if analysis and analysis.should_reply and analysis.reply_text:
             smtp = entry.get("smtp")
-            if smtp:
+            if smtp and self._may_auto_reply(email_msg):
                 await self._send_reply(smtp, email_msg, analysis, account)
 
         await entry["imap"].mark_as_seen(email_msg.uid)
@@ -573,6 +585,76 @@ class EmailModule(BaseModule):
                 self.logger.info("Stored email memory: %s", mem["type"])
             except Exception:
                 self.logger.exception("Failed to store email memory: %s", mem)
+
+    def _may_auto_reply(self, email_msg) -> bool:
+        """Le triage a-t-il le droit de repondre a ce message ?
+
+        La decision d'envoi vient du modele, qui l'a prise en ayant le corps
+        de l'e-mail dans son contexte : la consigne de prompt qui l'encadre
+        est du meme cote que la donnee dont il faut se mefier. Ce controle-ci
+        n'en depend pas : un interrupteur, les en-tetes de courrier
+        automatique, puis deux plafonds — par releve et par expediteur.
+        """
+        from modules.plugins.email.autoreply import (
+            SENDER_WINDOW_SECONDS,
+            auto_reply_enabled,
+            loop_risk_reason,
+            max_per_sender,
+            max_per_tick,
+        )
+
+        if not auto_reply_enabled():
+            self.logger.info(
+                "Reponse automatique desactivee — rien envoye a %s",
+                email_msg.from_addr,
+            )
+            return False
+
+        reason = loop_risk_reason(email_msg)
+        if reason:
+            self.logger.info(
+                "Reponse automatique refusee (%s) a %s: %s",
+                reason, email_msg.from_addr, email_msg.subject,
+            )
+            return False
+
+        if self._auto_replies_this_tick >= max_per_tick():
+            self.logger.warning(
+                "Plafond de reponses automatiques atteint pour cette releve "
+                "(%d) — rien envoye a %s",
+                self._auto_replies_this_tick, email_msg.from_addr,
+            )
+            return False
+
+        _, sender = parseaddr(email_msg.from_addr or "")
+        sender = sender.lower().strip()
+        now = time.monotonic()
+        window_start = now - SENDER_WINDOW_SECONDS
+        stamps = [t for t in self._auto_reply_log.get(sender, ()) if t >= window_start]
+        self._auto_reply_log[sender] = stamps
+
+        if len(stamps) >= max_per_sender():
+            self.logger.warning(
+                "Plafond de reponses automatiques atteint pour %s (%d sur "
+                "%dh) — rien envoye",
+                sender, len(stamps), SENDER_WINDOW_SECONDS // 3600,
+            )
+            return False
+
+        # Le budget est consomme ici, pas apres l'envoi : un SMTP qui echoue
+        # ne doit pas rendre son jeton et faire reessayer a chaque releve.
+        stamps.append(now)
+        self._auto_replies_this_tick += 1
+        self._prune_auto_reply_log(window_start)
+        return True
+
+    def _prune_auto_reply_log(self, window_start: float) -> None:
+        """Oublie les expediteurs dont la fenetre est vide."""
+        if len(self._auto_reply_log) <= AUTO_REPLY_MAX_TRACKED:
+            return
+        for sender, stamps in list(self._auto_reply_log.items()):
+            if not stamps or stamps[-1] < window_start:
+                self._auto_reply_log.pop(sender, None)
 
     async def _send_reply(self, smtp, email_msg, analysis, account):
         """Send an email reply via SMTP."""

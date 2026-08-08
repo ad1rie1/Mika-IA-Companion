@@ -24,6 +24,13 @@ class EmailMessage:
     in_reply_to: str = ""
     references: str = ""
     has_attachments: bool = False
+    # En-tetes qui annoncent un message deja automatique. Ils ne servent qu'au
+    # garde anti-boucle de la reponse automatique (``autoreply.py``) : le
+    # triage, lui, ne les voit jamais.
+    auto_submitted: str = ""
+    precedence: str = ""
+    list_id: str = ""
+    list_unsubscribe: str = ""
 
 
 class IMAPClient:
@@ -154,6 +161,10 @@ class IMAPClient:
                     in_reply_to=msg.get("In-Reply-To", "") or "",
                     references=msg.get("References", "") or "",
                     has_attachments=has_attachments,
+                    auto_submitted=str(msg.get("Auto-Submitted", "") or ""),
+                    precedence=str(msg.get("Precedence", "") or ""),
+                    list_id=str(msg.get("List-Id", "") or ""),
+                    list_unsubscribe=str(msg.get("List-Unsubscribe", "") or ""),
                 )
                 logger.info(
                     "Fetched email: from=%s cc=%s subject=%s date=%s has_attachments=%s",
