@@ -158,6 +158,35 @@ class OllamaProvider:
         _record_ollama_usage(response)
         return response.message.content or ""
 
+    async def complete_chat(
+        self,
+        prompt,
+        model: str,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ) -> str:
+        """Structured turn — the local path's real win is the KV cache.
+
+        Ollama reuses the KV cache of the previous request as long as the
+        prompt prefix is byte-identical. The flattened form rebuilt the
+        whole prompt every turn (volatile system + re-serialized history),
+        so a slow local model re-prefilled everything at ~19 tok/s; with
+        the stable system + history prefix, only the newest exchange and
+        the per-turn state get prefilled.
+        """
+        messages = [{"role": "system", "content": prompt.system_stable}]
+        messages.extend(prompt.chat_messages())
+
+        response = await self._chat(
+            model=model,
+            messages=messages,
+            think=self._thinking(),
+            options=self._generation_options(max_tokens, temperature),
+        )
+
+        _record_ollama_usage(response)
+        return response.message.content or ""
+
     async def list_models(self) -> list[dict]:
         """List models available on the configured Ollama server.
 

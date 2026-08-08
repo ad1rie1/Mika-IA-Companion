@@ -201,5 +201,5 @@ def test_response_passes_the_context_object():
     from pipeline import response
 
     src = inspect.getsource(response.call_ai_and_parse)
-    assert "build_system_prompt(context)" in src
+    assert "build_chat_prompt(context" in src
     assert "emotion_context=context.emotion_context" not in src

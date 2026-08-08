@@ -255,6 +255,15 @@ CONFIG_SCHEMA = [
                     key="temperature", type="float", label="Température",
                     default=0.7, min=0.0, max=2.0,
                 ),
+                record_item(
+                    key="max_tokens", type="int", label="Max tokens (réponse)",
+                    default=4096, min=256, max=64000,
+                    hint=(
+                        "Plafond de génération par appel pour ce modèle. "
+                        "Ollama garde en plus sa ceinture locale "
+                        "(ai.ollama.max_reply_tokens) : le plus petit gagne."
+                    ),
+                ),
             ),
         ),
     ),

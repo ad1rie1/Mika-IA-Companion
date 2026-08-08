@@ -1028,7 +1028,7 @@ class ConscienceEngine:
         the day's greeting and the decision log from that answer."""
         from conscience.models import Observation, ScheduledAction
         from modules.manager import module_manager
-        from pipeline.context import ConversationContext, gather_context
+        from pipeline.context import gather_context
         from pipeline.perception import Perception
         from pipeline.processor import process_message
 
@@ -1070,23 +1070,18 @@ class ConscienceEngine:
                 tools = []
             tool_names = [t.name for t in tools]
 
-            context = ConversationContext(
+            # ``replace`` plutôt qu'une recopie champ à champ : la
+            # transcription manuelle avait déjà dérivé — ``identity_context``
+            # et ``journal_context`` manquaient à l'appel, si bien qu'un tour
+            # spontané adressé à une vraie personne partait sans le bloc
+            # « QUI TU AS EN FACE » alors que ``person_context`` (que ce bloc
+            # qualifie) passait, lui. Un champ ajouté demain suit tout seul.
+            import dataclasses as _dc
+            context = _dc.replace(
+                base_context,
                 memory_context=memory_context if memory_context else base_context.memory_context,
-                emotion_context=base_context.emotion_context,
-                module_context=base_context.module_context,
-                history=base_context.history,
                 tools=tools,
                 tool_names=tool_names,
-                self_concept=base_context.self_concept,
-                person_context=base_context.person_context,
-                circadian_context=base_context.circadian_context,
-                fatigue_fog=base_context.fatigue_fog,
-                rumination_context=base_context.rumination_context,
-                user_mood_hint=base_context.user_mood_hint,
-                dream_context=base_context.dream_context,
-                project_context=base_context.project_context,
-                project_suppresses_emotion=base_context.project_suppresses_emotion,
-                project_id=base_context.project_id,
             )
 
             perception = Perception.from_internal_trigger(

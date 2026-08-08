@@ -146,7 +146,7 @@ class TestProcessorPublishes:
                        new_callable=AsyncMock), \
                  patch("pipeline.processor.publish_turn_completed", _capture), \
                  patch("pipeline.response.ai_client") as client:
-                client.complete = AsyncMock(return_value=response)
+                client.chat = AsyncMock(return_value=response)
                 await process_message(perception, context=ctx)
             return published
 
@@ -196,7 +196,7 @@ class TestProcessorPublishes:
                    new_callable=AsyncMock), \
              patch("pipeline.processor.publish_turn_completed", _capture), \
              patch("pipeline.response.ai_client") as client:
-            client.complete = AsyncMock(side_effect=RuntimeError("api down"))
+            client.chat = AsyncMock(side_effect=RuntimeError("api down"))
             output = await process_message(
                 Perception.from_text("Salut", source="frontend", person_id="user_c"),
                 context=ctx,
@@ -385,7 +385,7 @@ class TestEndToEnd:
              patch("pipeline.processor.emit_communication_event",
                    new_callable=AsyncMock), \
              patch("pipeline.response.ai_client") as client:
-            client.complete = AsyncMock(
+            client.chat = AsyncMock(
                 return_value="[EMOTION:happy:0.8] Mais oui carrement, tiens !",
             )
             await process_message(

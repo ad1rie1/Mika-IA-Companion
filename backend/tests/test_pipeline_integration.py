@@ -48,7 +48,7 @@ class TestCallAiAndParse:
 
         ctx = _fake_context()
         with patch("pipeline.response.ai_client") as mock_client:
-            mock_client.complete = AsyncMock(return_value=AI_RESPONSES["greeting"])
+            mock_client.chat = AsyncMock(return_value=AI_RESPONSES["greeting"])
             text, emotion, tools = await call_ai_and_parse(ctx, "Salut Mika !")
 
         assert "Bienvenue" in text
@@ -62,7 +62,7 @@ class TestCallAiAndParse:
 
         ctx = _fake_context()
         with patch("pipeline.response.ai_client") as mock_client:
-            mock_client.complete = AsyncMock(return_value=AI_RESPONSES["no_emotion"])
+            mock_client.chat = AsyncMock(return_value=AI_RESPONSES["no_emotion"])
             text, emotion, _ = await call_ai_and_parse(ctx, "hey")
 
         assert "Salut" in text
@@ -94,7 +94,7 @@ class TestProcessMessage:
              patch("pipeline.processor.emit_communication_event",
                    new_callable=AsyncMock), \
              patch("pipeline.response.ai_client") as mock_client:
-            mock_client.complete = AsyncMock(return_value=AI_RESPONSES["greeting"])
+            mock_client.chat = AsyncMock(return_value=AI_RESPONSES["greeting"])
 
             output = await process_message(self._perception(), context=ctx)
 
@@ -116,7 +116,7 @@ class TestProcessMessage:
              patch("pipeline.processor.emit_communication_event",
                    new_callable=AsyncMock), \
              patch("pipeline.response.ai_client") as mock_client:
-            mock_client.complete = AsyncMock(return_value=AI_RESPONSES["greeting"])
+            mock_client.chat = AsyncMock(return_value=AI_RESPONSES["greeting"])
 
             await process_message(self._perception("hi", "u"), context=ctx, broadcast=False)
 
@@ -136,7 +136,7 @@ class TestProcessMessage:
              patch("pipeline.processor.emit_communication_event",
                    new_callable=AsyncMock), \
              patch("pipeline.response.ai_client") as mock_client:
-            mock_client.complete = AsyncMock(return_value=AI_RESPONSES["greeting"])
+            mock_client.chat = AsyncMock(return_value=AI_RESPONSES["greeting"])
 
             await process_message(self._perception("hi", "u"), context=ctx, persist=False)
 
@@ -165,7 +165,7 @@ class TestProcessMessage:
              patch("pipeline.processor.emit_communication_event",
                    new_callable=AsyncMock), \
              patch("pipeline.response.ai_client") as mock_client:
-            mock_client.complete = AsyncMock(return_value=AI_RESPONSES["greeting"])
+            mock_client.chat = AsyncMock(return_value=AI_RESPONSES["greeting"])
             await process_message(perception, context=ctx)
 
         # The descriptors ride on the *user* message — the only side that has

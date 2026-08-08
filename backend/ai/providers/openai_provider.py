@@ -92,6 +92,43 @@ class OpenAIProvider:
 
         return response.choices[0].message.content or ""
 
+    async def complete_chat(
+        self,
+        prompt,
+        model: str,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ) -> str:
+        """Structured turn: real message roles instead of a flattened blob.
+
+        The stable prefix (system + history) stays byte-identical from one
+        turn to the next, which is exactly what OpenAI-compatible backends
+        key their automatic prefix caching on; the per-turn state rides in
+        the final user turn, after the reusable prefix.
+        """
+        messages = [{"role": "system", "content": prompt.system_stable}]
+        messages.extend(prompt.chat_messages())
+
+        response = await self._client.chat.completions.create(
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            messages=messages,
+        )
+
+        try:
+            from ai.quota import set_usage
+            usage = getattr(response, "usage", None)
+            if usage is not None:
+                set_usage(
+                    input_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
+                    output_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
+                )
+        except Exception:
+            pass
+
+        return response.choices[0].message.content or ""
+
     async def list_models(self) -> list[dict]:
         """List chat-capable models from the configured endpoint.
 

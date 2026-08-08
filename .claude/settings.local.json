@@ -37,7 +37,9 @@
       "Bash(API_PORT=8001 nohup python run.py)",
       "Bash(echo \"launched, pid $!\")",
       "Bash(npm run *)",
-      "Bash(npm install *)"
+      "Bash(npm install *)",
+      "Skill(claude-api)",
+      "Skill(claude-api:*)"
     ]
   }
 }

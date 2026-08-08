@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ai.chat import ChatPrompt
 from config.personality import personality
 from pipeline.context import ConversationContext
 
@@ -81,26 +82,44 @@ _LAYERS: tuple[_Layer, ...] = (
 )
 
 
-def build_system_prompt(context: ConversationContext) -> str:
-    """Assemble the full system prompt from personality + contextual layers.
+# Boundary of the cacheable prefix, as a count of leading ``_LAYERS`` entries.
+# Personality + the first two layers (self-concept, identity) are the "slow"
+# zone: personality is static per process, the self-narrative regenerates
+# ~daily, identity moves only when a claim appears or resolves. Everything
+# from ``person_context`` onward is recomputed every turn (live PAD affect,
+# "Il est 14h", ruminations, module state, retrieved memories) and would
+# invalidate a provider-side prompt cache on every single call if it lived
+# in the prefix.
+_STABLE_LAYER_COUNT = 2
 
-    Takes the context object rather than unpacking it: the caller held a
-    ``ConversationContext`` whose fields matched these parameters one for
-    one, so the unpacking was pure transcription — and the kind that stays
-    silently wrong when a field is added and one of the four places is
-    missed.
+
+def _render_layer(layer: _Layer, value: str) -> str:
+    if layer.header is None:
+        return value
+    return f"{layer.header}\n{value}\n{layer.footer}"
+
+
+def build_prompt_parts(context: ConversationContext) -> tuple[str, str]:
+    """Return ``(stable, volatile)`` — the system prompt split on volatility.
+
+    ``stable + "\\n\\n" + volatile`` is byte-identical to what
+    :func:`build_system_prompt` returns; a test pins that equivalence so the
+    split can never drift from the legacy rendering.
     """
     suppress_emotion = context.project_suppresses_emotion
 
     # Personality bases itself on whether a project is active and what its
     # emotion policy says: in professional mode it drops the variability
-    # block and the mandatory [EMOTION:...] tag instruction.
-    system = personality.to_system_prompt(
+    # block and the mandatory [EMOTION:...] tag instruction. A project turn
+    # therefore rewrites the stable prefix — accepted: professional mode is
+    # a mode, not a per-turn fluctuation.
+    stable = personality.to_system_prompt(
         project_active=bool(context.project_context),
         project_suppresses_emotion=suppress_emotion,
     )
 
-    for layer in _LAYERS:
+    volatile_blocks: list[str] = []
+    for index, layer in enumerate(_LAYERS):
         # Strict getattr, no default: a typo in a layer's field name would
         # otherwise read as "this block is empty" and drop it from every
         # prompt, forever, without a single error. The table trades four
@@ -110,12 +129,44 @@ def build_system_prompt(context: ConversationContext) -> str:
             continue
         if layer.muted_by_project and suppress_emotion:
             continue
-        if layer.header is None:
-            system += "\n\n" + value
+        rendered = _render_layer(layer, value)
+        if index < _STABLE_LAYER_COUNT:
+            stable += "\n\n" + rendered
         else:
-            system += f"\n\n{layer.header}\n{value}\n{layer.footer}"
+            volatile_blocks.append(rendered)
 
-    return system
+    return stable, "\n\n".join(volatile_blocks)
+
+
+def build_system_prompt(context: ConversationContext) -> str:
+    """Assemble the full system prompt from personality + contextual layers.
+
+    Takes the context object rather than unpacking it: the caller held a
+    ``ConversationContext`` whose fields matched these parameters one for
+    one, so the unpacking was pure transcription — and the kind that stays
+    silently wrong when a field is added and one of the four places is
+    missed.
+    """
+    stable, volatile = build_prompt_parts(context)
+    if volatile:
+        return f"{stable}\n\n{volatile}"
+    return stable
+
+
+def build_chat_prompt(context: ConversationContext, message: str) -> ChatPrompt:
+    """Build the structured prompt for a conversation turn.
+
+    The provider decides the rendering: chat-native providers cache the
+    stable prefix and send the history as real messages; legacy providers
+    get the exact old two-string shape via ``ChatPrompt.legacy_pair()``.
+    """
+    stable, volatile = build_prompt_parts(context)
+    return ChatPrompt(
+        system_stable=stable,
+        system_volatile=volatile,
+        history=list(context.history or []),
+        message=message,
+    )
 
 
 def format_conversation(

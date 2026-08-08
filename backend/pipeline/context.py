@@ -155,8 +155,13 @@ async def gather_context(
             f"{emotion_context}\n{drive_context}" if emotion_context else drive_context
         )
 
-    # Module context for system prompt (scoped to this person)
-    module_context = module_manager.collect_context(person_id)
+    # Module context for system prompt (scoped to this person). Capped here
+    # rather than in the collector: chaque module se borne déjà lui-même,
+    # mais leur somme (Forge inclus, qui concatène tous ses mini-modules)
+    # n'a aucune limite globale.
+    module_context = _clip(
+        module_manager.collect_context(person_id), _MODULE_CONTEXT_MAX_CHARS,
+    )
 
     # Conversation history — annotee de qui parle quand ce n'est pas la
     # personne en face. Le tampon est partage par tout le monde et c'est
@@ -317,6 +322,27 @@ async def _label_history_speakers(history: list[dict], person_id: str) -> list[d
     return labelled
 
 
+# ── Plafonds des blocs sans borne naturelle ─────────────────────────────────
+# Chaque bloc du prompt doit porter sa propre limite : rien en aval ne mesure
+# ni ne tronque (pas de tokenizer dans le processus), donc un bloc qui grossit
+# sans borne — un self-narrative que le consolidateur allonge, un module
+# bavard, un projet aux consignes fleuves — gonfle chaque tour en silence.
+# Les valeurs sont larges : le but est d'empêcher la dérive, pas de rogner
+# le cas nominal.
+_SELF_CONCEPT_MAX_CHARS = 1600
+_MODULE_CONTEXT_MAX_CHARS = 1800
+_PROJECT_TEXT_MAX_CHARS = 300
+_PROJECT_LIST_ITEMS_MAX = 8
+_IDENTITY_CLAIMS_MAX = 5
+
+
+def _clip(text: str, limit: int) -> str:
+    """Hard cap with a visible marker — a silent slice hides the loss."""
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
+
+
 def _format_identity_block(ctx) -> str:
     """Render the identity situation as the `--- QUI TU AS EN FACE ---` body.
 
@@ -339,11 +365,16 @@ def _format_identity_block(ctx) -> str:
 
     if ctx.pending_claims:
         lines.append("")
-        for claim in ctx.pending_claims:
+        # Compte borné : chaque ligne coûte à chaque tour, et au-delà de
+        # quelques revendications simultanées le modèle n'arbitre plus rien.
+        for claim in ctx.pending_claims[:_IDENTITY_CLAIMS_MAX]:
             lines.append(
                 f"- Revendication #{claim['id']} : se presente comme "
                 f"« {claim['name']} » (« {claim['evidence'][:140]} »)"
             )
+        hidden = len(ctx.pending_claims) - _IDENTITY_CLAIMS_MAX
+        if hidden > 0:
+            lines.append(f"- (+{hidden} autre(s) revendication(s) en attente)")
         lines.append(
             "Tu peux la tester avec identity_check_story (est-ce que ce qui "
             "est dit recoupe ce que tu sais ?), puis trancher avec "
@@ -370,19 +401,19 @@ def _format_project_block(data: dict) -> str:
     """
     lines: list[str] = [f"Titre : {data['title']}"]
     if data.get("description"):
-        lines.append(f"Cadre : {data['description']}")
+        lines.append(f"Cadre : {_clip(data['description'], 2 * _PROJECT_TEXT_MAX_CHARS)}")
     if data.get("tone_directive"):
-        lines.append(f"Ton à utiliser : {data['tone_directive']}")
+        lines.append(f"Ton à utiliser : {_clip(data['tone_directive'], _PROJECT_TEXT_MAX_CHARS)}")
     instr = data.get("instructions") or []
     if instr:
         lines.append("Consignes :")
-        for i in instr:
-            lines.append(f"  - {i}")
+        for i in instr[:_PROJECT_LIST_ITEMS_MAX]:
+            lines.append(f"  - {_clip(i, _PROJECT_TEXT_MAX_CHARS)}")
     oos = data.get("out_of_scope") or []
     if oos:
         lines.append("Hors de portée :")
-        for o in oos:
-            lines.append(f"  - {o}")
+        for o in oos[:_PROJECT_LIST_ITEMS_MAX]:
+            lines.append(f"  - {_clip(o, _PROJECT_TEXT_MAX_CHARS)}")
 
     policy = data.get("emotion_policy", "off")
     if policy == "off":
@@ -713,7 +744,9 @@ async def _fetch_self_concept() -> str:
 
     try:
         latest = await read.latest_self_narrative()
-        return latest.content if latest and latest.content else ""
+        if latest and latest.content:
+            return _clip(latest.content, _SELF_CONCEPT_MAX_CHARS)
+        return ""
     except Exception as exc:
         degradations.record("prompt: self-concept", exc)
         return ""

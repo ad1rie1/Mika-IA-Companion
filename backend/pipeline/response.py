@@ -3,7 +3,7 @@
 from ai.client import ai_client
 from emotion.types import EmotionData, extract_emotion
 from pipeline.context import ConversationContext
-from pipeline.prompt import build_system_prompt, format_conversation
+from pipeline.prompt import build_chat_prompt
 
 
 async def call_ai_and_parse(
@@ -13,21 +13,21 @@ async def call_ai_and_parse(
 
     Returns (clean_text, emotion_data, tool_calls).
     Les fichiers uploadés sont accessibles via les outils files_* du FilesModule.
+
+    Passes the ``ConversationContext`` object itself to the prompt builder —
+    never a transcription of its fields. The structured ``ChatPrompt`` keeps
+    the cacheable prefix, the per-turn state and the real message turns
+    apart; each provider renders it in its native optimal form.
     """
-    system = build_system_prompt(context)
-    user_prompt = format_conversation(message, context.history)
+    prompt = build_chat_prompt(context, message)
 
     if context.tools:
-        raw_text, tool_calls = await ai_client.complete_with_tools(
-            system_prompt=system,
-            user_prompt=user_prompt,
+        raw_text, tool_calls = await ai_client.chat_with_tools(
+            prompt=prompt,
             tools=context.tools,
         )
     else:
-        raw_text = await ai_client.complete(
-            system_prompt=system,
-            user_prompt=user_prompt,
-        )
+        raw_text = await ai_client.chat(prompt=prompt)
         tool_calls = []
 
     clean_text, emotion_data = extract_emotion(raw_text)

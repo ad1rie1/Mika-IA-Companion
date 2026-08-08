@@ -143,10 +143,21 @@ def _load_declared_models() -> dict[str, dict]:
             temperature = float(payload.get("temperature", 0.7))
         except (TypeError, ValueError):
             temperature = 0.7
+        # ``max_tokens`` est optionnel sur les lignes existantes (le champ a
+        # été ajouté après coup) : absent ou invalide → None, et le provider
+        # garde son défaut de signature.
+        try:
+            raw_mt = payload.get("max_tokens")
+            max_tokens = int(raw_mt) if raw_mt not in (None, "") else None
+        except (TypeError, ValueError):
+            max_tokens = None
+        if max_tokens is not None and max_tokens <= 0:
+            max_tokens = None
         out[name] = {
             "provider": provider,
             "model_id": model_id,
             "temperature": temperature,
+            "max_tokens": max_tokens,
         }
     return out
 
@@ -401,14 +412,17 @@ class AIRouter:
         user_prompt: str,
         invoke,
         timeout: float | None = None,
+        extra_prompt_chars: int = 0,
     ):
         """Séquence commune à TOUT appel routé, outillé ou non.
 
         Résolution du rôle → contrôle de quota → appel → relevé d'usage →
-        comptabilisation → log unifié. ``invoke(provider, model, temperature)``
-        exécute l'appel réel et renvoie ``(valeur_rendue, texte_produit)`` ;
-        le texte ne sert qu'à estimer les tokens de sortie quand le provider
-        n'a pas remonté son usage réel.
+        comptabilisation → log unifié.
+        ``invoke(provider, model, temperature, max_tokens)`` exécute l'appel
+        réel et renvoie ``(valeur_rendue, texte_produit)`` ; le texte ne sert
+        qu'à estimer les tokens de sortie quand le provider n'a pas remonté
+        son usage réel. ``max_tokens`` vient de la ligne du modèle déclaré
+        (None = défaut du provider).
 
         Factorisé plutôt que recopié : le chemin outillé contournait le
         routeur, donc ni les plafonds, ni la température déclarée, ni la
@@ -423,8 +437,15 @@ class AIRouter:
         """
         provider_name, model, temperature, internal_name = self._resolve(role)
         provider = self._get_provider(provider_name)
+        max_tokens = (self._get_declared_models().get(internal_name) or {}).get(
+            "max_tokens"
+        )
 
-        prompt_chars = len(system_prompt) + len(user_prompt)
+        # ``extra_prompt_chars`` porte ce qui n'apparaît dans aucun des deux
+        # prompts mais part quand même sur le réseau — les déclarations
+        # d'outils, ~6 500 tokens pour les neuf modules. Sans lui, le contrôle
+        # de quota pré-appel minorait systématiquement le chemin le plus cher.
+        prompt_chars = len(system_prompt) + len(user_prompt) + extra_prompt_chars
         timeout_s = self._call_timeout(timeout)
 
         project_id = current_project_id.get()
@@ -482,7 +503,8 @@ class AIRouter:
 
         try:
             result, text = await asyncio.wait_for(
-                invoke(provider, model, temperature), timeout=remaining_s,
+                invoke(provider, model, temperature, max_tokens),
+                timeout=remaining_s,
             )
             elapsed_ms = (time.monotonic() - t_call) * 1000
 
@@ -557,9 +579,11 @@ class AIRouter:
         """
         timeout = kwargs.pop("timeout", None)
 
-        async def _invoke(provider, model, temperature):
+        async def _invoke(provider, model, temperature, max_tokens):
             # Role-configured temperature wins unless the caller overrides it.
             kwargs.setdefault("temperature", temperature)
+            if max_tokens is not None:
+                kwargs.setdefault("max_tokens", max_tokens)
             text = await provider.complete(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
@@ -588,10 +612,12 @@ class AIRouter:
         """
         timeout = kwargs.pop("timeout", None)
 
-        async def _invoke(provider, model, temperature):
+        async def _invoke(provider, model, temperature, max_tokens):
             # Même règle que ``complete`` : la température du modèle déclaré
             # s'applique, sauf si l'appelant en impose une.
             kwargs.setdefault("temperature", temperature)
+            if max_tokens is not None:
+                kwargs.setdefault("max_tokens", max_tokens)
             text, called = await provider.complete_with_tools(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
@@ -603,7 +629,91 @@ class AIRouter:
 
         return await self._metered_call(
             role, system_prompt, user_prompt, _invoke, timeout=timeout,
+            extra_prompt_chars=_tools_prompt_chars(tools),
         )
+
+    # ── Structured conversation turns ────────────────────────────
+
+    async def chat(self, role: AIRole, prompt, **kwargs) -> str:
+        """Route a structured ``ChatPrompt`` turn.
+
+        Providers exposing ``complete_chat`` receive the structured form
+        (cacheable prefix + real message turns); the others get the exact
+        legacy two-string shape, so the fallback providers are untouched.
+        """
+        timeout = kwargs.pop("timeout", None)
+        system_est, user_est = prompt.legacy_pair()
+
+        async def _invoke(provider, model, temperature, max_tokens):
+            kwargs.setdefault("temperature", temperature)
+            if max_tokens is not None:
+                kwargs.setdefault("max_tokens", max_tokens)
+            if hasattr(provider, "complete_chat"):
+                text = await provider.complete_chat(
+                    prompt=prompt, model=model, **kwargs,
+                )
+            else:
+                text = await provider.complete(
+                    system_prompt=system_est,
+                    user_prompt=user_est,
+                    model=model,
+                    **kwargs,
+                )
+            return text, text
+
+        return await self._metered_call(
+            role, system_est, user_est, _invoke, timeout=timeout,
+        )
+
+    async def chat_with_tools(
+        self, role: AIRole, prompt, tools: list, **kwargs,
+    ) -> tuple[str, list[str]]:
+        """Route a tool-enabled structured turn, metered like the rest."""
+        timeout = kwargs.pop("timeout", None)
+        system_est, user_est = prompt.legacy_pair()
+
+        async def _invoke(provider, model, temperature, max_tokens):
+            kwargs.setdefault("temperature", temperature)
+            if max_tokens is not None:
+                kwargs.setdefault("max_tokens", max_tokens)
+            if hasattr(provider, "complete_chat_with_tools"):
+                text, called = await provider.complete_chat_with_tools(
+                    prompt=prompt, model=model, tools=tools or [], **kwargs,
+                )
+            else:
+                text, called = await provider.complete_with_tools(
+                    system_prompt=system_est,
+                    user_prompt=user_est,
+                    model=model,
+                    tools=tools or [],
+                    **kwargs,
+                )
+            return (text, called), text
+
+        return await self._metered_call(
+            role, system_est, user_est, _invoke, timeout=timeout,
+            extra_prompt_chars=_tools_prompt_chars(tools),
+        )
+
+
+def _tools_prompt_chars(tools: list) -> int:
+    """Approximate character weight of the tool declarations.
+
+    Name + description + serialized JSON schema — the payload every provider
+    re-sends with the request. Defensive: an exotic tool object without the
+    expected surface simply doesn't count, it never breaks the call.
+    """
+    import json
+
+    total = 0
+    for t in tools or []:
+        try:
+            total += len(getattr(t, "name", "") or "")
+            total += len(getattr(t, "description", "") or "")
+            total += len(json.dumps(t.to_json_schema(), ensure_ascii=False))
+        except Exception:
+            continue
+    return total
 
 
 ai_router = AIRouter()
