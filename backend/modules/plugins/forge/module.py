@@ -41,6 +41,24 @@ from modules.plugins.forge.api import ForgeAPI, write_log
 HANDLER_TIMEOUT_DEFAULT = 10
 CONTEXT_TIMEOUT_S = 5.0
 POOL_WORKERS = 2
+# Ce que le contexte forgé pèse dans le prompt système, à chaque tour. Le
+# cache d'un module est déjà borné à 500 caractères (``_refresh_context``),
+# mais leur somme ne l'était pas : ``forge.max_modules`` monte jusqu'à 50,
+# soit 25 000 caractères renvoyés à chaque tour face à un prompt système
+# d'environ 6 000 — et écrits par du code que Mika écrit elle-même.
+CONTEXT_TOTAL_BUDGET = 900
+# En dessous, une part ne dit plus rien d'utile : mieux vaut détailler moins
+# de modules et nommer ceux qu'on a laissés de côté.
+CONTEXT_MIN_PART = 120
+# Fenêtre de rappel d'une panne de chargement dans le prompt (15 min).
+BROKEN_NOTICE_TTL_S = 900.0
+
+
+def _ecourter(texte: str, limite: int) -> str:
+    """Coupe à ``limite`` caractères en laissant la coupe visible."""
+    if len(texte) <= limite:
+        return texte
+    return texte[: max(1, limite - 1)].rstrip() + "…"
 
 
 def _cfg(key: str, default):
@@ -80,6 +98,7 @@ class ForgeModule(BaseModule):
         self._tick_task: asyncio.Task | None = None
         self._event_tasks: set[asyncio.Task] = set()
         self._breaker_notified: set[str] = set()
+        self._broken_notice: dict[str, float] = {}
         self._ops_lock: asyncio.Lock = asyncio.Lock()
         # Autant de jetons que de fils : voir _submit().
         self._pool_slots: asyncio.Semaphore = asyncio.Semaphore(POOL_WORKERS)
@@ -886,21 +905,63 @@ class ForgeModule(BaseModule):
         from modules.plugins.forge.config_schema import CONFIG_SCHEMA
         return CONFIG_SCHEMA
 
+    def _context_fragments(self) -> list[str]:
+        """Le contexte des modules forgés, plafonné en agrégat.
+
+        La part est égale plutôt que premier arrivé premier servi : sans ça
+        un module en fin de dict ne serait jamais entendu. Quand elle tombe
+        sous ``CONTEXT_MIN_PART`` elle ne dit plus rien, alors on détaille
+        moins de modules et on nomme ceux qui n'ont pas eu la parole.
+        """
+        parlants = [lm for lm in self._loaded.values() if lm.context_cache]
+        if not parlants:
+            return []
+        part = max(CONTEXT_MIN_PART, CONTEXT_TOTAL_BUDGET // len(parlants))
+        detailles = parlants[: max(1, CONTEXT_TOTAL_BUDGET // part)]
+        fragments = [
+            _ecourter(f"({lm.name}) {lm.context_cache}", part)
+            for lm in detailles
+        ]
+        muets = [lm.name for lm in parlants[len(detailles):]]
+        if muets:
+            fragments.append(_ecourter(
+                "non détaillés faute de place: " + ", ".join(muets),
+                CONTEXT_MIN_PART,
+            ))
+        return fragments
+
+    def _broken_a_signaler(self) -> list[str]:
+        """Les pannes ne sont rappelées que pendant ``BROKEN_NOTICE_TTL_S``.
+
+        Passé ce délai la panne reste un fait du dashboard et de
+        ``forge_list_modules`` ; la répéter à chaque tour la fait payer
+        aussi longtemps que le module n'est pas réparé. Un module réparé
+        puis re-cassé rouvre une fenêtre.
+        """
+        maintenant = time.monotonic()
+        for name in list(self._broken_notice):
+            if name not in self._load_errors:
+                del self._broken_notice[name]
+        return [
+            name for name in sorted(self._load_errors)
+            if maintenant - self._broken_notice.setdefault(name, maintenant)
+            <= BROKEN_NOTICE_TTL_S
+        ]
+
     def get_context(self, person_id: str = "") -> str:
-        parts: list[str] = []
-        broken = [n for n in self._load_errors]
-        for lm in self._loaded.values():
-            if lm.context_cache:
-                parts.append(f"({lm.name}) {lm.context_cache}")
+        parts = self._context_fragments()
+        broken = self._broken_a_signaler()
         if broken:
-            parts.append(
-                "modules forgés en panne: " + ", ".join(sorted(broken))
-                + " — tu peux les inspecter avec forge_read_module"
-            )
-        if not parts and not self._loaded:
+            parts.append(_ecourter(
+                "modules forgés en panne: " + ", ".join(broken),
+                CONTEXT_MIN_PART,
+            ) + " — tu peux les inspecter avec forge_read_module")
+        # Un compteur seul n'apprend rien au modèle : sans fragment à
+        # porter, le bloc ne vaut pas ses tokens (elle a forge_list_modules).
+        if not parts:
             return ""
         summary = f"{len(self._loaded)} module(s) forgé(s) actif(s)"
-        return summary + (" | " + " | ".join(parts) if parts else "")
+        return summary + " | " + " | ".join(parts)
 
     def get_status(self) -> ModuleStatus:
         status = super().get_status()
