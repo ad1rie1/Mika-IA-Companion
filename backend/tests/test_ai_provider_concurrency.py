@@ -134,7 +134,7 @@ class TestSerialisation:
         live = 0
         peak = 0
 
-        async def invoke(provider, model, temperature):
+        async def invoke(provider, model, temperature, max_tokens):
             nonlocal live, peak
             live += 1
             peak = max(peak, live)
@@ -172,7 +172,7 @@ class TestSerialisation:
 
         r = self._router_for("claude", 1, monkeypatch)
 
-        async def boom(provider, model, temperature):
+        async def boom(provider, model, temperature, max_tokens):
             raise RuntimeError("provider down")
 
         for _ in range(3):
@@ -192,10 +192,10 @@ class TestSerialisation:
 
         r = self._router_for("claude", 1, monkeypatch)
 
-        async def inner(provider, model, temperature):
+        async def inner(provider, model, temperature, max_tokens):
             return "inner", "inner"
 
-        async def outer(provider, model, temperature):
+        async def outer(provider, model, temperature, max_tokens):
             await asyncio.wait_for(
                 r._metered_call(AIRole.VISION_CAPTION, "s", "u", inner),
                 timeout=1.0,

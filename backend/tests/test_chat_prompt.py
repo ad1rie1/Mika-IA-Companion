@@ -636,6 +636,10 @@ def routed(monkeypatch):
     r = router_mod.AIRouter.__new__(router_mod.AIRouter)
     r._providers = {}
     r._role_to_internal = {}
+    # Attributs du sémaphore par provider, posés par __init__ que __new__
+    # contourne — None force _provider_semaphore à repartir de zéro.
+    r._semaphore_loop = None
+    r._semaphores = {}
     # Primed so `_metered_call` reads the declared row (incl. max_tokens)
     # without touching the config service.
     r._declared_models = {

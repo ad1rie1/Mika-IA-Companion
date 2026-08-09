@@ -458,7 +458,10 @@ class AIRouter:
         """
         provider_name, model, temperature, internal_name = self._resolve(role)
         provider = self._get_provider(provider_name)
-        max_tokens = (self._get_declared_models().get(internal_name) or {}).get(
+        # Lu sur le cache mémoïsé que ``_resolve`` vient de chauffer — jamais
+        # une relecture : un ``_resolve`` substitué (tests) ou une table vide
+        # donnent simplement None, c'est-à-dire le défaut du provider.
+        max_tokens = ((self._declared_models or {}).get(internal_name) or {}).get(
             "max_tokens"
         )
 
