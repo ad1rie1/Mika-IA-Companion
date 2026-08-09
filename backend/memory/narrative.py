@@ -46,8 +46,15 @@ NARRATIVE_MIN_AGE_HOURS = 24
 NARRATIVE_MIN_NEW_SOUVENIRS = 5
 
 # Hard cap on how many memories we feed the LLM, to keep prompt size
-# bounded. Sampled by (importance DESC, recency DESC).
-MAX_SOUVENIRS_IN_PROMPT = 25
+# bounded. La porte compte le NEUF ; l'échantillon doit donc en contenir,
+# sinon le self-concept se fige : trié sur la seule importance, le pool était
+# occupé à demeure par les souvenirs que la Conscience booste et par ceux que
+# le sommeil écrit avec une importance à la main, et une semaine riche à
+# importance ordinaire n'y entrait jamais.
+NARRATIVE_WINDOW_DAYS = 14
+MAX_RECENT_SOUVENIRS = 18
+MAX_ANCHOR_SOUVENIRS = 7
+MAX_SOUVENIRS_IN_PROMPT = MAX_RECENT_SOUVENIRS + MAX_ANCHOR_SOUVENIRS
 MAX_CONNAISSANCES_IN_PROMPT = 20
 
 # Timeout on the LLM call. This runs in the consolidation loop, so we
@@ -177,16 +184,36 @@ class NarrativeGenerator:
 
     @staticmethod
     async def gather_input() -> tuple[NarrativeInput, int]:
-        """Pull the recent high-importance memory pool. Returns (input, max_souvenir_id)."""
-        from memory.models import Connaissance, EmotionalSummary, Souvenir
+        """Le vécu récent, plus quelques ancres. Returns (input, max_souvenir_id).
 
-        souvenir_rows = await sync_to_async(
-            lambda: list(
-                Souvenir.objects
-                .order_by("-importance", "-occurred_at")[:MAX_SOUVENIRS_IN_PROMPT]
+        L'ordre du prompt est délibéré : le vécu récent d'abord, les ancres
+        toutes époques ensuite — c'est ce qui a bougé qui doit peser.
+        """
+        from django.db.models import Q
+
+        from memory.models import Connaissance, EmotionalSummary, SelfNarrative, Souvenir
+
+        def _sample():
+            last_id = (
+                SelfNarrative.objects.order_by("-created_at")
+                .values_list("last_souvenir_id", flat=True)
+                .first()
+                or 0
+            )
+            cutoff = timezone.now() - timedelta(days=NARRATIVE_WINDOW_DAYS)
+            recent = list(
+                Souvenir.objects.filter(Q(id__gt=last_id) | Q(occurred_at__gte=cutoff))
+                .order_by("-occurred_at")[:MAX_RECENT_SOUVENIRS]
                 .prefetch_related("themes", "entities")
             )
-        )()
+            anchors = list(
+                Souvenir.objects.exclude(pk__in=[s.pk for s in recent])
+                .order_by("-importance", "-occurred_at")[:MAX_ANCHOR_SOUVENIRS]
+                .prefetch_related("themes", "entities")
+            )
+            return recent + anchors
+
+        souvenir_rows = await sync_to_async(_sample)()
 
         def _serialize_souvenir(s):
             return {
@@ -227,10 +254,12 @@ class NarrativeGenerator:
             )
         )()
 
-        max_id = souvenir_rows[0].id if souvenir_rows else 0
-        # souvenirs are ordered by importance, not id — recompute true max.
-        if souvenir_rows:
-            max_id = max(s.id for s in souvenir_rows)
+        # Le max GLOBAL, pas celui du pool : c'est un repère « j'ai vu
+        # jusque-là ». Le prendre sur un pool majoritairement ancien laissait
+        # la porte re-compter le même neuf à chaque passe.
+        max_id = await sync_to_async(
+            lambda: Souvenir.objects.order_by("-id").values_list("id", flat=True).first() or 0
+        )()
 
         return NarrativeInput(
             souvenirs=souvenirs,

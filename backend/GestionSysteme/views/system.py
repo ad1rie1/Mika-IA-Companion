@@ -58,6 +58,7 @@ def _health(request) -> dict:
         bus = {"emitted": 0, "subscriptions": []}
 
     subscriptions = bus.get("subscriptions", [])
+    boucles = _loops_snapshot()
     return {
         "sites_page": tables.paginate(request, sites, per_page=50),
         "total_events": degradations.total(),
@@ -65,7 +66,47 @@ def _health(request) -> dict:
         "bus_emitted": bus.get("emitted", 0),
         "subscriptions": subscriptions,
         "failing": [s for s in subscriptions if s.get("failed")],
+        "boucles": boucles,
+        "boucles_muettes": [b for b in boucles if b["en_retard"]],
     }
+
+
+# Une boucle est déclarée en retard bien après sa période : elles ticquent
+# entre 1 s et 60 s, et un tick lent ne doit pas allumer la page.
+_LOOP_LATE_FACTOR = 10
+
+
+def _loops_snapshot() -> list[dict]:
+    """Chaque boucle de fond avec l'âge de son dernier tick *réussi*.
+
+    Isolé comme le reste de la vue : c'est la page qu'on ouvre parce que
+    quelque chose est cassé.
+    """
+    import time
+
+    try:
+        from utils.periodic import active_loops
+        loops = active_loops()
+    except Exception:
+        logger.exception("inventaire des boucles indisponible")
+        return []
+
+    now = time.time()
+    rows = []
+    for loop in loops:
+        age = None if loop.last_success_at is None else now - loop.last_success_at
+        rows.append({
+            "nom": loop.name,
+            "running": loop.is_running,
+            "interval": loop.interval,
+            "age_seconds": age,
+            "last_error": loop.last_error,
+            "en_retard": bool(
+                loop.is_running
+                and (age is None or age > _LOOP_LATE_FACTOR * max(loop.interval, 1))
+            ),
+        })
+    return rows
 
 
 # ── Routage IA ──────────────────────────────────────────────────────────
@@ -104,7 +145,6 @@ def _routing(request) -> dict:
         {
             "name": "claude",
             "details": [
-                ("Jeton OAuth", bool(cfg("ai.claude.oauth_token"))),
                 ("Clé d'API", bool(cfg("ai.claude.api_key"))),
             ],
         },

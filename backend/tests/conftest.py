@@ -6,6 +6,8 @@ and conversation simulation helpers.
 """
 
 import time
+from unittest.mock import patch
+
 import pytest
 
 from emotion.types import Emotion, EmotionData
@@ -86,6 +88,51 @@ def explosive_engine() -> EmotionEngine:
 def melancholic_engine() -> EmotionEngine:
     """EmotionEngine with melancholic temperament — defaults to sadness."""
     return _make_engine(TEMPERAMENT_MELANCHOLIC)
+
+
+# ---------------------------------------------------------------------------
+# Lectures de configuration sans base
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def config_hors_base():
+    """``config_service.get`` servi depuis le registre, jamais depuis la base.
+
+    Opt-in (``pytest.mark.usefixtures``), pas autouse : la majorité de la
+    suite décrit justement le stockage de la configuration. C'est pour les
+    tests qui décrivent autre chose et lisent des réglages en passant — le
+    routeur IA lit ``ai.quota.*``, ``ai.call_timeout_seconds`` et
+    ``ai.<provider>.max_concurrent_calls`` à *chaque* appel routé.
+
+    ``ConfigService.get`` ne retombe sur le défaut de schéma qu'après avoir
+    essayé la base, et cet essai devient fatal quand deux états laissés par
+    des tests antérieurs se rencontrent : le cache de valeurs vidé
+    (``invalidate_cache()``) et une connexion ouverte dans le thread
+    ``config-db`` par un test ``django_db``. La lecture part alors hors
+    boucle, où ``close_old_connections()`` précède le ``except`` de
+    ``_fetch_value_row`` censé absorber une base illisible, et le blocage de
+    pytest-django remonte intact jusqu'à l'appelant. D'où des tests verts
+    seuls, rouges dans la suite complète — et, entre les deux, incapables de
+    signaler la régression qu'ils prétendent surveiller.
+
+    Le défaut du registre est exactement ce que rend ``get`` sans ligne en
+    base, c'est-à-dire ce sur quoi tourne une installation neuve.
+    """
+    from configs.registry import registry
+    from configs.service import config_service
+
+    absent = object()
+
+    def _defaut_declare(key, default=absent):
+        item = registry.get(key)
+        if item is not None:
+            return item.default
+        if default is not absent:
+            return default
+        raise KeyError(f"Unknown config key: {key}")
+
+    with patch.object(config_service, "get", side_effect=_defaut_declare):
+        yield
 
 
 # ---------------------------------------------------------------------------

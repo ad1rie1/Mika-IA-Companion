@@ -13,7 +13,7 @@ import pytest
 from emotion.types import Emotion, EmotionData
 from pipeline import voice
 from pipeline.processor import SpeechOutput
-from pipeline.voice import VoiceClip, VoiceSink, decide_voice
+from pipeline.voice import VoiceClip, VoicePersona, VoiceSink, decide_voice
 
 
 def _output(text="Salut !"):
@@ -60,11 +60,35 @@ class TestVoicePolicy:
         assert not d.speak
         assert "asleep" in d.reason
 
-    def test_screen_speaks_even_at_night(self):
-        # The person is deliberately looking at the app; the avatar's own
-        # animation carries the sleepiness.
+    def test_screen_stays_silent_while_she_sleeps(self):
+        # Le pin change : une adresse à voix haute pendant que l'avatar a les
+        # yeux fermés et que la scène est tamisée n'est pas cohérente. Une
+        # vraie question ne tombe jamais dans cette garde — la perception la
+        # réveille avant l'appel IA (router._note_live_interaction).
         d = decide_voice(VoiceSink.SCREEN, hour=3, sleep_phase="light_sleep")
+        assert not d.speak
+        assert "asleep" in d.reason
+
+    def test_screen_speaks_at_night_when_she_is_awake(self):
+        # Seule la SPEAKER a des heures calmes : la nuit à elle seule ne
+        # suffit pas à la faire taire à l'écran.
+        d = decide_voice(VoiceSink.SCREEN, hour=3, sleep_phase="awake")
         assert d.speak
+
+    def test_inner_murmur_survives_sleep_on_screen(self):
+        d = decide_voice(
+            VoiceSink.SCREEN, hour=3, sleep_phase="deep_sleep",
+            persona=VoicePersona.INNER,
+        )
+        assert d.speak
+        assert d.reason == "inner_screen_ok"
+
+    def test_screen_asleep_reason_matches_the_speaker_wording(self):
+        # Deux formulations pour un même fait est le début d'une dérive : le
+        # frontend et les tests cherchent la sous-chaîne "asleep".
+        ecran = decide_voice(VoiceSink.SCREEN, hour=14, sleep_phase="rem")
+        haut_parleur = decide_voice(VoiceSink.SPEAKER, hour=14, sleep_phase="rem")
+        assert ecran.reason == haut_parleur.reason
 
     def test_screen_silent_without_a_client(self):
         d = decide_voice(VoiceSink.SCREEN, hour=14, person_present=False)

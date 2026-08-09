@@ -25,6 +25,10 @@ class AIProvider(Protocol):
       - ``test()``               — lightweight liveness check. Default impl just
         calls ``list_models()`` and counts the result, but providers may
         override if they have a cheaper ping.
+
+    Le tour structuré (``complete_chat`` / ``complete_chat_with_tools``) ne
+    figure pas ici : c'est une *capacité*, déclarée par ``ChatNativeProvider``
+    et ``ChatToolsProvider`` ci-dessous.
     """
 
     async def complete(
@@ -62,6 +66,53 @@ class AIProvider(Protocol):
 
     async def test(self) -> dict:
         """Return ``{"ok": bool, "model_count": int, "error"?: str}``."""
+        ...
+
+
+@runtime_checkable
+class ChatNativeProvider(Protocol):
+    """Provider sachant consommer un ``ChatPrompt`` sans outil.
+
+    Volontairement **hors** de ``AIProvider`` : ``AIRouter.chat`` bascule sur
+    ``hasattr(provider, "complete_chat")`` et retombe sur ``complete()`` avec
+    l'aplatissement à deux chaînes sinon. Un membre de Protocol n'est jamais
+    optionnel — l'exiger dans ``AIProvider`` déclarerait obligatoire ce que le
+    routeur détecte comme une *capacité*, et présenterait le ``hasattr`` comme
+    un test qui ne peut pas échouer, c'est-à-dire comme du code mort. Le socle
+    reste ``AIProvider`` ; ceci nomme la forme que le routeur y cherche.
+    """
+
+    async def complete_chat(
+        self,
+        prompt,                   # ChatPrompt — quoted to avoid import cycle
+        model: str,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ) -> str:
+        """Run a structured turn: cacheable prefix + real message turns."""
+        ...
+
+
+@runtime_checkable
+class ChatToolsProvider(Protocol):
+    """Provider sachant consommer un ``ChatPrompt`` **avec** outils.
+
+    Capacité distincte de la précédente, et détectée séparément : le routeur
+    teste ``complete_chat`` dans ``chat()`` et ``complete_chat_with_tools``
+    dans ``chat_with_tools()``. Deux protocoles pour deux ``hasattr``.
+    """
+
+    async def complete_chat_with_tools(
+        self,
+        prompt,                   # ChatPrompt — quoted to avoid import cycle
+        model: str,
+        tools: list,              # list[ModuleTool]
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        *,
+        max_turns: int = 10,
+    ) -> tuple[str, list[str]]:
+        """Same contract as ``complete_with_tools``: ``(texte, outils appelés)``."""
         ...
 
 

@@ -22,9 +22,24 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+import weakref
 from typing import Awaitable, Callable
 
+from utils.degradation import degradations
+
 logger = logging.getLogger(__name__)
+
+# Every live loop, so the health page can answer "when did each of these
+# last actually work?" without any subsystem having to register itself.
+# Weak so the throwaway loops tests build don't accumulate; the real ones
+# are held by their singletons.
+_LOOPS: weakref.WeakSet[PeriodicLoop] = weakref.WeakSet()
+
+
+def active_loops() -> list[PeriodicLoop]:
+    """All loops still alive in this process, by name."""
+    return sorted(_LOOPS, key=lambda loop: loop.name)
 
 
 class PeriodicLoop:
@@ -46,6 +61,14 @@ class PeriodicLoop:
         self._interval = interval
         self._task: asyncio.Task | None = None
         self._running = False
+        # "Running" says a task exists, which is exactly what a loop stuck on
+        # a persistent `database is locked` also says. The age of the last
+        # *successful* tick is the fact that distinguishes them.
+        self.last_success_at: float | None = None
+        # Deliberately not cleared on success: the age above says whether the
+        # loop is up to date, this says how it breaks when it breaks.
+        self.last_error: str = ""
+        _LOOPS.add(self)
 
     @property
     def is_running(self) -> bool:
@@ -86,9 +109,12 @@ class PeriodicLoop:
                 # shutdown writes to a database that is being torn down.
                 if self._running:
                     await self._tick()
+                    self.last_success_at = time.time()
             except asyncio.CancelledError:
                 break
-            except Exception:
+            except Exception as exc:
                 # Nothing supervises this loop, so a propagating exception
                 # would silently end it for the lifetime of the process.
+                self.last_error = f"{type(exc).__name__}: {exc}"
+                degradations.record(f"boucle {self.name}", exc)
                 logger.exception("%s loop error", self.name)

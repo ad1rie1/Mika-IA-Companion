@@ -172,12 +172,45 @@ class OpenAIProvider:
         max_turns: int = 10,
     ) -> tuple[str, list[str]]:
         """OpenAI function-calling via ``tools=[...]`` + ping/pong loop."""
-        from ai.providers._openai_tools import run_openai_tool_loop
-        return await run_openai_tool_loop(
+        from ai.providers._openai_tools import run_openai_tool_loop_from_pair
+        return await run_openai_tool_loop_from_pair(
             client=self._client,
             provider_label="OpenAI",
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+            model=model,
+            tools=tools,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            max_turns=max_turns,
+        )
+
+    async def complete_chat_with_tools(
+        self,
+        prompt,
+        model: str,
+        tools: list,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        *,
+        max_turns: int = 10,
+    ) -> tuple[str, list[str]]:
+        """Tour outillé structuré — la même boucle, amorcée sur de vrais tours.
+
+        C'est le tour le plus cher du système : les déclarations d'outils
+        (~6 500 jetons) repartent à chaque aller-retour de la boucle. Amorcée
+        sur l'aplatissement, chaque itération présentait un préfixe différent
+        et tout était refacturé plein tarif ; ici le préfixe stable ne bouge
+        pas de la boucle, ni d'un tour à l'autre.
+        """
+        from ai.providers._openai_tools import (
+            messages_from_chat_prompt,
+            run_openai_tool_loop,
+        )
+        return await run_openai_tool_loop(
+            client=self._client,
+            provider_label="OpenAI",
+            messages=messages_from_chat_prompt(prompt),
             model=model,
             tools=tools,
             max_tokens=max_tokens,

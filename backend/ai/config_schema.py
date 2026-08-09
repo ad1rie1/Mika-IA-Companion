@@ -82,16 +82,15 @@ CONFIG_SCHEMA = [
     ),
     # Claude
     ConfigItem(
-        key="ai.claude.oauth_token", type="secret", section="ai_providers", group="Claude",
-        label="OAuth token", sensitive=True,
-        hot_reload=True,
-        hint="Jeton Claude.ai (commence par sk-ant-oat01-).",
-    ),
-    ConfigItem(
         key="ai.claude.api_key", type="secret", section="ai_providers", group="Claude",
-        label="API key (fallback)", sensitive=True,
+        label="Clé d'API", sensitive=True,
         hot_reload=True,
-        hint="Requis uniquement si pas d'OAuth token.",
+        hint=(
+            "Clé Anthropic (commence par sk-ant-api). Seul mode "
+            "d'authentification accepté : les jetons OAuth Claude.ai "
+            "passaient par un sous-processus CLI qu'Anthropic ne supporte "
+            "plus."
+        ),
     ),
     _concurrency_item("claude", "Claude", default=0, maximum=64,
                       hint=_HOSTED_CONCURRENCY_HINT),

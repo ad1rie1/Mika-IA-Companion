@@ -18,6 +18,12 @@ from ai.quota import (
 )
 from ai.router import AIRole, AIRouter
 
+# Aucun test de ce fichier ne décrit le stockage de la configuration : ils
+# décrivent la tarification, le compteur et le routage. Les réglages lus au
+# passage viennent donc du registre, pas de la base de l'installation — sinon
+# c'est l'ordre d'exécution qui décide si le cache couvrait la lecture.
+pytestmark = pytest.mark.usefixtures("config_hors_base")
+
 
 @pytest.fixture(autouse=True)
 def reset_tracker():
@@ -65,6 +71,11 @@ class _patched_router:
         def _fake_get(key, default=""):
             if key in role_config:
                 return role_config[key]
+            # Un rôle absent de la table doit se lire « non mappé », pas depuis
+            # la base de l'installation : sinon construire le routeur touche la
+            # DB, et c'est l'ordre des tests qui décide si le cache la couvrait.
+            if key.startswith("ai.role."):
+                return default
             return real_get(key, default=default)
 
         self._declared_patch = patch("ai.router._load_declared_models", return_value=declared)
@@ -322,6 +333,37 @@ class TestRouterRecords:
         snap = quota_tracker.snapshot()
         assert snap.projects["42"]["tokens_day"] == 150
         assert snap.roles["memory_extraction"]["tokens_day"] == 150
+
+
+class TestIsolationConfiguration:
+    """La garde qui rend les tests ci-dessus indépendants de l'ordre.
+
+    Un appel routé lit trois familles de réglages (``ai.quota.*``,
+    ``ai.call_timeout_seconds``, ``ai.<provider>.max_concurrent_calls``).
+    Tant que ces lectures descendaient jusqu'à ``ConfigService._resolve``,
+    elles ne passaient que parce qu'un test antérieur avait chauffé le cache
+    de valeurs : vert seul, rouge derrière un test qui vide ce cache, et
+    entre les deux hors d'état de signaler quoi que ce soit.
+    """
+
+    @pytest.mark.asyncio
+    async def test_un_appel_route_ne_lit_pas_la_base(self):
+        from configs import service as service_mod
+
+        def _interdit(key):
+            raise AssertionError(
+                f"lecture en base de {key!r} pendant un test de routeur"
+            )
+
+        with patch.object(service_mod, "_fetch_value_row", _interdit):
+            with _patched_router({AIRole.CONVERSATION: ("claude", "claude-opus-4-7")}) as router:
+                mock_provider = MagicMock()
+                mock_provider.complete = AsyncMock(return_value="ok")
+                router._providers["claude"] = mock_provider
+
+                await router.complete(AIRole.CONVERSATION, "sys", "user")
+
+        assert quota_tracker.snapshot().roles["conversation"]["calls_day"] == 1
 
 
 # ── Project budget ────────────────────────────────────────────────

@@ -175,6 +175,41 @@ class TestObserve:
 
 
 # ===================================================================
+# Instantané des pulsions
+# ===================================================================
+
+class TestSauvegardeDesPulsions:
+    """La conscience est déjà l'horloge du DriveEngine — c'est elle qui appelle
+    `update()`. La sauvegarde s'accroche donc là plutôt que dans une septième
+    boucle de fond, et elle est étranglée : un `kill -9` est précisément le
+    scénario où la fatigue de la soirée disparaissait avec la nuit."""
+
+    @pytest.mark.asyncio
+    async def test_la_sauvegarde_est_etranglee(self):
+        e = _make_engine()
+        e._last_drive_save = 0.0
+
+        with patch("drives.engine.drive_engine.save_state", new=AsyncMock()) as save:
+            await e._save_drives_if_due()
+            await e._save_drives_if_due()
+            await e._save_drives_if_due()
+
+        assert save.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_la_sauvegarde_repasse_apres_l_intervalle(self):
+        from conscience.engine import ConscienceEngine
+
+        e = _make_engine()
+        e._last_drive_save = time.time() - ConscienceEngine._DRIVE_SAVE_INTERVAL_S - 1
+
+        with patch("drives.engine.drive_engine.save_state", new=AsyncMock()) as save:
+            await e._save_drives_if_due()
+
+        assert save.await_count == 1
+
+
+# ===================================================================
 # _compute_score
 # ===================================================================
 

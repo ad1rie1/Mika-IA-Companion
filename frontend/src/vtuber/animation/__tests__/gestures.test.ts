@@ -143,3 +143,71 @@ describe("ambient drift", () => {
     expect(d).toEqual({ action: "none", reason: "asleep" });
   });
 });
+
+/**
+ * La frame `speech` porte désormais l'émotion de la balise [EMOTION:] —
+ * la vérité du tour — et non plus la lecture de l'oscillateur d'avant
+ * l'impulsion, qui passait structurellement sous tous les seuils. Ces cas
+ * pincent que la valeur qui arrive maintenant traverse bien les portes, et
+ * que la dérive, elle, ne les traverse toujours pas.
+ *
+ * Les blends utilisés sont ceux que le backend produit réellement
+ * (`EmotionEngine._build_turn_view`) : dominante = la balise, secondaire =
+ * ce que la position projetée laisse d'inexpliqué.
+ */
+describe("frame speech vs dérive (S7)", () => {
+  const speech = (over: Partial<GestureDecisionInput> = {}) =>
+    base({ persona: "speaking", ...over });
+  const drift = (over: Partial<GestureDecisionInput> = {}) =>
+    base({ persona: undefined, ambient: true, ...over });
+
+  it("une frame speech portant angry 0.8 déclenche un one-shot", () => {
+    const d = decideGesture(
+      speech({
+        emotion: "angry",
+        intensity: 0.8,
+        blend: [
+          { emotion: "angry", weight: 0.8 },
+          { emotion: "determined", weight: 0.46 },
+        ],
+      })
+    );
+    expect(d).toEqual({ action: "oneshot", clip: "gesture_angry" });
+  });
+
+  it("la même émotion arrivée par dérive n'en déclenche pas", () => {
+    const d = decideGesture(
+      drift({
+        emotion: "angry",
+        intensity: 0.8,
+        blend: [{ emotion: "angry", weight: 0.8 }],
+      })
+    );
+    expect(d).toEqual({ action: "none", reason: "ambient_drift" });
+  });
+
+  it("un blend mono-entrée ne se lit jamais comme de l'ambivalence", () => {
+    const d = decideGesture(
+      speech({
+        emotion: "angry",
+        intensity: 0.8,
+        blend: [{ emotion: "angry", weight: 0.38 }],
+      })
+    );
+    expect(d).toEqual({ action: "oneshot", clip: "gesture_angry" });
+  });
+
+  it("un blend vide non plus", () => {
+    const d = decideGesture(
+      speech({ emotion: "angry", intensity: 0.8, blend: [] })
+    );
+    expect(d).toEqual({ action: "oneshot", clip: "gesture_angry" });
+  });
+
+  it("l'ancienne lecture pré-impulsion serait restée sous le seuil", () => {
+    // Ce que la frame portait avant le correctif backend : la position de
+    // l'oscillateur telle quelle, que l'impulsion n'avait pas encore bougée.
+    const d = decideGesture(speech({ emotion: "angry", intensity: 0.36 }));
+    expect(d).toEqual({ action: "none", reason: "below_threshold" });
+  });
+});

@@ -185,6 +185,34 @@ async def pending_commitments_for(entity, *, limit: int = 5) -> list[str]:
     )()
 
 
+async def rows_mentioning_others(model, pks, *, entity_id) -> set[int]:
+    """Parmi ``pks``, ceux rattachés à une personne AUTRE que ``entity_id``.
+
+    Le filtrage est fait côté Python et non en ORM parce que la forme ORM
+    naturelle est fausse dans le sens dangereux :
+    ``.filter(entities__entity_type="person").exclude(entities__id=<pk>)``
+    écarte toute ligne ayant *au moins une* entité égale, donc un souvenir
+    liant l'interlocuteur ET un tiers sort de l'exclusion et se retrouve
+    servi. ``entity_id=None`` (personne non liée) : toute entité-personne
+    compte comme autrui.
+    """
+    pks = [pk for pk in (pks or ()) if pk is not None]
+    if not pks:
+        return set()
+
+    def _query() -> set[int]:
+        rows = model.objects.filter(pk__in=pks).prefetch_related("entities")
+        return {
+            r.pk for r in rows
+            if any(
+                e.entity_type == "person" and e.pk != entity_id
+                for e in r.entities.all()
+            )
+        }
+
+    return await sync_to_async(_query)()
+
+
 async def recent_daily_summaries(person_id: str, *, days: int = 7) -> list:
     """Per-day emotional summaries for a person, newest first."""
     from memory.models import EmotionalSummary

@@ -1,6 +1,7 @@
 """Tests for MemoryRetriever — reranking, formatting, time helpers."""
 
 import pytest
+from collections import deque
 from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -133,9 +134,18 @@ class TestConfidenceLabel:
 
 class TestFormatContext:
 
-    def test_always_has_header_footer(self):
+    def test_header_footer_only_when_there_is_something_to_say(self):
+        """Le pin change volontairement : un bloc réduit à son entête est le
+        même défaut que « [Quelque chose te revient] » suivi de rien, un cran
+        au-dessus — l'encadrement annonce des souvenirs et n'en montre aucun."""
         r = _make_retriever()
-        result = r._format_context([], [])
+        assert r._format_context([], []) == ""
+
+        result = r._format_context(
+            [{"content": "Thomas aime le café", "confidence": 0.9,
+              "entities": [], "themes": []}],
+            [],
+        )
         assert "--- TES SOUVENIRS ---" in result
         assert "--- FIN SOUVENIRS ---" in result
 
@@ -178,15 +188,24 @@ class TestRetrieve:
 
     @pytest.mark.asyncio
     async def test_empty_store_returns_empty_string(self):
+        # Le pin change : le retriever ne lit plus `settings` depuis le
+        # passage à config_service, donc patcher `retriever.settings` ne
+        # patchait plus rien et le vrai `config_service.get` touchait la base
+        # sans marque django_db — un échec qui dépendait de l'ordre des tests.
         from memory.retrieval.retriever import MemoryRetriever
         mock_store = MagicMock()
         mock_store.search_souvenirs = MagicMock(return_value=[])
         mock_store.search_connaissances = MagicMock(return_value=[])
 
-        with patch("memory.retrieval.retriever.settings") as ms:
-            ms.MEMORY_RETRIEVAL_SOUVENIRS = 5
-            ms.MEMORY_RETRIEVAL_CONNAISSANCES = 5
-            ms.MEMORY_MIN_IMPORTANCE = 0.3
+        vals = {
+            "memory.retrieval_souvenirs": 5,
+            "memory.retrieval_connaissances": 5,
+            "memory.min_importance": 0.3,
+            "memory.retrieval_fetch_multiplier": 3,
+            "memory.retrieval_exchanges": 0,
+        }
+        with patch("configs.service.config_service.get",
+                   lambda k, *a, **kw: vals.get(k, 0)):
             r = MemoryRetriever(mock_store)
             result = await r.retrieve("quelque chose", person_id="u1")
 
@@ -528,3 +547,309 @@ class TestImportanceIntrusion:
         strong = await self._souvenir("assez important", 0.9, "sad")
         assert await r._importance_intrusion({strong.pk}, 0.9) == []  # exclu → rien d'éligible
         _ = weak
+
+
+# ===================================================================
+# Souvenir fantôme — l'entrée ChromaDB dont la ligne ORM a disparu.
+#
+# `_load_by_pk` distingue « le chargement a échoué » (None) de « la ligne
+# n'existe plus » (absente du dict). `_enrich_souvenirs` confondait les deux
+# et repliait sur ChromaDB dans les deux cas : un souvenir effacé (décroissance,
+# fusion) était donc reservi pour toujours, importance figée — l'oubli décidé
+# devenait inoubliable. `_enrich_connaissances` traitait déjà le cas
+# correctement ; c'est l'asymétrie qui EST le bug.
+# ===================================================================
+
+class TestSouvenirFantome:
+
+    def _hit(self, pk, content="souvenir efface"):
+        return {"id": str(pk), "content": content, "distance": 0.2,
+                "metadata": {"emotion": "happy", "importance": 0.95}}
+
+    @pytest.mark.asyncio
+    async def test_loaded_but_missing_pk_is_dropped_and_evicted(self):
+        r = _make_retriever()
+        r.vector_store.remove_souvenir = MagicMock()
+        with patch.object(type(r), "_load_by_pk", AsyncMock(return_value={})):
+            out = await r._enrich_souvenirs([self._hit(4242)])
+
+        assert out == []
+        r.vector_store.remove_souvenir.assert_called_once_with(4242)
+
+    @pytest.mark.asyncio
+    async def test_failed_load_keeps_the_chromadb_fallback(self):
+        """Une base verrouillée ne doit pas déclencher un nettoyage vectoriel."""
+        r = _make_retriever()
+        r.vector_store.remove_souvenir = MagicMock()
+        with patch.object(type(r), "_load_by_pk", AsyncMock(return_value=None)):
+            out = await r._enrich_souvenirs([self._hit(4242)])
+
+        assert [s["id"] for s in out] == [4242]
+        r.vector_store.remove_souvenir.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_non_numeric_id_keeps_the_fallback(self):
+        r = _make_retriever()
+        r.vector_store.remove_souvenir = MagicMock()
+        hit = {"id": "pas-un-pk", "content": "x", "metadata": {}}
+        with patch.object(type(r), "_load_by_pk", AsyncMock(return_value={})):
+            out = await r._enrich_souvenirs([hit])
+
+        assert [s["content"] for s in out] == ["x"]
+        r.vector_store.remove_souvenir.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_failing_eviction_is_counted_not_raised(self):
+        from utils.degradation import degradations
+        degradations.reset()
+        r = _make_retriever()
+        r.vector_store.remove_souvenir = MagicMock(side_effect=RuntimeError("chroma"))
+        with patch.object(type(r), "_load_by_pk", AsyncMock(return_value={})):
+            out = await r._enrich_souvenirs([self._hit(7)])
+
+        assert out == []
+        assert degradations.count_for("rappel: retrait souvenir fantome") == 1
+        degradations.reset()
+
+    @pytest.mark.asyncio
+    async def test_souvenirs_and_connaissances_agree_on_a_deleted_row(self):
+        """Symétrie : « pk absent après un chargement réussi » se traite de la
+        même façon des deux côtés. L'asymétrie était le défaut."""
+        r = _make_retriever()
+        r.vector_store.remove_souvenir = MagicMock()
+        with patch.object(type(r), "_load_by_pk", AsyncMock(return_value={})):
+            souvenirs = await r._enrich_souvenirs([self._hit(1)])
+            connaissances = await r._enrich_connaissances([self._hit(1)])
+
+        assert souvenirs == [] and connaissances == []
+
+
+# ===================================================================
+# Anti-répétition — les deux voies non-lexicales sont déterministes, donc
+# « ça me rappelle… » se répétait mot pour mot d'un tour à l'autre.
+# ===================================================================
+
+class TestAntiRepetition:
+
+    def _s(self, pk, **kw):
+        base = {"id": pk, "content": "x", "relevance": 0.5, "occurred_at": None,
+                "entities": [], "importance": 0.0, "emotion": "neutral"}
+        base.update(kw)
+        return base
+
+    def test_demoted_memory_falls_behind_an_equivalent_one(self):
+        r = _make_retriever()
+        frais, deja_vu = self._s(1), self._s(2)
+        out = r._rerank_souvenirs([deja_vu, frais], "", demote_pks={2})
+        assert out[0] is frais
+        assert out[1]["_score"] < out[0]["_score"]
+
+    def test_memo_unions_the_last_turns_and_forgets_the_oldest(self):
+        from memory.retrieval.retriever import RECALL_MEMO_TURNS
+        r = _make_retriever()
+        for tour in range(RECALL_MEMO_TURNS):
+            with patch("pipeline.tracing.get_request_id", return_value=f"r{tour}"):
+                r._noter_servis("web_a", {tour})
+        assert r._deja_servis("web_a") == set(range(RECALL_MEMO_TURNS))
+
+        with patch("pipeline.tracing.get_request_id", return_value="rN"):
+            r._noter_servis("web_a", {99})
+        assert 0 not in r._deja_servis("web_a")
+        assert 99 in r._deja_servis("web_a")
+
+    def test_two_recalls_of_one_turn_consume_a_single_bucket(self):
+        """Un tour réel lance deux rappels (spéculatif puis dirigé) : sans la
+        fusion sur le request_id, un seul tour viderait le mémo."""
+        r = _make_retriever()
+        with patch("pipeline.tracing.get_request_id", return_value="abc123"):
+            r._noter_servis("web_a", {1})
+            r._noter_servis("web_a", {2})
+        assert len(r._servis["web_a"]) == 1
+        assert r._deja_servis("web_a") == {1, 2}
+
+    def test_memo_is_bounded_by_an_lru(self):
+        from memory.retrieval.retriever import RECALL_MEMO_MAX_PERSONS
+        r = _make_retriever()
+        for i in range(RECALL_MEMO_MAX_PERSONS + 5):
+            r._noter_servis(f"web_{i}", {i})
+        assert len(r._servis) == RECALL_MEMO_MAX_PERSONS
+        assert r._deja_servis("web_0") == set()
+
+    def test_unknown_person_has_no_memo(self):
+        r = _make_retriever()
+        assert r._deja_servis("jamais_vu") == set()
+
+    @pytest.mark.asyncio
+    async def test_retrieve_multi_feeds_the_memo_to_both_lanes(self):
+        """Le câblage : le mémo démote la voie directe ET exclut durement les
+        deux voies « surprise », puis ce qui vient d'être servi est noté."""
+        from memory.retrieval.retriever import MemoryRetriever
+
+        store = MagicMock()
+        store.search_souvenirs = MagicMock(return_value=[
+            {"id": "7", "content": "déjà dit", "distance": 0.1, "metadata": {}},
+        ])
+        store.search_connaissances = MagicMock(return_value=[])
+        r = MemoryRetriever(store)
+        r._servis["web_a"] = deque([("r0", {7, 42})], maxlen=3)
+
+        vus = {}
+
+        def _rerank(souvenirs, boost_name, **kw):
+            vus["demote"] = kw.get("demote_pks")
+            return souvenirs
+
+        async def _assoc(souvenirs, exclude_pks):
+            vus["assoc_exclude"] = set(exclude_pks)
+            return []
+
+        async def _intru(exclude_pks, boost):
+            vus["intru_exclude"] = set(exclude_pks)
+            return []
+
+        vals = {
+            "memory.retrieval_souvenirs": 5,
+            "memory.retrieval_connaissances": 5,
+            "memory.min_importance": 0.3,
+            "memory.retrieval_fetch_multiplier": 3,
+            "memory.retrieval_exchanges": 0,
+        }
+        with patch("configs.service.config_service.get",
+                   lambda k, *a, **kw: vals.get(k, 0)), \
+             patch.object(r, "_enrich_souvenirs",
+                          AsyncMock(return_value=[{"id": 7, "content": "déjà dit"}])), \
+             patch.object(r, "_enrich_connaissances", AsyncMock(return_value=[])), \
+             patch.object(r, "_person_boost_name", AsyncMock(return_value="")), \
+             patch.object(r, "_rerank_souvenirs", _rerank), \
+             patch.object(r, "_associative_expansion", _assoc), \
+             patch.object(r, "_importance_intrusion", _intru):
+            await r.retrieve_multi(["une question"], person_id="web_a")
+
+        assert vus["demote"] == {7, 42}
+        assert {7, 42} <= vus["assoc_exclude"]
+        assert {7, 42} <= vus["intru_exclude"]
+        assert 7 in r._deja_servis("web_a")
+
+
+@pytest.mark.django_db(transaction=True)
+class TestAntiRepetitionSurLesVoiesSurprise:
+
+    @pytest.fixture(autouse=True)
+    def _clean(self):
+        from memory.models import Entity, Souvenir, Theme
+        Souvenir.objects.all().delete()
+        Theme.objects.all().delete()
+        Entity.objects.all().delete()
+        yield
+
+    def _cfg(self, monkeypatch, **over):
+        vals = {
+            "memory.assoc_expansion_enabled": True,
+            "memory.assoc_expansion_max": 2,
+            "memory.assoc_min_importance": 0.5,
+            "memory.intrusion_enabled": True,
+            "memory.intrusion_charge_threshold": 0.6,
+            "memory.intrusion_min_importance": 0.85,
+        }
+        vals.update(over)
+        monkeypatch.setattr("configs.service.config_service.get",
+                            lambda k, *a, **kw: vals.get(k, 0))
+
+    async def _souvenir(self, content, importance, theme=None, emotion="neutral"):
+        from django.utils import timezone
+        from memory.models import Souvenir
+        s = await Souvenir.objects.acreate(
+            content=content, importance=importance, emotion=emotion,
+            occurred_at=timezone.now())
+        if theme is not None:
+            await _sync(s.themes.add, theme)
+        return s
+
+    async def test_the_same_association_is_not_served_twice(self, monkeypatch):
+        from memory.models import Theme
+        self._cfg(monkeypatch)
+        r = _make_retriever()
+        theme = await Theme.objects.acreate(name="espace")
+        anchor = await self._souvenir("la fusée", 0.7, theme)
+        linked = await self._souvenir("le rêve d'être astronaute", 0.8, theme)
+        hits = [{"id": anchor.pk, "themes": ["espace"], "entities": []}]
+
+        premier = await r._associative_expansion(hits, {anchor.pk})
+        assert [s["id"] for s in premier] == [linked.pk]
+        r._noter_servis("web_a", {anchor.pk, linked.pk})
+
+        second = await r._associative_expansion(
+            hits, {anchor.pk} | r._deja_servis("web_a"),
+        )
+        assert second == []
+
+    async def test_the_same_intrusion_does_not_impose_itself_twice(self, monkeypatch):
+        self._cfg(monkeypatch)
+        r = _make_retriever()
+        brulant = await self._souvenir("le grand drame", 0.95, emotion="sad")
+
+        premier = await r._importance_intrusion(set(), salience_boost=0.9)
+        assert [x["id"] for x in premier] == [brulant.pk]
+        r._noter_servis("web_a", {brulant.pk})
+
+        second = await r._importance_intrusion(r._deja_servis("web_a"), 0.9)
+        assert second == []
+
+
+# ===================================================================
+# Entêtes de section vides — « [Quelque chose te revient] » suivi de RIEN
+# est, sur petit modèle, une invitation à confabuler le souvenir manquant.
+# ===================================================================
+
+class TestEntetesVides:
+
+    TITRES = [
+        "[Ce que tu sais]", "[Tes souvenirs vecus]", "[Ça t'évoque aussi]",
+        "[Echanges recents (mot pour mot)]", "[Quelque chose te revient]",
+    ]
+
+    def _souvenir(self, content):
+        return {"content": content, "emotion": "neutral", "occurred_at": None,
+                "entities": [], "themes": [], "importance": 0.5}
+
+    def _echange(self, content):
+        return type("Hit", (), {"ts": 0, "content": content})()
+
+    def _appel(self, r, cap):
+        return r._format_context(
+            [{"content": "C" * 400, "confidence": 0.9, "entities": [], "themes": []}],
+            [self._souvenir("S" * 400)],
+            exchanges=[self._echange("E" * 400)],
+            associations=[self._souvenir("A" * 400)],
+            intrusions=[self._souvenir("I" * 400)],
+            max_chars=cap,
+        )
+
+    def test_no_title_ever_appears_without_a_line_under_it(self):
+        r = _make_retriever()
+        out = self._appel(r, 460)
+        for titre in self.TITRES:
+            if titre in out:
+                suite = out.split(titre, 1)[1].lstrip("\n")
+                assert suite.startswith("  - "), f"{titre} sans contenu"
+
+    def test_an_intrusion_that_does_not_fit_takes_its_title_with_it(self):
+        r = _make_retriever()
+        assert "[Quelque chose te revient]" not in self._appel(r, 460)
+
+    def test_a_partially_fitting_section_keeps_its_title(self):
+        r = _make_retriever()
+        out = r._format_context(
+            [], [self._souvenir("S" * 100) for _ in range(5)], max_chars=300,
+        )
+        assert "[Tes souvenirs vecus]" in out
+        assert out.count("  - ") >= 1
+
+    def test_everything_cut_yields_no_block_at_all(self):
+        r = _make_retriever()
+        assert self._appel(r, 30) == ""
+
+    def test_the_cap_is_not_exceeded_by_the_size_of_a_title(self):
+        r = _make_retriever()
+        out = self._appel(r, 460)
+        assert len(out) <= 460 + len("\n--- FIN SOUVENIRS ---")

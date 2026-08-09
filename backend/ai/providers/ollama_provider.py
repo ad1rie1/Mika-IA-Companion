@@ -224,16 +224,69 @@ class OllamaProvider:
     ) -> tuple[str, list[str]]:
         """Ollama function-calling loop (SDK ≥ 0.3, model must support tools).
 
+        Amorce à deux chaînes : le chemin non structuré du routeur ne connaît
+        que celle-là.
+        """
+        return await self._tool_loop(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            model=model,
+            tools=tools,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            max_turns=max_turns,
+        )
+
+    async def complete_chat_with_tools(
+        self,
+        prompt,
+        model: str,
+        tools: list,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        *,
+        max_turns: int = 10,
+    ) -> tuple[str, list[str]]:
+        """Tour outillé structuré — la même boucle, amorcée sur de vrais tours.
+
+        C'est ici que le cache KV compte le plus : la boucle rappelle le
+        modèle à chaque aller-retour d'outil, et un préfixe reconstruit à
+        chaque fois se re-préremplit intégralement, déclarations d'outils
+        comprises, aux ~19 tok/s auxquels un contexte long descend.
+        """
+        messages = [{"role": "system", "content": prompt.system_stable}]
+        messages.extend(prompt.chat_messages())
+        return await self._tool_loop(
+            messages=messages,
+            model=model,
+            tools=tools,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            max_turns=max_turns,
+        )
+
+    async def _tool_loop(
+        self,
+        *,
+        messages: list[dict],
+        model: str,
+        tools: list,
+        max_tokens: int,
+        temperature: float,
+        max_turns: int,
+    ) -> tuple[str, list[str]]:
+        """The one tool-loop body, whichever way the thread was started.
+
         If the selected model isn't tool-capable, Ollama returns a plain
         response with no ``tool_calls`` — we detect this and return the
         text as-is, so the call degrades gracefully instead of looping.
         """
         import json
 
-        messages: list[dict] = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
+        # Le fil appartient à l'appelant : la boucle y empile ses tours.
+        messages = list(messages)
         serialized = _serialize_tools_for_ollama(tools) if tools else None
         tools_by_name = {t.name: t for t in tools}
 

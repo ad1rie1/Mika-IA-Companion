@@ -68,15 +68,61 @@ class TestSelectFoldSlice:
         assert fold == []
 
 
+class TestPlancherDeSanite:
+    """Un refus d'une phrase remplaçait des semaines de contexte compressé —
+    et comme le curseur avance dans la foulée, la matière repliée n'était
+    jamais re-résumée."""
+
+    def test_le_plancher_est_calcule_sur_l_ancien_et_sur_la_matiere(self):
+        floor = ConversationCompactor._summary_floor
+        assert floor("x" * 4000, 0) == 1400          # 35 % de l'ancien
+        assert floor("", 10_000) == 200              # 2 % de la matière repliée
+        assert floor("", 0) == 120                   # plancher absolu
+
+    async def test_un_resume_honnete_passe(self):
+        c = _compactor()
+        fold = _buffer(40, size=2000)
+        with patch("ai.router.ai_router.complete",
+                   new_callable=AsyncMock, return_value="r" * 2500):
+            assert await c._summarize("a" * 4000, fold) == "r" * 2500
+
+    async def test_le_premier_repli_sans_ancien_resume_reste_possible(self):
+        c = _compactor()
+        fold = _buffer(5, size=200)
+        with patch("ai.router.ai_router.complete",
+                   new_callable=AsyncMock, return_value="s" * 800):
+            assert await c._summarize("", fold) == "s" * 800
+
+
 class TestCompactIfNeeded:
 
-    def _manager_stub(self, buffer):
+    def _manager_stub(self, buffer, summary=""):
         stub = MagicMock()
         stub.conversation = object()
         stub.get_conversation_context = MagicMock(return_value=buffer)
-        stub.get_conversation_summary = MagicMock(return_value="")
+        stub.get_conversation_summary = MagicMock(return_value=summary)
         stub.fold_into_summary = AsyncMock(return_value=True)
         return stub
+
+    async def test_un_refus_d_une_phrase_ne_remplace_pas_le_resume(self, monkeypatch):
+        import memory.manager as manager_mod
+        from utils.degradation import degradations
+
+        degradations.reset()
+        c = _compactor()
+        stub = self._manager_stub(_buffer(50, size=2000), summary="a" * 4000)
+        monkeypatch.setattr(manager_mod, "memory_manager", stub)
+        monkeypatch.setattr(c, "_high_watermark_chars", lambda: 10_000)
+        monkeypatch.setattr(c, "_keep_last", lambda: 10)
+        c._extraction_checkpoint = AsyncMock(return_value=10_000)
+
+        with patch("ai.router.ai_router.complete", new_callable=AsyncMock,
+                   return_value="Je ne peux pas resumer cela."):
+            assert await c.compact_if_needed() is False
+
+        stub.fold_into_summary.assert_not_called()
+        assert degradations.count_for("compaction: resume degenere") == 1
+        degradations.reset()
 
     async def test_a_full_pass_folds_and_reports(self, monkeypatch):
         import memory.manager as manager_mod

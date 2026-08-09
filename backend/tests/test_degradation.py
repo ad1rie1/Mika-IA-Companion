@@ -358,3 +358,34 @@ class TestHealthEndpoint:
 
     def test_a_healthy_process_reports_nothing_failing(self, client):
         assert client.get(self.URL).context["failing"] == []
+
+    def test_la_page_montre_l_age_du_dernier_tick_reussi(self, client):
+        """Un `database is locked` persistant laissait la boucle « running »,
+        zéro ligne au registre, et rien à l'écran."""
+        import time
+
+        from utils.periodic import PeriodicLoop
+
+        loop = PeriodicLoop("Consolidator-test", _noop, interval=60)
+        loop.last_success_at = time.time() - 3 * 86400
+
+        rows = {b["nom"]: b for b in client.get(self.URL).context["boucles"]}
+        assert "Consolidator-test" in rows
+        assert rows["Consolidator-test"]["age_seconds"] == pytest.approx(
+            3 * 86400, rel=0.01
+        )
+
+    def test_une_boucle_jamais_demarree_ne_ment_pas(self, client):
+        from utils.periodic import PeriodicLoop
+
+        loop = PeriodicLoop("Jamais-partie", _noop, interval=60)
+        assert loop.last_success_at is None
+
+        rows = {b["nom"]: b for b in client.get(self.URL).context["boucles"]}
+        assert rows["Jamais-partie"]["age_seconds"] is None
+        # Arrêtée : « jamais » y est un état normal, pas une alerte.
+        assert rows["Jamais-partie"]["en_retard"] is False
+
+
+async def _noop() -> None:
+    return None

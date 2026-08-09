@@ -125,7 +125,7 @@ class TestFailedTurnIsRecordedNotPretended:
         with patch.object(config_service, "get", return_value=60), \
              patch.object(processor.emotion_engine, "ensure_person_loaded",
                           new=AsyncMock()), \
-             patch.object(processor.emotion_engine, "_maybe_save_snapshot",
+             patch.object(processor.emotion_engine, "save_snapshot",
                           new=AsyncMock()):
             yield
 

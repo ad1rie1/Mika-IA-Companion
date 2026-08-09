@@ -62,9 +62,21 @@ class TestTableIntegrity:
         fields = [layer.field for layer in _LAYERS]
         assert len(fields) == len(set(fields))
 
-    def test_only_the_emotion_layer_is_project_muted(self):
+    def test_professional_mode_mutes_every_affective_layer(self):
+        # Le pin change : le mode professionnel coupait 1 canal affectif sur 6
+        # (l'état émotionnel) pendant que la fatigue, les ruminations, le rêve
+        # et la lecture du ton de l'interlocuteur restaient dans le prompt, à
+        # quelques lignes d'une directive « ton factuel et posé uniquement ».
+        # Le rythme et le fil d'hier restent : ce sont des faits, pas de
+        # l'affect.
         muted = [layer.field for layer in _LAYERS if layer.muted_by_project]
-        assert muted == ["emotion_context"]
+        assert muted == [
+            "user_mood_hint",
+            "fatigue_fog",
+            "rumination_context",
+            "dream_context",
+            "emotion_context",
+        ]
 
     def test_only_memory_is_appended_raw(self):
         """The retriever formats its own block; everything else is wrapped."""
@@ -196,8 +208,177 @@ class TestRendering:
                 assert layer.header not in prompt
 
 
+class TestProfessionalModeCutsEveryAffectiveChannel:
+    """`emotion_policy=OFF` coupait un canal sur six.
+
+    Restaient la fatigue (« laisse-toi etre moins parfaite »), le rêve (« tu
+    peux le mentionner »), les ruminations (« colorent subtilement ton
+    humeur »), la lecture du ton de l'interlocuteur — et les marqueurs
+    `[angry]` du rendu mémoire, à trois lignes d'une directive « ton factuel
+    et posé uniquement », dans la zone de récence qui pèse le plus.
+    """
+
+    @staticmethod
+    def _pro(**kwargs) -> str:
+        return build_system_prompt(ConversationContext(
+            project_context="Titre : audit",
+            project_suppresses_emotion=True,
+            **kwargs,
+        ))
+
+    def test_every_affective_header_is_gone(self):
+        prompt = self._pro(
+            user_mood_hint="il a l'air a cran",
+            fatigue_fog="tu es clairement fatiguee",
+            rumination_context="tu repenses a la reunion",
+            dream_context="tu as reve d'un train",
+            emotion_context="tu te sens excited",
+            circadian_context="il est 14h",
+            journal_context="hier tu as avance sur le rapport",
+        )
+        for header in (
+            "--- CE QUE TU PERCOIS DE SON ETAT ---",
+            "--- ETAT COGNITIF ---",
+            "--- CE QUI TE TROTTE DANS LA TETE ---",
+            "--- CE QUE TU AS REVE CETTE NUIT ---",
+            "--- TON ETAT EMOTIONNEL ACTUEL ---",
+        ):
+            assert header not in prompt
+        # Le rythme et le fil d'hier sont des faits, pas de l'affect.
+        assert "--- TON RYTHME ---" in prompt
+        assert "--- TON FIL D'HIER ---" in prompt
+
+    def test_memory_emotion_tags_are_stripped(self):
+        prompt = self._pro(memory_context=(
+            "  - (hier) [angry] il a crie\n"
+            "  - (hier) [excited] on a fete ca"
+        ))
+        assert "[angry]" not in prompt
+        assert "[excited]" not in prompt
+        assert "il a crie" in prompt
+        assert "on a fete ca" in prompt
+
+    def test_memory_emotion_tags_survive_outside_professional_mode(self):
+        prompt = build_system_prompt(ConversationContext(
+            memory_context="  - (hier) [angry] il a crie",
+        ))
+        assert "[angry]" in prompt
+
+    def test_confidence_labels_are_not_mistaken_for_emotions(self):
+        prompt = self._pro(memory_context="  - un fait [certain]")
+        assert "[certain]" in prompt
+
+    def test_section_headers_are_not_stripped(self):
+        prompt = self._pro(memory_context=(
+            "[Quelque chose te revient]\n  - (hier) [sad] x"
+        ))
+        assert "[Quelque chose te revient]" in prompt
+        assert "[sad]" not in prompt
+
+
 # ---------------------------------------------------------------------------
-# 4. The caller no longer transcribes the context field by field
+# 4. La table produit aussi la décomposition du volatil
+# ---------------------------------------------------------------------------
+
+
+class TestBlocsVolatilesEmis:
+    """`_assemble` rend le volatil ET ses blocs.
+
+    La borne globale du tour (`ai.budget.fit_turn`) doit pouvoir vider une
+    couche *nommée* sans laisser un « --- CE QUE TU SAIS DE CETTE PERSONNE
+    --- » sans sa fin. Elle recevait `volatile_blocks=[]` : elle ne pouvait
+    couper que le résumé et se contentait de constater le dépassement.
+    Reconstruire les blocs ailleurs aurait fait deux tables d'ordre à tenir
+    d'accord — c'est ce que `_LAYERS` existe pour éviter.
+    """
+
+    @staticmethod
+    def _plein() -> ConversationContext:
+        return ConversationContext(**{
+            layer.field: f"<{layer.field}>" for layer in _LAYERS
+        })
+
+    def test_les_couches_volatiles_sortent_en_blocs_dans_l_ordre_de_la_table(self):
+        from pipeline.prompt import _STABLE_LAYER_COUNT, _assemble
+
+        _, blocks = _assemble(self._plein())
+        assert [b.field for b in blocks] == [
+            layer.field for layer in _LAYERS[_STABLE_LAYER_COUNT:]
+        ]
+
+    def test_les_couches_stables_restent_dans_le_prefixe(self):
+        """Personnalité + self-concept + identité : la zone cacheable, et
+        exactement ce qu'une troncature par la tête détruit."""
+        from pipeline.prompt import _STABLE_LAYER_COUNT, _assemble
+
+        stable, blocks = _assemble(self._plein())
+        for layer in _LAYERS[:_STABLE_LAYER_COUNT]:
+            assert layer.header in stable
+            assert layer.field not in {b.field for b in blocks}
+
+    def test_un_bloc_porte_son_entete_et_son_pied(self):
+        from pipeline.prompt import _assemble
+
+        _, blocks = _assemble(ConversationContext(module_context="3 mails"))
+        assert len(blocks) == 1
+        assert blocks[0].render() == (
+            "--- CONTEXTE MODULES ---\n3 mails\n--- FIN CONTEXTE MODULES ---"
+        )
+
+    def test_le_rendu_des_blocs_est_le_volatil_de_build_prompt_parts(self):
+        """L'émission des blocs est une sortie SUPPLÉMENTAIRE, pas une
+        réécriture du rendu : le prompt système ne bouge pas d'un octet."""
+        from pipeline.prompt import _assemble, _render_volatile, build_prompt_parts
+
+        context = self._plein()
+        stable, volatile = build_prompt_parts(context)
+        stable_bis, blocks = _assemble(context)
+        assert stable_bis == stable
+        assert _render_volatile(blocks) == volatile
+        assert build_system_prompt(context) == f"{stable}\n\n{volatile}"
+
+    def test_une_couche_muette_ne_produit_pas_de_bloc(self):
+        """Sinon la couche supprimée reviendrait par la recomposition d'après
+        coupe, en mode professionnel précisément."""
+        from pipeline.prompt import _assemble
+
+        _, blocks = _assemble(ConversationContext(
+            emotion_context="tu te sens excited",
+            project_context="Titre : audit",
+            project_suppresses_emotion=True,
+        ))
+        assert "emotion_context" not in {b.field for b in blocks}
+        assert "project_context" in {b.field for b in blocks}
+
+    def test_le_bloc_memoire_porte_la_valeur_deja_nettoyee(self):
+        """La coupe re-rend `block.value` : si le bloc gardait les marqueurs
+        `[angry]`, ils reviendraient dans un tour tronqué."""
+        from pipeline.prompt import _assemble
+
+        _, blocks = _assemble(ConversationContext(
+            memory_context="  - (hier) [angry] il a crie",
+            project_context="Titre : audit",
+            project_suppresses_emotion=True,
+        ))
+        memoire = {b.field: b.value for b in blocks}["memory_context"]
+        assert "[angry]" not in memoire
+        assert "il a crie" in memoire
+
+    def test_un_bloc_vide_disparait_avec_son_entete(self):
+        """C'est ce que fait la borne d'un cran à plancher 0 : le rendu ne
+        doit pas laisser une balise ouverte sur rien."""
+        from ai.chat import VolatileBlock
+        from pipeline.prompt import _render_volatile
+
+        blocks = [
+            VolatileBlock("module_context", "", "--- CONTEXTE MODULES ---"),
+            VolatileBlock("memory_context", "MEM"),
+        ]
+        assert _render_volatile(blocks) == "MEM"
+
+
+# ---------------------------------------------------------------------------
+# 5. The caller no longer transcribes the context field by field
 # ---------------------------------------------------------------------------
 
 

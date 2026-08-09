@@ -248,19 +248,34 @@ class TestDecayInvariants:
 
         Since circadian.py was introduced, home = default_mood × 0.15 +
         phase_bias × 0.35, so the oscillator settles near the biased home,
-        not pure default. We only check that the *angry* impulse has fully
-        dissipated — velocity is near zero and intensity is bounded by the
-        home magnitude (~0.4 max).
+        not pure default. We check that the *angry* impulse has fully
+        dissipated — the state sits on its resting point, velocity near zero,
+        and no longer reads as anger.
+
+        The horizon is derived from the engine's own time constant
+        (τ = 2m/c) rather than hardcoded. The 50 × 10 s it used to be was
+        already shorter than τ once audit finding B2 moved the return to rest
+        from ~27 s to ~11.6 min: the test then measured an angry state still
+        halfway home and read that as a convergence failure. This test is
+        about *whether* the state converges, never about how fast (the pace
+        is pinned in test_scenario_long_conversation.py), so tying the
+        horizon to τ is what stops it rotting the next time τ moves.
         """
         engine = make_engine(TEMPERAMENTS[2])
         engine.process_emotion(EmotionData(Emotion.ANGRY, 0.9), "user")
 
+        from emotion import pad
+        params = engine._person_params
+        tau = 2.0 * params.mass / params.damping
         for _ in range(50):
-            simulate_time_decay(engine, 10.0)
+            simulate_time_decay(engine, 5.0 * tau / 50.0)
 
         mood = engine._get_person_mood("user")
+        # Converged: sitting on the resting point the spring pulls toward.
+        assert pad.distance(
+            mood.dynamic.position, engine._person_home(mood)
+        ) < 0.05
         # Settled: velocity near zero (no residual anger impulse)
-        from emotion import pad
         assert pad.norm(mood.dynamic.velocity) < 0.05
         # Intensity bounded by home magnitude (default × 0.15 + bias × 0.35)
         assert mood.intensity < 0.5

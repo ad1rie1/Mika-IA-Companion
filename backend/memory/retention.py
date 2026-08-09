@@ -45,6 +45,10 @@ class Policy:
     keep_rows: int | None = None
     # Rows matching this filter are never deleted (e.g. unresolved work).
     protect: dict | None = None
+    # Table-checkpoint : la ligne la plus recente EST l'etat d'une boucle.
+    # Une machine eteinte plus longtemps que keep_days la ferait disparaitre,
+    # et la boucle repartirait du debut de l'histoire.
+    checkpoint: bool = False
     note: str = ""
 
 
@@ -56,12 +60,14 @@ POLICIES: tuple[Policy, ...] = (
     # One row per consolidation tick, and only the latest is ever read
     # (checkpoint resume). Everything older is pure weight.
     Policy("memory", "ConsolidationLog", date_field="ran_at",
-           keep_days=14, keep_rows=5_000,
+           keep_days=14, keep_rows=5_000, checkpoint=True,
            note="only the newest row is read, for the checkpoint"),
     # Même profil que ConsolidationLog : une ligne par tick de l'indexeur
-    # épisodique, seule la plus récente sert (checkpoint).
+    # épisodique, seule la plus récente sert (checkpoint). Pire encore ici :
+    # une ligne n'est écrite que par un tick ayant avancé, donc une install
+    # inactive n'en produit aucune pour remplacer celle qu'on aurait balayée.
     Policy("memory", "EpisodicIndexLog", date_field="ran_at",
-           keep_days=14, keep_rows=5_000,
+           keep_days=14, keep_rows=5_000, checkpoint=True,
            note="only the newest row is read, for the episodic checkpoint"),
     # Faded ruminations are done being turned over; active/resolved ones
     # are still referenced by journals and digestion.
@@ -219,6 +225,14 @@ async def _sweep_one(policy: Policy) -> int:
         base = model.objects.all()
         if policy.protect:
             base = base.exclude(**policy.protect)
+        if policy.checkpoint:
+            # Sur ``-pk``, pas sur ``-{date_field}`` : c'est l'ordre dans
+            # lequel les trois lecteurs de checkpoint relisent la table, donc
+            # la ligne protegee est exactement celle qu'ils prendront.
+            # L'exclusion vaut pour les deux plafonds ci-dessous.
+            newest = model.objects.order_by("-pk").values_list("pk", flat=True).first()
+            if newest is not None:
+                base = base.exclude(pk=newest)
 
         if policy.keep_days is not None:
             cutoff = timezone.now() - timedelta(days=policy.keep_days)

@@ -6,13 +6,50 @@ unified ``Client`` with an async companion at ``client.aio``, which we
 use directly instead of offloading the sync API to a thread.
 
 The SDK handles Google's endpoint, so no base URL is required.
+
+Le tour outillé a **deux amorces et un seul corps** : ``complete_with_tools``
+part de deux chaînes, ``complete_chat_with_tools`` d'un ``ChatPrompt``, et les
+deux entrent dans ``_tool_loop`` avec un fil déjà construit. Le fil de départ
+décide de tout ce qui compte (préfixe cacheable, fidélité des rôles) ; la
+boucle, elle, ne fait qu'y empiler ses allers-retours.
 """
 
 from __future__ import annotations
 
 import logging
 
+from utils.degradation import degradations
+
 logger = logging.getLogger(__name__)
+
+
+def _contents_from_pair(user_prompt: str) -> list:
+    """Fil de départ pour un appel à deux chaînes."""
+    from google.genai import types
+
+    return [
+        types.Content(role="user", parts=[types.Part.from_text(text=user_prompt)])
+    ]
+
+
+def _contents_from_chat_prompt(prompt) -> list:
+    """Fil de départ pour un ``ChatPrompt``.
+
+    Gemini nomme ``model`` ce que le reste du dépôt appelle ``assistant``, et
+    n'accepte aucun autre rôle. Le premier élément de ``contents`` ne peut pas
+    être un tour ``model`` — ``chat_messages()`` garantit déjà l'inverse (il
+    ouvre sur un marqueur de reprise quand l'historique commence par Mika),
+    donc rien n'est re-vérifié ici.
+    """
+    from google.genai import types
+
+    return [
+        types.Content(
+            role="model" if m["role"] == "assistant" else "user",
+            parts=[types.Part.from_text(text=m["content"])],
+        )
+        for m in prompt.chat_messages()
+    ]
 
 
 class GeminiProvider:
@@ -78,6 +115,31 @@ class GeminiProvider:
         _record_gemini_usage(resp)
         return (resp.text or "").strip()
 
+    async def complete_chat(
+        self,
+        prompt,
+        model: str,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ) -> str:
+        """Tour structuré : ``system_instruction`` + de vrais tours."""
+        from google.genai import types
+
+        contents = _contents_from_chat_prompt(prompt)
+
+        config = types.GenerateContentConfig(
+            system_instruction=prompt.system_stable or None,
+            temperature=temperature,
+            max_output_tokens=max_tokens,
+        )
+        resp = await self._client.aio.models.generate_content(
+            model=model,
+            contents=contents,
+            config=config,
+        )
+        _record_gemini_usage(resp)
+        return (resp.text or "").strip()
+
     async def list_models(self) -> list[dict]:
         """List Gemini models that support content generation."""
         out: list[dict] = []
@@ -114,6 +176,56 @@ class GeminiProvider:
         *,
         max_turns: int = 10,
     ) -> tuple[str, list[str]]:
+        """Amorce à deux chaînes du même corps de boucle."""
+        return await self._tool_loop(
+            system_instruction=system_prompt or None,
+            contents=_contents_from_pair(user_prompt),
+            model=model,
+            tools=tools,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            max_turns=max_turns,
+        )
+
+    async def complete_chat_with_tools(
+        self,
+        prompt,
+        model: str,
+        tools: list,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        *,
+        max_turns: int = 10,
+    ) -> tuple[str, list[str]]:
+        """Tour outillé structuré — la même boucle, amorcée sur de vrais tours.
+
+        C'est le tour le plus cher du système : les déclarations d'outils
+        repartent à chaque aller-retour de la boucle. Amorcée sur
+        l'aplatissement, chaque itération présentait un préfixe différent ;
+        ici ``system_instruction`` et les tours d'historique ne bougent ni
+        pendant la boucle, ni d'un tour à l'autre.
+        """
+        return await self._tool_loop(
+            system_instruction=prompt.system_stable or None,
+            contents=_contents_from_chat_prompt(prompt),
+            model=model,
+            tools=tools,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            max_turns=max_turns,
+        )
+
+    async def _tool_loop(
+        self,
+        *,
+        system_instruction: str | None,
+        contents: list,
+        model: str,
+        tools: list,
+        max_tokens: int,
+        temperature: float,
+        max_turns: int,
+    ) -> tuple[str, list[str]]:
         """Gemini function-calling loop (google-genai SDK).
 
         Gemini uses a different shape than OpenAI: tools are wrapped in
@@ -138,11 +250,10 @@ class GeminiProvider:
         )
         tools_by_name = {t.name: t for t in tools}
 
-        contents: list = [
-            types.Content(role="user", parts=[types.Part.from_text(text=user_prompt)])
-        ]
+        # Le fil appartient à l'appelant : la boucle y empile ses allers-retours.
+        contents = list(contents)
         config = types.GenerateContentConfig(
-            system_instruction=system_prompt or None,
+            system_instruction=system_instruction,
             temperature=temperature,
             max_output_tokens=max_tokens,
             tools=gemini_tools,
@@ -168,8 +279,8 @@ class GeminiProvider:
             # Replay the model turn (the Content holding function_call parts).
             try:
                 contents.append(resp.candidates[0].content)
-            except (AttributeError, IndexError):
-                pass
+            except (AttributeError, IndexError) as exc:
+                degradations.record("ai.providers.gemini._tool_loop model turn", exc)
 
             response_parts = []
             for fc in function_calls:
@@ -215,5 +326,5 @@ def _record_gemini_usage(resp) -> None:
                 input_tokens=int(getattr(usage, "prompt_token_count", 0) or 0),
                 output_tokens=int(getattr(usage, "candidates_token_count", 0) or 0),
             )
-    except Exception:
-        pass
+    except Exception as exc:
+        degradations.record("ai.providers.gemini usage", exc)

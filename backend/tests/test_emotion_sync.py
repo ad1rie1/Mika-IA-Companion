@@ -52,11 +52,10 @@ def _push(person_id: str, emotion: Emotion, intensity: float) -> None:
 def _advance(seconds: float = 3.0) -> None:
     """Step the real physics forward, as the engine's own decay loop does.
 
-    An impulse only sets *velocity*: the PAD position — which is what
-    ``compute_message_emotion`` reads — moves over the following seconds.
-    So the emotional consequence of a reply is not in the ``speech`` frame
-    that reports it; it arrives afterwards, which is precisely what nothing
-    was pushing to the frontend.
+    An impulse moves the position at once, but the state keeps drifting
+    afterwards — spring pull toward home, global mood catching up, circadian
+    tint moving underneath. That drift is what nothing was pushing to the
+    frontend between two replies.
     """
     import time
 
@@ -120,9 +119,9 @@ class TestOnlyWhenItMoved:
             assert push.await_count == first
 
     async def test_state_moving_on_its_own_pushes(self):
-        """The reason the loop exists: an impulse is velocity, so the mood
-        keeps travelling for seconds after the reply that caused it — with no
-        turn happening, and nothing else to report it."""
+        """The reason the loop exists: the mood keeps travelling after the
+        reply that caused it — with no turn happening, and nothing else to
+        report it."""
         _connect()
         sync = EmotionSync()
         with patch(
@@ -135,19 +134,25 @@ class TestOnlyWhenItMoved:
             await sync.tick()
         assert push.await_count == before + 1
 
-    async def test_impulse_alone_is_not_yet_visible(self):
-        """Pins the physics this loop is built on: right after the impulse the
-        reported emotion is unchanged — the movement is still in the velocity.
-        If this ever became instantaneous, the loop's cadence would matter far
-        less than it does today."""
+    async def test_impulse_est_visible_immediatement(self):
+        """Le pin s'inverse (audit B2).
+
+        La position était le seul canal que lisent le prompt, le relevé et les
+        gestes, et l'impulsion ne la touchait pas : ce test épinglait ce
+        défaut. Ce qui justifie la boucle reste la deuxième moitié — la dérive
+        *ultérieure*, qu'aucune trame ne rapportait.
+        """
         _connect()
         before = emotion_engine.compute_message_emotion(PERSON)
         _push(PERSON, Emotion.ANGRY, 0.9)
         after = emotion_engine.compute_message_emotion(PERSON)
-        assert (after.emotion, after.intensity) == (before.emotion, before.intensity)
-        _advance()
+        assert (after.emotion, after.intensity) != (before.emotion, before.intensity)
+        # La dérive se compte maintenant en minutes, pas en secondes : c'est
+        # tout l'objet du correctif B2, et c'est ce qui fait qu'une trame ne
+        # part que quand il y a vraiment quelque chose à dire.
+        _advance(120.0)
         moved = emotion_engine.compute_message_emotion(PERSON)
-        assert (moved.emotion, moved.intensity) != (before.emotion, before.intensity)
+        assert (moved.emotion, moved.intensity) != (after.emotion, after.intensity)
 
     async def test_intensity_drift_below_threshold_stays_silent(self):
         _connect()

@@ -227,10 +227,42 @@ class TestMultiPersonDecay:
             "Alice's emotions should decay while she's inactive"
 
     def test_expired_persons_cleaned_up(self, engine):
-        """Persons inactive for >1 hour with near-zero state should be cleaned up."""
+        """Persons inactive for >1 hour and settled at rest should be cleaned up.
+
+        "At rest" is the person's own resting point, not the PAD origin. The
+        two were never the same point — home is `default_mood × 0.15 +
+        circadian bias`, of magnitude 0.27 to 0.50 depending on the hour —
+        but zeroing the position used to be close enough: with the ~27 s
+        return audit finding B2 replaced, the 60 s of decay below covered the
+        whole way. At the delivered ~11.6 min it covers 0.6 % of it, so the
+        old setup asked the engine to evict a person it correctly still sees
+        as moved.
+        """
         engine.process_emotion(EmotionData(Emotion.HAPPY, 0.1), "temp_user")
 
-        # Backdate their last_interaction to >1 hour ago, and zero the state
+        # Backdate their last_interaction to >1 hour ago, and park the state
+        # on the resting point the eviction rule measures against.
+        import time
+        mood = engine._get_person_mood("temp_user")
+        mood.last_interaction = time.time() - 4000
+        mood.dynamic.position = engine._person_home(mood)
+        mood.dynamic.velocity = pad.zero()
+
+        simulate_time_decay(engine, 60.0)
+
+        assert "temp_user" not in engine.person_moods, \
+            "Expired inactive persons should be cleaned up"
+
+    def test_idle_person_still_moved_is_not_cleaned_up(self, engine):
+        """Idle alone is not enough — eviction also needs the state settled.
+
+        Keeps the test above honest: the same person, idle for the same hour,
+        parked at the PAD origin instead of at their resting point, stays.
+        The origin is a point the oscillator is still travelling away from,
+        which is precisely why it must not read as "nothing left to hold".
+        """
+        engine.process_emotion(EmotionData(Emotion.HAPPY, 0.1), "temp_user")
+
         import time
         mood = engine._get_person_mood("temp_user")
         mood.last_interaction = time.time() - 4000
@@ -239,8 +271,8 @@ class TestMultiPersonDecay:
 
         simulate_time_decay(engine, 60.0)
 
-        assert "temp_user" not in engine.person_moods, \
-            "Expired inactive persons should be cleaned up"
+        assert "temp_user" in engine.person_moods, \
+            "A person whose state is not at rest should survive the sweep"
 
 
 class TestMultiPersonScale:

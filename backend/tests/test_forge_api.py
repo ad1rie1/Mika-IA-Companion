@@ -133,9 +133,20 @@ class TestHttp:
 @pytest.mark.django_db
 class TestSignals:
     def test_notify_cooldown(self, monkeypatch):
+        """Le premier ``notify_ai`` passe, le second est retenu par le cooldown.
+
+        Le cooldown est choisi plus grand que toute durée de fonctionnement
+        plausible, et c'est la moitié du test : ``_last_notify_mono`` valait
+        ``0.0`` à la construction, comparé à ``time.monotonic()`` dont
+        l'origine est indéfinie (le démarrage de la machine, sous Linux). La
+        sentinelle « jamais notifié » se lisait donc comme « notifié au
+        démarrage », et le tout premier appel d'un module forgé était refusé tant
+        que l'uptime restait sous le cooldown. Avec 9999 s le test passait
+        par accident sur une machine allumée depuis trois heures.
+        """
         monkeypatch.setattr(
             "modules.plugins.forge.api._limit",
-            lambda key, default: 9999 if key == "forge.notify_cooldown_s" else default,
+            lambda key, default: 10**9 if key == "forge.notify_cooldown_s" else default,
         )
         api = _make_api()
         assert api.notify_ai("premier") is True

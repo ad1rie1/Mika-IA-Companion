@@ -5,12 +5,40 @@ import logging
 from django.conf import settings
 
 from ai.router import AIRole, UnconfiguredRoleError, ai_router
+from emotion.types import Emotion
 from utils.degradation import degradations
 from utils.parsing import strip_markdown_json
 
 EXTRACTION_TIMEOUT = 45  # seconds — prevent hanging the consolidation loop
 
 logger = logging.getLogger(__name__)
+
+# La palette imposée au modèle est celle du moteur, pas une liste recopiée :
+# les sept noms écrits à la main ici rendaient un cauchemar né de la peur
+# structurellement impossible (le classifieur de rêves attend scared/anxious)
+# et faisaient mesurer une charge nulle à la saillance.
+EXTRACTION_EMOTIONS = ", ".join(e.value for e in Emotion)
+
+
+class ExtractionUnavailable(RuntimeError):
+    """Aucun modèle n'a répondu — à distinguer de « rien à extraire »."""
+
+
+def _call_timeout() -> float:
+    """La borne effective d'un appel d'extraction.
+
+    ``EXTRACTION_TIMEOUT`` était plus serré que la borne que le routeur
+    applique déjà (``ai.call_timeout_seconds``), donc sur un backend local une
+    extraction expirait systématiquement. Depuis que le checkpoint n'avance
+    plus sur un échec, ce second plafond plus serré gèlerait la consolidation
+    pour de bon.
+    """
+    try:
+        from configs.service import config_service
+
+        return max(EXTRACTION_TIMEOUT, float(config_service.get("ai.call_timeout_seconds")))
+    except Exception:
+        return EXTRACTION_TIMEOUT
 
 # fmt: off
 EXTRACTION_PROMPT_TEMPLATE = """\
@@ -24,7 +52,7 @@ TROIS TYPES A EXTRAIRE:
 1. SOUVENIR (evenement vecu):
    - Ecrit du point de vue SUBJECTIF de {name} (1ere personne), avec SES emotions
    - Doit sonner comme un journal intime de {name}
-   - Emotion parmi: neutral, happy, sad, angry, surprised, thinking, love
+   - Emotion parmi: {emotions}
 
 2. CONNAISSANCE (fait objectif durable):
    - Ecrit de maniere OBJECTIVE (3eme personne), sans emotion
@@ -133,6 +161,7 @@ class MemoryExtractor:
                 description=personality.description,
                 tone=personality.tone,
                 traits=", ".join(personality.traits),
+                emotions=EXTRACTION_EMOTIONS,
             )
         return self._system_prompt
 
@@ -140,7 +169,7 @@ class MemoryExtractor:
         self,
         messages: list[dict],
         pending_commitments: list[dict] | None = None,
-    ) -> list[dict]:
+    ) -> list[dict] | None:
         """Analyze a batch of messages and extract souvenirs + connaissances.
 
         Args:
@@ -150,8 +179,14 @@ class MemoryExtractor:
                 shows one being honored (→ ``commitment_resolved`` extraction).
 
         Returns:
-            list of extraction dicts with keys:
-            type, store, content, emotion (souvenirs only), themes, entities
+            La liste des extractions retenues, ou ``None`` quand **aucun
+            modèle n'a répondu** (timeout, provider mort, rôle non mappé).
+            La distinction porte le checkpoint du consolidateur : une liste
+            vide veut dire « rien à retenir dans cette fenêtre » et laisse la
+            fenêtre passer, ``None`` veut dire « on n'a rien pu lire » et la
+            laisse en attente. Un JSON illisible reste une liste vide : une
+            tranche que le modèle rend systématiquement en prose figerait
+            sinon le checkpoint pour toujours.
         """
         if not messages:
             return []
@@ -170,23 +205,32 @@ class MemoryExtractor:
                 "qu'ils ont ete tenus ou sont devenus caducs):\n" + lines
             )
 
+        timeout = _call_timeout()
         try:
             return await asyncio.wait_for(
                 self._call_extraction(conversation_text, len(messages)),
-                timeout=EXTRACTION_TIMEOUT,
+                timeout=timeout,
             )
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as exc:
             logger.warning(
-                "Extraction timed out after %ds (role=%s)",
-                EXTRACTION_TIMEOUT, AIRole.MEMORY_EXTRACTION.value,
+                "Extraction timed out after %ss (role=%s)",
+                timeout, AIRole.MEMORY_EXTRACTION.value,
             )
-            return []
+            degradations.record("extraction: delai depasse", exc)
+            return None
         except UnconfiguredRoleError as exc:
             logger.warning("Extraction ignorée — IA non configurée: %s", exc)
-            return []
-        except Exception:
+            degradations.record("extraction: role IA non mappe", exc)
+            return None
+        except ExtractionUnavailable as exc:
+            logger.warning("Extraction sans réponse (role=%s): %s",
+                           AIRole.MEMORY_EXTRACTION.value, exc)
+            degradations.record("extraction: aucune reponse du modele", exc)
+            return None
+        except Exception as exc:
             logger.exception("Extraction error (role=%s)", AIRole.MEMORY_EXTRACTION.value)
-            return []
+            degradations.record("extraction: appel IA en echec", exc)
+            return None
 
     async def _call_extraction(self, conversation_text: str, msg_total: int) -> list[dict]:
         """Inner extraction call — separated so we can wrap it with a timeout."""
@@ -205,7 +249,7 @@ class MemoryExtractor:
     async def _query_model_json(self, conversation_text: str) -> dict | None:
         """Query model and parse JSON response. Returns parsed dict or None."""
         raw = await self._query_model(conversation_text, AIRole.MEMORY_EXTRACTION)
-        if raw is None:
+        if raw is None:  # défensif : `_query_model` lève désormais plutôt que de rendre None
             return None
 
         text = strip_markdown_json(raw)
@@ -222,25 +266,22 @@ class MemoryExtractor:
             degradations.record("extraction: JSON de l'extraction illisible", exc)
             return None
 
-    async def _query_model(self, user_prompt: str, role: AIRole) -> str | None:
-        """Send prompt to the configured provider via ai_router. Returns raw text or None."""
-        try:
-            raw_text = await ai_router.complete(
-                role=role,
-                system_prompt=self._get_system_prompt(),
-                user_prompt=user_prompt,
-            )
-        except UnconfiguredRoleError as exc:
-            logger.warning("Appel IA ignoré — IA non configurée (role=%s): %s", role.value, exc)
-            return None
-        except Exception:
-            logger.exception("AI query failed (role=%s)", role.value)
-            return None
+    async def _query_model(self, user_prompt: str, role: AIRole) -> str:
+        """Send prompt to the configured provider via ai_router. Returns raw text.
 
-        raw = raw_text.strip()
+        Ne rattrape plus rien : un provider mort et « le modèle n'a rien vu de
+        notable » ne peuvent pas remonter la même valeur, sinon l'appelant fait
+        avancer son checkpoint sur une panne.
+        """
+        raw_text = await ai_router.complete(
+            role=role,
+            system_prompt=self._get_system_prompt(),
+            user_prompt=user_prompt,
+        )
+
+        raw = (raw_text or "").strip()
         if not raw:
-            logger.warning("Empty response (role=%s)", role.value)
-            return None
+            raise ExtractionUnavailable(f"reponse vide (role={role.value})")
         return raw
 
     async def check_connaissance_validity(
@@ -270,9 +311,9 @@ class MemoryExtractor:
             # la durée du processus.
             raw = await asyncio.wait_for(
                 self._query_model(prompt, AIRole.VALIDITY_CHECK),
-                timeout=EXTRACTION_TIMEOUT,
+                timeout=_call_timeout(),
             )
-            if raw is None:
+            if raw is None:  # défensif, même raison qu'au-dessus
                 return True, None
 
             text = strip_markdown_json(raw)
@@ -289,15 +330,17 @@ class MemoryExtractor:
             if raw_confidence is None:
                 return still_valid, None
             return still_valid, max(0.0, min(1.0, float(raw_confidence)))
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as exc:
             logger.warning(
-                "Validity check timed out after %ds (role=%s)",
-                EXTRACTION_TIMEOUT, AIRole.VALIDITY_CHECK.value,
+                "Validity check timed out (role=%s)", AIRole.VALIDITY_CHECK.value,
             )
+            degradations.record("extraction: delai depasse sur controle de validite", exc)
             return True, None
         except UnconfiguredRoleError as exc:
             logger.warning("Validity check ignoré — IA non configurée: %s", exc)
+            degradations.record("extraction: role IA non mappe pour le controle de validite", exc)
             return True, None
-        except Exception:
+        except Exception as exc:
             logger.exception("Validity check error")
+            degradations.record("extraction: controle de validite en echec", exc)
             return True, None  # Conservative: keep valid on error

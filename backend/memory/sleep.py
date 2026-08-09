@@ -20,10 +20,10 @@ night phase (when Mika has earned her rest) and does *creative*,
 Design choices:
   - Owns a dedicated background loop (started from ASGI lifespan,
     cadence ``memory.sleep_check_interval``) that calls ``run_if_due()``.
-    Decoupled from the consolidator since 2026-04 so a 45s LLM call here
+    Decoupled from the consolidator since 2026-04 so a long LLM call here
     never delays memory consolidation.
-  - Triple-gated: night phase AND idle AND REST drive above threshold.
-    Sleep only happens when Mika has actually been living that day.
+  - Double-gated: night phase AND idle. The REST drive no longer forbids
+    sleeping, it only brings the night forward when she is tired.
   - Budget-capped: 1 journal (retried at most
     ``JOURNAL_MAX_ATTEMPTS_PER_NIGHT`` times if the call fails) + up to
     2 dreams + optional digestion summary.
@@ -48,7 +48,7 @@ from django.utils import timezone as tz
 from ai.router import AIRole, UnconfiguredRoleError, ai_router
 from utils.parsing import strip_markdown_json
 from utils.periodic import PeriodicLoop
-from utils.degradation import degradations
+from utils.degradation import degradations, degraded
 
 logger = logging.getLogger(__name__)
 
@@ -59,22 +59,22 @@ logger = logging.getLogger(__name__)
 NIGHT_START_HOUR = 23       # phase gate opens at 23h
 NIGHT_END_HOUR = 6          # closes at 6h
 IDLE_SECONDS_THRESHOLD = 900  # 15 min without interaction
-# Mika must have earned her rest. Ces deux seuils sont COUPLÉS à
-# `drives.engine._REST_NATURAL_DECAY` : `_is_eligible_to_sleep` exige les
-# 900 s d'idle *puis* lit la tension, or pendant cette fenêtre REST ne fait
-# que décroître. Le gate n'est donc franchissable que si
-# `_REST_NATURAL_DECAY * IDLE_SECONDS_THRESHOLD` reste bien en dessous de
-# `1.0 - REST_DRIVE_THRESHOLD` — sinon le cycle entier sort par AWAKE à
-# chaque tick, silencieusement. Relever l'un des deux seuils sans revoir la
-# décroissance rend le sommeil inatteignable.
-REST_DRIVE_THRESHOLD = 0.5
+# REST n'INTERDIT plus de dormir, il AVANCE l'heure du coucher. Le gate
+# exigeait `rest_tension >= 0.5` : REST ne croît que par événement d'activité
+# et décroît pendant les 900 s d'idle que le gate impose d'abord, si bien
+# qu'une soirée calme (conversation jusqu'à 20h30, coucher à 23h) laissait la
+# tension à ~0.01 — nuit blanche, aucun journal, aucun rêve, aucune digestion,
+# et l'avatar les yeux ouverts. Une fatigue pleine ouvre donc la nuit deux
+# heures plus tôt ; pas davantage, sinon on empiéterait sur `_night_of` (qui
+# range 21h dans la nuit du jour même) et sur la phase EVENING.
+EARLY_NIGHT_MAX_ADVANCE_HOURS = 2
 
 # Each sleeping tick relieves the REST drive by this `satisfy()` amount —
 # sleep is what rest tension is FOR. With REST's decay_on_satisfy (0.3),
 # 0.1 ≈ 3%/tick: tension melts over the first couple of hours of sleep,
 # so morning-Mika wakes with real energy instead of yesterday's fatigue.
-# The REST eligibility gate only applies to *falling* asleep (entry);
-# once asleep for the night, draining tension doesn't wake her up.
+# La tension qui fond ne peut plus la réveiller : elle n'ouvre que l'heure
+# d'entrée, et `_night_start_hour` revient à l'heure nominale une fois endormie.
 SLEEP_REST_RECOVERY = 0.1
 
 # Journal (light sleep)
@@ -102,8 +102,11 @@ DIGESTION_DECAY_MULTIPLIER = 3.0     # vs ~5% normal decay
 DIGESTION_TO_SOUVENIR_THRESHOLD = 0.4  # intensity above which digested ruminations
                                        # become reflective souvenirs
 
-# LLM
-SLEEP_LLM_TIMEOUT = 45
+# LLM — repli du module quand le registre n'est pas lisible. Réglable via
+# `memory.sleep_llm_timeout` : à 45 s le budget expirait sous les 76-219 s
+# qu'un modèle local met à répondre, donc journal et rêves ne se terminaient
+# jamais sur une installation par défaut.
+SLEEP_LLM_TIMEOUT = 120
 
 
 # ── Emotion drift map for deep-sleep digestion ───────────────────
@@ -226,12 +229,15 @@ class SleepCycle:
         # the REST gate governs falling asleep, not staying asleep (sleep
         # drains REST, and draining it must not bounce her awake).
         self._asleep_night: date | None = None
+        # Diffusions de réveil détachées, tenues pour ne pas être collectées
+        # en vol (même motif que `ConscienceEngine._fastpath_tasks`).
+        self._wake_tasks: set[asyncio.Task] = set()
         # Current phase — observable by the frontend via the inner_state
         # broadcast. Transitions trigger an inner_state push so the UI
         # can dim the scene, close the VTuber's eyes, etc.
         self._phase: str = SleepPhase.AWAKE
         # Dedicated background loop (since 2026-04): previously piggy-backed
-        # on the consolidator's tick budget, now independent so a 45s LLM
+        # on the consolidator's tick budget, now independent so a long LLM
         # call here never delays memory consolidation.
         self._loop = PeriodicLoop("Sleep cycle", self.run_if_due, interval=60)
 
@@ -256,6 +262,34 @@ class SleepCycle:
     def phase(self) -> str:
         return self._phase
 
+    def note_interaction(self) -> None:
+        """Quelqu'un lui parle : elle se réveille tout de suite.
+
+        La phase est posée SYNCHRONIQUEMENT, pas via `_set_phase` : la frame
+        `speech` du tour en cours lit `sleep_cycle.phase` en plein milieu, et
+        un await la ferait lire `deep_sleep` pendant que le TTS parle.
+        `_asleep_night` est effacé pour que l'hystérésis d'entrée ne la
+        rendorme pas au tick suivant sans repasser par les 15 min d'inactivité.
+        Idempotente, ne lève jamais — elle est appelée sur le chemin chaud,
+        éventuellement depuis un thread sans boucle.
+        """
+        if self._phase == SleepPhase.AWAKE and self._asleep_night is None:
+            return
+        self._phase = SleepPhase.AWAKE
+        self._asleep_night = None
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        task = loop.create_task(self._announce_awake())
+        self._wake_tasks.add(task)
+        task.add_done_callback(self._wake_tasks.discard)
+
+    async def _announce_awake(self) -> None:
+        with degraded("sommeil: diffusion du reveil"):
+            from pipeline.broadcast import broadcast_inner_state_update
+            await broadcast_inner_state_update()
+
     async def _set_phase(self, new_phase: str) -> None:
         """Update the observable phase + push an inner_state update to the UI.
 
@@ -273,27 +307,28 @@ class SleepCycle:
             degradations.record("sleep: sleep phase broadcast", exc)
 
     async def run_if_due(self) -> None:
-        """Invoked by the consolidator loop after each consolidation tick.
+        """Invoked by the dedicated sleep loop.
 
-        No-op unless all three gates (night phase + idle + rested) pass.
-        Each phase is independently guarded so a single corrupted phase
-        never blocks the others.
+        No-op unless both gates (night phase + idle) pass — the night's own
+        start hour being brought forward by fatigue. Each phase is
+        independently guarded so a single corrupted phase never blocks the
+        others.
         """
         if not self._is_enabled():
             await self._set_phase(SleepPhase.AWAKE)
             return
 
         now_dt = datetime.now()
-        if not self._is_night(now_dt):
+        current_night = self._night_of(now_dt)
+        already_asleep = self._asleep_night == current_night
+
+        if not self._is_night(now_dt, self._night_start_hour(already_asleep)):
             # Crossing midnight: reset the per-night counters.
             self._maybe_reset_counters(now_dt.date())
             await self._set_phase(SleepPhase.AWAKE)
             return
 
-        current_night = self._night_of(now_dt)
-
-        already_asleep = self._asleep_night == current_night
-        if not await self._is_eligible_to_sleep(already_asleep=already_asleep):
+        if not await self._is_eligible_to_sleep():
             # Night hours but she's active — she's up late, not asleep.
             await self._set_phase(SleepPhase.AWAKE)
             return
@@ -384,7 +419,7 @@ class SleepCycle:
         """Espace, puis abandonne, les reprises d'un journal qui a échoué.
 
         Le drapeau `_last_journal_date` n'avance que sur succès : sans ce
-        garde, une seule cause d'échec (timeout de 45 s, JSON illisible,
+        garde, une seule cause d'échec (timeout, JSON illisible,
         rôle IA non configuré) suffit à relancer l'appel LLM toutes les
         60 s jusqu'au matin. Au-delà de JOURNAL_MAX_ATTEMPTS_PER_NIGHT on
         renonce jusqu'à la nuit suivante — un modèle qui a échoué trois
@@ -396,6 +431,19 @@ class SleepCycle:
             return True
         return (monotonic() - self._last_journal_attempt) >= JOURNAL_ATTEMPT_INTERVAL_S
 
+    @staticmethod
+    def _llm_timeout() -> int:
+        """Budget d'un appel nocturne. Une lecture de config peut précéder
+        une base joignable — même prudence que `load_temperament`."""
+        try:
+            from configs.service import config_service
+            return int(
+                config_service.get("memory.sleep_llm_timeout", default=SLEEP_LLM_TIMEOUT)
+            )
+        except Exception as exc:
+            degradations.record("sommeil: budget LLM illisible", exc)
+            return SLEEP_LLM_TIMEOUT
+
     def _rem_is_due(self) -> bool:
         """Space REM episodes out instead of retrying on every tick."""
         if not self._last_dream_attempt:
@@ -403,10 +451,34 @@ class SleepCycle:
         return (monotonic() - self._last_dream_attempt) >= DREAM_ATTEMPT_INTERVAL_S
 
     @staticmethod
-    def _is_night(now: datetime) -> bool:
-        """Night phase wraps across midnight: [23h, 06h)."""
+    def _is_night(now: datetime, start_hour: int = NIGHT_START_HOUR) -> bool:
+        """Night phase wraps across midnight: [start_hour, 06h)."""
         h = now.hour
-        return h >= NIGHT_START_HOUR or h < NIGHT_END_HOUR
+        return h >= start_hour or h < NIGHT_END_HOUR
+
+    def _night_start_hour(self, already_asleep: bool) -> int:
+        """L'heure à laquelle la nuit s'ouvre ce soir, avancée par la fatigue.
+
+        Une fois endormie, l'heure nominale reprend : la tension REST retombe
+        pendant le sommeil (c'est ce à quoi il sert), donc une heure calculée
+        sur elle refermerait le gate et la réveillerait vers 22h.
+        """
+        if already_asleep:
+            return NIGHT_START_HOUR - EARLY_NIGHT_MAX_ADVANCE_HOURS
+
+        try:
+            from drives.engine import drive_engine
+            from drives.state import DriveKind
+            drive_engine.update()
+            tension = drive_engine.states[DriveKind.REST].tension
+        except Exception as exc:
+            # Fail-ouvert : une tension illisible coûte le coucher anticipé,
+            # jamais la nuit elle-même.
+            degradations.record("sommeil: tension REST illisible", exc)
+            tension = 0.0
+
+        avance = EARLY_NIGHT_MAX_ADVANCE_HOURS * max(0.0, min(1.0, tension))
+        return NIGHT_START_HOUR - int(round(avance))
 
     @staticmethod
     def _night_of(now: datetime) -> date:
@@ -416,36 +488,18 @@ class SleepCycle:
         return now.date()
 
     @staticmethod
-    async def _is_eligible_to_sleep(already_asleep: bool = False) -> bool:
-        """Check idle time + REST drive tension.
-
-        Idle always applies — an interaction wakes her whatever the hour.
-        The REST gate applies only to *falling* asleep: a fresh Mika at
-        23h hasn't earned a night's processing yet. Once asleep for the
-        night (``already_asleep``), the recovery draining her REST
-        tension must not bounce her back awake.
-        """
+    async def _is_eligible_to_sleep() -> bool:
+        """Idle time, and nothing else — an interaction wakes her whatever
+        the hour. L'heure d'entrée, elle, est modulée par la fatigue
+        (`_night_start_hour`)."""
         try:
             from conscience.engine import conscience_engine
             idle_seconds = conscience_engine.get_idle_seconds()
-        except Exception:
+        except Exception as exc:
+            degradations.record("sommeil: temps d'inactivite illisible", exc)
             idle_seconds = 0.0
 
-        if idle_seconds < IDLE_SECONDS_THRESHOLD:
-            return False
-
-        if already_asleep:
-            return True
-
-        try:
-            from drives.engine import drive_engine
-            from drives.state import DriveKind
-            drive_engine.update()
-            rest_tension = drive_engine.states[DriveKind.REST].tension
-        except Exception as exc:
-            rest_tension = 0.0
-
-        return rest_tension >= REST_DRIVE_THRESHOLD
+        return idle_seconds >= IDLE_SECONDS_THRESHOLD
 
     def _maybe_reset_counters(self, today: date) -> None:
         """Outside night window — reset per-night state once per day."""
@@ -525,7 +579,10 @@ class SleepCycle:
                     .prefetch_related("entities")[:12]
                 )
             )()
-        except Exception:
+        except Exception as exc:
+            # Sans matériau, pas de journal — et le bloc `--- TON FIL D'HIER ---`
+            # reste vide toute la journée suivante.
+            degradations.record("sommeil: souvenirs du jour illisibles", exc)
             return None
 
         if not souvenirs:
@@ -554,8 +611,8 @@ class SleepCycle:
                     "emotion": r.emotion or "",
                     "intensity": round(r.intensity, 3),
                 })
-        except Exception:
-            pass
+        except Exception as exc:
+            degradations.record("sommeil: ruminations du journal illisibles", exc)
 
         # Dominant emotion = mode of the souvenirs' emotions
         emotions = [s.emotion for s in souvenirs if s.emotion]
@@ -608,16 +665,21 @@ class SleepCycle:
                     system_prompt="Tu rediges un journal intime nocturne.",
                     user_prompt=user_prompt,
                 ),
-                timeout=SLEEP_LLM_TIMEOUT,
+                timeout=self._llm_timeout(),
             )
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as exc:
             logger.warning("Sleep: journal LLM timed out")
+            degradations.record("sommeil: journal, appel LLM expire", exc)
             return None
         except UnconfiguredRoleError as exc:
             logger.warning("Sleep: journal ignoré — IA non configurée: %s", exc)
+            # Un rôle non associé n'est pas un incident : c'est une nuit
+            # mentale morte à l'installation, indéfiniment et sans signal.
+            degradations.record("sommeil: journal, IA non configuree", exc)
             return None
-        except Exception:
+        except Exception as exc:
             logger.exception("Sleep: journal LLM failed")
+            degradations.record("sommeil: journal, appel LLM en echec", exc)
             return None
 
         if not raw or not raw.strip():
@@ -788,16 +850,19 @@ class SleepCycle:
                     system_prompt="Tu generes un reve nocturne bref.",
                     user_prompt=user_prompt,
                 ),
-                timeout=SLEEP_LLM_TIMEOUT,
+                timeout=self._llm_timeout(),
             )
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as exc:
             logger.warning("Sleep: dream LLM timed out")
+            degradations.record("sommeil: reve, appel LLM expire", exc)
             return None
         except UnconfiguredRoleError as exc:
             logger.warning("Sleep: rêve ignoré — IA non configurée: %s", exc)
+            degradations.record("sommeil: reve, IA non configuree", exc)
             return None
-        except Exception:
+        except Exception as exc:
             logger.exception("Sleep: dream LLM failed")
+            degradations.record("sommeil: reve, appel LLM en echec", exc)
             return None
 
         if not raw or not raw.strip():
@@ -869,6 +934,10 @@ class SleepCycle:
                 )
             )()
         except Exception as exc:
+            # Un lot illisible rendait 0, exactement comme « rien à digérer » :
+            # la phase de guérison pouvait échouer toutes les nuits sans qu'un
+            # seul compteur ne bouge.
+            degradations.record("sommeil: ruminations a digerer illisibles", exc)
             return 0
 
         if not aging:
@@ -876,18 +945,46 @@ class SleepCycle:
 
         from memory.manager import memory_manager
 
+        def _digerer_ligne(pk: int) -> tuple[float, str] | None:
+            """Relit la ligne et applique la digestion sur ses valeurs fraîches.
+
+            La boucle de décision de la conscience écrit `status`/`intensity`
+            sur les mêmes lignes toutes les 30 s, et la digestion await entre
+            chaque écriture (dont un embedding ChromaDB) : rejouer un `status`
+            lu au début de la passe ressuscitait en `active` — ou pire figeait
+            en `faded` — une rumination résolue entre-temps. Lecture et
+            écriture tiennent donc dans un seul callable synchrone, que
+            `sync_to_async(thread_sensitive=True)` sérialise sur le même thread
+            d'exécuteur que les bulk_update de la conscience.
+            """
+            row = Rumination.objects.filter(pk=pk).first()
+            if row is None or row.status != "active":
+                return None
+
+            avant = row.intensity
+            row.intensity *= (1.0 - 0.05 * DIGESTION_DECAY_MULTIPLIER)
+            derive = DIGESTION_DRIFT.get(row.emotion)
+            if derive and derive != row.emotion:
+                row.emotion = derive
+            if row.intensity < 0.15:
+                row.status = "faded"
+            row.save(update_fields=["intensity", "emotion", "status"])
+            return avant, row.emotion
+
         processed = 0
         for r in aging:
-            # 1. Aggressive decay (vs ~5% normal)
-            old_intensity = r.intensity
-            r.intensity *= (1.0 - 0.05 * DIGESTION_DECAY_MULTIPLIER)
+            try:
+                frais = await sync_to_async(_digerer_ligne)(r.pk)
+            except Exception as exc:
+                degradations.record("sommeil: ecriture de la digestion", exc)
+                continue
+            if frais is None:
+                continue
+            processed += 1
 
-            # 2. Forced emotional drift toward a peaceful neighbor
-            new_emotion = DIGESTION_DRIFT.get(r.emotion)
-            if new_emotion and new_emotion != r.emotion:
-                r.emotion = new_emotion
-
-            # 3. Heavy ones: convert to a reflective Souvenir
+            # Les lourdes deviennent un souvenir réflexif — après l'écriture,
+            # pour que l'aller-retour ChromaDB soit hors de la fenêtre de course.
+            old_intensity, emotion = frais
             if old_intensity >= DIGESTION_TO_SOUVENIR_THRESHOLD:
                 try:
                     # Passe par le manager, qui cree *et* indexe dans ChromaDB.
@@ -898,7 +995,7 @@ class SleepCycle:
                         content=(
                             f"Apres y avoir repense cette nuit: {r.summary[:200]}"
                         ),
-                        emotion=r.emotion or "thinking",
+                        emotion=emotion or "thinking",
                         importance=min(0.85, old_intensity + 0.1),
                     )
                     if souvenir:
@@ -907,19 +1004,7 @@ class SleepCycle:
                             r.pk, souvenir.pk,
                         )
                 except Exception as exc:
-                    degradations.record("sleep: sleep: reflective souvenir creation", exc)
-
-            # 4. Close the rumination
-            if r.intensity < 0.15:
-                r.status = "faded"
-
-            try:
-                await sync_to_async(r.save)(
-                    update_fields=["intensity", "emotion", "status"]
-                )
-                processed += 1
-            except Exception:
-                pass
+                    degradations.record("sommeil: creation du souvenir reflexif", exc)
 
         logger.info("Sleep: digested %d rumination(s) in deep sleep", processed)
         return processed

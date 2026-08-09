@@ -19,7 +19,13 @@ from memory.sleep import SLEEP_REST_RECOVERY, SleepCycle
 class TestEligibilityHysteresis:
 
     async def test_entry_requires_rest_tension(self):
-        """Falling asleep still requires having earned the rest."""
+        """Le pin change avec B1 : REST n'interdit plus de s'endormir.
+
+        Il exigeait REST >= 0.5 à l'entrée — un seuil que le gate lui-même
+        rendait inatteignable, puisqu'il impose d'abord 900 s d'inactivité
+        pendant lesquelles REST ne fait que décroître. La fatigue n'ouvre plus
+        que l'heure du coucher (`_night_start_hour`).
+        """
         from drives.engine import drive_engine
         from drives.state import DriveKind
 
@@ -28,8 +34,8 @@ class TestEligibilityHysteresis:
 
         with patch("conscience.engine.conscience_engine") as ce:
             ce.get_idle_seconds.return_value = 99999
-            eligible = await SleepCycle._is_eligible_to_sleep(already_asleep=False)
-        assert eligible is False
+            eligible = await SleepCycle._is_eligible_to_sleep()
+        assert eligible is True
 
     async def test_staying_asleep_ignores_rest_gate(self):
         """Once asleep, a drained REST drive must not wake her up."""
@@ -41,14 +47,14 @@ class TestEligibilityHysteresis:
 
         with patch("conscience.engine.conscience_engine") as ce:
             ce.get_idle_seconds.return_value = 99999
-            eligible = await SleepCycle._is_eligible_to_sleep(already_asleep=True)
+            eligible = await SleepCycle._is_eligible_to_sleep()
         assert eligible is True
 
     async def test_interaction_always_wakes(self):
         """Idle gate applies even mid-sleep: someone talking wakes her."""
         with patch("conscience.engine.conscience_engine") as ce:
             ce.get_idle_seconds.return_value = 10.0
-            eligible = await SleepCycle._is_eligible_to_sleep(already_asleep=True)
+            eligible = await SleepCycle._is_eligible_to_sleep()
         assert eligible is False
 
 

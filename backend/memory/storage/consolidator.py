@@ -1,13 +1,14 @@
 import asyncio
 import logging
 import time as _time
-from datetime import timedelta
+from datetime import date, timedelta
 
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
+from emotion.types import Emotion
 from memory.extraction.extractor import MemoryExtractor
 from memory.storage.vector_store import (
     VectorStore,
@@ -32,6 +33,12 @@ from memory.storage.window import INTERNAL_MESSAGE_SOURCES, user_facing_messages
 # Une tranche d'extraction ne dépasse jamais ce volume : au-delà, le backlog
 # est découpé sur les frontières de messages (voir _extract_and_store).
 EXTRACTION_MAX_CHARS = 8000
+
+# Plafond de la fenêtre lue par passe. Le checkpoint ne bouge plus quand
+# l'extraction est indisponible : sans ce plafond, un backlog resté au-dessus
+# serait relu intégralement à chaque tick de 60 s. Le plafond est choisi AVANT
+# la lecture des messages, donc l'invariant « la borne d'abord » tient.
+MAX_WINDOW_MESSAGES = 400
 
 # Pending commitments older than this are dropped (see _expire_commitments).
 COMMITMENT_MAX_AGE_DAYS = 30
@@ -172,9 +179,21 @@ class MemoryConsolidator:
 
         logger.info("Consolidating %d new messages (skipped internal)", len(messages))
 
-        counts = await self._extract_and_store(messages)
+        counts, extracted_through = await self._extract_and_store(messages)
 
-        max_id = ceiling_id or messages[-1]["id"]
+        if extracted_through is None:
+            # Aucun modèle n'a répondu : la fenêtre reste due. Faire avancer le
+            # checkpoint ici, c'est décider que rien de cet après-midi ne
+            # deviendra jamais un souvenir. L'extracteur a déjà compté la panne.
+            logger.warning(
+                "Consolidation: extraction indisponible, checkpoint inchangé (last_id=%d)",
+                self._last_processed_id,
+            )
+            await self._run_maintenance(regenerate=False)
+            return
+
+        complete = extracted_through >= messages[-1]["id"]
+        max_id = (ceiling_id or messages[-1]["id"]) if complete else extracted_through
         await self._save_checkpoint(max_id, len(messages), counts)
         self._last_processed_id = max_id
 
@@ -196,17 +215,24 @@ class MemoryConsolidator:
         the messages first and taking the max id afterwards would let a turn
         persisted between the two queries be counted by the checkpoint but
         never extracted — that exchange would be skipped forever.
+
+        Elle est aussi bornée à ``MAX_WINDOW_MESSAGES`` : un backlog que
+        l'extraction n'a pas pu absorber reste au-dessus du checkpoint, et le
+        relire en entier toutes les 60 s coûterait plus que de le rattraper
+        tranche par tranche.
         """
         from memory.models import Message
 
-        ceiling_id = await sync_to_async(
-            lambda: Message.objects.filter(id__gt=self._last_processed_id)
-            .order_by("-id")
-            .values_list("id", flat=True)
-            .first()
+        window_ids = await sync_to_async(
+            lambda: list(
+                Message.objects.filter(id__gt=self._last_processed_id)
+                .order_by("id")
+                .values_list("id", flat=True)[:MAX_WINDOW_MESSAGES]
+            )
         )()
-        if not ceiling_id:
+        if not window_ids:
             return [], None
+        ceiling_id = window_ids[-1]
 
         # Exclusions canoniques partagées avec l'indexeur épisodique
         # (memory/storage/window.py) : plomberie de modules, machinerie
@@ -225,10 +251,16 @@ class MemoryConsolidator:
 
     # ── Step 2: turn the window into memories ─────────────────────
 
-    async def _extract_and_store(self, messages: list[dict]) -> dict[str, int]:
+    async def _extract_and_store(
+        self, messages: list[dict],
+    ) -> tuple[dict[str, int], int | None]:
         """Run the extraction LLM over the window and persist what comes back.
 
-        Returns per-type creation counts for the checkpoint log.
+        Returns per-type creation counts, and the id of the last message
+        réellement extrait — ``None`` quand même la première tranche n'a pas
+        pu l'être. C'est ce second terme qui décide du checkpoint : une
+        tranche en échec au milieu d'un backlog était jusqu'ici
+        indistinguable des autres.
 
         Un backlog démesuré (reprise après indisponibilité) est découpé en
         tranches d'au plus ``EXTRACTION_MAX_CHARS`` sur les frontières de
@@ -256,26 +288,39 @@ class MemoryConsolidator:
         interlocutors = await self._resolve_interlocutors(messages)
 
         counts = {"souvenirs": 0, "connaissances": 0, "commitments": 0}
+        extracted_through: int | None = None
         for batch in _split_batches(messages, EXTRACTION_MAX_CHARS):
             msg_dicts = [{"role": m["role"], "content": m["content"]} for m in batch]
             extractions = await self.extractor.analyze_messages(
                 msg_dicts, pending_commitments=pending_commitments,
             )
+            if extractions is None:
+                # Le provider est mort : les tranches suivantes échoueraient
+                # de même, et chacune coûterait son timeout.
+                break
             batch_counts = await self.store_extractions(
                 extractions, interlocutors=interlocutors,
+                occurred_at=batch[-1].get("created_at"),
             )
             for key, value in batch_counts.items():
                 counts[key] = counts.get(key, 0) + value
+            extracted_through = batch[-1]["id"]
 
-        return counts
+        return counts, extracted_through
 
     async def store_extractions(
         self, extractions: list[dict], *, interlocutors: list,
+        occurred_at=None,
     ) -> dict[str, int]:
         """Persiste une liste d'extractions (souvenirs, connaissances,
         engagements) — le second temps de ``_extract_and_store``, public
         pour que la réorganisation nocturne (memory/reorg.py) réutilise le
         dédoublonnage-renforcement et les contrôles de contradiction.
+
+        ``occurred_at`` = quand l'épisode a eu lieu. L'instant de l'extraction
+        est un artefact du planificateur : la réorg de 3 h datait d'aujourd'hui
+        un échange de la veille, et le biais de récence classait alors la copie
+        nocturne devant l'originale.
         """
         counts = {"souvenirs": 0, "connaissances": 0, "commitments": 0}
         handlers = {
@@ -294,7 +339,7 @@ class MemoryConsolidator:
                 themes, entities = await self._resolve_tags(extraction)
                 created = await handler(
                     extraction, themes=themes, entities=entities,
-                    interlocutors=interlocutors,
+                    interlocutors=interlocutors, occurred_at=occurred_at,
                 )
                 if created:
                     counts[created] += 1
@@ -327,15 +372,15 @@ class MemoryConsolidator:
 
     async def _store_souvenir(
         self, extraction: dict, *, themes: list, entities: list,
-        interlocutors: list,
+        interlocutors: list, occurred_at=None,
     ) -> str | None:
         from memory.models import Souvenir
 
-        now = timezone.now()
-        emotion = extraction.get("emotion", "neutral")
+        occurred = occurred_at or timezone.now()
+        emotion = _valid_emotion(extraction.get("emotion"))
         souvenir = await sync_to_async(Souvenir.objects.create)(
             content=extraction["content"], emotion=emotion,
-            importance=1.0, occurred_at=now,
+            importance=1.0, occurred_at=occurred,
         )
         if themes:
             await sync_to_async(souvenir.themes.set)(themes)
@@ -352,7 +397,7 @@ class MemoryConsolidator:
             metadata=souvenir_metadata(
                 importance=1.0,
                 emotion=emotion,
-                occurred_at=now.isoformat(),
+                occurred_at=occurred.isoformat(),
                 themes=[t.name for t in themes],
             ),
         )
@@ -363,7 +408,7 @@ class MemoryConsolidator:
 
     async def _store_connaissance(
         self, extraction: dict, *, themes: list, entities: list,
-        interlocutors: list,
+        interlocutors: list, occurred_at=None,
     ) -> str | None:
         from memory.models import Connaissance
 
@@ -421,6 +466,7 @@ class MemoryConsolidator:
     @staticmethod
     async def _store_commitment(
         extraction: dict, *, themes: list, entities: list, interlocutors: list,
+        occurred_at=None,
     ) -> str | None:
         from memory.models import Commitment, Entity
 
@@ -451,6 +497,7 @@ class MemoryConsolidator:
     @staticmethod
     async def _resolve_commitment(
         extraction: dict, *, themes: list, entities: list, interlocutors: list,
+        occurred_at=None,
     ) -> str | None:
         from memory.models import Commitment
 
@@ -690,19 +737,37 @@ class MemoryConsolidator:
             days_since = max(0.0, (now - anchor).total_seconds() / 86400)
             new_importance = souvenir.importance * (decay_rate ** days_since)
             if new_importance < min_importance:
+                # Le lot est lu à T0 puis traité avec des ``await`` : la
+                # Conscience peut booster entre les deux, et c'est justement le
+                # vieux souvenir condamné que le boost existe pour ranimer.
+                # L'écriture est donc conditionnée à la valeur lue, et le
+                # retrait Chroma ne suit qu'une suppression SQL effective —
+                # sinon on orpheline le vecteur d'une ligne qui survit.
+                deleted, _ = await sync_to_async(
+                    lambda s=souvenir: Souvenir.objects.filter(
+                        pk=s.pk, importance=s.importance, decayed_at=s.decayed_at,
+                    ).delete()
+                )()
+                if not deleted:
+                    continue
                 try:
                     await vector_call(self.vector_store.remove_souvenir)(souvenir.pk)
                 except Exception as exc:
                     degradations.record("consolidator: chromadb remove failed for souvenir #", exc)
-                await sync_to_async(souvenir.delete)()
                 logger.debug("Pruned souvenir #%d (too old)", souvenir.pk)
             elif abs(new_importance - souvenir.importance) > 0.01:
                 # Below that delta we leave the anchor alone so the elapsed
                 # time keeps accumulating instead of being silently dropped.
-                souvenir.importance = round(new_importance, 3)
+                rounded = round(new_importance, 3)
+                updated = await sync_to_async(
+                    lambda s=souvenir, v=rounded: Souvenir.objects.filter(
+                        pk=s.pk, importance=s.importance, decayed_at=s.decayed_at,
+                    ).update(importance=v, decayed_at=now)
+                )()
+                if not updated:
+                    continue
+                souvenir.importance = rounded
                 souvenir.decayed_at = now
-                await sync_to_async(souvenir.save)(
-                    update_fields=["importance", "decayed_at"])
                 # Le helper garantit qu'un ré-index ne perd plus `emotion` ni
                 # `themes` — un upsert remplace les métadonnées en entier.
                 reindex.append({
@@ -820,7 +885,10 @@ class MemoryConsolidator:
         self._last_aggregation = monotonic
 
         now = timezone.now()
-        today = now.date()
+        # Même horloge que l'écrivain et que le lookup ``__date`` (heure
+        # locale). Dater depuis l'instant aware donne la date UTC, qui range
+        # la journée émotionnelle dans la veille entre minuit et l'aube.
+        today = date.today()
 
         # Get distinct person_ids with snapshots from today (exclude __global__)
         #
@@ -1168,6 +1236,23 @@ def _split_batches(messages: list[dict], max_chars: int) -> list[list[dict]]:
     if current:
         batches.append(current)
     return batches
+
+
+def _valid_emotion(raw) -> str:
+    """Le nom canonique de l'émotion d'un souvenir, ou ``neutral``.
+
+    ``Souvenir.emotion`` est un champ texte libre et le modèle est libre
+    d'inventer : un nom hors palette pèse une charge nulle au rappel et ne
+    peut classer aucun rêve. Une extraction *sans* émotion n'est pas une
+    panne — seul un nom inconnu en est une.
+    """
+    if not raw:
+        return Emotion.NEUTRAL.value
+    try:
+        return Emotion(str(raw).strip().lower()).value
+    except ValueError as exc:
+        degradations.record("consolidator: emotion de souvenir inconnue", exc)
+        return Emotion.NEUTRAL.value
 
 
 def _merge_entities(extracted: list, interlocutors: list) -> list:

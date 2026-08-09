@@ -49,6 +49,101 @@ class TestTable:
         assert not identiques, f"non traduits : {identiques}"
 
 
+class TestProseDuPrompt:
+    """La même règle, appliquée aux couches émotionnelles du *prompt*.
+
+    « tu te sens a peine amused (intensite: 0.3) » : des chiffres bruts et des
+    libellés anglais dans une phrase française, exactement ce que le dépôt
+    s'interdit pour le bloc identité (« never prints a number »). Un modèle
+    moyen les récite tels quels à l'utilisateur.
+
+    La table est **recopiée** dans ``emotion/state.py`` plutôt qu'importée :
+    l'app d'administration dépend du domaine, l'inverse ferait dépendre le
+    moteur d'émotion de GestionSystème. Ces tests verrouillent la copie.
+    """
+
+    def test_la_table_du_prompt_couvre_les_29_emotions(self):
+        from emotion.state import EMOTION_PROMPT_FR
+
+        assert set(EMOTION_PROMPT_FR) == {e.value for e in Emotion}
+
+    def test_elle_ne_s_ecarte_d_EMOTION_FR_que_sur_bored(self):
+        from emotion.state import EMOTION_PROMPT_FR
+
+        ecarts = {
+            k for k, v in EMOTION_PROMPT_FR.items() if fmt.EMOTION_FR[k] != v
+        }
+        assert ecarts == {"bored"}, ecarts
+
+    def test_toutes_les_entrees_entrent_dans_la_phrase(self):
+        """« s'ennuie » est un verbe : il ne rentre pas dans « tu te sens … »."""
+        from emotion.state import EMOTION_PROMPT_FR
+
+        verbes = [
+            v for v in EMOTION_PROMPT_FR.values()
+            if v.startswith("s'") or v.startswith("se ")
+        ]
+        assert not verbes, f"inutilisables après « tu te sens » : {verbes}"
+
+    def test_aucun_chiffre_dans_la_prose_emotionnelle(self):
+        import re
+
+        for texte in _prose_emotionnelle():
+            assert not re.search(r"\d", texte), texte
+
+    def test_aucun_nom_anglais_dans_la_prose_emotionnelle(self):
+        canoniques = {e.value for e in Emotion} - {"surprised"}
+        for texte in _prose_emotionnelle():
+            trouves = [nom for nom in canoniques if nom in texte]
+            assert not trouves, f"{trouves} dans « {texte} »"
+
+    def test_le_nom_canonique_reste_dans_to_dict(self):
+        """La traduction s'arrête au rendu : ni le stockage ni la diffusion."""
+        from emotion import pad
+        from emotion.state import MessageEmotion, PersonMood
+
+        mood = PersonMood(person_id="p")
+        mood.dynamic.position = pad.label_to_pad(Emotion.MISCHIEVOUS, 0.8)
+        assert mood.to_dict()["emotion"] == "mischievous"
+
+        msg = MessageEmotion(
+            emotion=Emotion.MELANCHOLIC, intensity=0.6,
+            person_emotion=Emotion.MELANCHOLIC, person_intensity=0.6,
+            global_emotion=Emotion.HAPPY, global_intensity=0.2,
+            blend=((Emotion.MELANCHOLIC, 0.6),),
+        )
+        assert msg.to_dict()["emotion"] == "melancholic"
+        assert msg.to_dict()["blend"][0]["emotion"] == "melancholic"
+
+
+def _prose_emotionnelle():
+    """Tout ce que les couches émotionnelles rendent au prompt."""
+    from emotion import pad
+    from emotion.state import GlobalMood, MessageEmotion, PersonMood
+
+    for emotion in Emotion:
+        for intensite in (0.15, 0.45, 0.95):
+            mood = PersonMood(person_id="p")
+            mood.dynamic.position = pad.label_to_pad(emotion, intensite)
+            yield mood.to_prompt_description()
+
+            globale = GlobalMood()
+            globale.dynamic.position = pad.label_to_pad(emotion, intensite)
+            yield globale.to_prompt_description(Emotion.HAPPY)
+
+            yield MessageEmotion(
+                emotion=emotion, intensity=intensite,
+                person_emotion=emotion, person_intensity=intensite,
+                global_emotion=Emotion.HAPPY, global_intensity=0.2,
+            ).to_prompt_description()
+            yield MessageEmotion(
+                emotion=emotion, intensity=intensite,
+                person_emotion=emotion, person_intensity=intensite,
+                global_emotion=Emotion.HAPPY, global_intensity=0.2,
+                blend=((emotion, intensite), (Emotion.NOSTALGIC, intensite)),
+            ).to_prompt_description()
+
+
 class TestRendu:
 
     def test_un_nom_connu_est_traduit(self):

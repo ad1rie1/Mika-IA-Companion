@@ -8,10 +8,17 @@ is identical. Keeping it here prevents divergence.
 The caller passes:
   - an already-configured ``AsyncOpenAI`` client
   - the model id
-  - the system/user prompts
+  - the thread to start from, as a ``messages`` array
   - a list of provider-agnostic ``ModuleTool`` objects
 
 and gets back ``(assistant_text, tool_names_called_in_order)``.
+
+Le fil de départ arrive **déjà construit** : c'est ce qui permet au tour
+outillé de partir de la forme structurée (préfixe stable en système, vrais
+tours d'historique, état du tour dans le dernier tour user) au lieu de
+l'aplatissement à deux chaînes. Deux amorces, un seul corps —
+``run_openai_tool_loop_from_pair`` reste là pour le chemin non structuré
+(``AIRouter.complete_with_tools``), qui ne connaît que deux chaînes.
 """
 
 from __future__ import annotations
@@ -19,7 +26,32 @@ from __future__ import annotations
 import json
 import logging
 
+from utils.degradation import degradations
+
 logger = logging.getLogger(__name__)
+
+
+def messages_from_pair(system_prompt: str, user_prompt: str) -> list[dict]:
+    """Fil de départ pour un appel à deux chaînes."""
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+
+def messages_from_chat_prompt(prompt) -> list[dict]:
+    """Fil de départ pour un ``ChatPrompt``.
+
+    Même rendu que ``complete_chat`` : le préfixe stable en système, puis de
+    vrais tours ``{role, content}``. La boucle d'outils n'ajoute qu'à la fin,
+    donc ce préfixe reste identique octet pour octet d'un aller-retour à
+    l'autre — ce sur quoi les back-ends compatibles OpenAI indexent leur
+    cache de préfixe automatique.
+    """
+    return [
+        {"role": "system", "content": prompt.system_stable},
+        *prompt.chat_messages(),
+    ]
 
 
 def _serialize_tools(tools: list) -> list[dict]:
@@ -59,12 +91,36 @@ async def _run_handler(tool, raw_args: str) -> str:
         return json.dumps({"result": str(result)})
 
 
-async def run_openai_tool_loop(
+async def run_openai_tool_loop_from_pair(
     *,
     client,
     provider_label: str,
     system_prompt: str,
     user_prompt: str,
+    model: str,
+    tools: list,
+    max_tokens: int,
+    temperature: float,
+    max_turns: int,
+) -> tuple[str, list[str]]:
+    """Amorce à deux chaînes du même corps de boucle."""
+    return await run_openai_tool_loop(
+        client=client,
+        provider_label=provider_label,
+        messages=messages_from_pair(system_prompt, user_prompt),
+        model=model,
+        tools=tools,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        max_turns=max_turns,
+    )
+
+
+async def run_openai_tool_loop(
+    *,
+    client,
+    provider_label: str,
+    messages: list[dict],
     model: str,
     tools: list,
     max_tokens: int,
@@ -80,10 +136,8 @@ async def run_openai_tool_loop(
     """
     from ai.quota import set_usage
 
-    messages: list[dict] = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
-    ]
+    # Le fil appartient à l'appelant : la boucle y empile ses allers-retours.
+    messages = list(messages)
 
     tools_by_name = {t.name: t for t in tools}
     serialized = _serialize_tools(tools) if tools else None
@@ -110,8 +164,10 @@ async def run_openai_tool_loop(
                     input_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
                     output_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                degradations.record(
+                    "ai.providers._openai_tools.run_openai_tool_loop usage", exc,
+                )
 
         msg = response.choices[0].message
         tool_calls = getattr(msg, "tool_calls", None) or []

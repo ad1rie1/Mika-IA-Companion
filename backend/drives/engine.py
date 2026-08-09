@@ -1,9 +1,14 @@
 """DriveEngine — singleton managing intrinsic motivation.
 
 Design notes:
-  - Purely in-RAM. Drives are ephemeral — if Mika restarts, she starts
-    with fresh drives. This matches human intuition: you don't wake up
-    with the exact tension you had when you fell asleep.
+  - Snapshotted to the DB (`DriveSnapshot`), restored at boot. L'état a
+    longtemps été purement en RAM, justifié par « on ne se réveille pas
+    avec la tension exacte de la veille » — mais ce qui disparaissait au
+    redémarrage, ce n'était pas une nuance de fatigue : c'était la nuit
+    mentale entière (le gate de sommeil lisait REST) et toute échelle de
+    temps au-delà d'une session (SOCIAL lit `last_satisfied`). L'intuition
+    reste vraie et reste servie : `restore_state()` repose les horodatages
+    et laisse `update()` rejouer le temps d'arrêt.
   - No background loop needed: tensions are computed lazily via
     `update()` each time the conscience queries them. This keeps the
     engine cheap and race-free.
@@ -22,7 +27,9 @@ from drives.state import (
     DriveState,
     dominant_drive,
     drive_prompt_description,
+    log_growth,
 )
+from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +84,17 @@ class DriveEngine:
                 pressure = self._rest_pressure(now)
                 decay = _REST_NATURAL_DECAY * dt
                 state.tension += pressure - decay
+            elif params.growth_horizon:
+                # `max` et non `=` : après un assouvissement partiel
+                # `last_satisfied` repart de zéro, donc la cible aussi — le
+                # résidu de tension est conservé jusqu'à ce que la courbe le
+                # rattrape. Idempotent comme la branche linéaire.
+                cible = log_growth(
+                    now - state.last_satisfied,
+                    params.growth_tau,
+                    params.growth_horizon,
+                )
+                state.tension = max(state.tension, cible)
             elif dt > 0:
                 state.tension += params.growth_rate * dt
             # else: no time passed → nothing to do for this drive
@@ -296,6 +314,67 @@ class DriveEngine:
 
         combined = 0.7 * circadian_energy + 0.3 * rest_energy
         return max(0.0, min(1.0, combined))
+
+    # ── Persistence ───────────────────────────────────────────────
+
+    async def save_state(self) -> None:
+        """Écrase l'instantané de chaque pulsion. Ne lève jamais."""
+        from asgiref.sync import sync_to_async
+
+        from drives.models import DriveSnapshot
+
+        self.update()
+        try:
+            from datetime import datetime, timezone as dt_timezone
+
+            def _write() -> None:
+                for kind, state in self.states.items():
+                    DriveSnapshot.objects.update_or_create(
+                        kind=kind.value,
+                        defaults={
+                            "tension": state.tension,
+                            "last_satisfied": datetime.fromtimestamp(
+                                state.last_satisfied, dt_timezone.utc
+                            ),
+                        },
+                    )
+
+            await sync_to_async(_write)()
+        except Exception as exc:
+            degradations.record("drives.save_state", exc)
+
+    async def restore_state(self) -> None:
+        """Relit l'instantané, puis laisse `update()` rejouer le temps d'arrêt.
+
+        Sans ce rejeu, une coupure de trois heures rendrait la fatigue de la
+        veille intacte ; avec lui, REST retombe et les pulsions positives
+        montent exactement comme si le processus n'avait pas coupé.
+        `_activity` n'est pas persisté : c'est une fenêtre glissante de 10 min
+        d'événements déjà consommés.
+        """
+        from asgiref.sync import sync_to_async
+
+        from drives.models import DriveSnapshot
+
+        try:
+            rows = await sync_to_async(
+                lambda: {r.kind: r for r in DriveSnapshot.objects.all()}
+            )()
+        except Exception as exc:
+            degradations.record("drives.restore_state", exc)
+            return
+
+        for kind, state in self.states.items():
+            row = rows.get(kind.value)
+            if row is None:
+                continue
+            state.tension = max(0.0, min(1.0, row.tension))
+            if row.last_satisfied is not None:
+                state.last_satisfied = row.last_satisfied.timestamp()
+            state.last_update = row.saved_at.timestamp()
+
+        self.update()
+        logger.info("Drives restored from %d snapshot(s)", len(rows))
 
     # ── Test / admin helpers ──────────────────────────────────────
 

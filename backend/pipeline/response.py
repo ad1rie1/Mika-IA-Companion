@@ -8,10 +8,14 @@ from pipeline.prompt import build_chat_prompt
 
 async def call_ai_and_parse(
     context: ConversationContext, message: str
-) -> tuple[str, EmotionData, list[str]]:
+) -> tuple[str, EmotionData | None, list[str]]:
     """Build prompt, call AI, extract emotion from response.
 
-    Returns (clean_text, emotion_data, tool_calls).
+    Returns (clean_text, emotion_data, tool_calls), where ``emotion_data`` is
+    ``None`` when the turn declared nothing usable — no tag at all, or a name
+    outside the 29. The caller must not turn that into a neutral: NEUTRAL is
+    the origin of PAD space, so applying it as an impulse pulls whatever the
+    person just provoked back toward zero.
     Les fichiers uploadés sont accessibles via les outils files_* du FilesModule.
 
     Passes the ``ConversationContext`` object itself to the prompt builder —

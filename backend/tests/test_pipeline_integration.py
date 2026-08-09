@@ -57,7 +57,11 @@ class TestCallAiAndParse:
         assert tools == []
 
     @pytest.mark.asyncio
-    async def test_missing_tag_falls_back_to_neutral(self):
+    async def test_missing_tag_declares_nothing(self):
+        # Le pin change : une absence de tag n'est plus un NEUTRAL à 0.5. Ce
+        # NEUTRAL était appliqué comme une vraie impulsion, et l'ancre PAD de
+        # NEUTRAL est l'origine — un tour sans tag après une colère était donc
+        # vécu comme un apaisement. « Rien déclaré » se dit maintenant None.
         from pipeline.response import call_ai_and_parse
 
         ctx = _fake_context()
@@ -66,8 +70,7 @@ class TestCallAiAndParse:
             text, emotion, _ = await call_ai_and_parse(ctx, "hey")
 
         assert "Salut" in text
-        # No tag → NEUTRAL fallback
-        assert emotion.emotion is Emotion.NEUTRAL
+        assert emotion is None
 
 
 # ===================================================================

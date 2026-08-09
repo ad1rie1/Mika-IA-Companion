@@ -1,12 +1,11 @@
 """AI client — pure call layer.
 
 Simple completion via the router (any provider).
-Tool-enabled completion is delegated to ai.tool_client (Claude-only, MCP).
+Tool-enabled completion is delegated to ai.tool_client (Claude-only).
 
-This module carries **no** SDK-specific setup — every credential /
-environment concern (including the ``CLAUDE_CODE_OAUTH_TOKEN`` the Claude
-Agent SDK picks up, passé par ``ClaudeAgentOptions.env`` et non par
-``os.environ``) is handled inside ``ClaudeProvider``. The client is a
+This module carries **no** SDK-specific setup — every credential concern
+(la clé d'API Anthropic, lue dans la configuration et passée au client
+``AsyncAnthropic``) is handled inside ``ClaudeProvider``. The client is a
 thin facade.
 """
 

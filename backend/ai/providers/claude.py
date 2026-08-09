@@ -9,23 +9,17 @@ invalidates what is cached. Tool-enabled turns run a native tool loop on the
 same API (tools render before system, so the ~6 500 tokens of declarations
 are covered by the same cached prefix, across iterations *and* across turns).
 
-The claude_agent_sdk (CLI subprocess) survives only as a fallback for
-credentials the raw API refuses — an OAuth token whose entitlements are
-CLI-only. The switch happens on a **401 before any side effect** (such a
-credential fails on the very first request) and covers tooled and untooled
-turns alike, for the instance's lifetime; a credential rotation recreates
-the instance and retries native. A 403 never switches (possibly transient,
-and the CLI would fail the same way), and an auth error after a tool
-already ran propagates — replaying the turn would re-run the side effects.
+The Messages API is the only path. The ``claude_agent_sdk`` CLI subprocess,
+authenticated by a Claude.ai OAuth token, is no longer supported by
+Anthropic and has been removed: authentication is an API key, and a
+401/403 is an ordinary authentication error that propagates — no fallback
+can mask it any more.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import os
-
-from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -48,17 +42,10 @@ def _model_accepts_temperature(model: str) -> bool:
     return not model.startswith(_NO_SAMPLING_PREFIXES)
 
 
-class _NativeAuthRejected(Exception):
-    """Raised when the Messages API rejects the credentials **before any
-    side effect** — the only situation where replaying the turn through the
-    claude_agent_sdk CLI is safe. An auth error after a tool already ran
-    must propagate instead: a replay would re-send the email."""
-
-
 class ClaudeProvider:
     """Anthropic Claude via the official ``anthropic`` Python SDK.
 
-    Supports both API key and OAuth token authentication.
+    Authenticated by API key, exclusively.
     Uses ``anthropic.AsyncAnthropic.messages.create()`` for completions.
     """
 
@@ -67,53 +54,22 @@ class ClaudeProvider:
         from configs.service import config_service
 
         api_key = config_service.get("ai.claude.api_key", default="") or None
-        auth_token = config_service.get("ai.claude.oauth_token", default="") or None
 
-        if not api_key and not auth_token:
+        if not api_key:
             raise ValueError(
-                "ClaudeProvider nécessite ai.claude.api_key ou ai.claude.oauth_token "
-                "(éditeur Configuration > IA · Providers)."
+                "ClaudeProvider nécessite une clé d'API Anthropic : saisis-la "
+                "dans Configuration → IA · Claude (champ « Clé d'API »). Les "
+                "jetons OAuth Claude.ai ne sont plus acceptés."
             )
 
-        # The anthropic SDK supports both api_key and auth_token kwargs.
-        # auth_token is used for OAuth-based access (Claude.ai sessions).
-        # claude_agent_sdk (used by complete_with_tools) ne lit ses
-        # identifiants que dans l'environnement du sous-processus CLI, qu'il
-        # construit par ``{**os.environ, **options.env, ...}``. On porte donc
-        # l'identifiant dans ``options.env`` (voir _run_tool_loop), jamais
-        # dans os.environ.
-        if auth_token:
-            self._agent_env = {"CLAUDE_CODE_OAUTH_TOKEN": auth_token}
-            self._client = AsyncAnthropic(auth_token=auth_token)
-        else:
-            self._agent_env = {"ANTHROPIC_API_KEY": api_key}
-            self._client = AsyncAnthropic(api_key=api_key)
+        self._client = AsyncAnthropic(api_key=api_key)
 
-        # Une variable posée dans os.environ est globale au processus et
-        # survit à l'éviction de l'instance : après une rotation OAuth → clé
-        # d'API, CLAUDE_CODE_OAUTH_TOKEN gardait le jeton révoqué et restait
-        # prioritaire côté CLI (tous les tours outillés en 401 pendant que
-        # test() répondait ok). On purge les deux variables pour que
-        # l'environnement ne contredise jamais la configuration courante —
-        # et qu'un secret retiré de la base ne subsiste pas en clair dans
-        # chaque sous-processus engendré.
-        for var in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"):
-            os.environ.pop(var, None)
-
-        # Bascule mémorisée : si l'API Messages refuse ces identifiants en
-        # 401 (jeton OAuth aux droits CLI seulement), tous les tours —
-        # outillés ou non — repassent par claude_agent_sdk pour la durée de
-        # vie de l'instance. Une rotation d'identifiants recrée l'instance
-        # et retente le natif. Un 403 (permission/plafond de dépense) ne
-        # bascule jamais : il peut être transitoire, et le CLI échouerait
-        # pareil.
-        self._force_agent_sdk_tools = False
         # Modèles dont le serveur a refusé ``temperature`` alors qu'ils ne
         # figurent pas dans _NO_SAMPLING_PREFIXES (id futur) : mémorisés pour
         # ne pas payer une requête condamnée + un retry à chaque appel.
         self._no_temperature_models: set[str] = set()
 
-        logger.info("ClaudeProvider initialisé (auth=%s)", "oauth" if auth_token else "api_key")
+        logger.info("ClaudeProvider initialisé (auth=clé d'API)")
 
     async def complete(
         self,
@@ -183,30 +139,15 @@ class ClaudeProvider:
         max_tokens: int = 4096,
         temperature: float = 0.7,
     ) -> str:
-        """Conversation turn with prompt caching and real message turns.
-
-        Same auth fallback as the tooled path: a pure completion has no side
-        effect, so a 401 can always be replayed through the CLI loop.
-        """
-        if self._force_agent_sdk_tools:
-            text, _ = await self._tools_via_agent_sdk(prompt, model, [], max_turns=1)
-            return text
-
-        from anthropic import AuthenticationError
-
+        """Conversation turn with prompt caching and real message turns."""
         system, messages = self._chat_payload(prompt)
-        try:
-            response = await self._create_message(
-                model=model,
-                max_tokens=max_tokens,
-                system=system,
-                messages=messages,
-                temperature=temperature,
-            )
-        except AuthenticationError:
-            self._switch_to_agent_sdk("complete_chat")
-            text, _ = await self._tools_via_agent_sdk(prompt, model, [], max_turns=1)
-            return text
+        response = await self._create_message(
+            model=model,
+            max_tokens=max_tokens,
+            system=system,
+            messages=messages,
+            temperature=temperature,
+        )
         totals = {"in": 0, "out": 0}
         self._accumulate_usage(getattr(response, "usage", None), totals)
         self._flush_usage(totals)
@@ -229,46 +170,29 @@ class ClaudeProvider:
         ~6 500 tokens of declarations are written to cache once and read at
         ~0.1× afterwards — across loop iterations and across turns — instead
         of being re-billed at full price on every iteration.
-
-        Falls back to the claude_agent_sdk CLI loop when the raw API rejects
-        the configured credentials **in 401 and before any tool ran** (OAuth
-        token with CLI-only entitlements — the failure shows on the very
-        first request). An auth error *after* a tool executed propagates:
-        replaying the turn would re-run its side effects.
         """
         if not tools:
-            # complete_chat porte lui-même la bascule agent-SDK.
             text = await self.complete_chat(
                 prompt, model=model, max_tokens=max_tokens, temperature=temperature,
             )
             return text, []
-        if self._force_agent_sdk_tools:
-            return await self._tools_via_agent_sdk(prompt, model, tools, max_turns)
 
-        try:
-            return await self._native_tool_loop(
-                prompt=prompt,
-                model=model,
-                tools=tools,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                max_turns=max_turns,
-            )
-        except _NativeAuthRejected:
-            self._switch_to_agent_sdk("boucle d'outils")
-            return await self._tools_via_agent_sdk(prompt, model, tools, max_turns)
-
-    def _switch_to_agent_sdk(self, where: str) -> None:
-        logger.warning(
-            "L'API Messages refuse les identifiants (401, %s) — bascule sur "
-            "claude_agent_sdk pour la durée de vie du provider.", where,
+        system, messages = self._chat_payload(prompt)
+        return await self._native_tool_loop(
+            system=system,
+            messages=messages,
+            model=model,
+            tools=tools,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            max_turns=max_turns,
         )
-        self._force_agent_sdk_tools = True
 
     async def _native_tool_loop(
         self,
         *,
-        prompt,
+        system,
+        messages: list[dict],
         model: str,
         tools: list,
         max_tokens: int,
@@ -288,9 +212,6 @@ class ClaudeProvider:
         ]
         handlers = {t.name: t.handler for t in tools}
 
-        from anthropic import AuthenticationError
-
-        system, messages = self._chat_payload(prompt)
         totals = {"in": 0, "out": 0}
         texts: list[str] = []
         calls: list[str] = []
@@ -301,22 +222,14 @@ class ClaudeProvider:
 
         try:
             for _ in range(max_turns):
-                try:
-                    response = await self._create_message(
-                        model=model,
-                        max_tokens=max_tokens,
-                        system=system,
-                        messages=messages,
-                        tools=tool_defs,
-                        temperature=temperature,
-                    )
-                except AuthenticationError:
-                    if not calls:
-                        # Rien n'a encore tourné : rejouer le tour via le CLI
-                        # est sans risque. Après un premier outil exécuté, on
-                        # laisse remonter — un replay renverrait l'email.
-                        raise _NativeAuthRejected() from None
-                    raise
+                response = await self._create_message(
+                    model=model,
+                    max_tokens=max_tokens,
+                    system=system,
+                    messages=messages,
+                    tools=tool_defs,
+                    temperature=temperature,
+                )
                 self._accumulate_usage(getattr(response, "usage", None), totals)
 
                 turn_text = "".join(
@@ -379,22 +292,6 @@ class ClaudeProvider:
         if isinstance(out, dict) and (out.get("isError") or out.get("is_error")):
             result["is_error"] = True
         return result
-
-    async def _tools_via_agent_sdk(
-        self, prompt, model: str, tools: list, max_turns: int,
-    ) -> tuple[str, list[str]]:
-        """Legacy CLI loop, fed with the flattened two-string shape."""
-        system_prompt, user_prompt = prompt.legacy_pair()
-        mcp_server = self._build_mcp_server(tools)
-        return await self._run_tool_loop(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            model=model,
-            mcp_server=mcp_server,
-            tool_names=[t.name for t in tools],
-            max_turns=max_turns,
-            env=self._agent_env,
-        )
 
     # ── Payload construction & plumbing ──────────────────────────
 
@@ -527,7 +424,7 @@ class ClaudeProvider:
         from ai.providers import default_test
         return await default_test(self)
 
-    # ── Tool-enabled completion (via MCP, Claude-specific) ───────
+    # ── Tool-enabled completion (flattened two-string shape) ─────
     async def complete_with_tools(
         self,
         system_prompt: str,
@@ -539,119 +436,38 @@ class ClaudeProvider:
         *,
         max_turns: int = 10,
     ) -> tuple[str, list[str]]:
-        """Tool-enabled completion.
+        """Tool-enabled completion from a plain (system, user) pair.
 
-        Accepts a list of provider-agnostic ``ModuleTool`` objects —
-        each exposing ``name``, ``description``, ``to_json_schema()``
-        and an async ``handler``. The Claude-specific MCP plumbing
-        (server construction, tool loop, stream parsing) is an internal
-        implementation detail and never leaks out.
+        Accepts a list of provider-agnostic ``ModuleTool`` objects — each
+        exposing ``name``, ``description``, ``to_json_schema()`` and an
+        async ``handler``. Runs the same native Messages loop as the
+        structured path; only the payload differs.
 
         Returns ``(assistant_text, tool_names_called_in_order)``.
         """
-        mcp_server = self._build_mcp_server(tools)
-        return await self._run_tool_loop(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            model=model,
-            mcp_server=mcp_server,
-            tool_names=[t.name for t in tools],
-            max_turns=max_turns,
-            env=self._agent_env,
-        )
-
-    @staticmethod
-    def _build_mcp_server(tools: list):
-        """Wrap ``tools`` into an in-process Claude-MCP server.
-
-        Encapsulated here so ``claude_agent_sdk`` never escapes the
-        provider boundary. Returns ``None`` when ``tools`` is empty so
-        the tool loop falls back to a plain text completion.
-        """
-        from claude_agent_sdk import SdkMcpTool, create_sdk_mcp_server
-
         if not tools:
-            return None
-        sdk_tools = [
-            SdkMcpTool(
-                name=t.name,
-                description=t.description,
-                input_schema=t.to_json_schema(),
-                handler=t.handler,
+            text = await self.complete(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
             )
-            for t in tools
-        ]
-        return create_sdk_mcp_server(
-            name="vtuber_modules", version="1.0.0", tools=sdk_tools,
-        )
+            return text, []
 
-    @staticmethod
-    async def _run_tool_loop(
-        *,
-        system_prompt: str,
-        user_prompt: str,
-        model: str,
-        mcp_server,
-        tool_names: list[str],
-        max_turns: int,
-        env: dict[str, str],
-    ) -> tuple[str, list[str]]:
-        from claude_agent_sdk import (
-            AssistantMessage,
-            ResultMessage,
-            TextBlock,
-            ToolUseBlock,
-            query,
-        )
-        from claude_agent_sdk.types import ClaudeAgentOptions
-
-        mcp_servers: dict = {}
-        allowed_tools: list[str] = []
-        if mcp_server is not None:
-            mcp_servers["vtuber_modules"] = mcp_server
-            allowed_tools = [f"mcp__vtuber_modules__{n}" for n in tool_names]
-
-        options = ClaudeAgentOptions(
-            system_prompt=system_prompt,
+        # Pas de ``cache_control`` ici, contrairement au chemin structuré :
+        # ce prompt système est le rendu aplati, état par tour compris, donc
+        # le préfixe change à chaque appel. Marquer le bloc paierait l'
+        # écriture en cache (1,25×) pour une lecture qui n'arriverait jamais.
+        return await self._native_tool_loop(
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
             model=model,
+            tools=tools,
+            max_tokens=max_tokens,
+            temperature=temperature,
             max_turns=max_turns,
-            mcp_servers=mcp_servers,
-            allowed_tools=allowed_tools,
-            permission_mode="bypassPermissions",
-            # Écrase os.environ dans la fusion faite par le transport, donc
-            # l'identifiant transmis au CLI est toujours celui que la
-            # configuration déclare à cet instant.
-            env=dict(env),
         )
-
-        async def _prompt_stream():
-            yield {
-                "type": "user",
-                "session_id": "",
-                "message": {"role": "user", "content": user_prompt},
-                "parent_tool_use_id": None,
-            }
-
-        response_stream = query(prompt=_prompt_stream(), options=options)
-
-        raw_text = ""
-        calls: list[str] = []
-        async for msg in response_stream:
-            if isinstance(msg, AssistantMessage):
-                for block in msg.content:
-                    if isinstance(block, TextBlock):
-                        raw_text += block.text
-                    elif isinstance(block, ToolUseBlock):
-                        logger.info(
-                            "Claude called tool: %s (input=%s)",
-                            block.name, str(block.input)[:200],
-                        )
-                        calls.append(block.name)
-            elif isinstance(msg, ResultMessage):
-                _record_claude_usage(msg)
-        if calls:
-            logger.info("Tools used in this turn: %s", calls)
-        return raw_text, calls
 
 
 def _tool_result_text(out) -> str:
@@ -679,33 +495,3 @@ def _tool_result_text(out) -> str:
             return str(out)
     return "" if out is None else str(out)
 
-
-def _record_claude_usage(result) -> None:
-    """Remonte au compteur de quota l'usage de la boucle d'outils.
-
-    ``ResultMessage`` clôt la session du CLI et porte le **cumul** de tous
-    les tours. Sans cette remontée, le routeur ne trouvait rien dans le
-    contexte d'usage et retombait sur son estimation de repli — la seule
-    taille des prompts système et utilisateur. Or c'est de très loin le
-    chemin le plus cher : les déclarations d'outils pèsent quelques
-    milliers de tokens et sont renvoyées à *chaque* itération, jusqu'à
-    ``max_turns``. Le poste dominant se comptait donc pour une fraction de
-    lui-même, et le plafond se vérifiait contre ce chiffre minoré.
-
-    Les tokens de cache sont comptés en entrée : ce sont bien des tokens
-    consommés, et c'est par eux que passe l'essentiel d'un prompt outillé
-    (prompt système + outils, réutilisés tour après tour).
-    """
-    try:
-        from ai.quota import set_usage
-        usage = getattr(result, "usage", None) or {}
-        tokens_in = (
-            int(usage.get("input_tokens", 0) or 0)
-            + int(usage.get("cache_creation_input_tokens", 0) or 0)
-            + int(usage.get("cache_read_input_tokens", 0) or 0)
-        )
-        tokens_out = int(usage.get("output_tokens", 0) or 0)
-        if tokens_in or tokens_out:
-            set_usage(input_tokens=tokens_in, output_tokens=tokens_out)
-    except Exception:
-        pass

@@ -145,20 +145,113 @@ class TestExecutePlan:
         assert results.exchange_hits == []
 
     async def test_exchange_intents_query_the_episodic_tier(self):
+        # Le pin change : l'intent ne passe plus `person=<nom rendu par le
+        # petit modèle>` mais `handles=<ceux de l'interlocuteur>`. La sortie
+        # de la passe entre dans le prompt d'un tiers, donc elle suit la même
+        # politique « own identity only » que la voie chaude.
         from memory.episodic.api import ExchangeHit
 
-        hit = ExchangeHit("5", "Lui: x", "web_b", 1, 5, 6, 0.0, 0.2)
+        hit = ExchangeHit("5", "Lui: x", "web_a", 1, 5, 6, 0.0, 0.2)
         plan = PreparationPlan(rappels=(
-            Rappel("echanges_passes", "le projet", person="Thomas"),
+            Rappel("echanges_passes", "le projet", person="Bob"),
             Rappel("echanges_passes", "le projet encore"),
         ))
-        with patch("memory.episodic.api.search_exchanges",
+        with patch("identity.resolver.identity_resolver.handles_for_person",
+                   AsyncMock(return_value=[{"person_id": "web_a"}])), \
+             patch("memory.episodic.api.resolve_person_handles",
+                   AsyncMock(return_value=["web_a"])), \
+             patch("memory.episodic.api.search_exchanges",
                    AsyncMock(return_value=[hit])) as mock:
             results = await execute_plan(plan, "web_a")
         assert mock.call_count == 2
-        assert mock.call_args_list[0].kwargs["person"] == "Thomas"
+        assert mock.call_args_list[0].kwargs["handles"] == ["web_a"]
+        assert "person" not in mock.call_args_list[0].kwargs
         # Même chunk remonté deux fois → dédupliqué.
         assert len(results.exchange_hits) == 1
+
+
+class TestExecutePlanPerimetre:
+    """La sortie du planificateur entre dans le prompt d'un tiers.
+
+    Le planificateur est bien un consommateur interne — mais les chunks qu'il
+    ramène sont du verbatim, fusionné dans le bloc mémoire du tour de
+    conversation. « Qu'est-ce que Thomas t'a raconté hier soir ? » posé par
+    Bob remontait donc les DM de Thomas, mot pour mot, dans le prompt de Bob,
+    en contournant entièrement la politique « own identity only » que la voie
+    chaude (`retriever._episodic_lane`) applique.
+    """
+
+    def _bob(self):
+        return patch(
+            "identity.resolver.identity_resolver.handles_for_person",
+            AsyncMock(return_value=[{"person_id": "web_bob"}]),
+        )
+
+    async def test_un_rappel_vise_un_tiers_ne_ramene_rien(self):
+        from memory.episodic.api import ExchangeHit
+
+        hit = ExchangeHit("5", "Thomas: secret", "tg_42", 1, 5, 6, 0.0, 0.2)
+        plan = PreparationPlan(rappels=(
+            Rappel("echanges_passes", "hier soir", person="Thomas"),
+        ))
+        with self._bob(), \
+             patch("memory.episodic.api.resolve_person_handles",
+                   AsyncMock(return_value=["tg_42", "web_thomas"])), \
+             patch("memory.episodic.api.search_exchanges",
+                   AsyncMock(return_value=[hit])) as mock:
+            results = await execute_plan(plan, "web_bob")
+
+        mock.assert_not_called()
+        assert results.exchange_hits == []
+
+    async def test_un_rappel_sur_soi_meme_est_execute(self):
+        plan = PreparationPlan(rappels=(
+            Rappel("echanges_passes", "hier soir", person="Bob"),
+        ))
+        with self._bob(), \
+             patch("memory.episodic.api.resolve_person_handles",
+                   AsyncMock(return_value=["web_bob"])), \
+             patch("memory.episodic.api.search_exchanges",
+                   AsyncMock(return_value=[])) as mock:
+            await execute_plan(plan, "web_bob")
+
+        assert mock.call_args.kwargs["handles"] == ["web_bob"]
+        assert "person" not in mock.call_args.kwargs
+
+    async def test_un_rappel_sans_personne_reste_borne_a_l_interlocuteur(self):
+        # `person=None` signifiait « tout l'index » : la même fuite, sans même
+        # un nom à blâmer.
+        plan = PreparationPlan(rappels=(Rappel("echanges_passes", "hier soir"),))
+        with self._bob(), \
+             patch("memory.episodic.api.search_exchanges",
+                   AsyncMock(return_value=[])) as mock:
+            await execute_plan(plan, "web_bob")
+
+        assert mock.call_args.kwargs["handles"] == ["web_bob"]
+
+    async def test_un_appelant_interne_garde_l_acces_croise(self):
+        plan = PreparationPlan(rappels=(
+            Rappel("echanges_passes", "hier soir", person="Thomas"),
+        ))
+        with patch("memory.episodic.api.search_exchanges",
+                   AsyncMock(return_value=[])) as mock:
+            await execute_plan(plan, "conscience_mika")
+
+        assert mock.call_args.kwargs["person"] == "Thomas"
+
+    async def test_une_resolution_qui_echoue_ferme_le_perimetre(self):
+        from utils.degradation import degradations
+
+        degradations.reset()
+        plan = PreparationPlan(rappels=(Rappel("echanges_passes", "hier soir"),))
+        with patch("identity.resolver.identity_resolver.handles_for_person",
+                   AsyncMock(side_effect=RuntimeError("db down"))), \
+             patch("memory.episodic.api.search_exchanges",
+                   AsyncMock(return_value=[])) as mock:
+            await execute_plan(plan, "web_bob")
+
+        assert mock.call_args.kwargs["handles"] == ["web_bob"]
+        assert degradations.count_for("identite: perimetre des handles") == 1
 
 
 class TestGatherSeam:

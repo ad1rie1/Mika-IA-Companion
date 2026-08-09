@@ -11,6 +11,7 @@ preserved in the persisted ``Message.attachments_meta``.
 """
 
 import asyncio
+import dataclasses
 import logging
 import random
 from dataclasses import dataclass
@@ -79,7 +80,11 @@ def _compute_thinking_delay(
 class SpeechOutput:
     """Result of processing a message through the pipeline."""
     text: str
-    emotion_data: EmotionData
+    # What the reply's [EMOTION:] tag said, raw — ``None`` when it declared
+    # nothing. Deliberately not the policy-filtered value: a module reading
+    # this wants to know what the model said, not what the project mode did
+    # with it.
+    emotion_data: EmotionData | None
     emotion_name: str
     emotion_intensity: float
     emotion_state: dict
@@ -172,7 +177,20 @@ async def process_message(
             context = await gather_context(
                 message, person_id, channel=source,
                 authenticated=authenticated, is_public=is_public,
+                intent=perception.intent,
             )
+
+        # Second statement of the same rule, and deliberately not a duplicate:
+        # a caller assembling its own context (the conscience does) cannot be
+        # made to declare the intent, and this is the only point that sees
+        # both. Without it, an action brief Mika wrote to herself is read as
+        # the recipient's tone — "besoin de vider son sac" about a text
+        # nobody sent.
+        if (
+            perception.intent is not Intent.REQUEST_RESPONSE
+            and context.user_mood_hint
+        ):
+            context = dataclasses.replace(context, user_mood_hint="")
 
         # 1b. Write the question down, before attempting to answer it.
         #
@@ -225,7 +243,7 @@ async def process_message(
         )
         ai_failed = True
         response_text = "Hmm, je reflechis plus lentement que prevu... Laisse-moi un instant."
-        emotion_data = EmotionData(emotion=Emotion.NEUTRAL, intensity=0.0)
+        emotion_data = None
     except UnconfiguredRoleError as ure:
         # Configuration error, not a runtime bug: no model is mapped to the
         # role. One concise line — a traceback adds nothing actionable here.
@@ -238,7 +256,7 @@ async def process_message(
             "Je ne suis pas encore configurée pour repondre... "
             "Mon IA n'a pas de modele associe (Configuration > IA · Roles)."
         )
-        emotion_data = EmotionData(emotion=Emotion.NEUTRAL, intensity=0.0)
+        emotion_data = None
     except QuotaExceeded as qe:
         # Hit a daily/monthly LLM quota. Return a truthful short message
         # instead of the generic "bug" fallback so the user knows why.
@@ -251,7 +269,7 @@ async def process_message(
             "Desolee, j'ai atteint la limite d'usage IA pour le moment. "
             "Reessaie un peu plus tard."
         )
-        emotion_data = EmotionData(emotion=Emotion.NEUTRAL, intensity=0.0)
+        emotion_data = None
     except Exception:
         logger.exception(
             "AI error while processing message (person=%s, source=%s)",
@@ -259,7 +277,7 @@ async def process_message(
         )
         ai_failed = True
         response_text = "Oups, j'ai eu un petit bug... Tu peux reessayer ?"
-        emotion_data = EmotionData(emotion=Emotion.NEUTRAL, intensity=0.0)
+        emotion_data = None
         # A light global-mood perturbation reflects Mika's own frustration
         # at her technical failure — not a relational emotion toward the user.
         emotion_engine.process_emotion(
@@ -275,10 +293,28 @@ async def process_message(
     #    Deliberately OUTSIDE the AI try-block and non-fatal: a bookkeeping
     #    error here must not turn a real, already-received answer into the
     #    "j'ai eu un petit bug" fallback and drop it from memory.
-    if not ai_failed and not getattr(context, "project_suppresses_emotion", False):
+    #
+    #    `declared` is what this turn is entitled to claim as its emotion: the
+    #    tag, when there is one and when nothing forbids it. A failure declared
+    #    nothing (the fallback is not a sentence Mika wrote), and professional
+    #    mode already suppresses the impulse — letting the tag colour the frame
+    #    would put back through the window what emotion_policy=OFF throws out
+    #    the door.
+    suppresses_emotion = bool(
+        getattr(context, "project_suppresses_emotion", False)
+    )
+    declared = emotion_data if not ai_failed and not suppresses_emotion else None
+    if not ai_failed and not suppresses_emotion:
         try:
-            emotion_engine.process_emotion(emotion_data, person_id)
-            await emotion_engine._maybe_save_snapshot(person_id)
+            # No tag means *no impulse*. NEUTRAL is not "nothing", it is the
+            # origin of PAD space, so the default one pulled whatever the
+            # person had just provoked back toward zero: a turn she had no
+            # tag for was lived as a soothing.
+            if declared is not None:
+                emotion_engine.process_emotion(declared, person_id)
+            # Snapshot runs either way, so the drift between turns keeps being
+            # archived even when a turn declares nothing.
+            await emotion_engine.save_snapshot(person_id, declared=declared)
         except Exception:
             logger.exception(
                 "Emotion post-processing failed (person=%s) — the reply itself "
@@ -331,8 +367,8 @@ async def process_message(
             source=source,
             intent=perception.intent.name,
             text=response_text,
-            emotion_name=emotion_data.emotion.value,
-            emotion_intensity=emotion_data.intensity,
+            emotion_name=emotion_data.emotion.value if emotion_data else "",
+            emotion_intensity=emotion_data.intensity if emotion_data else 0.0,
             project_suppresses_emotion=bool(
                 getattr(context, "project_suppresses_emotion", False)
             ),
@@ -342,28 +378,66 @@ async def process_message(
             project_id=getattr(context, "project_id", None),
         )
 
-    # 6. Compute final blended emotion for the reply's display.
-    msg_emotion = emotion_engine.compute_message_emotion(person_id)
+    # 5c. Consume the dream, now that the turn actually happened.
+    #
+    #     Marking it during gather_context spent it before the AI call: a
+    #     timeout on the first message of the morning — exactly when a local
+    #     model is cold — burned last night's dream forever, while the
+    #     fallback never mentioned it. It was the only irreversible effect a
+    #     failed turn still produced. The widened window can now inject the
+    #     same dream into two overlapping turns (the conscience calls the
+    #     model outside the single-worker queue); a duplicate in one prompt
+    #     is cheap against losing the dream outright.
+    if not ai_failed:
+        pending_dream = getattr(context, "pending_dream_recall", None)
+        if pending_dream is not None:
+            try:
+                from memory import read
+
+                await read.mark_dream_recalled(pending_dream)
+            except Exception as exc:
+                degradations.record("turn: marquage du reve", exc)
+
+    # 6. What this turn's frame carries. The tag wins when there is one: it is
+    #    what she chose while writing, where the oscillator only says where
+    #    the relation stands — and it only absorbs a share of an impulse, so
+    #    reading it here reported a state closer to the one before the turn
+    #    than to what the reply declared.
+    try:
+        view = await emotion_engine.turn_emotion_view(person_id, declared)
+        emotion_name = view.emotion
+        emotion_intensity = view.intensity
+        emotion_state = view.state
+        emotion_blend = [
+            {"emotion": name, "weight": round(w, 2)} for name, w in view.blend
+        ]
+    except Exception as exc:
+        degradations.record("turn: vue emotionnelle", exc)
+        msg_emotion = emotion_engine.compute_message_emotion(person_id)
+        emotion_name = msg_emotion.emotion.value
+        emotion_intensity = msg_emotion.intensity
+        emotion_state = emotion_engine.get_state_dict(person_id)
+        emotion_blend = [
+            {"emotion": e.value, "weight": round(w, 2)}
+            for e, w in msg_emotion.blend
+        ]
 
     logger.info(
         "[%s/%s] %s -> %s (emotion=%s intensity=%.2f)",
         source, person_id,
         message[:60], response_text[:80],
-        msg_emotion.emotion.value, msg_emotion.intensity,
+        emotion_name, emotion_intensity,
     )
 
     output = SpeechOutput(
         text=response_text,
         emotion_data=emotion_data,
-        emotion_name=msg_emotion.emotion.value,
-        emotion_intensity=msg_emotion.intensity,
-        emotion_state=emotion_engine.get_state_dict(person_id),
+        emotion_name=emotion_name,
+        emotion_intensity=emotion_intensity,
+        emotion_state=emotion_state,
         tool_calls=tool_calls,
         request_id=request_id,
-        emotion_blend=[
-            {"emotion": e.value, "weight": round(w, 2)}
-            for e, w in msg_emotion.blend
-        ],
+        emotion_blend=emotion_blend,
         ai_failed=ai_failed,
         message_id=assistant_message_id,
         user_message_id=user_message_id,

@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import logging
 
+from utils.degradation import degradations
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
@@ -84,6 +86,43 @@ class GLMProvider:
 
         return (response.choices[0].message.content or "").strip()
 
+    async def complete_chat(
+        self,
+        prompt,
+        model: str,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ) -> str:
+        """Tour structuré : de vrais rôles au lieu d'un bloc aplati.
+
+        L'endpoint de Zhipu est compatible OpenAI jusque dans son cache de
+        préfixe : le préfixe stable (système + historique) reste identique
+        octet pour octet d'un tour à l'autre, et l'état du tour voyage dans
+        le dernier tour user, après ce préfixe réutilisable.
+        """
+        messages = [{"role": "system", "content": prompt.system_stable}]
+        messages.extend(prompt.chat_messages())
+
+        response = await self._client.chat.completions.create(
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            messages=messages,
+        )
+
+        try:
+            from ai.quota import set_usage
+            usage = getattr(response, "usage", None)
+            if usage is not None:
+                set_usage(
+                    input_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
+                    output_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
+                )
+        except Exception as exc:
+            degradations.record("ai.providers.glm.complete_chat usage", exc)
+
+        return (response.choices[0].message.content or "").strip()
+
     async def list_models(self) -> list[dict]:
         """List GLM models via the Zhipu OpenAI-compatible endpoint."""
         page = await self._client.models.list()
@@ -110,12 +149,43 @@ class GLMProvider:
         max_turns: int = 10,
     ) -> tuple[str, list[str]]:
         """Zhipu exposes OpenAI-compatible function-calling — reuse the loop."""
-        from ai.providers._openai_tools import run_openai_tool_loop
-        return await run_openai_tool_loop(
+        from ai.providers._openai_tools import run_openai_tool_loop_from_pair
+        return await run_openai_tool_loop_from_pair(
             client=self._client,
             provider_label="GLM",
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+            model=model,
+            tools=tools,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            max_turns=max_turns,
+        )
+
+    async def complete_chat_with_tools(
+        self,
+        prompt,
+        model: str,
+        tools: list,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        *,
+        max_turns: int = 10,
+    ) -> tuple[str, list[str]]:
+        """Tour outillé structuré — même boucle, amorcée sur de vrais tours.
+
+        Le cache de préfixe de Zhipu s'indexe comme celui d'OpenAI : ce qui
+        compte est que le système et l'historique ne bougent pas d'un
+        aller-retour d'outil à l'autre.
+        """
+        from ai.providers._openai_tools import (
+            messages_from_chat_prompt,
+            run_openai_tool_loop,
+        )
+        return await run_openai_tool_loop(
+            client=self._client,
+            provider_label="GLM",
+            messages=messages_from_chat_prompt(prompt),
             model=model,
             tools=tools,
             max_tokens=max_tokens,

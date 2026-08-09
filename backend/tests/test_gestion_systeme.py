@@ -852,6 +852,14 @@ def test_un_handle_hors_liste_est_ignore(client, releves):
 
 @pytest.mark.django_db
 def test_le_filtre_personne_restreint_les_deux_tableaux(client, releves):
+    """Le filtre personne porte sur les relevés *et* sur les résumés.
+
+    Les résumés sont créés en granularité ``daily`` : la page en montre une
+    seule à la fois (une ligne « semaine » entrelacée au milieu de ses propres
+    jours se lit comme un doublon) et sert la semaine par défaut, donc le test
+    doit demander la granularité qu'il vient d'écrire — sinon il vérifie le
+    filtre sur un tableau vide.
+    """
     from memory.models import EmotionalSummary
 
     EmotionalSummary.objects.create(
@@ -867,9 +875,10 @@ def test_le_filtre_personne_restreint_les_deux_tableaux(client, releves):
         trend="cooling", snapshot_count=2,
     )
 
-    reponse = _historique(client, personne="web_abc123")
+    reponse = _historique(client, personne="web_abc123", periode="daily")
 
     assert {r["person_id"] for r in reponse.context["snapshot_rows"]} == {"web_abc123"}
+    assert reponse.context["summary_rows"], "aucun résumé servi : le filtre ne serait pas testé"
     assert {r["person_id"] for r in reponse.context["summary_rows"]} == {"web_abc123"}
 
 
@@ -919,7 +928,11 @@ def test_un_handle_lie_renvoie_vers_sa_fiche_personne(client, releves, personne)
 @pytest.mark.django_db
 def test_un_resume_expose_sa_repartition_et_sa_tendance_en_francais(client, releves):
     """``emotion_distribution`` est le champ le plus riche du modèle et n'était
-    pas affiché ; ``trend`` sortait tel quel, en anglais."""
+    pas affiché ; ``trend`` sortait tel quel, en anglais.
+
+    La ligne est écrite en ``daily`` et lue en demandant cette granularité :
+    la page en sert une seule à la fois, la semaine par défaut.
+    """
     from memory.models import EmotionalSummary
 
     EmotionalSummary.objects.create(
@@ -930,7 +943,7 @@ def test_un_resume_expose_sa_repartition_et_sa_tendance_en_francais(client, rele
         trend="warming", snapshot_count=4,
     )
 
-    ligne = _historique(client).context["summary_rows"][0]
+    ligne = _historique(client, periode="daily").context["summary_rows"][0]
 
     assert ligne["trend_fr"] == "se réchauffe"
     assert ligne["trend_tone"] == "ok"
@@ -938,6 +951,43 @@ def test_un_resume_expose_sa_repartition_et_sa_tendance_en_francais(client, rele
     assert [d["emotion"] for d in ligne["distribution"]] == ["excited", "happy"], (
         "la répartition doit descendre triée par poids"
     )
+
+
+@pytest.mark.django_db
+def test_une_seule_granularite_de_resume_a_la_fois(client, releves):
+    """Jour et semaine se recouvrent : la page en sert une, la semaine d'abord.
+
+    Deux tests voisins créaient des résumés ``daily`` puis lisaient la page
+    par défaut, donc un tableau vide. La règle n'était écrite nulle part côté
+    tests ; elle l'est ici, avec la liste close qui la protège.
+    """
+    from memory.models import EmotionalSummary
+
+    EmotionalSummary.objects.create(
+        person_id="web_abc123", period_type="daily",
+        period_start="2026-07-28", dominant_emotion="excited",
+        dominant_intensity=0.6, emotion_distribution={"excited": 1.0},
+        trend="warming", snapshot_count=2,
+    )
+    EmotionalSummary.objects.create(
+        person_id="web_abc123", period_type="weekly",
+        period_start="2026-07-27", dominant_emotion="happy",
+        dominant_intensity=0.5, emotion_distribution={"happy": 1.0},
+        trend="stable", snapshot_count=9,
+    )
+
+    defaut = _historique(client)
+    assert defaut.context["period"] == "weekly"
+    assert [r["period_fr"] for r in defaut.context["summary_rows"]] == ["semaine"]
+
+    jour = _historique(client, periode="daily")
+    assert [r["period_fr"] for r in jour.context["summary_rows"]] == ["jour"]
+
+    # Liste close : une granularité inventée retombe sur le défaut, elle
+    # n'atteint jamais l'ORM.
+    invente = _historique(client, periode="monthly")
+    assert invente.context["period"] == "weekly"
+    assert [r["period_fr"] for r in invente.context["summary_rows"]] == ["semaine"]
 
 
 @pytest.mark.django_db

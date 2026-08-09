@@ -37,6 +37,18 @@ SUMMARY_TARGET_CHARS = 6000
 _MSG_WEIGHT_CAP = 4000
 _LLM_TIMEOUT_S = 45.0
 
+# Plancher de sanité du nouveau résumé. « Non vide » ne suffisait pas : un
+# refus d'une phrase du petit modèle REMPLACE des semaines de contexte
+# compressé, et comme le curseur avance dans la foulée, la matière repliée
+# n'est jamais re-résumée.
+MIN_SUMMARY_CHARS = 120       # en dessous, ce n'est pas un résumé
+MIN_PREVIOUS_RATIO = 0.35     # un nouveau résumé peut condenser, pas évaporer
+MIN_FOLD_RATIO = 0.02         # très permissif face à SURVIVAL_FACTOR
+
+
+class DegenerateSummary(RuntimeError):
+    """Le modèle a rendu autre chose qu'un résumé."""
+
 
 class ConversationCompactor:
     def __init__(self, interval_seconds: int | None = None):
@@ -93,7 +105,11 @@ class ConversationCompactor:
             # tard — ne jamais résumer ce qui n'a pas encore été extrait.
             return False
 
-        new_summary = await self._summarize(summary, fold)
+        try:
+            new_summary = await self._summarize(summary, fold)
+        except DegenerateSummary as exc:
+            degradations.record("compaction: resume degenere", exc)
+            return False
         if not new_summary:
             return False
 
@@ -110,6 +126,15 @@ class ConversationCompactor:
     @staticmethod
     def _weight(msg: dict) -> int:
         return min(len(msg.get("content") or ""), _MSG_WEIGHT_CAP)
+
+    @staticmethod
+    def _summary_floor(previous: str, folded_chars: int) -> int:
+        """Longueur en dessous de laquelle la sortie n'est pas un résumé."""
+        return max(
+            MIN_SUMMARY_CHARS,
+            int(MIN_PREVIOUS_RATIO * len(previous)),
+            int(MIN_FOLD_RATIO * folded_chars),
+        )
 
     def _select_fold_slice(
         self, buffer: list[dict], *, checkpoint: int, keep_last: int,
@@ -218,6 +243,13 @@ class ConversationCompactor:
         text = (raw or "").strip()
         if not text:
             return None
+        floor = self._summary_floor(
+            prev_summary, sum(self._weight(m) for m in fold),
+        )
+        if len(text) < floor:
+            raise DegenerateSummary(
+                f"{len(text)} caracteres pour un plancher de {floor}"
+            )
         if len(text) > SUMMARY_TARGET_CHARS:
             text = text[: SUMMARY_TARGET_CHARS - 1].rstrip() + "…"
         return text

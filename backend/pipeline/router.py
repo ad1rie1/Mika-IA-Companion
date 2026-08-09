@@ -28,8 +28,43 @@ from __future__ import annotations
 import logging
 
 from pipeline.perception import Intent, Modality, Perception
+from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
+
+
+def _note_live_interaction(person_id: str) -> None:
+    """Elle se reveille parce qu'on lui parle, pas parce qu'elle a repondu.
+
+    Le reveil etait l'effet de bord de `chat.message`, emis apres l'appel IA
+    et seulement s'il aboutissait : pendant tout le tour (jusqu'a 120 s) elle
+    restait officiellement inactive, la frame partait avec `sleep_phase` a
+    `deep_sleep`, et une nuit de timeouts la laissait endormie pendant qu'on
+    lui parlait.
+
+    `is_internal_person` et non `is_identifiable_person` : un socket `anon_*`
+    est bien quelqu'un qui parle, et le laisser dehors le priverait aussi de
+    la voix (la garde de sommeil de `decide_voice`).
+
+    Deux `try` separes : une conscience cassee ne doit pas empecher le reveil
+    du sommeil, et l'inverse.
+    """
+    from identity.trust import is_internal_person
+
+    if is_internal_person(person_id):
+        return
+    try:
+        from conscience.engine import conscience_engine
+
+        conscience_engine.note_activity(person_id)
+    except Exception as exc:
+        degradations.record("perception: reveil conscience", exc)
+    try:
+        from memory.sleep import sleep_cycle
+
+        sleep_cycle.note_interaction()
+    except Exception as exc:
+        degradations.record("perception: reveil sommeil", exc)
 
 
 async def perceive(perception: Perception):
@@ -43,6 +78,11 @@ async def perceive(perception: Perception):
         perception.modality.value, perception.intent.value,
         perception.source, perception.person_id, len(perception.parts),
     )
+
+    # 0. Avant tout le reste — avant l'enregistrement des medias et avant le
+    #    preprocessing, qui coute plusieurs secondes sur une legende de vision.
+    if perception.intent is Intent.REQUEST_RESPONSE:
+        _note_live_interaction(perception.person_id)
 
     # 1. Save any raw media + detach heavy payloads. Non-fatal — failures
     #    in media handling must not break the AI loop.

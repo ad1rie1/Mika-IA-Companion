@@ -146,9 +146,15 @@ class TestMessageEmotionAmbivalence:
         assert msg.is_ambivalent() is True
 
     def test_prompt_description_single_emotion(self):
+        """Le pin change (audit STYLE) : la prose du prompt est en français.
+
+        Le nom canonique anglais reste ce qui est stocké et diffusé ; il n'a
+        rien à faire dans une phrase que le modèle peut réciter telle quelle.
+        """
         msg = self._make_msg(((Emotion.HAPPY, 0.7),))
         desc = msg.to_prompt_description()
-        assert "happy" in desc
+        assert "contente" in desc
+        assert "happy" not in desc
         assert "mais aussi" not in desc
 
     def test_prompt_description_ambivalent(self):
@@ -157,9 +163,9 @@ class TestMessageEmotionAmbivalence:
             (Emotion.NOSTALGIC, 0.45),
         ))
         desc = msg.to_prompt_description()
-        assert "grateful" in desc
-        assert "nostalgic" in desc
-        assert "mais aussi" in desc or "nuance" in desc
+        assert "reconnaissante" in desc
+        assert "nostalgique" in desc
+        assert "nuance" in desc
 
 
 # ---------------------------------------------------------------------------

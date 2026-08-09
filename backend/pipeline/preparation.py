@@ -268,12 +268,21 @@ async def execute_plan(plan: PreparationPlan, person_id: str) -> PlanResults:
     """Exécute les intents du plan, borné par ``EXEC_BUDGET_S``.
 
     Les intents souvenirs/connaissances ne coûtent rien ici : leurs requêtes
-    rejoignent le rappel multi-requêtes du retriever. Les intents
-    ``echanges_passes`` interrogent l'étage épisodique (rappel inter-personnes
-    permis : c'est ce qui s'est dit dans la pièce, le planificateur est un
-    consommateur interne). Timeout → partiels conservés.
+    rejoignent le rappel multi-requêtes du retriever.
+
+    Les intents ``echanges_passes`` interrogent l'étage épisodique, sous la
+    MÊME politique « own identity only » que la voie chaude
+    (``retriever._episodic_lane``). Le planificateur est bien un consommateur
+    interne, mais sa SORTIE ne l'est pas : les chunks remontent mot pour mot
+    dans le bloc mémoire du tour de conversation. Un `person` fourni par le
+    petit modèle suffisait donc à faire lire à Bob le verbatim des DM de
+    Thomas. Seul un appelant interne (la conscience) garde l'accès croisé.
+
+    Timeout → partiels conservés.
     """
     from datetime import datetime
+
+    from identity.trust import is_internal_person
 
     results = PlanResults(memory_queries=plan.memory_queries)
     exchange_rappels = plan.exchange_rappels
@@ -282,6 +291,14 @@ async def execute_plan(plan: PreparationPlan, person_id: str) -> PlanResults:
 
     from memory.episodic import api as episodic_api
 
+    interne = is_internal_person(person_id)
+    if interne:
+        own_scope: list[str] = []
+    else:
+        from pipeline.context import own_handles
+
+        own_scope = await own_handles(person_id)
+
     def _parse_date(s: str):
         try:
             return datetime.fromisoformat(s) if s else None
@@ -289,12 +306,28 @@ async def execute_plan(plan: PreparationPlan, person_id: str) -> PlanResults:
             return None
 
     async def _one(rappel: Rappel):
+        kwargs = {
+            "n": 3,
+            "since": _parse_date(rappel.depuis),
+            "until": _parse_date(rappel.jusqua),
+        }
+        if interne:
+            return await episodic_api.search_exchanges(
+                rappel.query, person=rappel.person or None, **kwargs,
+            )
+        if rappel.person:
+            cible = await episodic_api.resolve_person_handles(rappel.person)
+            if not set(cible) & set(own_scope):
+                # La demande porte sur quelqu'un d'autre. On n'exécute pas :
+                # `person=None` retomberait sur tout l'index, ce qui est la
+                # même fuite sans même un nom à blâmer.
+                logger.debug(
+                    "Intent echanges hors perimetre ignore (cible=%s)",
+                    rappel.person,
+                )
+                return []
         return await episodic_api.search_exchanges(
-            rappel.query,
-            person=rappel.person or None,
-            n=3,
-            since=_parse_date(rappel.depuis),
-            until=_parse_date(rappel.jusqua),
+            rappel.query, handles=own_scope, **kwargs,
         )
 
     try:

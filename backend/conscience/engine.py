@@ -7,7 +7,7 @@ with full R/W access.
 Lifecycle (managed by ASGI lifespan):
   1. initialize()   — start decision loop
   2. observe(event)  — called by event bus for every module event
-  3. _decision_loop  — periodic evaluation (every 30s)
+  3. _decide()       — periodic evaluation (every 30s, PeriodicLoop)
   4. shutdown()      — stop everything
 """
 
@@ -30,6 +30,7 @@ from drives.engine import drive_engine
 from emotion.engine import emotion_engine
 from modules.types import ModuleEvent, ModuleNotification
 from utils.degradation import degradations
+from utils.periodic import PeriodicLoop
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,11 @@ class ConscienceEngine:
         self.memory = MemoryBridge()
 
         # State
-        self._decision_task: asyncio.Task | None = None
+        # Même primitive que les cinq autres boucles de fond : elle horodate
+        # le dernier tick réussi et compte ses échecs, ce qu'une boucle
+        # maison écrite ici ne faisait pas — une conscience muette depuis
+        # trois jours ressemblait exactement à une conscience sans rien à dire.
+        self._loop = PeriodicLoop("Conscience", self._decide, interval=30)
         self._decision_lock = asyncio.Lock()
         # Detached high-pertinence decision cycles, held so they aren't GC'd.
         self._fastpath_tasks: set[asyncio.Task] = set()
@@ -64,6 +69,7 @@ class ConscienceEngine:
         # coute qu'un passage supplementaire.
         self._last_cleanup: float = 0.0
         self._last_stale_sweep: float = 0.0
+        self._last_drive_save: float = 0.0
 
         # Config (loaded from settings on initialize)
         self._decision_interval: int = 30
@@ -91,6 +97,12 @@ class ConscienceEngine:
 
         # Restore cooldown from last "act" decision log (survives restarts)
         await self._restore_cooldown()
+
+        # Les pulsions se rechargent ici parce que la conscience est déjà leur
+        # horloge — c'est elle qui appelle `update()`, et rien d'autre ne tick
+        # le DriveEngine. Ajouter une boucle dédiée pour ça n'apprendrait rien
+        # à personne.
+        await drive_engine.restore_state()
 
         # Subscribe to the event bus rather than being installed into it by
         # ModuleManager.set_conscience(). The conscience is the thing that
@@ -127,7 +139,7 @@ class ConscienceEngine:
             mode=DeliveryMode.SPAWN,
         )
 
-        self._decision_task = asyncio.create_task(self._decision_loop())
+        await self._loop.start(interval=self._decision_interval)
         self._initialized = True
 
         logger.info(
@@ -171,12 +183,8 @@ class ConscienceEngine:
         event_bus.unsubscribe("conscience")
         event_bus.unsubscribe("conscience.audit")
 
-        if self._decision_task:
-            self._decision_task.cancel()
-            try:
-                await self._decision_task
-            except asyncio.CancelledError:
-                pass
+        await self._loop.stop()
+        await drive_engine.save_state()
 
         self._initialized = False
         logger.info("Conscience shut down")
@@ -207,7 +215,7 @@ class ConscienceEngine:
 
         # Track activity for idle detection
         if event.event_type in ("chat.message", "telegram.message"):
-            self._last_activity = time.time()
+            self.note_activity()
             # L'assouvissement de SOCIAL/CURIOSITY par un message n'est plus
             # décidé ici : c'est une politique des pulsions, déclarée dans
             # drives/apps.py sur `_turn.completed`, donc valable pour tout
@@ -295,20 +303,6 @@ class ConscienceEngine:
 
     # ── 2. DECISION LOOP ──────────────────────────────────────────
 
-    async def _decision_loop(self) -> None:
-        """Periodic evaluation: decide and act."""
-        while True:
-            try:
-                await asyncio.sleep(self._decision_interval)
-
-                # Run decision cycle
-                await self._decide()
-
-            except asyncio.CancelledError:
-                break
-            except Exception:
-                logger.exception("Conscience decision loop error")
-
     async def _decide(self) -> None:
         """Core decision: evaluate accumulated signals, maintain memory, maybe act.
 
@@ -394,6 +388,20 @@ class ConscienceEngine:
 
         # Periodic cleanup of old observations
         await self._cleanup_old_observations()
+
+        # Instantané des pulsions, étranglé. Sauver au seul `shutdown()` ne
+        # couvrirait pas un `kill -9`, qui est exactement le cas où la fatigue
+        # de la soirée disparaissait avec la nuit qu'elle devait déclencher.
+        await self._save_drives_if_due()
+
+    _DRIVE_SAVE_INTERVAL_S = 300
+
+    async def _save_drives_if_due(self) -> None:
+        now = time.time()
+        if self._last_drive_save and (now - self._last_drive_save) < self._DRIVE_SAVE_INTERVAL_S:
+            return
+        self._last_drive_save = now
+        await drive_engine.save_state()
 
     async def _introspect(self) -> tuple[int, int]:
         """Query recent ConscienceLogs for self-awareness.
@@ -506,6 +514,14 @@ class ConscienceEngine:
         # speaks less spontaneously (see scoring Factor 11).
         energy = drive_engine.energy_level()
 
+        # Import local : memory.sleep importe conscience.engine en différé.
+        sleep_phase = "awake"
+        try:
+            from memory.sleep import sleep_cycle
+            sleep_phase = sleep_cycle.phase
+        except Exception as exc:
+            degradations.record("conscience: phase de sommeil illisible", exc)
+
         return DecisionContext(
             pending_observations=pending,
             global_mood=glob.emotion.value,
@@ -524,6 +540,7 @@ class ConscienceEngine:
             rumination_pressure=rum_pressure,
             rumination_count=rum_count,
             energy=energy,
+            sleep_phase=sleep_phase,
         )
 
     async def _rumination_snapshot(self) -> tuple[float, int]:
@@ -1424,6 +1441,24 @@ class ConscienceEngine:
 
     def get_idle_seconds(self) -> float:
         return time.time() - self._last_activity
+
+    def note_activity(self, person_id: str | None = None) -> None:
+        """Quelqu'un vient de se manifester. Appelable sur le chemin chaud.
+
+        Le réveil ne peut pas être l'effet de bord d'une réponse réussie :
+        `_last_activity` n'était écrit qu'à l'émission de `chat.message`, donc
+        après l'appel IA et seulement s'il aboutissait — pendant tout le tour
+        elle restait officiellement inactive, et un tour en échec ne la
+        réveillait jamais.
+
+        `is_internal_person` et non `is_identifiable_person` : un socket
+        `anon_*` est bien quelqu'un qui parle.
+        """
+        from identity.trust import is_internal_person
+
+        if person_id is not None and is_internal_person(person_id):
+            return
+        self._last_activity = time.time()
 
     # ── Post-action self-audit ────────────────────────────────────
 

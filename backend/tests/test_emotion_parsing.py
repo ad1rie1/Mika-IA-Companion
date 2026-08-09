@@ -42,20 +42,39 @@ class TestExtractEmotion:
             assert data.emotion == emotion, f"Failed to parse {emotion.value}"
             assert data.intensity == 0.5
 
-    def test_unknown_emotion_defaults_to_neutral(self):
-        """Unknown emotion names should fall back to neutral."""
+    def test_un_nom_inconnu_ne_produit_aucune_emotion(self):
+        """Le pin change (audit S1) : un nom hors des 29 ne vaut plus NEUTRAL.
+
+        Un NEUTRAL est une cible réelle en espace PAD — l'origine — donc le
+        raté de parsing s'appliquait comme une impulsion vers le calme, en
+        proportion de l'intensité annoncée. La balise est retirée du texte
+        quand même : elle ne doit jamais s'afficher.
+        """
+        from utils.degradation import degradations
+
         text = "hmm [EMOTION:spaghetti:0.9]"
         clean, data = extract_emotion(text)
 
-        assert data.emotion == Emotion.NEUTRAL
-        assert data.intensity == 0.9
+        assert data is None
+        assert clean == "hmm"
+        compte = {
+            d["label"]: d["count"] for d in degradations.snapshot()
+        }
+        assert compte.get("emotion: tag inconnu", 0) >= 1
 
     def test_no_emotion_tag(self):
-        """Text without an emotion tag should return default."""
+        """Text without an emotion tag declares nothing (audit S1)."""
         text = "Salut comment tu vas ?"
         clean, data = extract_emotion(text)
 
         assert clean == "Salut comment tu vas ?"
+        assert data is None
+
+    def test_un_tag_neutral_explicite_reste_une_emotion(self):
+        """« Rien n'a été déclaré » et « elle a déclaré neutre » sont deux faits."""
+        clean, data = extract_emotion("bof [EMOTION:neutral:0.5]")
+
+        assert data is not None
         assert data.emotion == Emotion.NEUTRAL
         assert data.intensity == 0.5
 
@@ -113,12 +132,11 @@ class TestExtractEmotion:
         assert data.intensity == 0.8
 
     def test_empty_string(self):
-        """Empty string should return default."""
+        """Empty string declares nothing."""
         clean, data = extract_emotion("")
 
         assert clean == ""
-        assert data.emotion == Emotion.NEUTRAL
-        assert data.intensity == 0.5
+        assert data is None
 
 
 class TestEmotionData:

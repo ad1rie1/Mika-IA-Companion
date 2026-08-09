@@ -21,20 +21,20 @@ from tests.conftest import simulate_time_decay
 class TestImpulse:
 
     def test_first_impulse_moves_state_toward_anchor(self, engine):
-        """A single impulse should push velocity toward the target anchor."""
+        """A single impulse moves the POSITION toward the target anchor.
+
+        Le pin change (audit B2) : l'impulsion posait une vitesse, donc la
+        position — la seule grandeur que lisent le prompt, le relevé et les
+        gestes — ne bougeait pas au moment du tour.
+        """
         pid = "u1"
         engine.process_emotion(EmotionData(Emotion.EXCITED, 0.8), pid)
         mood = engine._get_person_mood(pid)
 
         anchor = pad.EMOTION_ANCHORS[Emotion.EXCITED]
-        # Velocity is set immediately; position needs integration to follow
-        assert pad.norm(mood.dynamic.velocity) > 0.05
-        assert pad.dot(mood.dynamic.velocity, anchor) > 0, \
-            "Velocity should point toward the target anchor"
-
-        # After time passes, position follows
-        simulate_time_decay(engine, 1.0)
         assert pad.norm(mood.dynamic.position) > 0.05
+        assert pad.dot(mood.dynamic.position, anchor) > 0, \
+            "Position should point toward the target anchor"
 
     def test_repeated_same_impulse_accumulates(self, engine):
         """Repeated identical impulses + integration should build position magnitude."""
@@ -52,29 +52,26 @@ class TestImpulse:
             f"5 impulses should accumulate beyond 1: {mag1:.2f} -> {mag5:.2f}"
 
     def test_opposite_impulse_cancels(self, engine):
-        """An opposite-direction impulse should reduce position magnitude."""
+        """An opposite-direction impulse should pull the position back."""
         pid = "u3"
         for _ in range(3):
             engine.process_emotion(EmotionData(Emotion.HAPPY, 0.9), pid)
 
-        mag_before = pad.norm(engine._get_person_mood(pid).dynamic.position)
-        engine.process_emotion(EmotionData(Emotion.SAD, 0.9), pid)
-        # After an opposite impulse, the state should have started moving away
-        # from HAPPY territory — velocity dotted with happy anchor < 0.
         mood = engine._get_person_mood(pid)
         happy_anchor = pad.EMOTION_ANCHORS[Emotion.HAPPY]
-        assert pad.dot(mood.dynamic.velocity, happy_anchor) < pad.dot(
-            pad.scale(mood.dynamic.velocity, 0), happy_anchor
-        ) + 1e-9 or pad.norm(mood.dynamic.velocity) > 0.0
+        before = pad.dot(mood.dynamic.position, happy_anchor)
+
+        engine.process_emotion(EmotionData(Emotion.SAD, 0.9), pid)
+        assert pad.dot(mood.dynamic.position, happy_anchor) < before
 
     def test_intensity_scales_target(self, engine):
-        """Higher intensity should produce a larger kick."""
+        """Higher intensity should move the position further."""
         engine.process_emotion(EmotionData(Emotion.EXCITED, 0.2), "low")
         engine.process_emotion(EmotionData(Emotion.EXCITED, 1.0), "high")
 
-        low_speed = pad.norm(engine._get_person_mood("low").dynamic.velocity)
-        high_speed = pad.norm(engine._get_person_mood("high").dynamic.velocity)
-        assert high_speed > low_speed
+        low = pad.norm(engine._get_person_mood("low").dynamic.position)
+        high = pad.norm(engine._get_person_mood("high").dynamic.position)
+        assert high > low
 
 
 # ===================================================================
@@ -84,10 +81,15 @@ class TestImpulse:
 class TestDecay:
 
     def test_state_decays_toward_home(self, engine):
-        """After enough time, position should converge near home (default mood)."""
+        """After enough time, position should converge near home (default mood).
+
+        3 τ, pas 300 s : le retour au repos se compte désormais en minutes
+        (audit B2). Une seule passe suffit — ``_MAX_ADVANCE_SECONDS`` plafonne
+        à une heure de rattrapage, pas à 30 s.
+        """
         pid = "decay"
         engine.process_emotion(EmotionData(Emotion.ANGRY, 0.9), pid)
-        simulate_time_decay(engine, 300.0)
+        simulate_time_decay(engine, 2100.0)
 
         mood = engine._get_person_mood(pid)
         # Should no longer be in angry territory
@@ -115,15 +117,14 @@ class TestDecay:
 class TestGlobalCoupling:
 
     def test_person_impulse_affects_global(self, engine):
-        """A strong person impulse should produce a global kick."""
-        gmag_before = pad.norm(engine.global_mood.dynamic.position)
+        """A strong person impulse should move the global position."""
+        before = pad.norm(engine.global_mood.dynamic.position)
         engine.process_emotion(EmotionData(Emotion.EXCITED, 0.9), "u")
-        # Global velocity should be non-zero after the impulse
-        assert pad.norm(engine.global_mood.dynamic.velocity) > 0.0
+        assert pad.norm(engine.global_mood.dynamic.position) > before
 
     def test_low_intensity_produces_small_global_kick(self, engine):
         engine.process_emotion(EmotionData(Emotion.HAPPY, 0.1), "u")
-        assert pad.norm(engine.global_mood.dynamic.velocity) < 0.3
+        assert pad.norm(engine.global_mood.dynamic.position) < 0.3
 
     def test_high_bleed_temperament(self, explosive_engine):
         """High global_bleed should push the global mood harder."""
@@ -194,7 +195,7 @@ class TestTemperamentVariants:
     def test_stoic_moves_less(self, stoic_engine):
         """Stoic (low volatility) should produce less motion for same impulse."""
         stoic_engine.process_emotion(EmotionData(Emotion.EXCITED, 0.8), "s")
-        stoic_speed = pad.norm(stoic_engine._get_person_mood("s").dynamic.velocity)
+        stoic_move = pad.norm(stoic_engine._get_person_mood("s").dynamic.position)
 
         # Reference: default engine
         ref = EmotionEngine()
@@ -203,16 +204,16 @@ class TestTemperamentVariants:
         ref._recompute_params()
         ref._initialized = True
         ref.process_emotion(EmotionData(Emotion.EXCITED, 0.8), "r")
-        ref_speed = pad.norm(ref._get_person_mood("r").dynamic.velocity)
+        ref_move = pad.norm(ref._get_person_mood("r").dynamic.position)
 
-        assert stoic_speed < ref_speed, \
-            f"Stoic should produce slower motion: stoic={stoic_speed:.3f} vs ref={ref_speed:.3f}"
+        assert stoic_move < ref_move, \
+            f"Stoic should move less: stoic={stoic_move:.3f} vs ref={ref_move:.3f}"
 
     def test_explosive_moves_more(self, explosive_engine):
-        """Explosive (high volatility + gain) should move faster."""
+        """Explosive (high volatility + gain) should move further."""
         explosive_engine.process_emotion(EmotionData(Emotion.HAPPY, 0.6), "e")
-        exp_speed = pad.norm(explosive_engine._get_person_mood("e").dynamic.velocity)
-        assert exp_speed > 0.3
+        exp_move = pad.norm(explosive_engine._get_person_mood("e").dynamic.position)
+        assert exp_move > 0.3
 
     def test_melancholic_returns_to_melancholic(self, melancholic_engine):
         """Melancholic temperament should decay back to the melancholic anchor.
@@ -229,7 +230,9 @@ class TestTemperamentVariants:
         pid = "m"
         with patch.object(circadian, "phase_bias", return_value=(0.0, 0.0, 0.0)):
             melancholic_engine.process_emotion(EmotionData(Emotion.HAPPY, 0.6), pid)
-            simulate_time_decay(melancholic_engine, 300.0)
+            # 3 τ pour ce tempérament (audit B2) ; le rattrapage d'une passe
+            # est plafonné à ``_MAX_ADVANCE_SECONDS``, soit une heure.
+            simulate_time_decay(melancholic_engine, 3600.0)
 
             mood = melancholic_engine._get_person_mood(pid)
             mel_anchor = pad.EMOTION_ANCHORS[Emotion.MELANCHOLIC]
@@ -275,3 +278,63 @@ class TestEdgeCases:
             engine.process_emotion(EmotionData(Emotion.HAPPY, 0.5), pid)
         mood = engine._get_person_mood(pid)
         assert len(mood.history) == 100
+
+
+# ===================================================================
+# SHUTDOWN — the state we stop the process to keep
+# ===================================================================
+
+class TestArret:
+    """``_save_state`` awaits once per person; the decay loop evicts persons.
+
+    Sauver pendant qu'elle tourne, c'est itérer un dict qu'un autre écrit —
+    ``RuntimeError`` avalée par le ``except`` de la sauvegarde, et les relevés
+    des personnes restantes perdus en silence (audit M9).
+    """
+
+    async def test_l_arret_coupe_le_decay_avant_de_sauver(self, engine):
+        import asyncio
+
+        vu: dict[str, bool] = {}
+
+        async def _save():
+            vu["arretee"] = (
+                engine._decay_task.done() or engine._decay_task.cancelled()
+            )
+
+        engine._decay_task = asyncio.create_task(engine._decay_loop())
+        engine._save_state = _save
+        await engine.shutdown()
+
+        assert vu["arretee"], \
+            "la boucle de decay doit être arrêtée avant la sauvegarde"
+
+    async def test_une_eviction_pendant_la_sauvegarde_ne_perd_personne(
+        self, engine, monkeypatch
+    ):
+        for i in range(4):
+            engine.process_emotion(EmotionData(Emotion.HAPPY, 0.5), f"p{i}")
+
+        ecrits: list[str] = []
+
+        async def _create(**kwargs):
+            if len(ecrits) == 1:
+                # Ce que fait ``_evict_persons`` pendant un await.
+                engine.person_moods.pop("p3", None)
+            ecrits.append(kwargs["person_id"])
+
+        class _FauxManager:
+            conversation = object()
+
+        import memory.manager as manager_module
+        from asgiref import sync as asgiref_sync
+
+        monkeypatch.setattr(manager_module, "memory_manager", _FauxManager())
+        monkeypatch.setattr(
+            asgiref_sync, "sync_to_async", lambda fn, **kw: _create,
+        )
+
+        await engine._save_state()
+
+        assert {"p0", "p1", "p2"} <= set(ecrits), \
+            f"toutes les personnes présentes doivent avoir un relevé : {ecrits}"

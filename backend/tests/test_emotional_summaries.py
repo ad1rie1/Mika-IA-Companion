@@ -321,7 +321,10 @@ class TestSourceDuCumul:
 
         await _consolidator()._aggregate_emotion_snapshots()
 
-        aujourdhui = timezone.now().date()
+        # Le pin change : le test datait comme le code qu'il vérifiait, donc
+        # il ne pouvait pas voir que les deux dataient en UTC alors que le
+        # lookup ``__date`` range en heure locale.
+        aujourdhui = date.today()
         lundi = aujourdhui - timedelta(days=aujourdhui.weekday())
         lignes = await sync_to_async(
             lambda: {

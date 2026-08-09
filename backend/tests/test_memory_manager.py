@@ -16,6 +16,7 @@ def _make_manager(max_limit=10, initialized=False):
     m.extractor = None
     m.consolidator = None
     m.retriever = None
+    m.recall_unavailable = False
     return m
 
 
@@ -84,6 +85,66 @@ class TestGetMemoryContext:
         mock_r.retrieve = AsyncMock(side_effect=Exception("DB error"))
         m.retriever = mock_r
         assert await m.get_memory_context("test") == ""
+
+
+# ===================================================================
+# Une mémoire longue en panne rend un bloc vide, indistinguable de « rien à
+# dire » : la panne était donc invisible, indéfiniment, avec la page santé au
+# vert. On compte, et on expose un drapeau lisible par la couche prompt — sans
+# changer le flux : un rappel raté ne coûte toujours sa réponse à personne.
+# ===================================================================
+
+class TestRappelIndisponible:
+
+    @pytest.fixture(autouse=True)
+    def _ledger(self):
+        from utils.degradation import degradations
+        degradations.reset()
+        yield
+        degradations.reset()
+
+    @pytest.mark.asyncio
+    async def test_simple_recall_failure_is_counted_and_flagged(self):
+        from utils.degradation import degradations
+        m = _make_manager()
+        m.retriever = MagicMock()
+        m.retriever.retrieve = AsyncMock(side_effect=Exception("chroma down"))
+
+        assert await m.get_memory_context("test") == ""
+        assert degradations.count_for("rappel memoire simple") == 1
+        assert m.recall_unavailable is True
+
+    @pytest.mark.asyncio
+    async def test_multi_recall_failure_is_counted_and_flagged(self):
+        from utils.degradation import degradations
+        m = _make_manager()
+        m.retriever = MagicMock()
+        m.retriever.retrieve_multi = AsyncMock(side_effect=Exception("chroma down"))
+
+        assert await m.get_memory_context_multi(["test"]) == ""
+        assert degradations.count_for("rappel memoire multi") == 1
+        assert m.recall_unavailable is True
+
+    @pytest.mark.asyncio
+    async def test_a_successful_recall_clears_the_flag(self):
+        """Sinon le drapeau est un cliquet et la ligne de prompt reste à vie."""
+        m = _make_manager()
+        m.retriever = MagicMock()
+        m.retriever.retrieve = AsyncMock(side_effect=Exception("chroma down"))
+        await m.get_memory_context("test")
+        assert m.recall_unavailable is True
+
+        m.retriever.retrieve = AsyncMock(return_value="Souvenir: chats")
+        assert await m.get_memory_context("test") == "Souvenir: chats"
+        assert m.recall_unavailable is False
+
+    @pytest.mark.asyncio
+    async def test_no_retriever_is_an_absence_not_a_failure(self):
+        from utils.degradation import degradations
+        m = _make_manager()
+        assert await m.get_memory_context("test") == ""
+        assert m.recall_unavailable is True
+        assert degradations.total() == 0
 
 
 # ===================================================================

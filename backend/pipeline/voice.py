@@ -164,8 +164,14 @@ def decide_voice(
     if sink == VoiceSink.SCREEN:
         if not person_present:
             return VoiceDecision(False, "no_client_connected")
-        # Sleeping Mika still murmurs through the app the person is watching
-        # — the avatar's own animation carries the sleep state.
+        # Une pensée murmurée la nuit est cohérente — c'est ce qui rend la
+        # nuit habitée plutôt que muette. Une phrase adressée à quelqu'un en
+        # plein deep_sleep ne l'est pas : l'avatar a les yeux fermés et la
+        # scène est tamisée pendant que le TTS parle. Un vrai message la
+        # réveille avant d'arriver ici (router._note_live_interaction), donc
+        # une vraie question ne tombe jamais dans cette garde.
+        if sleep_phase != "awake" and not inner:
+            return VoiceDecision(False, f"asleep({sleep_phase})")
         return VoiceDecision(True, "inner_screen_ok" if inner else "screen_ok")
 
     return VoiceDecision(False, f"unknown_sink({sink})")

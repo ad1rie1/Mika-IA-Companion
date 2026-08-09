@@ -110,6 +110,52 @@ class TestResilience:
         assert len(calls) == seen
 
 
+class TestObservabilite:
+    """« Démarrée » et « à jour » ne sont pas le même fait : un
+    `database is locked` persistant laisse la boucle running, sans extraction
+    ni décroissance ni rétention pendant trois jours."""
+
+    async def test_un_tick_reussi_horodate_le_dernier_succes(self):
+        loop = PeriodicLoop("test", lambda: _record([]), interval=0.01)
+        assert loop.last_success_at is None
+        await loop.start()
+        await asyncio.sleep(0.05)
+        await _drain(loop)
+        assert loop.last_success_at is not None
+
+    async def test_un_tick_en_echec_laisse_last_success_at_intact(self):
+        async def flaky():
+            raise RuntimeError("boom")
+
+        loop = PeriodicLoop("test", flaky, interval=0.01)
+        await loop.start()
+        await asyncio.sleep(0.05)
+        await _drain(loop)
+        assert loop.last_success_at is None
+        assert "RuntimeError: boom" in loop.last_error
+
+    async def test_un_tick_en_echec_est_compte_au_registre(self):
+        from utils.degradation import degradations
+
+        degradations.reset()
+
+        async def flaky():
+            raise RuntimeError("boom")
+
+        loop = PeriodicLoop("compteur", flaky, interval=0.01)
+        await loop.start()
+        await asyncio.sleep(0.05)
+        await _drain(loop)
+        assert degradations.count_for("boucle compteur") >= 1
+
+    async def test_la_boucle_est_enregistree_et_retrouvable(self):
+        from utils.periodic import active_loops
+
+        loop = PeriodicLoop("inventaire", lambda: _record([]), interval=60)
+        assert any(b.name == "inventaire" for b in active_loops())
+        assert loop.is_running is False
+
+
 class TestWiring:
     """The three subsystems expose the same lifecycle through the primitive."""
 
@@ -133,6 +179,15 @@ class TestWiring:
 
         assert isinstance(project_runner._loop, PeriodicLoop)
         assert project_runner._loop.name == "Project runner"
+
+    def test_conscience_uses_the_shared_loop(self):
+        """Sa boucle de décision était une copie maison : même forme, mêmes
+        vingt lignes, mais ni horodatage du dernier succès ni comptage des
+        échecs — donc absente de la page santé."""
+        from conscience.engine import conscience_engine
+
+        assert isinstance(conscience_engine._loop, PeriodicLoop)
+        assert conscience_engine._loop.name == "Conscience"
 
 
 async def _record(sink: list) -> None:

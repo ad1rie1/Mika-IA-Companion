@@ -39,7 +39,9 @@
       "Bash(npm run *)",
       "Bash(npm install *)",
       "Skill(claude-api)",
-      "Skill(claude-api:*)"
+      "Skill(claude-api:*)",
+      "Bash(python3 -c \"import sys; print\\(sys.version\\)\")",
+      "Bash(timeout 300 python3 -m pytest backend/tests/ --collect-only -q)"
     ]
   }
 }

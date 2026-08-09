@@ -184,4 +184,12 @@ CONFIG_SCHEMA = [
         hint="Cadence de la boucle dédiée qui appelle sleep_cycle.run_if_due() "
              "(journal/rêves/digestion). Découplée du consolidator.",
     ),
+    ConfigItem(
+        key="memory.sleep_llm_timeout", type="int", section="memory", group="Consolidation",
+        label="Budget d'un appel LLM nocturne (s)",
+        default=120, min=30, max=600, hot_reload=True,
+        hint="Journal et rêves. 45 s passaient sous les 76-219 s mesurés sur "
+             "un modèle local : la vie nocturne s'éteignait à l'installation, "
+             "sans signal. Aligné sur ai.call_timeout_seconds.",
+    ),
 ]

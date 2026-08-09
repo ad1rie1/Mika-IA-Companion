@@ -7,6 +7,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from enum import Enum
+from math import log1p
 
 
 class DriveKind(str, Enum):
@@ -30,6 +31,24 @@ class DriveParams:
     decay_on_satisfy: float = 0.5      # fraction of tension removed when assouvi
     weight: float = 0.25               # contribution to conscience score at tension=1.0
     satisfy_threshold: float = 0.4     # below this, drive doesn't contribute
+    # Croissance en temps logarithmique, opt-in : `growth_horizon = 0` garde
+    # la croissance linéaire d'origine.
+    growth_tau: float = 0.0            # secondes ; échelle du début de courbe
+    growth_horizon: float = 0.0        # secondes pour atteindre 1.0
+
+
+def log_growth(elapsed: float, tau: float, horizon: float) -> float:
+    """Tension bâtie par le seul écoulement du temps, dans [0, 1].
+
+    Une échelle linéaire ne peut pas décrire une absence : à 0.0010/s SOCIAL
+    saturait en 16 min 40, donc une heure, un jour et trois semaines rendaient
+    la même phrase de prompt et le même facteur de scoring. En log-temps, la
+    première demi-heure compte encore et l'écart entre une heure et trois
+    semaines reste lisible.
+    """
+    if elapsed <= 0 or tau <= 0 or horizon <= 0:
+        return 0.0
+    return min(1.0, log1p(elapsed / tau) / log1p(horizon / tau))
 
 
 # Default per-kind parameters. Calibrated so that a drive devient notable
@@ -48,11 +67,19 @@ DEFAULT_PARAMS: dict[DriveKind, DriveParams] = {
         weight=0.30,
         satisfy_threshold=0.35,
     ),
+    # SOCIAL est la seule pulsion qui parle d'*absence*, donc la seule dont
+    # l'échelle de temps doit dépasser le quart d'heure : le linéaire la
+    # saturait en 16 min 40, après quoi une heure et trois semaines rendaient
+    # la même ligne de prompt. Courbe obtenue : 1 h 0.28, 1 j 0.63, 1 sem
+    # 0.84, 3 sem 0.96. Le seuil descend à 0.25 pour qu'elle redevienne
+    # visible après ~45 min et non après ~3 h.
     DriveKind.SOCIAL: DriveParams(
-        growth_rate=0.0010,
+        growth_rate=0.0,
         decay_on_satisfy=0.7,
         weight=0.35,
-        satisfy_threshold=0.40,
+        satisfy_threshold=0.25,
+        growth_tau=300.0,
+        growth_horizon=30 * 86400.0,
     ),
     DriveKind.EXPRESSION: DriveParams(
         growth_rate=0.0007,

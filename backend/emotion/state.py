@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -5,6 +7,56 @@ from dataclasses import dataclass, field
 from emotion import pad
 from emotion.dynamics import OscillatorState
 from emotion.types import Emotion
+
+
+# Libellés d'affichage pour la prose du prompt. Recopiés de
+# ``GestionSysteme/formatting.py::EMOTION_FR`` plutôt qu'importés : l'app
+# d'administration dépend du domaine, l'importer ici inverserait le sens (ce
+# module est chargé par ``emotion.engine``, lui-même par ``conscience``,
+# ``pipeline`` et ``projects``). Même arbitrage que la copie déjà assumée dans
+# ``emotion/config_schema.py`` ; un test vérifie que les deux tables restent
+# alignées.
+#
+# Un seul écart volontaire : ``bored`` s'affiche « s'ennuie », un verbe, qui
+# n'entre pas dans « tu te sens … ».
+EMOTION_PROMPT_FR: dict[str, str] = {
+    "neutral": "neutre",
+    "happy": "contente",
+    "excited": "excitée",
+    "love": "amoureuse",
+    "proud": "fière",
+    "grateful": "reconnaissante",
+    "playful": "joueuse",
+    "amused": "amusée",
+    "hopeful": "pleine d'espoir",
+    "relieved": "soulagée",
+    "sad": "triste",
+    "angry": "en colère",
+    "scared": "effrayée",
+    "disgusted": "dégoûtée",
+    "frustrated": "frustrée",
+    "lonely": "seule",
+    "anxious": "anxieuse",
+    "bored": "lasse",
+    "jealous": "jalouse",
+    "surprised": "surprise",
+    "thinking": "pensive",
+    "confused": "confuse",
+    "embarrassed": "gênée",
+    "nostalgic": "nostalgique",
+    "dreamy": "rêveuse",
+    "determined": "déterminée",
+    "mischievous": "malicieuse",
+    "curious": "curieuse",
+    "melancholic": "mélancolique",
+}
+
+#: Au-delà, l'humeur ne se lit plus « dans la pente naturelle ».
+MARKED_INTENSITY = 0.6
+
+
+def _fr(emotion: Emotion) -> str:
+    return EMOTION_PROMPT_FR.get(emotion.value, emotion.value)
 
 
 def _format_blend_phrase(blend: list[tuple[Emotion, float]]) -> str:
@@ -19,7 +71,7 @@ def _format_blend_phrase(blend: list[tuple[Emotion, float]]) -> str:
     if s_w < 0.4 * p_w:
         return ""
     return (
-        f" Mais il y a aussi une nuance de {secondary.value} ({s_w:.1f}) "
+        f" Mais il y a aussi une nuance de {_fr(secondary)} "
         "en sous-texte — ton humeur n'est pas mono-couleur."
     )
 
@@ -113,6 +165,11 @@ class PersonMood:
     history: deque[EmotionHistoryEntry] = field(
         default_factory=lambda: deque(maxlen=100)
     )
+    #: Point de repos propre à cette personne : une moyenne lissée de ce
+    #: qu'elle a déjà provoqué, jamais une lecture instantanée. ``None`` tant
+    #: qu'elle n'a rien provoqué — l'oscillateur revient alors au repos
+    #: circadien commun, comme pour un inconnu.
+    anchor: pad.Vec3 | None = None
 
     @property
     def emotion(self) -> Emotion:
@@ -138,8 +195,7 @@ class PersonMood:
 
         intensity_word = _intensity_label(intensity)
         base = (
-            f"Envers cette personne, tu te sens {intensity_word} "
-            f"{label.value} (intensite: {intensity:.1f})."
+            f"Envers cette personne, tu te sens {intensity_word} {_fr(label)}."
         )
         blend = pad.pad_to_blend(self.dynamic.position, top_k=2)
         return base + _format_blend_phrase(blend)
@@ -170,14 +226,27 @@ class GlobalMood:
 
     def to_prompt_description(self, default_mood: Emotion) -> str:
         label, intensity = pad.pad_to_label(self.dynamic.position)
-        if intensity < 0.1 or label == default_mood:
-            base = f"Ton humeur generale est {default_mood.value}, comme d'habitude."
-        else:
-            intensity_word = _intensity_label(intensity)
+        # Brancher sur le seul libellé disait « comme d'habitude » aussi bien
+        # d'un tempérament à peine teinté que d'une euphorie pleine : avec le
+        # défaut ``happy``, toute l'amplitude dans la direction du personnage
+        # était muette dans le prompt pendant que le visage la montrait.
+        if intensity < 0.1:
+            base = f"Ton humeur générale est {_fr(default_mood)}, comme d'habitude."
+        elif label != default_mood:
             base = (
-                f"Ton humeur generale en ce moment est {intensity_word} "
-                f"{label.value} (intensite: {intensity:.1f}), "
-                f"alors que normalement tu es plutot {default_mood.value}."
+                f"Ton humeur générale en ce moment est "
+                f"{_intensity_label(intensity)} {_fr(label)}, "
+                f"alors que normalement tu es plutôt {_fr(default_mood)}."
+            )
+        elif intensity >= MARKED_INTENSITY:
+            base = (
+                f"Ton humeur générale est {_fr(label)}, nettement plus "
+                "que d'habitude."
+            )
+        else:
+            base = (
+                f"Ton humeur générale est {_intensity_label(intensity)} "
+                f"{_fr(label)}, dans ta pente naturelle."
             )
         blend = pad.pad_to_blend(self.dynamic.position, top_k=2)
         return base + _format_blend_phrase(blend)
@@ -219,15 +288,15 @@ class MessageEmotion:
     def to_prompt_description(self) -> str:
         """Natural-language description that expresses ambivalence if any."""
         if not self.blend:
-            return f"{self.emotion.value} (intensite {self.intensity:.1f})"
+            return f"{_intensity_label(self.intensity)} {_fr(self.emotion)}"
         if not self.is_ambivalent():
             primary, weight = self.blend[0]
-            return f"{primary.value} (intensite {weight:.1f})"
-        primary, p_w = self.blend[0]
-        secondary, s_w = self.blend[1]
+            return f"{_intensity_label(weight)} {_fr(primary)}"
+        primary, _ = self.blend[0]
+        secondary, _ = self.blend[1]
         return (
-            f"principalement {primary.value} ({p_w:.1f}), "
-            f"mais aussi une nuance de {secondary.value} ({s_w:.1f})"
+            f"principalement {_fr(primary)}, "
+            f"avec une nuance de {_fr(secondary)}"
         )
 
 

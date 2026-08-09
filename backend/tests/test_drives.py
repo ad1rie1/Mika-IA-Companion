@@ -16,6 +16,8 @@ Tests:
 from __future__ import annotations
 
 import time
+from datetime import timedelta
+
 import pytest
 
 from drives.engine import DriveEngine
@@ -32,10 +34,16 @@ from drives.state import (
 # ---------------------------------------------------------------------------
 
 def _backdate(engine: DriveEngine, seconds: float) -> None:
-    """Pretend `seconds` have passed by rewinding every drive's last_update."""
+    """Pretend `seconds` have passed by rewinding every drive's clocks.
+
+    `last_satisfied` recule aussi : SOCIAL croît désormais en temps
+    logarithmique depuis le dernier assouvissement, pas par accumulation
+    d'incréments depuis `last_update`.
+    """
     past = time.time() - seconds
     for state in engine.states.values():
         state.last_update = past
+        state.last_satisfied = past
 
 
 @pytest.fixture
@@ -61,13 +69,19 @@ class TestTensionGrowth:
         tension = engine.states[DriveKind.CURIOSITY].tension
         assert 0.20 < tension < 0.30
 
-    def test_social_grows_faster_than_curiosity(self, engine):
-        _backdate(engine, 100.0)
+    def test_social_ne_sature_plus_avec_curiosity(self, engine):
+        """Le pin change avec P7.
+
+        Il disait « SOCIAL monte plus vite que CURIOSITY », ce qui n'était vrai
+        que pendant les 17 min avant que les deux ne saturent ensemble. C'est
+        exactement le défaut : passé ce quart d'heure, une heure et trois
+        semaines rendaient la même ligne de prompt. SOCIAL est maintenant la
+        seule pulsion qui a encore quelque chose à dire au bout d'une heure.
+        """
+        _backdate(engine, 3600.0)
         engine.update()
-        assert (
-            engine.states[DriveKind.SOCIAL].tension
-            > engine.states[DriveKind.CURIOSITY].tension
-        )
+        assert engine.states[DriveKind.CURIOSITY].tension == pytest.approx(1.0)
+        assert engine.states[DriveKind.SOCIAL].tension < 0.5
 
     def test_tension_clamps_at_one(self, engine):
         _backdate(engine, 10_000.0)  # way beyond saturation
@@ -98,7 +112,9 @@ class TestTensionGrowth:
 class TestSatisfaction:
 
     def test_satisfy_reduces_tension(self, engine):
-        _backdate(engine, 600.0)
+        # 6 h et non 10 min : en temps logarithmique SOCIAL n'est qu'à 0.12
+        # au bout de 600 s, sous le seuil que l'assertion suivante impose.
+        _backdate(engine, 6 * 3600.0)
         engine.update()
         before = engine.states[DriveKind.SOCIAL].tension
         assert before > 0.3
@@ -345,3 +361,128 @@ class TestOnReply:
         engine.on_reply(word_count=80)
         engine.update()
         assert engine.states[DriveKind.REST].tension > 0.0
+
+
+# ---------------------------------------------------------------------------
+# Échelles de temps (SOCIAL en temps logarithmique)
+# ---------------------------------------------------------------------------
+
+class TestEchellesDeTemps:
+    """Trois semaines d'absence valaient vingt-cinq minutes : SOCIAL saturait
+    en 16 min 40, après quoi une heure, un jour et trois semaines rendaient la
+    même ligne de prompt et le même facteur de scoring. Si le modèle disait
+    « tu m'as manqué », rien dans la mécanique ne le justifiait."""
+
+    @staticmethod
+    def _apres(seconds: float) -> DriveEngine:
+        e = DriveEngine()
+        _backdate(e, seconds)
+        e.update()
+        return e
+
+    def test_une_heure_et_trois_semaines_ne_se_lisent_pas_pareil(self):
+        une_heure = self._apres(3600.0)
+        trois_semaines = self._apres(21 * 86400.0)
+
+        t1 = une_heure.states[DriveKind.SOCIAL].tension
+        t2 = trois_semaines.states[DriveKind.SOCIAL].tension
+        assert t2 - t1 >= 0.5
+        assert (
+            drive_prompt_description(une_heure.states)
+            != drive_prompt_description(trois_semaines.states)
+        )
+
+    def test_social_est_monotone_et_bornee(self):
+        echelles = [300.0, 3600.0, 86400.0, 7 * 86400.0, 21 * 86400.0]
+        tensions = [
+            self._apres(s).states[DriveKind.SOCIAL].tension for s in echelles
+        ]
+        assert tensions == sorted(tensions)
+        assert tensions[0] < tensions[-1] <= 1.0
+
+    def test_un_echange_remet_l_horloge_a_zero(self):
+        e = self._apres(21 * 86400.0)
+        avant = e.states[DriveKind.SOCIAL].tension
+        e.on_conversation(from_person=True)
+        e.update()
+        assert e.states[DriveKind.SOCIAL].tension < avant
+
+    def test_la_croissance_lineaire_reste_pour_curiosity(self):
+        """Le mécanisme est opt-in : `growth_horizon = 0` garde l'ancien calcul."""
+        assert DEFAULT_PARAMS[DriveKind.CURIOSITY].growth_horizon == 0.0
+        e = self._apres(300.0)
+        assert 0.20 < e.states[DriveKind.CURIOSITY].tension < 0.30
+
+
+class TestLogGrowth:
+
+    def test_zero_au_depart_un_a_l_horizon_jamais_plus(self):
+        from drives.state import log_growth
+
+        assert log_growth(0.0, 300.0, 1000.0) == 0.0
+        assert log_growth(1000.0, 300.0, 1000.0) == pytest.approx(1.0)
+        assert log_growth(10_000.0, 300.0, 1000.0) == 1.0
+
+    def test_parametres_absents_valent_zero(self):
+        from drives.state import log_growth
+
+        assert log_growth(500.0, 0.0, 1000.0) == 0.0
+        assert log_growth(500.0, 300.0, 0.0) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Persistance
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.asyncio
+class TestPersistance:
+    """L'état en RAM pur n'était pas une nuance de fatigue perdue : le gate du
+    cycle de sommeil lisait REST, donc tout redémarrage du soir supprimait la
+    nuit mentale, et SOCIAL ne pouvait rien dire d'une absence dont
+    l'horodatage disparaissait au boot."""
+
+    @pytest.fixture(autouse=True)
+    def _clean(self):
+        from drives.models import DriveSnapshot
+        DriveSnapshot.objects.all().delete()
+        yield
+        DriveSnapshot.objects.all().delete()
+
+    async def test_un_redemarrage_retrouve_les_tensions(self):
+        source = DriveEngine()
+        source.states[DriveKind.REST].tension = 0.72
+        await source.save_state()
+
+        neuf = DriveEngine()
+        assert neuf.states[DriveKind.REST].tension == 0.0
+        await neuf.restore_state()
+        assert neuf.states[DriveKind.REST].tension == pytest.approx(0.72, abs=0.01)
+
+    async def test_le_temps_d_arret_est_rejoue(self):
+        """On ne se réveille pas avec la tension exacte de la veille : les
+        horodatages sont reposés, `update()` rejoue l'écoulement."""
+        from asgiref.sync import sync_to_async
+        from django.utils import timezone as tz
+
+        from drives.models import DriveSnapshot
+
+        source = DriveEngine()
+        source.states[DriveKind.REST].tension = 0.9
+        await source.save_state()
+        await sync_to_async(
+            lambda: DriveSnapshot.objects.filter(kind=DriveKind.REST.value).update(
+                saved_at=tz.now() - timedelta(hours=1)
+            )
+        )()
+
+        neuf = DriveEngine()
+        await neuf.restore_state()
+        # Une heure de décroissance naturelle (0.0001/s) sur la valeur relue.
+        assert neuf.states[DriveKind.REST].tension == pytest.approx(0.54, abs=0.02)
+
+    async def test_une_base_vide_laisse_l_etat_a_zero(self):
+        neuf = DriveEngine()
+        await neuf.restore_state()
+        for state in neuf.states.values():
+            assert state.tension < 0.01

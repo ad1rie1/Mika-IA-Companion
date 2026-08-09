@@ -11,6 +11,10 @@ from datetime import datetime
 
 from conscience.types import DecisionContext
 
+# Même barre que le fast-path de `ConscienceEngine.observe`.
+SLEEP_WAKE_PERTINENCE = 0.85
+SLEEP_PENALTY = 0.30
+
 
 def compute_decision_score(
     ctx: DecisionContext,
@@ -28,6 +32,18 @@ def compute_decision_score(
     # Cooldown check (in-memory, no DB query)
     if ctx.in_cooldown:
         return 0.0, "cooldown", greeted_periods, greeted_date
+
+    # Facteur 12 : elle dort. Aucun facteur au-dessus ne le savait, et dormir
+    # *vide* REST — donc annule la pénalité de fatigue : la nuit la rendait
+    # mécaniquement plus bavarde que la veille au soir. Un acte non urgent est
+    # ici un réveil, pas une initiative. Le veto passe avant le Facteur 5 :
+    # `check_time_trigger` marque une période comme saluée dès la passe de
+    # scoring, et le salut de 23 h ne doit pas être brûlé par un cycle endormi.
+    asleep = ctx.sleep_phase != "awake"
+    if asleep and not (
+        ctx.max_pertinence >= SLEEP_WAKE_PERTINENCE or ctx.scheduled_actions
+    ):
+        return 0.0, f"asleep({ctx.sleep_phase})", greeted_periods, greeted_date
 
     score = 0.0
     parts = []
@@ -114,6 +130,10 @@ def compute_decision_score(
         fatigue_penalty = min(0.25, (0.5 - ctx.energy) * 0.5)
         score -= fatigue_penalty
         parts.append(f"fatigue(-{fatigue_penalty:.2f})")
+
+    if asleep:
+        score -= SLEEP_PENALTY
+        parts.append(f"sommeil(-{SLEEP_PENALTY:.2f})")
 
     # Hard cap: too many ignored acts today -> suppress
     if ctx.acts_today >= 5 and ctx.consecutive_ignored_acts >= 3:

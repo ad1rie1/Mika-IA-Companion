@@ -13,6 +13,11 @@ import pytest
 
 from pipeline.media import MediaAttachment
 
+# Ce fichier décrit la charge utile multimodale et le passage des pièces
+# jointes, jamais le stockage de la configuration : les réglages lus au
+# passage par le routeur viennent du registre, pas de la base.
+pytestmark = pytest.mark.usefixtures("config_hors_base")
+
 
 def _image_attachment() -> MediaAttachment:
     return MediaAttachment(
@@ -51,6 +56,11 @@ class _patched_router:
         def _fake_get(key, default=""):
             if key in role_config:
                 return role_config[key]
+            # Un rôle absent de la table se lit « non mappé ». Sans ça la
+            # construction du routeur lit les neuf autres rôles en base, et
+            # c'est l'ordre des tests qui décide si le cache la couvrait.
+            if key.startswith("ai.role."):
+                return default
             return real_get(key, default=default)
 
         self._declared_patch = patch("ai.router._load_declared_models", return_value=declared)

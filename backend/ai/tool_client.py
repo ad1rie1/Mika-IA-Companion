@@ -2,7 +2,7 @@
 
 Every provider implements ``complete_with_tools(tools=[ModuleTool])`` on
 itself:
-  - Claude → MCP loop via claude_agent_sdk
+  - Claude → boucle d'outils native sur l'API Messages (``tools=[...]``)
   - OpenAI / GLM → OpenAI-compat ``tools=[...]`` ping/pong loop
   - Ollama → native ``tools=[...]`` loop (SDK ≥ 0.3, tool-capable model)
   - Gemini → ``types.Tool(function_declarations=[...])`` loop

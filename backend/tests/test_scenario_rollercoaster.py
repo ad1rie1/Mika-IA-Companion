@@ -189,7 +189,32 @@ class TestRollercoasterWithMelancholicTemperament:
     """Melancholic temperament defaults to sadness — chaos should feel different."""
 
     def test_melancholic_resonates_with_sadness(self, melancholic_engine):
-        """Melancholic temperament should amplify sad moments."""
+        """Melancholic temperament should amplify sad moments.
+
+        DELIBERATELY LEFT RED. The assertion is unchanged: it names a property
+        the engine does not implement, and softening it would only hide that.
+        Measured on this exact conversation, turns 1 and 5:
+
+          melancholic  0.1627 / 0.0971      default  0.1554 / 0.0914
+          stoic        0.0608 / 0.0728      explosive 0.3254 / 0.2235
+
+        Melancholic and default sit 4.7 % apart, and that whole gap comes from
+        `intensity_base` (0.7 vs 0.6) feeding the ratchet gain — nothing comes
+        from `default_mood`. The temperament's mood only enters the physics
+        through the resting point, which reaches the position via relaxation
+        alone; with τ = 1059 s and turns 2-8 s apart it contributes under 1 %
+        per gap. The only temperament clearing the 0.2 bar is `explosive`, on
+        gain (0.75) — so the bar reads reactivity, never melancholy.
+
+        It is not a stale pin either. Under the pre-B2 engine it passed while
+        reading `excited` 0.6075 at turn 1 and `hopeful` 0.7430 at turn 5 —
+        positions pointing 0.90 *away* from the sad target, i.e. the leftover
+        of the previous turns, since a velocity impulse moved nothing at the
+        instant `play_conversation` reads. It asserted "any(i > 0.2)" on a
+        state that was neither melancholic nor sad, and `default` satisfied it
+        just as well (0.6334 / 0.5863). B2 is what made the readout honest,
+        and the honest readout says the property was never there.
+        """
         snapshots = play_conversation(
             melancholic_engine, "chaotic_user", ROLLERCOASTER_CONVERSATION
         )

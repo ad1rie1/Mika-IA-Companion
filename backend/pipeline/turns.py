@@ -39,6 +39,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from utils.degradation import degradations
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_WORKERS = 1
@@ -255,15 +257,50 @@ async def resume_interrupted_turns() -> int:
     transcripts were inlined before it was written — so replaying it as
     plain text is faithful and skips re-running the preprocessors over
     media that may no longer be on disk.
+
+    Replaying has an horizon. A question from last week answered with today's
+    mood, today's journal and today's ruminations is not a resumption, it is a
+    ghost — and since the selection is ordered by ``pk``, ten of them filled
+    ``MAX_RESUMED`` and kept the genuinely interrupted turns from ever being
+    replayed. The horizon is ``memory_manager.resume_window_minutes``, already
+    the answer to "are we still in the same conversation?"; declaring a second
+    value for one question is the mistake the ``env_fallback`` cleanup cost.
+    Past it the flag is cleared without replaying — the question stays in the
+    history and on the person's fiche, it just no longer gets an answer.
     """
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from memory.manager import memory_manager
     from memory.models import Message
     from pipeline.perception import Intent, Perception
+
+    # getattr défensif : les tests substituent le manager par un mock.
+    window = getattr(memory_manager, "resume_window_minutes", 120)
+    cutoff = timezone.now() - timedelta(minutes=window)
+
+    try:
+        # Purger d'abord : c'est ce qui libère les places de MAX_RESUMED pour
+        # les tours réellement récents.
+        stale = await Message.objects.filter(
+            awaiting_reply=True, role="user", is_internal=False,
+            created_at__lt=cutoff,
+        ).aupdate(awaiting_reply=False)
+        if stale:
+            logger.info(
+                "%d question(s) trop anciennes : drapeau nettoye sans rejeu",
+                stale,
+            )
+    except Exception as exc:
+        degradations.record("reprise: purge des tours anciens", exc)
 
     try:
         rows = [
             row
             async for row in Message.objects.filter(
                 awaiting_reply=True, role="user", is_internal=False,
+                created_at__gte=cutoff,
             ).order_by("pk")[:MAX_RESUMED]
         ]
     except Exception:

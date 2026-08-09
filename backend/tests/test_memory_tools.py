@@ -2,6 +2,13 @@
 
 Search goes through memory_manager (mocked — no ChromaDB in tests);
 journal and commitment tools hit the ORM directly.
+
+Aucune de ces classes ne pose ``set_current_person_id`` : ``current_person_id()``
+vaut donc "", un id réservé, ce qui fait de l'appelant un **interne**
+(conscience, boucle de fond) et lui donne l'accès complet. C'est délibéré — ces
+tests décrivent la surface de l'outil, pas sa frontière de divulgation. Celle-ci
+vit dans ``test_frontiere_intime_outils.py``, où le ContextVar est posé
+explicitement (sans quoi le test serait vacueux).
 """
 from __future__ import annotations
 

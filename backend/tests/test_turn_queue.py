@@ -335,6 +335,112 @@ class TestResumeAfterRestart:
 
         assert await resume_interrupted_turns() == 0
 
+    # ── Horizon temporel ─────────────────────────────────────────
+    #
+    # Une question d'il y a une semaine répondue avec l'humeur, le journal et
+    # les ruminations d'aujourd'hui n'est pas une reprise, c'est un fantôme.
+    # La fenêtre est celle de `memory_manager.resume_window_minutes`, qui
+    # répond déjà à « sommes-nous encore dans la même conversation ? ».
+
+    @staticmethod
+    async def _question(content, *, person_id, age_minutes=0):
+        from datetime import timedelta
+
+        from django.utils import timezone
+        from memory.models import Conversation, Message
+
+        conv = await Conversation.objects.acreate()
+        row = await Message.objects.acreate(
+            conversation=conv, role="user", content=content,
+            person_id=person_id, awaiting_reply=True,
+        )
+        if age_minutes:
+            # `update()` contourne `auto_now_add`.
+            await Message.objects.filter(pk=row.pk).aupdate(
+                created_at=timezone.now() - timedelta(minutes=age_minutes),
+            )
+        return row
+
+    async def test_une_question_trop_ancienne_n_est_pas_rejouee(self):
+        from pipeline.turns import resume_interrupted_turns, turn_queue
+
+        await self._question("et hier ?", person_id="web_vieux", age_minutes=300)
+
+        assert await resume_interrupted_turns() == 0
+        assert turn_queue.pending == 0
+
+    async def test_une_question_trop_ancienne_perd_quand_meme_son_drapeau(self):
+        from asgiref.sync import sync_to_async
+        from memory.models import Message
+        from pipeline.turns import resume_interrupted_turns
+
+        row = await self._question(
+            "et hier ?", person_id="web_vieux2", age_minutes=300,
+        )
+        await resume_interrupted_turns()
+
+        refreshed = await sync_to_async(Message.objects.get)(pk=row.pk)
+        assert refreshed.awaiting_reply is False
+        # La question reste dans l'historique et sur la fiche.
+        assert refreshed.content == "et hier ?"
+
+    async def test_une_purge_en_panne_ne_rouvre_pas_l_horizon(self):
+        """La purge est avalée (non fatale) : la sélection doit borner aussi."""
+        from django.db.models.query import QuerySet
+        from pipeline.turns import resume_interrupted_turns
+        from utils.degradation import degradations
+
+        await self._question("et hier ?", person_id="web_purge", age_minutes=300)
+        degradations.reset()
+
+        original = QuerySet.aupdate
+        appels = {"n": 0}
+
+        async def flaky(self, **kwargs):
+            appels["n"] += 1
+            if appels["n"] == 1:
+                raise RuntimeError("purge down")
+            return await original(self, **kwargs)
+
+        with patch.object(QuerySet, "aupdate", flaky):
+            assert await resume_interrupted_turns() == 0
+
+        assert degradations.count_for("reprise: purge des tours anciens") == 1
+
+    async def test_une_question_recente_est_toujours_rejouee(self):
+        from pipeline.turns import resume_interrupted_turns
+
+        await self._question("tu es la ?", person_id="web_frais", age_minutes=10)
+
+        assert await resume_interrupted_turns() == 1
+
+    async def test_les_anciennes_ne_volent_pas_les_places_des_recentes(self):
+        """Le vrai dégât : `order_by("pk")` sert les plus VIEILLES d'abord.
+
+        Dix fantômes consommaient tout `MAX_RESUMED` et empêchaient le rejeu
+        des tours réellement interrompus.
+        """
+        from pipeline.turns import MAX_RESUMED, resume_interrupted_turns, turn_queue
+
+        for i in range(MAX_RESUMED):
+            await self._question(
+                f"vieux {i}", person_id="web_vieux3", age_minutes=600,
+            )
+        await self._question("tout frais", person_id="web_frais2")
+
+        seen: list[str] = []
+
+        async def record(perception):
+            seen.append(perception.text)
+
+        await turn_queue.start(workers=1)
+        with patch("pipeline.router.perceive", new=record):
+            count = await resume_interrupted_turns()
+            await _drain()
+
+        assert count == 1
+        assert seen == ["tout frais"]
+
 
 @pytest.mark.asyncio
 class TestNoCrossPersonLeak:

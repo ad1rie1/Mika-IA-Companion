@@ -30,6 +30,17 @@ class TestBuildBudget:
     def test_default_window_fallback(self):
         assert default_window_tokens() == 16_384
 
+    def test_the_physical_terms_are_kept_for_the_window_bound(self):
+        # `usable_tokens` dimensionne les parts ; `window_room` dit ce qui
+        # tient physiquement, et a donc besoin des deux termes séparément.
+        b = build_budget(1_000_000, max_tokens=16_000, tools_chars=28_000)
+        assert b.max_tokens == 16_000
+        assert b.tools_tokens == 7_000
+        assert b.window_room() == 1_000_000 - 16_000 - 7_000 - 50_000
+
+    def test_max_tokens_defaults_to_the_declared_output_reserve(self):
+        assert build_budget(100_000).max_tokens == 4_096
+
 
 class TestBudgetFor:
 
@@ -55,6 +66,27 @@ class TestBudgetFor:
         assert isinstance(budget, ContextBudget)
         assert budget.window_tokens == 200_000
         assert budget.usable_tokens > 0
+
+    def test_tools_default_to_the_recorded_weight(self, monkeypatch):
+        from ai.budget import tool_weight
+        from ai import router as router_mod
+        from ai.router import AIRole
+
+        monkeypatch.setattr(
+            router_mod.ai_router, "resolve",
+            lambda role: ("claude", "model-x", 0.7, "x"),
+        )
+        monkeypatch.setattr(
+            router_mod.ai_router, "_get_declared_models",
+            lambda: {"x": {"context_window": 200_000, "max_tokens": 8_000}},
+        )
+        try:
+            tool_weight.note(AIRole.CONVERSATION.value, 24_000)
+            # Défaut = relevé ; 0 explicite = « ce tour ne porte pas d'outils ».
+            assert budget_for(AIRole.CONVERSATION).tools_tokens == 6_000
+            assert budget_for(AIRole.CONVERSATION, tools_chars=0).tools_tokens == 0
+        finally:
+            tool_weight._chars.clear()
 
     def test_missing_window_is_none(self, monkeypatch):
         from ai import router as router_mod

@@ -15,6 +15,7 @@ from identity.resolver import identity_resolver
 from identity.trust import ChannelTrust, is_internal_person
 from memory.manager import memory_manager
 from modules.manager import module_manager
+from pipeline.perception import Intent
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,11 @@ class ConversationContext:
     # ChatPrompt, dans la zone cacheable.
     conversation_summary: str = ""
 
+    # Le `Dream` injecté dans `dream_context`, en attente d'être consommé.
+    # Volontairement hors de `_LAYERS` : ce n'est pas un bloc de prompt mais
+    # l'instance que le processor marque comme rappelée *si* le tour aboutit.
+    pending_dream_recall: object | None = None
+
 
 async def gather_context(
     message: str,
@@ -99,6 +105,7 @@ async def gather_context(
     authenticated: bool = False,
     is_public: bool = False,
     include_memory: bool = True,
+    intent: Intent = Intent.REQUEST_RESPONSE,
 ) -> ConversationContext:
     """Assemble all context needed for an AI conversation turn.
 
@@ -115,6 +122,8 @@ async def gather_context(
             conscience recalls on the observations themselves, then overrode
             this field, so the embedding + ChromaDB query paid here was
             thrown away on every spontaneous act.
+        intent: What kind of stimulus this is. Only a ``REQUEST_RESPONSE``
+            carries text somebody actually wrote — see ``user_mood_hint``.
     """
     # ── Rappel mémoire : spéculatif (plancher) + plan de préparation ──
     #
@@ -171,9 +180,25 @@ async def gather_context(
         else:
             try:
                 memory_context = await spec_task
-            except Exception:
+            except Exception as exc:
+                degradations.record("rappel memoire", exc)
                 logger.warning("Memory retrieval failed, continuing without context")
                 memory_context = ""
+
+        # Un rappel vide est le cas nominal d'une base jeune ; une mémoire
+        # longue en panne ne l'est pas. Le drapeau vient du manager, jamais
+        # déduit d'un bloc vide — sinon le prompt annoncerait une panne dès
+        # le premier jour. Le dire lui permet de répondre « je ne retrouve
+        # pas » au lieu de confabuler.
+        # `is True` et non une vérité pythonique : les tests substituent le
+        # manager par un mock, dont n'importe quel attribut est truthy.
+        if getattr(memory_manager, "recall_unavailable", False) is True:
+            notice = (
+                "[Ta memoire longue est indisponible en ce moment : tu ne "
+                "peux rien y retrouver. Dis-le simplement si ca compte pour "
+                "la conversation, plutot que d'inventer un souvenir.]"
+            )
+            memory_context = f"{notice}\n{memory_context}" if memory_context else notice
 
     # Self-concept: latest autobiographical narrative from the consolidator.
     # Best-effort — if the table hasn't been populated yet (no narrative
@@ -228,9 +253,8 @@ async def gather_context(
     # voulu, mais l'arbitrage confie a Mika suppose qu'elle puisse distinguer
     # les tours : sans marquage, la question posee par Alice il y a trois
     # minutes se lit exactement comme celle que Thomas vient d'ecrire.
-    history = await _label_history_speakers(
-        memory_manager.get_conversation_context(), person_id
-    )
+    history = await _stamp_history_gaps(memory_manager.get_conversation_context())
+    history = await _label_history_speakers(history, person_id)
     # Résumé roulant du fil (compaction). Coercition défensive : les tests
     # substituent le manager par un mock dont l'attribut rendrait un objet.
     _summary = getattr(memory_manager, "get_conversation_summary", lambda: "")()
@@ -242,21 +266,24 @@ async def gather_context(
     # Active ruminations — now visible every turn, not only during _act()
     rumination_context = await _fetch_rumination_context()
 
-    # User mood heuristic — a best-effort read of the user's emotional
-    # tone from the raw message. Skipped for internal triggers (messages
-    # Mika sent herself — she doesn't "read" her own rumination).
-    if is_internal_person(person_id):
+    # User mood heuristic — a best-effort read of the user's emotional tone
+    # from the raw message. Gated on the *intent*, not only on the person: an
+    # internal trigger aimed at a real person carries their handle, so the
+    # person gate let the action brief Mika wrote to herself be read as their
+    # tone. On ne lit pas le ton d'un texte que personne n'a envoyé.
+    if intent is not Intent.REQUEST_RESPONSE or is_internal_person(person_id):
         user_mood_hint = ""
     else:
         user_mood_hint = detect_user_mood_hint(message)
 
     # Dream residue from last night. Only surfaces in the morning and
     # only to real interlocutors (not to Mika's own conscience trigger).
+    pending_dream_recall = None
     if is_internal_person(person_id):
         dream_context = ""
         journal_context = ""
     else:
-        dream_context = await _fetch_dream_context()
+        dream_context, pending_dream_recall = await _fetch_dream_context()
         journal_context = await _fetch_journal_context()
 
     # Project detection — is this turn about an active project?
@@ -321,6 +348,7 @@ async def gather_context(
         identity_context=identity_context,
         note_de_focus=note_de_focus,
         conversation_summary=conversation_summary,
+        pending_dream_recall=pending_dream_recall,
     )
 
 
@@ -413,6 +441,148 @@ async def _label_history_speakers(history: list[dict], person_id: str) -> list[d
         else:
             labelled.append(msg)
     return labelled
+
+
+async def own_handles(person_id: str) -> list[str]:
+    """Les handles de l'identité de ``person_id`` — repli fermé sur le sien.
+
+    Même formule que ``retriever._episodic_lane`` : la politique « own
+    identity only » ne doit pas avoir deux définitions selon la voie qui la
+    demande. Une résolution qui échoue ferme le périmètre, jamais l'inverse.
+    """
+    try:
+        rows = await identity_resolver.handles_for_person(person_id)
+        handles = sorted({h["person_id"] for h in rows if h.get("person_id")})
+        return handles or [person_id]
+    except Exception as exc:
+        degradations.record("identite: perimetre des handles", exc)
+        return [person_id]
+
+
+# En deçà, deux messages sont la même conversation : le cas nominal ne doit
+# pas payer une ligne de prompt à chaque tour, et un fil continu ne doit pas
+# se retrouver tapissé de marqueurs.
+_ECART_PLANCHER_S = 6 * 3600
+_HISTORY_GAP_SECONDS = 6 * 3600
+
+_EN_LETTRES = {
+    2: "deux", 3: "trois", 4: "quatre", 5: "cinq", 6: "six",
+    7: "sept", 8: "huit", 9: "neuf", 10: "dix", 11: "onze",
+}
+
+
+def _duree_approx(seconds: float) -> str:
+    """Durée en prose française, arrondie. Jamais un nombre de secondes.
+
+    Le prompt se lit, il ne se calcule pas : « depuis 1814400s » n'aide pas
+    un modèle qui doit ensuite écrire « ça fait un moment ».
+    """
+    jours = max(0.0, seconds) / 86400
+    if jours < 1:
+        return "quelques heures"
+    if jours < 2:
+        return "un jour"
+    if jours < 7:
+        return f"{_EN_LETTRES.get(int(jours), int(jours))} jours"
+    if jours < 14:
+        return "une semaine"
+    if jours < 30:
+        semaines = int(jours // 7)
+        return f"{_EN_LETTRES.get(semaines, semaines)} semaines"
+    if jours < 60:
+        return "un mois"
+    mois = int(jours // 30)
+    return f"{_EN_LETTRES.get(mois, mois)} mois"
+
+
+def _phrase_ecart(seconds: float) -> str:
+    """Le temps écoulé depuis le dernier échange, ou '' s'il est négligeable."""
+    if seconds < _ECART_PLANCHER_S:
+        return ""
+    if seconds < 86400:
+        return "Vous vous etes deja parle plus tot dans la journee."
+    if seconds < 2 * 86400:
+        return "Vous ne vous etes pas parle depuis hier."
+    return f"Vous ne vous etes pas parle depuis {_duree_approx(seconds)}."
+
+
+async def _last_contact_gap(person_id: str) -> str:
+    """Depuis combien de temps cette personne ne s'est pas manifestée.
+
+    Rien du tout quand aucune ligne n'existe : dire « c'est la premiere fois »
+    contredirait une identité liée qui revient sur un nouveau handle, et une
+    absence de donnée n'est pas un fait sur la relation.
+    """
+    from django.db.models import Max
+    from django.utils import timezone
+
+    from memory.models import Message
+
+    try:
+        handles = await own_handles(person_id)
+        row = await Message.objects.filter(
+            person_id__in=handles, is_internal=False,
+        ).aaggregate(dernier=Max("created_at"))
+        last = row.get("dernier")
+        if last is None:
+            return ""
+        return _phrase_ecart((timezone.now() - last).total_seconds())
+    except Exception as exc:
+        degradations.record("prompt: derniere interaction", exc)
+        return ""
+
+
+async def _stamp_history_gaps(history: list[dict]) -> list[dict]:
+    """Date les segments d'historique séparés par un trou.
+
+    Un fil réhydraté après trois semaines se lit exactement comme la suite de
+    la conversation d'il y a cinq minutes : le tampon ne porte aucun
+    horodatage et ``ChatPrompt.chat_messages()`` ne rend que ``{role,
+    content}``. Le marqueur va donc DANS le contenu — une clé supplémentaire
+    n'atteindrait aucun modèle.
+
+    Les dicts du tampon sont partagés avec ``MemoryManager.short_term`` : on
+    recopie, jamais on ne mute.
+    """
+    if len(history) < 2:
+        return history
+
+    from django.utils import timezone
+
+    from memory.models import Message
+
+    try:
+        ids = [m["id"] for m in history if isinstance(m.get("id"), int)]
+        if not ids:
+            return history
+        dates = {
+            pk: created
+            async for pk, created in Message.objects.filter(
+                pk__in=ids
+            ).values_list("id", "created_at")
+        }
+
+        now = timezone.now()
+        stamped: list[dict] = []
+        previous = None
+        for msg in history:
+            # Une entrée jamais persistée est de maintenant : c'est le tour
+            # en cours, pas un fragment d'archive.
+            current = dates.get(msg.get("id")) or now
+            if previous is not None:
+                gap = (current - previous).total_seconds()
+                if gap >= _HISTORY_GAP_SECONDS:
+                    msg = {
+                        **msg,
+                        "content": f"[il y a {_duree_approx(gap)}] "
+                                   + (msg.get("content") or ""),
+                    }
+            stamped.append(msg)
+            previous = current
+        return stamped
+    except Exception as exc:
+        degradations.record("prompt: horodatage historique", exc)
+        return history
 
 
 # ── Plafonds des blocs sans borne naturelle ─────────────────────────────────
@@ -586,13 +756,15 @@ _DREAM_RECALL_WINDOW_HOURS = 8
 _DREAM_VIVIDNESS_THRESHOLD = 0.6
 
 
-async def _fetch_dream_context() -> str:
-    """Return the morning residue of last night's dream, or ''.
+async def _fetch_dream_context() -> tuple[str, object | None]:
+    """Return ``(residue, dream)`` for last night's dream, or ``("", None)``.
 
     Gating: current hour must be before NIGHT_END_HOUR + window, the
     dream must not have been recalled yet, and vividness above threshold.
-    Marks the dream as recalled the moment it is surfaced — we don't
-    want the same dream popping up turn after turn.
+
+    The dream is *not* marked here. Marking it during context assembly spent
+    it before the AI call, so a timeout consumed it forever while the fallback
+    never mentioned it — the caller marks it once the turn succeeded.
     """
     from datetime import datetime
 
@@ -602,7 +774,7 @@ async def _fetch_dream_context() -> str:
     now = datetime.now()
     # Only eligible in the morning window [NIGHT_END_HOUR, +WINDOW]
     if not (NIGHT_END_HOUR <= now.hour < NIGHT_END_HOUR + _DREAM_RECALL_WINDOW_HOURS):
-        return ""
+        return "", None
 
     try:
         dream = await read.dream_of_last_night(
@@ -610,14 +782,10 @@ async def _fetch_dream_context() -> str:
         )
     except Exception as exc:
         degradations.record("prompt: dream context", exc)
-        return ""
+        return "", None
 
     if not dream:
-        return ""
-
-    # Mark as recalled so subsequent turns don't re-surface the same dream.
-    # A failed write is accepted — losing the trace beats double-injection.
-    await read.mark_dream_recalled(dream)
+        return "", None
 
     # Build a human-readable residue hint.
     type_label = {
@@ -632,7 +800,8 @@ async def _fetch_dream_context() -> str:
         f"Le souvenir du reve : \"{dream.content[:400]}\"\n"
         "Tu peux le mentionner si la conversation s'y prete (ou au contraire "
         "le garder pour toi). N'en parle pas tout de suite si l'autre commence "
-        "par quelque chose d'important — laisse la conversation couler naturellement."
+        "par quelque chose d'important — laisse la conversation couler naturellement.",
+        dream,
     )
 
 
@@ -877,12 +1046,17 @@ async def _fetch_person_context(identity_ctx) -> str:
         return ""
 
     affect = emotion_engine.get_person_affect_context(person_id)
+    # Le temps écoulé est un fait sur l'échange avec CE handle, pas un extrait
+    # de la fiche d'un tiers : il reste sous le seuil de divulgation, au même
+    # titre que la stance affective. Sans lui, « tu m'as manqué » n'a aucune
+    # base mécanique — le prompt ne porte que l'heure courante et « hier ».
+    derniere_interaction = await _last_contact_gap(person_id)
 
     # Not sure enough who this is: the affective stance toward the handle is
     # still Mika's own feeling and safe to keep, but the semantic profile,
     # the shared history and the commitments are someone else's business.
     if not identity_ctx.may_disclose:
-        return affect
+        return "\n".join(x for x in (affect, derniere_interaction) if x)
 
     entity = None
     try:
@@ -890,7 +1064,7 @@ async def _fetch_person_context(identity_ctx) -> str:
 
         entity = await identity_resolver.entity_for_person(person_id)
         if entity is None:
-            return affect
+            return "\n".join(x for x in (affect, derniere_interaction) if x)
 
         profile = await read.person_profile_for(entity)
         commitments = await read.pending_commitments_for(entity)
@@ -900,6 +1074,7 @@ async def _fetch_person_context(identity_ctx) -> str:
 
         if (
             not affect
+            and not derniere_interaction
             and profile is None
             and not commitments
             and not weekly_trend
@@ -911,17 +1086,19 @@ async def _fetch_person_context(identity_ctx) -> str:
             commitments=commitments,
             affect=affect,
             weekly_trend=weekly_trend,
+            derniere_interaction=derniere_interaction,
         )
 
     except Exception as exc:
         degradations.record("prompt: person context", exc)
         # If DB failed but we at least have an affect string, return that —
         # it's better than a silent blank about the person.
-        return affect
+        return "\n".join(x for x in (affect, derniere_interaction) if x)
 
 
 def _format_person_context(
     *, profile, commitments: list[str], affect: str, weekly_trend: str,
+    derniere_interaction: str = "",
 ) -> str:
     """Assemble a compact French block covering everything Mika knows+feels."""
     lines: list[str] = []
@@ -950,6 +1127,9 @@ def _format_person_context(
 
     if affect:
         lines.append(affect)
+
+    if derniere_interaction:
+        lines.append(derniere_interaction)
 
     if weekly_trend:
         lines.append(weekly_trend)

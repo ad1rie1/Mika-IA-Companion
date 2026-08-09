@@ -71,9 +71,13 @@ class TestPersonMoodDescription:
         assert "pas de sentiment particulier" in desc
 
     def test_description_contains_emotion_name(self):
+        # Le pin change : le bloc est rendu en français (`emotion.state._fr`),
+        # pas avec le nom canonique anglais que le modèle émet dans la balise.
+        from emotion.state import EMOTION_PROMPT_FR
+
         mood = _make_person(Emotion.ANGRY, 0.9)
         desc = mood.to_prompt_description()
-        assert "angry" in desc
+        assert EMOTION_PROMPT_FR["angry"] in desc
 
     def test_description_contains_intensity_label(self):
         mood = _make_person(Emotion.SAD, 1.0)
@@ -81,11 +85,14 @@ class TestPersonMoodDescription:
         # For strong SAD, intensity label should be "tres" or "assez"
         assert any(w in desc for w in ["tres", "assez"])
 
-    def test_description_contains_numeric_intensity(self):
+    def test_description_states_intensity_in_words_not_digits(self):
+        # Le pin change : le bloc ne porte plus de valeur chiffrée. Un prompt
+        # qui annonce « 0.9 » invite le modèle à recracher des nombres ;
+        # l'intensité se dit maintenant en toutes lettres.
         mood = _make_person(Emotion.EXCITED, 0.9)
         desc = mood.to_prompt_description()
-        # Should include a numeric intensity formatted to 1 decimal
-        assert any(f"0.{n}" in desc for n in range(1, 10))
+        assert not any(f"0.{n}" in desc for n in range(0, 10))
+        assert _intensity_label(0.9) in desc
 
     def test_all_emotions_produce_valid_descriptions(self):
         """Every emotion should produce a non-empty description."""
@@ -116,10 +123,13 @@ class TestGlobalMoodDescription:
 
     def test_non_default_mood_mentions_both(self):
         """When in a non-default mood, should mention current and default."""
+        # Même changement de pin que ci-dessus : rendu en français.
+        from emotion.state import EMOTION_PROMPT_FR
+
         glob = _make_global(Emotion.ANGRY, 0.9)
         desc = glob.to_prompt_description(Emotion.HAPPY)
-        assert "angry" in desc
-        assert "happy" in desc
+        assert EMOTION_PROMPT_FR["angry"] in desc
+        assert EMOTION_PROMPT_FR["happy"] in desc
         assert "normalement" in desc
 
     def test_contains_intensity_label(self):

@@ -35,8 +35,11 @@ class TestRetentionSweep:
     @pytest.fixture(autouse=True)
     def _clean(self):
         from conscience.models import ConscienceLog, Rumination
+        from memory.models import ConsolidationLog, EpisodicIndexLog
         ConscienceLog.objects.all().delete()
         Rumination.objects.all().delete()
+        ConsolidationLog.objects.all().delete()
+        EpisodicIndexLog.objects.all().delete()
         yield
 
     @pytest.mark.asyncio
@@ -116,6 +119,92 @@ class TestRetentionSweep:
 
         # The real policy still ran despite the bogus one raising.
         assert await sync_to_async(ConscienceLog.objects.count)() == 0
+
+    @pytest.mark.asyncio
+    async def test_le_checkpoint_le_plus_recent_survit_a_la_purge(self):
+        """La dernière ligne de ces deux tables EST l'état d'une boucle.
+
+        Machine éteinte quinze jours : la purge la vidait, et au redémarrage
+        suivant la consolidation repartait du début de l'histoire — tout
+        l'historique ré-extrait, daté d'aujourd'hui.
+        """
+        from memory.models import ConsolidationLog, EpisodicIndexLog
+        from memory.retention import run_sweep
+
+        vieux = timezone.now() - timedelta(days=15)
+        log = await sync_to_async(ConsolidationLog.objects.create)(
+            messages_processed=1, last_message_id=4242,
+        )
+        await sync_to_async(
+            lambda: ConsolidationLog.objects.filter(pk=log.pk).update(ran_at=vieux))()
+        idx = await sync_to_async(EpisodicIndexLog.objects.create)(
+            last_message_id=99, chunks_created=3,
+        )
+        await sync_to_async(
+            lambda: EpisodicIndexLog.objects.filter(pk=idx.pk).update(ran_at=vieux))()
+
+        await run_sweep()
+
+        survivant = await sync_to_async(
+            lambda: ConsolidationLog.objects.order_by("-pk").first())()
+        assert survivant is not None and survivant.last_message_id == 4242
+        survivant_idx = await sync_to_async(
+            lambda: EpisodicIndexLog.objects.order_by("-pk").first())()
+        assert survivant_idx is not None and survivant_idx.last_message_id == 99
+
+    @pytest.mark.asyncio
+    async def test_les_lignes_anciennes_hors_la_plus_recente_partent_quand_meme(self):
+        from memory.models import ConsolidationLog
+        from memory.retention import run_sweep
+
+        vieux = timezone.now() - timedelta(days=15)
+        pks = []
+        for i in range(3):
+            row = await sync_to_async(ConsolidationLog.objects.create)(
+                messages_processed=1, last_message_id=i,
+            )
+            await sync_to_async(
+                lambda pk=row.pk: ConsolidationLog.objects.filter(pk=pk).update(
+                    ran_at=vieux))()
+            pks.append(row.pk)
+
+        await run_sweep()
+
+        restants = await sync_to_async(
+            lambda: list(ConsolidationLog.objects.values_list("pk", flat=True)))()
+        assert restants == [max(pks)]
+
+    @pytest.mark.asyncio
+    async def test_le_plafond_de_lignes_ne_mange_pas_la_ligne_protegee(self):
+        from memory.models import ConsolidationLog
+        from memory.retention import Policy, _sweep_one
+
+        for i in range(3):
+            await sync_to_async(ConsolidationLog.objects.create)(
+                messages_processed=1, last_message_id=i,
+            )
+
+        # keep_rows=0 : sans exclusion, le plafond emporterait tout.
+        policy = Policy("memory", "ConsolidationLog", date_field="ran_at",
+                        keep_rows=0, checkpoint=True)
+        await _sweep_one(policy)
+
+        assert await sync_to_async(ConsolidationLog.objects.count)() == 1
+
+    @pytest.mark.asyncio
+    async def test_toute_table_checkpoint_est_declaree_comme_telle(self):
+        from memory.retention import POLICIES
+
+        # Toute nouvelle table dont seule la DERNIÈRE ligne est lue s'ajoute
+        # ici ET dans POLICIES, avec checkpoint=True.
+        TABLES_CHECKPOINT = {
+            ("memory", "ConsolidationLog"),
+            ("memory", "EpisodicIndexLog"),
+        }
+        declarees = {
+            (p.app_label, p.model_name) for p in POLICIES if p.checkpoint
+        }
+        assert declarees == TABLES_CHECKPOINT
 
     @pytest.mark.asyncio
     async def test_every_policy_targets_a_real_model_and_field(self):

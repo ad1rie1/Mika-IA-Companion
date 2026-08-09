@@ -40,6 +40,7 @@ def make_context(
     drive_summary="",
     rumination_pressure=0.0,
     rumination_count=0,
+    sleep_phase="awake",
 ) -> DecisionContext:
     return DecisionContext(
         pending_observations=pending_observations or [],
@@ -57,6 +58,7 @@ def make_context(
         drive_summary=drive_summary,
         rumination_pressure=rumination_pressure,
         rumination_count=rumination_count,
+        sleep_phase=sleep_phase,
     )
 
 

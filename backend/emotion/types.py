@@ -2,6 +2,8 @@ import re
 from enum import Enum
 from dataclasses import dataclass
 
+from utils.degradation import degradations
+
 
 class Emotion(str, Enum):
     # --- Neutral ---
@@ -54,32 +56,44 @@ class EmotionData:
 
     @staticmethod
     def default() -> "EmotionData":
+        """A deliberate neutral, for a caller who wants one.
+
+        Not what "no tag" produces — `extract_emotion` returns ``None`` there,
+        and rewiring it back here would restore the bug this replaced.
+        """
         return EmotionData(emotion=Emotion.NEUTRAL, intensity=0.5)
 
 
-def extract_emotion(text: str) -> tuple[str, EmotionData]:
+def extract_emotion(text: str) -> tuple[str, EmotionData | None]:
     """Extract emotion tag from Claude's response.
 
     Supports:
     - [EMOTION:happy] (legacy, defaults to intensity 0.7)
     - [EMOTION:happy:0.8] (new format with explicit intensity)
 
-    Returns (clean_text, EmotionData).
+    Returns ``(clean_text, EmotionData)``, or ``(clean_text, None)`` when the
+    turn declared nothing usable: no tag at all, or a name outside the 29.
+    ``None`` means *apply no impulse* — a default NEUTRAL is a real target in
+    PAD space, the origin, so a missing tag pulled an angry state back through
+    zero and out the other side, and a parsing miss was lived as a soothing.
+    An explicit ``[EMOTION:neutral:0.5]`` stays an EmotionData: "nothing was
+    declared" and "she declared neutral" are two different facts.
     """
     match = EMOTION_PATTERN.search(text)
-    if match:
-        emotion_str = match.group(1).lower()
-        intensity_str = match.group(2)
-        clean_text = EMOTION_PATTERN.sub("", text).strip()
+    if not match:
+        return text.strip(), None
 
-        try:
-            emotion = Emotion(emotion_str)
-        except ValueError:
-            emotion = Emotion.NEUTRAL
+    emotion_str = match.group(1).lower()
+    intensity_str = match.group(2)
+    clean_text = EMOTION_PATTERN.sub("", text).strip()
 
-        intensity = float(intensity_str) if intensity_str else 0.7
-        intensity = max(0.0, min(1.0, intensity))
+    try:
+        emotion = Emotion(emotion_str)
+    except ValueError as exc:
+        degradations.record("emotion: tag inconnu", exc)
+        return clean_text, None
 
-        return clean_text, EmotionData(emotion=emotion, intensity=intensity)
+    intensity = float(intensity_str) if intensity_str else 0.7
+    intensity = max(0.0, min(1.0, intensity))
 
-    return text.strip(), EmotionData.default()
+    return clean_text, EmotionData(emotion=emotion, intensity=intensity)

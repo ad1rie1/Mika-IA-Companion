@@ -29,8 +29,9 @@ Providers choose their optimal rendering:
   OpenAI-compatibles, KV-cache reuse for Ollama).
 - Providers without a chat method (GLM, Gemini) get the legacy two-string
   shape via :meth:`legacy_pair` — same rendering as the old pipeline, with
-  one deliberate divergence: history messages are clipped at
-  ``HISTORY_MSG_MAX_CHARS`` on every path.
+  two deliberate divergences: history messages are clipped at
+  ``HISTORY_MSG_MAX_CHARS`` on every path, and a turn said by someone else
+  than the current interlocutor is named (see :func:`_speaker_of`).
 
 This module lives in ``ai/`` because providers consume the type; it must not
 import anything from ``pipeline`` (the dependency points the other way).
@@ -67,10 +68,53 @@ SUMMARY_HEADER = "[Fil de la conversation jusqu'ici — résumé]"
 SUMMARY_MAX_CHARS = 8000
 
 
+# Borne du nom de locuteur rendu devant un tour d'historique. Le nom vient
+# d'un ``display_name`` en base : un retour à la ligne y forgerait un tour.
+_SPEAKER_MAX_CHARS = 40
+
+
 def _clip_msg(content: str) -> str:
     if len(content) <= HISTORY_MSG_MAX_CHARS:
         return content
     return content[: HISTORY_MSG_MAX_CHARS - len(_TRUNCATION_MARK)].rstrip() + _TRUNCATION_MARK
+
+
+def _speaker_of(m: dict) -> str:
+    """Nom du tiers ayant dit ce tour, ou "" — posé par le contexte.
+
+    Le tampon court terme est partagé par tout le monde (« quelqu'un dans une
+    pièce entend ce qui s'y dit »), donc l'historique d'un tour d'Alice arrive
+    dans le prompt de Thomas. Rendu « User: », il se lit comme une phrase de
+    Thomas et le modèle la lui attribue. Seuls les tours *user* sont marqués :
+    les réponses de Mika sont les siennes quel que soit le destinataire.
+    """
+    if m.get("role") != "user":
+        return ""
+    raw = (m.get("speaker") or "").strip()
+    if not raw:
+        return ""
+    return raw.replace("\n", " ").replace("\r", " ")[:_SPEAKER_MAX_CHARS].strip()
+
+
+@dataclass(frozen=True)
+class VolatileBlock:
+    """Une couche volatile encore séparable de son en-tête.
+
+    ``system_volatile`` est la concaténation rendue de ces blocs ; la borne
+    globale du tour (``ai.budget.fit_turn``) a besoin de couper une couche
+    *nommée* sans laisser un « --- CE QUE TU SAIS DE CETTE PERSONNE --- »
+    sans sa fin.
+    """
+
+    field: str
+    value: str
+    header: str | None = None
+    footer: str = "--- FIN ---"
+
+    def render(self) -> str:
+        if self.header is None:
+            return self.value
+        return f"{self.header}\n{self.value}\n{self.footer}"
 
 
 @dataclass
@@ -83,6 +127,10 @@ class ChatPrompt:
     message: str = ""
     # Résumé roulant des segments déjà compactés du fil ("" = aucun).
     conversation_summary: str = ""
+    # Décomposition de ``system_volatile``, quand le constructeur la fournit.
+    # Vide = borne globale sans prise sur les couches (elle ne coupe alors que
+    # le résumé et se contente de rapporter le dépassement).
+    volatile_blocks: list[VolatileBlock] = field(default_factory=list)
 
     # ── Full-fidelity views ─────────────────────────────────────
 
@@ -102,13 +150,19 @@ class ChatPrompt:
         - The volatile state block is embedded at the top of the *final*
           user turn: it sits after the cacheable prefix (system + history),
           so per-turn state never invalidates what is already cached.
+        - A turn carrying a ``speaker`` is prefixed with that name.
         """
         msgs: list[dict] = []
         for m in self.history or []:
             role = m.get("role")
             content = (m.get("content") or "").strip()
             if role in ("user", "assistant") and content:
-                msgs.append({"role": role, "content": _clip_msg(content)})
+                # Clipper PUIS nommer : le cap borne le message, pas le nom.
+                content = _clip_msg(content)
+                speaker = _speaker_of(m)
+                if speaker:
+                    content = f"{speaker}: {content}"
+                msgs.append({"role": role, "content": content})
         if self.conversation_summary:
             # Avant le garde premier-message : le résumé EST un tour user
             # valide, donc un historique qui s'ouvrait sur Mika n'a plus
@@ -135,9 +189,11 @@ class ChatPrompt:
         """(system_prompt, user_prompt) as the old pipeline built them.
 
         Same rendering as ``build_system_prompt`` + ``format_conversation``,
-        with one deliberate divergence: history messages beyond
-        ``HISTORY_MSG_MAX_CHARS`` are clipped (the old flattener resent a
-        50 kB paste verbatim on every turn until it rotated out).
+        speaker labelling included (``User (Alice): …``) — that is the shape
+        ``format_conversation`` has always produced, and the only one in the
+        repo for that fact. One deliberate divergence: history messages
+        beyond ``HISTORY_MSG_MAX_CHARS`` are clipped (the old flattener
+        resent a 50 kB paste verbatim on every turn until it rotated out).
         """
         flat = ""
         if self.conversation_summary:
@@ -151,7 +207,9 @@ class ChatPrompt:
             if isinstance(content, str):
                 content = _clip_msg(content)
             if role == "user":
-                flat += f"User: {content}\n\n"
+                speaker = _speaker_of(m)
+                label = f"User ({speaker})" if speaker else "User"
+                flat += f"{label}: {content}\n\n"
             elif role == "assistant":
                 flat += f"Assistant: {content}\n\n"
         flat += f"User: {self.message}"

@@ -567,7 +567,15 @@ class TestEligibleToSleep:
             assert await SleepCycle._is_eligible_to_sleep() is False
 
     @pytest.mark.asyncio
-    async def test_not_eligible_when_rested(self):
+    async def test_le_repos_non_merite_n_interdit_plus_de_dormir(self):
+        """Le pin change avec le correctif B1.
+
+        Il exigeait REST >= 0.5 pour s'endormir. Mais REST ne croît que par
+        événement d'activité et décroît pendant les 900 s d'inactivité que le
+        gate impose d'abord : une soirée calme laissait la tension à ~0.01, et
+        la nuit mentale entière (journal, rêves, digestion, réorg) ne
+        s'exécutait jamais. REST n'avance plus que l'heure du coucher.
+        """
         from memory.sleep import SleepCycle
 
         with (
@@ -575,29 +583,20 @@ class TestEligibleToSleep:
             patch("drives.engine.drive_engine") as mock_drives,
         ):
             mock_cons.get_idle_seconds.return_value = 1200.0
-            # REST below threshold — she hasn't earned her sleep yet
             mock_drives.update.return_value = None
             mock_rest = MagicMock()
             mock_rest.tension = 0.3
             from drives.state import DriveKind
             mock_drives.states = {DriveKind.REST: mock_rest}
 
-            assert await SleepCycle._is_eligible_to_sleep() is False
+            assert await SleepCycle._is_eligible_to_sleep() is True
 
     @pytest.mark.asyncio
     async def test_eligible_when_idle_and_tired(self):
         from memory.sleep import SleepCycle
 
-        with (
-            patch("conscience.engine.conscience_engine") as mock_cons,
-            patch("drives.engine.drive_engine") as mock_drives,
-        ):
+        with patch("conscience.engine.conscience_engine") as mock_cons:
             mock_cons.get_idle_seconds.return_value = 1200.0
-            mock_drives.update.return_value = None
-            mock_rest = MagicMock()
-            mock_rest.tension = 0.7
-            from drives.state import DriveKind
-            mock_drives.states = {DriveKind.REST: mock_rest}
 
             assert await SleepCycle._is_eligible_to_sleep() is True
 

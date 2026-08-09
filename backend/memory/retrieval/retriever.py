@@ -1,11 +1,11 @@
 import asyncio
 import logging
+from collections import OrderedDict, deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
 
 from asgiref.sync import sync_to_async
-from django.conf import settings
 from django.utils import timezone
 
 from memory.storage.vector_store import VectorStore, vector_call
@@ -70,6 +70,22 @@ def _mood_congruence(mood_pad, emotion: str) -> float:
         return 0.5
 
 
+# ── Anti-répétition du rappel ────────────────────────────────────────────
+#
+# Les deux voies non-lexicales sont déterministes (`order_by("-importance")`)
+# et le biais ×1.5 « moins d'une heure » rend collant le souvenir né pendant la
+# conversation en cours. Sans mémo entre les tours, « ça me rappelle… » se
+# répète mot pour mot, ce que la saillance devait précisément éviter.
+
+#: Nombre de tours pendant lesquels un souvenir servi reste connu.
+RECALL_MEMO_TURNS = 3
+#: Plafond LRU du mémo — un rappel ne doit pas devenir une fuite mémoire.
+RECALL_MEMO_MAX_PERSONS = 32
+#: Voie directe : on DÉMOTE, on n'exclut pas. À la même question posée deux
+#: fois, une mémoire qui ne rend plus rien est pire que la répétition.
+RECALL_REPEAT_PENALTY = 0.45
+
+
 class MemoryRetriever:
     """Retrieves relevant memories for a given query and formats them
     as a context block for the Claude system prompt.
@@ -81,6 +97,45 @@ class MemoryRetriever:
 
     def __init__(self, vector_store: VectorStore):
         self.vector_store = vector_store
+        # Mémo RAM des pks servis récemment, par personne. L'objet vit aussi
+        # longtemps que memory_manager, donc l'état survit aux tours.
+        self._servis: "OrderedDict[str, deque]" = OrderedDict()
+
+    def _deja_servis(self, person_id: str) -> set:
+        """Les pks servis à cette personne sur les derniers tours."""
+        seaux = self._servis.get(person_id or "")
+        if not seaux:
+            return set()
+        return set().union(*(pks for _rid, pks in seaux))
+
+    def _noter_servis(self, person_id: str, pks: set) -> None:
+        """Enregistre ce qui vient d'être servi, en un seau par *tour*.
+
+        Un tour réel lance deux rappels (spéculatif puis dirigé, cf.
+        ``pipeline/context.py``) : les fusionner sur le ``request_id`` évite
+        qu'un seul tour consomme deux seaux et vide le mémo aussitôt.
+        """
+        if not pks:
+            return
+        try:
+            from pipeline.tracing import get_request_id
+            rid = get_request_id()
+        except Exception:
+            rid = "-"
+
+        cle = person_id or ""
+        seaux = self._servis.get(cle)
+        if seaux is None:
+            seaux = deque(maxlen=RECALL_MEMO_TURNS)
+            self._servis[cle] = seaux
+        if seaux and rid != "-" and seaux[-1][0] == rid:
+            seaux[-1][1].update(pks)
+        else:
+            seaux.append((rid, set(pks)))
+
+        self._servis.move_to_end(cle)
+        while len(self._servis) > RECALL_MEMO_MAX_PERSONS:
+            self._servis.popitem(last=False)
 
     async def retrieve(self, query: str, person_id: str = "") -> str:
         """Retrieve and format relevant memories for a user message."""
@@ -170,8 +225,10 @@ class MemoryRetriever:
         boost_name = await self._person_boost_name(person_id)
         mood_pad = self._mood_pad_for(person_id)
         weights = self._salience_weights(boost=salience_boost)
+        memo = self._deja_servis(person_id)
         souvenirs = self._rerank_souvenirs(
             souvenirs, boost_name, mood_pad=mood_pad, weights=weights,
+            demote_pks=memo,
         )
 
         # Take top N after reranking
@@ -181,10 +238,15 @@ class MemoryRetriever:
         #  · association « ça me rappelle… », ancrée sur les thèmes des hits ;
         #  · intrusion d'un souvenir intense (opt-in), seulement si le tour est
         #    DÉJÀ chargé — jamais à froid.
-        exclude_pks = {s["id"] for s in souvenirs if s.get("id")}
+        # Ces deux voies-là sont exclues DUREMENT sur le mémo : leur raison
+        # d'être est de ne pas se répéter.
+        exclude_pks = {s["id"] for s in souvenirs if s.get("id")} | memo
         associations = await self._associative_expansion(souvenirs, exclude_pks)
         exclude_pks |= {a["id"] for a in associations if a.get("id")}
         intrusions = await self._importance_intrusion(exclude_pks, salience_boost)
+        self._noter_servis(person_id, {
+            s["id"] for s in (souvenirs + associations + intrusions) if s.get("id")
+        })
 
         return self._format_context(
             connaissances, souvenirs, exchanges=exchanges,
@@ -324,6 +386,7 @@ class MemoryRetriever:
     def _rerank_souvenirs(
         self, souvenirs: list[dict], boost_name: str, *,
         mood_pad=None, weights: "_SalienceWeights | None" = None,
+        demote_pks: set | None = None,
     ) -> list[dict]:
         """Classe les souvenirs par pertinence × récence × personne × SAILLANCE.
 
@@ -331,11 +394,12 @@ class MemoryRetriever:
         fait enfin remonter « ce qui a compté » et pas seulement « ce qui
         ressemble » — l'humain rappelle par la charge, pas par la distance.
 
-        Fonction **pure** : ``mood_pad`` (humeur PAD courante) et ``weights``
-        sont injectés, donc testable sans ``emotion_engine`` ni config.
-        ``boost_name`` est un *nom d'entité* (résolu via la couche identité),
-        pas un handle. ``_score`` n'est qu'une clé de tri : plus de plafond à
-        1.0, qui saturait et effaçait précisément les écarts de saillance.
+        Fonction **pure** : ``mood_pad`` (humeur PAD courante), ``weights`` et
+        ``demote_pks`` (mémo anti-répétition) sont injectés, donc testable
+        sans ``emotion_engine`` ni config. ``boost_name`` est un *nom
+        d'entité* (résolu via la couche identité), pas un handle. ``_score``
+        n'est qu'une clé de tri : plus de plafond à 1.0, qui saturait et
+        effaçait précisément les écarts de saillance.
         """
         w = weights or _SalienceWeights()
         now = timezone.now()
@@ -376,6 +440,10 @@ class MemoryRetriever:
                     w_mood *= w.mood_negative_damp
                 cong = _mood_congruence(mood_pad, s.get("emotion") or "neutral")
                 score *= (1 + w_mood * (cong - 0.5) * 2)
+
+            # Déjà servi il y a peu : il recule, il ne disparaît pas.
+            if demote_pks and s.get("id") in demote_pks:
+                score *= RECALL_REPEAT_PENALTY
 
             s["_score"] = score
 
@@ -435,45 +503,77 @@ class MemoryRetriever:
         from memory.models import Souvenir
 
         pks = [pk for pk in (self._pk_of(r) for r in raw_results) if pk is not None]
+        # Aucun filtre sur le queryset (contrairement aux connaissances) : un
+        # pk absent du chargement ne peut donc signifier qu'une chose, la
+        # ligne n'existe plus.
         loaded = await self._load_by_pk(Souvenir.objects.all(), pks)
 
         # L'ordre ChromaDB est l'ordre de pertinence : on le reconstitue en
         # Python plutot que de le demander a la base.
         enriched = []
+        orphelins: list[int] = []
         for r in raw_results:
-            row = loaded.get(self._pk_of(r)) if loaded is not None else None
-            if row is None:
-                # Fallback: use ChromaDB data only
-                meta = r.get("metadata", {})
+            pk = self._pk_of(r)
+            if loaded is not None and pk is not None:
+                row = loaded.get(pk)
+                if row is None:
+                    # Effacee (decroissance, fusion) : le repli ChromaDB la
+                    # resservirait indefiniment, importance figee, et l'oubli
+                    # decide deviendrait inoubliable.
+                    orphelins.append(pk)
+                    continue
+
+                souvenir, themes, entities = row
+
+                # Compute base relevance from vector distance (lower = more relevant)
+                distance = r.get("distance")
+                relevance = max(0, 1.0 - (distance or 0.5)) if distance is not None else 0.5
+
                 enriched.append({
-                    "id": self._pk_of(r),
-                    "content": r["content"],
-                    "emotion": meta.get("emotion", "neutral"),
-                    "importance": meta.get("importance", 0.5),
-                    "occurred_at": None,
-                    "themes": [],
-                    "entities": [],
-                    "relevance": 0.5,
+                    "id": souvenir.pk,
+                    "content": souvenir.content,
+                    "emotion": souvenir.emotion,
+                    "importance": souvenir.importance,
+                    "occurred_at": souvenir.occurred_at,
+                    "themes": themes,
+                    "entities": entities,
+                    "relevance": relevance,
                 })
                 continue
 
-            souvenir, themes, entities = row
-
-            # Compute base relevance from vector distance (lower = more relevant)
-            distance = r.get("distance")
-            relevance = max(0, 1.0 - (distance or 0.5)) if distance is not None else 0.5
-
+            # Chargement en echec, ou identifiant inexploitable : repli ChromaDB.
+            meta = r.get("metadata", {})
             enriched.append({
-                "id": souvenir.pk,
-                "content": souvenir.content,
-                "emotion": souvenir.emotion,
-                "importance": souvenir.importance,
-                "occurred_at": souvenir.occurred_at,
-                "themes": themes,
-                "entities": entities,
-                "relevance": relevance,
+                "id": pk,
+                "content": r["content"],
+                "emotion": meta.get("emotion", "neutral"),
+                "importance": meta.get("importance", 0.5),
+                "occurred_at": None,
+                "themes": [],
+                "entities": [],
+                "relevance": 0.5,
             })
+
+        await self._evincer_orphelins(orphelins)
         return enriched
+
+    #: Une desynchro massive ne doit pas transformer un rappel en campagne de
+    #: suppression ChromaDB au milieu d'un tour.
+    MAX_ORPHAN_EVICTIONS = 10
+
+    async def _evincer_orphelins(self, pks: list[int]) -> None:
+        """Retire de ChromaDB les entrees dont la ligne ORM a disparu."""
+        if not pks or self.vector_store is None:
+            return
+        for pk in pks[:self.MAX_ORPHAN_EVICTIONS]:
+            logger.warning(
+                "Souvenir #%d present dans ChromaDB mais absent de la base — "
+                "entree orpheline retiree", pk,
+            )
+            try:
+                await vector_call(self.vector_store.remove_souvenir)(pk)
+            except Exception as exc:
+                degradations.record("rappel: retrait souvenir fantome", exc)
 
     # ── Rappels non-lexicaux — ce que le cosinus ne trouvera jamais ──────
 
@@ -660,78 +760,63 @@ class MemoryRetriever:
         contexte du modèle déclaré peut l'élever, jamais l'abaisser).
         """
         cap = max_chars if max_chars and max_chars > 0 else self.MAX_CONTEXT_CHARS
-        lines = ["--- TES SOUVENIRS ---"]
-        current_len = len(lines[0])
+        entete = "--- TES SOUVENIRS ---"
+        lines: list[str] = []
+        current_len = len(entete)
 
-        if connaissances:
-            lines.append("\n[Ce que tu sais]")
-            current_len += len(lines[-1])
-            for c in connaissances:
-                conf_label = self._confidence_label(c["confidence"])
-                entities_str = ""
-                if c["entities"]:
-                    entities_str = f" (concerne: {', '.join(c['entities'])})"
-                # Truncate individual content to avoid one memory dominating
-                content = c["content"][:300]
-                line = f"  - {content}{entities_str} [{conf_label}]"
-                if current_len + len(line) > cap:
+        def _section(titre: str, entrees, rendu) -> None:
+            # L'entête n'est posé qu'APRÈS le corps : « [Quelque chose te
+            # revient] » suivi de rien est, sur petit modèle, une invitation à
+            # inventer le souvenir manquant. Sa longueur est réservée d'avance,
+            # sinon la section dépasserait le plafond de la taille du titre.
+            nonlocal current_len
+            reserve = current_len + len(titre)
+            corps: list[str] = []
+            for e in entrees or ():
+                ligne = rendu(e)
+                if reserve + len(ligne) > cap:
                     break
-                lines.append(line)
-                current_len += len(line)
+                corps.append(ligne)
+                reserve += len(ligne)
+            if not corps:
+                return
+            lines.append(titre)
+            lines.extend(corps)
+            current_len = reserve
 
-        if souvenirs:
-            lines.append("\n[Tes souvenirs vecus]")
-            current_len += len(lines[-1])
-            for s in souvenirs:
-                line = self._souvenir_line(s)
-                if current_len + len(line) > cap:
-                    break
-                lines.append(line)
-                current_len += len(line)
+        def _connaissance_line(c: dict) -> str:
+            conf_label = self._confidence_label(c["confidence"])
+            entities_str = ""
+            if c["entities"]:
+                entities_str = f" (concerne: {', '.join(c['entities'])})"
+            # Truncate individual content to avoid one memory dominating
+            content = c["content"][:300]
+            return f"  - {content}{entities_str} [{conf_label}]"
 
-        if associations:
-            # « Ça me rappelle… » : lié par thème, pas par similarité lexicale.
-            lines.append("\n[Ça t'évoque aussi]")
-            current_len += len(lines[-1])
-            for s in associations:
-                line = self._souvenir_line(s)
-                if current_len + len(line) > cap:
-                    break
-                lines.append(line)
-                current_len += len(line)
+        def _exchange_line(h) -> str:
+            when = "?"
+            if getattr(h, "ts", 0):
+                when = self._time_ago(
+                    datetime.fromtimestamp(h.ts, tz=dt_timezone.utc)
+                )
+            content = (h.content or "").replace("\n", " / ")[:300]
+            return f"  - ({when}) {content}"
 
-        if exchanges:
-            # Verbatim de l'étage épisodique — ce qui s'est réellement dit,
-            # trouvable le jour même, avant toute extraction.
-            lines.append("\n[Echanges recents (mot pour mot)]")
-            current_len += len(lines[-1])
-            for h in exchanges:
-                when = "?"
-                if getattr(h, "ts", 0):
-                    when = self._time_ago(
-                        datetime.fromtimestamp(h.ts, tz=dt_timezone.utc)
-                    )
-                content = (h.content or "").replace("\n", " / ")[:300]
-                line = f"  - ({when}) {content}"
-                if current_len + len(line) > cap:
-                    break
-                lines.append(line)
-                current_len += len(line)
+        _section("\n[Ce que tu sais]", connaissances, _connaissance_line)
+        _section("\n[Tes souvenirs vecus]", souvenirs, self._souvenir_line)
+        # « Ça me rappelle… » : lié par thème, pas par similarité lexicale.
+        _section("\n[Ça t'évoque aussi]", associations, self._souvenir_line)
+        # Verbatim de l'étage épisodique — ce qui s'est réellement dit,
+        # trouvable le jour même, avant toute extraction.
+        _section("\n[Echanges recents (mot pour mot)]", exchanges, _exchange_line)
+        # Le souvenir qui s'impose — cadré comme tel pour que le modèle sache
+        # que c'est une résurgence, pas une réponse à la question.
+        _section("\n[Quelque chose te revient]", intrusions, self._souvenir_line)
 
-        if intrusions:
-            # Le souvenir qui s'impose — cadré comme tel pour que le modèle
-            # sache que c'est une résurgence, pas une réponse à la question.
-            lines.append("\n[Quelque chose te revient]")
-            current_len += len(lines[-1])
-            for s in intrusions:
-                line = self._souvenir_line(s)
-                if current_len + len(line) > cap:
-                    break
-                lines.append(line)
-                current_len += len(line)
-
-        lines.append("\n--- FIN SOUVENIRS ---")
-        return "\n".join(lines)
+        if not lines:
+            # Un bloc réduit à son entête est le même défaut, un cran au-dessus.
+            return ""
+        return "\n".join([entete, *lines, "\n--- FIN SOUVENIRS ---"])
 
     # L'historique emotionnel avec une personne ne se lit plus ici. Il vivait
     # en double : `context._fetch_person_context` pose deja la meme question a

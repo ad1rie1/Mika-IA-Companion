@@ -10,7 +10,9 @@ exchanges, realistic time gaps simulate real stream pacing.
 
 Tests:
 - Emotion decay between messages works correctly
-- Long idle periods reset emotions to default
+- Long idle periods reset emotions to default — on the delivered time scale
+  (settled after ~30 min, still readable after 5), not the ~27 s the engine
+  used to take before audit finding B2
 - Re-engagement after silence works naturally
 - System stability over many turns (50+ exchanges)
 """
@@ -162,40 +164,102 @@ class TestLongConversation:
         assert dist_home_after <= dist_home_before + 1e-9, \
             f"State should not drift further from home during pause: {dist_home_before:.3f} -> {dist_home_after:.3f}"
 
-    def test_five_minute_pause_settles_near_home(self, engine):
-        """A 5-minute bio break should settle the state near home."""
+    def test_five_minute_pause_keeps_the_emotion_readable(self, engine):
+        """5 min later the impulse is still readable; 30 min later it is gone.
+
+        This pin used to assert the opposite — under 0.1 from home after five
+        minutes. It changed because the intention changed: audit finding B2
+        measured the return to rest at ~27 s against turns lasting 30-120 s,
+        so the emotion of a turn only existed *between* turns and everything
+        reading the position (prompt, snapshot, affect panel, gestures) read
+        rest. The time constant is now ~11.6 min at the default
+        `recovery_speed`, and surviving a bio break is the wanted behaviour.
+
+        Stated as a fraction of the distance the impulse itself covered: the
+        offset to home obeys a linear ODE, so that fraction is exactly the
+        same whatever the home vector, and the pin does not depend on the
+        hour the suite runs at. Discriminant at both ends — the ~27 s engine
+        leaves ~0 % after five minutes, an engine that never comes back
+        leaves 100 % after thirty. Measured here: 87.6 % and 2.0 %.
+        """
         from emotion import pad
         pid = "regular_viewer"
 
         engine.process_emotion(EmotionData(Emotion.EXCITED, 0.8), pid)
+        home = engine._home_vector()
+        travelled = pad.distance(
+            engine._get_person_mood(pid).dynamic.position, home
+        )
+
         simulate_time_decay(engine, 300.0)
+        mood = engine._get_person_mood(pid)
+        after_5min = pad.distance(mood.dynamic.position, home)
+        assert after_5min > 0.5 * travelled, (
+            f"5-minute pause should leave the impulse readable: "
+            f"{after_5min:.3f} of {travelled:.3f}"
+        )
+        assert mood.emotion is Emotion.EXCITED, (
+            f"5 min later the state should still read as the emotion that "
+            f"created it, got {mood.emotion.value}"
+        )
 
-        pos = engine._get_person_mood(pid).dynamic.position
-        dist_home = pad.distance(pos, engine._home_vector())
-        assert dist_home < 0.1, \
-            f"5-minute pause should settle near home: distance={dist_home:.3f}"
+        simulate_time_decay(engine, 1500.0)  # 30 minutes in total
+        after_30min = pad.distance(
+            engine._get_person_mood(pid).dynamic.position, home
+        )
+        assert after_30min < 0.1 * travelled, (
+            f"30-minute pause should settle back to home: "
+            f"{after_30min:.3f} of {travelled:.3f}"
+        )
 
-    def test_ten_minute_pause_nearly_resets(self, engine):
-        """A 10-minute pause should nearly reset emotions to default."""
+    def test_thirty_minute_pause_drains_the_anger(self, engine):
+        """Anger survives a 10-minute pause and is gone after 30.
+
+        Same intention change as the test above (audit finding B2): the two
+        assertions this test always carried — bounded intensity, non-negative
+        valence — are unchanged, they are simply read at 30 minutes instead of
+        10. What is new is the lower bound at 10 minutes, without which the
+        test would still pass on the very engine B2 condemned, the one where a
+        ten-turn argument was archived as `playful`.
+
+        The 10-minute check reads the *direction* of the residue rather than
+        its label: at that distance the position is the sum of the residue and
+        the circadian home, and outside the night phase the nearest anchor is
+        `determined`, not `angry`. The dot product with the impulse target is
+        what says "the anger is still in there" independently of the hour.
+        """
+        from emotion import pad
         pid = "regular_viewer"
+        target = pad.label_to_pad(Emotion.ANGRY, 0.6)
 
         engine.process_emotion(EmotionData(Emotion.ANGRY, 0.6), pid)
+        home = engine._home_vector()
+        travelled = pad.distance(
+            engine._get_person_mood(pid).dynamic.position, home
+        )
 
         simulate_time_decay(engine, 600.0)
-        mood = engine._get_person_mood(pid)
+        offset = pad.sub(engine._get_person_mood(pid).dynamic.position, home)
+        assert pad.norm(offset) > 0.4 * travelled, (
+            f"10-minute pause should not erase a dispute: "
+            f"{pad.norm(offset):.3f} of {travelled:.3f}"
+        )
+        assert pad.dot(offset, target) > 0.0, \
+            "The residue after 10 min should still point toward the anger"
 
-        # After 10 minutes, anger should be gone. The oscillator now settles
-        # at the home vector (default_mood × 0.15 + circadian bias × 0.35)
-        # whose magnitude is ~0.4 max, and the emotion there is never angry.
-        # So: no anger residual + bounded intensity.
-        from emotion import pad
+        simulate_time_decay(engine, 1200.0)  # 30 minutes in total
+        mood = engine._get_person_mood(pid)
+        assert pad.distance(mood.dynamic.position, home) < 0.1 * travelled, (
+            f"30-minute pause should drain to home: "
+            f"{mood.emotion.value}({mood.intensity:.2f})"
+        )
         assert mood.intensity < 0.5, (
-            f"10-minute pause should drain to home magnitude: "
+            f"30-minute pause should drain to home magnitude: "
             f"{mood.emotion.value}({mood.intensity:.2f})"
         )
         # Anger is negative valence — the settled home must be non-negative.
         assert pad.valence(mood.emotion) >= 0.0, \
-            f"Residual negative emotion after 10 min: {mood.emotion.value}"
+            f"Residual negative emotion after 30 min: {mood.emotion.value}"
 
     def test_re_engagement_after_silence(self, engine):
         """After a long pause, a new message should re-engage naturally.

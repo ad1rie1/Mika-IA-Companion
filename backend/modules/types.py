@@ -32,8 +32,9 @@ class ToolParameter:
 class ModuleTool:
     """Tool definition that a module exposes to Claude.
 
-    The ModuleManager converts these into SdkMcpTool instances
-    for the claude_agent_sdk MCP server.
+    Provider-agnostic on purpose: each provider translates it into its own
+    tool protocol — for Claude, a ``tools=[...]`` declaration on the native
+    Messages API.
     """
 
     name: str

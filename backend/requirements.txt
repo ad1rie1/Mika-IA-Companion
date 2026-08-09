@@ -3,7 +3,6 @@ channels>=4.0
 django-cors-headers>=4.0
 django-environ>=0.11
 anthropic>=0.42.0
-claude_agent_sdk>=0.1.0
 openai>=1.0.0
 ollama>=0.4.0
 google-genai>=1.0.0

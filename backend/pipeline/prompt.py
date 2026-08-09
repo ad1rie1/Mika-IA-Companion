@@ -18,14 +18,34 @@ thing that runs.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 
-from ai.chat import HISTORY_MSG_MAX_CHARS, ChatPrompt
+from ai.chat import HISTORY_MSG_MAX_CHARS, ChatPrompt, VolatileBlock
 from config.personality import personality
+from emotion.types import Emotion
 from pipeline.context import ConversationContext
 from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
+
+# La forme exacte que `retriever._souvenir_line` produit : `f" [{emotion}]"`.
+# Ancré sur l'espace qui précède, donc un entête de section en début de ligne
+# (`[Ce que tu sais]`) et les libellés de confiance (`[certain]`) ne matchent
+# jamais.
+_EMOTION_TAG_RE = re.compile(
+    r"\s\[(?:" + "|".join(e.value for e in Emotion) + r")\]"
+)
+
+
+def _strip_emotion_tags(text: str) -> str:
+    """Retire les marqueurs `[angry]` du rendu mémoire.
+
+    Le retriever ne peut pas les omettre lui-même : `memory_context` est
+    calculé dans `gather_context` avant la détection de projet, donc il ne
+    connaît structurellement pas la politique du tour.
+    """
+    return _EMOTION_TAG_RE.sub("", text)
 
 # Mention posée dans le créneau du résumé quand la compaction est inactive et
 # que le fil dépasse quand même le budget L3 : une coupe visible plutôt que
@@ -77,6 +97,9 @@ class _Layer:
     footer: str = "--- FIN ---"
     # Suppressed when an active project runs in professional mode.
     muted_by_project: bool = False
+    # Nettoyé des marqueurs `[emotion]` dans ce même mode — le bloc porte
+    # autre chose que de l'affect et ne peut donc pas être coupé en entier.
+    strip_emotion_tags: bool = False
 
 
 # Order matters for the model's attention. Personality, self-concept,
@@ -98,11 +121,26 @@ _LAYERS: tuple[_Layer, ...] = (
     # withholds private material when certainty is too low; this says why.
     _Layer("identity_context", "--- QUI TU AS EN FACE ---"),
     _Layer("person_context", "--- CE QUE TU SAIS DE CETTE PERSONNE ---"),
-    _Layer("user_mood_hint", "--- CE QUE TU PERCOIS DE SON ETAT ---"),
+    # Le mode professionnel coupe TOUS les canaux affectifs, pas seulement
+    # l'état émotionnel : lire le ton de l'interlocuteur, s'autoriser à être
+    # « moins parfaite », ruminer et proposer de raconter un rêve sont autant
+    # de contradictions à trois lignes d'une directive « ton factuel et posé
+    # uniquement ». Le rythme et le fil d'hier restent : ce sont des faits,
+    # pas de l'affect.
+    _Layer(
+        "user_mood_hint", "--- CE QUE TU PERCOIS DE SON ETAT ---",
+        muted_by_project=True,
+    ),
     _Layer("circadian_context", "--- TON RYTHME ---"),
-    _Layer("fatigue_fog", "--- ETAT COGNITIF ---"),
-    _Layer("rumination_context", "--- CE QUI TE TROTTE DANS LA TETE ---"),
-    _Layer("dream_context", "--- CE QUE TU AS REVE CETTE NUIT ---"),
+    _Layer("fatigue_fog", "--- ETAT COGNITIF ---", muted_by_project=True),
+    _Layer(
+        "rumination_context", "--- CE QUI TE TROTTE DANS LA TETE ---",
+        muted_by_project=True,
+    ),
+    _Layer(
+        "dream_context", "--- CE QUE TU AS REVE CETTE NUIT ---",
+        muted_by_project=True,
+    ),
     _Layer("journal_context", "--- TON FIL D'HIER ---"),
     _Layer("module_context", "--- CONTEXTE MODULES ---", "--- FIN CONTEXTE MODULES ---"),
     # Last of the "slow" zone but before the emotional state: when a project
@@ -116,8 +154,10 @@ _LAYERS: tuple[_Layer, ...] = (
         "emotion_context", "--- TON ETAT EMOTIONNEL ACTUEL ---",
         "--- FIN ETAT EMOTIONNEL ---", muted_by_project=True,
     ),
-    # Retrieved memories arrive pre-formatted by the retriever.
-    _Layer("memory_context", None),
+    # Retrieved memories arrive pre-formatted by the retriever — including a
+    # `[angry]` per souvenir, rendered *after* the project directive, in the
+    # recency zone that weighs most.
+    _Layer("memory_context", None, strip_emotion_tags=True),
     # La pensée pré-verbale de la passe de préparation ferme le prompt : la
     # récence est la position qui pèse le plus, et c'est la seule couche qui
     # dit quelque chose sur CE tour précis plutôt que sur l'état ambiant.
@@ -142,12 +182,14 @@ def _render_layer(layer: _Layer, value: str) -> str:
     return f"{layer.header}\n{value}\n{layer.footer}"
 
 
-def build_prompt_parts(context: ConversationContext) -> tuple[str, str]:
-    """Return ``(stable, volatile)`` — the system prompt split on volatility.
+def _assemble(context: ConversationContext) -> tuple[str, list[VolatileBlock]]:
+    """``(stable, blocs volatils)`` — le rendu ET sa décomposition, une passe.
 
-    ``stable + "\\n\\n" + volatile`` is byte-identical to what
-    :func:`build_system_prompt` returns; a test pins that equivalence so the
-    split can never drift from the legacy rendering.
+    La borne globale du tour (``ai.budget.fit_turn``) doit pouvoir couper une
+    couche *nommée* sans laisser un « --- CE QUE TU SAIS DE CETTE PERSONNE ---
+    » sans sa fin : elle a besoin des blocs, pas seulement de leur
+    concaténation. Les reconstruire ailleurs aurait fait deux tables d'ordre à
+    tenir d'accord, ce que `_LAYERS` existe précisément pour éviter.
     """
     suppress_emotion = context.project_suppresses_emotion
 
@@ -161,7 +203,7 @@ def build_prompt_parts(context: ConversationContext) -> tuple[str, str]:
         project_suppresses_emotion=suppress_emotion,
     )
 
-    volatile_blocks: list[str] = []
+    blocks: list[VolatileBlock] = []
     for index, layer in enumerate(_LAYERS):
         # Strict getattr, no default: a typo in a layer's field name would
         # otherwise read as "this block is empty" and drop it from every
@@ -172,13 +214,37 @@ def build_prompt_parts(context: ConversationContext) -> tuple[str, str]:
             continue
         if layer.muted_by_project and suppress_emotion:
             continue
-        rendered = _render_layer(layer, value)
+        if layer.strip_emotion_tags and suppress_emotion:
+            value = _strip_emotion_tags(value)
         if index < _STABLE_LAYER_COUNT:
-            stable += "\n\n" + rendered
+            stable += "\n\n" + _render_layer(layer, value)
         else:
-            volatile_blocks.append(rendered)
+            blocks.append(VolatileBlock(
+                field=layer.field, value=value,
+                header=layer.header, footer=layer.footer,
+            ))
 
-    return stable, "\n\n".join(volatile_blocks)
+    return stable, blocks
+
+
+def _render_volatile(blocks: list[VolatileBlock]) -> str:
+    """Concaténation rendue des blocs volatils.
+
+    Même forme que la recomposition d'après coupe dans ``ai.budget.fit_turn``
+    — un bloc vidé disparaît avec son en-tête. Un test pin l'accord des deux.
+    """
+    return "\n\n".join(b.render() for b in blocks if b.value)
+
+
+def build_prompt_parts(context: ConversationContext) -> tuple[str, str]:
+    """Return ``(stable, volatile)`` — the system prompt split on volatility.
+
+    ``stable + "\\n\\n" + volatile`` is byte-identical to what
+    :func:`build_system_prompt` returns; a test pins that equivalence so the
+    split can never drift from the legacy rendering.
+    """
+    stable, blocks = _assemble(context)
+    return stable, _render_volatile(blocks)
 
 
 def build_system_prompt(context: ConversationContext) -> str:
@@ -209,15 +275,37 @@ def build_chat_prompt(context: ConversationContext, message: str) -> ChatPrompt:
     (jusqu'à ``memory.short_term_limit`` messages, défaut 500). On borne la
     *copie* de rendu, jamais le buffer — la compaction et la réhydratation en
     restent maîtresses.
+
+    Le tour entier est ensuite ramené dans la fenêtre : chaque bloc porte son
+    plafond, leur SOMME n'était mesurée nulle part, et un dépassement fait
+    tronquer le provider **par la tête** — le préfixe stable, c'est-à-dire la
+    personnalité. Les déclarations d'outils y comptent (~6 500 tokens pour les
+    neuf modules embarqués) : elles partent sur le fil sans apparaître dans
+    aucun des deux prompts, donc sans ce terme le budget promettait une place
+    déjà occupée.
     """
-    stable, volatile = build_prompt_parts(context)
+    stable, blocks = _assemble(context)
     history = list(context.history or [])
     summary = context.conversation_summary
+    tools_chars = 0
 
     try:
-        from ai.budget import conversation_l3_chars
+        from ai.budget import conversation_l3_chars, tool_weight, tools_prompt_chars
+        from ai.router import AIRole
 
-        history, dropped = _trim_history_to_l3(history, conversation_l3_chars())
+        tools_chars = tools_prompt_chars(context.tools)
+        if tools_chars:
+            # Le relevé porte la valeur jusqu'aux appelants sans outils sous la
+            # main — la compaction, qui décide *quand* replier le fil, appelle
+            # `conversation_l3_chars()` sans argument. Sans ce dépôt les deux
+            # viseraient deux tailles : le compactor laisserait grossir jusqu'à
+            # 7 864 caractères pendant que le rendu en enverrait 4 000. Un tour
+            # sans outils (conscience, `include_tools=False`) ne dit rien du
+            # poids d'un tour outillé et n'écrase donc pas le relevé.
+            tool_weight.note(AIRole.CONVERSATION.value, tools_chars)
+        history, dropped = _trim_history_to_l3(
+            history, conversation_l3_chars(tools_chars),
+        )
     except Exception as exc:
         degradations.record("prompt: borne historique L3", exc)
         dropped = 0
@@ -239,13 +327,39 @@ def build_chat_prompt(context: ConversationContext, message: str) -> ChatPrompt:
             dropped,
         )
 
-    return ChatPrompt(
+    prompt = ChatPrompt(
         system_stable=stable,
-        system_volatile=volatile,
+        system_volatile=_render_volatile(blocks),
         history=history,
         message=message,
         conversation_summary=summary,
+        volatile_blocks=blocks,
     )
+
+    try:
+        from ai.budget import (
+            budget_for,
+            build_budget,
+            default_window_tokens,
+            fit_turn,
+        )
+        from ai.router import AIRole
+
+        budget = budget_for(AIRole.CONVERSATION, tools_chars=tools_chars)
+        if budget is None:
+            # Même repli que le budget L3 : « fenêtre non déclarée » ne peut
+            # pas vouloir dire « pas de borne », sinon le seul cas où la
+            # troncature par la tête est certaine est aussi le seul où rien ne
+            # la retient. La coupe vise la place PHYSIQUE (`window_room`), pas
+            # `usable_tokens` — derrière un modèle 200k dont la fenêtre n'est
+            # simplement pas déclarée, viser la cible viderait le prompt à
+            # chaque tour.
+            budget = build_budget(default_window_tokens(), tools_chars=tools_chars)
+        prompt, _fit = fit_turn(prompt, budget)
+    except Exception as exc:
+        degradations.record("prompt: borne globale du tour", exc)
+
+    return prompt
 
 
 def format_conversation(

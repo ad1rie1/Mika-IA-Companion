@@ -268,7 +268,12 @@ class ForgeAPI:
         self._manifest = manifest
         self._host = host                     # ForgeModule (hôte)
         self._loop = None                     # boucle asyncio, injectée à load
-        self._last_notify_mono: float = 0.0
+        # `None` = jamais notifié. Le point de référence de `time.monotonic()`
+        # est indéfini (sous Linux, le démarrage de la machine) : un `0.0`
+        # sentinelle est un instant comme un autre, donc tant que la machine
+        # tournait depuis moins que le cooldown, le tout premier `notify_ai`
+        # du processus était refusé.
+        self._last_notify_mono: float | None = None
         self._emit_window: deque = deque()
         self._http_calls_this_run = 0
         self._log_calls_this_run = 0
@@ -326,7 +331,9 @@ class ForgeAPI:
         """
         cooldown = float(_limit("forge.notify_cooldown_s", 300))
         now = time.monotonic()
-        if now - self._last_notify_mono < cooldown:
+        if self._last_notify_mono is not None and (
+            now - self._last_notify_mono < cooldown
+        ):
             self._write_log_budgeted("warning", "system",
                                      f"notify_ai ignoré (cooldown {cooldown:.0f}s)")
             return False

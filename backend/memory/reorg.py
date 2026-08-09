@@ -10,7 +10,12 @@ Quatrième phase du sommeil (après journal, rêves, digestion) :
    son propre appel d'extraction, au lieu du flux linéaire — « il y a eu
    trois conversations aujourd'hui : le projet, la dispute, les vacances ».
    Réutilise ``consolidator.store_extractions`` (dédoublonnage-renforcement
-   et contrôles de contradiction gratuits).
+   et contrôles de contradiction gratuits). Ne porte que sur ce qui reste
+   **au-dessus du checkpoint du consolidateur** : à 3 h, le fil de l'eau a
+   normalement déjà couvert la journée, et re-passer les mêmes chunks créait
+   des paraphrases jumelles que le dédoublonnage ne rattrapait qu'à moitié.
+   Le chemin reste vivant pour ce que la journée n'a pas pu extraire — un
+   provider mort tout l'après-midi laisse justement ce backlog derrière lui.
 3. **Dédoublonnage des souvenirs du jour** sans LLM : auto-requête
    vectorielle, paires quasi identiques fusionnées (importance max, M2M
    unis, FK repointées, perdant retiré de Chroma puis supprimé — le pattern
@@ -117,13 +122,17 @@ class NightlyReorg:
             chunks, threshold,
         )
 
+        checkpoint = await self._extraction_checkpoint()
+
         extracted = 0
         used_clusters = 0
         for items in clusters:
             total_chars = sum(len(c.get("content") or "") for c in items)
             if total_chars < MIN_CLUSTER_CHARS:
                 continue
-            messages = await self._fetch_cluster_messages(items)
+            messages = await self._fetch_cluster_messages(
+                items, min_message_id=checkpoint,
+            )
             if not messages:
                 continue
             used_clusters += 1
@@ -133,8 +142,11 @@ class NightlyReorg:
             ]
             try:
                 extractions = await extractor.analyze_messages(msg_dicts)
+                if extractions is None:
+                    continue
                 counts = await consolidator.store_extractions(
                     extractions, interlocutors=interlocutors,
+                    occurred_at=messages[-1].get("created_at"),
                 )
                 extracted += sum(counts.values())
             except Exception as exc:
@@ -143,8 +155,26 @@ class NightlyReorg:
         return {"chunks": len(chunks), "clusters": used_clusters, "extracted": extracted}
 
     @staticmethod
-    async def _fetch_cluster_messages(items: list[dict]) -> list[dict]:
-        """Verbatim SQL des plages du cluster, borné à MAX_CLUSTER_CHARS."""
+    async def _extraction_checkpoint() -> int:
+        from memory.models import ConsolidationLog
+
+        return await sync_to_async(
+            lambda: ConsolidationLog.objects.order_by("-pk")
+            .values_list("last_message_id", flat=True)
+            .first()
+            or 0
+        )()
+
+    @staticmethod
+    async def _fetch_cluster_messages(
+        items: list[dict], *, min_message_id: int = 0,
+    ) -> list[dict]:
+        """Verbatim SQL des plages du cluster, borné à MAX_CLUSTER_CHARS.
+
+        ``min_message_id`` = le checkpoint du consolidateur : en dessous, le
+        fil de l'eau a déjà extrait, et un cluster entièrement couvert repart
+        vide (donc sans appel LLM ni doublon).
+        """
         from django.db.models import Q
 
         from memory.models import Message
@@ -163,9 +193,11 @@ class NightlyReorg:
             for first, last in ranges:
                 q |= Q(pk__gte=first, pk__lte=last)
             rows = list(
-                user_facing_messages(Message.objects.filter(q))
+                user_facing_messages(
+                    Message.objects.filter(q).filter(pk__gt=min_message_id)
+                )
                 .order_by("pk")
-                .values("id", "role", "content", "person_id")
+                .values("id", "role", "content", "person_id", "created_at")
             )
             out, size = [], 0
             for r in rows:
@@ -213,9 +245,13 @@ class NightlyReorg:
         except Exception:
             max_distance = 0.12
 
+        # ``__gte`` et non ``=`` : les copies écrites par la passe en cours
+        # portent ``created_at`` = nuit+1, donc le dédoublonnage ne voyait
+        # jamais ce que la nuit venait de produire — ni les souvenirs
+        # réflexifs de la digestion, écrits juste avant.
         todays = await sync_to_async(
             lambda: list(
-                Souvenir.objects.filter(created_at__date=night)
+                Souvenir.objects.filter(created_at__date__gte=night)
                 .order_by("pk")
                 .values("id", "content", "importance")
             )

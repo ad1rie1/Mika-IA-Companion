@@ -21,6 +21,11 @@ class MemoryManager:
         )
         self.conversation = None
         self._initialized = False
+        # Lu par la couche prompt : sans ça, une mémoire longue en panne est
+        # indistinguable de « rien à dire », donc Mika simule l'amnésie au
+        # lieu de pouvoir dire qu'elle ne peut pas y accéder. Dit « le dernier
+        # rappel tenté a échoué », pas « les deux voies sont mortes ».
+        self.recall_unavailable = False
         # Résumé roulant du fil (compaction) — chargé à la réhydratation,
         # réécrit par fold_into_summary. "" tant qu'aucune passe n'a tourné.
         self.conversation_summary = ""
@@ -314,12 +319,17 @@ class MemoryManager:
         should still recall general knowledge).
         """
         if not self.retriever:
+            self.recall_unavailable = True
             return ""
         try:
-            return await self.retriever.retrieve(query, person_id=person_id)
-        except Exception:
+            bloc = await self.retriever.retrieve(query, person_id=person_id)
+        except Exception as exc:
+            degradations.record("rappel memoire simple", exc)
             logger.exception("Memory retrieval error")
+            self.recall_unavailable = True
             return ""
+        self.recall_unavailable = False
+        return bloc
 
     async def get_memory_context_multi(
         self,
@@ -334,15 +344,20 @@ class MemoryManager:
         ``salience_boost`` (charge émotionnelle du tour, plan de préparation)
         monte les poids émotion/humeur du re-ranking pour ce tour."""
         if not self.retriever:
+            self.recall_unavailable = True
             return ""
         try:
-            return await self.retriever.retrieve_multi(
+            bloc = await self.retriever.retrieve_multi(
                 queries, person_id=person_id, extra_exchanges=extra_exchanges,
                 salience_boost=salience_boost,
             )
-        except Exception:
+        except Exception as exc:
+            degradations.record("rappel memoire multi", exc)
             logger.exception("Memory multi-retrieval error")
+            self.recall_unavailable = True
             return ""
+        self.recall_unavailable = False
+        return bloc
 
     # ── Souvenir operations (used by Conscience) ───────────────────
 

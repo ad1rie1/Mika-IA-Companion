@@ -42,6 +42,7 @@ def make_context(
     acts_today=0,
     consecutive_ignored_acts=0,
     pending_observations=None,
+    sleep_phase="awake",
 ) -> DecisionContext:
     return DecisionContext(
         pending_observations=pending_observations or [],
@@ -55,6 +56,7 @@ def make_context(
         consecutive_waits=consecutive_waits,
         acts_today=acts_today,
         consecutive_ignored_acts=consecutive_ignored_acts,
+        sleep_phase=sleep_phase,
     )
 
 

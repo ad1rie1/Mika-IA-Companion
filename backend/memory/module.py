@@ -17,15 +17,97 @@ Thin adapter over ``memory_manager`` + the ORM, same pattern as
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 from modules.base import BaseModule
 from modules.types import ModuleTool, ToolParameter, ToolParameterType
+from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
 # Ceilings so a tool answer never blows up the conversation budget.
 MAX_SEARCH_RESULTS = 8
 MAX_JOURNALS = 7
+
+REFUS_JOURNAL = (
+    "Tu n'es pas assez sure de qui tu as en face pour relire ton journal a "
+    "voix haute : il raconte tes journees et les gens que tu as croises."
+)
+REFUS_ENGAGEMENTS = (
+    "Tu ne sais pas assez qui tu as en face pour parler de tes engagements : "
+    "ils concernent d'autres personnes."
+)
+REFUS_RECHERCHE = (
+    "Tu ne sais pas assez qui tu as en face pour fouiller ce que d'autres "
+    "t'ont confie. Reste sur ce que tu sais de general."
+)
+
+
+@dataclass(frozen=True)
+class _Perimetre:
+    """Ce que le tour en cours a le droit de sortir de la memoire."""
+
+    interne: bool
+    divulgation: bool
+    entity_id: int | None
+
+
+async def _perimetre() -> _Perimetre:
+    """Qui appelle l'outil, et jusqu'ou peut-il lire.
+
+    Les outils memoire sont exposes a *toutes* les conversations, alors que
+    le bloc prompt equivalent passe par ``may_disclose_private_context``.
+    Sans cette porte, un inconnu obtient par l'outil la fiche que le prompt
+    lui refuse — meme defaut que celui deja corrige dans ``files/service.py``.
+
+    Un ``person_id`` interne (conscience, projets, boucle de fond) n'a
+    personne en face : acces complet. Une panne de la couche identite ferme
+    la porte plutot que de l'ouvrir — c'est une porte.
+    """
+    from identity.trust import is_internal_person
+    from pipeline.tracing import current_person_id
+
+    person_id = current_person_id()
+    if is_internal_person(person_id):
+        return _Perimetre(True, True, None)
+    try:
+        from identity.resolver import identity_resolver
+
+        ctx = await identity_resolver.resolve_context(person_id)
+        return _Perimetre(False, bool(ctx.may_disclose), ctx.entity_id)
+    except Exception as exc:
+        degradations.record("outils memoire: perimetre", exc)
+        return _Perimetre(False, False, None)
+
+
+def _pk_of(row) -> int | None:
+    """Le pk ORM d'une ligne ChromaDB (``id`` textuel) ou d'une ligne ORM."""
+    brut = row.get("id") if isinstance(row, dict) else getattr(row, "pk", None)
+    try:
+        return int(brut)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _sans_les_autres(rows: list, model, perimetre: _Perimetre) -> list:
+    """Ecarte les lignes rattachees a quelqu'un d'autre que l'interlocuteur.
+
+    Une ligne dont le pk est illisible est ecartee elle aussi : on ne peut
+    pas verifier de qui elle parle.
+    """
+    if not rows:
+        return rows
+    from memory import read
+
+    pks = [_pk_of(r) for r in rows]
+    try:
+        autrui = await read.rows_mentioning_others(
+            model, pks, entity_id=perimetre.entity_id,
+        )
+    except Exception as exc:
+        degradations.record("outils memoire: filtrage tiers", exc)
+        return []
+    return [r for r, pk in zip(rows, pks) if pk is not None and pk not in autrui]
 
 
 class MemoryToolsModule(BaseModule):
@@ -160,6 +242,19 @@ class MemoryToolsModule(BaseModule):
                 query, n=MAX_SEARCH_RESULTS
             )
 
+        perimetre = await _perimetre()
+        if not perimetre.interne and not perimetre.divulgation:
+            from memory.models import Connaissance, Souvenir
+
+            retenus_s = await _sans_les_autres(souvenirs, Souvenir, perimetre)
+            retenues_c = await _sans_les_autres(
+                connaissances, Connaissance, perimetre
+            )
+            ecarte = len(retenus_s) < len(souvenirs) or len(retenues_c) < len(connaissances)
+            souvenirs, connaissances = retenus_s, retenues_c
+            if ecarte and not souvenirs and not connaissances:
+                return {"message": REFUS_RECHERCHE}
+
         def _fmt(row: dict) -> dict:
             meta = row.get("metadata") or {}
             out = {"content": row.get("content", "")}
@@ -184,6 +279,14 @@ class MemoryToolsModule(BaseModule):
         rows = await memory_manager.get_important_souvenirs(
             min_importance=0.3, limit=limit
         )
+        perimetre = await _perimetre()
+        if rows and not perimetre.interne and not perimetre.divulgation:
+            from memory.models import Souvenir
+
+            retenus = await _sans_les_autres(rows, Souvenir, perimetre)
+            if not retenus:
+                return {"message": REFUS_RECHERCHE}
+            rows = retenus
         if not rows:
             return {"message": "Aucun souvenir marquant recemment."}
         return {
@@ -202,6 +305,12 @@ class MemoryToolsModule(BaseModule):
     async def _read_journal(params: dict) -> dict:
         from asgiref.sync import sync_to_async
         from memory.models import DailyJournal
+
+        # Un journal nomme les gens croises dans la journee : il est du
+        # meme cote de la porte que la fiche d'une personne.
+        perimetre = await _perimetre()
+        if not perimetre.interne and not perimetre.divulgation:
+            return {"message": REFUS_JOURNAL}
 
         date_str = (params.get("date") or "").strip()
 
@@ -244,10 +353,22 @@ class MemoryToolsModule(BaseModule):
 
         include_resolved = bool(params.get("include_resolved"))
 
+        perimetre = await _perimetre()
+        if not perimetre.interne and not perimetre.divulgation:
+            return {"message": REFUS_ENGAGEMENTS}
+
         def _fetch():
+            from django.db.models import Q
+
             qs = Commitment.objects.select_related("person").order_by("-created_at")
             if not include_resolved:
                 qs = qs.filter(status="pending")
+            if not perimetre.interne:
+                # Ce que la personne en face peut legitimement s'entendre
+                # dire — exactement ce que le bloc prompt lui montre deja.
+                qs = qs.filter(
+                    Q(person__isnull=True) | Q(person_id=perimetre.entity_id)
+                )
             return list(qs[:15])
 
         rows = await sync_to_async(_fetch)()
@@ -280,10 +401,21 @@ class MemoryToolsModule(BaseModule):
         if status not in ("honored", "dropped"):
             return {"error": "status doit etre 'honored' ou 'dropped'"}
 
+        perimetre = await _perimetre()
+        if not perimetre.interne and not perimetre.divulgation:
+            return {"message": REFUS_ENGAGEMENTS}
+
         def _resolve() -> int:
-            return Commitment.objects.filter(
-                pk=commitment_id, status="pending"
-            ).update(status=status, resolved_at=timezone.now())
+            from django.db.models import Q
+
+            qs = Commitment.objects.filter(pk=commitment_id, status="pending")
+            if not perimetre.interne:
+                # Hors perimetre, la reponse doit etre celle d'un id
+                # inexistant : confirmer la ligne serait deja une fuite.
+                qs = qs.filter(
+                    Q(person__isnull=True) | Q(person_id=perimetre.entity_id)
+                )
+            return qs.update(status=status, resolved_at=timezone.now())
 
         updated = await sync_to_async(_resolve)()
         if not updated:

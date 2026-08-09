@@ -47,3 +47,6 @@ class DecisionContext:
     # Energy level from DriveEngine.energy_level() — combines circadian
     # phase + REST drive. Low energy = less likely to speak spontaneously.
     energy: float = 1.0
+    # Phase du cycle de sommeil (SleepPhase). Défaut = valeur éveillée, donc
+    # un contexte qui ne la renseigne pas score exactement comme avant.
+    sleep_phase: str = "awake"

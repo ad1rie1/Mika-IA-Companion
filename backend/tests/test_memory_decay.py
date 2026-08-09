@@ -27,6 +27,39 @@ async def _run_decay():
     await _make_consolidator()._decay_souvenirs()
 
 
+def _boost_pendant_la_passe(monkeypatch, pk, valeur):
+    """Sceau déterministe : la Conscience booste juste après la lecture du lot.
+
+    Le lot est matérialisé à T0 puis traité avec des ``await`` — c'est
+    exactement la fenêtre dans laquelle ``boost_souvenirs_by_themes`` écrit
+    ``save(update_fields=["importance"])``. Le premier appel à
+    ``sync_to_async`` du passage EST cette lecture.
+    """
+    from asgiref.sync import sync_to_async as vrai
+
+    import memory.storage.consolidator as consolidator_mod
+
+    etat = {"appels": 0}
+
+    def spy(fn, *args, **kwargs):
+        enveloppe = vrai(fn, *args, **kwargs)
+
+        async def _appel(*a, **kw):
+            resultat = await enveloppe(*a, **kw)
+            etat["appels"] += 1
+            if etat["appels"] == 1:
+                from memory.models import Souvenir
+
+                await vrai(
+                    lambda: Souvenir.objects.filter(pk=pk).update(importance=valeur)
+                )()
+            return resultat
+
+        return _appel
+
+    monkeypatch.setattr(consolidator_mod, "sync_to_async", spy)
+
+
 @pytest.mark.django_db(transaction=True)
 class TestSouvenirDecay:
 
@@ -129,3 +162,41 @@ class TestSouvenirDecay:
         exists = await sync_to_async(
             Souvenir.objects.filter(pk=s.pk).exists)()
         assert not exists
+
+    @pytest.mark.asyncio
+    async def test_un_boost_tombe_pendant_la_passe_n_est_pas_detruit(self, monkeypatch):
+        """C'est précisément le vieux souvenir que le boost existe pour ranimer."""
+        from memory.models import Souvenir
+
+        now = timezone.now()
+        s = await sync_to_async(Souvenir.objects.create)(
+            content="souvenir que la Conscience vient de retrouver",
+            importance=0.11,
+            occurred_at=now - timedelta(days=400),
+            decayed_at=now - timedelta(days=400),
+        )
+        _boost_pendant_la_passe(monkeypatch, s.pk, 0.61)
+
+        await _run_decay()
+
+        assert await sync_to_async(Souvenir.objects.filter(pk=s.pk).exists)()
+        await sync_to_async(s.refresh_from_db)()
+        assert s.importance == pytest.approx(0.61)
+
+    @pytest.mark.asyncio
+    async def test_un_boost_tombe_pendant_la_passe_n_est_pas_ecrase(self, monkeypatch):
+        from memory.models import Souvenir
+
+        now = timezone.now()
+        s = await sync_to_async(Souvenir.objects.create)(
+            content="souvenir vieillissant mais pertinent",
+            importance=0.5,
+            occurred_at=now - timedelta(days=10),
+            decayed_at=now - timedelta(days=10),
+        )
+        _boost_pendant_la_passe(monkeypatch, s.pk, 1.0)
+
+        await _run_decay()
+
+        await sync_to_async(s.refresh_from_db)()
+        assert s.importance == pytest.approx(1.0)

@@ -2,11 +2,12 @@ import asyncio
 import logging
 import random
 import time
+from dataclasses import dataclass
 from datetime import date, timedelta
 
 from django.conf import settings
 
-from emotion import pad
+from emotion import dynamics, pad
 from emotion.dynamics import OscillatorParams
 from emotion.pad import Vec3
 from emotion.types import Emotion, EmotionData
@@ -29,19 +30,75 @@ _TICK_DT = 1.0
 # Maximum sub-step size for stable integration. Semi-implicit Euler is only
 # stable when dt · ω₀ < ~π; for our parameter range, 0.5s is always safe.
 _MAX_SUBSTEP_DT = 0.5
+# Past this much simulated time, the sub-step is coarsened: relaxation over
+# an hour is 720 steps at 5s, and dt · ω₀ ≈ 0.006 stays far from the stability
+# limit. The window before it stays fine-grained so a normal tick is exact.
+_FINE_WINDOW_S = 60.0
+_COARSE_SUBSTEP_DT = 5.0
 # Upper bound on the total time advanced in a single _apply_decay call.
-# Larger gaps (e.g. after hibernation) are capped to prevent runaway steps.
-_MAX_ADVANCE_SECONDS = 30.0
+# Invisible while the time constant was ~7s (the old 30s cap was already four
+# time constants); with a τ counted in minutes it froze the state of a machine
+# that had hibernated, so the bound is an hour of catch-up.
+_MAX_ADVANCE_SECONDS = 3600.0
 # Probability per tick that the global mood receives a tiny stochastic
 # nudge. Without this, a well-rested idle Mika sits exactly on her home
 # point — humans don't. Small nudges produce barely-perceptible drift
 # ("why am I a bit off today") that the oscillator then metabolizes
 # normally. Scoped to the global mood only; per-person moods are always
 # reactive, never spontaneous.
-_SPONTANEOUS_NUDGE_PROBABILITY: float = 0.04
-# Max magnitude of a spontaneous nudge (in PAD units). Tiny — should
-# decay back to home in a handful of seconds if nothing else happens.
-_SPONTANEOUS_NUDGE_MAX: float = 0.08
+# A nudge now lives for τ — minutes, not seconds — so at the old cadence they
+# compounded into a visible random walk. Rarer and smaller, same drift.
+_SPONTANEOUS_NUDGE_PROBABILITY: float = 0.004
+# Max magnitude of a spontaneous nudge (in PAD units).
+_SPONTANEOUS_NUDGE_MAX: float = 0.05
+
+# Constante de temps du retour au repos, aux deux bouts du curseur « vitesse
+# de récupération » (interpolation géométrique). Un tour dure 30-120 s : avec
+# le réglage précédent l'état revenait au repos en ~27 s, donc l'émotion d'un
+# tour avait disparu avant le tour suivant et tout ce qui lit la position —
+# prompt, relevé, fiche affect, gestes — lisait le repos. Cible au défaut
+# (recovery_speed 0.5) : ~11,6 min, dans une plage de 4 min à 30 min.
+PERSON_TAU_FAST = 240.0
+PERSON_TAU_SLOW = 1800.0
+GLOBAL_TAU_FACTOR = 2.0
+# Part de la distance restante qu'une impulsion parcourt d'un coup.
+RATCHET_BASE = 1.0
+RATCHET_MAX = 0.75
+RATCHET_GLOBAL = 0.45
+
+# Ancrage personnel : part du point de repos d'une personne qui vient de ce
+# qu'elle a déjà provoqué, contre le repos circadien commun.
+PERSON_ANCHOR_WEIGHT = 0.6
+ANCHOR_MAX_NORM = 0.7
+ANCHOR_ALPHA = 0.15
+ANCHOR_SAMPLE = 20
+
+# « Bien ancrée » : une stance construite, pas déclenchée une fois.
+ANCHORED_MIN_NORM = 0.4
+ANCHORED_MIN_IMPULSES = 2
+ANCHORED_WINDOW_S = 900.0
+
+
+@dataclass(frozen=True)
+class TurnEmotionView:
+    """Ce qu'un tour porte comme émotion, côté sortie.
+
+    La balise ``[EMOTION:]`` est la vérité du tour : c'est ce que le modèle a
+    choisi en écrivant sa réponse. L'oscillateur, lui, dit où en est la
+    relation — utile, mais ce n'est pas ce qui vient d'être dit.
+    """
+    emotion: str
+    intensity: float
+    blend: list[tuple[str, float]]
+    state: dict
+    declared: bool
+
+
+def _clamp_anchor(vector: Vec3) -> Vec3:
+    magnitude = pad.norm(vector)
+    if magnitude <= ANCHOR_MAX_NORM:
+        return vector
+    return pad.scale(vector, ANCHOR_MAX_NORM / magnitude)
 
 
 class EmotionEngine:
@@ -128,15 +185,20 @@ class EmotionEngine:
         )
 
     async def shutdown(self):
-        """Save emotional state and stop decay loop."""
-        await self._save_state()
+        """Stop the decay loop, then save emotional state.
 
+        In that order: the decay loop evicts idle persons, and `_save_state`
+        awaits once per person — saving while it runs is iterating a dict
+        somebody else is writing.
+        """
         if self._decay_task:
             self._decay_task.cancel()
             try:
                 await self._decay_task
             except asyncio.CancelledError:
                 pass
+
+        await self._save_state()
         logger.info("EmotionEngine shut down (state saved)")
 
     def _reload_temperament(self, key: str) -> None:
@@ -158,26 +220,51 @@ class EmotionEngine:
         """Derive OscillatorParams from the current temperament.
 
         Scaling choices:
-        - mass = 1/volatility, clamped to [0.25, 4.0]
-        - stiffness scaled × 0.15 so impulses aren't immediately annulled by
-          the recovery spring — emotions persist for ~10s before fading.
-        - damping tuned to be underdamped (ζ≈0.5) for natural-feeling motion.
-        - impulse_gain = intensity_base so temperament directly scales reaction.
+        - `recovery_speed` fixes the time constant τ, geometrically between
+          PERSON_TAU_SLOW and PERSON_TAU_FAST. It used to set the *stiffness*,
+          which moves the oscillation frequency and nothing else: the decay
+          envelope was c/2m, a function of `volatility` alone, so the cursor
+          labelled "vitesse de récupération" changed no recovery at all
+          (measured identical to five decimals across its whole range).
+        - `damping = 2m/τ` is what makes that envelope exactly exp(-t/τ).
+        - `volatility` keeps the mass, the damping ratio, and the size of the
+          ratchet an impulse applies.
         """
         t = self.temperament
-        mass = max(0.25, min(4.0, 1.0 / max(0.05, t.volatility)))
+        volatility = max(0.05, min(1.0, t.volatility))
+        recovery = max(0.05, min(1.0, t.recovery_speed))
+        mass = max(0.25, min(4.0, 1.0 / volatility))
+
+        tau = PERSON_TAU_SLOW * (PERSON_TAU_FAST / PERSON_TAU_SLOW) ** (
+            (recovery - 0.05) / 0.95
+        )
+        zeta = 1.0 - 0.35 * volatility
+        omega0 = 1.0 / (zeta * tau)
+
         self._person_params = OscillatorParams(
             mass=mass,
-            stiffness=max(0.02, t.recovery_speed * 0.15),
-            damping=0.35 + 0.25 * (1.0 - t.volatility),
-            impulse_gain=max(0.1, t.intensity_base),
+            stiffness=mass * omega0 * omega0,
+            damping=2.0 * mass / tau,
+            impulse_gain=min(
+                RATCHET_MAX,
+                RATCHET_BASE * max(0.1, t.intensity_base) * (0.5 + 0.5 * volatility),
+            ),
         )
-        # Global mood is lazier: softer spring, heavier mass, slower to react.
+
+        # Global mood is lazier: heavier mass, twice the time constant. The
+        # bleed is applied *once*, here — Factor 3 of conscience/scoring.py
+        # reads this same intensity at a 0.7 threshold, so anyone lowering this
+        # gain is turning that factor off. No floor either: the cursor promises
+        # "à 0 elle compartimente entièrement".
+        global_mass = mass * 1.5
+        global_tau = tau * GLOBAL_TAU_FACTOR
+        global_omega0 = 1.0 / (0.9 * global_tau)
+        bleed = max(0.0, t.global_bleed)
         self._global_params = OscillatorParams(
-            mass=mass * 1.5,
-            stiffness=max(0.015, t.recovery_speed * 0.08),
-            damping=0.5,
-            impulse_gain=max(0.05, t.global_bleed),
+            mass=global_mass,
+            stiffness=global_mass * global_omega0 * global_omega0,
+            damping=2.0 * global_mass / global_tau,
+            impulse_gain=0.0 if bleed <= 0.0 else min(0.5, RATCHET_GLOBAL * bleed),
         )
 
     # ------------------------------------------------------------------
@@ -205,7 +292,7 @@ class EmotionEngine:
                 global_intensity=g_intensity,
             )
 
-            for pid, mood in self.person_moods.items():
+            for pid, mood in list(self.person_moods.items()):
                 p_label, p_intensity = pad.pad_to_label(mood.dynamic.position)
                 await sync_to_async(EmotionSnapshot.objects.create)(
                     conversation=conversation,
@@ -450,13 +537,17 @@ class EmotionEngine:
             from asgiref.sync import sync_to_async
             from memory.models import EmotionSnapshot
 
-            snap = await sync_to_async(
-                lambda: EmotionSnapshot.objects
-                .filter(person_id=person_id)
-                .order_by("-created_at")
-                .first()
+            # Same query, same (person_id, -created_at) index: the newest row
+            # still gives the position, the tail gives the personal anchor.
+            snaps = await sync_to_async(
+                lambda: list(
+                    EmotionSnapshot.objects
+                    .filter(person_id=person_id)
+                    .order_by("-created_at")[:ANCHOR_SAMPLE]
+                )
             )()
 
+            snap = snaps[0] if snaps else None
             if snap:
                 elapsed = now_ts - snap.created_at.timestamp()
                 time_factor = max(0.0, 1.0 - elapsed / max_age_seconds)
@@ -467,6 +558,7 @@ class EmotionEngine:
                         label = Emotion(snap.primary_emotion)
                         mood = PersonMood(person_id=person_id)
                         mood.dynamic.position = pad.label_to_pad(label, intensity)
+                        mood.anchor = self._anchor_from_snapshots(snaps)
                         self.person_moods[person_id] = mood
                         logger.debug(
                             "Lazy-loaded mood for %s: %s(%.2f) from snapshot ~%dh ago",
@@ -497,33 +589,54 @@ class EmotionEngine:
     # Periodic snapshots (for emotional memory)
     # ------------------------------------------------------------------
 
-    async def _maybe_save_snapshot(self, person_id: str) -> None:
+    async def save_snapshot(
+        self, person_id: str, declared: EmotionData | None = None,
+    ) -> None:
         """Save a snapshot if enough time has passed since the last one.
 
-        Protected against concurrent calls on the same person_id so we
-        never double-insert snapshots when a user sends several messages
-        in quick succession.
+        `declared` is what the turn's [EMOTION:] tag said, when there was one;
+        that is what gets persisted, since it is what she meant by the reply
+        the snapshot is supposed to remember.
+
+        The throttle is stamped on the *write*, not on the attempt: stamping
+        first meant one message closed the next 30 seconds, and a failed write
+        closed them for nothing. The lock now covers the write too, so
+        snapshots for one person serialise — they are rare by construction.
         """
         async with self._snapshot_lock:
             now = time.time()
             last = self._last_snapshot_time.get(person_id, 0)
             if now - last < self._snapshot_interval:
                 return
-            self._last_snapshot_time[person_id] = now
-        await self._save_person_snapshot(person_id)
+            if await self._save_person_snapshot(person_id, declared):
+                self._last_snapshot_time[person_id] = time.time()
 
-    async def _save_person_snapshot(self, person_id: str) -> None:
-        """Persist a single EmotionSnapshot for one person + current global mood."""
+    # Ancien nom, gardé le temps que le processor bascule sur `save_snapshot`.
+    async def _maybe_save_snapshot(self, person_id: str) -> None:
+        await self.save_snapshot(person_id)
+
+    async def _save_person_snapshot(
+        self, person_id: str, declared: EmotionData | None = None,
+    ) -> bool:
+        """Persist a single EmotionSnapshot for one person + current global mood.
+
+        Returns whether a row was actually written.
+        """
         from asgiref.sync import sync_to_async
         from memory.manager import memory_manager
         from memory.models import EmotionSnapshot
 
         conversation = memory_manager.conversation
         if not conversation:
-            return
+            return False
 
         person = self._get_person_mood(person_id)
-        p_label, p_intensity = pad.pad_to_label(person.dynamic.position)
+        if declared is not None:
+            p_label, p_intensity = declared.emotion, declared.intensity
+        else:
+            p_label, p_intensity = pad.pad_to_label(person.dynamic.position)
+        # The background mood is never what a turn declared: it stays read off
+        # the global oscillator.
         g_label, g_intensity = pad.pad_to_label(self.global_mood.dynamic.position)
 
         try:
@@ -538,6 +651,49 @@ class EmotionEngine:
         except Exception as exc:
             degradations.record("emotion.engine._save_person_snapshot", exc)
             logger.debug("Failed to save snapshot for %s", person_id, exc_info=True)
+            return False
+
+        self._note_anchor(person, pad.label_to_pad(p_label, p_intensity))
+        return True
+
+    def _note_anchor(self, mood: PersonMood, position: Vec3) -> None:
+        """Fold a written snapshot into this person's own resting point.
+
+        Fed from what was *persisted*, so the anchor and the record tell the
+        same story — the tag when a turn declared one.
+        """
+        if mood.anchor is None:
+            mood.anchor = _clamp_anchor(position)
+            return
+        mood.anchor = _clamp_anchor(pad.add(
+            pad.scale(mood.anchor, 1.0 - ANCHOR_ALPHA),
+            pad.scale(position, ANCHOR_ALPHA),
+        ))
+
+    @staticmethod
+    def _anchor_from_snapshots(rows) -> Vec3 | None:
+        """Recency-weighted mean of what a person has already provoked."""
+        try:
+            total = 0.0
+            accumulated = pad.zero()
+            for index, row in enumerate(rows):
+                try:
+                    label = Emotion(row.primary_emotion)
+                except ValueError:
+                    continue
+                weight = float(len(rows) - index)
+                accumulated = pad.add(
+                    accumulated,
+                    pad.scale(pad.label_to_pad(label, row.primary_intensity), weight),
+                )
+                total += weight
+
+            if total <= 0.0:
+                return None
+            return _clamp_anchor(pad.scale(accumulated, 1.0 / total))
+        except Exception as exc:
+            degradations.record("emotion.engine._anchor_from_snapshots", exc)
+            return None
 
     # ------------------------------------------------------------------
     # Person mood management
@@ -579,6 +735,28 @@ class EmotionEngine:
 
         return pad.add(base, bias)
 
+    def _person_home(self, mood: PersonMood, base: Vec3 | None = None) -> Vec3:
+        """Resting point of one person's oscillator.
+
+        A stance has to come back *somewhere*, and coming back to the same
+        circadian point for everybody made "envers cette personne" the same
+        hourly boilerplate for a friend, a troll and a stranger. The anchor is
+        a smoothed trace of what this person has already provoked.
+
+        The loop closes (anchor ← snapshots ← position ← home ← anchor) and
+        that is safe on purpose: its fixed point is `base` itself, since an
+        anchor equal to the circadian home reproduces exactly that home. No
+        runaway is possible.
+        """
+        if base is None:
+            base = self._home_vector()
+        if mood.anchor is None:
+            return base
+        return pad.add(
+            pad.scale(mood.anchor, PERSON_ANCHOR_WEIGHT),
+            pad.scale(base, 1.0 - PERSON_ANCHOR_WEIGHT),
+        )
+
     # ------------------------------------------------------------------
     # Core: process a new emotion from Claude
     # ------------------------------------------------------------------
@@ -586,12 +764,12 @@ class EmotionEngine:
     def process_emotion(
         self, emotion_data: EmotionData, person_id: str
     ) -> PersonMood:
-        """Apply a new emotion as an impulse toward its PAD anchor.
+        """Apply a new emotion as a ratchet toward its PAD anchor.
 
-        The physics handles reinforcement (successive impulses accumulate
-        velocity), opposition (impulses pointing against current position
-        decelerate it), and naturalness (far-away targets produce larger
-        impulses but are resisted by mass+damping).
+        Successive impulses of the same sign escalate (each covers a share of
+        what is left to the target), an opposing one brings the position back
+        toward the other side, and the spring governs how long any of it stays
+        readable.
         """
         self._recompute_params()  # in case temperament changed at runtime
 
@@ -601,9 +779,12 @@ class EmotionEngine:
         target = pad.label_to_pad(emotion_data.emotion, emotion_data.intensity)
         person.dynamic.impulse_toward(target, self._person_params)
 
-        # Propagate a fraction of the impulse into the global mood.
-        global_target = pad.scale(target, self.temperament.global_bleed)
-        self.global_mood.dynamic.impulse_toward(global_target, self._global_params)
+        # Propagate into the global mood. The bleed reduces the *gain*, once —
+        # reducing the target as well capped the global mood around 0.30, well
+        # under the 0.7 that Factor 3 of conscience/scoring.py tests, so that
+        # factor could never fire.
+        if self.temperament.global_bleed > 0:
+            self.global_mood.dynamic.impulse_toward(target, self._global_params)
 
         person.last_interaction = now
         person.last_update = now
@@ -666,6 +847,76 @@ class EmotionEngine:
             blend=tuple(blend_components),
         )
 
+    async def turn_emotion_view(
+        self, person_id: str, declared: EmotionData | None,
+    ) -> TurnEmotionView:
+        """What the frame answering this turn should carry.
+
+        Called after `process_emotion`, so the oscillator already holds the
+        turn. When the reply declared a tag, that tag wins: it is what she
+        chose while writing, where the oscillator only says how the relation
+        stands. The blend is read on the projected position so the frame's
+        `emotion` and its `blend[0]` can never disagree — the frontend's
+        ambivalence gate reads exactly that pair.
+
+        Never raises: a turn goes out with an emotion, or with the fallback.
+        """
+        try:
+            return self._build_turn_view(person_id, declared)
+        except Exception as exc:
+            degradations.record("emotion: vue du tour", exc)
+        return self._plain_turn_view(declared)
+
+    def _build_turn_view(
+        self, person_id: str, declared: EmotionData | None,
+    ) -> TurnEmotionView:
+        mood = self._get_person_mood(person_id)
+        projected = dynamics.peak_projection(
+            mood.dynamic.position,
+            mood.dynamic.velocity,
+            self._person_home(mood),
+            self._person_params,
+        )
+        blend = [(e.value, w) for e, w in pad.pad_to_blend(projected, top_k=2)]
+        state = self.get_state_dict(person_id)
+
+        if declared is not None:
+            name = declared.emotion.value
+            if not blend or blend[0][0] != name:
+                blend = [(name, declared.intensity), *blend][:2]
+            return TurnEmotionView(
+                emotion=name,
+                intensity=declared.intensity,
+                blend=blend,
+                state=state,
+                declared=True,
+            )
+
+        current = self.compute_message_emotion(person_id)
+        if not blend:
+            blend = [(e.value, w) for e, w in current.blend]
+        return TurnEmotionView(
+            emotion=current.emotion.value,
+            intensity=current.intensity,
+            blend=blend,
+            state=state,
+            declared=False,
+        )
+
+    def _plain_turn_view(self, declared: EmotionData | None) -> TurnEmotionView:
+        """Fallback view — reads nothing, so it cannot fail in turn."""
+        if declared is not None:
+            name, intensity = declared.emotion.value, declared.intensity
+        else:
+            name, intensity = self.temperament.default_mood.value, 0.0
+        return TurnEmotionView(
+            emotion=name,
+            intensity=intensity,
+            blend=[(name, intensity)],
+            state={},
+            declared=declared is not None,
+        )
+
     # ------------------------------------------------------------------
     # System prompt context
     # ------------------------------------------------------------------
@@ -684,9 +935,9 @@ class EmotionEngine:
         """French description of how Mika feels *toward this specific person*.
 
         Covers both the current PersonMood (live PAD oscillator) and the
-        "ancrage" marker when the state is actively engaged (high velocity
-        and intensity). Returned as a block ready to be concatenated into
-        the person_context section.
+        "ancrage" marker when the stance was built rather than triggered
+        once. Returned as a block ready to be concatenated into the
+        person_context section.
 
         Returns "" when the state is effectively neutral — absence is
         more useful than boilerplate ("pas de sentiment particulier")
@@ -694,23 +945,37 @@ class EmotionEngine:
         empty in that case, which keeps the prompt lean.
         """
         person = self._get_person_mood(person_id)
-        intensity = pad.norm(person.dynamic.position)
-        speed = pad.norm(person.dynamic.velocity)
-        # Engagement = enough settled state (position) OR a fresh impulse
-        # (velocity). A just-applied impulse hasn't yet moved the position,
-        # but the energy is real and should surface in the prompt.
-        if intensity < 0.1 and speed < 0.15:
+        # The "or a fresh impulse" clause read the velocity, to catch an
+        # impulse not yet integrated. An impulse now moves the position
+        # itself, so there is nothing left in flight to catch.
+        if pad.norm(person.dynamic.position) < 0.1:
             return ""
 
         lines: list[str] = [person.to_prompt_description()]
 
-        if speed > 0.3 and intensity > 0.4:
+        if self._is_anchored(person):
             lines.append(
                 "Cette emotion envers cette personne est bien ancree, "
                 "elle ne va pas s'estomper facilement."
             )
 
         return "\n".join(lines)
+
+    def _is_anchored(self, mood: PersonMood) -> bool:
+        """Whether a stance was built by several agreeing turns, not just one."""
+        position = mood.dynamic.position
+        if pad.norm(position) < ANCHORED_MIN_NORM:
+            return False
+
+        cutoff = time.time() - ANCHORED_WINDOW_S
+        agreeing = 0
+        for entry in mood.history:
+            if entry.timestamp < cutoff:
+                continue
+            if pad.dot(pad.EMOTION_ANCHORS[entry.emotion], position) > 0:
+                agreeing += 1
+
+        return agreeing >= ANCHORED_MIN_IMPULSES
 
     # ------------------------------------------------------------------
     # State dict for WebSocket
@@ -746,10 +1011,13 @@ class EmotionEngine:
     def _advance(dynamic, home: Vec3, params: OscillatorParams, total_dt: float) -> None:
         """Advance an oscillator by total_dt seconds in stable sub-steps."""
         remaining = min(total_dt, _MAX_ADVANCE_SECONDS)
+        fine = _FINE_WINDOW_S
         while remaining > 1e-6:
-            step_dt = min(_MAX_SUBSTEP_DT, remaining)
+            substep = _MAX_SUBSTEP_DT if fine > 0.0 else _COARSE_SUBSTEP_DT
+            step_dt = min(substep, remaining)
             dynamic.step(home, params, step_dt)
             remaining -= step_dt
+            fine -= step_dt
 
     def _apply_decay(self):
         """Step the physics forward. Sub-divides into stable chunks."""
@@ -763,12 +1031,13 @@ class EmotionEngine:
             if dt <= 0.0:
                 continue
 
-            self._advance(person.dynamic, home, self._person_params, dt)
+            person_home = self._person_home(person, home)
+            self._advance(person.dynamic, person_home, self._person_params, dt)
             person.last_update = now
 
             if (
                 now - person.last_interaction > self._IDLE_EVICTION_SECONDS
-                and pad.distance(person.dynamic.position, home) < 0.05
+                and pad.distance(person.dynamic.position, person_home) < 0.05
             ):
                 expired_persons.append(pid)
 

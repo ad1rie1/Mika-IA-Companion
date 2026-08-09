@@ -210,8 +210,12 @@ class TestGatherInput:
         assert pool.connaissances == []
         assert max_id == 0
 
+    # Le pin change : l'échantillon n'est plus trié par importance, il est
+    # majoritairement RÉCENT. Trié sur la seule importance, il était occupé à
+    # demeure par les souvenirs que la Conscience booste, et le self-concept
+    # se régénérait toutes les 24 h à partir de la même matière.
     @pytest.mark.asyncio
-    async def test_sorts_by_importance(self):
+    async def test_le_vecu_recent_entre_dans_l_echantillon(self):
         from memory.models import Souvenir
         from memory.narrative import NarrativeGenerator
 
@@ -224,24 +228,80 @@ class TestGatherInput:
         )
 
         pool, _ = await NarrativeGenerator.gather_input()
-        # Highest importance first
-        assert pool.souvenirs[0]["content"] == "high"
+        contents = [s["content"] for s in pool.souvenirs]
+        assert set(contents) == {"low", "high"}
 
     @pytest.mark.asyncio
-    async def test_max_id_reflects_pool(self):
+    async def test_une_semaine_a_importance_ordinaire_change_l_entree(self):
+        """La porte compte le NEUF ; l'échantillon doit donc en contenir."""
+        from memory.models import SelfNarrative, Souvenir
+        from memory.narrative import NarrativeGenerator
+
+        now = timezone.now()
+        anciens = []
+        for i in range(25):
+            s = await sync_to_async(Souvenir.objects.create)(
+                content=f"ancien {i}", importance=1.0,
+                occurred_at=now - timedelta(days=200),
+            )
+            anciens.append(s.id)
+        await sync_to_async(SelfNarrative.objects.create)(
+            content="Je suis...", last_souvenir_id=max(anciens),
+        )
+
+        recents = []
+        for i in range(10):
+            s = await sync_to_async(Souvenir.objects.create)(
+                content=f"cette semaine {i}", importance=0.5, occurred_at=now,
+            )
+            recents.append(s.content)
+
+        pool, _ = await NarrativeGenerator.gather_input()
+        contents = {s["content"] for s in pool.souvenirs}
+        assert contents & set(recents), (
+            "une semaine à importance ordinaire n'entre jamais dans le pool"
+        )
+
+    @pytest.mark.asyncio
+    async def test_les_ancres_anciennes_restent_presentes(self):
         from memory.models import Souvenir
         from memory.narrative import NarrativeGenerator
 
         now = timezone.now()
-        ids = []
-        for i in range(3):
-            s = await sync_to_async(Souvenir.objects.create)(
-                content=f"s{i}", importance=0.5, occurred_at=now,
+        await sync_to_async(Souvenir.objects.create)(
+            content="le jour où tout a basculé", importance=1.0,
+            occurred_at=now - timedelta(days=300),
+        )
+        for i in range(20):
+            await sync_to_async(Souvenir.objects.create)(
+                content=f"banal {i}", importance=0.3, occurred_at=now,
             )
-            ids.append(s.id)
 
-        _, max_id = await NarrativeGenerator.gather_input()
-        assert max_id == max(ids)
+        pool, _ = await NarrativeGenerator.gather_input()
+        contents = {s["content"] for s in pool.souvenirs}
+        assert "le jour où tout a basculé" in contents
+
+    @pytest.mark.asyncio
+    async def test_max_id_est_le_max_global(self):
+        """Le repère « j'ai vu jusque-là » pris sur un pool ancien laissait la
+        porte re-compter le même neuf à chaque passe."""
+        from memory.models import Souvenir
+        from memory.narrative import NarrativeGenerator
+
+        now = timezone.now()
+        for i in range(25):
+            await sync_to_async(Souvenir.objects.create)(
+                content=f"s{i}", importance=1.0,
+                occurred_at=now - timedelta(minutes=i + 1),
+            )
+        hors_pool = await sync_to_async(Souvenir.objects.create)(
+            content="vieux et sans importance", importance=0.05,
+            occurred_at=now - timedelta(days=300),
+        )
+
+        pool, max_id = await NarrativeGenerator.gather_input()
+        assert hors_pool.content not in {s["content"] for s in pool.souvenirs}
+        assert max_id == hors_pool.id
 
     @pytest.mark.asyncio
     async def test_connaissances_filtered_by_validity(self):

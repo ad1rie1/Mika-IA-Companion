@@ -62,6 +62,55 @@
 
 <section class="card mb-6">
   <div class="card-head">
+    <h3>Boucles de fond</h3>
+    <span class="card-sub">rien ne les redémarre : « démarrée » ne dit pas « à jour »</span>
+  </div>
+  <div class="card-body flush">
+    <div class="table-scroll">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Boucle</th>
+            <th class="fit">État</th>
+            <th class="fit">Période</th>
+            <th class="fit">Dernier tick réussi</th>
+            <th style="min-width: 24rem;">Dernière erreur</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for b in boucles %}
+            <tr>
+              <td>{{ b.nom }}</td>
+              <td class="fit">
+                {% if b.running %}
+                  <span class="badge">démarrée</span>
+                {% else %}
+                  <span class="badge badge-warn">arrêtée</span>
+                {% endif %}
+              </td>
+              <td class="fit muted">{{ b.interval|duration }}</td>
+              <td class="fit">
+                {% if b.age_seconds is None %}
+                  <span class="badge {% if b.en_retard %}badge-danger{% endif %}">jamais</span>
+                {% elif b.en_retard %}
+                  <span class="badge badge-danger">il y a {{ b.age_seconds|duration }}</span>
+                {% else %}
+                  <span class="muted">il y a {{ b.age_seconds|duration }}</span>
+                {% endif %}
+              </td>
+              <td class="text-xs break">{{ b.last_error|default:"—" }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="5"><span class="muted">Aucune boucle enregistrée.</span></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="card mb-6">
+  <div class="card-head">
     <h3>Pannes silencieuses</h3>
     <span class="card-sub">triées par nombre d'occurrences</span>
   </div>
