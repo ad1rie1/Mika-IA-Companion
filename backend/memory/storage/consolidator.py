@@ -9,7 +9,12 @@ from django.db import transaction
 from django.utils import timezone
 
 from memory.extraction.extractor import MemoryExtractor
-from memory.storage.vector_store import VectorStore, vector_call
+from memory.storage.vector_store import (
+    VectorStore,
+    connaissance_metadata,
+    souvenir_metadata,
+    vector_call,
+)
 from utils.periodic import PeriodicLoop
 from utils.degradation import degradations
 
@@ -20,7 +25,13 @@ logger = logging.getLogger(__name__)
 RETENTION_SWEEP_INTERVAL_S = 3600
 
 # Message sources that are module plumbing, not user-facing exchanges.
-INTERNAL_MESSAGE_SOURCES = ("module_email", "module_wake")
+# La définition vit dans memory/storage/window.py (partagée avec l'indexeur
+# épisodique) ; le nom est ré-exporté ici pour les lecteurs existants.
+from memory.storage.window import INTERNAL_MESSAGE_SOURCES, user_facing_messages  # noqa: E402
+
+# Une tranche d'extraction ne dépasse jamais ce volume : au-delà, le backlog
+# est découpé sur les frontières de messages (voir _extract_and_store).
+EXTRACTION_MAX_CHARS = 8000
 
 # Pending commitments older than this are dropped (see _expire_commitments).
 COMMITMENT_MAX_AGE_DAYS = 30
@@ -197,18 +208,16 @@ class MemoryConsolidator:
         if not ceiling_id:
             return [], None
 
-        # Exclude module notifications (not user-facing exchanges) and
-        # everything flagged as machinery: the scaffolding prompt of an
-        # internal trigger, and the fallback a failed turn returned. Mika's
-        # real replies (role=assistant, is_internal=False) stay in, so she
-        # still remembers her own initiatives.
+        # Exclusions canoniques partagées avec l'indexeur épisodique
+        # (memory/storage/window.py) : plomberie de modules, machinerie
+        # is_internal, prompts d'action de la conscience. Les vraies réponses
+        # de Mika (role=assistant, is_internal=False) restent incluses.
         messages = await sync_to_async(list)(
-            Message.objects.filter(
-                id__gt=self._last_processed_id, id__lte=ceiling_id,
+            user_facing_messages(
+                Message.objects.filter(
+                    id__gt=self._last_processed_id, id__lte=ceiling_id,
+                )
             )
-            .exclude(source__in=INTERNAL_MESSAGE_SOURCES)
-            .exclude(is_internal=True)
-            .exclude(source="conscience", role="user")
             .order_by("created_at")
             .values("id", "role", "content", "created_at", "source", "person_id")
         )
@@ -220,10 +229,12 @@ class MemoryConsolidator:
         """Run the extraction LLM over the window and persist what comes back.
 
         Returns per-type creation counts for the checkpoint log.
+
+        Un backlog démesuré (reprise après indisponibilité) est découpé en
+        tranches d'au plus ``EXTRACTION_MAX_CHARS`` sur les frontières de
+        messages : la fenêtre sans borne partait entière dans UN appel LLM.
         """
         from memory.models import Commitment
-
-        msg_dicts = [{"role": m["role"], "content": m["content"]} for m in messages]
 
         # Open commitments ride along so the same call can notice one being
         # honored in the window ("voila la playlist !") — the autonomous half
@@ -236,9 +247,6 @@ class MemoryConsolidator:
                 .values("id", "description")[:10]
             )
         )()
-        extractions = await self.extractor.analyze_messages(
-            msg_dicts, pending_commitments=pending_commitments,
-        )
 
         # Who Mika was talking to, as memory entities. The extractor names
         # entities from the *content* ("Thomas said…"), which misses the most
@@ -247,6 +255,28 @@ class MemoryConsolidator:
         # PersonProfile never had material and theory-of-mind stayed empty.
         interlocutors = await self._resolve_interlocutors(messages)
 
+        counts = {"souvenirs": 0, "connaissances": 0, "commitments": 0}
+        for batch in _split_batches(messages, EXTRACTION_MAX_CHARS):
+            msg_dicts = [{"role": m["role"], "content": m["content"]} for m in batch]
+            extractions = await self.extractor.analyze_messages(
+                msg_dicts, pending_commitments=pending_commitments,
+            )
+            batch_counts = await self.store_extractions(
+                extractions, interlocutors=interlocutors,
+            )
+            for key, value in batch_counts.items():
+                counts[key] = counts.get(key, 0) + value
+
+        return counts
+
+    async def store_extractions(
+        self, extractions: list[dict], *, interlocutors: list,
+    ) -> dict[str, int]:
+        """Persiste une liste d'extractions (souvenirs, connaissances,
+        engagements) — le second temps de ``_extract_and_store``, public
+        pour que la réorganisation nocturne (memory/reorg.py) réutilise le
+        dédoublonnage-renforcement et les contrôles de contradiction.
+        """
         counts = {"souvenirs": 0, "connaissances": 0, "commitments": 0}
         handlers = {
             "souvenir": self._store_souvenir,
@@ -319,12 +349,12 @@ class MemoryConsolidator:
             self.vector_store.add_souvenir, "souvenir", souvenir.pk,
             souvenir_id=souvenir.pk,
             content=extraction["content"],
-            metadata={
-                "importance": 1.0,
-                "emotion": emotion,
-                "occurred_at": now.isoformat(),
-                "themes": ",".join(t.name for t in themes),
-            },
+            metadata=souvenir_metadata(
+                importance=1.0,
+                emotion=emotion,
+                occurred_at=now.isoformat(),
+                themes=[t.name for t in themes],
+            ),
         )
         logger.info(
             "Souvenir created: [%s] %s", emotion, extraction["content"][:120],
@@ -354,10 +384,10 @@ class MemoryConsolidator:
                 self.vector_store.add_connaissance, "connaissance", existing.pk,
                 connaissance_id=existing.pk,
                 content=existing.content,
-                metadata={
-                    "confidence": existing.confidence,
-                    "is_valid": existing.is_valid,
-                },
+                metadata=connaissance_metadata(
+                    confidence=existing.confidence,
+                    is_valid=existing.is_valid,
+                ),
             )
             logger.info(
                 "Connaissance reinforced (confidence=%.2f): %s",
@@ -379,11 +409,11 @@ class MemoryConsolidator:
             self.vector_store.add_connaissance, "connaissance", connaissance.pk,
             connaissance_id=connaissance.pk,
             content=content,
-            metadata={
-                "confidence": 1.0,
-                "is_valid": True,
-                "themes": ",".join(t.name for t in themes),
-            },
+            metadata=connaissance_metadata(
+                confidence=1.0,
+                is_valid=True,
+                themes=[t.name for t in themes],
+            ),
         )
         logger.info("Connaissance created: %s", content[:120])
         return "connaissances"
@@ -637,10 +667,14 @@ class MemoryConsolidator:
         now = timezone.now()
         cutoff = now - DECAY_MIN_AGE
 
+        # ``prefetch_related`` obligatoire : le ré-index relit les thèmes en
+        # contexte async — sans le cache de prefetch, `.themes.all()` lèverait
+        # SynchronousOnlyOperation (et coûterait un aller DB par ligne).
         souvenirs = await sync_to_async(list)(
             Souvenir.objects.filter(importance__gt=min_importance)
             .filter(Q(decayed_at__isnull=True) | Q(decayed_at__lt=cutoff))
-            .order_by("decayed_at")[:DECAY_BATCH]
+            .order_by("decayed_at")
+            .prefetch_related("themes")[:DECAY_BATCH]
         )
         if not souvenirs:
             return
@@ -669,13 +703,17 @@ class MemoryConsolidator:
                 souvenir.decayed_at = now
                 await sync_to_async(souvenir.save)(
                     update_fields=["importance", "decayed_at"])
+                # Le helper garantit qu'un ré-index ne perd plus `emotion` ni
+                # `themes` — un upsert remplace les métadonnées en entier.
                 reindex.append({
                     "souvenir_id": souvenir.pk,
                     "content": souvenir.content,
-                    "metadata": {
-                        "importance": souvenir.importance,
-                        "occurred_at": ref_date.isoformat(),
-                    },
+                    "metadata": souvenir_metadata(
+                        importance=souvenir.importance,
+                        emotion=souvenir.emotion,
+                        occurred_at=ref_date.isoformat(),
+                        themes=[t.name for t in souvenir.themes.all()],
+                    ),
                 })
 
         if reindex:
@@ -1073,10 +1111,10 @@ class MemoryConsolidator:
                         await vector_call(self.vector_store.add_connaissance)(
                             connaissance_id=conn.pk,
                             content=conn.content,
-                            metadata={
-                                "confidence": conn.confidence,
-                                "is_valid": False,
-                            },
+                            metadata=connaissance_metadata(
+                                confidence=conn.confidence,
+                                is_valid=False,
+                            ),
                         )
                     except Exception:
                         logger.warning(
@@ -1110,6 +1148,26 @@ class MemoryConsolidator:
             except (Connaissance.DoesNotExist, ValueError):
                 pass
         return None
+
+
+def _split_batches(messages: list[dict], max_chars: int) -> list[list[dict]]:
+    """Découpe une fenêtre en tranches ≤ max_chars, aux frontières de messages.
+
+    Un message seul plus gros que la tranche part seul (jamais coupé).
+    """
+    batches: list[list[dict]] = []
+    current: list[dict] = []
+    size = 0
+    for m in messages:
+        weight = len(m.get("content") or "")
+        if current and size + weight > max_chars:
+            batches.append(current)
+            current, size = [], 0
+        current.append(m)
+        size += weight
+    if current:
+        batches.append(current)
+    return batches
 
 
 def _merge_entities(extracted: list, interlocutors: list) -> list:

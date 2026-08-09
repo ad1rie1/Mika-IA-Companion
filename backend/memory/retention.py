@@ -58,6 +58,11 @@ POLICIES: tuple[Policy, ...] = (
     Policy("memory", "ConsolidationLog", date_field="ran_at",
            keep_days=14, keep_rows=5_000,
            note="only the newest row is read, for the checkpoint"),
+    # Même profil que ConsolidationLog : une ligne par tick de l'indexeur
+    # épisodique, seule la plus récente sert (checkpoint).
+    Policy("memory", "EpisodicIndexLog", date_field="ran_at",
+           keep_days=14, keep_rows=5_000,
+           note="only the newest row is read, for the episodic checkpoint"),
     # Faded ruminations are done being turned over; active/resolved ones
     # are still referenced by journals and digestion.
     Policy("conscience", "Rumination", date_field="created_at", keep_days=90,

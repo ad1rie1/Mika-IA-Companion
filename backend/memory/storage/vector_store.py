@@ -8,6 +8,56 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 
+# ── Schémas de métadonnées — un helper par collection ───────────────────────
+# Chroma n'accepte que des scalaires, et chaque site d'écriture composait son
+# dict à la main : le ré-index de la décroissance perdait `emotion`/`themes`
+# parce qu'un upsert remplace les métadonnées EN ENTIER. Un helper par
+# collection rend l'oubli impossible — tout écrivain passe par ici.
+
+def souvenir_metadata(
+    *, importance: float, emotion: str = "", occurred_at: str = "",
+    themes: list[str] | None = None,
+) -> dict:
+    meta: dict = {"importance": float(importance)}
+    if emotion:
+        meta["emotion"] = emotion
+    if occurred_at:
+        meta["occurred_at"] = occurred_at
+    if themes:
+        meta["themes"] = ",".join(themes)
+    return meta
+
+
+def connaissance_metadata(
+    *, confidence: float, is_valid: bool, themes: list[str] | None = None,
+) -> dict:
+    meta: dict = {"confidence": float(confidence), "is_valid": bool(is_valid)}
+    if themes:
+        meta["themes"] = ",".join(themes)
+    return meta
+
+
+def exchange_metadata(
+    *, conversation_id: int, first_message_id: int, last_message_id: int,
+    handle: str, ts: float,
+) -> dict:
+    """Métadonnées d'un chunk d'échange brut (étage épisodique).
+
+    ``ts`` = epoch du premier message — epoch plutôt qu'ISO parce que la
+    rétention et la fenêtre du jour filtrent en ``$gte``/``$lt`` numériques.
+    ``handle`` = identifiant transport UNIQUE du chunk ("" pour une
+    initiative interne de Mika) ; la résolution handle ↔ personne se fait à
+    la requête via la couche identité, jamais ici.
+    """
+    return {
+        "conversation_id": int(conversation_id),
+        "first_message_id": int(first_message_id),
+        "last_message_id": int(last_message_id),
+        "handle": handle or "",
+        "ts": float(ts),
+    }
+
+
 def vector_call(fn):
     """Enveloppe asynchrone d'un appel ChromaDB, **hors du thread partagé**.
 
@@ -28,9 +78,13 @@ def vector_call(fn):
 class VectorStore:
     """ChromaDB wrapper for persistent semantic memory.
 
-    Two collections:
-    - souvenirs: episodic memories (events that happened)
+    Three collections:
+    - souvenirs: curated episodic memories (what the night decided to keep)
     - connaissances: durable knowledge facts
+    - echanges: raw exchange chunks — the same-day findability tier. Nothing
+      is *decided* here: everything user-facing is indexed as it happens and
+      pruned after ``memory.episodic_retention_days``; SQL keeps the truth
+      forever and the nightly consolidation promotes what is durable.
     """
 
     def __init__(self, persist_dir: str | None = None, model_name: str | None = None):
@@ -50,10 +104,16 @@ class VectorStore:
             embedding_function=self._ef,
             metadata={"hnsw:space": "cosine"},
         )
+        self._echanges = self._client.get_or_create_collection(
+            name="echanges",
+            embedding_function=self._ef,
+            metadata={"hnsw:space": "cosine"},
+        )
         logger.info(
-            "VectorStore initialized (%d souvenirs, %d connaissances)",
+            "VectorStore initialized (%d souvenirs, %d connaissances, %d echanges)",
             self._souvenirs.count(),
             self._connaissances.count(),
+            self._echanges.count(),
         )
 
     # ------------------------------------------------------------------
@@ -118,8 +178,132 @@ class VectorStore:
             logger.debug("Connaissance %d not found in ChromaDB", connaissance_id)
 
     # ------------------------------------------------------------------
+    # Echanges (episodic tier) — write / prune
+    # ------------------------------------------------------------------
+
+    def add_exchanges(self, entries: list[dict]):
+        """Upsert un lot de chunks d'échanges.
+
+        Chaque entrée : ``{"chunk_id": str, "content": str, "metadata": dict}``
+        (métadonnées via :func:`exchange_metadata`). Un seul upsert = un seul
+        encode SentenceTransformer par lot. Idempotent par id — le checkpoint
+        de l'indexeur peut rejouer un lot sans dommage.
+        """
+        if not entries:
+            return
+        self._echanges.upsert(
+            ids=[str(e["chunk_id"]) for e in entries],
+            documents=[e["content"] for e in entries],
+            metadatas=[e.get("metadata") or {} for e in entries],
+        )
+
+    def remove_exchanges(self, chunk_ids: list[str]):
+        if not chunk_ids:
+            return
+        try:
+            self._echanges.delete(ids=[str(c) for c in chunk_ids])
+        except Exception:
+            logger.debug("remove_exchanges: ids absents de ChromaDB")
+
+    def prune_exchanges_before(self, cutoff_ts: float, page: int = 500) -> int:
+        """Purge les chunks plus anciens que ``cutoff_ts`` (rétention étage 1).
+
+        La rétention ORM (`memory/retention.py`) ne sait pas parler au vector
+        store ; l'étage épisodique n'a pas de ligne ORM par chunk, donc il
+        porte son propre chemin de purge. Paginé pour ne jamais matérialiser
+        toute la collection.
+        """
+        removed = 0
+        while True:
+            got = self._echanges.get(
+                where={"ts": {"$lt": float(cutoff_ts)}},
+                limit=page,
+                include=[],
+            )
+            ids = got.get("ids") or []
+            if not ids:
+                break
+            self._echanges.delete(ids=ids)
+            removed += len(ids)
+            if len(ids) < page:
+                break
+        return removed
+
+    def count_exchanges(self) -> int:
+        return self._echanges.count()
+
+    def get_exchanges_between(
+        self, since_ts: float, until_ts: float, include_embeddings: bool = False,
+    ) -> list[dict]:
+        """Chunks d'une plage temporelle — l'entrée du clustering nocturne.
+
+        Renvoie ``[{id, content, metadata, embedding?}]``. Les embeddings
+        stockés sont réutilisés tels quels : la nuit ne ré-encode jamais.
+        """
+        include = ["documents", "metadatas"]
+        if include_embeddings:
+            include.append("embeddings")
+        got = self._echanges.get(
+            where={"$and": [
+                {"ts": {"$gte": float(since_ts)}},
+                {"ts": {"$lt": float(until_ts)}},
+            ]},
+            include=include,
+        )
+        out = []
+        ids = got.get("ids") or []
+        embeddings = got.get("embeddings")
+        for i, chunk_id in enumerate(ids):
+            row = {
+                "id": chunk_id,
+                "content": got["documents"][i],
+                "metadata": got["metadatas"][i] if got.get("metadatas") is not None else {},
+            }
+            if include_embeddings and embeddings is not None:
+                row["embedding"] = embeddings[i]
+            out.append(row)
+        return out
+
+    # ------------------------------------------------------------------
     # Search operations
     # ------------------------------------------------------------------
+
+    def search_exchanges(
+        self,
+        query: str,
+        n: int = 8,
+        *,
+        handles: list[str] | None = None,
+        since_ts: float | None = None,
+        until_ts: float | None = None,
+        contains: str | None = None,
+    ) -> list[dict]:
+        """Recherche sémantique dans les échanges bruts.
+
+        ``handles`` restreint aux chunks de ces identifiants transport (la
+        résolution personne → handles appartient à l'appelant, via la couche
+        identité). ``contains`` ajoute un filtre plein-texte sur le document
+        (l'hybride minimal pour les noms propres, que l'embedding multilingue
+        sert mal). Chroma exige un ``$and`` explicite au-delà d'une clause.
+        """
+        count = self._echanges.count()
+        if count == 0:
+            return []
+        clauses: list[dict] = []
+        if handles:
+            clauses.append({"handle": {"$in": [h or "" for h in handles]}})
+        if since_ts is not None:
+            clauses.append({"ts": {"$gte": float(since_ts)}})
+        if until_ts is not None:
+            clauses.append({"ts": {"$lte": float(until_ts)}})
+        where = clauses[0] if len(clauses) == 1 else ({"$and": clauses} if clauses else None)
+        results = self._echanges.query(
+            query_texts=[query],
+            n_results=min(n, count),
+            where=where,
+            where_document={"$contains": contains} if contains else None,
+        )
+        return self._parse_results(results)
 
     def search_souvenirs(
         self, query: str, n: int = 5, min_importance: float = 0.3

@@ -403,6 +403,47 @@ class Commitment(models.Model):
         return f"[{self.status}] to {who}: {self.description[:60]}"
 
 
+class ConversationSummary(models.Model):
+    """Résumé roulant d'une conversation — la compaction du fil.
+
+    Une ligne vivante par conversation, réécrite en place à chaque passe.
+    ``last_message_id`` = plus haut ``Message.pk`` replié dedans ; la
+    réhydratation du buffer reprend strictement après. Le verbatim reste en
+    SQL et dans l'index épisodique : la fenêtre est un cache, pas une archive.
+    """
+
+    conversation = models.OneToOneField(
+        Conversation, on_delete=models.CASCADE, related_name="rolling_summary",
+    )
+    content = models.TextField()
+    last_message_id = models.BigIntegerField()
+    folded_count = models.IntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Résumé conv#{self.conversation_id} (≤ msg {self.last_message_id})"
+
+
+class EpisodicIndexLog(models.Model):
+    """Checkpoint de l'indexeur épisodique (miroir de ConsolidationLog).
+
+    Une ligne par tick ayant avancé ; seule la plus récente est lue. Le
+    checkpoint n'avance que si l'upsert ChromaDB a réussi — contrairement à
+    l'indexation des souvenirs (best-effort), un chunk sauté ici serait
+    introuvable jusqu'à sa purge.
+    """
+
+    last_message_id = models.IntegerField(default=0)
+    chunks_created = models.IntegerField(default=0)
+    ran_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-ran_at"]
+
+    def __str__(self):
+        return f"EpisodicIndex @ {self.ran_at:%H:%M}: {self.chunks_created} chunks"
+
+
 class ConsolidationLog(models.Model):
     """Tracks when the consolidation background task ran."""
 

@@ -221,6 +221,7 @@ class SleepCycle:
         self._last_dream_night: date | None = None
         self._last_dream_attempt: float = 0.0  # monotonic()
         self._last_digestion_night: date | None = None
+        self._last_reorg_night: date | None = None
         # Night for which Mika already fell asleep — entry/stay hysteresis:
         # the REST gate governs falling asleep, not staying asleep (sleep
         # drains REST, and draining it must not bounce her awake).
@@ -342,6 +343,20 @@ class SleepCycle:
                     self._last_digestion_night = current_night
         except Exception:
             logger.exception("Sleep: digestion phase failed (non-fatal)")
+
+        # Phase 4: réorganisation — clusteriser les échanges du jour,
+        # ré-extraire par thème, dédoublonner les souvenirs (03h+, une fois
+        # par nuit, après la digestion). Même profil d'isolement que les
+        # autres phases : un échec ne coûte que sa nuit.
+        try:
+            if 3 <= now_dt.hour < NIGHT_END_HOUR:
+                if self._last_reorg_night != current_night:
+                    await self._set_phase(SleepPhase.DEEP_SLEEP)
+                    from memory.reorg import nightly_reorg
+                    await nightly_reorg.run(current_night)
+                    self._last_reorg_night = current_night
+        except Exception:
+            logger.exception("Sleep: reorg phase failed (non-fatal)")
 
         # Cycle finished for this tick — between active phases Mika is
         # "asleep but idle", so she settles into DEEP_SLEEP (the most dormant

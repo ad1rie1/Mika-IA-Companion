@@ -57,6 +57,14 @@ class AIRole(str, Enum):
     # back" into the short murmured reaction she thinks out loud. Small and
     # cheap by design: it fires far more often than a conversation turn.
     INNER_VOICE = "inner_voice"
+    # Pré-passe de rappel dirigé : planifie les recherches mémoire d'un tour
+    # (souvenirs, connaissances, échanges passés) + note de focus. Petit
+    # modèle rapide ; non mappé = passe désactivée (fail-open sur le rappel
+    # spéculatif) — le défaut sain en local.
+    PREPARATION = "preparation"
+    # Compaction conversationnelle : replie les segments anciens du fil en
+    # résumé roulant, hors tour (lot B). Non mappé = compaction désactivée.
+    COMPACTION = "compaction"
 
 
 # Config-key prefixes that carry a provider's credentials. A change under one
@@ -153,11 +161,21 @@ def _load_declared_models() -> dict[str, dict]:
             max_tokens = None
         if max_tokens is not None and max_tokens <= 0:
             max_tokens = None
+        # ``context_window`` : 0 (défaut du champ) ou invalide → None, et le
+        # budget de contexte reste sur les planchers fixes.
+        try:
+            raw_cw = payload.get("context_window")
+            context_window = int(raw_cw) if raw_cw not in (None, "") else None
+        except (TypeError, ValueError):
+            context_window = None
+        if context_window is not None and context_window <= 0:
+            context_window = None
         out[name] = {
             "provider": provider,
             "model_id": model_id,
             "temperature": temperature,
             "max_tokens": max_tokens,
+            "context_window": context_window,
         }
     return out
 
@@ -204,6 +222,8 @@ class AIRouter:
             AIRole.VALIDITY_CHECK:        "ai.role.validity_check",
             AIRole.VISION_CAPTION:        "ai.role.vision_caption",
             AIRole.INNER_VOICE:           "ai.role.inner_voice",
+            AIRole.PREPARATION:           "ai.role.preparation",
+            AIRole.COMPACTION:            "ai.role.compaction",
         }
         for role, cfg_key in role_keys.items():
             name = (config_service.get(cfg_key, default="") or "").strip()
@@ -413,6 +433,7 @@ class AIRouter:
         invoke,
         timeout: float | None = None,
         extra_prompt_chars: int = 0,
+        calibrate: bool = True,
     ):
         """Séquence commune à TOUT appel routé, outillé ou non.
 
@@ -512,6 +533,16 @@ class AIRouter:
             if usage:
                 tokens_in = int(usage.get("in", 0))
                 tokens_out = int(usage.get("out", 0))
+                # Calibration chars→tokens sur l'usage RÉEL uniquement, et
+                # jamais sur une boucle d'outils (son usage cumule les
+                # itérations et les lectures de cache — l'échantillon serait
+                # faux par construction).
+                if calibrate:
+                    try:
+                        from ai.calibration import calibration
+                        calibration.record(provider_name, prompt_chars, tokens_in)
+                    except Exception:
+                        pass
             else:
                 tokens_in = expected_in
                 tokens_out = estimate_tokens_from_chars(len(text))
@@ -630,6 +661,7 @@ class AIRouter:
         return await self._metered_call(
             role, system_prompt, user_prompt, _invoke, timeout=timeout,
             extra_prompt_chars=_tools_prompt_chars(tools),
+            calibrate=False,
         )
 
     # ── Structured conversation turns ────────────────────────────
@@ -693,6 +725,7 @@ class AIRouter:
         return await self._metered_call(
             role, system_est, user_est, _invoke, timeout=timeout,
             extra_prompt_chars=_tools_prompt_chars(tools),
+            calibrate=False,
         )
 
 

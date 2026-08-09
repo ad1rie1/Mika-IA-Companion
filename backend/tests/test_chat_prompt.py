@@ -24,6 +24,8 @@ from ai.chat import CONTEXT_FOOTER, CONTEXT_HEADER, ChatPrompt
 from pipeline.context import ConversationContext
 from pipeline.prompt import (
     _LAYERS,
+    _TRUNCATION_NOTICE,
+    _trim_history_to_l3,
     build_chat_prompt,
     build_prompt_parts,
     build_system_prompt,
@@ -749,3 +751,75 @@ def test_router_chat_falls_back_to_the_legacy_pair(routed, monkeypatch):
     assert kind == "legacy"
     assert system == "S\n\nV"
     assert user == "User: a\n\nUser: b"
+
+
+# ---------------------------------------------------------------------------
+# Borne L3 au rendu — sans cette borne (et sans compaction mappée), un fil
+# long partait entier dans le prompt : short_term_limit est passé de 20 à 500.
+# ---------------------------------------------------------------------------
+
+
+class TestHistoryL3Trim:
+
+    def test_small_history_is_untouched(self):
+        hist = [{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"}]
+        kept, dropped = _trim_history_to_l3(hist, 10_000)
+        assert kept == hist and dropped == 0
+
+    def test_oldest_are_dropped_as_a_contiguous_block(self):
+        hist = [{"role": "user", "content": "x" * 100} for _ in range(10)]
+        kept, dropped = _trim_history_to_l3(hist, 250)
+        # 250 car. ⇒ 2 messages de 100 tiennent, le 3e déborde → 8 élagués.
+        assert dropped == 8
+        assert kept == hist[-2:]  # les plus RÉCENTS, contigus
+
+    def test_the_newest_turn_is_kept_even_if_it_alone_overflows(self):
+        hist = [{"role": "user", "content": "y" * 50_000}]
+        kept, dropped = _trim_history_to_l3(hist, 100)
+        assert len(kept) == 1 and dropped == 0
+
+    def test_weight_uses_the_render_clip_not_raw_length(self):
+        # Un message de 40 000 car. pèse HISTORY_MSG_MAX_CHARS au rendu, pas 40k.
+        from ai.chat import HISTORY_MSG_MAX_CHARS
+        hist = [
+            {"role": "user", "content": "z" * 40_000},
+            {"role": "assistant", "content": "court"},
+        ]
+        kept, _ = _trim_history_to_l3(hist, HISTORY_MSG_MAX_CHARS + 100)
+        assert len(kept) == 2  # les deux tiennent une fois clippés
+
+
+class TestBuildChatPromptL3Cap:
+
+    def _ctx(self, history, summary=""):
+        return ConversationContext(history=history, conversation_summary=summary)
+
+    def test_truncation_without_summary_injects_a_visible_notice(self, monkeypatch):
+        monkeypatch.setattr("ai.budget.conversation_l3_chars", lambda: 250)
+        hist = [{"role": "user", "content": "x" * 100} for _ in range(10)]
+        prompt = build_chat_prompt(self._ctx(hist), "et maintenant ?")
+        assert len(prompt.history) == 2
+        assert prompt.conversation_summary.startswith("[Début de conversation non affiché")
+        assert "8" in prompt.conversation_summary  # le compte élagué
+
+    def test_truncation_with_a_real_summary_keeps_the_summary(self, monkeypatch):
+        monkeypatch.setattr("ai.budget.conversation_l3_chars", lambda: 250)
+        hist = [{"role": "user", "content": "x" * 100} for _ in range(10)]
+        prompt = build_chat_prompt(
+            self._ctx(hist, summary="ce qui s'est dit avant"), "suite",
+        )
+        # Le résumé de compaction couvre déjà le début : pas de mention parasite.
+        assert prompt.conversation_summary == "ce qui s'est dit avant"
+
+    def test_no_truncation_leaves_summary_untouched(self, monkeypatch):
+        monkeypatch.setattr("ai.budget.conversation_l3_chars", lambda: 100_000)
+        hist = [{"role": "user", "content": "a"}]
+        prompt = build_chat_prompt(self._ctx(hist), "b")
+        assert prompt.history == hist
+        assert prompt.conversation_summary == ""
+
+    def test_notice_constant_is_the_one_rendered(self, monkeypatch):
+        monkeypatch.setattr("ai.budget.conversation_l3_chars", lambda: 10)
+        hist = [{"role": "user", "content": "x" * 100} for _ in range(3)]
+        prompt = build_chat_prompt(self._ctx(hist), "m")
+        assert prompt.conversation_summary == _TRUNCATION_NOTICE.format(n=2)

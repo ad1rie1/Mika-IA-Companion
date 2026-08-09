@@ -264,6 +264,16 @@ CONFIG_SCHEMA = [
                         "(ai.ollama.max_reply_tokens) : le plus petit gagne."
                     ),
                 ),
+                record_item(
+                    key="context_window", type="int", label="Fenêtre de contexte (tokens)",
+                    default=0, min=0, max=2_000_000,
+                    hint=(
+                        "0 = inconnue : les plafonds fixes actuels restent "
+                        "seuls maîtres. Déclarée, elle dimensionne le budget "
+                        "de contexte (historique, rappel mémoire) et le "
+                        "seuil de compaction du fil."
+                    ),
+                ),
             ),
         ),
     ),
@@ -310,6 +320,61 @@ CONFIG_SCHEMA = [
         key="ai.role.inner_voice", type="select", section="ai_roles",
         label="Voix intérieure",
         hint="Pensées murmurées. Appelé souvent — garde un petit modèle.",
+    ),
+    ConfigItem(
+        key="ai.role.preparation", type="select", section="ai_roles",
+        label="Préparation (rappel dirigé)",
+        hint="Pré-passe qui planifie les recherches mémoire avant la réponse. "
+             "Petit modèle rapide (Haiku). Non mappé = désactivée — "
+             "recommandé derrière un modèle local lent.",
+    ),
+    ConfigItem(
+        key="ai.role.compaction", type="select", section="ai_roles",
+        label="Compaction du fil",
+        hint="Résumé roulant de la conversation, hors tour. Petit modèle. "
+             "Non mappé = désactivée (l'historique reste borné en nombre).",
+    ),
+
+    ConfigSection(
+        key="ai_context", label="IA · Contexte", icon="◫", order=25,
+        description=(
+            "Passe de préparation (rappel dirigé) et gestion de la fenêtre "
+            "de contexte."
+        ),
+    ),
+    ConfigItem(
+        key="ai.preparation.deadline_ms", type="int", section="ai_context",
+        group="Préparation", label="Deadline du plan (ms)",
+        default=1500, min=300, max=5000, hot_reload=True,
+        hint="La réponse n'attend JAMAIS la réflexion au-delà : passé ce "
+             "délai, le tour part avec le rappel spéculatif seul.",
+    ),
+    ConfigItem(
+        key="ai.preparation.min_chars", type="int", section="ai_context",
+        group="Préparation", label="Longueur minimale du message",
+        default=20, min=0, max=200, hot_reload=True,
+        hint="Sous ce seuil (et sans « ? »), pas de passe — le small talk "
+             "garde sa latence actuelle.",
+    ),
+    ConfigItem(
+        key="ai.preparation.max_rappels", type="int", section="ai_context",
+        group="Préparation", label="Rappels max par plan",
+        default=3, min=1, max=5, hot_reload=True,
+    ),
+    ConfigItem(
+        key="ai.context.usage_ratio", type="float", section="ai_context",
+        group="Budget", label="Part de fenêtre visée",
+        default=0.5, min=0.1, max=0.95, hot_reload=True,
+        hint="La fenêtre est un plafond, pas une cible : 0.5 borne le coût "
+             "du pire tour et laisse l'autre moitié comme marge de session "
+             "avant compaction.",
+    ),
+    ConfigItem(
+        key="ai.context.default_window", type="int", section="ai_context",
+        group="Budget", label="Fenêtre de repli (tokens)",
+        default=16384, min=2048, max=2_000_000, hot_reload=True,
+        hint="Utilisée quand le modèle déclaré n'a pas de context_window : "
+             "la compaction du fil garde ainsi toujours un seuil.",
     ),
 
     ConfigSection(

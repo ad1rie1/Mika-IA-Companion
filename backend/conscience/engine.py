@@ -273,6 +273,11 @@ class ConscienceEngine:
             # donc sans cette fusion les deux lectures renvoient toujours [].
             raw_data = dict(event.data or {})
             raw_data["themes"] = signal.themes
+            # Les entités nommées par l'interprétation mouraient à la
+            # frontière (produites, jamais persistées) alors qu'elles sont
+            # exactement ce qu'un rappel dirigé ou un routage par personne
+            # peut exploiter plus tard.
+            raw_data["entities"] = [str(e) for e in (signal.entities or []) if e]
 
             return await sync_to_async(Observation.objects.create)(
                 source=event.source_module,

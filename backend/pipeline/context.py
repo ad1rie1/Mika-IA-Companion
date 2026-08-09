@@ -4,7 +4,9 @@ Collects memory, emotion, module context, and conversation history
 into a single structure ready for the AI call.
 """
 
+import asyncio
 import logging
+import time as _time
 from dataclasses import dataclass, field
 
 from drives.engine import drive_engine
@@ -78,6 +80,16 @@ class ConversationContext:
     # disclosure threshold, private per-person memory is withheld entirely.
     identity_context: str = ""
 
+    # Pensée pré-verbale produite par la passe de préparation — injectée en
+    # dernier (`--- CE QUI TE VIENT A L'ESPRIT ---`), là où la récence pèse
+    # le plus. Vide quand la passe n'a pas tourné ou n'avait rien à dire.
+    note_de_focus: str = ""
+
+    # Résumé roulant du fil (compaction) — matériau de la zone messages,
+    # PAS une couche du prompt système : rendu comme premier tour user par
+    # ChatPrompt, dans la zone cacheable.
+    conversation_summary: str = ""
+
 
 async def gather_context(
     message: str,
@@ -104,16 +116,64 @@ async def gather_context(
             this field, so the embedding + ChromaDB query paid here was
             thrown away on every spontaneous act.
     """
-    # Memory context (graceful degradation)
+    # ── Rappel mémoire : spéculatif (plancher) + plan de préparation ──
+    #
+    # Le spéculatif est la recherche historique sur le message ; la passe de
+    # préparation (petit LLM, pipeline/preparation.py) tourne EN PARALLÈLE et
+    # peut la remplacer par un rappel dirigé (multi-requêtes + échanges
+    # bruts). Deadline dure, fail-open : la réponse n'attend jamais la
+    # réflexion, et tout échec redonne exactement le comportement d'avant.
     memory_context = ""
+    note_de_focus = ""
     if include_memory:
-        try:
-            memory_context = await memory_manager.get_memory_context(
-                message, person_id=person_id
-            )
-        except Exception:
-            logger.warning("Memory retrieval failed, continuing without context")
-            memory_context = ""
+        prep_task, prep_deadline = _launch_preparation(message, person_id)
+
+        spec_task = asyncio.create_task(
+            memory_manager.get_memory_context(message, person_id=person_id)
+        )
+
+        plan = None
+        if prep_task is not None:
+            try:
+                remaining = max(0.05, prep_deadline - _time.monotonic())
+                plan = await asyncio.wait_for(prep_task, timeout=remaining)
+            except Exception as exc:
+                prep_task.cancel()
+                degradations.record("preparation: attente du plan", exc)
+
+        plan_used = False
+        if plan is not None:
+            if plan.note_de_focus:
+                note_de_focus = (
+                    "(pensée pré-verbale, pas une consigne) " + plan.note_de_focus
+                )
+            if plan.rappels:
+                try:
+                    from pipeline.preparation import execute_plan
+
+                    results = await execute_plan(plan, person_id)
+                    directed = await memory_manager.get_memory_context_multi(
+                        [message] + results.memory_queries,
+                        person_id=person_id,
+                        extra_exchanges=results.exchange_hits,
+                        # Tour émotionnellement chargé → le rappel attend
+                        # davantage aux souvenirs marquants (réflexe humain).
+                        salience_boost=plan.charge_emotionnelle,
+                    )
+                    if directed:
+                        memory_context = directed
+                        plan_used = True
+                except Exception as exc:
+                    degradations.record("preparation: rappel dirige", exc)
+
+        if plan_used:
+            spec_task.cancel()
+        else:
+            try:
+                memory_context = await spec_task
+            except Exception:
+                logger.warning("Memory retrieval failed, continuing without context")
+                memory_context = ""
 
     # Self-concept: latest autobiographical narrative from the consolidator.
     # Best-effort — if the table hasn't been populated yet (no narrative
@@ -171,6 +231,10 @@ async def gather_context(
     history = await _label_history_speakers(
         memory_manager.get_conversation_context(), person_id
     )
+    # Résumé roulant du fil (compaction). Coercition défensive : les tests
+    # substituent le manager par un mock dont l'attribut rendrait un objet.
+    _summary = getattr(memory_manager, "get_conversation_summary", lambda: "")()
+    conversation_summary = _summary if isinstance(_summary, str) else ""
 
     # Fatigue fog — when energy is low, shape the cognitive tone
     fatigue_fog = _fatigue_fog_context()
@@ -255,7 +319,36 @@ async def gather_context(
         project_suppresses_emotion=project_suppresses_emotion,
         project_id=project_id,
         identity_context=identity_context,
+        note_de_focus=note_de_focus,
+        conversation_summary=conversation_summary,
     )
+
+
+def _launch_preparation(message: str, person_id: str):
+    """Crée la tâche de plan si le tour la mérite — sinon ``(None, 0.0)``.
+
+    Toute erreur ici coûte au pire l'absence de passe, jamais le tour.
+    """
+    try:
+        from pipeline.preparation import prepare, should_prepare
+
+        if not should_prepare(message, person_id):
+            return None, 0.0
+
+        from configs.service import config_service
+        try:
+            deadline_s = float(config_service.get("ai.preparation.deadline_ms")) / 1000.0
+        except Exception:
+            deadline_s = 1.5
+
+        history_tail = list(memory_manager.get_conversation_context())[-6:]
+        task = asyncio.create_task(
+            prepare(message, history_tail, person_id, deadline_s)
+        )
+        return task, _time.monotonic() + deadline_s
+    except Exception as exc:
+        degradations.record("preparation: lancement", exc)
+        return None, 0.0
 
 
 def _conversation_tool_modules() -> list[str]:

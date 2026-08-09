@@ -58,6 +58,14 @@ _RESUME_MARKER = "[Reprise de la conversation.]"
 HISTORY_MSG_MAX_CHARS = 4000
 _TRUNCATION_MARK = " …[tronqué]"
 
+# En-tête du résumé roulant (compaction du fil). Rendu comme PREMIER message
+# user du tableau : il vit dans la zone cacheable des messages et ne change
+# qu'à chaque passe de compaction (rare par hystérésis).
+SUMMARY_HEADER = "[Fil de la conversation jusqu'ici — résumé]"
+# Ceinture : le compactor vise bien plus court, mais le résumé ne doit
+# jamais pouvoir manger la part du fil vivant.
+SUMMARY_MAX_CHARS = 8000
+
 
 def _clip_msg(content: str) -> str:
     if len(content) <= HISTORY_MSG_MAX_CHARS:
@@ -73,6 +81,8 @@ class ChatPrompt:
     system_volatile: str = ""
     history: list[dict] = field(default_factory=list)
     message: str = ""
+    # Résumé roulant des segments déjà compactés du fil ("" = aucun).
+    conversation_summary: str = ""
 
     # ── Full-fidelity views ─────────────────────────────────────
 
@@ -99,6 +109,14 @@ class ChatPrompt:
             content = (m.get("content") or "").strip()
             if role in ("user", "assistant") and content:
                 msgs.append({"role": role, "content": _clip_msg(content)})
+        if self.conversation_summary:
+            # Avant le garde premier-message : le résumé EST un tour user
+            # valide, donc un historique qui s'ouvrait sur Mika n'a plus
+            # besoin du marqueur de reprise.
+            msgs.insert(0, {
+                "role": "user",
+                "content": f"{SUMMARY_HEADER}\n{self.conversation_summary[:SUMMARY_MAX_CHARS]}",
+            })
         if msgs and msgs[0]["role"] == "assistant":
             msgs.insert(0, {"role": "user", "content": _RESUME_MARKER})
 
@@ -122,6 +140,11 @@ class ChatPrompt:
         50 kB paste verbatim on every turn until it rotated out).
         """
         flat = ""
+        if self.conversation_summary:
+            flat += (
+                f"User: {SUMMARY_HEADER}\n"
+                f"{self.conversation_summary[:SUMMARY_MAX_CHARS]}\n\n"
+            )
         for m in self.history or []:
             role = m.get("role")
             content = m.get("content")

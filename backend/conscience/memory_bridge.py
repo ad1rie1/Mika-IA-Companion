@@ -23,8 +23,16 @@ class MemoryBridge:
 
     # ── Read ─────────────────────────────────────────────────────
 
-    async def recall_for_context(self, queries: list[str]) -> str:
+    async def recall_for_context(self, queries: list[str], person_id: str = "") -> str:
         """Retrieve relevant memories for a list of query strings.
+
+        Multi-requêtes : chaque résumé d'observation interroge la mémoire
+        séparément et les pages fusionnent par pertinence — la concaténation
+        (« q1 q2 q3 » en une seule recherche) produisait un embedding moyen
+        qui ne ressemblait à aucune des trois questions. Les résumés
+        d'observations SONT le plan de rappel de la conscience : c'est
+        pourquoi les tours de conscience ne passent pas par la passe de
+        préparation LLM du pipeline.
 
         Returns formatted context string or empty.
         """
@@ -33,12 +41,59 @@ class MemoryBridge:
         if not queries:
             return ""
 
-        combined = " ".join(queries[:3])
         try:
-            return await memory_manager.get_memory_context(combined)
+            return await memory_manager.get_memory_context_multi(
+                queries[:3], person_id=person_id,
+            )
         except Exception:
             logger.exception("MemoryBridge: recall_for_context failed")
             return ""
+
+    # Poids de l'évidence épisodique dans who_is_concerned : un échange
+    # récent pèse un peu plus qu'une mention en mémoire curée.
+    _EXCHANGE_WEIGHT = 1.2
+
+    async def _merge_exchange_evidence(
+        self, signal_text: str, names_scores: dict, n: int,
+    ) -> None:
+        """Ajoute aux scores les personnes dont les échanges bruts récents
+        parlent du sujet. Mutation en place, jamais d'exception."""
+        from identity.resolver import identity_resolver
+        from identity.trust import is_internal_person
+
+        try:
+            from memory.episodic import api as episodic_api
+
+            hits = await episodic_api.search_exchanges(signal_text, n=n)
+        except Exception as exc:
+            degradations.record("conscience: evidence episodique", exc)
+            return
+
+        entity_cache: dict = {}
+        for h in hits:
+            handle = h.handle
+            if not handle or is_internal_person(handle):
+                continue
+            if handle not in entity_cache:
+                try:
+                    entity_cache[handle] = await identity_resolver.entity_for_person(handle)
+                except Exception:
+                    entity_cache[handle] = None
+            entity = entity_cache[handle]
+            if entity is None:
+                # Visiteur non lié : aucun nom vers qui router.
+                continue
+            distance = h.distance if h.distance is not None else 0.5
+            relevance = max(0.0, 1.0 - distance) * self._EXCHANGE_WEIGHT
+            if relevance > 0:
+                names_scores[entity.name] = names_scores.get(entity.name, 0.0) + relevance
+
+    async def get_important_souvenirs(
+        self, min_importance: float = 0.5, limit: int = 5
+    ) -> list:
+        """Get recent important souvenirs."""
+        from memory.manager import memory_manager
+        return await memory_manager.get_important_souvenirs(min_importance, limit)
 
     async def who_is_concerned(self, signal_text: str, n: int = 5) -> list[dict]:
         """Who does this signal concern, ranked, with reachable handles.
@@ -76,6 +131,13 @@ class MemoryBridge:
         names_scores = await sync_to_async(self._person_entities_from_matches)(
             souvenirs, connaissances
         )
+
+        # 2bis. Évidence épisodique : un échange brut récent sur le sujet est
+        # une preuve plus fraîche qu'une vieille mention dans un souvenir —
+        # et elle existe le jour même, avant toute extraction. Le handle du
+        # chunk remonte à l'entité via la couche identité, jamais par nom.
+        await self._merge_exchange_evidence(signal_text, names_scores, n)
+
         if not names_scores:
             return []
 

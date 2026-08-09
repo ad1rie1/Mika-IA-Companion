@@ -125,9 +125,15 @@ class TestLayerOrdering:
         )
         assert project < emotion
 
-    def test_memory_comes_last(self):
+    def test_memory_comes_last_before_the_focus_note(self):
+        """La mémoire ferme le bloc d'état ; seule la pensée du tour (note
+        de focus, passe de préparation) passe après elle — la récence est la
+        position qui pèse le plus, et cette couche parle de CE tour."""
         prompt = self._full()
-        assert prompt.rstrip().endswith("<memory_context>")
+        assert prompt.rstrip().endswith("--- FIN ---")
+        assert prompt.find("<memory_context>") < prompt.find("<note_de_focus>")
+        after_memory = prompt[prompt.find("<memory_context>"):]
+        assert "--- CE QUI TE VIENT A L'ESPRIT ---" in after_memory
 
     def test_table_order_is_the_prompt_order(self):
         """The table *is* the documentation — pinned so it stays true."""

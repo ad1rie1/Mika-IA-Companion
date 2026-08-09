@@ -17,11 +17,50 @@ thing that runs.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
-from ai.chat import ChatPrompt
+from ai.chat import HISTORY_MSG_MAX_CHARS, ChatPrompt
 from config.personality import personality
 from pipeline.context import ConversationContext
+from utils.degradation import degradations
+
+logger = logging.getLogger(__name__)
+
+# Mention posée dans le créneau du résumé quand la compaction est inactive et
+# que le fil dépasse quand même le budget L3 : une coupe visible plutôt que
+# silencieuse (docs/evolution-contexte.md §5). Le SQL et l'index épisodique
+# gardent le verbatim ; seul le contexte immédiat est élagué.
+_TRUNCATION_NOTICE = (
+    "[Début de conversation non affiché ici : {n} message(s) plus anciens "
+    "restent en mémoire mais sortent du budget de contexte immédiat.]"
+)
+
+
+def _trim_history_to_l3(history: list[dict], max_chars: int) -> tuple[list[dict], int]:
+    """Garde le bloc le plus récent de l'historique tenant dans ``max_chars``.
+
+    Pur et testable. Le poids d'un message est sa taille de *rendu* (clippée
+    à ``HISTORY_MSG_MAX_CHARS``), pour que la borne corresponde à ce qui part
+    réellement sur le réseau. Le fil est contigu : dès qu'un message (en
+    remontant) ne tient plus, tout ce qui est plus ancien est élagué d'un
+    bloc — jamais de trou au milieu. Le tour le plus récent est toujours
+    gardé, même s'il dépasse à lui seul.
+
+    Retourne ``(kept, dropped_count)``.
+    """
+    if max_chars <= 0:
+        return list(history), 0
+    kept_rev: list[dict] = []
+    used = 0
+    for m in reversed(history):
+        weight = min(len(m.get("content") or ""), HISTORY_MSG_MAX_CHARS)
+        if kept_rev and used + weight > max_chars:
+            break
+        kept_rev.append(m)
+        used += weight
+    kept_rev.reverse()
+    return kept_rev, len(history) - len(kept_rev)
 
 
 @dataclass(frozen=True)
@@ -79,6 +118,10 @@ _LAYERS: tuple[_Layer, ...] = (
     ),
     # Retrieved memories arrive pre-formatted by the retriever.
     _Layer("memory_context", None),
+    # La pensée pré-verbale de la passe de préparation ferme le prompt : la
+    # récence est la position qui pèse le plus, et c'est la seule couche qui
+    # dit quelque chose sur CE tour précis plutôt que sur l'état ambiant.
+    _Layer("note_de_focus", "--- CE QUI TE VIENT A L'ESPRIT ---"),
 )
 
 
@@ -159,13 +202,49 @@ def build_chat_prompt(context: ConversationContext, message: str) -> ChatPrompt:
     The provider decides the rendering: chat-native providers cache the
     stable prefix and send the history as real messages; legacy providers
     get the exact old two-string shape via ``ChatPrompt.legacy_pair()``.
+
+    L'historique est borné ici par le budget L3 du modèle (la même valeur que
+    le watermark de compaction) : sans rôle ``COMPACTION`` mappé, c'est la
+    SEULE chose qui empêche un fil long de partir entier dans le prompt
+    (jusqu'à ``memory.short_term_limit`` messages, défaut 500). On borne la
+    *copie* de rendu, jamais le buffer — la compaction et la réhydratation en
+    restent maîtresses.
     """
     stable, volatile = build_prompt_parts(context)
+    history = list(context.history or [])
+    summary = context.conversation_summary
+
+    try:
+        from ai.budget import conversation_l3_chars
+
+        history, dropped = _trim_history_to_l3(history, conversation_l3_chars())
+    except Exception as exc:
+        degradations.record("prompt: borne historique L3", exc)
+        dropped = 0
+
+    # Coupe visible seulement dans le cas réellement perdant : rien pour
+    # couvrir le début élagué. Avec un résumé de compaction, l'élagage est le
+    # fonctionnement normal (le résumé couvre déjà les anciens), pas une
+    # dégradation à signaler.
+    if dropped and not summary:
+        # La mention DANS le prompt est la garantie « pas de coupe silencieuse »
+        # (le modèle la voit lui-même) ; le log est pour l'opérateur. Pas
+        # `degradations.record` : ce n'est pas une exception avalée mais un
+        # état attendu (compaction non mappée + fil long), et le registre est
+        # réservé aux except (invariant AST de utils/degradation).
+        summary = _TRUNCATION_NOTICE.format(n=dropped)
+        logger.debug(
+            "Historique élagué au budget L3 : %d message(s) hors contexte "
+            "immédiat (compaction inactive) — mention posée dans le prompt.",
+            dropped,
+        )
+
     return ChatPrompt(
         system_stable=stable,
         system_volatile=volatile,
-        history=list(context.history or []),
+        history=history,
         message=message,
+        conversation_summary=summary,
     )
 
 

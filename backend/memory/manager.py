@@ -21,6 +21,9 @@ class MemoryManager:
         )
         self.conversation = None
         self._initialized = False
+        # Résumé roulant du fil (compaction) — chargé à la réhydratation,
+        # réécrit par fold_into_summary. "" tant qu'aucune passe n'a tourné.
+        self.conversation_summary = ""
         # A restart within this window reattaches to the conversation in
         # progress instead of opening a new one, so an exchange interrupted
         # by a restart stays one exchange.
@@ -31,6 +34,10 @@ class MemoryManager:
         self.extractor = None
         self.consolidator = None
         self.retriever = None
+        # Indexeur épisodique (étage 1) — vit et meurt avec le vector store.
+        self.episodic = None
+        # Compacteur du fil — indépendant de chromadb (LLM + ORM seulement).
+        self.compactor = None
 
     async def initialize(self):
         """Initialize all memory subsystems."""
@@ -53,6 +60,15 @@ class MemoryManager:
             self.retriever = MemoryRetriever(self.vector_store)
             self.consolidator = MemoryConsolidator(self.extractor, self.vector_store)
             await self.consolidator.start()
+
+            # Étage épisodique : les échanges bruts, trouvables le jour même.
+            # Dans le même try que le reste — sans chromadb il n'existe pas.
+            from configs.service import config_service
+            from memory.episodic import EpisodicIndexer
+            if config_service.get("memory.episodic_enabled"):
+                self.episodic = EpisodicIndexer(self.vector_store)
+                await self.episodic.start()
+
             logger.info("Contextual memory system initialized")
         except ImportError:
             import sys
@@ -66,6 +82,15 @@ class MemoryManager:
                 logger.warning("chromadb not installed — contextual memory disabled")
         except Exception:
             logger.exception("Failed to initialize contextual memory (falling back to basic)")
+
+        # Compaction du fil — hors du try chromadb : elle n'a besoin que de
+        # l'ORM et du rôle COMPACTION (non mappé = no-op à chaque tick).
+        try:
+            from memory.compaction import ConversationCompactor
+            self.compactor = ConversationCompactor()
+            await self.compactor.start()
+        except Exception:
+            logger.exception("Failed to start conversation compactor")
 
         self._initialized = True
 
@@ -119,9 +144,18 @@ class MemoryManager:
         if not self.conversation:
             return
 
-        def _tail():
+        def _load():
+            from memory.models import ConversationSummary
+
+            summary_row = (
+                ConversationSummary.objects.filter(conversation=self.conversation)
+                .first()
+            )
+            floor_id = summary_row.last_message_id if summary_row else 0
             rows = list(
-                Message.objects.filter(conversation=self.conversation)
+                Message.objects.filter(
+                    conversation=self.conversation, pk__gt=floor_id,
+                )
                 # Machinery, whichever side it sits on: the scaffolding prompt
                 # of an internal trigger, and the fallback text a failed turn
                 # returned. Neither was said by anyone, so neither belongs in
@@ -133,16 +167,18 @@ class MemoryManager:
                 # dit »), donc savoir qui a dit quoi est la seule chose qui
                 # permette au prompt d'arbitrer. Sans lui, apres un
                 # redemarrage comme avant, tout le monde redevient « User: ».
-                .values("role", "content", "person_id")[: self.max_short_term]
+                # `id` rend l'entree repliable par la compaction.
+                .values("id", "role", "content", "person_id")[: self.max_short_term]
             )
             rows.reverse()
-            return rows
+            return rows, (summary_row.content if summary_row else "")
 
         try:
-            self.short_term = await sync_to_async(_tail)()
+            self.short_term, self.conversation_summary = await sync_to_async(_load)()
         except Exception:
             logger.exception("Short-term rehydration failed — starting empty")
             self.short_term = []
+            self.conversation_summary = ""
             return
 
         if self.short_term:
@@ -183,15 +219,15 @@ class MemoryManager:
         otherwise fill the history the model reads with sentences she never
         said, and invite her to say them again.
         """
+        ram_entry = None
         if not is_internal:
             # `person_id` etait recu puis jete : le tampon ne gardait que le
             # role, donc le prompt rendait chaque tour « User: » sans pouvoir
             # dire lequel venait de qui. Il est conserve tel quel (un handle,
             # pas un nom) — la traduction en libelle lisible appartient a la
             # couche identite, pas a la memoire.
-            self.short_term.append(
-                {"role": role, "content": content, "person_id": person_id}
-            )
+            ram_entry = {"role": role, "content": content, "person_id": person_id}
+            self.short_term.append(ram_entry)
             if len(self.short_term) > self.max_short_term:
                 self.short_term = self.short_term[-self.max_short_term :]
 
@@ -214,6 +250,11 @@ class MemoryManager:
                     is_internal=is_internal,
                     awaiting_reply=awaiting_reply,
                 )
+                # L'id rend l'entrée « repliable » par la compaction (une
+                # entrée sans id — écriture ratée, mémoire non initialisée —
+                # n'est simplement jamais repliée, ce qui est sûr).
+                if ram_entry is not None:
+                    ram_entry["id"] = row.pk
                 return row.pk
             except Exception:
                 logger.exception("Failed to persist message to DB")
@@ -222,6 +263,48 @@ class MemoryManager:
     def get_conversation_context(self) -> list[dict]:
         """Get short-term conversation history for Claude."""
         return list(self.short_term)
+
+    def get_conversation_summary(self) -> str:
+        """Résumé roulant du fil (compaction), "" si aucun."""
+        return self.conversation_summary
+
+    async def fold_into_summary(self, new_summary: str, last_id: int) -> bool:
+        """Applique une passe de compaction : upsert du résumé, puis trim.
+
+        Le trim du buffer ne se fait **qu'après** l'écriture réussie du
+        résumé — dans l'autre ordre, une écriture ratée perdrait le verbatim
+        des deux côtés. Les entrées sans id (jamais persistées) survivent
+        toujours. Appelé uniquement par le compactor.
+        """
+        if not new_summary or not self.conversation:
+            return False
+        from memory.models import ConversationSummary
+
+        def _upsert():
+            folded = sum(
+                1 for m in self.short_term
+                if isinstance(m.get("id"), int) and m["id"] <= last_id
+            )
+            obj, _created = ConversationSummary.objects.update_or_create(
+                conversation=self.conversation,
+                defaults={"content": new_summary, "last_message_id": last_id},
+            )
+            ConversationSummary.objects.filter(pk=obj.pk).update(
+                folded_count=obj.folded_count + folded,
+            )
+
+        try:
+            await sync_to_async(_upsert)()
+        except Exception:
+            logger.exception("fold_into_summary: écriture du résumé échouée")
+            return False
+
+        self.conversation_summary = new_summary
+        self.short_term = [
+            m for m in self.short_term
+            if not (isinstance(m.get("id"), int) and m["id"] <= last_id)
+        ]
+        return True
 
     async def get_memory_context(self, query: str, person_id: str = "") -> str:
         """Retrieve relevant long-term memories formatted for the system prompt.
@@ -236,6 +319,29 @@ class MemoryManager:
             return await self.retriever.retrieve(query, person_id=person_id)
         except Exception:
             logger.exception("Memory retrieval error")
+            return ""
+
+    async def get_memory_context_multi(
+        self,
+        queries: list[str],
+        person_id: str = "",
+        extra_exchanges: list | None = None,
+        salience_boost: float = 0.0,
+    ) -> str:
+        """Rappel multi-requêtes (plan de préparation, observations de la
+        conscience) — un seul bloc formaté, fusion par pertinence.
+
+        ``salience_boost`` (charge émotionnelle du tour, plan de préparation)
+        monte les poids émotion/humeur du re-ranking pour ce tour."""
+        if not self.retriever:
+            return ""
+        try:
+            return await self.retriever.retrieve_multi(
+                queries, person_id=person_id, extra_exchanges=extra_exchanges,
+                salience_boost=salience_boost,
+            )
+        except Exception:
+            logger.exception("Memory multi-retrieval error")
             return ""
 
     # ── Souvenir operations (used by Conscience) ───────────────────
@@ -259,14 +365,18 @@ class MemoryManager:
             )
 
             if self.vector_store:
-                from memory.storage.vector_store import vector_call
+                from memory.storage.vector_store import souvenir_metadata, vector_call
                 await vector_call(self.vector_store.add_souvenir)(
                     souvenir_id=souvenir.pk,
                     content=souvenir.content,
-                    metadata={
-                        "importance": souvenir.importance,
-                        "emotion": souvenir.emotion,
-                    },
+                    # occurred_at inclus : les souvenirs créés ici (conscience,
+                    # digestion nocturne) étaient invisibles à tout futur
+                    # filtre temporel sur les métadonnées.
+                    metadata=souvenir_metadata(
+                        importance=souvenir.importance,
+                        emotion=souvenir.emotion,
+                        occurred_at=souvenir.occurred_at.isoformat(),
+                    ),
                 )
 
             logger.info(
@@ -386,13 +496,14 @@ class MemoryManager:
             if self.vector_store:
                 # `search_connaissances` filtre sur `is_valid` cote ChromaDB :
                 # sans cette metadonnee la ligne ne serait jamais servie.
+                from memory.storage.vector_store import connaissance_metadata
                 await sync_to_async(self.vector_store.add_connaissance)(
                     connaissance_id=connaissance.pk,
                     content=connaissance.content,
-                    metadata={
-                        "confidence": connaissance.confidence,
-                        "is_valid": True,
-                    },
+                    metadata=connaissance_metadata(
+                        confidence=connaissance.confidence,
+                        is_valid=True,
+                    ),
                 )
 
             logger.info(
@@ -419,15 +530,15 @@ class MemoryManager:
             # ORM : sans reindexation la connaissance continuerait d'etre servie
             # au prompt a chaque tour. Meme geste que le consolidateur.
             if self.vector_store:
-                from memory.storage.vector_store import vector_call
+                from memory.storage.vector_store import connaissance_metadata, vector_call
                 try:
                     await vector_call(self.vector_store.add_connaissance)(
                         connaissance_id=conn.pk,
                         content=conn.content,
-                        metadata={
-                            "confidence": conn.confidence,
-                            "is_valid": False,
-                        },
+                        metadata=connaissance_metadata(
+                            confidence=conn.confidence,
+                            is_valid=False,
+                        ),
                     )
                 except Exception:
                     logger.warning(
@@ -558,6 +669,16 @@ class MemoryManager:
 
     async def shutdown(self):
         """Graceful shutdown: force final consolidation and stop background tasks."""
+        if self.compactor:
+            try:
+                await self.compactor.stop()
+            except Exception:
+                logger.exception("Error stopping conversation compactor")
+        if self.episodic:
+            try:
+                await self.episodic.stop()
+            except Exception:
+                logger.exception("Error stopping episodic indexer")
         if self.consolidator:
             try:
                 await self.consolidator.force_consolidate()
