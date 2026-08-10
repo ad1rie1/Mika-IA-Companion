@@ -50,7 +50,14 @@ WIDGETS = {
     "select": "select",
     "multiselect": "multiselect",
     "list": "list",
+    "lines": "lines",
 }
+
+#: Les types dont la valeur se rend « une par ligne » plutôt que sur une seule.
+#: Nommé plutôt que testé en place : deux classes de champ rendent la valeur,
+#: et une seule des deux corrigée aurait donné un formulaire qui affiche des
+#: virgules et enregistre des lignes.
+LINE_TYPES = ("lines",)
 
 
 @dataclass
@@ -98,6 +105,8 @@ class BoundField:
         if isinstance(v, bool):
             return "1" if v else ""
         if isinstance(v, (list, tuple)):
+            if self.item.type in LINE_TYPES:
+                return "\n".join(str(x) for x in v)
             return ", ".join(str(x) for x in v)
         return str(v)
 
@@ -321,6 +330,8 @@ class RecordField:
         if isinstance(v, bool):
             return "1" if v else ""
         if isinstance(v, (list, tuple)):
+            if self.item.type in LINE_TYPES:
+                return "\n".join(str(x) for x in v)
             return ", ".join(str(x) for x in v)
         return str(v)
 

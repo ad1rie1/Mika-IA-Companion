@@ -61,14 +61,26 @@ def temperament_propre():
 
 # ── Une seule source ────────────────────────────────────────────────────
 
-def test_le_yaml_ne_declare_plus_de_temperament():
-    """Deux déclarants pour un même curseur, c'est deux valeurs qui divergent."""
+def test_le_yaml_de_personnalite_a_disparu():
+    """Deux déclarants pour une même valeur, c'est deux valeurs qui divergent.
+
+    Le tempérament est parti le premier, et le reste du personnage l'a suivi :
+    nom, description, ton, traits, manies, valeurs, tics de langage,
+    salutations et profil circadien se règlent dans le tableau de bord. Le
+    fichier n'a donc plus rien à porter, et le laisser vide aurait rouvert la
+    question à la première personne qui y aurait recollé un bloc.
+
+    Le test vise la racine du dépôt directement : ``settings.PERSONALITY_PATH``
+    n'existe plus non plus, et le garder pour pointer un fichier absent aurait
+    été le dernier fil par lequel le rattraper.
+    """
     from django.conf import settings
 
-    data = yaml.safe_load(Path(settings.PERSONALITY_PATH).read_text("utf-8")) or {}
-    assert "temperament" not in data, (
-        "le bloc temperament: doit avoir quitté personality.yaml — sinon le "
-        "fichier et le tableau de bord annoncent deux tempéraments"
+    chemin = Path(settings.PROJECT_ROOT) / "personality.yaml"
+    assert not chemin.exists(), (
+        "personality.yaml est de retour : le fichier et le tableau de bord "
+        "annonceraient deux personnages, et lequel gagne dépendrait de l'ordre "
+        "de lecture. Les valeurs se déclarent dans config/personality_schema.py."
     )
 
 

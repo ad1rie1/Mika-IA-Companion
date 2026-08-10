@@ -8,7 +8,7 @@ the DriveEngine reads the energy curve so tiredness follows the night.
 Design:
   - Zero side effects, zero state. `current_phase(now)` and
     `phase_bias(phase, profile)` are pure — trivial to test at any hour.
-  - The profile is loaded from `personality.yaml::temperament.circadian_profile`
+  - The profile is rebuilt from the `personality.circadian.*` config keys
     so a different character (lève-tôt vs noctambule) is a YAML edit,
     not a code change.
   - 4 phases: morning, afternoon, evening, night. A "sleep" window is
@@ -260,7 +260,7 @@ def phase_description_fr(state: CircadianState) -> str:
 
 
 def profile_from_yaml(data: dict) -> CircadianProfile:
-    """Build a ``CircadianProfile`` from a personality.yaml ``circadian_profile`` dict.
+    """Build a ``CircadianProfile`` from a ``circadian_profile``-shaped dict.
 
     All fields are optional — any missing keys fall back to the defaults.
     The YAML schema:

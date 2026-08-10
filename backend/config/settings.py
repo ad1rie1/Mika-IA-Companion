@@ -6,7 +6,7 @@ import environ
 
 # backend/
 BASE_DIR = Path(__file__).resolve().parent.parent
-# vtuber/ (project root, where .env and personality.yaml live)
+# vtuber/ (racine du dépôt, où vit .env)
 PROJECT_ROOT = BASE_DIR.parent
 
 env = environ.Env()
@@ -255,8 +255,6 @@ CONSUMER_REQUIRE_AUTH = env.bool("CONSUMER_REQUIRE_AUTH", default=True)
 # (unread emails, pending wakes). Authenticated users (user_*) and Mika's own
 # internal channels are always trusted; this adds extras (e.g. your tg_<id>).
 OWNER_PERSON_IDS = env.list("OWNER_PERSON_IDS", default=[])
-
-PERSONALITY_PATH = PROJECT_ROOT / "personality.yaml"
 
 # --- AI Quota / Limiter ---
 # Token budgets act as a circuit breaker: when a counter would be

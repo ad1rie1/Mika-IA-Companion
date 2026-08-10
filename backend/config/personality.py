@@ -1,95 +1,200 @@
-from pathlib import Path
+"""Le personnage, lu dans le registre de configuration.
 
-import yaml
-from django.conf import settings
+``personality.yaml`` n'existe plus. Il portait le nom, la description, le ton,
+les traits, les manies, les valeurs, les tics de langage, les salutations et le
+profil circadien ; tout cela se règle maintenant dans le tableau de bord
+(Configuration → Personnalité). Le tempérament était déjà parti le premier, et
+pour la même raison, écrite alors dans le fichier lui-même : deux endroits où
+déclarer une valeur, ce sont deux valeurs qui finissent par diverger.
 
+Rien n'est perdu au passage — les défauts déclarés dans
+``config/personality_schema.py`` reproduisent mot pour mot ce que le fichier
+contenait, et un test l'épingle. Un clone neuf obtient la même Mika ; une
+installation qui avait personnalisé son YAML retrouve son texte dans l'écran, à
+l'endroit où il se modifie désormais.
+
+L'objet ``personality`` reste un singleton importé partout et son interface ne
+bouge pas : les appelants font ``personality.name``, ``personality.traits``.
+Ce qui change, c'est que chaque accès relit la configuration. C'est voulu et
+peu coûteux (``config_service`` mémoïse), et c'est ce qui rend le rechargement
+à chaud honnête : une modification s'applique au tour suivant, sans redémarrage.
+"""
 from emotion.circadian import CircadianProfile, profile_from_yaml
 from emotion.types import Emotion
 from emotion.state import Temperament, load_temperament
 
+#: Les phases telles que le schéma les nomme.
+_PHASES = ("morning", "afternoon", "evening", "night")
+
+#: Les trois textes qui n'ont pas le droit d'être vides, et ce qu'on sert
+#: quand ils le sont.
+#:
+#: Deux ratés mènent ici et un seul repli les couvre : le registre hors
+#: d'atteinte (import avant ``migrate``, base verrouillée) et le champ vidé
+#: depuis le formulaire. Le prompt met le nom juste après « Tu es » — ce n'est
+#: donc pas une préférence, c'est ce qui reste prononçable.
+#:
+#: Nommé plutôt qu'écrit dans chaque accesseur pour que le test de cohérence
+#: des défauts puisse le lire : ces valeurs doivent rester égales au ``default``
+#: du ``ConfigItem`` correspondant, sinon renommer le personnage dans le schéma
+#: laisserait « Mika » revenir par la porte du champ vidé.
+TEXTES_OBLIGATOIRES = {
+    "name": "Mika",
+    "language": "fr",
+    "greeting": "Hey ! Bienvenue bienvenue ~ Posez-vous, faites comme chez "
+                "vous. Alors, quoi de beau aujourd'hui ?",
+}
+
 
 class Personality:
-    def __init__(self, path: Path | None = None):
-        self.path = path or settings.PERSONALITY_PATH
-        self._data: dict = {}
-        self.load()
+    """Accesseurs de personnage, tous adossés au registre.
 
-    def load(self):
-        if self.path.exists():
-            with open(self.path, "r", encoding="utf-8") as f:
-                self._data = yaml.safe_load(f) or {}
+    Aucun état : pas de cache local, pas de ``load()``. Un cache ici serait un
+    troisième endroit où la valeur existe, et il faudrait l'invalider à chaque
+    écriture du tableau de bord — c'est exactement ce que fait déjà
+    ``config_service``.
+    """
+
+    # ── Lecture ─────────────────────────────────────────────────
+
+    @staticmethod
+    def _txt(cle: str, repli: str = "") -> str:
+        """Un texte du personnage, avec un repli qui couvre les DEUX ratés.
+
+        Le registre peut être hors d'atteinte (import avant ``migrate``, base
+        verrouillée) et le champ peut avoir été vidé depuis le formulaire. Les
+        trois textes qui n'ont pas le droit d'être vides — le nom, la langue,
+        la salutation — passent le même repli pour les deux cas, plutôt qu'un
+        ``or "Mika"`` ajouté plus loin : ce serait une deuxième valeur
+        déclarée, libre de diverger du défaut du schéma le jour où on renomme
+        le personnage. Ici le repli vaut le ``default`` du ``ConfigItem``, et
+        un test l'épingle.
+        """
+        from configs.runtime import cfg_str
+        return cfg_str(f"personality.{cle}", repli).strip() or repli
+
+    @staticmethod
+    def _lignes(cle: str) -> list[str]:
+        from configs.runtime import cfg_list
+        return [str(v).strip() for v in cfg_list(f"personality.{cle}", []) if str(v).strip()]
+
+    # ── Identité ────────────────────────────────────────────────
 
     @property
     def name(self) -> str:
-        return self._data.get("name", "Mika")
+        # Un nom vide ouvrirait le prompt sur « Tu es , … ». Le repli n'est pas
+        # une préférence, c'est ce qui reste dicible.
+        return self._txt("name", TEXTES_OBLIGATOIRES["name"])
 
     @property
     def description(self) -> str:
-        return self._data.get("description", "")
-
-    @property
-    def tone(self) -> dict:
-        raw = self._data.get("tone", {})
-        if isinstance(raw, str):
-            return {"default": raw}
-        return raw
-
-    @property
-    def personality_data(self) -> dict:
-        return self._data.get("personality", {})
-
-    @property
-    def traits(self) -> list[str]:
-        return self.personality_data.get("core_traits", self._data.get("traits", []))
-
-    @property
-    def quirks(self) -> list[str]:
-        return self.personality_data.get("quirks", [])
-
-    @property
-    def vulnerabilities(self) -> list[str]:
-        return self.personality_data.get("vulnerabilities", [])
-
-    @property
-    def values(self) -> list[str]:
-        return self.personality_data.get("values", [])
-
-    @property
-    def interests(self) -> list[str]:
-        return self.personality_data.get("interests", [])
-
-    @property
-    def speech_patterns(self) -> list[str]:
-        return self._data.get("speech_patterns", [])
-
-    @property
-    def mood_greetings(self) -> dict:
-        return self._data.get("mood_greetings", {})
+        return self._txt("description")
 
     @property
     def language(self) -> str:
-        return self._data.get("language", "fr")
+        return self._txt("language", TEXTES_OBLIGATOIRES["language"])
 
     @property
     def greeting(self) -> str:
-        return self._data.get("greeting", "Salut !")
+        return self._txt("greeting", TEXTES_OBLIGATOIRES["greeting"])
+
+    @property
+    def tone(self) -> dict:
+        """Les trois tons, les vides retirés.
+
+        Une clé absente du dictionnaire et une clé valant la chaîne vide ne se
+        distinguent pas en aval : ``to_system_prompt`` teste la vérité de la
+        valeur. On rend donc un dictionnaire sans entrée vide, pour qu'un ton
+        effacé retire sa ligne du prompt au lieu d'en écrire une amputée.
+        """
+        out = {}
+        for cle in ("default", "when_excited", "when_teasing"):
+            valeur = self._txt(f"tone.{cle}")
+            if valeur:
+                out[cle] = valeur
+        return out
+
+    @property
+    def mood_greetings(self) -> dict:
+        out = {}
+        for cle in ("energetic", "chill", "curious"):
+            valeur = self._txt(f"mood_greetings.{cle}")
+            if valeur:
+                out[cle] = valeur
+        return out
+
+    # ── Caractère ───────────────────────────────────────────────
+
+    @property
+    def traits(self) -> list[str]:
+        return self._lignes("core_traits")
+
+    @property
+    def quirks(self) -> list[str]:
+        return self._lignes("quirks")
+
+    @property
+    def vulnerabilities(self) -> list[str]:
+        return self._lignes("vulnerabilities")
+
+    @property
+    def values(self) -> list[str]:
+        return self._lignes("values")
+
+    @property
+    def interests(self) -> list[str]:
+        return self._lignes("interests")
+
+    @property
+    def speech_patterns(self) -> list[str]:
+        return self._lignes("speech_patterns")
+
+    # ── Rythme ──────────────────────────────────────────────────
 
     @property
     def circadian_profile(self) -> CircadianProfile:
-        """Parse the ``circadian_profile`` block. Defaults kick in for missing keys."""
-        return profile_from_yaml(self._data.get("circadian_profile", {}))
+        """Le profil circadien, recomposé depuis les huit réglages de phase.
+
+        Passe par ``profile_from_yaml`` plutôt que de construire le dataclass
+        ici : cette fonction sait déjà écarter une phase inconnue et une ancre
+        qui n'est pas une émotion, et elle est testée pour ça. Le dictionnaire
+        qu'on lui donne a la forme qu'avait le bloc YAML — c'est la seule chose
+        qu'il reste de lui.
+        """
+        from config.personality_schema import PHASE_DEFAUTS
+        from configs.runtime import cfg_float, cfg_int, cfg_str
+
+        # Le repli vient du schéma, pas d'un littéral réécrit ici : une valeur
+        # sentinelle serait pire qu'inutile — ``profile_from_yaml`` fait
+        # ``int(h) % 24``, donc un « -1 » signifiant « lecture ratée » se
+        # rangerait silencieusement à 23 h et décalerait toute la journée.
+        return profile_from_yaml({
+            "phase_hours": {
+                p: cfg_int(f"personality.circadian.phase_hours.{p}",
+                           PHASE_DEFAUTS[p][0], mini=0, maxi=23)
+                for p in _PHASES
+            },
+            "phase_anchors": {
+                p: cfg_str(f"personality.circadian.phase_anchors.{p}",
+                           PHASE_DEFAUTS[p][1])
+                for p in _PHASES
+            },
+            "energy_peak_hour": cfg_float(
+                "personality.circadian.energy_peak_hour", 14.0),
+            "energy_amplitude": cfg_float(
+                "personality.circadian.energy_amplitude", 0.7),
+            "energy_baseline": cfg_float(
+                "personality.circadian.energy_baseline", 0.55),
+        })
 
     @property
     def temperament(self) -> Temperament:
-        """Le tempérament effectif — lu depuis la **configuration**, pas d'ici.
+        """Le tempérament effectif — même registre, section Émotion.
 
-        Le bloc ``temperament:`` a quitté ``personality.yaml`` : il ne se
-        rédige pas, il se règle, et l'y laisser en second déclarant aurait
-        rendu possible qu'un fichier et le tableau de bord annoncent deux
-        valeurs différentes pour un même curseur. L'accesseur reste sur
-        ``personality`` parce que c'est là que tous les appelants le
+        L'accesseur reste ici parce que c'est là que tous les appelants le
         cherchent, et parce que le tempérament reste conceptuellement une
-        propriété du personnage.
+        propriété du personnage : ce sont des curseurs, pas de la prose, d'où
+        un écran séparé.
         """
         return load_temperament()
 

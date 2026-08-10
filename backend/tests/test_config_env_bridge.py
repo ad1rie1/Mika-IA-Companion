@@ -103,8 +103,10 @@ class TestSettingsScope:
     def test_infrastructure_is_still_declared(self):
         from django.conf import settings
 
+        # PERSONALITY_PATH a quitté cette liste avec le fichier qu'il
+        # désignait : le personnage se déclare au registre.
         for name in ("API_HOST", "API_PORT", "DEBUG", "TIME_ZONE",
-                     "CHROMA_PERSIST_DIR", "FORGE_DIR", "PERSONALITY_PATH"):
+                     "CHROMA_PERSIST_DIR", "FORGE_DIR"):
             assert hasattr(settings, name), name
 
     def test_no_legacy_module_credential_survives(self):

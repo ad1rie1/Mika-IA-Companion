@@ -27,9 +27,15 @@ ValueType = Literal[
     "secret",              # sensitive — redacted in read path
     "select",              # choices required
     "multiselect",
-    "list",                # list of scalars
+    "list",                # list of scalars, saisie séparée par des virgules
+    # Liste dont chaque élément est une PHRASE : une valeur par ligne.
+    # ``list`` découpe sur la virgule, ce qui convient à des mots-clés et
+    # détruit de la prose — « Curieuse de tout, pas juste de tech » devient
+    # deux traits de caractère dont un commençant par « pas ». Le séparateur
+    # est donc le saut de ligne, et la saisie une zone de texte.
+    "lines",
     "record_list",         # list of objects, item schema via ``record``
-    "yaml_block",          # for personality.yaml-style structured blocks
+    "yaml_block",          # bloc structuré rendu tel quel dans une zone de texte
 ]
 
 Validator = Callable[[Any], str | None]  # returns error msg or None

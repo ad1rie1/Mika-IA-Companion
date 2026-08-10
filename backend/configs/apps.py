@@ -1,7 +1,10 @@
 from django.apps import AppConfig
 
 # Paquets porteurs d'un ``config_schema`` sans être une application Django.
-_SCHEMAS_HORS_APPS = ("pipeline.config_schema",)
+_SCHEMAS_HORS_APPS = (
+    "pipeline.config_schema",
+    "config.personality_schema",
+)
 
 
 class ConfigsConfig(AppConfig):

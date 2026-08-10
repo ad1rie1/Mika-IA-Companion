@@ -174,42 +174,76 @@ class TestSystemPromptGeneration:
 # ===================================================================
 
 class TestPersonalityDefaults:
+    """Le personnage se lit au registre — plus aucun fichier derrière.
 
-    def test_missing_yaml_uses_defaults(self, tmp_path):
-        """Loading a non-existent file should use sensible defaults."""
-        p = Personality(path=tmp_path / "nonexistent.yaml")
-        assert p.name == "Mika"  # default
-        assert p.language == "fr"  # default
-        assert p.greeting == "Salut !"  # default
-        assert isinstance(p.temperament, Temperament)
+    Ces tests portaient sur le chargeur YAML (fichier absent, vide, minimal,
+    malformé). Le fichier n'existe plus : ces cas n'ont plus de sens, mais la
+    propriété qu'ils protégeaient, elle, en a toujours une — *une valeur
+    illisible ne doit jamais produire un prompt cassé*. Elle se vérifie
+    maintenant sur les deux façons dont une lecture peut mal tourner : une
+    valeur effacée dans le tableau de bord, et un registre hors d'atteinte.
+    """
 
-    def test_empty_yaml_uses_defaults(self, tmp_path):
-        """An empty YAML file should use defaults."""
-        empty = tmp_path / "empty.yaml"
-        empty.write_text("")
-        p = Personality(path=empty)
+    def test_les_defauts_declares_donnent_mika(self):
+        """Sans aucun réglage enregistré, on obtient le personnage livré."""
+        p = Personality()
         assert p.name == "Mika"
-        assert p.traits == []
+        assert p.language == "fr"
+        assert p.greeting.startswith("Hey !")
+        assert p.traits, "les traits déclarés au schéma doivent remonter"
         assert isinstance(p.temperament, Temperament)
 
-    def test_minimal_yaml(self, tmp_path):
-        """A minimal YAML with just a name should work."""
-        minimal = tmp_path / "minimal.yaml"
-        minimal.write_text('name: "TestBot"\nlanguage: "en"\n')
-        p = Personality(path=minimal)
-        assert p.name == "TestBot"
-        assert p.language == "en"
-        prompt = p.to_system_prompt()
-        assert "TestBot" in prompt
+    @pytest.mark.django_db
+    def test_un_nom_regle_remplace_le_defaut(self):
+        """Écrire dans la configuration change le prompt du tour suivant."""
+        from configs.service import config_service
 
-    def test_invalid_default_mood_fallback(self, tmp_path):
-        """Invalid default_mood should fall back to HAPPY."""
-        broken = tmp_path / "broken.yaml"
-        broken.write_text(
-            'name: "Broken"\n'
-            'temperament:\n'
-            '  default_mood: "nonexistent_emotion"\n'
-            '  volatility: 0.5\n'
-        )
-        p = Personality(path=broken)
-        assert p.temperament.default_mood == Emotion.HAPPY
+        config_service.set("personality.name", "TestBot", actor="test")
+        try:
+            p = Personality()
+            assert p.name == "TestBot"
+            assert "TestBot" in p.to_system_prompt()
+        finally:
+            config_service.unset("personality.name", actor="test")
+            config_service.invalidate_cache("personality.name")
+
+    @pytest.mark.django_db
+    def test_un_nom_efface_reste_dicible(self):
+        """Un nom vidé ne doit pas ouvrir le prompt sur « Tu es , … ».
+
+        Le formulaire permet d'effacer un champ texte, et le prompt met le nom
+        juste après « Tu es ». Le repli n'est pas une préférence, c'est ce qui
+        reste prononçable.
+        """
+        from configs.service import config_service
+
+        config_service.set("personality.name", "", actor="test")
+        try:
+            assert Personality().name == "Mika"
+        finally:
+            config_service.unset("personality.name", actor="test")
+            config_service.invalidate_cache("personality.name")
+
+    def test_un_registre_injoignable_ne_casse_pas_le_prompt(self, monkeypatch):
+        """Base illisible : on sert les replis, on ne lève pas.
+
+        C'est le cas qui remplace « fichier absent ». Il arrive pour de vrai —
+        un import avant ``migrate``, une base verrouillée — et la personnalité
+        est la première couche du prompt : elle échoue avant tout le reste.
+        """
+        from configs.service import config_service
+
+        def _explose(*a, **kw):
+            raise RuntimeError("base injoignable")
+
+        monkeypatch.setattr(config_service, "get", _explose)
+
+        p = Personality()
+        assert p.name == "Mika"
+        assert p.language == "fr"
+        # Les listes retombent sur « rien à dire », pas sur une exception : le
+        # prompt perd des sections, il reste bien formé.
+        assert p.traits == []
+        prompt = p.to_system_prompt()
+        assert "Tu es Mika" in prompt
+        assert "[EMOTION:" in prompt

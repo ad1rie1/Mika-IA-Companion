@@ -389,6 +389,14 @@ def _coerce(item: ConfigItem, value):
             if isinstance(value, str):
                 return [v.strip() for v in value.split(",") if v.strip()]
             return list(value)
+        if t == "lines":
+            # Une valeur par ligne, jamais par virgule : ces listes portent des
+            # phrases. Les lignes vides sont écartées — un formulaire en rend
+            # toujours au moins une, et une trace vide dans un bloc de prompt
+            # se lit comme un tiret orphelin.
+            if isinstance(value, str):
+                return [v.strip() for v in value.splitlines() if v.strip()]
+            return [str(v) for v in value]
     except (TypeError, ValueError) as e:
         raise ValidationError(f"Type invalide pour {item.key}: {e}")
     return value

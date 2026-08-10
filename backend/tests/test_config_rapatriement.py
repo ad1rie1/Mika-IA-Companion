@@ -208,6 +208,27 @@ def _paires_pulsions():
             yield prefixe + "growth_horizon_days", base.growth_horizon / 86400.0
 
 
+def _paires_personnalite():
+    """Les trois textes qui doivent rester dicibles, et les huit phases.
+
+    ``config/personality.py`` compose ses clés en f-string, donc le scanner AST
+    ne les voit pas. Ce sont pourtant les replis qui comptent le plus : ils
+    servent aussi quand un champ a été *vidé* depuis le formulaire, pas
+    seulement quand le registre est injoignable — un nom effacé ouvrirait le
+    prompt sur « Tu es , … ».
+    """
+    from config.personality import TEXTES_OBLIGATOIRES
+    from config.personality_schema import PHASE_DEFAUTS
+
+    # Lus sur les tables elles-mêmes : ce sont les replis réellement passés aux
+    # sites d'appel, pas une recopie qui pourrait déjà avoir divergé.
+    for champ, repli in TEXTES_OBLIGATOIRES.items():
+        yield f"personality.{champ}", repli
+    for phase, (heure, ancre) in PHASE_DEFAUTS.items():
+        yield f"personality.circadian.phase_hours.{phase}", heure
+        yield f"personality.circadian.phase_anchors.{phase}", ancre
+
+
 def _paires_voix():
     from pipeline.voice import VOICE_PROFILES
     for persona, profil in VOICE_PROFILES.items():
@@ -220,6 +241,7 @@ PAIRES_INDIRECTES = [
     for nom, source in (
         ("scoring", _paires_scoring), ("confiance", _paires_confiance),
         ("pulsions", _paires_pulsions), ("voix", _paires_voix),
+        ("personnalite", _paires_personnalite),
     )
     for cle, repli in source()
 ]
@@ -228,7 +250,8 @@ PAIRES_INDIRECTES = [
 def test_les_tables_indirectes_sont_bien_trouvees():
     """Même garde-fou d'inventaire : une table renommée viderait la liste."""
     familles = {nom for nom, _, _ in PAIRES_INDIRECTES}
-    assert familles == {"scoring", "confiance", "pulsions", "voix"}, familles
+    assert familles == {"scoring", "confiance", "pulsions", "voix",
+                        "personnalite"}, familles
     assert len(PAIRES_INDIRECTES) > 60, len(PAIRES_INDIRECTES)
 
 
