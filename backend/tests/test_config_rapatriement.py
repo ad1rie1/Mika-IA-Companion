@@ -447,11 +447,20 @@ def test_la_prose_dun_champ_vient_apres_sa_saisie(section):
 
     vus = 0
     for champ in champs:
-        i_lab = champ.find('class="field-label"')
         i_ctl = champ.find('class="field-control"')
         i_not = champ.find('class="field-notes"')
-        if min(i_lab, i_ctl, i_not) < 0:
+        if min(i_ctl, i_not) < 0:
             continue
+
+        # Une case à cocher porte son libellé À CÔTÉ d'elle, donc dans la piste
+        # du contrôle : elle laisse un emplacement vide dans celle du libellé.
+        # C'est le seul champ où le libellé suit le contrôle, et c'est voulu —
+        # rangée dans la piste du libellé, la case flottait au-dessus des
+        # saisies de sa rangée.
+        case_a_cocher = champ.lstrip().startswith("field-check")
+        i_lab = champ.find(
+            'class="field-slot"' if case_a_cocher else 'class="field-label"')
+        assert i_lab >= 0, f"emplacement de libellé absent dans « {section} »"
         assert i_lab < i_ctl < i_not, (
             f"pistes dans le désordre dans « {section} » : la description doit "
             "suivre la saisie, sinon un champ sans prose hérite du vide de son "
@@ -598,3 +607,132 @@ def test_aucune_page_ne_bride_sa_largeur_en_style_en_ligne():
         f"largeur bridée en style en ligne : {fautifs}. La largeur se décide "
         "dans la feuille de style, pas gabarit par gabarit."
     )
+
+
+# ── Panneaux d'une section ──────────────────────────────────────────────
+#
+# Une section mêle deux natures : des réglages (un formulaire qu'on enregistre
+# d'un bloc) et des listes (un tableau de lignes, chacune créée et supprimée
+# séparément). Empilées, elles donnaient un formulaire suivi sans transition
+# d'un tableau avec ses boutons. Le découpage ne se déclare pas — il découle de
+# ce que la section contient, donc un module qui ajoute un `record_list` gagne
+# son onglet sans que l'interface connaisse son nom.
+
+@pytest.mark.django_db
+def test_une_section_a_liste_se_decoupe_en_onglets():
+    """Le module Email : « Réglages » d'un côté, « Comptes email » de l'autre."""
+    import re
+
+    from django.test import Client
+
+    client = Client()
+    base = "/gestion/modules/email/p/configuration/"
+    html = client.get(base).content.decode()
+
+    onglets = re.findall(r'<a class="cfg-panneau" href="[^"]*\?panneau=([^"]+)"', html)
+    assert onglets == ["reglages", "email-accounts"], onglets
+
+    # Le premier panneau montre le formulaire, pas le tableau.
+    assert 'class="cfg-bar' in html
+    assert "Ajouter" not in html
+
+    # Le second montre le tableau, pas le formulaire.
+    liste = client.get(f"{base}?panneau=email-accounts").content.decode()
+    assert "Ajouter" in liste
+    assert 'class="cfg-bar' not in liste
+
+
+@pytest.mark.django_db
+def test_un_panneau_unique_ne_se_presente_pas_comme_un_choix():
+    """Une section sans ``record_list`` n'a rien à onglet-er."""
+    from django.test import Client
+
+    html = Client().get("/gestion/configuration/memory/").content.decode()
+    assert "cfg-panneaux" not in html
+
+
+@pytest.mark.django_db
+def test_un_panneau_inconnu_retombe_sur_le_premier():
+    """Un favori d'avant un renommage doit atterrir, pas rendre une page vide."""
+    from django.test import Client
+
+    html = Client().get(
+        "/gestion/modules/email/p/configuration/?panneau=nexistepas"
+    ).content.decode()
+    assert 'class="cfg-bar' in html
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("url", [
+    "/gestion/configuration/personnalite_traits/",   # 3 blocs
+    "/gestion/modules/email/p/configuration/",       # 2 blocs
+    "/gestion/configuration/memory/",                # beaucoup
+])
+def test_une_section_annonce_toujours_ses_sous_categories(url):
+    """Le sommaire apparaît dès DEUX blocs, et liste tous ceux affichés.
+
+    Le seuil était à trois : la page Caractère annonçait ses trois
+    sous-catégories sous le filtre, la page Email n'annonçait pas les deux
+    siennes. Un écran dont le sommaire va et vient selon le nombre de blocs
+    laisse croire que certaines sections n'ont pas de sous-catégories — on ne
+    devine pas ce que rien ne nomme.
+    """
+    import re
+
+    from django.test import Client
+
+    html = Client().get(url).content.decode()
+    blocs = html.count('class="card cfg-bloc')
+    pastilles = re.findall(r'class="cfg-toc-item"', html)
+    assert blocs >= 2, f"{url} n'a pas assez de blocs pour ce test"
+    assert len(pastilles) == blocs, (
+        f"{url} : {blocs} blocs mais {len(pastilles)} entrées de sommaire."
+    )
+
+
+def test_la_grille_de_formulaire_ne_depasse_pas_trois_colonnes():
+    """Un formulaire n'est pas une galerie.
+
+    ``auto-fill`` créait autant de colonnes que la largeur en acceptait. Tant
+    que les cartes étaient bridées à 62rem ça faisait trois ; la bride retirée,
+    la même règle en fabriquait cinq, et six champs tombaient en 5 + 1 avec une
+    rangée presque vide. Au-delà de trois colonnes l'œil ne rattache plus une
+    saisie à son étiquette.
+    """
+    css = (BACKEND / "GestionSysteme" / "static" / "gestion" / "css"
+           / "components.css").read_text(encoding="utf-8")
+    assert "repeat(auto-fill" not in css, (
+        "`auto-fill` refait dépendre le nombre de colonnes de la largeur "
+        "disponible : le nombre se déclare."
+    )
+    assert "repeat(3, minmax(0, 1fr))" in css
+
+
+@pytest.mark.django_db
+def test_une_case_a_cocher_est_a_hauteur_des_saisies():
+    """La case EST le contrôle : sa place est dans la piste des contrôles.
+
+    Rangée dans la piste du libellé, elle se retrouvait à hauteur des libellés
+    voisins — donc flottant au-dessus de leurs saisies, comme oubliée en haut
+    de la colonne. Elle laisse maintenant un ``field-slot`` vide à sa place,
+    pour que le champ garde ses trois pistes.
+    """
+    import re
+
+    from django.test import Client
+
+    html = Client().get(
+        "/gestion/configuration/accounts/accounts.users/nouveau/"
+    ).content.decode()
+
+    vues = 0
+    for champ in re.split(r'<div class="field[ "]', html)[1:]:
+        if not champ.lstrip().startswith("field-check"):
+            continue
+        i_slot = champ.index('class="field-slot"')
+        i_ctl = champ.index('class="field-control"')
+        i_case = champ.index('type="checkbox"')
+        i_notes = champ.index('class="field-notes"')
+        assert i_slot < i_ctl < i_case < i_notes
+        vues += 1
+    assert vues >= 2, vues

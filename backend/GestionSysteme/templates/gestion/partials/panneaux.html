@@ -1,0 +1,35 @@
+{% comment %} Les onglets d'une section de configuration.
+
+   Une section mêle deux natures de contenu : des RÉGLAGES (un formulaire qu'on
+   parcourt et qu'on enregistre d'un bloc) et des LISTES (un tableau de lignes,
+   chacune créée, modifiée, supprimée séparément). Empilées, elles donnaient un
+   formulaire suivi sans transition d'un tableau avec ses boutons — deux gestes
+   différents dans le même écran.
+
+   Le découpage ne se déclare pas : il découle de ce que la section contient.
+   Un module qui ajoute un `record_list` gagne son onglet, sans que l'interface
+   connaisse son nom.
+
+   La barre n'apparaît qu'à partir de deux panneaux : un choix unique n'est pas
+   un choix. Le panneau ouvert vit dans l'URL (`?panneau=`), donc un lien vers
+   « les comptes du module Email » se partage et le retour arrière le défait.
+
+   Le dessin est un CONTRÔLE SEGMENTÉ, pas une barre d'onglets. Trois
+   mécanismes de navigation se superposent sur cet écran — les onglets de
+   l'espace au-dessus, ce sélecteur, les blocs dépliants en dessous — et la
+   première version, en pastilles, se lisait comme un troisième niveau de
+   blocs : mêmes libellé et compteur bordés, juste au-dessus de cartes portant
+   elles aussi libellé et compteur. Un segment enfoncé dans un creux dit qu'on
+   choisit une position, pas qu'on déplie un contenu. {% endcomment %}
+
+{% if panneaux_visibles %}
+  <nav class="cfg-panneaux" aria-label="Contenu de cette section">
+    {% for p in panneaux_visibles %}
+      <a class="cfg-panneau" href="{{ request.path }}?panneau={{ p.cle }}"
+         {% if panneau_actif.cle == p.cle %}aria-current="page"{% endif %}>
+        {{ p.libelle }}
+        {% if p.compte %}<span class="cfg-panneau-n">{{ p.compte }}</span>{% endif %}
+      </a>
+    {% endfor %}
+  </nav>
+{% endif %}

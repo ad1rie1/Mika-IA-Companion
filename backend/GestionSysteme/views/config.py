@@ -182,7 +182,10 @@ def _ancre(section_key: str, group_key: str) -> str:
     Dérivé du libellé, donc lisible dans l'URL — un lien vers un bloc précis
     d'une longue section reste compréhensible quand on le colle ailleurs.
     """
-    brut = (group_key or "general").lower()
+    # Sans accents : ``isalnum()`` est vrai pour « é », donc l'ancre sortait
+    # « g-relevé » — valide en HTML5, mais un fragment d'URL accentué se fait
+    # ré-encoder par la moitié des outils qui le recopient.
+    brut = _sans_accents(group_key or "general")
     garde = [c if c.isalnum() else "-" for c in brut]
     return "g-" + "".join(garde).strip("-").replace("--", "-") or "g-general"
 
@@ -265,7 +268,43 @@ def blocs_de_section(section_key: str, form, *, modifiees: set[str],
     return blocs
 
 
-def contexte_reglages(request, section_key: str, form) -> dict:
+def panneaux_de_section(form, record_lists) -> list[dict]:
+    """Le contenu d'une section, découpé par NATURE.
+
+    Une section mêle deux choses qui ne se lisent pas pareil : des **réglages**
+    (un formulaire de champs, qu'on parcourt et qu'on enregistre d'un bloc) et
+    des **listes** (un tableau de lignes, chacune créée, modifiée, supprimée
+    séparément). Les empiler sur une page donnait, pour le module Email, un
+    formulaire de cinq champs suivi sans transition d'un tableau de comptes
+    avec ses boutons — deux gestes différents dans un même écran.
+
+    Le découpage n'a rien à déclarer : il découle de ce que la section contient
+    déjà. Un module qui déclare un ``record_list`` gagne son onglet, sans que
+    l'interface connaisse son nom.
+    """
+    panneaux: list[dict] = []
+    if form is not None and form.fields:
+        panneaux.append({
+            "cle": "reglages",
+            "libelle": "Réglages",
+            "nature": "reglages",
+            "compte": len(form.fields),
+        })
+    for liste in record_lists or ():
+        item = liste["item"]
+        panneaux.append({
+            # La clé complète, pas son dernier segment : deux listes d'une même
+            # section pourraient finir sur le même mot.
+            "cle": item.key.replace(".", "-"),
+            "libelle": item.label,
+            "nature": "liste",
+            "compte": len(liste.get("rows") or ()),
+            "liste": liste,
+        })
+    return panneaux
+
+
+def contexte_reglages(request, section_key: str, form, record_lists=()) -> dict:
     """Tout ce dont le partiel « réglages » a besoin, pour n'importe quel écran.
 
     Trois pages servent des réglages — le cœur, l'espace d'un module, l'espace
@@ -286,7 +325,21 @@ def contexte_reglages(request, section_key: str, form) -> dict:
         section_key, form, modifiees=modifiees,
         terme=terme, modifies_seuls=modifies_seuls,
     )
+
+    # Le panneau ouvert vit dans l'URL, comme le reste des filtres : un lien
+    # vers « les comptes du module Email » se partage et le retour arrière le
+    # défait. Une valeur inconnue retombe sur le premier panneau plutôt que de
+    # rendre une page vide — un favori d'avant un renommage doit atterrir.
+    panneaux = panneaux_de_section(form, record_lists)
+    demande = request.GET.get("panneau") or ""
+    actif = next((p for p in panneaux if p["cle"] == demande),
+                 panneaux[0] if panneaux else None)
+
     return {
+        "panneaux": panneaux,
+        "panneau_actif": actif,
+        # Un seul panneau ne se présente pas comme un choix.
+        "panneaux_visibles": panneaux if len(panneaux) > 1 else [],
         "blocs": blocs,
         "recherche": request.GET.get("q") or "",
         "modifies_seuls": modifies_seuls,
@@ -294,9 +347,17 @@ def contexte_reglages(request, section_key: str, form) -> dict:
         "total_reglages": len(form.fields),
         "total_modifies": sum(1 for f in form.fields if f.item.key in modifiees),
         "affiches": sum(b["total"] for b in blocs),
-        # Le sommaire ne sert que s'il y a plusieurs blocs à survoler ; à deux
-        # titres il double la hauteur de l'écran pour rien.
-        "sommaire": blocs if len(blocs) >= 3 else [],
+        # Le sommaire dès DEUX blocs. Le seuil était à trois, au prétexte qu'à
+        # deux titres il ne servait pas assez — mais il ne coûte qu'une ligne
+        # de pastilles, et le faire apparaître selon le nombre de blocs rendait
+        # l'écran incohérent d'une section à l'autre : la page Caractère
+        # annonçait ses trois sous-catégories sous le filtre, la page Email
+        # n'annonçait pas les siennes. On ne devine pas qu'une section a des
+        # sous-catégories quand rien ne les nomme.
+        #
+        # À UN bloc il n'y a toujours rien à parcourir : un sommaire d'une
+        # entrée ne mène qu'à ce qu'on regarde déjà.
+        "sommaire": blocs if len(blocs) >= 2 else [],
         "_modifiees": modifiees,
     }
 
@@ -354,7 +415,8 @@ def config_section(request, section: str):
 
     # Recherche et filtre vivent dans l'URL, comme partout ailleurs ici : un
     # écran filtré se partage, se met en favori, et le retour arrière le défait.
-    reglages = contexte_reglages(request, section, form)
+    listes = _record_lists(section, items)
+    reglages = contexte_reglages(request, section, form, listes)
 
     item = item_for("config")
     ctx = page_context(
@@ -366,7 +428,7 @@ def config_section(request, section: str):
         "groups": grouped_sections(modifiees=reglages["_modifiees"]),
         "section": spec,
         "form": form,
-        "record_lists": _record_lists(section, items),
+        "record_lists": listes,
     })
     return render(request, "gestion/config/section.html", ctx)
 

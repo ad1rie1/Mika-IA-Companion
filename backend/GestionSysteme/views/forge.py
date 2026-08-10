@@ -297,12 +297,13 @@ def forge_app_config(request, app: str):
     # Même mise en forme que le cœur : recherche, sommaire, blocs repliables,
     # pastille « modifié ». Elle vient du contexte partagé, donc un module qui
     # déclare ses ``ConfigGroup`` en profite sans que cette vue le sache.
-    ctx.update(config_view.contexte_reglages(request, section_key, form))
+    listes = _record_lists(section_key, items)
+    ctx.update(config_view.contexte_reglages(request, section_key, form, listes))
     ctx.update({
         "form": form,
         "section": section,
         "section_key": section_key,
-        "record_lists": _record_lists(section_key, items),
+        "record_lists": listes,
     })
     return render(request, "gestion/forge/configuration.html", ctx)
 

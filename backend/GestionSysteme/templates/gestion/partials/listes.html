@@ -7,7 +7,11 @@
    rendu. {% endcomment %}
 {% load gestion %}
 
-{% for rl in record_lists %}
+{% comment %} Une seule liste à la fois : celle de l'onglet ouvert. Les
+   autres restent à un clic, avec leur nombre de lignes annoncé dans
+   l'onglet. {% endcomment %}
+{% if panneau_actif.nature == 'liste' %}
+{% with rl=panneau_actif.liste %}
   <section class="card mb-6">
     <div class="card-head">
       <h3>{{ rl.item.label }}</h3>
@@ -68,4 +72,5 @@
       <div class="card-body"><div class="empty">Aucun élément.</div></div>
     {% endif %}
   </section>
-{% endfor %}
+{% endwith %}
+{% endif %}

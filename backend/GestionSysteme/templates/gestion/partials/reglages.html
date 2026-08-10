@@ -13,7 +13,11 @@
    quelle qu'elle soit. C'est ce qui permet au partiel d'ignorer sur quelle
    des trois pages il est rendu. {% endcomment %}
 
-{% if form.fields %}
+{% comment %} Rendu seulement quand l'onglet « Réglages » est ouvert. Le
+   contexte est calculé dans tous les cas — la barre d'onglets a besoin du
+   compte — mais le formulaire, lui, ne s'affiche que sur son panneau.
+{% endcomment %}
+{% if form.fields and panneau_actif.nature == 'reglages' %}
   {% comment %} Barre d'outils en GET, donc HORS du formulaire d'enregistrement :
      un champ de recherche à l'intérieur soumettrait les réglages en
      cherchant. {% endcomment %}

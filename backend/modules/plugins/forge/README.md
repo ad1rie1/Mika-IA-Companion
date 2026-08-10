@@ -175,6 +175,12 @@ config:
   - {key: prevenir,   label: Me prévenir,         type: bool, default: true,  group: Alertes}
 ```
 
+**Une liste devient son propre onglet.** Un champ `record_list` n'est pas rendu
+au milieu des autres : il a son tableau, avec ses boutons Ajouter / Modifier /
+Supprimer, sur un onglet à lui. Les champs simples restent groupés sur
+« Réglages ». Rien à déclarer — le découpage suit ce que le manifeste contient,
+et la barre d'onglets n'apparaît qu'à partir de deux panneaux.
+
 **Types disponibles** : `str`, `text`, `int`, `float`, `bool`, `secret`,
 `select` (avec `choices`), `list`, `lines`, `record_list` (avec `fields`).
 

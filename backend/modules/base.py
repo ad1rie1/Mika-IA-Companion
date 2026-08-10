@@ -254,6 +254,25 @@ class BaseModule(ABC):
 
         Default: no schema. Override to ship ``ConfigSection`` / ``ConfigItem``
         instances declared alongside the module.
+
+        **Ce que l'écran fait de votre déclaration**, sans que vous ayez à le
+        demander (voir « Declaring a configuration screen » dans CLAUDE.md) :
+
+        - ``ConfigSection(family=…, summary=…)`` range la section et lui donne
+          son infobulle ;
+        - ``ConfigGroup(section=…, key=…, description=…, advanced=…)`` décrit
+          un bloc, l'ordonne, et le replie s'il ne sert qu'au diagnostic. La
+          ``key`` est la chaîne exacte du ``ConfigItem.group`` — pas un
+          identifiant parallèle à tenir à jour ;
+        - chaque ``record_list`` obtient **son propre onglet**, les champs
+          simples restant groupés sur « Réglages ». Un tableau de lignes et un
+          formulaire ne se manipulent pas pareil ; les empiler donnait un écran
+          où deux gestes se suivaient sans transition ;
+        - recherche, sommaire, pastille « modifié » et barre d'enregistrement
+          collante viennent avec.
+
+        Tout est facultatif : un schéma qui ne déclare qu'une section et des
+        items se rend comme avant, en liste plate.
         """
         return []
 

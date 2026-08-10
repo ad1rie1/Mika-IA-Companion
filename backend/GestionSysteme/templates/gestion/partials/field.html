@@ -24,23 +24,30 @@
 {% if f.widget == "checkbox" %}
   <div class="field field-check {% if f.error %}has-error{% endif %}">
     {% if marker %}<input type="hidden" name="__champ" value="{{ f.name }}">{% endif %}
-    <div class="check-row">
-      <input type="checkbox" id="c-{{ f.name }}" name="{{ f.name }}" value="1"
-             {% if f.checked %}checked{% endif %}
-             {% if f.item.readonly %}disabled{% endif %}>
-      <label class="field-label" for="c-{{ f.name }}">
-        <span class="field-name">{{ f.label }}</span>
-        <span class="field-flags">
-          {% if f.porte_un_defaut and not f.is_default %}<span class="field-mod" title="Valeur enregistrée — ne suit plus le défaut déclaré">modifié</span>{% endif %}
-          {% if f.item.hot_reload %}<span class="field-flag hot" title="Pris en compte sans redémarrage">à chaud</span>{% endif %}
-          {% if f.item.restart_required %}<span class="field-flag restart" title="Nécessite un redémarrage">redémarrage</span>{% endif %}
-        </span>
-      </label>
+    {% comment %} La piste du libellé reste émise, VIDE : une case à cocher porte
+       son libellé à côté d'elle, pas au-dessus. L'emplacement est conservé pour
+       que le champ garde ses trois pistes et s'aligne sur ses voisins.
+
+       Elle occupait auparavant cette piste-là, ce qui la plaçait à hauteur des
+       libellés voisins — donc flottant au-dessus de leurs saisies, comme si
+       elle avait été oubliée en haut de la colonne. La case EST le contrôle :
+       sa place est dans la piste des contrôles. {% endcomment %}
+    <div class="field-slot" aria-hidden="true"></div>
+    <div class="field-control">
+      <div class="check-row">
+        <input type="checkbox" id="c-{{ f.name }}" name="{{ f.name }}" value="1"
+               {% if f.checked %}checked{% endif %}
+               {% if f.item.readonly %}disabled{% endif %}>
+        <label class="field-label" for="c-{{ f.name }}">
+          <span class="field-name">{{ f.label }}</span>
+          <span class="field-flags">
+            {% if f.porte_un_defaut and not f.is_default %}<span class="field-mod" title="Valeur enregistrée — ne suit plus le défaut déclaré">modifié</span>{% endif %}
+            {% if f.item.hot_reload %}<span class="field-flag hot" title="Pris en compte sans redémarrage">à chaud</span>{% endif %}
+            {% if f.item.restart_required %}<span class="field-flag restart" title="Nécessite un redémarrage">redémarrage</span>{% endif %}
+          </span>
+        </label>
+      </div>
     </div>
-    {% comment %} Une case à cocher n'a pas de saisie distincte : sa boîte occupe
-       la piste du libellé. La piste du contrôle reste émise, vide, pour que le
-       champ garde ses trois pistes et reste aligné sur ses voisins. {% endcomment %}
-    <div class="field-control"></div>
     <div class="field-notes">
       {% if f.item.description %}<div class="field-desc">{{ f.item.description }}</div>{% endif %}
       {% if f.item.hint %}<div class="field-hint">{{ f.item.hint }}</div>{% endif %}

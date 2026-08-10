@@ -473,10 +473,28 @@ a.chip:hover { background: var(--surface-3); color: var(--text); text-decoration
 
 /* ── Formulaires ────────────────────────────────────────────────────── */
 
+/* Trois colonnes AU MAXIMUM, déclarées par palier.
+
+   `auto-fill` créait autant de colonnes que la largeur en acceptait. Tant que
+   les cartes étaient bridées à 62rem ça faisait trois, ce qui allait ; une
+   fois la largeur libérée, la même règle en fabriquait CINQ — et six champs
+   tombaient en 5 + 1, avec une rangée presque vide et des saisies trop
+   étroites pour leur libellé.
+
+   Un formulaire n'est pas une galerie : au-delà de trois colonnes, l'œil ne
+   rattache plus une saisie à son étiquette, et la ligne devient un balayage
+   plutôt qu'une lecture. Le nombre est donc déclaré, pas déduit de la place
+   disponible. */
 .form-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sp-4);
+}
+@media (min-width: 640px) {
+  .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 1040px) {
+  .form-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 .form-grid .field-full { grid-column: 1 / -1; }
 
@@ -491,6 +509,7 @@ a.chip:hover { background: var(--surface-3); color: var(--text); text-decoration
    étirant les champs restants sur toute la largeur — une saisie numérique de
    huit cents pixels pour écrire « 0 ». On déclare donc le nombre de colonnes,
    à partir d'un compte que la vue connaît déjà. */
+/* Déclarés APRÈS les paliers, donc prioritaires à spécificité égale. */
 .form-grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .form-grid.cols-1 { grid-template-columns: minmax(0, 1fr); }
 
@@ -589,9 +608,15 @@ a.chip:hover { background: var(--surface-3); color: var(--text); text-decoration
 .field.has-error textarea,
 .field.has-error select { border-color: var(--danger); }
 
-/* Case à cocher : la boîte précède le libellé, tous deux cliquables. Elle
-   occupe la piste « libellé », ce qui la met à hauteur des libellés voisins
-   plutôt qu'à hauteur de leurs saisies. */
+/* Case à cocher : la boîte précède le libellé, tous deux cliquables. Elle vit
+   dans la piste des CONTRÔLES, à hauteur des saisies voisines — la case est le
+   contrôle. Rangée dans la piste du libellé, elle flottait au-dessus des
+   saisies de sa rangée, comme oubliée en haut de la colonne.
+
+   `.field-slot` est l'emplacement vide qu'elle laisse dans la piste du
+   libellé : sans lui le champ n'aurait que deux pistes et décalerait ses
+   voisins d'un cran. */
+.field-slot { min-height: 0; }
 .check-row { display: flex; align-items: flex-start; gap: var(--sp-2); }
 .check-row > input { margin-top: 0.15rem; }
 .field-check .field-label { margin-bottom: 0; font-weight: var(--fw-normal); }
@@ -931,3 +956,68 @@ a.chip:hover { background: var(--surface-3); color: var(--text); text-decoration
   .cfg-nav { position: static; max-height: none; }
   .cfg-bar-stat { margin-left: 0; }
 }
+
+/* Sélecteur de panneau — le second niveau d'une section de configuration.
+
+   Trois mécanismes de navigation se superposent sur cet écran, et ils doivent
+   se distinguer AU PREMIER COUP D'ŒIL, sinon on ne sait plus lequel commande
+   quoi :
+
+     1. les onglets de l'espace (État / Configuration / pages) — une barre
+        soulignée, sans conteneur ;
+     2. CE sélecteur — quelle vue de la section on regarde ;
+     3. les blocs de réglages — des cartes pleine largeur qui se déplient.
+
+   La première version reprenait `.tabs` en pastilles : deux éléments bordés
+   portant un libellé et un compteur, empilés juste au-dessus de cartes qui
+   portent elles aussi un libellé et un compteur. Le sélecteur se lisait comme
+   un troisième niveau de blocs, pas comme un changement de vue.
+
+   D'où un contrôle segmenté : UN seul objet, compact, creusé dans la page,
+   dont un segment est enfoncé. Aucune carte ne ressemble à ça, et il dit ce
+   qu'il fait — on choisit une position, on ne déplie pas un contenu. */
+.cfg-panneaux {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 0;
+  padding: 3px;
+  margin-bottom: var(--sp-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-inset);
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.cfg-panneaux::-webkit-scrollbar { display: none; }
+
+.cfg-panneau {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  border-radius: calc(var(--radius-md) - 3px);
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  text-decoration: none;
+  transition: background var(--dur-fast) var(--ease),
+              color var(--dur-fast) var(--ease);
+}
+.cfg-panneau:hover { color: var(--text); text-decoration: none; }
+
+/* Le segment actif est SURÉLEVÉ sur un fond creusé : c'est ce contraste qui
+   dit « position choisie » sans avoir besoin d'une couleur d'accent forte,
+   laquelle entrerait en concurrence avec les onglets soulignés du dessus. */
+.cfg-panneau[aria-current="page"] {
+  background: var(--surface-0);
+  color: var(--text);
+  font-weight: var(--fw-medium);
+  box-shadow: var(--shadow-sm);
+}
+.cfg-panneau-n {
+  font-size: var(--fs-xs);
+  color: var(--text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+.cfg-panneau[aria-current="page"] .cfg-panneau-n { color: var(--text-muted); }
