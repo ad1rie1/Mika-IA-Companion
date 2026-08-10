@@ -826,3 +826,88 @@ class TestFenetreConnue:
             budget = budget_for(AIRole.CONVERSATION, tools_chars=0)
         assert budget is not None
         assert budget.window_room() < 8192
+
+
+@pytest.mark.django_db
+class TestDemarrageRefuseSansMemoireLongue:
+    """Sans magasin vectoriel il n'y a ni souvenir, ni connaissance, ni
+    engagement, ni self-narrative, ni fiche de personne, ni réorganisation
+    nocturne — définitivement, puisque `_initialized` était posé quand même.
+    L'échec n'était que journalisé : l'installation paraissait tourner
+    normalement pendant qu'elle perdait sa journée."""
+
+    async def test_le_demarrage_est_refuse(self):
+        from unittest.mock import patch
+
+        from memory.manager import MemoryManager, MemoryUnavailable
+
+        m = MemoryManager()
+        with patch("memory.storage.VectorStore",
+                   side_effect=RuntimeError("dossier corrompu")):
+            with pytest.raises(MemoryUnavailable) as capture:
+                await m.initialize()
+
+        message = str(capture.value)
+        assert "CHROMA_PERSIST_DIR" in message
+        assert "MEMORY_REQUIRE_VECTOR_STORE=0" in message
+        assert not m._initialized, (
+            "un démarrage refusé ne doit pas se marquer initialisé"
+        )
+
+    async def test_le_repli_explicite_reste_possible(self):
+        from unittest.mock import patch
+
+        from django.test import override_settings
+
+        from memory.manager import MemoryManager
+
+        m = MemoryManager()
+        with override_settings(MEMORY_REQUIRE_VECTOR_STORE=False), \
+             patch("memory.storage.VectorStore",
+                   side_effect=RuntimeError("dossier corrompu")):
+            await m.initialize()
+
+        assert m._initialized and m.retriever is None
+
+    async def test_l_echec_est_compte_au_registre(self):
+        """Même en repli explicite, la page santé doit le voir."""
+        from unittest.mock import patch
+
+        from django.test import override_settings
+
+        from memory.manager import MemoryManager
+        from utils.degradation import degradations
+
+        def _compteur():
+            return next(
+                (e["count"] for e in degradations.snapshot()
+                 if e["label"] == "memoire: vector store indisponible"), 0,
+            )
+
+        avant = _compteur()
+        m = MemoryManager()
+        with override_settings(MEMORY_REQUIRE_VECTOR_STORE=False), \
+             patch("memory.storage.VectorStore", side_effect=RuntimeError("boom")):
+            await m.initialize()
+        assert _compteur() > avant
+
+    def test_le_lifespan_laisse_remonter(self):
+        """Le refus n'a d'effet que si le démarrage ASGI ne l'attrape pas.
+
+        Vérifié en vrai par ailleurs (uvicorn sort en code 3, « Application
+        startup failed ») ; ce test empêche qu'un `try/except` bien intentionné
+        soit ajouté autour de l'appel.
+        """
+        import ast
+        import pathlib
+
+        source = pathlib.Path("backend/config/asgi.py").read_text()
+        arbre = ast.parse(source)
+        for noeud in ast.walk(arbre):
+            if not isinstance(noeud, ast.Try):
+                continue
+            corps = ast.dump(ast.Module(body=noeud.body, type_ignores=[]))
+            assert "memory_manager" not in corps or "initialize" not in corps, (
+                "memory_manager.initialize() doit rester hors try/except dans "
+                "le lifespan, sinon le refus de démarrage est avalé"
+            )

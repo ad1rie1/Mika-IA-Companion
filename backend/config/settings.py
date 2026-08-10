@@ -288,6 +288,17 @@ FORGE_DIR = env("FORGE_DIR", default=str(PROJECT_ROOT / "data" / "forge_modules"
 # --- Contextual Memory ---
 CHROMA_PERSIST_DIR = env("CHROMA_PERSIST_DIR", default=str(PROJECT_ROOT / "data" / "chromadb"))
 EMBEDDING_MODEL = env("EMBEDDING_MODEL", default="paraphrase-multilingual-MiniLM-L12-v2")
+# Refuser de démarrer si le magasin vectoriel ne se charge pas.
+#
+# Sans lui il n'y a ni souvenir, ni connaissance, ni engagement, ni
+# self-narrative, ni fiche de personne, ni réorganisation nocturne — pour toute
+# la durée du processus. L'échec était rattrapé et journalisé : l'installation
+# paraissait tourner normalement pendant qu'elle perdait sa journée. Mieux vaut
+# ne pas démarrer que démarrer amnésique sans le dire.
+#
+# Ici et pas dans le tableau de bord : un processus qui refuse de démarrer ne
+# peut pas servir la page qui contiendrait le réglage.
+MEMORY_REQUIRE_VECTOR_STORE = env.bool("MEMORY_REQUIRE_VECTOR_STORE", default=True)
 
 # Emotion physics (mass, stiffness, damping, impulse gain) are derived at
 # runtime from the temperament, five dashboard sliders read through

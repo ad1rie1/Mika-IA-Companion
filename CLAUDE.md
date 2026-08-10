@@ -640,6 +640,7 @@ Guarded by tests: `ConfigItem` cannot even *declare* an `env_fallback` (the data
 | `CSRF_TRUSTED_ORIGINS` | = `CORS_ALLOWED_ORIGINS` | Origins allowed to submit a CSRF-protected request |
 | `CHROMA_PERSIST_DIR` | `data/chromadb` | ChromaDB on-disk location |
 | `EMBEDDING_MODEL` | `paraphrase-multilingual-MiniLM-L12-v2` | Sentence-transformer for ChromaDB |
+| `MEMORY_REQUIRE_VECTOR_STORE` | `True` | **Refuse to boot** when the vector store fails to load. Without it there is no souvenir, no connaissance, no commitment, no self-narrative, no person fiche and no nightly reorg — for the whole process lifetime, since `_initialized` was set anyway and nothing retries. The failure used to be caught and logged: the install looked like it was running while it lost its day. Lives in `.env` and not the dashboard because a process that refuses to boot cannot serve the page holding the setting |
 | `FORGE_DIR` | `data/forge_modules` | Confined directory for AI-forged modules |
 | `SESSION_COOKIE_SAMESITE` | `Lax` | Also the default for `CSRF_COOKIE_SAMESITE` |
 | `AI_QUOTA_ROLE_<ROLE>_DAILY` / `_MONTHLY` | `0` | Per-role token caps. Read by **computed name** in `ai/quota.py`, so they are settings constants rather than config keys |

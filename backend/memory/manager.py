@@ -7,6 +7,15 @@ from utils.degradation import degradations
 logger = logging.getLogger(__name__)
 
 
+class MemoryUnavailable(RuntimeError):
+    """La mémoire longue ne peut pas exister — le démarrage est refusé.
+
+    Type propre plutôt que ``RuntimeError`` nu : le lifespan ASGI laisse
+    remonter, et un exploitant qui lit la trace doit voir *ce qui* a refusé,
+    pas une erreur générique au milieu du démarrage.
+    """
+
+
 class MemoryManager:
     """Orchestrates short-term (in-memory), vector (ChromaDB), and
     structured (Django ORM) memory systems."""
@@ -44,6 +53,44 @@ class MemoryManager:
         # Compacteur du fil — indépendant de chromadb (LLM + ORM seulement).
         self.compactor = None
 
+    @staticmethod
+    def _refuser_ou_degrader(raison: str, cause: Exception) -> None:
+        """Refuse le démarrage quand la mémoire longue ne peut pas exister.
+
+        Sans mémoire longue il n'y a plus ni souvenir, ni connaissance, ni
+        engagement, ni self-narrative, ni fiche de personne, ni réorganisation
+        nocturne — pour toute la durée du processus, puisque ``_initialized``
+        était posé quand même et qu'aucune reprise n'est prévue. Côté
+        conversation l'aveu était honnête (« je ne retrouve pas ») ; côté
+        exploitant il n'y avait qu'une ligne de log, et l'installation
+        paraissait tourner normalement pendant qu'elle perdait sa journée.
+
+        Une Mika sans mémoire longue n'est pas une Mika dégradée, c'est une
+        autre : mieux vaut ne pas démarrer que démarrer amnésique sans le dire.
+        Le repli explicite reste possible via ``MEMORY_REQUIRE_VECTOR_STORE=0``
+        dans ``.env`` — dans ``.env`` et non dans le tableau de bord, parce
+        qu'un processus qui refuse de démarrer ne peut pas servir la page qui
+        contiendrait le réglage.
+        """
+        if not getattr(settings, "MEMORY_REQUIRE_VECTOR_STORE", True):
+            logger.warning(
+                "Mémoire longue indisponible (%s) — démarrage en mode basique, "
+                "explicitement autorisé par MEMORY_REQUIRE_VECTOR_STORE=0.",
+                raison,
+            )
+            return
+        raise MemoryUnavailable(
+            f"Démarrage refusé : {raison}.\n"
+            "Sans magasin vectoriel, Mika démarre sans souvenirs, sans "
+            "connaissances, sans engagements et sans fiches de personnes, "
+            "définitivement jusqu'au prochain redémarrage.\n"
+            "À vérifier : le dossier CHROMA_PERSIST_DIR est-il lisible et "
+            "non corrompu ? le modèle EMBEDDING_MODEL est-il téléchargé ? "
+            "chromadb est-il installé (pip install -r backend/requirements.txt) ?\n"
+            "Pour démarrer quand même en mémoire basique, poser "
+            "MEMORY_REQUIRE_VECTOR_STORE=0 dans .env."
+        ) from cause
+
     async def initialize(self):
         """Initialize all memory subsystems."""
         if self._initialized:
@@ -75,18 +122,21 @@ class MemoryManager:
                 await self.episodic.start()
 
             logger.info("Contextual memory system initialized")
-        except ImportError:
+        except ImportError as exc:
             import sys
             if sys.version_info >= (3, 14):
-                logger.warning(
-                    "chromadb is not compatible with Python %s — "
-                    "contextual memory disabled, using basic memory only",
-                    sys.version,
+                raison = (
+                    f"chromadb ne s'importe pas sous Python {sys.version.split()[0]}"
                 )
             else:
-                logger.warning("chromadb not installed — contextual memory disabled")
-        except Exception:
-            logger.exception("Failed to initialize contextual memory (falling back to basic)")
+                raison = "chromadb n'est pas installé"
+            degradations.record("memoire: vector store indisponible", exc)
+            self._refuser_ou_degrader(raison, exc)
+        except Exception as exc:
+            degradations.record("memoire: vector store indisponible", exc)
+            self._refuser_ou_degrader(
+                f"le magasin vectoriel n'a pas démarré ({exc})", exc,
+            )
 
         # Compaction du fil — hors du try chromadb : elle n'a besoin que de
         # l'ORM et du rôle COMPACTION (non mappé = no-op à chaque tick).
