@@ -125,6 +125,19 @@ async def gather_context(
         intent: What kind of stimulus this is. Only a ``REQUEST_RESPONSE``
             carries text somebody actually wrote — see ``user_mood_hint``.
     """
+    # Qui est en face, et à quel point elle en est sûre. Résolu ICI, avant
+    # tout le reste : le rappel mémoire lui-même en dépend. Sous le seuil de
+    # divulgation, `--- TES SOUVENIRS ---` ne doit pas servir les confidences
+    # d'un tiers alors que le bloc `CE QUE TU SAIS DE CETTE PERSONNE` vient
+    # d'être fermé pour la même raison — et alors que l'outil `memory_search`,
+    # lui, refusait déjà.
+    identity_ctx = await identity_resolver.resolve_context(
+        person_id, channel=channel,
+        authenticated=authenticated, is_public=is_public,
+    )
+    identity_context = _format_identity_block(identity_ctx)
+    peut_divulguer = bool(identity_ctx.may_disclose)
+
     # ── Rappel mémoire : spéculatif (plancher) + plan de préparation ──
     #
     # Le spéculatif est la recherche historique sur le message ; la passe de
@@ -138,7 +151,9 @@ async def gather_context(
         prep_task, prep_deadline = _launch_preparation(message, person_id)
 
         spec_task = asyncio.create_task(
-            memory_manager.get_memory_context(message, person_id=person_id)
+            memory_manager.get_memory_context(
+                message, person_id=person_id, disclose_others=peut_divulguer,
+            )
         )
 
         plan = None
@@ -165,6 +180,7 @@ async def gather_context(
                         [message] + results.memory_queries,
                         person_id=person_id,
                         extra_exchanges=results.exchange_hits,
+                        disclose_others=peut_divulguer,
                         # Tour émotionnellement chargé → le rappel attend
                         # davantage aux souvenirs marquants (réflexe humain).
                         salience_boost=plan.charge_emotionnelle,
@@ -204,15 +220,6 @@ async def gather_context(
     # Best-effort — if the table hasn't been populated yet (no narrative
     # generated), we just skip it and the prompt uses personality alone.
     self_concept = await _fetch_self_concept()
-
-    # Who is on the other end, and how sure Mika is. Resolved once here and
-    # reused below: it decides both what the prompt says about them and
-    # whether their private history may be surfaced at all.
-    identity_ctx = await identity_resolver.resolve_context(
-        person_id, channel=channel,
-        authenticated=authenticated, is_public=is_public,
-    )
-    identity_context = _format_identity_block(identity_ctx)
 
     # Theory of mind: profile + pending commitments for the current person.
     # Gated on identity certainty — recounting what someone confided to a
@@ -284,7 +291,9 @@ async def gather_context(
         journal_context = ""
     else:
         dream_context, pending_dream_recall = await _fetch_dream_context()
-        journal_context = await _fetch_journal_context()
+        journal_context = await _fetch_journal_context(
+            may_disclose=bool(identity_ctx.may_disclose),
+        )
 
     # Project detection — is this turn about an active project?
     # Skipped for internal triggers (conscience prompts don't reference
@@ -810,8 +819,37 @@ async def _fetch_dream_context() -> tuple[str, object | None]:
 _JOURNAL_MAX_CHARS = 450
 
 
-async def _fetch_journal_context() -> str:
+def _redige_sans_tiers(texte: str, noms: list[str]) -> str:
+    """Remplace les noms de tiers par « quelqu'un » dans un texte libre.
+
+    Le récit du journal est écrit à la première personne à partir des
+    souvenirs de la veille : il cite donc les gens et ce qu'ils ont confié.
+    On ne connaît pas d'autre inventaire de ces noms que
+    ``persons_interacted``, ce qui suffit — ce sont exactement les personnes
+    que la nuit a identifiées dans sa journée.
+    """
+    import re as _re
+
+    for nom in sorted((n for n in noms if n and len(n) > 2), key=len, reverse=True):
+        texte = _re.sub(
+            rf"\b{_re.escape(nom)}\b", "quelqu'un", texte, flags=_re.IGNORECASE,
+        )
+    return texte
+
+
+async def _fetch_journal_context(may_disclose: bool = True) -> str:
     """Return a compact recap of yesterday's journal, or ''.
+
+    ``may_disclose`` reprend la porte de divulgation de l'interlocuteur. Le
+    bloc n'était gardé que par ``is_internal_person`` : un handle jamais
+    identifié recevait donc, dès son premier « salut », le récit à la première
+    personne de la veille — « Thomas m'a raconté que sa mère était
+    hospitalisée » — et la liste nominative des gens croisés, dans le prompt
+    même où le bloc identité lui dit de ne rien raconter de personnel sur qui
+    que ce soit. L'outil ``memory_read_journal``, lui, refusait déjà.
+
+    Sous le seuil, elle garde son fil — c'est le sien — mais elle ne nomme
+    plus personne.
 
     The nightly journal gives Mika a causal thread through the previous
     day; without this injection it was write-only (frontend panel + tool
@@ -838,16 +876,27 @@ async def _fetch_journal_context() -> str:
     if len(narrative) > _JOURNAL_MAX_CHARS:
         narrative = narrative[:_JOURNAL_MAX_CHARS].rstrip() + "..."
 
-    lines = [f"Ce que tu retiens d'hier : {narrative}"]
     persons = [p for p in (journal.persons_interacted or []) if p]
-    if persons:
+
+    if not may_disclose:
+        narrative = _redige_sans_tiers(narrative, persons)
+
+    lines = [f"Ce que tu retiens d'hier : {narrative}"]
+    if persons and may_disclose:
         lines.append("Tu avais interagi avec : " + ", ".join(persons[:4]) + ".")
     if journal.dominant_emotion:
         lines.append(f"La journee etait teintee de : {journal.dominant_emotion}.")
-    lines.append(
-        "C'est ton fil de continuite — tu peux y faire reference naturellement "
-        "(\"comme hier...\") sans le reciter."
-    )
+    if may_disclose:
+        lines.append(
+            "C'est ton fil de continuite — tu peux y faire reference naturellement "
+            "(\"comme hier...\") sans le reciter."
+        )
+    else:
+        lines.append(
+            "C'est ton fil de continuite, pour toi. Tu ne sais pas assez qui "
+            "tu as en face pour raconter ta journee ni nommer les gens que tu "
+            "as croises — garde ca pour toi, ca colore juste ton humeur."
+        )
     return "\n".join(lines)
 
 

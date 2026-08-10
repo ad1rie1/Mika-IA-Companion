@@ -83,6 +83,64 @@ MAX_CONTRADICTION_CHECKS = 2
 # hour, with no loss — the anchor keeps their elapsed time.
 DECAY_BATCH = 500
 
+# Plancher de sommeil : l'importance à laquelle un souvenir cesse de décroître
+# et sort du rappel spontané, SANS être effacé. Repli si la config est
+# illisible ; la vraie valeur vient de `memory.dormant_importance`.
+DORMANT_FLOOR = 0.02
+
+
+# Ce que vaut un souvenir dont l'extraction n'a rien dit. Volontairement au
+# milieu du barème et non à 1.0 : un défaut haut fait de « ce qui a compté »
+# un synonyme de « ce qui est récent ».
+DEFAULT_IMPORTANCE = 0.5
+
+
+def _extracted_importance(extraction: dict) -> float:
+    """L'importance jugée par l'extraction, bornée à [0.05, 1.0].
+
+    Elle était écrite `1.0` en dur pour tout le monde, alors que le retriever
+    la promeut en POIDS DE RANG avec pour justification « l'humain rappelle ce
+    qui a COMPTÉ, pas seulement ce qui ressemble ». Le mot n'apparaissait pas
+    une seule fois dans l'extracteur : le poids ne départageait donc rien à la
+    naissance et ne se différenciait qu'en vieillissant — un doublon exact du
+    multiplicateur de récence appliqué trois lignes plus haut.
+
+    Plancher à 0.05 : une extraction qui rend 0 ne doit pas naître déjà
+    endormie, sinon elle n'aurait pas dû être extraite du tout.
+    """
+    brut = extraction.get("importance")
+    if brut is None:
+        return DEFAULT_IMPORTANCE
+    try:
+        valeur = float(brut)
+    except (TypeError, ValueError):
+        return DEFAULT_IMPORTANCE
+    if valeur != valeur:  # NaN
+        return DEFAULT_IMPORTANCE
+    return max(0.05, min(1.0, valeur))
+
+
+def _dormant_floor(min_importance: float) -> float:
+    """Plancher où un souvenir s'endort, toujours SOUS le seuil de rappel.
+
+    Le contrat entre les deux valeurs est ce qui fait tenir la mise en sommeil :
+    au-dessus de `memory.min_importance` un souvenir remonte tout seul dans le
+    prompt ; entre le plancher et ce seuil il est encore en train de sombrer ;
+    au plancher il dort. Si un réglage inverse les deux, on force la marge
+    plutôt que de rendre le sommeil inatteignable (le souvenir resterait alors
+    éternellement dans le rappel, ce qui est l'inverse du but).
+    """
+    from configs.service import config_service
+
+    try:
+        plancher = float(config_service.get("memory.dormant_importance"))
+    except Exception:
+        plancher = DORMANT_FLOOR
+    plancher = max(0.0, plancher)
+    if plancher >= min_importance:
+        plancher = max(0.0, min_importance * 0.2)
+    return plancher
+
 
 class MemoryConsolidator:
     """Background task that periodically processes raw messages into
@@ -304,6 +362,31 @@ class MemoryConsolidator:
             )
             for key, value in batch_counts.items():
                 counts[key] = counts.get(key, 0) + value
+
+            # Le curseur n'avance que si l'extraction a RÉELLEMENT abouti.
+            #
+            # Il ne dépendait que du fait que le LLM avait répondu : quand les
+            # quatorze extractions d'une fenêtre tombaient une à une dans le
+            # `except` de `store_extractions` — base verrouillée, ou un petit
+            # modèle qui rend `"entities": ["Thomas"]` au lieu d'objets — le
+            # curseur passait quand même, et ces soixante messages ne
+            # redevenaient jamais des souvenirs. La réorganisation nocturne,
+            # verrouillée sur le même curseur, ne les repêchait pas non plus.
+            #
+            # Échec TOTAL = cause systémique, qui aura disparu au prochain
+            # passage : on garde la fenêtre. Échec PARTIEL = extractions
+            # individuellement malformées, que rejouer ne réparera pas : on
+            # avance, sinon la fenêtre devient un poison qui gèle la
+            # consolidation pour de bon.
+            tentees = batch_counts.get("tentees", 0)
+            echouees = batch_counts.get("echouees", 0)
+            if tentees and echouees == tentees:
+                logger.warning(
+                    "Consolidation : les %d extractions de la fenêtre ont "
+                    "toutes échoué — checkpoint gelé, la fenêtre sera relue.",
+                    tentees,
+                )
+                break
             extracted_through = batch[-1]["id"]
 
         return counts, extracted_through
@@ -322,7 +405,15 @@ class MemoryConsolidator:
         un échange de la veille, et le biais de récence classait alors la copie
         nocturne devant l'originale.
         """
-        counts = {"souvenirs": 0, "connaissances": 0, "commitments": 0}
+        # `tentees` / `echouees` ne comptent pas des créations mais des
+        # TENTATIVES : c'est ce qui permet à l'appelant de distinguer « cette
+        # fenêtre ne contenait rien à retenir » (banalités) de « tout ce qu'on
+        # a essayé d'écrire a échoué » — deux situations qui rendaient jusqu'ici
+        # le même `{0, 0, 0}` et faisaient avancer le curseur dans les deux cas.
+        counts = {
+            "souvenirs": 0, "connaissances": 0, "commitments": 0,
+            "tentees": 0, "echouees": 0,
+        }
         handlers = {
             "souvenir": self._store_souvenir,
             "connaissance": self._store_connaissance,
@@ -335,6 +426,7 @@ class MemoryConsolidator:
             if handler is None:
                 logger.debug("Unknown extraction type: %s", extraction.get("type"))
                 continue
+            counts["tentees"] += 1
             try:
                 themes, entities = await self._resolve_tags(extraction)
                 created = await handler(
@@ -343,8 +435,10 @@ class MemoryConsolidator:
                 )
                 if created:
                     counts[created] += 1
-            except Exception:
+            except Exception as exc:
                 # One malformed extraction must not cost the whole window.
+                counts["echouees"] += 1
+                degradations.record("consolidator: extraction rejetee", exc)
                 logger.exception("Failed to process extraction: %s", extraction)
 
         return counts
@@ -355,17 +449,33 @@ class MemoryConsolidator:
         from memory.models import Entity, Theme
 
         themes = []
-        for name in extraction.get("themes", []):
+        for name in extraction.get("themes", []) or []:
+            if not isinstance(name, str) or not name.strip():
+                continue
             theme, _ = await sync_to_async(Theme.objects.get_or_create)(
                 name=name.lower().strip()
             )
             themes.append(theme)
 
         entities = []
-        for ent in extraction.get("entities", []):
+        for ent in extraction.get("entities", []) or []:
+            # Les deux formes sont acceptées. Un petit modèle local rend
+            # régulièrement `"entities": ["Thomas"]` là où le gabarit demande
+            # `[{"name": "Thomas", "type": "person"}]` ; l'indexation directe
+            # `ent["name"]` levait alors `TypeError: string indices must be
+            # integers` sur la PREMIÈRE entité de CHAQUE extraction — donc la
+            # fenêtre entière était perdue, silencieusement, à chaque tick.
+            if isinstance(ent, str):
+                nom, genre = ent.strip(), "concept"
+            elif isinstance(ent, dict):
+                nom = str(ent.get("name") or "").strip()
+                genre = ent.get("type") or "concept"
+            else:
+                continue
+            if not nom:
+                continue
             entity, _ = await sync_to_async(Entity.objects.get_or_create)(
-                name=ent["name"].strip(),
-                entity_type=ent.get("type", "concept"),
+                name=nom, entity_type=genre,
             )
             entities.append(entity)
         return themes, entities
@@ -378,9 +488,10 @@ class MemoryConsolidator:
 
         occurred = occurred_at or timezone.now()
         emotion = _valid_emotion(extraction.get("emotion"))
+        importance = _extracted_importance(extraction)
         souvenir = await sync_to_async(Souvenir.objects.create)(
             content=extraction["content"], emotion=emotion,
-            importance=1.0, occurred_at=occurred,
+            importance=importance, occurred_at=occurred,
         )
         if themes:
             await sync_to_async(souvenir.themes.set)(themes)
@@ -395,7 +506,7 @@ class MemoryConsolidator:
             souvenir_id=souvenir.pk,
             content=extraction["content"],
             metadata=souvenir_metadata(
-                importance=1.0,
+                importance=importance,
                 emotion=emotion,
                 occurred_at=occurred.isoformat(),
                 themes=[t.name for t in themes],
@@ -711,14 +822,20 @@ class MemoryConsolidator:
         from configs.service import config_service
         decay_rate = config_service.get("memory.decay_rate")
         min_importance = config_service.get("memory.min_importance")
+        dormant_floor = _dormant_floor(min_importance)
         now = timezone.now()
         cutoff = now - DECAY_MIN_AGE
 
         # ``prefetch_related`` obligatoire : le ré-index relit les thèmes en
         # contexte async — sans le cache de prefetch, `.themes.all()` lèverait
         # SynchronousOnlyOperation (et coûterait un aller DB par ligne).
+        # Le filtre porte sur le PLANCHER DE SOMMEIL, pas sur le seuil de
+        # rappel : un souvenir endormi ne doit plus être relu à chaque passe
+        # (il ne bougera plus), mais tout ce qui est encore au-dessus doit
+        # continuer à vieillir, y compris entre `dormant_floor` et
+        # `min_importance` — c'est la pente sur laquelle il s'endort.
         souvenirs = await sync_to_async(list)(
-            Souvenir.objects.filter(importance__gt=min_importance)
+            Souvenir.objects.filter(importance__gt=dormant_floor)
             .filter(Q(decayed_at__isnull=True) | Q(decayed_at__lt=cutoff))
             .order_by("decayed_at")
             .prefetch_related("themes")[:DECAY_BATCH]
@@ -736,25 +853,45 @@ class MemoryConsolidator:
             anchor = souvenir.decayed_at or ref_date
             days_since = max(0.0, (now - anchor).total_seconds() / 86400)
             new_importance = souvenir.importance * (decay_rate ** days_since)
-            if new_importance < min_importance:
-                # Le lot est lu à T0 puis traité avec des ``await`` : la
-                # Conscience peut booster entre les deux, et c'est justement le
-                # vieux souvenir condamné que le boost existe pour ranimer.
-                # L'écriture est donc conditionnée à la valeur lue, et le
-                # retrait Chroma ne suit qu'une suppression SQL effective —
-                # sinon on orpheline le vecteur d'une ligne qui survit.
-                deleted, _ = await sync_to_async(
+            if new_importance < dormant_floor:
+                # ON N'EFFACE PLUS. Un souvenir qui passe sous le seuil
+                # s'ENDORT : il descend au plancher, cesse d'y décroître, et
+                # sort du rappel spontané (le retriever filtre sur
+                # ``memory.min_importance``, au-dessus de ce plancher).
+                #
+                # Avant, c'était un `DELETE` SQL doublé d'un retrait ChromaDB :
+                # « Thomas m'a annoncé qu'il se marie » cessait d'exister au
+                # bout de 45 jours si personne n'en reparlait, et la couche
+                # *interprétée* — celle qui nourrit la self-narrative et les
+                # fiches — avait donc un horizon de six semaines, alors que la
+                # transcription brute, elle, est éternelle. L'oubli humain ne
+                # fonctionne pas ainsi : on cesse d'y penser tout seul, on
+                # reconnaît quand on nous le rappelle. La ligne et son vecteur
+                # restent donc en place, retrouvables par une recherche
+                # DÉLIBÉRÉE (`memory_search`) et ranimables par un boost de la
+                # Conscience.
+                if abs(souvenir.importance - dormant_floor) <= 1e-6:
+                    continue  # déjà endormi : rien à réécrire
+                updated = await sync_to_async(
                     lambda s=souvenir: Souvenir.objects.filter(
                         pk=s.pk, importance=s.importance, decayed_at=s.decayed_at,
-                    ).delete()
+                    ).update(importance=dormant_floor, decayed_at=now)
                 )()
-                if not deleted:
+                if not updated:
                     continue
-                try:
-                    await vector_call(self.vector_store.remove_souvenir)(souvenir.pk)
-                except Exception as exc:
-                    degradations.record("consolidator: chromadb remove failed for souvenir #", exc)
-                logger.debug("Pruned souvenir #%d (too old)", souvenir.pk)
+                souvenir.importance = dormant_floor
+                souvenir.decayed_at = now
+                reindex.append({
+                    "souvenir_id": souvenir.pk,
+                    "content": souvenir.content,
+                    "metadata": souvenir_metadata(
+                        importance=souvenir.importance,
+                        emotion=souvenir.emotion,
+                        occurred_at=ref_date.isoformat(),
+                        themes=[t.name for t in souvenir.themes.all()],
+                    ),
+                })
+                logger.debug("Souvenir #%d endormi (sous le seuil)", souvenir.pk)
             elif abs(new_importance - souvenir.importance) > 0.01:
                 # Below that delta we leave the anchor alone so the elapsed
                 # time keeps accumulating instead of being silently dropped.

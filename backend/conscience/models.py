@@ -98,8 +98,8 @@ class Rumination(models.Model):
     Lifecycle:
       - created from an Observation that stayed pending > 30 min
         while having pertinence >= 0.5
-      - decays ~5% intensity per decision cycle
-      - bleeds emotional charge into global mood each cycle
+      - decays on a wall-clock half-life (see ``decayed_at``)
+      - bleeds emotional charge into global mood, throttled in time
       - status="resolved" when Mika speaks (intensity halved, may drop
         below 0.1 threshold) and "faded" when it decays out on its own
     """
@@ -126,6 +126,20 @@ class Rumination(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    # Ancre de la décroissance, en temps réel et non en tours de boucle.
+    #
+    # L'ancienne formule était `intensity *= 0.95` À CHAQUE CYCLE DE DÉCISION
+    # (30 s) : une pensée « persistante » tombait sous le seuil de fade en
+    # 22 minutes. Tous ses lecteurs, eux, raisonnent en heures — la digestion
+    # nocturne exige 120 minutes d'âge, le journal du soir la relit, la
+    # rétention garde les fanées 90 jours. L'intersection était vide : la
+    # phase de guérison du sommeil profond n'a jamais rien eu à digérer.
+    #
+    # `decayed_at` n'avance qu'à l'écriture (même idiome que
+    # `Souvenir.decayed_at`) : le temps écoulé sous le seuil d'écriture
+    # s'accumule au lieu d'être perdu, ce qui rend la décroissance
+    # indépendante de la cadence de la boucle qui l'applique.
+    decayed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-intensity", "-created_at"]
@@ -135,6 +149,11 @@ class Rumination(models.Model):
 
     def __str__(self):
         return f"[{self.status}:{self.intensity:.2f}] {self.summary[:60]}"
+
+    @property
+    def decay_anchor(self):
+        """Depuis quand le temps n'a pas encore été facturé à cette pensée."""
+        return self.decayed_at or self.created_at
 
 
 class ScheduledAction(models.Model):

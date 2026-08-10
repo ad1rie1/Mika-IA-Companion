@@ -148,8 +148,17 @@ class TestSouvenirDecay:
         assert s.decayed_at is not None
 
     @pytest.mark.asyncio
-    async def test_souvenir_below_threshold_is_pruned(self):
+    async def test_souvenir_sous_le_seuil_s_endort_au_lieu_d_etre_efface(self):
+        """L'oubli déplace, il ne détruit pas.
+
+        Un souvenir qui passe sous le seuil sort du rappel spontané et cesse
+        d'y décroître — mais la ligne reste, avec son vecteur, donc une
+        recherche délibérée le retrouve et un boost le ranime. Auparavant
+        c'était un DELETE : la mémoire *interprétée* avait un horizon de six
+        semaines pendant que la transcription brute était éternelle.
+        """
         from memory.models import Souvenir
+        from memory.storage.consolidator import _dormant_floor
 
         now = timezone.now()
         s = await sync_to_async(Souvenir.objects.create)(
@@ -159,9 +168,33 @@ class TestSouvenirDecay:
             decayed_at=now - timedelta(days=400),
         )
         await _run_decay()
-        exists = await sync_to_async(
-            Souvenir.objects.filter(pk=s.pk).exists)()
-        assert not exists
+
+        exists = await sync_to_async(Souvenir.objects.filter(pk=s.pk).exists)()
+        assert exists, "la décroissance ne doit plus jamais supprimer une ligne"
+
+        await sync_to_async(s.refresh_from_db)()
+        plancher = _dormant_floor(0.1)
+        assert s.importance == pytest.approx(plancher)
+        assert s.importance < 0.1, "il est bien sorti du rappel spontané"
+
+    @pytest.mark.asyncio
+    async def test_un_souvenir_endormi_n_est_plus_reecrit(self):
+        """Une fois au plancher, il ne coûte plus ni écriture ni ré-index."""
+        from memory.models import Souvenir
+        from memory.storage.consolidator import _dormant_floor
+
+        now = timezone.now()
+        plancher = _dormant_floor(0.1)
+        s = await sync_to_async(Souvenir.objects.create)(
+            content="souvenir endormi de longue date",
+            importance=plancher,
+            occurred_at=now - timedelta(days=400),
+            decayed_at=now - timedelta(days=400),
+        )
+        await _run_decay()
+        await sync_to_async(s.refresh_from_db)()
+        assert s.importance == pytest.approx(plancher)
+        assert s.decayed_at == now - timedelta(days=400), "ancre inchangée"
 
     @pytest.mark.asyncio
     async def test_un_boost_tombe_pendant_la_passe_n_est_pas_detruit(self, monkeypatch):

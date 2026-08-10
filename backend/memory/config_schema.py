@@ -42,8 +42,21 @@ CONFIG_SCHEMA = [
     ),
     ConfigItem(
         key="memory.min_importance", type="float", section="memory", group="Décroissance",
-        label="Seuil de purge",
+        label="Seuil de rappel spontané",
         default=0.1, min=0.0, max=1.0, hot_reload=True,
+        hint="En dessous, un souvenir ne remonte plus tout seul dans le "
+             "prompt. Il n'est PAS effacé : il reste retrouvable par une "
+             "recherche délibérée et ranimable par un boost.",
+    ),
+    ConfigItem(
+        key="memory.dormant_importance", type="float", section="memory",
+        group="Décroissance", label="Plancher de sommeil",
+        default=0.02, min=0.0, max=1.0, hot_reload=True,
+        hint="Importance à laquelle un vieux souvenir cesse de décroître et "
+             "s'endort. Doit rester SOUS le seuil de rappel spontané. "
+             "Auparavant ce seuil déclenchait un DELETE : la mémoire "
+             "interprétée avait un horizon de six semaines pendant que la "
+             "transcription brute, elle, était éternelle.",
     ),
     ConfigItem(
         key="memory.retrieval_souvenirs", type="int", section="memory", group="Récupération",

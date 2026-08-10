@@ -311,7 +311,9 @@ class MemoryManager:
         ]
         return True
 
-    async def get_memory_context(self, query: str, person_id: str = "") -> str:
+    async def get_memory_context(
+        self, query: str, person_id: str = "", disclose_others: bool = True,
+    ) -> str:
         """Retrieve relevant long-term memories formatted for the system prompt.
 
         If person_id is provided, results are boosted for memories
@@ -322,7 +324,9 @@ class MemoryManager:
             self.recall_unavailable = True
             return ""
         try:
-            bloc = await self.retriever.retrieve(query, person_id=person_id)
+            bloc = await self.retriever.retrieve(
+                query, person_id=person_id, disclose_others=disclose_others,
+            )
         except Exception as exc:
             degradations.record("rappel memoire simple", exc)
             logger.exception("Memory retrieval error")
@@ -337,6 +341,7 @@ class MemoryManager:
         person_id: str = "",
         extra_exchanges: list | None = None,
         salience_boost: float = 0.0,
+        disclose_others: bool = True,
     ) -> str:
         """Rappel multi-requêtes (plan de préparation, observations de la
         conscience) — un seul bloc formaté, fusion par pertinence.
@@ -349,7 +354,7 @@ class MemoryManager:
         try:
             bloc = await self.retriever.retrieve_multi(
                 queries, person_id=person_id, extra_exchanges=extra_exchanges,
-                salience_boost=salience_boost,
+                salience_boost=salience_boost, disclose_others=disclose_others,
             )
         except Exception as exc:
             degradations.record("rappel memoire multi", exc)

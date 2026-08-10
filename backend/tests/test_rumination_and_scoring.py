@@ -345,17 +345,60 @@ class TestConscienceRuminationHelpers:
 
     @pytest.mark.asyncio
     async def test_decay_ruminations_fades_low_intensity(self):
+        """Une pensée déjà faible s'éteint — après que du TEMPS a passé.
+
+        La décroissance se compte désormais en heures écoulées et non en tours
+        de boucle, donc il faut vieillir la ligne pour la faire décroître. Le
+        seuil de fade (0.1) est inchangé.
+        """
+        from datetime import timedelta
+
         from asgiref.sync import sync_to_async
+        from django.utils import timezone
+
         from conscience.engine import ConscienceEngine
         from conscience.models import Rumination
 
         r = await sync_to_async(Rumination.objects.create)(
             summary="very weak", intensity=0.105, status="active"
         )
+        # Une heure d'ancienneté : 0.105 × 0.5^(1/6) = 0.0936 < 0.1 → faded.
+        vieux = timezone.now() - timedelta(hours=1)
+        await sync_to_async(
+            lambda: Rumination.objects.filter(pk=r.pk).update(
+                created_at=vieux, decayed_at=vieux,
+            )
+        )()
 
         engine = ConscienceEngine()
         await engine._decay_ruminations()
 
         await sync_to_async(r.refresh_from_db)()
-        # 0.105 × 0.95 = 0.0998 < 0.1 → faded
         assert r.status == "faded"
+        assert r.intensity < 0.1
+
+    @pytest.mark.asyncio
+    async def test_decay_ruminations_ne_touche_pas_une_pensee_toute_fraiche(self):
+        """Une pensée née il y a une seconde n'a pas encore vieilli.
+
+        C'est la propriété qui rend la digestion nocturne atteignable : sous
+        l'ancienne formule, une boucle qui tourne vite consumait la pensée
+        indépendamment du temps réel, et rien de ce qui filtre en minutes de
+        calendrier ne pouvait plus la voir.
+        """
+        from asgiref.sync import sync_to_async
+
+        from conscience.engine import ConscienceEngine
+        from conscience.models import Rumination
+
+        r = await sync_to_async(Rumination.objects.create)(
+            summary="toute fraiche", intensity=0.9, status="active",
+        )
+
+        engine = ConscienceEngine()
+        for _ in range(50):  # 50 cycles de boucle d'affilée
+            await engine._decay_ruminations()
+
+        await sync_to_async(r.refresh_from_db)()
+        assert r.status == "active"
+        assert r.intensity == pytest.approx(0.9, abs=1e-3)

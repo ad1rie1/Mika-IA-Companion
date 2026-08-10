@@ -53,6 +53,14 @@ TROIS TYPES A EXTRAIRE:
    - Ecrit du point de vue SUBJECTIF de {name} (1ere personne), avec SES emotions
    - Doit sonner comme un journal intime de {name}
    - Emotion parmi: {emotions}
+   - "importance" entre 0.0 et 1.0 = A QUEL POINT CA A COMPTE POUR {name},
+     pas a quel point c'est recent ni bien ecrit. Bareme:
+       0.9-1.0 : un evenement de vie, une revelation, une rupture, une promesse
+                 majeure — ce dont on se souvient encore dans un an
+       0.6-0.8 : un moment marquant de la relation, une confidence, une premiere
+       0.3-0.5 : un echange agreable ou utile, dont on garde une trace tiede
+       0.1-0.2 : anecdotique, on l'oubliera vite
+     Sois EXIGEANT sur le haut du bareme: si tout vaut 0.9, plus rien ne surnage.
 
 2. CONNAISSANCE (fait objectif durable):
    - Ecrit de maniere OBJECTIVE (3eme personne), sans emotion
@@ -91,6 +99,7 @@ Format:
       "store": true,
       "content": "On a passe un super moment a jouer a Zelda avec Thomas!",
       "emotion": "happy",
+      "importance": 0.45,
       "themes": ["gaming", "zelda"],
       "entities": [{{"name": "Thomas", "type": "person"}}]
     }},

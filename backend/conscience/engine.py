@@ -56,6 +56,10 @@ class ConscienceEngine:
         # Detached high-pertinence decision cycles, held so they aren't GC'd.
         self._fastpath_tasks: set[asyncio.Task] = set()
         self._last_activity: float = time.time()
+        # Dernier versement d'une teinte de rumination dans l'humeur globale,
+        # par étiquette émotionnelle. En RAM : perdre l'espacement au
+        # redémarrage ne coûte qu'un versement de plus.
+        self._rumination_bleed_at: dict[str, float] = {}
         self._last_action_time: float = 0.0
         self._greeted_periods: set[str] = set()
         self._greeted_date: object = None  # date of last greeting reset
@@ -481,13 +485,6 @@ class ConscienceEngine:
             )
         )()
 
-        # Cooldown check: use in-memory timestamp (faster, no DB query, no race)
-        now_ts = time.time()
-        in_cooldown = (
-            self._last_action_time > 0
-            and (now_ts - self._last_action_time) < self._cooldown_seconds
-        )
-
         # Emotional state
         glob = emotion_engine.global_mood
         idle = now - self._last_activity
@@ -502,6 +499,14 @@ class ConscienceEngine:
 
         # Introspection: query own recent behavior
         acts_today, consecutive_ignored_acts = await self._introspect()
+
+        # Cooldown check: use in-memory timestamp (faster, no DB query, no race)
+        now_ts = time.time()
+        in_cooldown = (
+            self._last_action_time > 0
+            and (now_ts - self._last_action_time)
+            < self._effective_cooldown(consecutive_ignored_acts)
+        )
 
         # Drives: intrinsic motivation pressure
         drive_bonus, drive_summary = drive_engine.conscience_contribution()
@@ -635,106 +640,185 @@ class ConscienceEngine:
         "embarrassed": "anxious",
         "lonely": "melancholic",
     }
-    # Cycles (~30s each by default) before emotional drift kicks in.
-    _RUMINATION_DRIFT_THRESHOLD: int = 4
+    # Repli si la config est illisible — une base injoignable ne doit pas
+    # rendre les pensées immortelles NI les tuer en deux minutes.
+    _RUMINATION_HALF_LIFE_H: float = 6.0
+    _RUMINATION_DRIFT_H: float = 1.0
+    # En deçà, on ne réécrit pas la ligne : le temps s'accumule sur
+    # `decayed_at` au lieu d'être perdu (cf. la décroissance des souvenirs).
+    _RUMINATION_WRITE_DELTA: float = 0.005
+    # Une pensée teinte l'humeur, elle ne la matraque pas. Sans cette borne,
+    # une rumination qui vit désormais des heures enverrait une impulsion
+    # toutes les 30 s dans l'humeur globale — l'ancienne cadence n'était
+    # tolérable que parce que la pensée mourait en 22 minutes.
+    _RUMINATION_BLEED_INTERVAL_S: float = 600.0
+
+    #: Plafond de l'espacement, quoi qu'il arrive : au-delà d'une demi-journée
+    #: sans un mot, se taire davantage n'est plus de la retenue, c'est une
+    #: panne. Le frein dur (`acts_today >= 5`) reste la borne du jour.
+    _COOLDOWN_MAX_S: float = 6 * 3600.0
+
+    def _effective_cooldown(self, consecutive_ignored: int) -> float:
+        """Le silence qu'elle s'impose avant de relancer, allongé à chaque fois.
+
+        Les trois plafonds du scoring — inactivité +0.30, « on m'ignore » −0.30,
+        pulsions +0.50 — somment exactement au seuil (0.50), comparé avec
+        ``>=`` : l'égalité agit. Aucune quantité de messages sans réponse ne
+        pouvait donc la faire taire, et comme le cooldown était constant, elle
+        dépensait ses cinq initiatives quotidiennes en vingt minutes avant que
+        le frein dur ne tombe — puis se taisait vingt-trois heures. Les deux
+        moitiés sont fausses : la rafale colle, le silence qui suit est mort.
+
+        Une personne qui n'obtient pas de réponse attend plus longtemps la fois
+        suivante. C'est tout ce que fait ce facteur, et il suffit à étaler les
+        mêmes cinq tentatives sur la journée.
+        """
+        base = float(self._cooldown_seconds)
+        if consecutive_ignored <= 0:
+            return base
+        from configs.service import config_service
+
+        try:
+            facteur = float(config_service.get("conscience.ignored_backoff_factor"))
+        except Exception:
+            facteur = 2.5
+        facteur = max(1.0, facteur)
+        return min(self._COOLDOWN_MAX_S, base * (facteur ** consecutive_ignored))
+
+    def _rumination_tuning(self) -> tuple[float, float]:
+        """(demi-vie en heures, délai de dérive en heures), depuis la config."""
+        from configs.service import config_service
+
+        def _f(key: str, defaut: float) -> float:
+            try:
+                valeur = float(config_service.get(key))
+                return valeur if valeur > 0 else defaut
+            except Exception:
+                return defaut
+
+        return (
+            _f("conscience.rumination_half_life_hours", self._RUMINATION_HALF_LIFE_H),
+            _f("conscience.rumination_drift_hours", self._RUMINATION_DRIFT_H),
+        )
 
     async def _decay_ruminations(self) -> None:
-        """Every cycle: active ruminations lose ~5% intensity and may
-        bleed their emotional charge into the global mood.
+        """Fait vieillir les pensées en cours, en TEMPS RÉEL.
 
-        Models the fact that unresolved thoughts color humor over time:
-        a lingering frustration keeps you a bit frustrated. Bleed is
-        proportional to intensity so only strong ruminations tint mood.
+        Une pensée s'estompe parce que des heures passent, pas parce qu'une
+        boucle a tourné. L'ancienne formule (`*= 0.95` à chaque cycle de 30 s)
+        liait la durée de vie d'une rumination à la cadence de la boucle : une
+        pensée « persistante » mourait en 22 minutes, et la moitié de ses
+        lecteurs — la digestion nocturne à 120 minutes d'âge, le journal du
+        soir, le fragment de rêve — ne pouvait structurellement jamais la voir.
+        La demi-vie est maintenant une durée (`conscience.rumination_half_life_hours`,
+        6 h par défaut) : une contrariété du soir est encore là au coucher, et
+        c'est bien la nuit qui la digère.
 
-        Emotional drift: ruminations that have been "turning over" for
-        several cycles shift their emotional tint toward a drift target
-        (frustration → anxious, excitement → nostalgic, etc.). Thoughts
-        mutate; humans don't stay angry at the same thing indefinitely,
-        they start *worrying* about it instead.
+        Dérive émotionnelle : au bout de `rumination_drift_hours`, une pensée
+        change de forme — la frustration devient de l'inquiétude. Elle aussi se
+        compte en heures.
+
+        **Lecture, calcul et écriture tiennent dans un seul appel synchrone.**
+        `sync_to_async(thread_sensitive=True)` les sérialise donc sur le même
+        thread d'exécuteur que la digestion du sommeil : un `status` lu avant
+        elle ne peut plus être réécrit après, ce qui ressuscitait en `active`
+        une pensée que la nuit venait de faner.
         """
         try:
             from conscience.models import Rumination
         except ImportError:
             return
 
+        demi_vie_h, derive_h = self._rumination_tuning()
+
+        def _passe() -> list[tuple[str, float]]:
+            """Vieillit le lot et rend ce qui doit teinter l'humeur."""
+            from django.utils import timezone as tz
+
+            maintenant = tz.now()
+            lot = list(Rumination.objects.filter(status="active")[:30])
+            if not lot:
+                return []
+
+            a_ecrire: list = []
+            derives: list = []
+            saignees: list[tuple[str, float]] = []
+
+            for r in lot:
+                ancre = r.decayed_at or r.created_at
+                heures = max(0.0, (maintenant - ancre).total_seconds() / 3600.0)
+                nouvelle = r.intensity * (0.5 ** (heures / demi_vie_h))
+
+                # Sous le seuil d'écriture on ne touche à rien : `decayed_at`
+                # reste en arrière et le temps écoulé s'accumule au lieu d'être
+                # perdu. C'est ce qui rend la décroissance indépendante de la
+                # cadence de la boucle qui l'applique.
+                if r.intensity - nouvelle > self._RUMINATION_WRITE_DELTA:
+                    r.intensity = round(nouvelle, 4)
+                    r.decayed_at = maintenant
+                    if r.intensity < 0.1:
+                        r.status = "faded"
+                    a_ecrire.append(r)
+
+                if r.emotion and r.status == "active":
+                    age_h = (maintenant - r.created_at).total_seconds() / 3600.0
+                    cible = self._RUMINATION_DRIFT.get(r.emotion)
+                    if cible and cible != r.emotion and age_h >= derive_h:
+                        logger.debug(
+                            "Rumination #%s drift: %s -> %s", r.pk, r.emotion, cible,
+                        )
+                        r.emotion = cible
+                        derives.append(r)
+                    if r.intensity > 0.3:
+                        saignees.append((r.emotion, r.intensity))
+
+            if a_ecrire:
+                Rumination.objects.bulk_update(
+                    a_ecrire, ["intensity", "status", "decayed_at"], batch_size=50,
+                )
+            if derives:
+                Rumination.objects.bulk_update(derives, ["emotion"], batch_size=50)
+            return saignees
+
         try:
-            active = await sync_to_async(
-                lambda: list(Rumination.objects.filter(status="active")[:30])
-            )()
+            saignees = await sync_to_async(_passe)()
         except Exception as exc:
             degradations.record("conscience: ruminations to decay", exc)
             return
 
-        if not active:
-            return
+        self._bleed_ruminations(saignees)
 
-        # Import inside to avoid circulars
-        from django.utils import timezone as tz
+    def _bleed_ruminations(self, saignees: list[tuple[str, float]]) -> None:
+        """Laisse les pensées en cours teinter l'humeur globale — par à-coups.
+
+        Une pensée colore l'humeur, elle ne la matraque pas. Tant qu'une
+        rumination mourait en 22 minutes, saigner à chaque cycle de 30 s était
+        auto-limité ; maintenant qu'elle vit des heures, la même cadence
+        clouerait l'humeur globale sur l'émotion de la rumination pour la
+        soirée entière. On espace donc à un versement par ``_RUMINATION_BLEED_INTERVAL_S``.
+        """
+        if not saignees:
+            return
         from emotion.types import Emotion, EmotionData
 
-        now_tz = tz.now()
-        # Ruminations dont l'etiquette emotionnelle a bouge pendant ce cycle.
-        derives: list = []
-        for r in active:
-            # 5% intensity decay per cycle
-            r.intensity *= 0.95
-
-            # Emotional drift: after several cycles, shift the label
-            # toward a softer / more introspective neighbor.
-            if r.emotion:
-                age_cycles = int(
-                    (now_tz - r.updated_at).total_seconds()
-                    / max(1, self._decision_interval)
+        maintenant = time.monotonic()
+        for etiquette, intensite in saignees:
+            dernier = self._rumination_bleed_at.get(etiquette, 0.0)
+            if maintenant - dernier < self._RUMINATION_BLEED_INTERVAL_S:
+                continue
+            try:
+                emo = Emotion(etiquette)
+            except ValueError:
+                continue  # étiquette inconnue sur une vieille ligne
+            try:
+                emotion_engine.process_emotion(
+                    EmotionData(emotion=emo, intensity=intensite * 0.15),
+                    "conscience_mika",
                 )
-                drift_target = self._RUMINATION_DRIFT.get(r.emotion)
-                if (
-                    drift_target
-                    and age_cycles >= self._RUMINATION_DRIFT_THRESHOLD
-                    and drift_target != r.emotion
-                ):
-                    logger.debug(
-                        "Rumination #%s drift: %s -> %s",
-                        r.pk, r.emotion, drift_target,
-                    )
-                    r.emotion = drift_target
-                    derives.append(r)
+                self._rumination_bleed_at[etiquette] = maintenant
+            except Exception as exc:
+                degradations.record("conscience: rumination emotional bleed", exc)
 
-            # Emotional bleed: if rumination has an associated emotion,
-            # re-inject a small fraction into the global mood.
-            if r.emotion and r.intensity > 0.3:
-                try:
-                    emo = Emotion(r.emotion)
-                    data = EmotionData(emotion=emo, intensity=r.intensity * 0.15)
-                    emotion_engine.process_emotion(data, "conscience_mika")
-                except ValueError:
-                    # Unknown emotion label on a stale rumination — skip.
-                    pass
-                except Exception as exc:
-                    degradations.record("conscience: rumination emotional bleed failed for #", exc)
-
-            if r.intensity < 0.1:
-                r.status = "faded"
-
-        # Ecriture groupee : jusqu'a 30 UPDATE par cycle de decision — donc
-        # toutes les 30 s — devenaient autant de sync_to_async serialises sur
-        # l'unique thread d'executeur partage avec les cinq autres boucles de
-        # fond. Le bleed emotionnel ci-dessus reste en RAM et ne change pas.
-        # `emotion` s'ecrit a part, seulement pour les lignes qui ont derive :
-        # reecrire l'etiquette des autres avec une valeur lue un instant plus
-        # tot pietinerait la derive forcee de la digestion nocturne.
-        def _ecrire_lot() -> None:
-            Rumination.objects.bulk_update(
-                active, ["intensity", "status"], batch_size=50,
-            )
-            if derives:
-                Rumination.objects.bulk_update(
-                    derives, ["emotion"], batch_size=50,
-                )
-
-        try:
-            await sync_to_async(_ecrire_lot)()
-        except Exception as exc:
-            degradations.record("conscience: rumination decay write", exc)
 
     async def _promote_stale_to_ruminations(self) -> None:
         """Convert recent skipped/stale pertinent observations into ruminations.

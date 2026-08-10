@@ -699,11 +699,11 @@ class TestAntiRepetition:
             vus["demote"] = kw.get("demote_pks")
             return souvenirs
 
-        async def _assoc(souvenirs, exclude_pks):
+        async def _assoc(souvenirs, exclude_pks, **_kw):
             vus["assoc_exclude"] = set(exclude_pks)
             return []
 
-        async def _intru(exclude_pks, boost):
+        async def _intru(exclude_pks, boost, **_kw):
             vus["intru_exclude"] = set(exclude_pks)
             return []
 

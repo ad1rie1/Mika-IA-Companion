@@ -55,6 +55,13 @@ EMOTION_PROMPT_FR: dict[str, str] = {
 MARKED_INTENSITY = 0.6
 
 
+#: Pendant combien de temps « ce qu'elle vient de déclarer » reste ce qu'elle
+#: éprouve. Calé sur la constante de temps de l'oscillateur au tempérament par
+#: défaut (~11 min 30) : au-delà, l'état a réellement bougé et c'est la
+#: position qui dit vrai.
+DECLARED_WINDOW_S: float = 700.0
+
+
 def _fr(emotion: Emotion) -> str:
     return EMOTION_PROMPT_FR.get(emotion.value, emotion.value)
 
@@ -170,6 +177,19 @@ class PersonMood:
     #: qu'elle n'a rien provoqué — l'oscillateur revient alors au repos
     #: circadien commun, comme pour un inconnu.
     anchor: pad.Vec3 | None = None
+    #: Ce que le dernier tour a DÉCLARÉ éprouver envers cette personne, et
+    #: quand (`time.time()`).
+    #:
+    #: La balise `[EMOTION:]` est ce qu'elle a ressenti en écrivant ; la
+    #: position PAD dit où en est la relation. Les deux sont vrais et ne
+    #: répondent pas à la même question. Les confondre faisait dire au prompt
+    #: une émotion qu'elle n'avait jamais prononcée : l'impulsion ne parcourt
+    #: que la moitié de la distance à l'ancre déclarée, et le vecteur mélangé
+    #: qui en résulte a souvent pour plus proche voisin une TROISIÈME émotion.
+    #: Mesuré : sur cinq états de départ réalistes, « embarrassed » revenait
+    #: en « effrayée », « amused » en « love », « grateful » en « excited ».
+    last_declared: tuple[Emotion, float] | None = None
+    last_declared_at: float = 0.0
 
     @property
     def emotion(self) -> Emotion:
@@ -188,17 +208,66 @@ class PersonMood:
             "intensity": round(intensity, 2),
         }
 
-    def to_prompt_description(self) -> str:
-        label, intensity = pad.pad_to_label(self.dynamic.position)
-        if intensity < 0.1:
-            return "Tu n'as pas de sentiment particulier envers cette personne."
+    def fresh_declaration(
+        self, window_s: float = DECLARED_WINDOW_S,
+    ) -> tuple[Emotion, float] | None:
+        """Ce qu'elle vient de déclarer, si c'est encore récent.
+
+        Au-delà de la fenêtre, ce n'est plus ce qu'elle éprouve : c'est un
+        souvenir de tour, et c'est l'oscillateur qui reprend la parole.
+        """
+        if self.last_declared is None:
+            return None
+        if time.time() - self.last_declared_at > window_s:
+            return None
+        return self.last_declared
+
+    def to_prompt_description(
+        self, declared_window_s: float = DECLARED_WINDOW_S,
+    ) -> str:
+        """Ce que le prompt lui dit éprouver envers cette personne.
+
+        Priorité à ce qu'elle vient de DÉCLARER : c'est le seul énoncé dont on
+        soit sûr qu'il correspond à quelque chose qu'elle a pensé. L'oscillateur
+        fournit alors la nuance (l'ambivalence de fond) mais ne renomme plus le
+        sentiment principal. Passé la fenêtre, la déclaration n'est plus
+        d'actualité et la position redevient la source — c'est bien elle qui
+        porte « où en est la relation ».
+        """
+        declaree = self.fresh_declaration(declared_window_s)
+        if declaree is not None:
+            label, intensity = declaree
+        else:
+            label, intensity = pad.pad_to_label(self.dynamic.position)
+            if intensity < 0.1:
+                return "Tu n'as pas de sentiment particulier envers cette personne."
 
         intensity_word = _intensity_label(intensity)
         base = (
             f"Envers cette personne, tu te sens {intensity_word} {_fr(label)}."
         )
-        blend = pad.pad_to_blend(self.dynamic.position, top_k=2)
-        return base + _format_blend_phrase(blend)
+        # La nuance vient de la position, mais on ne l'énonce que si elle
+        # apporte VRAIMENT autre chose : citer « une nuance de X » quand X est
+        # déjà le sentiment principal ne dit rien, et la citer alors qu'elle
+        # contredit la balise est exactement le renommage qu'on vient de retirer.
+        blend = [
+            (emo, poids)
+            for emo, poids in pad.pad_to_blend(self.dynamic.position, top_k=3)
+            if emo is not label
+        ]
+        if declaree is not None:
+            blend = blend[:1]
+            if blend and blend[0][1] >= 0.25:
+                # Tournure choisie pour marcher avec les 29 adjectifs sans
+                # élision : « un fond de effrayée » n'est pas du français.
+                return base + (
+                    f" Et en dessous, tu te sens aussi un peu {_fr(blend[0][0])} — "
+                    "ton humeur n'est pas mono-couleur."
+                )
+            return base
+        return base + _format_blend_phrase(
+            pad.pad_to_blend(self.dynamic.position, top_k=2)
+        )
 
 
 @dataclass

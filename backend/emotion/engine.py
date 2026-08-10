@@ -72,6 +72,16 @@ PERSON_ANCHOR_WEIGHT = 0.6
 ANCHOR_MAX_NORM = 0.7
 ANCHOR_ALPHA = 0.15
 ANCHOR_SAMPLE = 20
+# Demi-vie de la GUÉRISON d'une stance : le temps qu'il faut, sans plus aucun
+# échange, pour que l'ancre ait parcouru la moitié du chemin vers le repos
+# commun. Deux écrivains la déplaçaient — un relevé, une réhydratation — et
+# aucun ne la ramenait jamais vers le neutre : une brouille de quarante tours
+# installait un repos `frustrated` mesuré identique après 1 h, 6 h et 24 h de
+# silence complet. Une rancune humaine s'émousse toute seule ; il faut juste
+# que ce soit LENT devant une conversation (α = 0.15 par tour), sans quoi
+# l'attachement ne se construirait jamais. Trois jours : une brouille du lundi
+# est encore lisible le mercredi, oubliée la semaine suivante.
+ANCHOR_HEAL_HALF_LIFE_S = 3 * 86400.0
 
 # « Bien ancrée » : une stance construite, pas déclenchée une fois.
 ANCHORED_MIN_NORM = 0.4
@@ -517,6 +527,31 @@ class EmotionEngine:
             )
             return None
 
+    async def _backfill_anchor(self, mood: "PersonMood") -> None:
+        """Recalcule l'ancre d'une humeur restaurée sans elle.
+
+        Une seule requête, une seule fois par personne et par processus : au
+        retour, ``mood.anchor`` n'est plus ``None`` (même si les relevés ne
+        donnent rien, on pose le repos circadien courant plutôt que de
+        rejouer la requête à chaque tour).
+        """
+        try:
+            from asgiref.sync import sync_to_async
+            from memory.models import EmotionSnapshot
+
+            snaps = await sync_to_async(
+                lambda: list(
+                    EmotionSnapshot.objects
+                    .filter(person_id=mood.person_id)
+                    .order_by("-created_at")[:ANCHOR_SAMPLE]
+                )
+            )()
+            ancre = self._anchor_from_snapshots(snaps) if snaps else None
+            mood.anchor = ancre if ancre is not None else self._home_vector()
+        except Exception as exc:
+            degradations.record("emotion.engine._backfill_anchor", exc)
+            mood.anchor = self._home_vector()
+
     async def ensure_person_loaded(self, person_id: str) -> None:
         """Hydrate a person's mood from DB if they are not currently in RAM.
 
@@ -527,7 +562,20 @@ class EmotionEngine:
         plus tôt : il ne peut par construction porter ni relevé ni résumé, et
         chaque socket anonyme payait deux requêtes garanties vides.
         """
-        if person_id in self.person_moods or not is_identifiable_person(person_id):
+        if not is_identifiable_person(person_id):
+            return
+        existante = self.person_moods.get(person_id)
+        if existante is not None:
+            # `_restore_state` et `_restore_from_summaries` repeuplent
+            # `person_moods` au démarrage SANS jamais écrire d'ancre, et cette
+            # fonction est la seule à savoir la recalculer. Un simple « déjà en
+            # RAM » la rendait donc irrécupérable pour toute la durée du
+            # processus : ce qui distingue un ami d'un troll était remis à zéro
+            # par le moindre redémarrage. On repasse une fois pour combler
+            # l'ancre manquante — jamais pour réécrire la position, qui est
+            # vivante.
+            if existante.anchor is None:
+                await self._backfill_anchor(existante)
             return
 
         max_age_seconds = self._SNAPSHOT_DECAY_DAYS * 86400
@@ -670,9 +718,17 @@ class EmotionEngine:
             pad.scale(position, ANCHOR_ALPHA),
         ))
 
-    @staticmethod
-    def _anchor_from_snapshots(rows) -> Vec3 | None:
-        """Recency-weighted mean of what a person has already provoked."""
+    def _anchor_from_snapshots(self, rows) -> Vec3 | None:
+        """Recency-weighted mean of what a person has already provoked.
+
+        Le résultat est ensuite VIEILLI du temps écoulé depuis le relevé le
+        plus récent, avec la même demi-vie que ``_heal_anchor``. Sans cela,
+        l'éviction rouvrait la porte que la guérison venait de fermer : une
+        humeur inactive sort de la RAM au bout d'une heure, et la
+        réhydratation reconstruisait l'ancre à partir de vingt vieilles
+        déclarations — ramenant intacte, des semaines plus tard, une stance
+        que le temps avait justement effacée.
+        """
         try:
             total = 0.0
             accumulated = pad.zero()
@@ -690,7 +746,25 @@ class EmotionEngine:
 
             if total <= 0.0:
                 return None
-            return _clamp_anchor(pad.scale(accumulated, 1.0 / total))
+            ancre = _clamp_anchor(pad.scale(accumulated, 1.0 / total))
+
+            # `getattr` : une ligne peut ne pas porter de date (relevé
+            # partiel, substitut de test). Sans horodatage on ne vieillit
+            # simplement pas — jamais on ne perd l'ancre pour autant.
+            dates = [
+                d for d in (getattr(r, "created_at", None) for r in rows)
+                if d is not None and hasattr(d, "timestamp")
+            ]
+            recent = max(dates, default=None)
+            if recent is not None:
+                age = max(0.0, time.time() - recent.timestamp())
+                part = 1.0 - 0.5 ** (age / ANCHOR_HEAL_HALF_LIFE_S)
+                if part > 0.0:
+                    home = self._home_vector()
+                    ancre = _clamp_anchor(pad.add(
+                        pad.scale(ancre, 1.0 - part), pad.scale(home, part),
+                    ))
+            return ancre
         except Exception as exc:
             degradations.record("emotion.engine._anchor_from_snapshots", exc)
             return None
@@ -735,6 +809,27 @@ class EmotionEngine:
 
         return pad.add(base, bias)
 
+    @staticmethod
+    def _heal_anchor(mood: PersonMood, home: Vec3, dt: float) -> None:
+        """Rapproche lentement la stance envers quelqu'un du repos commun.
+
+        Le seul mouvement de l'ancre venait des relevés — donc de nouvelles
+        déclarations. Sans échange, elle ne bougeait pas d'un pouce : une
+        stance négative installée un soir était encore là mot pour mot le
+        lendemain, et seule une vingtaine de tours chaleureux pouvait la
+        défaire. Le temps compte aussi, et beaucoup plus lentement que les
+        mots — c'est ce rapport qui donne à la fois de la rancune et du pardon.
+        """
+        if mood.anchor is None or dt <= 0.0:
+            return
+        part = 1.0 - 0.5 ** (dt / ANCHOR_HEAL_HALF_LIFE_S)
+        if part <= 0.0:
+            return
+        mood.anchor = _clamp_anchor(pad.add(
+            pad.scale(mood.anchor, 1.0 - part),
+            pad.scale(home, part),
+        ))
+
     def _person_home(self, mood: PersonMood, base: Vec3 | None = None) -> Vec3:
         """Resting point of one person's oscillator.
 
@@ -778,6 +873,11 @@ class EmotionEngine:
 
         target = pad.label_to_pad(emotion_data.emotion, emotion_data.intensity)
         person.dynamic.impulse_toward(target, self._person_params)
+        # Ce qu'elle vient de dire éprouver, gardé tel quel à côté de la
+        # position. Le prompt du tour suivant le relit plutôt que de demander
+        # à `pad_to_label` de renommer un vecteur mélangé.
+        person.last_declared = (emotion_data.emotion, emotion_data.intensity)
+        person.last_declared_at = now
 
         # Propagate into the global mood. The bleed reduces the *gain*, once —
         # reducing the target as well capped the global mood around 0.30, well
@@ -948,7 +1048,15 @@ class EmotionEngine:
         # The "or a fresh impulse" clause read the velocity, to catch an
         # impulse not yet integrated. An impulse now moves the position
         # itself, so there is nothing left in flight to catch.
-        if pad.norm(person.dynamic.position) < 0.1:
+        #
+        # Une déclaration fraîche parle en revanche pour elle-même : un tour
+        # qui vient de dire « [EMOTION:thinking:0.4] » a un ressenti, même si
+        # le vecteur correspondant est court. Se taire dans ce cas, c'est
+        # perdre précisément ce dont on est sûr.
+        if (
+            pad.norm(person.dynamic.position) < 0.1
+            and person.fresh_declaration() is None
+        ):
             return ""
 
         lines: list[str] = [person.to_prompt_description()]
@@ -1031,6 +1139,7 @@ class EmotionEngine:
             if dt <= 0.0:
                 continue
 
+            self._heal_anchor(person, home, dt)
             person_home = self._person_home(person, home)
             self._advance(person.dynamic, person_home, self._person_params, dt)
             person.last_update = now
