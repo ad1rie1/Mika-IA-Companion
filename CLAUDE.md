@@ -224,9 +224,59 @@ Mounted at `/gestion/`. Replaces the `dashboard` app, **now deleted** (along wit
 
 **Layout**: `nav.py` (menu + tabs spec), `shell.py` (page context, badge counts, vitals — every read isolated, since this is the screen you open *because* something is broken), `tables.py` (pagination/filters; cell markup stays in the page template), `forms.py` (ConfigItem → HTML and back), `panels.py` (module spaces), `formatting.py` + `templatetags/gestion.py` (text only, never markup).
 
-**Configuration is three spaces.** *Fixed* (`/gestion/configuration/`) holds the core sections, grouped Accès / IA / Communication / Cœur. *Dynamic* lives in each module's own space, *forged* in each app's own space. `core_sections()` draws the line by excluding the `module_` and `forge_` prefixes; old section URLs redirect rather than 404. Nothing in the view knows any module — the registry describes the fields and the same form engine renders them, so a new `ConfigItem` appears with no code change. Secrets **never reach the browser**: the field ships empty, blank means unchanged. A `__champ` marker per rendered field distinguishes an unchecked box (absent from POST but on screen → save `False`) from a setting simply not in the form (don't touch).
+**Configuration is three spaces.** *Fixed* (`/gestion/configuration/`) holds the core sections, *dynamic* lives in each module's own space, *forged* in each app's own space. `core_sections()` draws the line by excluding the `module_` and `forge_` prefixes; old section URLs redirect rather than 404. Nothing in the view knows any module — the registry describes the fields and the same form engine renders them, so a new `ConfigItem` appears with no code change. Secrets **never reach the browser**: the field ships empty, blank means unchanged. A `__champ` marker per rendered field distinguishes an unchecked box (absent from POST but on screen → save `False`) from a setting simply not in the form (don't touch).
+
+**All three spaces render the same two partials** — [partials/reglages.html](backend/GestionSysteme/templates/gestion/partials/reglages.html) (toolbar, table of contents, blocks, save bar) and [partials/listes.html](backend/GestionSysteme/templates/gestion/partials/listes.html) (record-list tables), fed by `views/config.py::contexte_reglages()`. They each carried their own copy before, so an improvement reached one screen and a fix left the other two behind. A module or a forged app now gets search, collapsing and the modified badge without knowing they exist.
 
 **Projects are the one thing you *create* here** ([project_forms.py](backend/GestionSysteme/project_forms.py)) — plain Django `ModelForm`s, deliberately **not** the `ConfigItem` engine (a project is a real ORM model with relations, choices and JSON fields). Three rules the form adds: an **invalid schedule rule is refused** (`schedule.parse_rule` never raises — right for LLM-supplied text, but from a form `interval:5min` would silently mean "manual" forever); `allowed_modules` is a **closed multi-select** of registered modules (a typo quietly *closes* access); and `next_run_at` is **recomputed on every save**. List fields (`instructions`, `keywords`, …) are one-value-per-line textareas. Tasks are added from the project fiche, with the task id checked against its project.
+
+### Declaring a configuration screen
+
+A settings page is **entirely declarative**: no view, no template, no CSS. You describe what exists; the same engine renders the core, a module's space and a forged app's space identically. Everything below except `ConfigItem` is optional, and a schema that declares none of it renders as a plain field list — the way every section did before this existed.
+
+```python
+from configs.types import ConfigFamily, ConfigGroup, ConfigItem, ConfigSection
+
+CONFIG_SCHEMA = [
+    ConfigSection(
+        key="mon_truc", label="Mon truc", icon="◈", order=55,
+        family="vie_interieure",                     # intertitre de la barre latérale
+        summary="Une ligne, affichée en infobulle.", # ~90 caractères
+        description="Un paragraphe, affiché en encadré en haut de la page.",
+    ),
+    ConfigGroup(
+        section="mon_truc", key="Cadence", order=10,
+        description="Ce que ce bloc pilote dans le système qui tourne.",
+    ),
+    ConfigGroup(
+        section="mon_truc", key="Bornes internes", order=20, advanced=True,
+        description="Replié par défaut — on ne l'ouvre qu'en diagnostic.",
+    ),
+    ConfigItem(
+        key="mon_truc.intervalle", type="int", section="mon_truc",
+        group="Cadence",                              # doit valoir le `key` d'un ConfigGroup
+        label="Intervalle (s)", default=30, min=5, max=3600, hot_reload=True,
+        hint="Ce qu'il faut savoir avant de changer la valeur.",
+    ),
+]
+```
+
+**The four organizing primitives.**
+
+- **`ConfigFamily`** — a sidebar heading. Declared once in [GestionSysteme/families.py](backend/GestionSysteme/families.py) (`acces`, `personnage`, `intelligence`, `vie_interieure`, `conversation`, `canaux`, `travail`, `systeme`); a module may declare its own. Sections *say* which family they belong to. The previous arrangement **guessed** it from the key prefix (`comm_`, `ai_`) and dropped everything else into a bin called « Cœur » — fine at four sections, a flat list with a label on it at fifteen. A section that declares nothing falls back to the prefix heuristic, so a migration never breaks the screen; a test asserts nothing lands in « Non classé ».
+- **`ConfigGroup`** — metadata for a `ConfigItem.group`. `key` is the **exact string** used in `group=`, not a parallel identifier to keep in sync. It buys three things a bare string cannot: a chosen order, a sentence saying what the block controls, and `advanced=True`.
+- **`advanced=True`** collapses the block into a `<details>`. Collapsed is not hidden: it stays searchable, Ctrl+F opens it, and **it opens by itself when it contains a modified value** — hiding from the operator what the operator changed is the one way to make collapsing harmful.
+- **`summary` / `description`** on the section — one line for the sidebar tooltip, one paragraph for the page header.
+
+**Writing a group description** is most of the work, and the rule is: say what the block does *in the running system*, not what the field name already says; when a failure mode is known, name it. « Quand le fil devient trop long, les vieux échanges sont repliés en un résumé. Le verbatim, lui, ne bouge pas » beats « Réglages de compaction ».
+
+**What the renderer then gives you for free**, on all three spaces: a table of contents above 3 blocks, accent-insensitive multi-word search (`?q=`), a « modified only » filter (`?vue=modifies`), a per-section count and modified badge in the sidebar, a « modifié » pill on every field carrying a stored value, a sticky save bar, and a reset disclosure that only appears when something is actually modified. Filters live in the URL, so a filtered screen is shareable and the back button undoes it.
+
+**Value types**: `str`, `text`, `int`, `float`, `bool`, `secret`, `select`, `multiselect`, `list`, `lines`, `record_list`, `yaml_block`. Two are easy to confuse — `list` splits on commas (keywords), `lines` splits on newlines (sentences). Character traits, instructions and any prose list want `lines`; `list` would cut « Curieuse de tout, pas juste de tech » into two entries.
+
+**Forged apps get the same treatment.** A manifest `config:` field accepts `group:` and the `lines` type, and [forge/module.py](backend/modules/plugins/forge/module.py)`::_build_config_entries` turns those into real `ConfigGroup`s under a section carrying `family="systeme"` — so an app Mika writes at runtime lands in the same organized screen as the core, with no interface code aware of it.
+
+Guarded by [test_config_rapatriement.py](backend/tests/test_config_rapatriement.py): every section declares a family and a summary, every non-`record_list` setting sits in a declared and described group, and any section past 30 settings collapses at least one block.
 
 **Dynamic choices** ([choices.py](backend/GestionSysteme/choices.py)) — a field whose options depend on *another field* plus a network call, which the registry cannot express. A `DynamicField` names the driving field and a loader; `ai.models`/`model_id` is driven by `provider` and dispatches to the provider's own `list_models()`. Three properties: **loading is explicit** (a button, not every page render), it is a **plain server round-trip** carrying the in-progress input in the POST (no JS, and `__charger` never writes a row), and the field **stays typeable when loading fails** — an unreachable provider is exactly when you come to repair the config. A current value missing from the loaded list is re-injected as an option.
 

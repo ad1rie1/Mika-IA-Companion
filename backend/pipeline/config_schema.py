@@ -14,15 +14,41 @@ nettoyer).
 """
 from __future__ import annotations
 
-from configs.types import ConfigItem, ConfigSection
+from configs.types import ConfigGroup, ConfigItem, ConfigSection
 
 CONFIG_SCHEMA = [
 
     # ══ Tour · Traitement ═══════════════════════════════════════════
     ConfigSection(
-        key="pipeline_tour", label="Tour · Traitement", icon="⟳", order=26,
+        key="pipeline_tour", label="Traitement du tour", icon="⟳", order=26,
+        family="conversation",
+        summary="La file qui sérialise les tours, la voix intérieure, la passe de préparation.",
         description="Ce qui borne un tour de conversation : la file qui les "
                     "sérialise, la voix intérieure, la passe de préparation.",
+    ),
+    ConfigGroup(
+        section="pipeline_tour", key="File des tours", order=10, advanced=True,
+        description="Les tours ne sont pas traités dans la socket qui les "
+                    "reçoit : ils passent par une file, sinon la connexion "
+                    "devient sourde pendant toute la réponse et les "
+                    "surveillances de liveness reconnectent en plein tour. "
+                    "Ce qu'on règle ici, c'est la profondeur du dossier "
+                    "d'attente et ce qu'un redémarrage a le droit de rejouer.",
+    ),
+    ConfigGroup(
+        section="pipeline_tour", key="Voix intérieure", order=20,
+        description="Quand elle agit d'elle-même, elle murmure ce qu'elle "
+                    "s'apprête à faire. Ce murmure est fabriqué à chaque "
+                    "fois, à partir de l'action et de ce qui vient d'en "
+                    "revenir — et il se tait plutôt que d'afficher une erreur.",
+    ),
+    ConfigGroup(
+        section="pipeline_tour", key="Préparation", order=30,
+        description="La partie *exécution* de la pré-passe de rappel dirigé : "
+                    "le temps accordé à ses recherches, la longueur de la note "
+                    "de focus qu'elle glisse en dernière couche du prompt, et "
+                    "le lexique de politesses qui la court-circuite. Le modèle "
+                    "qui produit le plan, lui, se choisit dans IA · Rôles.",
     ),
 
     # ── File des tours ──────────────────────────────────────────────
@@ -116,10 +142,38 @@ CONFIG_SCHEMA = [
 
     # ══ Tour · Pièces jointes ═══════════════════════════════════════
     ConfigSection(
-        key="pipeline_medias", label="Tour · Pièces jointes", icon="⊞",
+        key="pipeline_medias", label="Pièces jointes", icon="⊞",
         order=27,
+        family="conversation",
+        summary="Ce qu'un message peut porter, et ce qu'on en fait avant que le modèle le lise.",
         description="Ce qu'un message peut porter, et ce que les "
                     "préprocesseurs en font avant que le modèle le lise.",
+    ),
+    ConfigGroup(
+        section="pipeline_medias", key="Pièces jointes", order=10,
+        description="Ce qu'un message a le droit de porter. Un dépassement "
+                    "n'est jamais silencieux : la pièce écartée est nommée "
+                    "dans l'accusé de réception, avec sa raison, et le client "
+                    "l'affiche sous la bulle — les deux côtés doivent voir le "
+                    "même message.",
+    ),
+    ConfigGroup(
+        section="pipeline_medias", key="Types acceptés", order=20, advanced=True,
+        description="Ces listes ne filtrent pas, elles *aiguillent* : elles "
+                    "décident quel préprocesseur prend la pièce — légende "
+                    "d'image, transcription, extraction de texte. Un type "
+                    "absent des trois n'est pas refusé, il retombe sur "
+                    "l'extraction générique.",
+    ),
+    ConfigGroup(
+        section="pipeline_medias", key="Prétraitement", order=30,
+        description="Une image devient une légende, un vocal une "
+                    "transcription, un PDF du texte — le pipeline en aval ne "
+                    "voit que du texte. Tout cela se passe dans le routeur, "
+                    "donc AVANT le budget d'appel IA et en occupant le worker "
+                    "de la file : ces échéances s'ajoutent à l'attente de la "
+                    "personne. Ce qui n'aboutit pas devient un placeholder, "
+                    "jamais une erreur affichée comme du contenu.",
     ),
 
     ConfigItem(
@@ -265,9 +319,38 @@ CONFIG_SCHEMA = [
 
     # ══ Tour · Contexte ═════════════════════════════════════════════
     ConfigSection(
-        key="pipeline_contexte", label="Tour · Contexte", icon="◫", order=28,
+        key="pipeline_contexte", label="Contexte du prompt", icon="◫", order=28,
+        family="conversation",
+        summary="Les plafonds des blocs de prompt, et les seuils qui décident si un bloc paraît.",
         description="Les plafonds des blocs de prompt sans borne naturelle, "
                     "et les seuils qui décident si un bloc paraît.",
+    ),
+    ConfigGroup(
+        section="pipeline_contexte", key="Plafonds des blocs", order=10,
+        advanced=True,
+        description="Des garde-fous, pas des réglages : rien en aval ne mesure "
+                    "ni ne tronque ces blocs, donc celui qui grossit — récit "
+                    "de soi, contexte des modules, revendications d'identité — "
+                    "alourdit chaque tour sans que rien ne le dise. Les valeurs "
+                    "sont larges exprès : empêcher la dérive, pas rogner le cas "
+                    "nominal.",
+    ),
+    ConfigGroup(
+        section="pipeline_contexte", key="Rythme du fil", order=20,
+        description="Ce qui fait qu'une conversation a une histoire plutôt "
+                    "qu'un présent perpétuel : au-delà de quel trou un segment "
+                    "du fil est daté pour elle, et au-delà de quel silence elle "
+                    "se permet de dire à la personne qu'on ne s'était pas parlé "
+                    "depuis un moment. Deux cadrans distincts, même si leur "
+                    "valeur par défaut coïncide.",
+    ),
+    ConfigGroup(
+        section="pipeline_contexte", key="Rêve", order=30,
+        description="À quelles conditions le rêve de la nuit lui revient. Il "
+                    "n'est proposé qu'une fois, le matin, et présenté comme "
+                    "mentionnable si ça tombe — pas comme quelque chose à "
+                    "raconter. Un rêve trop flou reste interne : il a quand "
+                    "même nourri le récit de soi.",
     ),
 
     # ── Plafonds des blocs ──────────────────────────────────────────
@@ -378,8 +461,31 @@ CONFIG_SCHEMA = [
     # ══ Voix ════════════════════════════════════════════════════════
     ConfigSection(
         key="voice", label="Voix", icon="♪", order=66,
+        family="conversation",
+        summary="Quand elle parle à voix haute, et avec quelle voix. Décidé côté serveur.",
         description="Quand Mika parle à voix haute, et avec quelle voix. La "
                     "décision est prise côté serveur, pas dans le navigateur.",
+    ),
+    ConfigGroup(
+        section="voice", key="Heures calmes", order=10,
+        description="La plage où un haut-parleur en pièce partagée reste muet. "
+                    "Elle ne concerne que lui : un onglet ouvert continue de "
+                    "parler, et une note vocale part quelle que soit l'heure — "
+                    "son destinataire l'écoutera quand il voudra.",
+    ),
+    ConfigGroup(
+        section="voice", key="Profil « adressé »", order=20, advanced=True,
+        description="Multiplicateurs appliqués par-dessus la modulation "
+                    "émotionnelle, quand elle s'adresse à quelqu'un. À 1,0 "
+                    "partout — le défaut — la voix est exactement celle que "
+                    "l'émotion a réglée, et ce bloc ne fait rien.",
+    ),
+    ConfigGroup(
+        section="voice", key="Profil « pensée »", order=30,
+        description="Sa voix quand elle pense tout haut plutôt qu'elle ne "
+                    "parle à quelqu'un : plus bas, plus lent, nettement plus "
+                    "discret. C'est ce contraste qui fait entendre un murmure "
+                    "surpris au lieu d'une phrase adressée.",
     ),
 
     ConfigItem(

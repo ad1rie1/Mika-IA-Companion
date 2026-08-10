@@ -16,10 +16,16 @@ from __future__ import annotations
 from GestionSysteme import config_backend  # noqa: F401
 
 from configs.types import ConfigItem, ConfigRecord, ConfigSection, record_item
+from GestionSysteme.families import FAMILIES
 
 CONFIG_SCHEMA = [
+    # Les familles de la barre latérale. Déclarées ici parce que c'est
+    # l'administration qui décide comment elle s'organise ; n'importe quel
+    # module peut en ajouter une dans son propre schéma.
+    *FAMILIES,
     ConfigSection(
-        key="accounts", label="Accès · Comptes", icon="⚿", order=10,
+        key="accounts", label="Comptes", icon="⚿", order=10, family="acces",
+        summary="Qui peut se connecter au frontend et à cette administration.",
         description=(
             "Comptes de connexion (frontend + administration). Tant que "
             "DASHBOARD_REQUIRE_AUTH est désactivé, quiconque atteint cette "

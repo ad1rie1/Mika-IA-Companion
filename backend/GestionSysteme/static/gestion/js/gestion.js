@@ -68,13 +68,18 @@
   }
 
   /* ── Filtres ─────────────────────────────────────────────────────────
-     Un <select> dans une barre de filtres soumet son formulaire au
+     Un contrôle marqué `data-autosubmit` soumet son formulaire au
      changement. Sans JS, le bouton « Filtrer » reste présent et fait le
-     même travail. */
+     même travail.
+
+     Le sélecteur ne se limite pas à `.filters` : la barre de configuration
+     porte la même bascule sans être une barre de filtres de tableau, et
+     restreindre au conteneur revenait à décider du comportement d'après
+     l'endroit plutôt que d'après l'intention déclarée sur le contrôle. */
   function wireFilters() {
     document.addEventListener("change", function (ev) {
       var el = ev.target;
-      if (!el.matches || !el.matches(".filters [data-autosubmit]")) return;
+      if (!el.matches || !el.matches("[data-autosubmit]")) return;
       var form = el.form;
       if (form) form.requestSubmit ? form.requestSubmit() : form.submit();
     });

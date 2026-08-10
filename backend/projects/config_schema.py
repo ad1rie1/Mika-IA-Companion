@@ -1,21 +1,58 @@
 """Config schema for the projects subsystem."""
 from __future__ import annotations
 
-from configs.types import ConfigItem, ConfigSection
+from configs.types import ConfigGroup, ConfigItem, ConfigSection
 
 CONFIG_SCHEMA = [
     ConfigSection(
         key="projects", label="Projets", icon="◱", order=60,
+        family="travail",
+        summary="Sa part professionnelle : quand un projet avance seul, et "
+                "quand il prend le ton en main.",
         description="Runner des projets agent.",
+    ),
+    ConfigGroup(
+        section="projects", key="Détection en conversation", order=10,
+        description="Un message est rattaché à un projet par heuristique — "
+                    "titre, mots-clés, propriétaire — sans appel LLM. Le "
+                    "rattachement ne fait pas qu'ajouter un bloc au prompt : "
+                    "un projet en `emotion_policy=OFF`, ce qui est le défaut à "
+                    "la création, bascule le tour en mode professionnel — plus "
+                    "de balise [EMOTION:], plus de bloc de variabilité, aucune "
+                    "impulsion affective vers la personne.",
+    ),
+    ConfigGroup(
+        section="projects", key="Cadence du runner", order=20,
+        description="La boucle dédiée qui fait avancer les projets dus, "
+                    "découplée du consolidator pour qu'un `interval:30s` "
+                    "tienne vraiment 30 s. Chaque avance est un appel LLM "
+                    "complet : ce qui arrive à échéance ensemble est servi par "
+                    "priorité, le reste attend le tick suivant.",
+    ),
+    ConfigGroup(
+        section="projects", key="Garde-fous d'autonomie", order=30,
+        description="Ce qui empêche un projet mal cadré de tourner tout seul "
+                    "indéfiniment, et une avance de fond de monopoliser "
+                    "l'unique créneau d'un modèle local pendant que quelqu'un "
+                    "attend une réponse.",
+    ),
+    ConfigGroup(
+        section="projects", key="Traçabilité", order=40, advanced=True,
+        description="Le tampon roulant qui garde le prompt envoyé et la "
+                    "réponse brute de chaque avance, relisible sur la fiche du "
+                    "projet. C'est de l'inspection : on l'ouvre quand un projet "
+                    "part de travers, pas pour le régler au quotidien.",
     ),
     ConfigItem(
         key="projects.prompt_history_size", type="int", section="projects",
+        group="Traçabilité",
         label="Buffer prompt history",
         default=30, min=0, max=500,
         hint="0 = désactive la capture prompt/response.",
     ),
     ConfigItem(
         key="projects.runner_interval", type="int", section="projects",
+        group="Cadence du runner",
         label="Période runner (s)",
         default=30, min=5, max=600, restart_required=True,
         hint="Cadence de la boucle dédiée qui fait avancer les projets dus. "
@@ -23,6 +60,7 @@ CONFIG_SCHEMA = [
     ),
     ConfigItem(
         key="projects.max_advances_per_tick", type="int", section="projects",
+        group="Cadence du runner",
         label="Projets avancés par tick",
         default=3, min=1, max=20, hot_reload=True,
         hint=(
@@ -34,6 +72,7 @@ CONFIG_SCHEMA = [
     ),
     ConfigItem(
         key="projects.llm_timeout_seconds", type="int", section="projects",
+        group="Garde-fous d'autonomie",
         label="Timeout d'une avance (s)",
         default=90, min=5, max=600, hot_reload=True,
         hint=(
@@ -47,6 +86,7 @@ CONFIG_SCHEMA = [
     ),
     ConfigItem(
         key="projects.runs_since_input_cap", type="int", section="projects",
+        group="Garde-fous d'autonomie",
         label="Avances max sans retour humain",
         default=10, min=1, max=100, hot_reload=True,
         hint=(
@@ -58,7 +98,8 @@ CONFIG_SCHEMA = [
     ),
     ConfigItem(
         key="projects.match_confidence_threshold", type="float",
-        section="projects", label="Seuil de détection en conversation",
+        section="projects", group="Détection en conversation",
+        label="Seuil de détection en conversation",
         default=0.4, min=0.0, max=1.0, hot_reload=True,
         hint=(
             "Score minimal (heuristique, sans LLM : titre, mots-clés, "

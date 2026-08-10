@@ -11,13 +11,40 @@ sert de repli ; le ``default`` ci-dessous lui est identique au bit près.
 """
 from __future__ import annotations
 
-from configs.types import ConfigItem, ConfigSection
+from configs.types import ConfigGroup, ConfigItem, ConfigSection
 
 CONFIG_SCHEMA = [
     ConfigSection(
         key="files", label="Fichiers", icon="◰", order=64,
+        family="travail",
+        summary="Ce que Mika voit des fichiers déposés : ce qui entre au "
+                "prompt, ce qu'un outil en rend.",
         description="Ce que Mika voit des fichiers déposés : combien sont "
                     "listés dans son prompt, et combien un outil en rend.",
+    ),
+    ConfigGroup(
+        section="files", key="Prompt système", order=10,
+        description="Le bloc « fichiers uploadés aujourd'hui » repart à chaque "
+                    "tour ET à chaque itération de la boucle d'outils. Ces "
+                    "plafonds ne protègent pas le disque, ils protègent le "
+                    "prompt : une entrée pèse ~60 tokens, un UUID et un "
+                    "horodatage ISO se tokenisant très mal.",
+    ),
+    ConfigGroup(
+        section="files", key="Outil files_list", order=20,
+        description="Ce que rend l'outil quand Mika fouille elle-même. Les "
+                    "deux valeurs sont interpolées dans la description MCP de "
+                    "l'outil au moment de l'enregistrement — d'où le "
+                    "redémarrage exigé : ce qui est annoncé au modèle ne se "
+                    "rafraîchit qu'au démarrage.",
+    ),
+    ConfigGroup(
+        section="files", key="Registre", order=30, advanced=True,
+        description="La table chargée en RAM au démarrage, qui traduit un "
+                    "identifiant de fichier pour files_read / analyze / move / "
+                    "delete. Bornée large : au-delà, les fichiers les plus "
+                    "anciens cessent d'être résolus par leur ID, et un "
+                    "avertissement le dit au démarrage.",
     ),
 
     ConfigItem(

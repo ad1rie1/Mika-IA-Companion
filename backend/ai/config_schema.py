@@ -14,7 +14,9 @@ Design:
 """
 from __future__ import annotations
 
-from configs.types import ConfigItem, ConfigRecord, ConfigSection, record_item
+from configs.types import (
+    ConfigGroup, ConfigItem, ConfigRecord, ConfigSection, record_item,
+)
 
 # Valeurs = clés de ``ai.router._PROVIDER_CLASSES``. Forme (valeur, libellé) :
 # « ollama_cloud » dans une liste déroulante ne dit pas de quoi il s'agit.
@@ -85,13 +87,68 @@ _PART_HINT = (
 
 CONFIG_SCHEMA = [
     ConfigSection(
-        key="ai_providers", label="IA · Providers", icon="⟠", order=20,
+        key="ai_providers", label="Providers", icon="⟠", order=20,
+        family="intelligence",
+        summary="Chez qui elle pense : identifiants, endpoints, appels simultanés.",
         description=(
             "Clés d'authentification des fournisseurs LLM. "
             "Seules les deux variantes d'Ollama demandent une URL — les SDK "
             "officiels (Anthropic, OpenAI, Gemini) gèrent eux-mêmes leur "
             "endpoint."
         ),
+    ),
+    # ── Organisation de l'écran ─────────────────────────────────────
+    #
+    # Un bloc par fournisseur : ce ne sont pas six variantes d'un même
+    # réglage, ce sont six comptes dont un seul est peut-être ouvert. La
+    # description dit ce que ce fournisseur-là sait faire de plus que les
+    # autres — c'est ce qui décide à quels rôles on l'attribue ensuite.
+    #
+    # Aucun n'est replié : un bloc d'identifiants est exactement ce qu'on
+    # vient chercher sur cette page, y compris celui qu'on n'a pas encore
+    # rempli.
+    ConfigGroup(
+        section="ai_providers", key="Claude", order=10,
+        description="Le seul fournisseur qui met en cache le préfixe stable "
+                    "du prompt — personnalité, récit de soi et déclarations "
+                    "d'outils sont alors écrits une fois puis relus à ~0,1× "
+                    "leur prix. Clé d'API seulement : le passage par un jeton "
+                    "OAuth Claude.ai n'existe plus.",
+    ),
+    ConfigGroup(
+        section="ai_providers", key="OpenAI", order=20,
+        description="Sert au-delà de la conversation : c'est le seul "
+                    "fournisseur déclaré à exposer de la reconnaissance "
+                    "vocale, donc c'est cette clé qui transcrit les messages "
+                    "audio reçus, quel que soit le modèle qui répondra ensuite.",
+    ),
+    ConfigGroup(
+        section="ai_providers", key="Gemini", order=30,
+        description="Fournisseur hébergé multimodal. Rien à renseigner "
+                    "d'autre que la clé : le SDK trouve son endpoint seul.",
+    ),
+    ConfigGroup(
+        section="ai_providers", key="GLM", order=40,
+        description="Endpoint compatible OpenAI côté Zhipu. Comme les autres "
+                    "hébergés, il ne coûte rien à déclarer sans l'utiliser : "
+                    "un fournisseur n'est instancié qu'au premier appel d'un "
+                    "rôle qui pointe sur lui.",
+    ),
+    ConfigGroup(
+        section="ai_providers", key="Ollama", order=50,
+        description="Le serveur local. C'est le seul bloc où la génération "
+                    "elle-même se règle — raisonnement et longueur de réponse "
+                    "— parce que c'est le seul où le temps de génération "
+                    "arrive en face du délai d'un tour au lieu d'une facture.",
+    ),
+    ConfigGroup(
+        section="ai_providers", key="Ollama Cloud", order=60,
+        description="Même protocole, autre machine, autre budget : les deux "
+                    "Ollama se déclarent en même temps, un petit modèle local "
+                    "sur la voix intérieure et un gros modèle hébergé sur la "
+                    "conversation. Les plafonds ne sont donc pas partagés — "
+                    "la ceinture calibrée pour une carte graphique tronquerait "
+                    "un modèle hébergé.",
     ),
     # Claude
     ConfigItem(
@@ -232,7 +289,9 @@ CONFIG_SCHEMA = [
 
     # ── Déclaration des modèles ──────────────────────────────────
     ConfigSection(
-        key="ai_models", label="Déclaration des modèles", icon="◈", order=21,
+        key="ai_models", label="Modèles", icon="◈", order=21,
+        family="intelligence",
+        summary="Le catalogue : quel modèle, chez quel fournisseur, sous quel nom interne.",
         description=(
             "Catalogue des modèles utilisables par l'application. "
             "Chaque entrée mappe un nom interne (librement choisi) vers "
@@ -240,8 +299,18 @@ CONFIG_SCHEMA = [
             "sélectionnables dans la section IA · Rôles."
         ),
     ),
+    ConfigGroup(
+        section="ai_models", key="Catalogue", order=10,
+        description="Rien ne tourne tant que cette liste est vide : les rôles "
+                    "ne choisissent pas un modèle, ils choisissent un nom "
+                    "déclaré ici. Une ligne porte aussi sa fenêtre de contexte "
+                    "et sa réserve de sortie, qui dimensionnent tout le budget "
+                    "du prompt — laissée à 0, la fenêtre est devinée d'après "
+                    "l'identifiant du modèle.",
+    ),
     ConfigItem(
         key="ai.models", type="record_list", section="ai_models",
+        group="Catalogue",
         label="Modèles déclarés",
         hint=(
             "Ajouter un modèle : choisir le provider → charger la liste "
@@ -294,65 +363,158 @@ CONFIG_SCHEMA = [
     # type=select : les choix sont injectés dynamiquement à partir de
     # ai.models par GestionSysteme.views.config._inject_dynamic_choices.
     ConfigSection(
-        key="ai_roles", label="IA · Rôles", icon="⟰", order=22,
+        key="ai_roles", label="Rôles", icon="⟰", order=22,
+        family="intelligence",
+        summary="Quel modèle déclaré répond à quoi — parler, retenir, percevoir, penser tout bas.",
         description="Associe chaque rôle à un modèle déclaré (par son nom interne).",
+    ),
+    # ── Organisation de l'écran ─────────────────────────────────────
+    #
+    # Les dix rôles ne se valent pas : deux tiennent la conversation, les
+    # autres tournent en fond, à des cadences et pour des budgets qui n'ont
+    # rien à voir. Regroupés par ce qu'ils font tourner, pas par ordre
+    # d'apparition dans l'énumération.
+    ConfigGroup(
+        section="ai_roles", key="Conversation", order=10,
+        description="Ce qui répond quand quelqu'un parle. C'est le seul "
+                    "endroit où la latence se voit : tout le reste tourne en "
+                    "fond, où un appel lent ne coûte qu'un tick.",
+    ),
+    ConfigGroup(
+        section="ai_roles", key="Mémoire & consolidation", order=20,
+        description="Ce que la boucle de fond fait de ce qui a été dit : en "
+                    "tirer des souvenirs et des connaissances, vérifier "
+                    "celles que la suite contredit, replier le fil trop long "
+                    "en résumé. Aucun de ces appels n'est attendu par "
+                    "quelqu'un — un petit modèle y est un bon choix.",
+    ),
+    ConfigGroup(
+        section="ai_roles", key="Perception", order=30,
+        description="Ce qui transforme un stimulus en texte qu'elle peut "
+                    "lire : décrire une image, classer un signal reçu, trier "
+                    "un mail. L'interprétation des signaux est appelée sur "
+                    "chaque événement qui n'a pas de raccourci, donc souvent.",
+    ),
+    ConfigGroup(
+        section="ai_roles", key="Voix intérieure", order=40,
+        description="Le murmure qui accompagne une initiative — « oh tiens, "
+                    "si j'envoyais un message à Alice… ». Il est fabriqué "
+                    "à chaque fois, jamais recyclé, et un échec se solde par "
+                    "du silence : garde un petit modèle.",
     ),
     ConfigItem(
         key="ai.role.conversation", type="select", section="ai_roles",
+        group="Conversation",
         label="Conversation",
         hint="Rôle principal utilisé pour parler à l'utilisateur.",
     ),
     ConfigItem(
         key="ai.role.conversation_tools", type="select", section="ai_roles",
+        group="Conversation",
         label="Conversation (avec outils MCP)",
         hint="Doit pointer sur un modèle Claude (seul provider MCP-capable).",
     ),
     ConfigItem(
-        key="ai.role.email_triage", type="select", section="ai_roles",
-        label="Triage email",
-    ),
-    ConfigItem(
-        key="ai.role.signal_interpretation", type="select", section="ai_roles",
-        label="Interprétation signaux",
-    ),
-    ConfigItem(
-        key="ai.role.memory_extraction", type="select", section="ai_roles",
-        label="Extraction mémoire",
-    ),
-    ConfigItem(
-        key="ai.role.validity_check", type="select", section="ai_roles",
-        label="Validation connaissances",
-    ),
-    ConfigItem(
-        key="ai.role.vision_caption", type="select", section="ai_roles",
-        label="Caption vision",
-        hint="Modèle multimodal requis.",
-    ),
-    ConfigItem(
-        key="ai.role.inner_voice", type="select", section="ai_roles",
-        label="Voix intérieure",
-        hint="Pensées murmurées. Appelé souvent — garde un petit modèle.",
-    ),
-    ConfigItem(
         key="ai.role.preparation", type="select", section="ai_roles",
+        group="Conversation",
         label="Préparation (rappel dirigé)",
         hint="Pré-passe qui planifie les recherches mémoire avant la réponse. "
              "Petit modèle rapide (Haiku). Non mappé = désactivée — "
              "recommandé derrière un modèle local lent.",
     ),
     ConfigItem(
+        key="ai.role.memory_extraction", type="select", section="ai_roles",
+        group="Mémoire & consolidation",
+        label="Extraction mémoire",
+    ),
+    ConfigItem(
+        key="ai.role.validity_check", type="select", section="ai_roles",
+        group="Mémoire & consolidation",
+        label="Validation connaissances",
+    ),
+    ConfigItem(
         key="ai.role.compaction", type="select", section="ai_roles",
+        group="Mémoire & consolidation",
         label="Compaction du fil",
         hint="Résumé roulant de la conversation, hors tour. Petit modèle. "
              "Non mappé = désactivée (l'historique reste borné en nombre).",
     ),
+    ConfigItem(
+        key="ai.role.vision_caption", type="select", section="ai_roles",
+        group="Perception",
+        label="Caption vision",
+        hint="Modèle multimodal requis.",
+    ),
+    ConfigItem(
+        key="ai.role.signal_interpretation", type="select", section="ai_roles",
+        group="Perception",
+        label="Interprétation signaux",
+    ),
+    ConfigItem(
+        key="ai.role.email_triage", type="select", section="ai_roles",
+        group="Perception",
+        label="Triage email",
+    ),
+    ConfigItem(
+        key="ai.role.inner_voice", type="select", section="ai_roles",
+        group="Voix intérieure",
+        label="Voix intérieure",
+        hint="Pensées murmurées. Appelé souvent — garde un petit modèle.",
+    ),
 
     ConfigSection(
-        key="ai_context", label="IA · Contexte", icon="◫", order=25,
+        key="ai_context", label="Contexte", icon="◫", order=25,
+        family="intelligence",
+        summary="Ce qui tient dans la fenêtre du modèle, et en quelles proportions.",
         description=(
             "Passe de préparation (rappel dirigé) et gestion de la fenêtre "
             "de contexte."
         ),
+    ),
+    # ── Organisation de l'écran ─────────────────────────────────────
+    #
+    # Du plus lisible au plus interne : ce qu'elle va chercher avant de
+    # répondre, combien de fenêtre on s'autorise, comment cette fenêtre se
+    # partage — puis deux blocs qu'on n'ouvre qu'en diagnostic.
+    ConfigGroup(
+        section="ai_context", key="Préparation", order=10,
+        description="Une pré-passe minuscule qui, avant la réponse, décide "
+                    "quoi aller chercher en mémoire et écrit une note de "
+                    "focus. Elle court en parallèle du rappel spéculatif et "
+                    "n'est jamais attendue : passé son délai, le tour part "
+                    "sans elle et ressemble trait pour trait à un tour d'avant.",
+    ),
+    ConfigGroup(
+        section="ai_context", key="Budget", order=20,
+        description="Quelle part de la fenêtre du modèle on s'autorise à "
+                    "remplir. La fenêtre est un plafond, pas une cible : ce "
+                    "qu'on ne dépense pas reste comme marge de session avant "
+                    "que la compaction n'ait à replier le fil.",
+    ),
+    ConfigGroup(
+        section="ai_context", key="Répartition du contexte", order=30,
+        description="Comment la place utilisable se partage entre le fil, ce "
+                    "qu'elle sait de la personne et ce qu'elle se rappelle. "
+                    "C'est leur SOMME qui engage la fenêtre, et rien ne "
+                    "l'empêche de dépasser 1,0 : le budget promet alors plus "
+                    "de place qu'il n'y en a, et le fournisseur tronque par la "
+                    "tête, c'est-à-dire par la personnalité.",
+    ),
+    ConfigGroup(
+        section="ai_context", key="Rendu du fil", order=40, advanced=True,
+        description="Deux ceintures sur ce qui part réellement sur le réseau : "
+                    "un message d'historique démesuré (un collage de 50 ko) et "
+                    "un résumé roulant qui grossirait au point de manger la "
+                    "part du fil vivant. Le tampon court terme, lui, ne "
+                    "plafonne que le NOMBRE de messages.",
+    ),
+    ConfigGroup(
+        section="ai_context", key="Calibration jetons", order=50, advanced=True,
+        description="Il n'y a pas de tokenizer dans le processus : la taille "
+                    "d'un prompt est estimée par un ratio caractères→jetons "
+                    "qu'une moyenne mobile corrige à partir des appels réels, "
+                    "par fournisseur. On n'y touche que si le budget se "
+                    "trompe visiblement de volume.",
     ),
     ConfigItem(
         key="ai.preparation.deadline_ms", type="int", section="ai_context",
@@ -501,21 +663,41 @@ CONFIG_SCHEMA = [
     ),
 
     ConfigSection(
-        key="ai_quota", label="IA · Quotas", icon="⌁", order=23,
+        key="ai_quota", label="Quotas", icon="⌁", order=23,
+        family="intelligence",
+        summary="Ce qu'elle a le droit de dépenser, et le temps qu'un appel a le droit de prendre.",
         description="Plafonds tokens, 0 = illimité.",
+    ),
+    ConfigGroup(
+        section="ai_quota", key="Plafonds de dépense", order=10,
+        description="Bornes de consommation, tous rôles confondus. 0 = pas de "
+                    "plafond. À poser avant de brancher un modèle hébergé sur "
+                    "une conscience qui délibère toutes les trente secondes.",
+    ),
+    ConfigGroup(
+        section="ai_quota", key="Délais et parallélisme", order=20,
+        description="Combien de temps un appel a le droit de prendre, et "
+                    "combien de tours de conversation avancent de front. Les "
+                    "deux se lisent ensemble : c'est le second qui décide si "
+                    "une personne attend derrière une autre, et le premier ce "
+                    "qui arrive quand l'attente est trop longue — un texte de "
+                    "repli, indiscernable d'un modèle simplement lent.",
     ),
     ConfigItem(
         key="ai.quota.daily_tokens", type="int", section="ai_quota",
+        group="Plafonds de dépense",
         label="Plafond journalier (tokens)",
         default=0, min=0, hot_reload=True,
     ),
     ConfigItem(
         key="ai.quota.monthly_tokens", type="int", section="ai_quota",
+        group="Plafonds de dépense",
         label="Plafond mensuel (tokens)",
         default=0, min=0, hot_reload=True,
     ),
     ConfigItem(
         key="ai.call_timeout_seconds", type="int", section="ai_quota",
+        group="Délais et parallélisme",
         label="Timeout appel IA (s)",
         description=(
             "Borne de TOUT appel IA routé — conversation, triage email, "
@@ -529,6 +711,7 @@ CONFIG_SCHEMA = [
     ),
     ConfigItem(
         key="pipeline.turn_workers", type="int", section="ai_quota",
+        group="Délais et parallélisme",
         label="Tours de conversation en parallèle",
         description=(
             "Nombre de tours traités simultanément par la file. Garder 1 "
@@ -542,15 +725,27 @@ CONFIG_SCHEMA = [
     ),
 
     ConfigSection(
-        key="ai_tools", label="IA · Outils", icon="⚒", order=24,
+        key="ai_tools", label="Outils", icon="⚒", order=24,
+        family="intelligence",
+        summary="Quels modules exposent leurs outils en conversation — une déclaration est du prompt.",
         description=(
             "Quels modules exposent leurs outils dans une conversation. "
             "Chaque schéma d'outil est renvoyé au modèle à chaque tour : "
             "c'est du prompt payé en entier, à chaque fois."
         ),
     ),
+    ConfigGroup(
+        section="ai_tools", key="Outils en conversation", order=10,
+        description="Ce qu'elle peut faire pendant qu'elle parle : chercher "
+                    "dans sa mémoire, écrire un module, envoyer un mail. Le "
+                    "coût n'est pas dans l'appel de l'outil mais dans sa "
+                    "*déclaration*, réécrite à chaque tour de la boucle. "
+                    "Restreindre ici n'enlève rien ailleurs — conscience, "
+                    "projets et tâches de fond gardent l'outillage complet.",
+    ),
     ConfigItem(
         key="ai.conversation_tool_modules", type="list", section="ai_tools",
+        group="Outils en conversation",
         label="Modules outillés en conversation",
         description=(
             "Vide = tous les modules démarrés. Sinon, liste blanche de noms "

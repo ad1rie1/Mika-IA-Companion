@@ -14,16 +14,43 @@ tourner en réglages n'offrirait qu'un moyen de casser le canal.
 """
 from __future__ import annotations
 
-from configs.types import ConfigItem, ConfigSection
+from configs.types import ConfigGroup, ConfigItem, ConfigSection
 
 CONFIG_SCHEMA = [
     # ── Web ──────────────────────────────────────────────────────
     ConfigSection(
-        key="comm_web", label="Communication · Web", icon="◇", order=31,
+        key="comm_web", label="Web", icon="◇", order=31,
+        family="canaux",
+        summary="Ce qu'une socket du frontend peut envoyer, à quel rythme, "
+                "et quand elle est saluée.",
         description=(
             "Connexion WebSocket du frontend : ce qu'une socket a le droit "
             "d'envoyer, et à quel rythme."
         ),
+    ),
+    ConfigGroup(
+        section="comm_web", key="Message", order=10,
+        description="La taille d'un message accepté. Au-delà il est refusé à "
+                    "voix haute (ack « too_long ») et jamais coupé : couper "
+                    "laisserait le navigateur afficher une phrase que le "
+                    "serveur n'a pas gardée.",
+    ),
+    ConfigGroup(
+        section="comm_web", key="Débit", order=20,
+        description="Fenêtre glissante par connexion, sur deux compteurs "
+                    "séparés : les messages, et les trames de contrôle "
+                    "(`sync`, `identify`). Chaque message accepté coûte un "
+                    "tour de pipeline complet. Valeurs de départ "
+                    "délibérément identiques à celles de Telegram, mais clés "
+                    "distinctes — bouger l'une ne bouge pas l'autre.",
+    ),
+    ConfigGroup(
+        section="comm_web", key="Accueil", order=30,
+        description="Elle ne récite pas un texte d'accueil : il part comme "
+                    "déclencheur interne, donc un vrai tour LLM, persisté. "
+                    "Le délai se compte par personne et non par socket — "
+                    "sinon un portable qui se réveille en achète un à chaque "
+                    "reconnexion.",
     ),
     ConfigItem(
         key="comm.web.max_message_length", type="int", section="comm_web",
@@ -86,15 +113,33 @@ CONFIG_SCHEMA = [
 
     # ── Historique ───────────────────────────────────────────────
     ConfigSection(
-        key="comm_historique", label="Communication · Historique", icon="≡",
-        order=33,
+        key="comm_historique", label="Historique", icon="≡",
+        order=33, family="canaux",
+        summary="Ce qu'un client voit en ouvrant un onglet, et ce qu'il "
+                "rattrape après une coupure.",
         description=(
             "Ce qu'un client reçoit en ouvrant un onglet, et ce qu'il "
             "rattrape après une coupure."
         ),
     ),
+    ConfigGroup(
+        section="comm_historique", key="Ouverture d'un onglet", order=10,
+        description="La fenêtre servie sans qu'on la demande, à la connexion. "
+                    "Une diffusion vers un groupe vide est perdue et n'est "
+                    "jamais rejouée : une réponse produite pendant qu'un "
+                    "onglet était fermé n'arrive à l'écran que par là.",
+    ),
+    ConfigGroup(
+        section="comm_historique", key="Rattrapage après coupure", order=20,
+        description="Le différentiel qu'un client réclame par curseur après "
+                    "une coupure. L'écart est plafonné, et la troncature est "
+                    "dite (drapeau `truncated`) plutôt que masquée : un "
+                    "curseur avancé au-delà de messages jamais affichés les "
+                    "perdrait pour de bon.",
+    ),
     ConfigItem(
         key="comm.history.default_limit", type="int", section="comm_historique",
+        group="Ouverture d'un onglet",
         label="Messages servis à l'ouverture",
         default=50, min=1, max=200, hot_reload=True,
         hint=(
@@ -106,6 +151,7 @@ CONFIG_SCHEMA = [
     ),
     ConfigItem(
         key="comm.history.max_limit", type="int", section="comm_historique",
+        group="Rattrapage après coupure",
         label="Plafond dur d'un rattrapage",
         default=200, min=1, max=2000, hot_reload=True,
         hint=(
@@ -121,15 +167,36 @@ CONFIG_SCHEMA = [
     # Section propre au *canal* (la socket qui reçoit les trames) ; le module
     # caméra, qui décide quoi en faire, garde la sienne (``module_camera``).
     ConfigSection(
-        key="comm_camera", label="Communication · Caméra", icon="◉", order=34,
+        key="comm_camera", label="Caméra", icon="◉", order=34,
+        family="canaux",
+        summary="Le débit accepté sur la socket caméra : chaque trame est "
+                "décodée avant d'être jugée.",
         description=(
             "Débit accepté sur la socket caméra. Une trame n'est jamais "
             "gratuite : elle est décodée pour son empreinte perceptuelle."
         ),
     ),
+    ConfigGroup(
+        section="comm_camera", key="Débit accepté", order=10,
+        description="Fenêtre glissante par connexion. Une trame n'est jamais "
+                    "gratuite : elle est décodée pour son empreinte "
+                    "perceptuelle avant même qu'on décide s'il y a quelque "
+                    "chose à en faire — et le module caméra, lui, n'en analyse "
+                    "au mieux qu'une toutes les 30 s.",
+    ),
+    ConfigGroup(
+        section="comm_camera", key="Anti-rafale", order=20, advanced=True,
+        description="Un plancher partagé par appareil, en plus de la fenêtre "
+                    "ci-dessus, qui laisse deux trous : dix sockets ouvertes "
+                    "sur le même appareil donnent dix budgets, et une moyenne "
+                    "n'interdit pas la rafale — vingt trames peuvent tenir en "
+                    "deux cents millisecondes, soit vingt décodages lancés "
+                    "d'un coup.",
+    ),
     ConfigItem(
         key="comm.camera.rate_limit_max_frames", type="int",
-        section="comm_camera", label="Trames max par fenêtre",
+        section="comm_camera", group="Débit accepté",
+        label="Trames max par fenêtre",
         default=20, min=1, max=1000, hot_reload=True,
         hint=(
             "Fenêtre glissante par connexion. 20 pour 10 s est déjà large : "
@@ -138,13 +205,15 @@ CONFIG_SCHEMA = [
     ),
     ConfigItem(
         key="comm.camera.rate_limit_window_seconds", type="float",
-        section="comm_camera", label="Fenêtre de comptage (s)",
+        section="comm_camera", group="Débit accepté",
+        label="Fenêtre de comptage (s)",
         default=10.0, min=0.5, max=3600.0, hot_reload=True,
         hint="Largeur de la fenêtre glissante appliquée aux trames.",
     ),
     ConfigItem(
         key="comm.camera.min_frame_interval_seconds", type="float",
-        section="comm_camera", label="Espacement minimal entre deux trames (s)",
+        section="comm_camera", group="Anti-rafale",
+        label="Espacement minimal entre deux trames (s)",
         default=0.4, min=0.0, max=60.0, hot_reload=True,
         hint=(
             "Plancher partagé par *device*, en plus de la fenêtre ci-dessus, "

@@ -5,24 +5,54 @@ class method so they stay co-located with the code that consumes them.
 """
 from __future__ import annotations
 
-from configs.types import ConfigItem, ConfigSection
+from configs.types import ConfigGroup, ConfigItem, ConfigSection
 
 CONFIG_SCHEMA = [
     ConfigSection(
-        key="modules_runtime", label="Modules · Runtime", icon="▦", order=70,
+        key="modules_runtime", label="Runtime", icon="▦", order=70,
+        family="systeme",
+        summary="Le tick cron partagé, le délai des abonnés au bus, le "
+                "registre des dégradations.",
         description=(
             "Planificateur cron partagé par tous les modules, bus "
             "d'événements, et registre des dégradations."
         ),
     ),
+    ConfigGroup(
+        section="modules_runtime", key="Planificateur cron", order=10,
+        description="La cadence à laquelle on regarde quel module est dû ; "
+                    "chaque module garde son propre `CRON_INTERVAL`. Les ticks "
+                    "partent détachés — attendre chacun rendait le "
+                    "planificateur aussi lent que son module le plus lent — et "
+                    "un module encore occupé voit son tour sauté, pas mis en "
+                    "file.",
+    ),
+    ConfigGroup(
+        section="modules_runtime", key="Bus d'événements", order=20,
+        description="Un module abonné en mode « await » fait attendre "
+                    "l'émetteur le temps de son `on_event`. Ce délai borne "
+                    "cette attente pour ceux qui ne déclarent rien ; un module "
+                    "portant son propre `EVENT_TIMEOUT` garde le sien.",
+    ),
+    ConfigGroup(
+        section="modules_runtime", key="Registre des dégradations", order=30,
+        advanced=True,
+        description="Le compteur des échecs avalés, un par site, lisible sur "
+                    "/gestion/systeme/sante/. On l'ouvre en diagnostic : quand "
+                    "un bloc du prompt revient vide sans que rien ne le dise. "
+                    "Le plafond est à surveiller — au-delà, un site nouveau "
+                    "n'est plus compté du tout.",
+    ),
     ConfigItem(
         key="modules.cron_tick_interval", type="int", section="modules_runtime",
+        group="Planificateur cron",
         label="Tick scheduler (s)",
         default=60, min=1, max=3600, restart_required=True,
     ),
     ConfigItem(
         key="modules.event_handler_timeout_s", type="int",
-        section="modules_runtime", label="Timeout d'un abonné au bus (s)",
+        section="modules_runtime", group="Bus d'événements",
+        label="Timeout d'un abonné au bus (s)",
         default=0, min=0, max=600, restart_required=True,
         description=(
             "Un module abonné en mode « await » fait attendre l'émetteur le "
@@ -38,7 +68,8 @@ CONFIG_SCHEMA = [
     ),
     ConfigItem(
         key="modules.degradation_max_labels", type="int",
-        section="modules_runtime", label="Sites de dégradation suivis",
+        section="modules_runtime", group="Registre des dégradations",
+        label="Sites de dégradation suivis",
         default=256, min=32, max=10000, hot_reload=True,
         description=(
             "Le registre des dégradations compte les échecs avalés, un "

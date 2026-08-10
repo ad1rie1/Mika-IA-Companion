@@ -701,3 +701,171 @@ a.chip:hover { background: var(--surface-3); color: var(--text); text-decoration
 }
 .theme-switch button:hover { background: var(--surface-2); color: var(--text); }
 .theme-switch button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-text); }
+
+/* ============================================================================
+   Configuration — navigation et mise en forme d'une section
+   ----------------------------------------------------------------------------
+   Ces classes existent parce que la page de configuration a changé d'échelle :
+   quatre cents réglages sur trente et une sections ne se parcourent pas comme
+   la liste de champs qu'elle était. Aucune n'est spécifique à une section
+   donnée — tout vient du registre, donc tout se rend pareil.
+   ========================================================================== */
+
+/* La barre latérale suit le défilement : sur une section longue, remonter en
+   haut pour changer de page est le geste qu'on répète le plus. */
+.cfg-nav {
+  position: sticky;
+  top: calc(var(--topbar-h) + var(--sp-4));
+  max-height: calc(100vh - var(--topbar-h) - var(--sp-8));
+  overflow-y: auto;
+}
+.nav-label { flex: 1 1 auto; min-width: 0; }
+
+/* Pastille « modifié ». Distincte de `.nav-count` (le total) et posée avant
+   elle : ce sont deux questions différentes — combien il y en a, et combien
+   s'écartent du défaut. */
+.nav-dot {
+  min-width: 1.35rem;
+  padding: 0 var(--sp-1);
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  color: var(--accent-text);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+/* ── Barre d'outils ─────────────────────────────────────────────────── */
+
+.cfg-bar-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.cfg-search {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+.cfg-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.cfg-bar-stat {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-subtle);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.cfg-mod-pill {
+  padding: 0 var(--sp-2);
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  color: var(--accent-text);
+  font-size: var(--fs-xs);
+}
+
+/* ── Sommaire ───────────────────────────────────────────────────────── */
+
+.cfg-toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-4);
+}
+.cfg-toc-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-1);
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  text-decoration: none;
+}
+.cfg-toc-item:hover {
+  background: var(--surface-2);
+  color: var(--text);
+  text-decoration: none;
+}
+.cfg-toc-n {
+  color: var(--text-subtle);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.cfg-toc-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* ── Bloc (un `group` du registre) ──────────────────────────────────── */
+
+.cfg-bloc > summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.cfg-bloc > summary::-webkit-details-marker { display: none; }
+/* Chevron : même dessin que `.disclosure`, pour que « ça s'ouvre » se lise
+   partout de la même façon. */
+.cfg-bloc > summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: var(--sp-2);
+  color: var(--text-subtle);
+  transition: transform var(--dur-fast) var(--ease);
+}
+.cfg-bloc[open] > summary::before { transform: rotate(90deg); }
+.cfg-bloc > summary:hover { background: var(--surface-2); }
+/* Le titre d'un bloc est une cible d'ancre : on lui laisse la place de ne pas
+   passer sous la barre supérieure quand on y saute depuis le sommaire. */
+.cfg-bloc { scroll-margin-top: calc(var(--topbar-h) + var(--sp-4)); }
+.cfg-bloc-desc {
+  margin: 0 0 var(--sp-5);
+  max-width: 68ch;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-loose);
+}
+
+/* La barre d'enregistrement colle en bas : sur un bloc de soixante-dix
+   réglages, le bouton était à un écran et demi de ce qu'on venait de taper. */
+.cfg-actions {
+  position: sticky;
+  bottom: var(--sp-4);
+  z-index: var(--z-sticky);
+  box-shadow: var(--shadow);
+}
+
+/* Repère « modifié » sur le champ lui-même : la pastille de section dit
+   combien, celui-ci dit lequel. */
+.field-mod {
+  margin-left: var(--sp-2);
+  padding: 0 var(--sp-2);
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  color: var(--accent-text);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-normal);
+}
+
+@media (max-width: 900px) {
+  /* Collée, la navigation mangerait la moitié d'un écran étroit. */
+  .cfg-nav { position: static; max-height: none; }
+  .cfg-bar-stat { margin-left: 0; }
+}

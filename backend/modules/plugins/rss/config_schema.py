@@ -19,21 +19,65 @@ from __future__ import annotations
 # L'import enregistre le backend — effet de bord voulu, comme pour l'email.
 from modules.plugins.rss import config_backend  # noqa: F401
 
-from configs.types import ConfigItem, ConfigRecord, ConfigSection, record_item
+from configs.types import (
+    ConfigGroup, ConfigItem, ConfigRecord, ConfigSection, record_item,
+)
 
 CONFIG_SCHEMA = [
     ConfigSection(
         key="module_rss", label="Modules · RSS", icon="⌁", order=73,
+        family="systeme",
+        summary="Les flux suivis, la cadence du relevé, et ce qui a le droit de l'interrompre.",
         description=(
             "Flux suivis, cadence de relevé, et ce qui mérite de réveiller "
             "Mika. Les articles relevés se consultent dans l'onglet Articles."
         ),
     ),
 
+    # ── Organisation de l'écran ─────────────────────────────────────────
+    # « Ce que le relevé télécharge » et « ce qui mérite de déranger Mika »
+    # ne sont pas la même question, et la seconde est celle qu'on vient
+    # régler. La plomberie HTTP et la rétention sont repliées : on les ouvre
+    # quand un flux ne répond plus, pas quand on ajoute un abonnement.
+    ConfigGroup(
+        section="module_rss", key="Flux", order=10,
+        description="Les abonnements. Une ligne désactivée n'est plus relevée "
+                    "mais garde ses articles ; ses mots-clés décident de ce "
+                    "qui est signalé plutôt que simplement stocké.",
+    ),
+    ConfigGroup(
+        section="module_rss", key="Relevé", order=20,
+        description="À quelle cadence les flux sont interrogés, et combien "
+                    "d'articles un tour examine. C'est ici que se règle le "
+                    "premier relevé d'un flux volumineux, qui sinon arrive "
+                    "d'un bloc.",
+    ),
+    ConfigGroup(
+        section="module_rss", key="Attention", order=30,
+        description="Le droit d'interrompre. Un article signalé passe par la "
+                    "conscience, qui décide ; un article en mot-clé d'alerte "
+                    "coupe la file et ouvre un tour de conversation "
+                    "directement. Tout décocher fait du module une revue de "
+                    "presse silencieuse.",
+    ),
+    ConfigGroup(
+        section="module_rss", key="Transport HTTP", order=40, advanced=True,
+        description="Ce que le client HTTP accepte de faire face à un éditeur : "
+                    "combien de temps il attend, combien il télécharge, et sous "
+                    "quel nom il se présente. On l'ouvre quand un flux précis "
+                    "revient toujours en erreur.",
+    ),
+    ConfigGroup(
+        section="module_rss", key="Conservation", order=50, advanced=True,
+        description="Combien d'articles restent en base par flux. Les plus "
+                    "anciens sont supprimés au-delà ; la déduplication n'en "
+                    "souffre pas.",
+    ),
+
     # ── Les flux ───────────────────────────────────────────────────────
     ConfigItem(
         key="rss.feeds", type="record_list", section="module_rss",
-        label="Flux suivis", min_items=0, max_items=100,
+        group="Flux", label="Flux suivis", min_items=0, max_items=100,
         description=(
             "Chaque ligne est un flux RSS, Atom ou RDF. Une ligne désactivée "
             "n'est plus relevée mais garde ses articles."
@@ -78,7 +122,7 @@ CONFIG_SCHEMA = [
     ),
     ConfigItem(
         key="rss.fetch_timeout", type="int", section="module_rss",
-        group="Relevé", label="Délai maximum par flux (s)",
+        group="Transport HTTP", label="Délai maximum par flux (s)",
         default=20, min=5, max=120, hot_reload=True,
         description="Au-delà, le flux est abandonné pour ce tour et compté en erreur.",
     ),
@@ -93,13 +137,13 @@ CONFIG_SCHEMA = [
     ),
     ConfigItem(
         key="rss.keep_per_feed", type="int", section="module_rss",
-        group="Relevé", label="Articles conservés par flux",
+        group="Conservation", label="Articles conservés par flux",
         default=200, min=20, max=5000, hot_reload=True,
         description="Les plus anciens sont supprimés au-delà. La déduplication n'en souffre pas.",
     ),
     ConfigItem(
         key="rss.max_feed_kb", type="int", section="module_rss",
-        group="Relevé", label="Taille max téléchargée par flux (Ko)",
+        group="Transport HTTP", label="Taille max téléchargée par flux (Ko)",
         default=5120, min=64, max=51200, hot_reload=True,
         description=(
             "Un flux est une liste de titres ; au-delà, ce n'en est pas un. "
@@ -110,7 +154,7 @@ CONFIG_SCHEMA = [
     ),
     ConfigItem(
         key="rss.user_agent", type="str", section="module_rss",
-        group="Relevé", label="User-Agent",
+        group="Transport HTTP", label="User-Agent",
         default="vtuber-rss/2.0 (+https://localhost)", hot_reload=True,
         description=(
             "Envoyé à chaque requête. Certains éditeurs refusent un client "

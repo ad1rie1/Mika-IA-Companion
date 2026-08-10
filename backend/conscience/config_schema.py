@@ -15,7 +15,7 @@ initiatives en vingt minutes, puis vingt-trois heures de silence ».
 """
 from __future__ import annotations
 
-from configs.types import ConfigItem, ConfigSection
+from configs.types import ConfigGroup, ConfigItem, ConfigSection
 
 #: Répété dans les trois plafonds qui se compensent. Un opérateur qui n'en
 #: lit qu'un doit quand même voir l'équation entière.
@@ -33,24 +33,129 @@ _GROUPE_PERTINENCE = "Pertinence sans appel LLM"
 _GROUPE_ENTRETIEN = "Cadences d'entretien"
 _GROUPE_SALUT = "Salutations"
 _GROUPE_AUDIT = "Retour sur ce qu'elle vient de dire"
+_GROUPE_BASE = "Seuil et cadence"
+_GROUPE_PENSEES = "Pensées qui trottent"
+_GROUPE_INITIATIVE = "Initiative"
+_GROUPE_SOMMEIL = "Sommeil"
+_GROUPE_BUDGETS = "Budgets d'appel"
 
 CONFIG_SCHEMA = [
     ConfigSection(
         key="conscience", label="Conscience", icon="◉", order=50,
+        family="vie_interieure",
+        summary="Ce qui décide qu'elle prend la parole d'elle-même, et à quelle fréquence.",
         description="Boucle de décision, seuil d'action, cooldown.",
+    ),
+    # ── Organisation de l'écran ─────────────────────────────────────
+    #
+    # Soixante-six réglages, dont vingt-sept qui ne sont que les poids des
+    # onze facteurs du score : le tas rendait invisible les cinq qu'on règle
+    # vraiment. L'ordre suit la question qu'on se pose en arrivant — quand
+    # parle-t-elle, à quel rythme relance-t-elle, que garde-t-elle en tête,
+    # dort-elle — et tout ce qui relève du calibrage est replié.
+    #
+    # « Replié » n'est pas « caché » : le bloc reste cherchable, et il s'ouvre
+    # de lui-même s'il contient une valeur modifiée.
+    ConfigGroup(
+        section="conscience", key=_GROUPE_BASE, order=10,
+        description="Les trois nombres qui décident si elle parle : à quelle "
+                    "cadence elle se pose la question, le score qu'il faut pour "
+                    "que la réponse soit oui, et le silence minimal entre deux "
+                    "prises de parole. C'est ici qu'on rend Mika plus ou moins "
+                    "bavarde, avant de toucher au moindre poids.",
+    ),
+    ConfigGroup(
+        section="conscience", key=_GROUPE_INITIATIVE, order=20,
+        description="Ce que ça lui fait d'être ignorée. Chaque relance sans "
+                    "réponse espace la suivante, jusqu'à un plafond, puis un "
+                    "frein dur tombe. Sans cet espacement, elle dépensait ses "
+                    "cinq initiatives du jour en vingt minutes puis se taisait "
+                    "vingt-trois heures.",
+    ),
+    ConfigGroup(
+        section="conscience", key=_GROUPE_PENSEES, order=30,
+        description="Les signaux pertinents qu'elle n'a pas traités deviennent "
+                    "des pensées qui traînent : elles s'éteignent sur une "
+                    "demi-vie en heures d'horloge, changent de couleur avec le "
+                    "temps et teintent son humeur. Cette échelle en heures est "
+                    "ce qui permet à une contrariété du soir d'être encore là "
+                    "au coucher, donc d'être digérée par la nuit.",
+    ),
+    ConfigGroup(
+        section="conscience", key=_GROUPE_SALUT, order=40,
+        description="Les trois créneaux où un bonjour est de mise, une fois par "
+                    "période et par jour. Le bonus ne suffit jamais seul à la "
+                    "faire parler, délibérément : la période n'est marquée "
+                    "« saluée » que si le cycle décide vraiment d'ouvrir la "
+                    "bouche.",
+    ),
+    ConfigGroup(
+        section="conscience", key=_GROUPE_SOMMEIL, order=50,
+        description="Ce qu'il faut pour la réveiller, et à quel point dormir la "
+                    "rend silencieuse. Un veto seul ne suffisait pas : dormir "
+                    "vide la fatigue, donc annule le malus de fatigue, ce qui la "
+                    "rendait mécaniquement plus bavarde à 3 h que la veille au "
+                    "soir.",
+    ),
+    ConfigGroup(
+        section="conscience", key=_GROUPE_FACTEURS, order=60, advanced=True,
+        description="Les poids des onze facteurs qui composent le score. "
+                    "⚠ INVARIANT : les trois plafonds — inactivité (+0.30), "
+                    "pulsions (+0.50), « on m'ignore » (−0.30) — somment "
+                    "EXACTEMENT au seuil d'action (0.50), comparé avec ≥, donc "
+                    "l'égalité agit. C'est ce qui empêche le silence de la "
+                    "museler tout à fait. Les déséquilibrer recrée le défaut "
+                    "connu : cinq initiatives en vingt minutes, puis vingt-trois "
+                    "heures de mutisme.",
+    ),
+    ConfigGroup(
+        section="conscience", key=_GROUPE_PERTINENCE, order=70, advanced=True,
+        description="Ce que vaut un signal quand on ne paie PAS un appel LLM "
+                    "pour l'interpréter. Ce raccourci couvre tout ce qui est "
+                    "volumineux — chat, Telegram, RSS, modules forgés — parce "
+                    "que l'interprétation tourne en série dans la boucle du "
+                    "module qui émet : cinq flux RSS, c'était ~75 appels à la "
+                    "suite avec l'ordonnanceur figé.",
+    ),
+    ConfigGroup(
+        section="conscience", key=_GROUPE_BUDGETS, order=80, advanced=True,
+        description="Combien de temps elle s'accorde pour interpréter un "
+                    "signal, choisir à qui parler et vérifier une connaissance. "
+                    "Ces appels tiennent le verrou de décision ou la boucle du "
+                    "module émetteur : les allonger fige autre chose, ce n'est "
+                    "jamais gratuit.",
+    ),
+    ConfigGroup(
+        section="conscience", key=_GROUPE_ENTRETIEN, order=90, advanced=True,
+        description="Le ménage de fond : combien de temps une observation reste "
+                    "en attente, quand elle est périmée, quand elle est purgée, "
+                    "et à quelle cadence les pulsions sont sauvegardées. Un "
+                    "instantané seulement à l'arrêt propre ne survit pas à un "
+                    "« kill -9 » — soit exactement le cas où la fatigue du soir "
+                    "disparaissait avec la nuit qu'elle devait déclencher.",
+    ),
+    ConfigGroup(
+        section="conscience", key=_GROUPE_AUDIT, order=100, advanced=True,
+        description="Ce qui arrive quand elle vient de dire quelque chose de "
+                    "chargé : elle se le repasse, et ça laisse une "
+                    "micro-rumination. Le plafond est bas exprès — une personne "
+                    "normale rejoue une ou deux fois, elle ne ressasse pas.",
     ),
     ConfigItem(
         key="conscience.decision_interval", type="int", section="conscience",
+        group=_GROUPE_BASE,
         label="Intervalle décision (s)",
         default=30, min=5, max=3600, restart_required=True,
     ),
     ConfigItem(
         key="conscience.cooldown_seconds", type="int", section="conscience",
+        group=_GROUPE_BASE,
         label="Cooldown entre actions (s)",
         default=300, min=0, max=86400, hot_reload=True,
     ),
     ConfigItem(
         key="conscience.act_threshold", type="float", section="conscience",
+        group=_GROUPE_BASE,
         label="Seuil score → agir",
         default=0.5, min=0.0, max=1.0, hot_reload=True,
         hint="Plus haut = Mika parle moins spontanément. " + _INVARIANT_PLAFONDS,

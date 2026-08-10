@@ -1,0 +1,71 @@
+{% comment %} Les `record_list` d'une section — le SEUL rendu, partagé par les
+   trois écrans de configuration.
+
+   Chaque entrée porte son propre `section_key` : les routes de ligne sont
+   communes au cœur, aux modules et aux apps forgées, et c'est la seule chose
+   qui change d'un écran à l'autre. Le partiel n'a donc pas à savoir où il est
+   rendu. {% endcomment %}
+{% load gestion %}
+
+{% for rl in record_lists %}
+  <section class="card mb-6">
+    <div class="card-head">
+      <h3>{{ rl.item.label }}</h3>
+      <span class="card-sub">{{ rl.rows|length }} élément{{ rl.rows|length|pluralize }}</span>
+      <span class="card-head-actions">
+        {% if rl.full %}
+          <span class="badge badge-warn">limite atteinte ({{ rl.item.max_items }})</span>
+        {% else %}
+          <a class="btn btn-sm btn-primary"
+             href="{% url 'gestionsysteme:config-record-new' rl.section_key rl.item.key %}">Ajouter</a>
+        {% endif %}
+      </span>
+    </div>
+
+    {% if rl.item.description %}
+      <div class="card-body" style="padding-bottom:0;">
+        <p class="field-desc">{{ rl.item.description }}</p>
+      </div>
+    {% endif %}
+
+    {% if rl.error %}
+      <div class="card-body"><div class="alert alert-danger">{{ rl.error }}</div></div>
+    {% elif rl.rows %}
+      <div class="card-body flush">
+        <div class="table-scroll">
+          <table class="table">
+            <thead>
+              <tr>
+                {% for c in rl.columns %}<th>{{ c }}</th>{% endfor %}
+                <th class="fit">Actif</th>
+                <th class="fit"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for entry in rl.rows %}
+                <tr>
+                  {% for v in entry.values %}<td class="break">{{ v }}</td>{% endfor %}
+                  <td class="fit">{{ entry.row.enabled|yes_no }}</td>
+                  <td class="fit">
+                    <div class="row">
+                      <a class="btn btn-sm"
+                         href="{% url 'gestionsysteme:config-record-edit' rl.section_key rl.item.key entry.row.row_id %}">Modifier</a>
+                      <form method="post"
+                            action="{% url 'gestionsysteme:config-record-delete' rl.section_key rl.item.key entry.row.row_id %}"
+                            data-confirm="Supprimer cet élément ?">
+                        {% csrf_token %}
+                        <button class="btn btn-sm btn-danger" type="submit">Supprimer</button>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% else %}
+      <div class="card-body"><div class="empty">Aucun élément.</div></div>
+    {% endif %}
+  </section>
+{% endfor %}

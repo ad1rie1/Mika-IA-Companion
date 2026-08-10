@@ -295,6 +295,10 @@ def _module_config(request, module: str):
         title="Configuration",
         description=(section.description if section else ""),
     )
+    # Même mise en forme que le cœur : recherche, sommaire, blocs repliables,
+    # pastille « modifié ». Elle vient du contexte partagé, donc un module qui
+    # déclare ses ``ConfigGroup`` en profite sans que cette vue le sache.
+    ctx.update(config_view.contexte_reglages(request, section_key, form))
     ctx.update({
         "form": form,
         "section": section,

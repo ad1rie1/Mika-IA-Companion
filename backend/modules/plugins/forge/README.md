@@ -20,7 +20,7 @@ data/forge_modules/
 | Capacité | Comment |
 |----------|---------|
 | Stockage / « BDD » | `api.storage.set/get/delete/find/keys/count/clear(collection, ...)` — clé/valeur JSON par collections, isolé par module, quotas (`forge.max_records_per_module`, `forge.max_value_kb`) |
-| Config utilisateur | section `config:` du manifest → apparaît dans **l'espace de l'app** (`/gestion/forge/<nom>/configuration/`), pas dans la Configuration du cœur (types scalaires, `secret`, `select`, et `record_list` pour les listes d'objets). Lu via `api.config.get(key)` / `api.config.rows(key)` |
+| Config utilisateur | section `config:` du manifest → apparaît dans **l'espace de l'app** (`/gestion/forge/<nom>/configuration/`), pas dans la Configuration du cœur. Lu via `api.config.get(key)` / `api.config.rows(key)` |
 | Planification | `schedule:` du manifest — `interval:30s/5m/2h`, `cron:0 9 * * MON-FRI`, `idle:15m`, `manual` → appelle `on_tick(api)` |
 | Réveil / signaux | `events:` du manifest (motifs `rss.new_entry`, `chat.*`, `forge.autre.*`) → `on_event(api, event)` ; `api.emit(type, data)` émet `forge.<module>.<type>` sur le bus (Conscience + autres modules) ; `api.notify_ai(...)` réveille Mika (cooldown `forge.notify_cooldown_s`) |
 | Pages | `views:` du manifest + fonction `view_<key>(api, params)` → page auto-montée dans l'espace de l'app sous `/gestion/forge/<module>/p/<vue>/`. La charge utile est convertie en **cellules typées** : un module forgé ne peut produire aucun balisage. |
@@ -124,7 +124,8 @@ events: []
 views:
   - {key: releves, label: Relevés, icon: "☁"}
 config:
-  - {key: ville, label: Ville, type: str, default: Paris}
+  - {key: ville, label: Ville, type: str, default: Paris, group: Lieu}
+  - {key: seuil_gel, label: Seuil d'alerte (°C), type: int, default: 0, group: Alertes}
 allowed_domains: [wttr.in]
 context: true
 ```
@@ -155,6 +156,36 @@ def view_releves(api, params):
         'rows': [{'id': l['key'], 'key': l['key'], 'temp': l['value']['temp']} for l in lignes],
     }
 ```
+
+## Organiser l'écran de configuration d'une app
+
+Les réglages d'une app forgée sont rendus par **le même moteur que le cœur** :
+recherche, sommaire, blocs repliables, pastille « modifié ». Rien à écrire côté
+interface — deux clés facultatives du manifeste suffisent.
+
+**`group`** range un réglage dans un bloc. Les blocs apparaissent dans l'ordre
+où leurs noms sont rencontrés, chacun avec son titre et son compteur. Sans
+`group`, tous les réglages tombent dans un seul bloc anonyme — acceptable à
+trois champs, illisible à quinze.
+
+```yaml
+config:
+  - {key: ville,      label: Ville,               type: str,  default: Paris, group: Lieu}
+  - {key: seuil_gel,  label: Seuil d'alerte (°C), type: int,  default: 0,     group: Alertes}
+  - {key: prevenir,   label: Me prévenir,         type: bool, default: true,  group: Alertes}
+```
+
+**Types disponibles** : `str`, `text`, `int`, `float`, `bool`, `secret`,
+`select` (avec `choices`), `list`, `lines`, `record_list` (avec `fields`).
+
+`list` et `lines` se ressemblent et ne font pas la même chose : `list` découpe
+la saisie sur les **virgules** (bon pour des mots-clés), `lines` sur les
+**sauts de ligne** (bon pour des phrases). Une liste de consignes ou de
+libellés veut `lines` — avec `list`, « Curieuse de tout, pas juste de tech »
+devient deux entrées.
+
+Un champ `secret` n'est jamais renvoyé au navigateur : il s'affiche vide et un
+envoi vide vaut « inchangé ».
 
 ## Réglages (Dashboard ▸ Configuration ▸ « Modules · Forge »)
 

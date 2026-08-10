@@ -16,7 +16,8 @@ from collections import OrderedDict
 from typing import Iterable
 
 from configs.types import (
-    ConfigItem, ConfigRecord, ConfigSection, choice_options,
+    ConfigFamily, ConfigGroup, ConfigItem, ConfigRecord, ConfigSection,
+    choice_options,
 )
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,10 @@ class ConfigRegistry:
     def __init__(self) -> None:
         self._sections: dict[str, ConfigSection] = {}
         self._items: dict[str, ConfigItem] = {}         # by full key
+        self._families: dict[str, ConfigFamily] = {}
+        # Clé composite (section, groupe) : un même nom de groupe se réutilise
+        # légitimement d'une section à l'autre (« Plafonds », « Cadences »).
+        self._groups: dict[tuple[str, str], ConfigGroup] = {}
 
     # ── Registration ────────────────────────────────────────────
 
@@ -39,6 +44,10 @@ class ConfigRegistry:
                     logger.warning("Config key %s re-declared, ignoring duplicate", e.key)
                     continue
                 self._items[e.key] = e
+            elif isinstance(e, ConfigFamily):
+                self._families.setdefault(e.key, e)
+            elif isinstance(e, ConfigGroup):
+                self._groups.setdefault((e.section, e.key), e)
             else:
                 logger.warning("Unknown schema entry %r", e)
 
@@ -57,6 +66,10 @@ class ConfigRegistry:
             elif isinstance(e, ConfigItem):
                 self._items[e.key] = e
                 replaced.append(e.key)
+            elif isinstance(e, ConfigFamily):
+                self._families[e.key] = e
+            elif isinstance(e, ConfigGroup):
+                self._groups[(e.section, e.key)] = e
             else:
                 logger.warning("Unknown schema entry %r", e)
 
@@ -87,6 +100,11 @@ class ConfigRegistry:
                 removed += 1
         if section_key:
             self._sections.pop(section_key, None)
+            # Les groupes d'une section retirée partent avec elle : les
+            # laisser ferait ressortir des intertitres orphelins si une app
+            # forgée du même nom se réenregistrait plus tard.
+            for cle in [k for k in self._groups if k[0] == section_key]:
+                del self._groups[cle]
         return removed
 
     def autodiscover(self) -> None:
@@ -120,6 +138,28 @@ class ConfigRegistry:
 
     def all_items(self) -> list[ConfigItem]:
         return list(self._items.values())
+
+    def families(self) -> list[ConfigFamily]:
+        """Familles déclarées, dans l'ordre d'affichage."""
+        return sorted(self._families.values(), key=lambda f: (f.order, f.label))
+
+    def family(self, key: str) -> ConfigFamily | None:
+        return self._families.get(key)
+
+    def group(self, section_key: str, group_key: str) -> ConfigGroup | None:
+        """Métadonnées d'un groupe, ou ``None`` s'il n'en déclare aucune.
+
+        Rendre ``None`` plutôt qu'un objet par défaut est délibéré : l'appelant
+        doit pouvoir distinguer « groupe décrit » de « groupe qui n'est qu'un
+        titre », les deux ne se rendant pas pareil.
+        """
+        return self._groups.get((section_key, group_key))
+
+    def groups_for(self, section_key: str) -> list[ConfigGroup]:
+        return sorted(
+            (g for (sec, _), g in self._groups.items() if sec == section_key),
+            key=lambda g: (g.order, g.title),
+        )
 
     def sections(self) -> list[ConfigSection]:
         """Sections in declared order (``order`` ASC, then label)."""

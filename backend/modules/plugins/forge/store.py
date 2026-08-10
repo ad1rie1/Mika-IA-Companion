@@ -51,8 +51,12 @@ def _max_manifest_bytes() -> int:
     return cfg_int("forge.max_manifest_kb", MAX_MANIFEST_BYTES // 1024,
                    mini=1, maxi=256) * 1024
 
+# ``lines`` : une valeur par ligne, pour des listes dont les éléments sont des
+# phrases. ``list`` découpe sur la virgule, ce qui détruit de la prose — une
+# app forgée qui collecte des consignes ou des libellés a le même besoin que le
+# cœur, et rien ne justifiait qu'elle ne puisse pas l'exprimer.
 _CONFIG_TYPES = {"str", "text", "int", "float", "bool", "secret",
-                 "select", "list", "record_list"}
+                 "select", "list", "lines", "record_list"}
 _SCHEDULE_RE = re.compile(
     r"^$|^manual$|^interval:\d+\s*[smhd]$|^idle:\d+\s*[smhd]$|^cron:.+$",
     re.IGNORECASE,
@@ -237,6 +241,10 @@ def _validate_config_field(c, i: int, seen: set[str], errors: list[str]) -> dict
         "label": str(c.get("label") or key)[:64],
         "description": str(c.get("description") or "")[:200],
         "default": c.get("default"),
+        # Un réglage peut nommer son bloc, comme n'importe quel schéma du
+        # cœur. Facultatif : sans lui l'app rend une liste plate, exactement
+        # comme avant. Borné parce que le manifeste est écrit par le modèle.
+        "group": str(c.get("group") or "")[:48],
     }
     if ftype == "select":
         choices = c.get("choices") or []

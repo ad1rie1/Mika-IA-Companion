@@ -1,20 +1,47 @@
 """Config schema for the Telegram communication channel."""
 from __future__ import annotations
 
-from configs.types import ConfigItem, ConfigSection
+from configs.types import ConfigGroup, ConfigItem, ConfigSection
 
 CONFIG_SCHEMA = [
     ConfigSection(
-        key="comm_telegram", label="Communication · Telegram", icon="📨", order=32,
+        key="comm_telegram", label="Telegram", icon="📨", order=32,
+        family="canaux",
+        summary="Le bot Telegram : son jeton, qui a le droit de lui écrire, "
+                "et à quel rythme.",
         description="Bot Telegram pour converser à distance.",
+    ),
+    ConfigGroup(
+        section="comm_telegram", key="Connexion", order=10,
+        description="Le jeton du bot. Sans lui le canal ne démarre pas du "
+                    "tout — il se tait proprement plutôt que d'échouer. La "
+                    "valeur est chiffrée en base et n'est jamais réaffichée : "
+                    "le champ repart vide, et le laisser vide ne l'efface pas.",
+    ),
+    ConfigGroup(
+        section="comm_telegram", key="Qui a le droit d'écrire", order=20,
+        description="La liste blanche est vérifiée avant la moindre écriture : "
+                    "un inconnu ne laisse ni entrée de présence, ni handle "
+                    "d'identité, ni message en base. Le refus est dit à voix "
+                    "haute plutôt que subi en silence.",
+    ),
+    ConfigGroup(
+        section="comm_telegram", key="Débit", order=30,
+        description="Fenêtre glissante par *compte* — il n'y a pas de "
+                    "connexion à compter de ce côté. Mêmes valeurs de départ "
+                    "que le canal web, délibérément : un message y coûte le "
+                    "même tour de pipeline complet. Les deux clés restent "
+                    "distinctes, régler ici ne touche pas au web.",
     ),
     ConfigItem(
         key="telegram.token", type="secret", section="comm_telegram",
+        group="Connexion",
         label="Bot token", sensitive=True,
         hint="Jeton fourni par @BotFather.",
     ),
     ConfigItem(
         key="telegram.allowed_chats", type="list", section="comm_telegram",
+        group="Qui a le droit d'écrire",
         label="Comptes et groupes autorisés",
         default=[], hot_reload=True,
         description=(

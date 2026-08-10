@@ -42,6 +42,58 @@ Validator = Callable[[Any], str | None]  # returns error msg or None
 
 
 @dataclass(frozen=True)
+class ConfigFamily:
+    """Un intertitre de la barre latérale, au-dessus des sections.
+
+    Sans familles, les sections forment une liste plate : à trente et une
+    entrées, « Mémoire » et « Pulsions » se cherchent au même endroit que
+    « Comptes » et « Providers ». La famille est *déclarée* par la section
+    (champ ``family``) plutôt que devinée à partir de son préfixe de clé —
+    l'ancien classement lisait ``comm_``/``ai_`` et rangeait tout le reste
+    dans un fourre-tout appelé « Cœur », qui a fini à quinze entrées.
+
+    Une famille qu'aucune section ne réclame n'est pas affichée : la déclarer
+    ne coûte donc rien, et un module peut poser la sienne.
+    """
+    key: str
+    label: str
+    icon: str = ""
+    description: str = ""
+    order: int = 100
+
+
+@dataclass(frozen=True)
+class ConfigGroup:
+    """Métadonnées d'un ``group`` à l'intérieur d'une section.
+
+    Un ``ConfigItem.group`` est une simple chaîne, et le rendu s'en contentait :
+    un ``<h4>`` et rien d'autre. Sur une section de soixante-dix réglages, ça
+    fait dix-sept titres identiques sans hiérarchie ni explication, où il faut
+    lire chaque champ pour savoir si le bloc concerne ce qu'on cherche.
+
+    Déclarer un groupe est **facultatif** et rétrocompatible : un groupe sans
+    déclaration s'affiche comme avant. ``key`` est la chaîne exacte utilisée
+    dans ``ConfigItem.group`` — pas d'identifiant parallèle à tenir à jour.
+
+    ``advanced`` replie le bloc : il reste présent, cherchable et modifiable,
+    mais ne s'ouvre pas de lui-même. C'est ce qui distingue « je règle la
+    mémoire » de « je vais chercher la taille d'un lot de décroissance ». Un
+    groupe replié qui contient une valeur modifiée s'ouvre quand même — sinon
+    on cache à l'opérateur ce que lui-même a changé.
+    """
+    section: str
+    key: str
+    label: str = ""
+    description: str = ""
+    order: int = 100
+    advanced: bool = False
+
+    @property
+    def title(self) -> str:
+        return self.label or self.key
+
+
+@dataclass(frozen=True)
 class ConfigSection:
     """One sidebar entry under Configuration.
 
@@ -53,6 +105,13 @@ class ConfigSection:
     icon: str = "⚙"
     description: str = ""
     order: int = 100
+    #: Clé d'une ``ConfigFamily``. Vide = classée par l'heuristique de repli,
+    #: le temps que toutes les sections aient déclaré la leur.
+    family: str = ""
+    #: Phrase d'accroche affichée sous le titre de la section. ``description``
+    #: sert déjà d'encadré explicatif ; celle-ci tient sur une ligne et sert
+    #: dans les listes, où l'encadré serait trop long.
+    summary: str = ""
 
 
 @dataclass(frozen=True)

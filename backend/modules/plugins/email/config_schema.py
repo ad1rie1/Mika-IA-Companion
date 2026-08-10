@@ -11,16 +11,44 @@ from __future__ import annotations
 # Importing the backend registers it — side-effect intentional.
 from modules.plugins.email import config_backend  # noqa: F401
 
-from configs.types import ConfigItem, ConfigRecord, ConfigSection, record_item
+from configs.types import (
+    ConfigGroup, ConfigItem, ConfigRecord, ConfigSection, record_item,
+)
 
 CONFIG_SCHEMA = [
     ConfigSection(
         key="module_email", label="Modules · Email", icon="✉", order=71,
+        family="systeme",
+        summary="Les boîtes qu'elle relève, à quelle cadence, et ce qu'un tour a le droit de traiter.",
         description="Comptes IMAP/SMTP (table EmailAccount).",
+    ),
+
+    # ── Organisation de l'écran ─────────────────────────────────────────
+    # Trois questions distinctes : quelles boîtes, à quel rythme on les
+    # relève, et combien de temps on garde ce qu'on y a lu.
+    ConfigGroup(
+        section="module_email", key="Comptes", order=10,
+        description="Les boîtes relevées. Chaque ligne est un compte autonome, "
+                    "stocké dans la table EmailAccount — pas dans le registre "
+                    "de configuration.",
+    ),
+    ConfigGroup(
+        section="module_email", key="Relevé", order=20,
+        description="Le rythme du module et ce qu'un tour a le droit d'avaler. "
+                    "Les trois réglages sont couplés : un message neuf coûte "
+                    "deux appels LLM en série, et le lot doit tenir dans le "
+                    "délai maximum du tour.",
+    ),
+    ConfigGroup(
+        section="module_email", key="Conservation", order=30, advanced=True,
+        description="Combien de messages relevés restent en base une fois "
+                    "triés. Ce ne sont pas les mails eux-mêmes : le serveur les "
+                    "garde, ceci ne borne que la trace locale qui sert de "
+                    "curseur au relevé.",
     ),
     ConfigItem(
         key="email.accounts", type="record_list", section="module_email",
-        label="Comptes email", min_items=0, max_items=50,
+        group="Comptes", label="Comptes email", min_items=0, max_items=50,
         description=(
             "Chaque ligne est un compte autonome. Le polling visite tous "
             "les comptes activés."
@@ -84,7 +112,7 @@ CONFIG_SCHEMA = [
     ),
     ConfigItem(
         key="email.keep_per_account", type="int", section="module_email",
-        group="Relevé", label="Messages conservés par compte",
+        group="Conservation", label="Messages conservés par compte",
         default=200, min=20, max=100000, hot_reload=True,
         description=(
             "Les plus anciens sont supprimés au-delà, jamais pendant la "

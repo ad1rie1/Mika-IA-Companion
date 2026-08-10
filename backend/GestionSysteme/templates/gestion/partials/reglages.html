@@ -1,0 +1,139 @@
+{% comment %} Le formulaire de réglages d'une section — le SEUL.
+
+   Trois écrans servent des réglages : le cœur (`config/section.html`),
+   l'espace d'un module et celui d'une app forgée. Ils portaient chacun leur
+   copie du même formulaire, si bien qu'une amélioration n'en touchait qu'un et
+   qu'une correction laissait les deux autres derrière.
+
+   Contexte attendu, fourni par `views.config.contexte_reglages()` :
+     blocs, sommaire, recherche, modifies_seuls, filtre_actif,
+     total_reglages, total_modifies, affiches, form
+
+   `action=""` sur le formulaire de filtre : il se soumet à l'URL courante,
+   quelle qu'elle soit. C'est ce qui permet au partiel d'ignorer sur quelle
+   des trois pages il est rendu. {% endcomment %}
+
+{% if form.fields %}
+  {% comment %} Barre d'outils en GET, donc HORS du formulaire d'enregistrement :
+     un champ de recherche à l'intérieur soumettrait les réglages en
+     cherchant. {% endcomment %}
+  <form method="get" action="" class="cfg-bar card mb-4">
+    <div class="card-body tight">
+      <div class="cfg-bar-row">
+        <input type="search" name="q" value="{{ recherche }}" class="cfg-search"
+               placeholder="Filtrer ces réglages…"
+               aria-label="Filtrer les réglages">
+        <label class="cfg-toggle">
+          <input type="checkbox" name="vue" value="modifies"
+                 {% if modifies_seuls %}checked{% endif %} data-autosubmit>
+          <span>Modifiés seulement</span>
+        </label>
+        <button class="btn btn-sm" type="submit">Filtrer</button>
+        {% if filtre_actif %}
+          <a class="btn btn-sm btn-ghost" href="{{ request.path }}">Tout voir</a>
+        {% endif %}
+        <span class="cfg-bar-stat">
+          {% if filtre_actif %}{{ affiches }} sur {{ total_reglages }}{% else %}{{ total_reglages }} réglage{{ total_reglages|pluralize }}{% endif %}
+          {% if total_modifies %}<span class="cfg-mod-pill">{{ total_modifies }} modifié{{ total_modifies|pluralize }}</span>{% endif %}
+        </span>
+      </div>
+    </div>
+  </form>
+
+  {% if sommaire %}
+    <div class="cfg-toc" role="navigation" aria-label="Blocs de cette section">
+      {% for b in sommaire %}
+        <a class="cfg-toc-item" href="#{{ b.ancre }}">
+          {{ b.titre }}
+          <span class="cfg-toc-n">{{ b.total }}</span>
+          {% if b.modifies %}<span class="cfg-toc-dot" title="{{ b.modifies }} modifié(s)"></span>{% endif %}
+        </a>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {% if not blocs %}
+    <div class="card mb-6"><div class="card-body">
+      <div class="empty">
+        <div class="empty-title">Aucun réglage ne correspond</div>
+        {% if modifies_seuls %}Rien n'a été modifié ici : tout tourne sur les défauts déclarés.
+        {% else %}Aucun réglage ne contient « {{ recherche }} ».{% endif %}
+      </div>
+    </div></div>
+  {% endif %}
+
+  <form method="post" class="mb-6">
+    {% csrf_token %}
+
+    {% for b in blocs %}
+      {% comment %} `details` plutôt qu'un bloc masqué en CSS : l'état ouvert /
+         fermé est natif, accessible au clavier, et la recherche du navigateur
+         (Ctrl+F) sait ouvrir un `details` fermé. {% endcomment %}
+      <details class="card cfg-bloc mb-4" id="{{ b.ancre }}"{% if b.ouvert %} open{% endif %}>
+        <summary class="card-head cfg-bloc-head">
+          <h3>{{ b.titre }}</h3>
+          <span class="card-sub">
+            {{ b.total }} réglage{{ b.total|pluralize }}
+            {% if b.modifies %}<span class="cfg-mod-pill">{{ b.modifies }} modifié{{ b.modifies|pluralize }}</span>{% endif %}
+            {% if b.avance %}<span class="badge">avancé</span>{% endif %}
+          </span>
+        </summary>
+        <div class="card-body">
+          {% if b.description %}<p class="cfg-bloc-desc">{{ b.description }}</p>{% endif %}
+          <div class="form-grid">
+            {% for f in b.champs %}
+              {% include "gestion/partials/field.html" with f=f marker=1 %}
+            {% endfor %}
+          </div>
+        </div>
+      </details>
+    {% endfor %}
+
+    {% if blocs %}
+      <div class="card cfg-actions">
+        <div class="card-body tight">
+          <div class="cfg-bar-row">
+            <button class="btn btn-primary" type="submit">Enregistrer</button>
+            <span class="field-hint" style="margin:0;">
+              Un champ secret laissé vide conserve la valeur en place.
+              {% if filtre_actif %}Seuls les réglages affichés sont enregistrés.{% endif %}
+            </span>
+          </div>
+        </div>
+      </div>
+    {% endif %}
+  </form>
+
+  {% comment %} Réinitialiser n'apparaît que s'il y a quelque chose à
+     réinitialiser : sur une installation neuve, tout est au défaut et ce bloc
+     ne proposait qu'une liste vide. {% endcomment %}
+  {% if total_modifies %}
+    <details class="disclosure mb-6">
+      <summary>Réinitialiser des réglages ({{ total_modifies }})</summary>
+      <div class="disclosure-body">
+        <p class="field-desc">
+          Retire la valeur enregistrée : le réglage retombe sur le défaut
+          déclaré au registre. Les valeurs par défaut fonctionnent toutes,
+          c'est ce qui permet aux boucles de fond de tourner sur une
+          installation neuve.
+        </p>
+        <form method="post">
+          {% csrf_token %}
+          <div class="form-grid mb-4">
+            {% for f in form.fields %}
+              {% if not f.is_default %}
+                <div class="field field-check">
+                  <input type="checkbox" id="r-{{ f.name }}" name="__reinitialiser" value="{{ f.name }}">
+                  <label class="field-label" for="r-{{ f.name }}">
+                    {{ f.label }} <span class="mono text-xs">{{ f.name }}</span>
+                  </label>
+                </div>
+              {% endif %}
+            {% endfor %}
+          </div>
+          <button class="btn btn-danger" type="submit">Réinitialiser la sélection</button>
+        </form>
+      </div>
+    </details>
+  {% endif %}
+{% endif %}

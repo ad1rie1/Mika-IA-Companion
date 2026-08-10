@@ -25,7 +25,7 @@ pipeline.
 """
 from __future__ import annotations
 
-from configs.types import ConfigItem, ConfigSection
+from configs.types import ConfigGroup, ConfigItem, ConfigSection
 
 # Les 29 émotions, en couples (valeur canonique, libellé français), pour les
 # ancres de phase. Réutilisées telles quelles : la valeur stockée doit rester
@@ -91,9 +91,65 @@ def _items_phases() -> list[ConfigItem]:
 
 
 CONFIG_SCHEMA = [
+    # ── Organisation de l'écran ─────────────────────────────────────
+    # Chaque bloc dit ce qu'il pilote dans le prompt : ces réglages ne sont pas
+    # des curseurs dont on observe l'effet, ce sont des phrases qui partent
+    # telles quelles au modèle, et savoir *où* elles atterrissent est la
+    # moitié de ce qu'il faut pour les écrire.
+    ConfigGroup(
+        section="personnalite", key="Identité", order=10,
+        description="La première ligne du prompt : « Tu es <nom>, "
+                    "<description>. » Tout le reste vient qualifier ça.",
+    ),
+    ConfigGroup(
+        section="personnalite", key="Ton", order=20,
+        description="Son style par défaut, plus deux variantes. Un champ laissé "
+                    "vide retire sa ligne du prompt au lieu d'en écrire une vide.",
+    ),
+    ConfigGroup(
+        section="personnalite", key="Accueil", order=30,
+        description="Ce qu'elle dit quand quelqu'un arrive. Jamais récité tel "
+                    "quel : le texte part comme déclencheur interne, et elle le "
+                    "reformule avec l'humeur du moment.",
+    ),
+    ConfigGroup(
+        section="personnalite_traits", key="Ce qu'elle est", order=10,
+        description="Traits, manies et vulnérabilités. Le prompt demande de les "
+                    "laisser transparaître, pas de les énumérer — écris-les "
+                    "comme tu décrirais quelqu'un, pas comme une fiche.",
+    ),
+    ConfigGroup(
+        section="personnalite_traits", key="Ce à quoi elle tient", order=20,
+        description="Valeurs et centres d'intérêt : ce qui la fait réagir, et "
+                    "ce sur quoi elle s'emballe.",
+    ),
+    ConfigGroup(
+        section="personnalite_traits", key="Sa façon de parler", order=30,
+        description="Tics de langage et registre. Se combine au ton ci-dessus : "
+                    "le ton dit l'humeur, ceci dit le vocabulaire.",
+    ),
+    ConfigGroup(
+        section="personnalite_rythme", key="Découpage de la journée", order=10,
+        description="À quelle heure chaque phase commence. C'est ici qu'un "
+                    "personnage devient nocturne.",
+    ),
+    ConfigGroup(
+        section="personnalite_rythme", key="Humeur de fond par phase", order=20,
+        description="Le point de repos vers lequel son humeur tire pendant "
+                    "chaque phase — pas ce qu'elle ressent, ce vers quoi elle "
+                    "revient quand rien ne la pousse.",
+    ),
+    ConfigGroup(
+        section="personnalite_rythme", key="Courbe d'énergie", order=30,
+        description="Son énergie au fil des heures. Elle nourrit le malus de "
+                    "fatigue de la conscience et le bloc « ton rythme » du "
+                    "prompt ; sous 0,5 en continu, elle traîne toute la journée.",
+    ),
     # ── Identité ────────────────────────────────────────────────────
     ConfigSection(
-        key="personnalite", label="Personnalité", icon="✦", order=15,
+        key="personnalite", label="Identité & voix", icon="✦", order=15,
+        family="personnage",
+        summary="Son nom, sa description, son ton, sa façon d'accueillir.",
         description="Qui elle est, comment elle parle, comment elle accueille. "
                     "C'est la première couche du prompt, celle qui ne change pas "
                     "d'un tour à l'autre.",
@@ -180,8 +236,9 @@ CONFIG_SCHEMA = [
 
     # ── Caractère ───────────────────────────────────────────────────
     ConfigSection(
-        key="personnalite_traits", label="Personnalité · Caractère", icon="✧",
-        order=16,
+        key="personnalite_traits", label="Caractère", icon="✧", order=16,
+        family="personnage",
+        summary="Traits, manies, vulnérabilités, valeurs, intérêts, tics de langage.",
         description="Traits, manies, vulnérabilités, valeurs, intérêts et tics "
                     "de langage. Une entrée par ligne — ce sont des phrases, "
                     "pas des mots-clés.",
@@ -262,8 +319,9 @@ CONFIG_SCHEMA = [
 
     # ── Rythme circadien ────────────────────────────────────────────
     ConfigSection(
-        key="personnalite_rythme", label="Personnalité · Rythme", icon="☾",
-        order=17,
+        key="personnalite_rythme", label="Rythme", icon="☾", order=17,
+        family="personnage",
+        summary="Le découpage de ses journées et sa courbe d'énergie.",
         description="À quelles heures ses journées basculent, et son énergie au "
                     "fil des heures. C'est ici qu'un personnage devient nocturne.",
     ),

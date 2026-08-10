@@ -44,6 +44,12 @@
 
     <label class="field-label" for="c-{{ f.name }}">
       {{ f.label }}
+      {% comment %} « Modifié » = une valeur est enregistrée en base, donc ce
+         réglage ne suit plus le défaut déclaré. C'est le repère qui manquait
+         le plus : sans lui, « réglé à 0,5 » et « laissé à 0,5 » sont
+         indiscernables quand on cherche pourquoi deux installations ne se
+         comportent pas pareil. {% endcomment %}
+      {% if not f.is_default %}<span class="field-mod" title="Valeur enregistrée — ne suit plus le défaut déclaré">modifié</span>{% endif %}
       {% if f.item.hot_reload %}<span class="field-flag hot" title="Pris en compte sans redémarrage">à chaud</span>{% endif %}
       {% if f.item.restart_required %}<span class="field-flag restart" title="Nécessite un redémarrage">redémarrage</span>{% endif %}
       {% if f.item.readonly %}<span class="field-flag" title="Valeur attribuée par le serveur">lecture seule</span>{% endif %}

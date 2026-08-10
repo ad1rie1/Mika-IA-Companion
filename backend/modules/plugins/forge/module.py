@@ -247,14 +247,31 @@ class ForgeModule(BaseModule):
 
     @staticmethod
     def _build_config_entries(name: str, manifest: store.ForgeManifest) -> list:
-        from configs.types import ConfigItem, ConfigRecord, ConfigSection, record_item
+        from configs.types import (
+            ConfigGroup, ConfigItem, ConfigRecord, ConfigSection, record_item,
+        )
         entries: list = [ConfigSection(
             key=f"forge_{name}",
             label=f"Forge · {manifest.title}",
             icon="⚒",
             order=91,
+            family="systeme",
+            summary=(manifest.description or "")[:120],
             description=manifest.description or "App forgée par Mika.",
         )]
+        # Les blocs déclarés par le manifeste, dans leur ordre d'apparition.
+        # Une app forgée obtient donc la même mise en forme que le cœur —
+        # sommaire, repli, pastille « modifié » — sans que l'interface
+        # connaisse une seule app par son nom.
+        for rang, nom_groupe in enumerate(
+                dict.fromkeys(
+                    (f.get("group") or "").strip()
+                    for f in manifest.config
+                    if (f.get("group") or "").strip()
+                )):
+            entries.append(ConfigGroup(
+                section=f"forge_{name}", key=nom_groupe, order=10 * (rang + 1),
+            ))
         for f in manifest.config:
             kwargs = dict(
                 key=f"forge.{name}.{f['key']}",
@@ -264,6 +281,7 @@ class ForgeModule(BaseModule):
                 description=f.get("description", ""),
                 default=f.get("default"),
                 sensitive=bool(f.get("sensitive")),
+                group=(f.get("group") or "").strip(),
                 hot_reload=True,
             )
             if f.get("choices"):

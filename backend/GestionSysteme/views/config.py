@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import unicodedata
 
 from django.contrib import messages
 from django.http import Http404
@@ -25,8 +26,10 @@ from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from configs.registry import registry
+from configs.types import ConfigFamily
 from configs.service import ValidationError, config_service
 from GestionSysteme import forms
+from GestionSysteme.families import family_of
 from GestionSysteme.nav import item_for
 from GestionSysteme.shell import page_context
 
@@ -38,26 +41,25 @@ MODULE_SECTION_PREFIX = "module_"
 # décide ce qui est « du cœur » — et que l'inverse ferait un import circulaire.
 FORGE_SECTION_PREFIX = "forge_"
 
-# Regroupement des sections du cœur. L'ordre des groupes est celui-ci ;
-# l'ordre à l'intérieur reste celui déclaré au registre (champ ``order``).
-GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Accès", ("accounts",)),
-    ("Intelligence artificielle", ("ai_providers", "ai_models", "ai_roles")),
-    ("Communication", ()),      # rempli par préfixe comm_
-    ("Cœur", ()),               # tout le reste
-)
 
+def _cles_modifiees() -> set[str]:
+    """Les clés portant une valeur enregistrée, donc différentes du défaut.
 
-def _group_of(section_key: str) -> str:
-    for label, keys in GROUPS:
-        if section_key in keys:
-            return label
-    if section_key.startswith("comm_"):
-        return "Communication"
-    if section_key.startswith("ai_") or section_key.startswith("ai."):
-        return "Intelligence artificielle"
-    return "Cœur"
+    Une seule requête pour tout l'écran. C'est le repère le plus utile sur
+    quatre cents réglages : « qu'est-ce que j'ai touché ici ? » n'a pas de
+    réponse quand tout se ressemble, et l'opérateur finit par relire chaque
+    champ pour comparer mentalement au défaut.
 
+    Illisible (base pas encore migrée, verrou) : on rend un ensemble vide.
+    Aucun réglage n'est alors signalé comme modifié — l'écran perd un repère,
+    il n'affiche pas un faux.
+    """
+    try:
+        from configs.models import ConfigValue
+        return set(ConfigValue.objects.values_list("key", flat=True))
+    except Exception:
+        logger.debug("lecture des clés modifiées impossible", exc_info=True)
+        return set()
 
 def is_module_section(section_key: str) -> bool:
     return section_key.startswith(MODULE_SECTION_PREFIX)
@@ -87,20 +89,45 @@ def core_sections() -> list:
     ]
 
 
-def grouped_sections() -> list[dict]:
-    groups: dict[str, list] = {}
-    order: list[str] = []
+def grouped_sections(*, modifiees: set[str] | None = None) -> list[dict]:
+    """Les sections du cœur, rangées par famille, prêtes pour la barre latérale.
+
+    Chaque section porte son nombre de réglages et son nombre de réglages
+    modifiés : la barre latérale devient une carte de l'installation plutôt
+    qu'un sommaire, et « où ai-je touché quelque chose ? » se lit sans ouvrir
+    les trente et une pages.
+
+    Une famille sans section n'est pas rendue — déclarer une famille en
+    prévision ne salit donc pas l'écran.
+    """
+    modifiees = _cles_modifiees() if modifiees is None else modifiees
+
+    par_section: dict[str, list] = {}
+    for item in registry.all_items():
+        par_section.setdefault(item.section, []).append(item)
+
+    paniers: dict[str, list] = {}
     for section in core_sections():
-        label = _group_of(section.key)
-        if label not in groups:
-            groups[label] = []
-            order.append(label)
-        groups[label].append(section)
-    # On respecte l'ordre déclaré dans GROUPS pour les groupes connus, puis
-    # l'ordre d'apparition pour les autres.
-    known = [label for label, _ in GROUPS]
-    order.sort(key=lambda label: known.index(label) if label in known else len(known))
-    return [{"label": label, "sections": groups[label]} for label in order]
+        items = par_section.get(section.key, [])
+        paniers.setdefault(family_of(section), []).append({
+            "section": section,
+            "total": len(items),
+            "modifies": sum(1 for i in items if i.key in modifiees),
+        })
+
+    sorties = []
+    for famille in registry.families():
+        entrees = paniers.pop(famille.key, None)
+        if entrees:
+            sorties.append({"famille": famille, "entrees": entrees})
+    # Une famille référencée mais jamais déclarée reste visible plutôt que de
+    # faire disparaître ses sections de la navigation.
+    for cle, entrees in paniers.items():
+        sorties.append({
+            "famille": ConfigFamily(key=cle, label=cle.capitalize(), order=998),
+            "entrees": entrees,
+        })
+    return sorties
 
 
 def items_for(section_key: str) -> list:
@@ -144,6 +171,134 @@ def _inject_dynamic_choices(form: forms.ScalarForm) -> None:
     for field in form.fields:
         if field.item.type == "select" and field.item.key.startswith("ai.role."):
             field.item = dataclasses.replace(field.item, choices=tuple(names))
+
+
+
+# ── Mise en forme d'une section ─────────────────────────────────────────
+
+def _ancre(section_key: str, group_key: str) -> str:
+    """Identifiant d'ancre stable pour un groupe.
+
+    Dérivé du libellé, donc lisible dans l'URL — un lien vers un bloc précis
+    d'une longue section reste compréhensible quand on le colle ailleurs.
+    """
+    brut = (group_key or "general").lower()
+    garde = [c if c.isalnum() else "-" for c in brut]
+    return "g-" + "".join(garde).strip("-").replace("--", "-") or "g-general"
+
+
+def _sans_accents(texte: str) -> str:
+    """Minuscule et sans diacritiques, pour comparer une saisie à du français.
+
+    Sans ça, chercher « reve » ne trouve pas « Rêves » et « energie » ne trouve
+    pas « Courbe d'énergie » — c'est-à-dire que la recherche ne marche pas pour
+    quelqu'un qui tape vite, ce qui est exactement le cas où on l'utilise. On
+    replie donc les deux côtés de la comparaison.
+    """
+    decompose = unicodedata.normalize("NFKD", texte.lower())
+    return "".join(c for c in decompose if not unicodedata.combining(c))
+
+
+def _correspond(champ, terme_replie: str) -> bool:
+    """Le réglage répond-il à la recherche ?
+
+    On cherche dans le libellé, la clé, la description, l'indice et le nom du
+    groupe : la clé parce qu'on arrive souvent depuis un log ou un commentaire
+    qui la cite, l'indice parce que c'est là que sont les mots dont on se
+    souvient (« coucher », « plafond », « salutation »).
+
+    Tous les mots doivent correspondre, dans n'importe quel ordre : « max
+    reve » trouve le plafond de rêves par nuit sans qu'il faille deviner
+    comment le libellé est tourné.
+    """
+    i = champ.item
+    foin = _sans_accents(" ".join((
+        champ.label or "", i.key, i.description or "", i.hint or "",
+        i.group or "",
+    )))
+    return all(mot in foin for mot in terme_replie.split())
+
+
+def blocs_de_section(section_key: str, form, *, modifiees: set[str],
+                     terme: str = "", modifies_seuls: bool = False) -> list[dict]:
+    """Les groupes d'une section, enrichis de leurs métadonnées déclarées.
+
+    Un groupe sans ``ConfigGroup`` déclaré se rend comme avant : un titre et
+    ses champs. Ce qu'ajoute une déclaration, c'est une phrase d'explication,
+    un ordre choisi, et la possibilité d'être **replié** — ce dernier point
+    étant ce qui rend une section de soixante-dix réglages consultable.
+
+    Un bloc replié s'ouvre quand même s'il contient une valeur modifiée ou un
+    résultat de recherche : cacher à l'opérateur ce que lui-même a changé, ou
+    ce qu'il vient de chercher, serait le seul moyen de rendre le repli
+    nuisible.
+    """
+    terme_replie = _sans_accents(terme) if terme else ""
+    blocs: list[dict] = []
+    for groupe in form.groups:
+        champs = groupe.fields
+        if terme_replie:
+            champs = [c for c in champs if _correspond(c, terme_replie)]
+        if modifies_seuls:
+            champs = [c for c in champs if c.item.key in modifiees]
+        if not champs:
+            continue
+
+        meta = registry.group(section_key, groupe.label)
+        n_modifies = sum(1 for c in champs if c.item.key in modifiees)
+        replie = bool(meta and meta.advanced)
+        blocs.append({
+            "cle": groupe.label,
+            "titre": (meta.title if meta else groupe.label),
+            "description": (meta.description if meta else ""),
+            "ancre": _ancre(section_key, groupe.label),
+            "champs": champs,
+            "total": len(champs),
+            "modifies": n_modifies,
+            "avance": replie,
+            # Replié seulement s'il n'y a aucune raison de l'ouvrir.
+            "ouvert": (not replie) or bool(n_modifies) or bool(terme)
+                      or modifies_seuls,
+            "ordre": (meta.order if meta else 100),
+        })
+    blocs.sort(key=lambda b: (b["ordre"],))
+    return blocs
+
+
+def contexte_reglages(request, section_key: str, form) -> dict:
+    """Tout ce dont le partiel « réglages » a besoin, pour n'importe quel écran.
+
+    Trois pages servent des réglages — le cœur, l'espace d'un module, l'espace
+    d'une app forgée — et elles rendaient chacune leur copie du même
+    formulaire. La barre de recherche, le sommaire, le repli des blocs avancés
+    et la pastille « modifié » n'auraient donc profité qu'à la première, et une
+    correction sur l'une aurait laissé les deux autres derrière.
+
+    Un module et une app forgée déclarent leurs ``ConfigGroup`` exactement
+    comme le cœur : la mise en forme leur arrive sans qu'ils sachent qu'elle
+    existe.
+    """
+    terme = (request.GET.get("q") or "").strip().lower()
+    modifies_seuls = request.GET.get("vue") == "modifies"
+    modifiees = _cles_modifiees()
+
+    blocs = blocs_de_section(
+        section_key, form, modifiees=modifiees,
+        terme=terme, modifies_seuls=modifies_seuls,
+    )
+    return {
+        "blocs": blocs,
+        "recherche": request.GET.get("q") or "",
+        "modifies_seuls": modifies_seuls,
+        "filtre_actif": bool(terme) or modifies_seuls,
+        "total_reglages": len(form.fields),
+        "total_modifies": sum(1 for f in form.fields if f.item.key in modifiees),
+        "affiches": sum(b["total"] for b in blocs),
+        # Le sommaire ne sert que s'il y a plusieurs blocs à survoler ; à deux
+        # titres il double la hauteur de l'écran pour rien.
+        "sommaire": blocs if len(blocs) >= 3 else [],
+        "_modifiees": modifiees,
+    }
 
 
 # ── Vues ────────────────────────────────────────────────────────────────
@@ -197,13 +352,18 @@ def config_section(request, section: str):
 
     _inject_dynamic_choices(form)
 
+    # Recherche et filtre vivent dans l'URL, comme partout ailleurs ici : un
+    # écran filtré se partage, se met en favori, et le retour arrière le défait.
+    reglages = contexte_reglages(request, section, form)
+
     item = item_for("config")
     ctx = page_context(
         request, item=item, active_key="config",
         title=spec.label, description=spec.description,
     )
+    ctx.update(reglages)
     ctx.update({
-        "groups": grouped_sections(),
+        "groups": grouped_sections(modifiees=reglages["_modifiees"]),
         "section": spec,
         "form": form,
         "record_lists": _record_lists(section, items),
@@ -218,9 +378,14 @@ def _record_lists(section_key: str, items) -> list[dict]:
             rows = config_service.list_rows(item.key, decrypt_secrets=False)
         except Exception as exc:
             logger.exception("lecture des lignes de %s impossible", item.key)
-            out.append({"item": item, "rows": [], "error": str(exc), "columns": []})
+            out.append({"section_key": section_key, "item": item, "rows": [],
+                        "error": str(exc), "columns": []})
             continue
         out.append({
+            # Exposé comme dans les espaces module et forge : le partiel des
+            # listes construit ses URL avec, et n'a donc pas trois façons de
+            # savoir à quelle section il appartient.
+            "section_key": section_key,
             "item": item,
             "columns": [f.label or f.key for f in item.record.fields],
             "rows": [

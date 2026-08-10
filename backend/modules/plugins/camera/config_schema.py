@@ -45,11 +45,13 @@ Trois questions distinctes, donc trois groupes :
 """
 from __future__ import annotations
 
-from configs.types import ConfigItem, ConfigSection
+from configs.types import ConfigGroup, ConfigItem, ConfigSection
 
 CONFIG_SCHEMA = [
     ConfigSection(
         key="module_camera", label="Modules · Caméra", icon="◉", order=75,
+        family="systeme",
+        summary="Ce qu'elle regarde d'elle-même, à quelle cadence, et ce qui a le droit de l'interrompre.",
         description=(
             "Perception visuelle : ce que Mika regarde d'elle-même, à quelle "
             "cadence, et ce qui a le droit de l'interrompre. Les devices se "
@@ -57,9 +59,56 @@ CONFIG_SCHEMA = [
         ),
     ),
 
+    # ── Organisation de l'écran ─────────────────────────────────────────
+    # Une fois allumé, ce module est le plus gros consommateur de tokens du
+    # moteur : chaque analyse envoie une image complète au modèle vision.
+    # L'ordre va donc du plus cher au moins cher — allumer, laisser entrer,
+    # regarder tout seul, interrompre — et se termine par de l'affichage pur,
+    # replié.
+    ConfigGroup(
+        section="module_camera", key="Mise en service", order=10,
+        description="L'interrupteur du module. Éteint, ses outils ne sont même "
+                    "pas déclarés à Mika : ni tick, ni analyse, ni ~6 500 "
+                    "tokens de déclarations inutiles à chaque tour sur une "
+                    "installation qui n'aura jamais de caméra.",
+    ),
+    ConfigGroup(
+        section="module_camera", key="Accès", order=20,
+        description="Qui a le droit de pousser des images. Un device n'a pas "
+                    "de session Django, d'où un jeton : ce que la socket "
+                    "injecte finit décrit dans l'invite système et peut ouvrir "
+                    "un tour de conversation.",
+    ),
+    ConfigGroup(
+        section="module_camera", key="Analyse proactive", order=30,
+        description="Est-ce qu'elle regarde d'elle-même, à quelle cadence, et "
+                    "jusqu'à quand après la dernière interaction. C'est le "
+                    "poste de dépense : chaque analyse transporte une image "
+                    "complète vers le modèle vision.",
+    ),
+    ConfigGroup(
+        section="module_camera", key="Attention", order=40,
+        description="Le droit d'interrompre. Un changement notable reste "
+                    "observé et visible dans l'invite même quand il n'a pas le "
+                    "droit d'ouvrir un tour — l'observer et le dire sont deux "
+                    "décisions séparées.",
+    ),
+    ConfigGroup(
+        section="module_camera", key="Regard actif", order=50,
+        description="La cadence maximale de l'outil « camera_see », celui "
+                    "qu'elle appelle quand on lui demande de regarder. Plus "
+                    "permissif que l'analyse de fond : un regard demandé vaut "
+                    "plus qu'un balayage périodique.",
+    ),
+    ConfigGroup(
+        section="module_camera", key="Affichage", order=60, advanced=True,
+        description="Mise en forme de l'espace du module. Aucun effet sur ce "
+                    "qui est stocké ni sur ce qui entre dans l'invite.",
+    ),
+
     ConfigItem(
         key="camera.enabled", type="bool", section="module_camera",
-        label="Caméra activée", default=False,
+        group="Mise en service", label="Caméra activée", default=False,
         description=(
             "Décoché, le module ne démarre pas : ses deux outils ne sont pas "
             "déclarés à Mika, aucune analyse vision n'est programmée et les "

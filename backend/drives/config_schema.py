@@ -15,13 +15,14 @@ l'identique ; ce qui change, c'est l'origine de la valeur. Voir
 """
 from __future__ import annotations
 
-from configs.types import ConfigItem, ConfigSection
+from configs.types import ConfigGroup, ConfigItem, ConfigSection
 
 CURIOSITY_GROUP = "Curiosité"
 SOCIAL_GROUP = "Social"
 EXPRESSION_GROUP = "Expression"
 REST_GROUP = "Repos"
 ENERGY_GROUP = "Énergie"
+COMMUN_GROUP = "Communs aux quatre pulsions"
 
 
 def _drive_items(
@@ -83,10 +84,61 @@ def _drive_items(
 CONFIG_SCHEMA = [
     ConfigSection(
         key="drives", label="Pulsions", icon="◈", order=45,
+        family="vie_interieure",
+        summary="Ce qui la pousse à parler d'elle-même, et ce qui l'en retient.",
         description=(
             "Curiosité, social, expression, repos : ce qui pousse Mika à "
             "parler d'elle-même, et ce qui l'en retient."
         ),
+    ),
+    # ── Organisation de l'écran ─────────────────────────────────────
+    #
+    # Un bloc par pulsion, dans l'ordre où elles se lisent : les trois qui
+    # poussent vers l'action, puis celle qui l'en retire, puis l'énergie qui
+    # les résume. Le bloc « communs » est replié : ce sont deux seuils de
+    # lecture, pas des curseurs de comportement.
+    ConfigGroup(
+        section="drives", key=CURIOSITY_GROUP, order=10,
+        description="Son envie d'apprendre quelque chose. Elle monte toute "
+                    "seule avec le temps et retombe quand une conversation ou "
+                    "une observation lui apporte de la matière.",
+    ),
+    ConfigGroup(
+        section="drives", key=SOCIAL_GROUP, order=20,
+        description="Son besoin de contact — la seule pulsion qui parle "
+                    "d'ABSENCE, donc la seule dont l'échelle de temps se compte "
+                    "en jours. Sa croissance est logarithmique : en linéaire, "
+                    "une heure, un jour et trois semaines de silence rendaient "
+                    "la même phrase de prompt.",
+    ),
+    ConfigGroup(
+        section="drives", key=EXPRESSION_GROUP, order=30,
+        description="Son envie de dire quelque chose d'elle-même. Une prise de "
+                    "parole spontanée la vide entièrement, une simple réponse "
+                    "n'en retire qu'une part.",
+    ),
+    ConfigGroup(
+        section="drives", key=REST_GROUP, order=40,
+        description="Sa fatigue. Elle ne monte pas avec le temps mais avec "
+                    "l'activité, et elle avance l'heure du coucher. ⚠ Monter la "
+                    "décroissance naturelle a déjà rendu TOUT le cycle de "
+                    "sommeil inatteignable — la nuit n'ouvre qu'après 900 s "
+                    "d'inactivité, pendant lesquelles la tension ne fait que "
+                    "baisser : ce coefficient borne mécaniquement ce qu'il en "
+                    "reste au moment du test.",
+    ),
+    ConfigGroup(
+        section="drives", key=ENERGY_GROUP, order=50,
+        description="Comment le rythme de la journée et la fatigue accumulée se "
+                    "mélangent en un seul nombre — lu par le malus de fatigue du "
+                    "scoring, par le bloc « ton rythme » du prompt et par la "
+                    "jauge de l'interface.",
+    ),
+    ConfigGroup(
+        section="drives", key=COMMUN_GROUP, order=60, advanced=True,
+        description="Deux seuils de lecture partagés : à partir de quelle "
+                    "tension on ose désigner une pulsion « dominante », et sur "
+                    "quelle fenêtre les événements d'activité sont comptés.",
     ),
 
     *_drive_items(
@@ -169,6 +221,7 @@ CONFIG_SCHEMA = [
 
     ConfigItem(
         key="drives.dominant_min_tension", type="float", section="drives",
+        group=COMMUN_GROUP,
         label="Tension minimale d'une pulsion « dominante »",
         default=0.2, min=0.0, max=1.0, hot_reload=True,
         hint="En dessous, aucune pulsion n'est déclarée dominante : tout est "
@@ -176,6 +229,7 @@ CONFIG_SCHEMA = [
     ),
     ConfigItem(
         key="drives.activity_window_seconds", type="float", section="drives",
+        group=COMMUN_GROUP,
         label="Fenêtre glissante d'activité (s)",
         default=600.0, min=1.0, max=86400.0, hot_reload=True,
         hint="Au-delà, un événement d'activité sort de l'historique. Il n'est "

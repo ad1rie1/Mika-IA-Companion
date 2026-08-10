@@ -1,12 +1,117 @@
 """Config schema for the memory subsystem."""
 from __future__ import annotations
 
-from configs.types import ConfigItem, ConfigSection
+from configs.types import ConfigGroup, ConfigItem, ConfigSection
 
 CONFIG_SCHEMA = [
     ConfigSection(
-        key="memory", label="Mémoire", icon="❖", order=30,
+        key="memory", label="Mémoire", icon="❖", order=30, family="vie_interieure",
+        summary="Ce qu'elle retient, comment elle le retrouve, ce que la nuit en fait.",
         description="Court-terme, consolidation, décroissance, récupération sémantique.",
+    ),
+        # ── Organisation de l'écran ─────────────────────────────────────
+    #
+    # Dix-sept groupes sur soixante-dix-sept réglages : sans ordre ni
+    # explication, la page se lisait comme un tas. L'ordre suit maintenant le
+    # trajet d'un souvenir — ce qu'elle vient d'entendre, ce qu'elle en garde,
+    # ce qu'elle retrouve, ce que la nuit en fait — et les blocs qu'on
+    # n'ouvre qu'en diagnostic sont repliés (`advanced`).
+    #
+    # « Replié » ne veut pas dire caché : le bloc reste cherchable, il
+    # s'ouvre seul s'il contient une valeur modifiée, et Ctrl+F du navigateur
+    # sait déplier un `<details>`.
+    ConfigGroup(
+        section="memory", key="Court-terme", order=10,
+        description="Combien de messages elle garde sous la main, en clair, "
+                    "avant que la compaction ne s'en mêle.",
+    ),
+    ConfigGroup(
+        section="memory", key="Compaction", order=20,
+        description="Quand le fil devient trop long, les vieux échanges sont "
+                    "repliés en un résumé. Le verbatim, lui, ne bouge pas : il "
+                    "reste en base et dans l'index épisodique.",
+    ),
+    ConfigGroup(
+        section="memory", key="Consolidation", order=30,
+        description="La boucle de fond qui relit les échanges et en extrait "
+                    "souvenirs, connaissances et engagements.",
+    ),
+    ConfigGroup(
+        section="memory", key="Récupération", order=40,
+        description="Combien de souvenirs et de connaissances remontent dans "
+                    "le prompt à chaque tour. Ce sont des planchers : si le "
+                    "modèle a de la place, elle en sert davantage.",
+    ),
+    ConfigGroup(
+        section="memory", key="Saillance du rappel", order=50,
+        description="Ce qui fait qu'un souvenir revient plutôt qu'un autre : "
+                    "son importance, sa charge émotionnelle, l'humeur du moment.",
+    ),
+    ConfigGroup(
+        section="memory", key="Rappel", order=60,
+        description="L'anti-répétition. Sans lui, elle ressort le même "
+                    "« ça me rappelle… » à quarante tours d'intervalle.",
+    ),
+    ConfigGroup(
+        section="memory", key="Sommeil", order=70,
+        description="À quelle heure elle se couche, et ce qu'il faut de calme "
+                    "pour qu'elle s'endorme. La fatigue avance l'heure du "
+                    "coucher, elle ne l'empêche jamais.",
+    ),
+    ConfigGroup(
+        section="memory", key="Rêves", order=80,
+        description="Phase REM : elle rapproche des souvenirs de thèmes "
+                    "différents. Un rêve assez net peut être mentionné le "
+                    "lendemain matin.",
+    ),
+    ConfigGroup(
+        section="memory", key="Journal intime", order=90,
+        description="Le récit de la journée écoulée, écrit en début de nuit et "
+                    "relu le lendemain.",
+    ),
+    ConfigGroup(
+        section="memory", key="Sommeil profond", order=100,
+        description="La digestion des pensées qui traînent : elles perdent de "
+                    "l'intensité, changent de couleur, et les plus fortes "
+                    "laissent un souvenir réfléchi.",
+    ),
+    ConfigGroup(
+        section="memory", key="Décroissance", order=110, advanced=True,
+        description="Un souvenir peu sollicité perd de l'importance. Il ne "
+                    "s'efface pas pour autant : sous le seuil il s'endort, et "
+                    "une recherche délibérée le retrouve encore.",
+    ),
+    ConfigGroup(
+        section="memory", key="Rappel associatif", order=120, advanced=True,
+        description="Les deux voies détournées : l'expansion de proche en "
+                    "proche, et l'intrusion — un souvenir chargé qui s'invite "
+                    "sans qu'on l'ait cherché.",
+    ),
+    ConfigGroup(
+        section="memory", key="Épisodique", order=130, advanced=True,
+        description="L'index vectoriel des échanges bruts, qui rend une "
+                    "conversation du jour retrouvable avant même que la nuit "
+                    "en ait tiré quoi que ce soit.",
+    ),
+    ConfigGroup(
+        section="memory", key="Réorganisation nocturne", order=140, advanced=True,
+        description="Regroupement thématique des échanges de la journée et "
+                    "fusion des souvenirs en double.",
+    ),
+    ConfigGroup(
+        section="memory", key="Profils", order=150, advanced=True,
+        description="Cadence de régénération de la fiche que Mika tient sur "
+                    "chaque personne.",
+    ),
+    ConfigGroup(
+        section="memory", key="Auto-narratif", order=160, advanced=True,
+        description="Cadence de régénération du paragraphe « qui tu es "
+                    "devenue », et la matière qu'on lui donne.",
+    ),
+    ConfigGroup(
+        section="memory", key="Outils de mémoire", order=170, advanced=True,
+        description="Plafonds des outils que Mika appelle elle-même pour "
+                    "fouiller sa mémoire en cours de conversation.",
     ),
     ConfigItem(
         key="memory.short_term_limit", type="int", section="memory", group="Court-terme",

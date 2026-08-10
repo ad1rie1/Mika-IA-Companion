@@ -320,6 +320,91 @@ def test_aucune_cle_declaree_deux_fois():
     assert not doublons, f"clés déclarées plusieurs fois : {doublons}"
 
 
+# ── Organisation de l'écran ─────────────────────────────────────────────
+#
+# La mise en forme est déclarative : une section dit sa famille, un groupe dit
+# ce qu'il pilote, un bloc rarement touché se déclare `advanced`. Rien de tout
+# cela n'est obligatoire — une section qui ne déclare rien se rend comme avant.
+# Ces tests ne vérifient donc pas que le mécanisme existe, mais qu'il reste
+# *appliqué* : une section ajoutée demain sans famille retomberait dans « Non
+# classé », et personne ne le remarquerait avant que ce groupe ne redevienne le
+# fourre-tout qu'on vient de démonter.
+
+def _sections_avec_reglages():
+    par_section: dict[str, list] = {}
+    for item in registry.all_items():
+        par_section.setdefault(item.section, []).append(item)
+    return [(s, par_section[s.key]) for s in registry.sections()
+            if par_section.get(s.key)]
+
+
+@pytest.mark.parametrize(
+    "cle", [s.key for s, _ in _sections_avec_reglages()])
+def test_chaque_section_declare_sa_famille_et_son_resume(cle):
+    from GestionSysteme.families import FAMILLE_DEFAUT, family_of
+
+    section = next(s for s in registry.sections() if s.key == cle)
+    assert family_of(section) != FAMILLE_DEFAUT, (
+        f"« {cle} » n'a pas de famille : elle atterrit dans « Non classé », "
+        "au bas de la barre latérale."
+    )
+    assert section.summary, (
+        f"« {cle} » n'a pas de résumé : la barre latérale n'a rien à montrer "
+        "en infobulle, et la section ne se distingue que par son titre."
+    )
+
+
+@pytest.mark.parametrize(
+    "cle", [s.key for s, _ in _sections_avec_reglages()])
+def test_chaque_reglage_est_range_dans_un_bloc_decrit(cle):
+    """Deux exigences en une : un groupe pour chaque réglage, et une
+    description pour chaque groupe.
+
+    Un réglage sans ``group`` tombe dans un bloc anonyme en tête de page —
+    c'est ce qui faisait ressembler une section de soixante réglages à un tas.
+    Un groupe sans ``ConfigGroup`` n'est qu'un titre : il ne peut ni être
+    ordonné, ni être replié, ni dire ce qu'il pilote.
+
+    Les ``record_list`` sont exclus : ils se rendent dans leur propre bloc
+    (un tableau avec ses actions), jamais parmi les champs d'un formulaire.
+    """
+    items = [i for i in registry.all_items()
+             if i.section == cle and i.type != "record_list"]
+    sans_groupe = sorted(i.key for i in items if not i.group)
+    assert not sans_groupe, f"réglages sans bloc dans « {cle} » : {sans_groupe}"
+
+    declares = {g.key for g in registry.groups_for(cle)}
+    orphelins = sorted({i.group for i in items} - declares)
+    assert not orphelins, (
+        f"blocs sans ConfigGroup dans « {cle} » : {orphelins}. "
+        "Sans déclaration, le bloc n'a ni ordre, ni description, ni repli."
+    )
+    for groupe in registry.groups_for(cle):
+        if groupe.key in {i.group for i in items}:
+            assert groupe.description, (
+                f"« {cle} / {groupe.key} » n'explique pas ce qu'il pilote."
+            )
+
+
+def test_les_grosses_sections_replient_une_partie_de_leurs_blocs():
+    """Au-delà d'une trentaine de réglages, tout laisser ouvert redonne le tas.
+
+    Le seuil est haut exprès : il ne prescrit pas une proportion, il attrape le
+    cas où quelqu'un ajoute quarante réglages à une section sans se demander
+    lesquels s'ouvrent en diagnostic seulement.
+    """
+    manquants = []
+    for section, items in _sections_avec_reglages():
+        if len(items) < 30:
+            continue
+        if not any(g.advanced for g in registry.groups_for(section.key)):
+            manquants.append(f"{section.key} ({len(items)} réglages)")
+    assert not manquants, (
+        "sections volumineuses dont aucun bloc n'est replié : "
+        f"{manquants}"
+    )
+
+
 def test_chaque_item_appartient_a_une_section_declaree():
     """Une section absente s'affiche quand même, sous une étiquette inventée
     à partir de sa clé (``render_schema``) — donc un réglage rangé dans une

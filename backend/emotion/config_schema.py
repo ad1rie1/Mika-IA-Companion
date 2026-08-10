@@ -1,7 +1,7 @@
 """Config schema for the emotion engine."""
 from __future__ import annotations
 
-from configs.types import ConfigItem, ConfigSection
+from configs.types import ConfigGroup, ConfigItem, ConfigSection
 
 # Les 29 émotions en couples ``(valeur, libellé)``. La valeur stockée reste le
 # nom canonique de ``emotion/types.py`` — c'est lui que le modèle produit dans
@@ -64,12 +64,77 @@ ANCRAGE_GROUP = "Ancrage relationnel"
 DERIVE_GROUP = "Dérive spontanée"
 GLOBALE_GROUP = "Humeur globale"
 
+DYNAMIQUE_GROUP = "Dynamique"
+
 CONFIG_SCHEMA = [
     ConfigSection(
         key="emotion", label="Émotion", icon="❋", order=40,
+        family="vie_interieure",
+        summary="Son tempérament, et la physique qui la ramène à son humeur de fond.",
         description=(
             "Tempérament du personnage, snapshots, rétention."
         ),
+    ),
+    # ── Organisation de l'écran ─────────────────────────────────────
+    #
+    # Deux blocs se règlent en regardant Mika vivre — le tempérament et les
+    # cadences —, les cinq autres sont la calibration de l'oscillateur PAD :
+    # des nombres qui n'ont de sens que rapportés les uns aux autres, et dont
+    # trois portent un invariant écrit noir sur blanc. Ils restent ouvrables,
+    # cherchables et modifiables, mais repliés : on ne tombe pas dessus en
+    # venant changer une humeur par défaut.
+    ConfigGroup(
+        section="emotion", key=TEMPERAMENT_GROUP, order=10,
+        description="Le caractère de fond : vers quelle émotion elle revient, "
+                    "avec quelle amplitude elle réagit, à quelle vitesse elle "
+                    "encaisse. Cinq curseurs qu'on essaie en regardant l'humeur "
+                    "bouger — tous appliqués sans redémarrage.",
+    ),
+    ConfigGroup(
+        section="emotion", key=DYNAMIQUE_GROUP, order=20,
+        description="Les cadences : à quel rythme l'état est relevé en base et "
+                    "poussé vers l'avatar entre deux répliques, et combien de "
+                    "temps on garde ces relevés. Sans cette poussée, le visage "
+                    "resterait figé sur la dernière phrase dite.",
+    ),
+    ConfigGroup(
+        section="emotion", key=OSC_GROUP, order=30, advanced=True,
+        description="La physique elle-même : constantes de temps du retour au "
+                    "repos, gain d'une impulsion, composition du point de repos. "
+                    "Descendre les deux constantes sous la durée d'un tour "
+                    "(30–120 s) fait disparaître l'émotion d'un tour avant le "
+                    "suivant — prompt, relevé et gestes reliraient tous le repos.",
+    ),
+    ConfigGroup(
+        section="emotion", key=DIFFUSION_GROUP, order=40, advanced=True,
+        description="Ce qui déteint de sa stance envers une personne sur son "
+                    "humeur de fond, et à quelle vitesse celle-ci retombe. "
+                    "Trois clés y portent un invariant : plancher + pente doit "
+                    "valoir le facteur maximal (0.4 + 1.6 = 2.0), sinon le "
+                    "plafond mord avant l'intensité 1.0 ou reste hors d'atteinte.",
+    ),
+    ConfigGroup(
+        section="emotion", key=ANCRAGE_GROUP, order=50, advanced=True,
+        description="Ce qui distingue un ami d'un troll : le point de repos "
+                    "qu'elle finit par avoir envers quelqu'un, comment il "
+                    "s'apprend et comment il cicatrise. La lenteur de "
+                    "l'apprentissage devant la guérison est ce qui donne à la "
+                    "fois de l'attachement et de la rancune.",
+    ),
+    ConfigGroup(
+        section="emotion", key=DERIVE_GROUP, order=60, advanced=True,
+        description="La petite dérive au hasard qui empêche une Mika inactive "
+                    "de tenir exactement son point de repos. Réservée à l'humeur "
+                    "globale ; trop fréquente, les dérives se composent en marche "
+                    "aléatoire visible au lieu d'un frémissement.",
+    ),
+    ConfigGroup(
+        section="emotion", key=GLOBALE_GROUP, order=70, advanced=True,
+        description="Comment son état se raconte dans le prompt : à partir de "
+                    "quelle intensité c'est « nettement plus que d'habitude », et "
+                    "combien de temps la balise [EMOTION:] qu'elle vient d'écrire "
+                    "prime sur la position de l'oscillateur pour dire ce qu'elle "
+                    "éprouve.",
     ),
     ConfigItem(
         key="emotion.temperament.default_mood", type="select", section="emotion",
