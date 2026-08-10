@@ -765,8 +765,17 @@ async def persist_assistant_message(
     — badly, but answered. Re-queuing it at every boot would replay the
     same failure forever.
     """
+    # Les jetons prosodiques sont pour la VOIX. Le frontend les reçoit dans la
+    # trame `speech` et les consomme ; la base, elle, ne doit pas garder des
+    # didascalies : elles ressortaient sur la fiche personne, dans l'historique
+    # rendu au modèle, et l'extraction nocturne en faisait des souvenirs
+    # contenant « [SIGH] ». La réhydratation d'un fil relu par le frontend en
+    # est déjà débarrassée côté client, ce qui rendait les deux vues
+    # incohérentes.
+    from emotion.types import strip_prosody
+
     assistant_id = await memory_manager.add_message(
-        "assistant", response, person_id=person_id,
+        "assistant", strip_prosody(response), person_id=person_id,
         is_internal=is_internal,
     )
     # `int` and not just "not None": a caller whose memory layer is stubbed

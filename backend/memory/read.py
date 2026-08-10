@@ -172,17 +172,64 @@ async def person_profile_for(entity):
 
 
 async def pending_commitments_for(entity, *, limit: int = 5) -> list[str]:
-    """Descriptions of what Mika still owes this person, newest first."""
+    """Ce qu'elle doit encore à cette personne — les plus PRESSANTS d'abord.
+
+    Le tri était `-created_at` : à partir de la sixième promesse, les trois
+    premières — les plus vieilles, donc celles qu'on attend le plus —
+    disparaissaient définitivement du prompt, puis basculaient en `dropped` à
+    trente jours sans avoir jamais été mentionnées ni proposées à résolution.
+    « Et le premier truc dont je t'avais parlé ? » n'avait aucune réponse
+    possible. C'est l'inverse exact de la façon dont une personne porte une
+    promesse : ce qui traîne pèse plus, pas moins.
+
+    L'ordre est donc : d'abord ce qui a une échéance (la plus proche en tête),
+    puis le reste du plus ancien au plus récent. Chaque ligne porte son âge,
+    pour qu'elle puisse dire « ça fait trois semaines » plutôt que de réciter
+    une liste hors du temps.
+    """
+    from django.db.models import F
+    from django.utils import timezone
+
     from memory.models import Commitment
 
-    return await sync_to_async(
-        lambda: list(
+    def _lire() -> list[str]:
+        maintenant = timezone.now()
+        lignes = list(
             Commitment.objects
             .filter(person=entity, status="pending")
-            .order_by("-created_at")
-            .values_list("description", flat=True)[:limit]
+            # `F(...).asc(nulls_last=True)` : une échéance datée passe devant
+            # tout le reste, et l'absence d'échéance ne se trie pas comme une
+            # échéance à l'époque zéro.
+            .order_by(F("due_at").asc(nulls_last=True), "created_at")
+            .values_list("description", "created_at", "due_at")[:limit]
         )
-    )()
+        rendues = []
+        for description, cree_le, echeance in lignes:
+            marque = _anciennete_engagement(maintenant, cree_le, echeance)
+            rendues.append(f"{description}{marque}" if marque else description)
+        return rendues
+
+    return await sync_to_async(_lire)()
+
+
+def _anciennete_engagement(maintenant, cree_le, echeance) -> str:
+    """« (promis il y a trois semaines) », « (échéance dépassée) », ou ''."""
+    if echeance is not None:
+        jours = (echeance - maintenant).days
+        if jours < 0:
+            return " (echeance depassee)"
+        if jours == 0:
+            return " (c'est pour aujourd'hui)"
+        if jours <= 7:
+            return f" (echeance dans {jours} j)"
+    if cree_le is None:
+        return ""
+    jours = (maintenant - cree_le).days
+    if jours >= 14:
+        return f" (promis il y a {jours // 7} semaines)"
+    if jours >= 2:
+        return f" (promis il y a {jours} jours)"
+    return ""
 
 
 async def rows_mentioning_others(model, pks, *, entity_id) -> set[int]:

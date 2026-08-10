@@ -616,3 +616,213 @@ class TestFrontiereIntime:
         assert "Thomas" not in ferme
         assert "quelqu'un" in ferme
         assert "hospitalisee" in ferme, "le fil reste le sien"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 8. Deuxième passe — ce qui reste après les huit premiers correctifs
+# ══════════════════════════════════════════════════════════════════════
+
+@pytest.mark.django_db
+class TestHumeurGlobaleReactive:
+    """`--- TON ETAT EMOTIONNEL ACTUEL ---` est le dernier bloc affectif avant
+    la mémoire, donc celui que le modèle lit le plus fort — et c'était le plus
+    lent de tous à bouger. À gain fixe, il annonçait encore « contente, comme
+    d'habitude » au sixième tour d'une conversation qui finit en larmes."""
+
+    @staticmethod
+    def _moteur(monkeypatch, temperament=None):
+        from emotion.engine import EmotionEngine
+        from emotion.state import Temperament
+
+        monkeypatch.setattr(circadian, "phase_bias", lambda *a, **k: (0.0, 0.0, 0.0))
+        m = EmotionEngine()
+        m.temperament = temperament or Temperament()
+        m._recompute_params()
+        return m
+
+    def test_une_detresse_est_remarquee_des_le_premier_tour_triste(self, monkeypatch):
+        m = self._moteur(monkeypatch)
+        for emo, force in ((Emotion.CURIOUS, 0.3), (Emotion.THINKING, 0.4),
+                           (Emotion.CONFUSED, 0.6), (Emotion.SAD, 0.7)):
+            m.process_emotion(EmotionData(emo, force), "p")
+            m.global_mood.last_update = time.time() - 60
+            for mo in m.person_moods.values():
+                mo.last_update = time.time() - 60
+            m._apply_decay()
+        assert "comme d'habitude" not in m.get_global_mood_context()
+
+    def test_le_gain_suit_l_intensite_declaree(self, monkeypatch):
+        m = self._moteur(monkeypatch)
+        faible = m._global_impulse_params(0.2).impulse_gain
+        forte = m._global_impulse_params(0.95).impulse_gain
+        assert faible < forte
+
+    def test_un_temperament_stoique_compartimente_toujours(self, monkeypatch):
+        """`global_bleed` promet « à 0 elle compartimente entièrement » : la
+        modulation reste RELATIVE au tempérament et ne peut pas passer
+        par-dessus le curseur."""
+        from emotion.state import Temperament
+
+        stoique = Temperament(volatility=0.2, intensity_base=0.3,
+                              recovery_speed=0.8, default_mood=Emotion.NEUTRAL,
+                              global_bleed=0.1)
+        m = self._moteur(monkeypatch, stoique)
+        expansif = self._moteur(monkeypatch)
+        assert (m._global_impulse_params(1.0).impulse_gain
+                < expansif._global_impulse_params(1.0).impulse_gain)
+
+    def test_un_bleed_nul_reste_nul(self, monkeypatch):
+        from emotion.state import Temperament
+
+        m = self._moteur(monkeypatch, Temperament(global_bleed=0.0))
+        assert m._global_impulse_params(1.0).impulse_gain == 0.0
+
+
+@pytest.mark.django_db
+class TestRappelDimensionneAuContexte:
+    """5 souvenirs et 10 connaissances étaient les valeurs d'un petit modèle
+    local. Derrière 256k, `_budget_cap()` accorde ~25 000 caractères au bloc
+    mémoire et le rappel en remplissait ~2 000."""
+
+    @staticmethod
+    def _retriever():
+        from memory.retrieval.retriever import MemoryRetriever
+
+        return MemoryRetriever(MagicMock())
+
+    def test_sans_fenetre_declaree_les_reglages_sont_intacts(self):
+        from unittest.mock import patch
+        from memory.retrieval.retriever import MemoryRetriever
+
+        r = self._retriever()
+        with patch.object(MemoryRetriever, "_budget_cap", return_value=4000):
+            assert r._comptes_adaptes() == (5, 10)
+
+    def test_une_grande_fenetre_lui_rend_de_la_memoire(self):
+        from unittest.mock import patch
+        from memory.retrieval.retriever import MemoryRetriever
+
+        r = self._retriever()
+        with patch.object(MemoryRetriever, "_budget_cap", return_value=25_768):
+            souvenirs, connaissances = r._comptes_adaptes()
+        assert souvenirs > 5 and connaissances > 10
+        assert souvenirs <= MemoryRetriever.MAX_SOUVENIRS
+
+    def test_le_rappel_reste_un_rappel_pas_un_dossier(self):
+        from unittest.mock import patch
+        from memory.retrieval.retriever import MemoryRetriever
+
+        r = self._retriever()
+        with patch.object(MemoryRetriever, "_budget_cap", return_value=1_000_000):
+            souvenirs, connaissances = r._comptes_adaptes()
+        assert souvenirs == MemoryRetriever.MAX_SOUVENIRS
+        assert connaissances == MemoryRetriever.MAX_CONNAISSANCES
+
+
+class TestProsodie:
+    """Les jetons sont pour la VOIX : le frontend les cale sur l'audio, la
+    base et Telegram recevaient des didascalies."""
+
+    def test_le_frontend_garde_tout_la_base_non(self):
+        from emotion.types import extract_emotion, strip_prosody
+
+        brut = ("[EMOTION:embarrassed:0.8] Ah... [PAUSE] ouais. [SIGH] Desolee. "
+                "[PAUSE:300] Voila ! [LAUGH] Promis. [BREATH] Bon.")
+        pour_la_voix, emo = extract_emotion(brut)
+        pour_la_base = strip_prosody(pour_la_voix)
+
+        assert emo is not None
+        for jeton in ("[PAUSE]", "[SIGH]", "[LAUGH]", "[BREATH]", "[PAUSE:300]"):
+            assert jeton in pour_la_voix
+            assert jeton not in pour_la_base
+
+    def test_la_ponctuation_francaise_est_respectee(self):
+        from emotion.types import strip_prosody
+
+        assert strip_prosody("Voila ! [LAUGH] Promis.") == "Voila ! Promis."
+        assert "  " not in strip_prosody("Desolee. [SIGH] Bon.")
+
+    def test_un_texte_sans_jeton_est_inchange(self):
+        from emotion.types import strip_prosody
+
+        texte = "Rien de special ici, juste une phrase."
+        assert strip_prosody(texte) == texte
+
+
+@pytest.mark.django_db
+class TestEngagementsQuiTiennent:
+    """Les cinq PLUS RÉCENTS étaient récités : dès la sixième promesse, les
+    trois premières quittaient le prompt pour toujours puis mouraient en
+    `dropped` sans avoir jamais été dites."""
+
+    async def test_le_plus_ancien_ne_disparait_plus(self):
+        from memory import read
+        from memory.models import Commitment, Entity
+
+        e = await sync_to_async(Entity.objects.create)(
+            name="ThomasEngagements", entity_type="person")
+        maintenant = timezone.now()
+        for description, age in (("le tout premier truc", 25), ("le deuxieme", 20),
+                                 ("le troisieme", 15), ("un recent", 1),
+                                 ("un autre recent", 0), ("le tout dernier", 0)):
+            c = await sync_to_async(Commitment.objects.create)(
+                person=e, description=description, status="pending")
+            await sync_to_async(
+                lambda pk=c.pk, a=age: Commitment.objects.filter(pk=pk).update(
+                    created_at=maintenant - timedelta(days=a)))()
+
+        lignes = await read.pending_commitments_for(e)
+        assert any("le tout premier truc" in l for l in lignes)
+        assert any("semaines" in l for l in lignes), "l'ancienneté est dite"
+
+    async def test_une_echeance_proche_passe_devant(self):
+        from memory import read
+        from memory.models import Commitment, Entity
+
+        e = await sync_to_async(Entity.objects.create)(
+            name="ThomasEcheance", entity_type="person")
+        await sync_to_async(Commitment.objects.create)(
+            person=e, description="sans echeance", status="pending")
+        await sync_to_async(Commitment.objects.create)(
+            person=e, description="pour demain", status="pending",
+            due_at=timezone.now() + timedelta(days=1))
+
+        lignes = await read.pending_commitments_for(e)
+        assert "pour demain" in lignes[0]
+
+
+class TestFenetreConnue:
+    """`context_window` est facultatif sur la ligne modèle, et une install
+    réelle le laisse vide : le budget rendait `None` et TOUT retombait sur les
+    16 384 tokens de repli. Un modèle à 256k était piloté comme un 16k —
+    historique élagué, rappel bridé — sans que rien ne le signale."""
+
+    def test_les_modeles_courants_sont_reconnus(self):
+        from ai.budget import known_window_for
+
+        assert known_window_for("gemma4:31b") == 262_144
+        assert known_window_for("GEMMA4:12B") == 262_144
+        assert known_window_for("claude-opus-5") == 200_000
+
+    def test_un_modele_inconnu_ne_se_voit_rien_inventer(self):
+        from ai.budget import known_window_for
+
+        assert known_window_for("un-modele-jamais-vu") is None
+        assert known_window_for("") is None
+        assert known_window_for(None) is None
+
+    def test_la_ligne_modele_reste_la_source_de_verite(self):
+        """Une valeur déclarée gagne sur la table — y compris plus petite."""
+        from unittest.mock import patch
+
+        from ai.budget import budget_for
+        from ai.router import AIRole
+
+        declare = {"conv": {"provider": "ollama_cloud", "model_id": "gemma4:31b",
+                            "context_window": 8192, "max_tokens": None}}
+        with patch("ai.router.ai_router.resolve",
+                   return_value=("ollama_cloud", "gemma4:31b", 1.0, "conv")), \
+             patch("ai.router.ai_router._get_declared_models", return_value=declare):
+            budget = budget_for(AIRole.CONVERSATION, tools_chars=0)
+        assert budget is not None
+        assert budget.window_room() < 8192

@@ -725,10 +725,27 @@ class TestAntiRepetition:
              patch.object(r, "_importance_intrusion", _intru):
             await r.retrieve_multi(["une question"], person_id="web_a")
 
-        assert vus["demote"] == {7, 42}
+        # La voie directe reçoit désormais des FACTEURS gradués par
+        # l'ancienneté du service, plus un ensemble plat : à égalité de
+        # pénalité l'ordre ne bougeait pas, donc le bloc sortait identique
+        # d'un tour à l'autre. Les deux voies non-lexicales, elles, restent
+        # sur une exclusion dure.
+        assert set(vus["demote"]) == {7, 42}
+        assert all(0 < f < 1 for f in vus["demote"].values())
         assert {7, 42} <= vus["assoc_exclude"]
         assert {7, 42} <= vus["intru_exclude"]
         assert 7 in r._deja_servis("web_a")
+
+    async def test_la_penalite_s_attenue_avec_la_distance_en_tours(self):
+        """Ce qu'elle vient de dire recule plus que ce qu'elle a dit avant."""
+        from memory.retrieval.retriever import MemoryRetriever
+
+        r = MemoryRetriever(MagicMock())
+        r._servis["web_a"] = deque(
+            [("r0", {1}), ("r1", {2}), ("r2", {3})], maxlen=3)
+        p = r._penalites_repetition("web_a")
+        assert p[3] < p[2] < p[1], "le plus récemment servi doit reculer le plus"
+        assert p[1] <= 1.0
 
 
 @pytest.mark.django_db(transaction=True)

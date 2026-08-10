@@ -108,6 +108,36 @@ class MemoryRetriever:
             return set()
         return set().union(*(pks for _rid, pks in seaux))
 
+    def _penalites_repetition(self, person_id: str) -> dict:
+        """pk → facteur de démotion, GRADUÉ par l'ancienneté du service.
+
+        Le mémo appliquait 0.45 à tout le monde indifféremment : à cinq
+        candidats pour cinq places, l'ordre restait rigoureusement le même et
+        le bloc mémoire sortait identique quarante tours de suite. Une remise
+        au même rang n'est pas une anti-répétition.
+
+        Ce qu'on veut est ce que fait un humain : ce qu'il vient de dire, il ne
+        le redit pas tout de suite ; ce qu'il a dit il y a un moment peut
+        revenir. La pénalité s'atténue donc avec la distance en tours, ce qui
+        fait effectivement TOURNER la sélection dès qu'il y a plus de candidats
+        que de places.
+        """
+        seaux = self._servis.get(person_id or "")
+        if not seaux:
+            return {}
+        penalites: dict = {}
+        dernier = len(seaux) - 1
+        for rang, (_rid, pks) in enumerate(seaux):
+            recul = dernier - rang          # 0 = le tour qui vient de passer
+            facteur = RECALL_REPEAT_PENALTY + (1.0 - RECALL_REPEAT_PENALTY) * (
+                recul / max(1, RECALL_MEMO_TURNS)
+            )
+            for pk in pks:
+                # Servi plusieurs fois : c'est le service le plus RÉCENT qui
+                # compte, donc la pénalité la plus forte.
+                penalites[pk] = min(penalites.get(pk, 1.0), facteur)
+        return penalites
+
     def _noter_servis(self, person_id: str, pks: set) -> None:
         """Enregistre ce qui vient d'être servi, en un seau par *tour*.
 
@@ -178,9 +208,17 @@ class MemoryRetriever:
         if not queries:
             return ""
 
-        n_souvenirs = config_service.get("memory.retrieval_souvenirs")
-        n_connaissances = config_service.get("memory.retrieval_connaissances")
         min_importance = config_service.get("memory.min_importance")
+        # Les comptes de rappel SUIVENT la place réellement disponible.
+        #
+        # Ils étaient figés (5 souvenirs, 10 connaissances) à des valeurs
+        # choisies pour un petit modèle local. Derrière une fenêtre de 256k,
+        # `_budget_cap()` accorde ~25 000 caractères au bloc mémoire et le
+        # rappel en remplissait ~2 000 : on lui donnait la place de se souvenir
+        # et elle ne s'en servait pas. Le plancher reste la valeur configurée —
+        # on n'AMPUTE jamais un réglage explicite, on ne fait que l'étendre
+        # quand la fenêtre le permet.
+        n_souvenirs, n_connaissances = self._comptes_adaptes()
 
         # On récupère plus large que nécessaire pour laisser le re-ranking par
         # saillance PROMOUVOIR un souvenir marquant mais lexicalement moins
@@ -238,7 +276,7 @@ class MemoryRetriever:
         memo = self._deja_servis(person_id)
         souvenirs = self._rerank_souvenirs(
             souvenirs, boost_name, mood_pad=mood_pad, weights=weights,
-            demote_pks=memo,
+            demote_pks=self._penalites_repetition(person_id),
         )
 
         # Take top N after reranking
@@ -268,6 +306,39 @@ class MemoryRetriever:
             connaissances, souvenirs, exchanges=exchanges,
             associations=associations, intrusions=intrusions,
             max_chars=self._budget_cap(),
+        )
+
+    #: Un rappel plus large reste un rappel : au-delà, ce n'est plus se
+    #: souvenir, c'est réciter un dossier. Les plafonds valent donc pour une
+    #: fenêtre de 1 M aussi bien que de 256 k.
+    MAX_SOUVENIRS = 15
+    MAX_CONNAISSANCES = 25
+    MAX_EXCHANGES = 10
+    #: Caractères de budget mémoire par souvenir supplémentaire accordé.
+    CHARS_PAR_SOUVENIR = 1800
+
+    def _comptes_adaptes(self) -> tuple[int, int]:
+        """(souvenirs, connaissances) — les réglages, étendus par la place."""
+        from configs.service import config_service
+
+        try:
+            base_s = int(config_service.get("memory.retrieval_souvenirs"))
+            base_c = int(config_service.get("memory.retrieval_connaissances"))
+        except Exception:
+            base_s, base_c = 5, 10
+
+        try:
+            marge = self._budget_cap() - self.MAX_CONTEXT_CHARS
+            if marge <= 0:
+                return base_s, base_c
+            extra = int(marge / self.CHARS_PAR_SOUVENIR)
+        except Exception as exc:
+            degradations.record("rappel: comptes adaptes au budget", exc)
+            return base_s, base_c
+
+        return (
+            min(self.MAX_SOUVENIRS, max(base_s, base_s + extra)),
+            min(self.MAX_CONNAISSANCES, max(base_c, base_c + extra)),
         )
 
     def _budget_cap(self) -> int:
@@ -369,6 +440,18 @@ class MemoryRetriever:
             n_exchanges = int(config_service.get("memory.retrieval_exchanges"))
         except Exception:
             n_exchanges = 3
+        # Même règle que les souvenirs : le verbatim du jour est ce qui rend
+        # « tu te souviens de ce que je t'ai dit ce matin ? » possible, et une
+        # fenêtre large peut en porter davantage.
+        try:
+            marge = self._budget_cap() - self.MAX_CONTEXT_CHARS
+            if marge > 0:
+                n_exchanges = min(
+                    self.MAX_EXCHANGES,
+                    max(n_exchanges, n_exchanges + int(marge / self.CHARS_PAR_SOUVENIR)),
+                )
+        except Exception as exc:
+            degradations.record("rappel: echanges adaptes au budget", exc)
         if n_exchanges <= 0:
             return []
         try:
@@ -402,7 +485,7 @@ class MemoryRetriever:
     def _rerank_souvenirs(
         self, souvenirs: list[dict], boost_name: str, *,
         mood_pad=None, weights: "_SalienceWeights | None" = None,
-        demote_pks: set | None = None,
+        demote_pks: "set | dict | None" = None,
     ) -> list[dict]:
         """Classe les souvenirs par pertinence × récence × personne × SAILLANCE.
 
@@ -457,9 +540,14 @@ class MemoryRetriever:
                 cong = _mood_congruence(mood_pad, s.get("emotion") or "neutral")
                 score *= (1 + w_mood * (cong - 0.5) * 2)
 
-            # Déjà servi il y a peu : il recule, il ne disparaît pas.
-            if demote_pks and s.get("id") in demote_pks:
-                score *= RECALL_REPEAT_PENALTY
+            # Déjà servi il y a peu : il recule, il ne disparaît pas — et il
+            # recule d'autant plus que c'était récent.
+            if demote_pks:
+                sid = s.get("id")
+                if isinstance(demote_pks, dict):
+                    score *= demote_pks.get(sid, 1.0)
+                elif sid in demote_pks:
+                    score *= RECALL_REPEAT_PENALTY
 
             s["_score"] = score
 

@@ -117,6 +117,47 @@ def _usage_ratio() -> float:
     return 0.5
 
 
+# Fenêtres connues, par PRÉFIXE d'identifiant de modèle.
+#
+# `context_window` est un champ facultatif de la ligne modèle, et une install
+# réelle le laisse vide : le budget rendait alors `None` et TOUT retombait sur
+# les planchers de 16 384 tokens — un modèle à 256 k était piloté comme un
+# modèle à 16 k, l'historique élagué, le rappel bridé à cinq souvenirs. Comme
+# rien ne le signalait, la capacité payée n'était simplement jamais utilisée.
+#
+# Les valeurs sont volontairement PRUDENTES (au niveau ou en dessous de la
+# fenêtre annoncée) : sous-estimer ne coûte que du contexte inutilisé, alors
+# que surestimer fait tronquer le provider PAR LA TÊTE, c'est-à-dire par la
+# personnalité. Une valeur déclarée sur la ligne modèle gagne toujours.
+_KNOWN_WINDOWS: tuple[tuple[str, int], ...] = (
+    ("gemma4", 262_144),
+    ("claude-", 200_000),
+    ("gpt-oss", 131_072),
+    ("kimi-k", 131_072),
+    ("glm-", 131_072),
+    ("qwen3", 131_072),
+    ("deepseek-v4", 131_072),
+    ("deepseek-r1", 65_536),
+    ("llama3", 131_072),
+    ("mistral", 32_768),
+)
+
+
+def known_window_for(model_id: str) -> int | None:
+    """Fenêtre connue pour cet identifiant de modèle, ou ``None``.
+
+    Repli seulement : la ligne modèle reste la source de vérité, et un
+    identifiant inconnu ne se voit rien inventer.
+    """
+    identifiant = (model_id or "").strip().lower()
+    if not identifiant:
+        return None
+    for prefixe, fenetre in _KNOWN_WINDOWS:
+        if identifiant.startswith(prefixe):
+            return fenetre
+    return None
+
+
 def default_window_tokens() -> int:
     """Fenêtre de repli quand le modèle déclaré n'en porte pas.
 
@@ -253,7 +294,9 @@ def budget_for(role, *, tools_chars: int | None = None) -> ContextBudget | None:
         except UnconfiguredRoleError:
             return None
         entry = ai_router._get_declared_models().get(internal_name) or {}
-        window = entry.get("context_window")
+        window = entry.get("context_window") or known_window_for(
+            entry.get("model_id") or "",
+        )
         if not window:
             return None
         return build_budget(

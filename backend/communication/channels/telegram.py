@@ -460,9 +460,11 @@ class TelegramChannel:
             return False
         try:
             if clip.mime_type in ("audio/ogg", "audio/opus"):
+                from emotion.types import strip_prosody
+
                 await self._app.bot.send_voice(
                     chat_id=int(chat_id), voice=clip.data,
-                    caption=output.text[:1024],
+                    caption=strip_prosody(output.text)[:1024],
                 )
             else:
                 await self._app.bot.send_audio(
@@ -484,7 +486,14 @@ class TelegramChannel:
         if not chat_id:
             return False
         try:
-            await self._app.bot.send_message(chat_id=int(chat_id), text=output.text)
+            # Telegram n'a pas de voix de synthèse : les jetons prosodiques y
+            # arrivaient en clair (« Ah... [PAUSE] ouais. [SIGH] Désolée. »).
+            # Ils sont destinés au seul frontend, qui les cale sur l'audio.
+            from emotion.types import strip_prosody
+
+            await self._app.bot.send_message(
+                chat_id=int(chat_id), text=strip_prosody(output.text),
+            )
             return True
         except Exception:
             logger.exception(

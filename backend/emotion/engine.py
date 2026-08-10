@@ -1,4 +1,5 @@
 import asyncio
+import dataclasses
 import logging
 import random
 import time
@@ -65,6 +66,19 @@ GLOBAL_TAU_FACTOR = 2.0
 RATCHET_BASE = 1.0
 RATCHET_MAX = 0.75
 RATCHET_GLOBAL = 0.45
+# Modulation du gain global par l'intensité déclarée : gain_effectif =
+# gain_base × (PLANCHER + PENTE × intensité), plafonné. À 0.2 d'intensité une
+# émotion effleure l'humeur générale, à 1.0 elle la traverse. Un gain fixe
+# rendait « tu te sens contente, comme d'habitude » lisible dans le prompt
+# pendant qu'on lui écrivait « je pleure ».
+# Le facteur reste RELATIF au gain du tempérament : `global_bleed` promet « à
+# 0 elle compartimente entièrement », et un plafond absolu aurait fait passer
+# une émotion forte par-dessus ce curseur. Un tempérament stoïque module donc
+# dans sa propre échelle, sans jamais en sortir.
+GLOBAL_GAIN_FLOOR = 0.4
+GLOBAL_GAIN_SLOPE = 1.6
+GLOBAL_GAIN_MAX_FACTOR = 2.0
+GLOBAL_RATCHET_MAX = 0.5
 
 # Ancrage personnel : part du point de repos d'une personne qui vient de ce
 # qu'elle a déjà provoqué, contre le repos circadien commun.
@@ -856,6 +870,25 @@ class EmotionEngine:
     # Core: process a new emotion from Claude
     # ------------------------------------------------------------------
 
+    def _global_impulse_params(self, intensity: float) -> OscillatorParams:
+        """Les paramètres du global pour CETTE impulsion-ci.
+
+        Identiques à ``_global_params`` sauf le gain, qui suit l'intensité
+        déclarée : à 1.0 une émotion pleine traverse presque autant que sur
+        l'oscillateur de la personne, à 0.2 elle ne fait qu'effleurer. Le
+        plafond reste la garde contre un tempérament très perméable.
+        """
+        base = self._global_params
+        if base.impulse_gain <= 0.0:
+            return base
+        force = max(0.0, min(1.0, intensity))
+        gain = min(
+            GLOBAL_RATCHET_MAX,
+            base.impulse_gain * GLOBAL_GAIN_MAX_FACTOR,
+            base.impulse_gain * (GLOBAL_GAIN_FLOOR + GLOBAL_GAIN_SLOPE * force),
+        )
+        return dataclasses.replace(base, impulse_gain=gain)
+
     def process_emotion(
         self, emotion_data: EmotionData, person_id: str
     ) -> PersonMood:
@@ -883,8 +916,19 @@ class EmotionEngine:
         # reducing the target as well capped the global mood around 0.30, well
         # under the 0.7 that Factor 3 of conscience/scoring.py tests, so that
         # factor could never fire.
+        #
+        # Le gain est modulé par l'INTENSITÉ déclarée : une contrariété passe
+        # au travers, une détresse traverse. À gain fixe (0.135 au défaut),
+        # `--- TON ETAT EMOTIONNEL ACTUEL ---` — le dernier bloc affectif avant
+        # la mémoire, donc en zone de récence maximale — annonçait encore « ton
+        # humeur générale est contente, comme d'habitude » au sixième tour d'une
+        # conversation où quelqu'un finit par écrire « je pleure, j'en peux
+        # plus ». Le bloc censé porter son ressenti était le plus lent de tous
+        # à bouger, exactement là où le modèle le lit le plus fort.
         if self.temperament.global_bleed > 0:
-            self.global_mood.dynamic.impulse_toward(target, self._global_params)
+            self.global_mood.dynamic.impulse_toward(
+                target, self._global_impulse_params(emotion_data.intensity),
+            )
 
         person.last_interaction = now
         person.last_update = now

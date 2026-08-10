@@ -64,6 +64,37 @@ class EmotionData:
         return EmotionData(emotion=Emotion.NEUTRAL, intensity=0.5)
 
 
+#: Les jetons prosodiques que la personnalité autorise. Ils sont *pour la
+#: voix* : le frontend les consomme dans `TTSService.onProsodicCue` pour caler
+#: un soupir ou un rire sur l'audio. Partout ailleurs ce sont des parasites.
+PROSODY_PATTERN = re.compile(
+    r"\[(?:SIGH|LAUGH|BREATH|PAUSE(?::\s*\d+)?)\]", re.IGNORECASE,
+)
+
+
+def strip_prosody(text: str) -> str:
+    """Retire les jetons prosodiques d'un texte qui ne va pas à la voix.
+
+    `extract_emotion` ne retire que la balise `[EMOTION:]` ; `[PAUSE]`,
+    `[SIGH]`, `[LAUGH]` et `[BREATH]` restaient donc dans le texte livré au
+    client ET persisté. Conséquence : Telegram recevait « Ah... [PAUSE] ouais,
+    c'est vrai. [SIGH] Désolée. » tel quel, la fiche personne aussi, et
+    l'extraction nocturne fabriquait des souvenirs contenant des didascalies.
+    Le frontend, lui, en a besoin — c'est le seul consommateur légitime, et
+    c'est lui qui garde le texte brut.
+
+    Les espaces laissés par la coupe sont recollés : « Désolée. [SIGH] Bon. »
+    ne doit pas devenir « Désolée.  Bon. ». On ne touche RIEN d'autre — en
+    français l'espace avant « ! », « ? », « ; » et « : » est correcte, et la
+    « nettoyer » abîmerait la ponctuation du texte qu'elle vient d'écrire.
+    """
+    if not text:
+        return text
+    sans = PROSODY_PATTERN.sub("", text)
+    sans = re.sub(r"[ \t]{2,}", " ", sans)
+    return "\n".join(ligne.strip() for ligne in sans.splitlines()).strip()
+
+
 def extract_emotion(text: str) -> tuple[str, EmotionData | None]:
     """Extract emotion tag from Claude's response.
 
