@@ -8,12 +8,18 @@
    champ en dur : ajouter un ConfigItem le fait apparaître ici. {% endcomment %}
 
 {% comment %} Trois emplacements, toujours les trois, dans cet ordre : libellé,
-   description, contrôle. C'est ce qui permet à `.form-grid` d'aligner les
-   saisies d'une même ligne (voir « Alignement » dans components.css) : les
-   descriptions n'ont pas la même hauteur — aucune, une ligne, deux — et
-   chaque champ empilait donc sa saisie à un endroit différent. La
-   description est émise même vide : un emplacement manquant décalerait le
-   contrôle d'une piste. {% endcomment %}
+   contrôle, notes. C'est ce qui permet à `.form-grid` d'aligner les saisies
+   d'une même ligne (voir « Alignement » dans components.css).
+
+   L'ordre a son importance et n'est pas celui d'origine. La description était
+   AU MILIEU, entre le libellé et la saisie : comme la ligne donne à chaque
+   piste la hauteur du plus grand, un champ sans description héritait du trou
+   creusé par le voisin qui en avait trois lignes — libellé en haut, saisie en
+   bas, un vide au milieu. Toute la prose est donc passée SOUS la saisie, avec
+   l'indice : une piste vide en dernier ne pousse plus rien.
+
+   Les trois emplacements sont émis même vides — un emplacement absent
+   décalerait le contrôle d'une piste. {% endcomment %}
 
 {% if f.widget == "checkbox" %}
   <div class="field field-check {% if f.error %}has-error{% endif %}">
@@ -23,39 +29,47 @@
              {% if f.checked %}checked{% endif %}
              {% if f.item.readonly %}disabled{% endif %}>
       <label class="field-label" for="c-{{ f.name }}">
-        {{ f.label }}
-        {% if f.item.hot_reload %}<span class="field-flag hot" title="Pris en compte sans redémarrage">à chaud</span>{% endif %}
-        {% if f.item.restart_required %}<span class="field-flag restart" title="Nécessite un redémarrage">redémarrage</span>{% endif %}
+        <span class="field-name">{{ f.label }}</span>
+        <span class="field-flags">
+          {% if f.porte_un_defaut and not f.is_default %}<span class="field-mod" title="Valeur enregistrée — ne suit plus le défaut déclaré">modifié</span>{% endif %}
+          {% if f.item.hot_reload %}<span class="field-flag hot" title="Pris en compte sans redémarrage">à chaud</span>{% endif %}
+          {% if f.item.restart_required %}<span class="field-flag restart" title="Nécessite un redémarrage">redémarrage</span>{% endif %}
+        </span>
       </label>
     </div>
-    <div class="field-desc">{% if f.item.description %}{{ f.item.description }}{% endif %}</div>
-    <div class="field-control">
+    {% comment %} Une case à cocher n'a pas de saisie distincte : sa boîte occupe
+       la piste du libellé. La piste du contrôle reste émise, vide, pour que le
+       champ garde ses trois pistes et reste aligné sur ses voisins. {% endcomment %}
+    <div class="field-control"></div>
+    <div class="field-notes">
+      {% if f.item.description %}<div class="field-desc">{{ f.item.description }}</div>{% endif %}
       {% if f.item.hint %}<div class="field-hint">{{ f.item.hint }}</div>{% endif %}
       {% if f.error %}<div class="field-error">{{ f.error }}</div>{% endif %}
     </div>
   </div>
 
 {% else %}
-  {% comment %} `lines` occupe toute la largeur au même titre qu'un `textarea` :
-     c'est le même contrôle, et une zone de saisie de prose dans une colonne
-     étroite rend chaque trait de caractère illisible sur trois lignes. {% endcomment %}
   <div class="field {% if f.widget == 'textarea' or f.widget == 'lines' %}field-full{% endif %} {% if f.error %}has-error{% endif %}">
     {% if marker %}<input type="hidden" name="__champ" value="{{ f.name }}">{% endif %}
 
     <label class="field-label" for="c-{{ f.name }}">
-      {{ f.label }}
+      <span class="field-name">{{ f.label }}</span>
       {% comment %} « Modifié » = une valeur est enregistrée en base, donc ce
          réglage ne suit plus le défaut déclaré. C'est le repère qui manquait
          le plus : sans lui, « réglé à 0,5 » et « laissé à 0,5 » sont
          indiscernables quand on cherche pourquoi deux installations ne se
          comportent pas pareil. {% endcomment %}
-      {% if not f.is_default %}<span class="field-mod" title="Valeur enregistrée — ne suit plus le défaut déclaré">modifié</span>{% endif %}
-      {% if f.item.hot_reload %}<span class="field-flag hot" title="Pris en compte sans redémarrage">à chaud</span>{% endif %}
-      {% if f.item.restart_required %}<span class="field-flag restart" title="Nécessite un redémarrage">redémarrage</span>{% endif %}
-      {% if f.item.readonly %}<span class="field-flag" title="Valeur attribuée par le serveur">lecture seule</span>{% endif %}
+      {% comment %} Les pastilles sont groupées : sans ça, un libellé long les
+         séparait — « modifié » restait accroché à la fin du nom et « à chaud »
+         partait seul à la ligne suivante. Groupées, elles descendent
+         ensemble. {% endcomment %}
+      <span class="field-flags">
+        {% if f.porte_un_defaut and not f.is_default %}<span class="field-mod" title="Valeur enregistrée — ne suit plus le défaut déclaré">modifié</span>{% endif %}
+        {% if f.item.hot_reload %}<span class="field-flag hot" title="Pris en compte sans redémarrage">à chaud</span>{% endif %}
+        {% if f.item.restart_required %}<span class="field-flag restart" title="Nécessite un redémarrage">redémarrage</span>{% endif %}
+        {% if f.item.readonly %}<span class="field-flag" title="Valeur attribuée par le serveur">lecture seule</span>{% endif %}
+      </span>
     </label>
-
-    <div class="field-desc">{% if f.item.description %}{{ f.item.description }}{% endif %}</div>
 
     <div class="field-control">
     {% if f.widget == "textarea" %}
@@ -77,14 +91,6 @@
              autocomplete="new-password" spellcheck="false"
              placeholder="{% if f.has_secret_value %}inchangé{% else %}non défini{% endif %}"
              {% if f.item.readonly %}readonly{% endif %}>
-      <div class="secret-state">
-        {% if f.has_secret_value %}
-          <span class="dot dot-ok"></span>
-          <span>défini <span class="mono">{{ f.secret_preview }}</span> — laisser vide pour conserver</span>
-        {% else %}
-          <span class="dot"></span><span>aucune valeur enregistrée</span>
-        {% endif %}
-      </div>
 
     {% elif f.widget == "select" %}
       <select id="c-{{ f.name }}" name="{{ f.name }}" {% if f.item.readonly %}disabled{% endif %}>
@@ -105,7 +111,6 @@
     {% elif f.widget == "list" %}
       <input type="text" id="c-{{ f.name }}" name="{{ f.name }}" value="{{ f.text_value }}"
              {% if f.item.readonly %}readonly{% endif %}>
-      <div class="field-hint">Valeurs séparées par des virgules.</div>
 
     {% elif f.widget == "lines" %}
       {% comment %} Une phrase par ligne. Le séparateur est le saut de ligne
@@ -113,15 +118,37 @@
          de caractère est une phrase, pas un mot-clé. {% endcomment %}
       <textarea id="c-{{ f.name }}" name="{{ f.name }}" rows="6"
                 {% if f.item.readonly %}readonly{% endif %}>{{ f.text_value }}</textarea>
-      <div class="field-hint">Une valeur par ligne. Les lignes vides sont ignorées.</div>
 
     {% else %}
       <input type="text" id="c-{{ f.name }}" name="{{ f.name }}" value="{{ f.text_value }}"
              {% if f.item.readonly %}readonly{% endif %}>
     {% endif %}
+    </div>
 
-    {% if f.item.hint %}<div class="field-hint">{{ f.item.hint }}</div>{% endif %}
-    {% if f.error %}<div class="field-error">{{ f.error }}</div>{% endif %}
+    {% comment %} Toute la prose du champ, sous la saisie : description déclarée,
+       indice, format de saisie, erreur. Un champ qui n'a rien à dire rend un
+       bloc vide, qui ne pousse rien puisqu'il est en dernier. {% endcomment %}
+    <div class="field-notes">
+      {% comment %} L'état d'un secret est du TEXTE, et il va donc avec le reste
+         du texte, sous la saisie. Il vivait dans la piste du contrôle, dont il
+         fixait la hauteur pour toute la rangée : les champs voisins voyaient
+         alors leur saisie suivie de soixante-dix pixels de vide avant leur
+         propre description. {% endcomment %}
+      {% if f.widget == "secret" %}
+        <div class="secret-state">
+          {% if f.has_secret_value %}
+            <span class="dot dot-ok"></span>
+            <span>défini <span class="mono">{{ f.secret_preview }}</span> — laisser vide pour conserver</span>
+          {% else %}
+            <span class="dot"></span><span>aucune valeur enregistrée</span>
+          {% endif %}
+        </div>
+      {% endif %}
+      {% if f.widget == "list" %}<div class="field-hint">Valeurs séparées par des virgules.</div>{% endif %}
+      {% if f.widget == "lines" %}<div class="field-hint">Une valeur par ligne. Les lignes vides sont ignorées.</div>{% endif %}
+      {% if f.item.description %}<div class="field-desc">{{ f.item.description }}</div>{% endif %}
+      {% if f.item.hint %}<div class="field-hint">{{ f.item.hint }}</div>{% endif %}
+      {% if f.error %}<div class="field-error">{{ f.error }}</div>{% endif %}
     </div>
   </div>
 {% endif %}

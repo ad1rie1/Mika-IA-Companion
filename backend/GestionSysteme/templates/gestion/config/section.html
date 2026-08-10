@@ -50,9 +50,9 @@
   </nav>
 
   <div>
-    {% if section.description %}
-      <div class="alert alert-info mb-4">{{ section.description }}</div>
-    {% endif %}
+  {% comment %} Pas d'encadré de description ici : `page_context` la
+     passe déjà à l'en-tête de page, qui la rend en `.page-desc`. Les deux
+     coexistaient, et la même phrase s'affichait deux fois de suite. {% endcomment %}
 
     {% include "gestion/partials/reglages.html" %}
     {% include "gestion/partials/listes.html" %}

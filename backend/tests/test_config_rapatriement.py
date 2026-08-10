@@ -415,3 +415,186 @@ def test_chaque_item_appartient_a_une_section_declaree():
         i.key for i in registry.all_items() if i.section not in sections
     })
     assert not orphelins, f"réglages sans section déclarée : {orphelins}"
+
+
+# ── Mise en page d'un champ ─────────────────────────────────────────────
+#
+# La grille aligne les champs d'une même ligne en donnant à chaque piste la
+# hauteur du plus grand. L'ORDRE des pistes décide donc où tombe le vide quand
+# les champs sont inégaux : description au milieu, un champ qui n'en a pas
+# héritait du trou creusé par son voisin — libellé en haut, saisie en bas,
+# et un blanc entre les deux. Toute la prose est en dernière piste.
+
+_PAGES_ECHANTILLON = ("emotion", "memory", "conscience", "personnalite_traits",
+                      "ai_providers", "projects")
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("section", _PAGES_ECHANTILLON)
+def test_la_prose_dun_champ_vient_apres_sa_saisie(section):
+    """Libellé, puis saisie, puis notes — dans cet ordre, dans chaque champ."""
+    from django.test import Client
+
+    import re
+
+    html = Client().get(f"/gestion/configuration/{section}/").content.decode()
+    # Le conteneur seul : ``class="field "`` ou ``class="field"``. Découper sur
+    # ``class="field`` tout court attraperait aussi ``field-label`` et
+    # ``field-notes``, et chaque fragment ne contiendrait plus qu'une piste —
+    # le test passerait alors sans jamais rien comparer.
+    champs = re.split(r'<div class="field[ "]', html)[1:]
+    assert champs, f"aucun champ rendu dans « {section} »"
+
+    vus = 0
+    for champ in champs:
+        i_lab = champ.find('class="field-label"')
+        i_ctl = champ.find('class="field-control"')
+        i_not = champ.find('class="field-notes"')
+        if min(i_lab, i_ctl, i_not) < 0:
+            continue
+        assert i_lab < i_ctl < i_not, (
+            f"pistes dans le désordre dans « {section} » : la description doit "
+            "suivre la saisie, sinon un champ sans prose hérite du vide de son "
+            "voisin."
+        )
+        # Et pas seulement les conteneurs : AUCUNE prose ne doit précéder la
+        # saisie. Sans cette seconde assertion, réinsérer une description entre
+        # le libellé et le contrôle laissait le test vert — l'ordre des trois
+        # conteneurs restait bon, et le vide revenait quand même.
+        for classe in ("field-desc", "field-hint", "secret-state"):
+            avant = champ.find(f'class="{classe}"')
+            assert avant < 0 or avant > i_ctl, (
+                f"« {classe} » rendu avant la saisie dans « {section} » : "
+                "toute la prose d'un champ va sous le contrôle."
+            )
+        # La piste du contrôle ne porte QUE la saisie. Sa hauteur est celle du
+        # plus grand contrôle de la rangée : y glisser du texte — c'était le
+        # cas de l'état d'un champ secret — allongeait la piste pour tous, et
+        # les champs voisins voyaient leur saisie suivie de plusieurs dizaines
+        # de pixels de vide avant leur propre description.
+        controle = champ[i_ctl:i_not]
+        for classe in ("field-desc", "field-hint", "secret-state"):
+            assert f'class="{classe}"' not in controle, (
+                f"« {classe} » est dans la piste du contrôle de « {section} » : "
+                "elle en fixerait la hauteur pour toute la rangée."
+            )
+        vus += 1
+    assert vus, f"aucun champ complet analysé dans « {section} »"
+
+
+@pytest.mark.django_db
+def test_une_description_absente_ne_rend_aucune_balise():
+    """Une piste vide doit être vide, pas contenir un conteneur vide.
+
+    L'ancien gabarit émettait ``<div class="field-desc"></div>`` même sans
+    description, pour garder les trois emplacements. La piste étant désormais
+    en dernier, le conteneur ne sert plus à rien : ce qui tient l'alignement,
+    c'est ``field-notes``, toujours émis.
+    """
+    from django.test import Client
+
+    for section in _PAGES_ECHANTILLON:
+        html = Client().get(f"/gestion/configuration/{section}/").content.decode()
+        assert '<div class="field-desc"></div>' not in html, section
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("section", _PAGES_ECHANTILLON)
+def test_la_grille_suit_le_nombre_de_champs(section):
+    """Un bloc de deux réglages ne réserve pas une troisième colonne vide.
+
+    La grille par défaut est en ``auto-fill`` : elle crée autant de colonnes
+    que la largeur en accepte, occupées ou non. Sur une carte large ça fait
+    trois colonnes, donc un bloc de deux réglages en laissait une vide et un
+    bloc d'un seul en laissait deux — un vide qui se lit comme un défaut
+    d'alignement plutôt que comme un choix. Le gabarit déclare donc
+    ``cols-1`` / ``cols-2`` à partir du compte que la vue connaît déjà.
+    """
+    import re
+
+    from django.test import Client
+
+    html = Client().get(f"/gestion/configuration/{section}/").content.decode()
+    blocs = re.split(r'<details class="card cfg-bloc', html)[1:]
+    assert blocs, f"aucun bloc rendu dans « {section} »"
+
+    for bloc in blocs:
+        grille = re.search(r'<div class="form-grid([^"]*)"', bloc)
+        if not grille:
+            continue
+        champs = bloc.count('name="__champ"')
+        classe = grille.group(1).strip()
+        attendu = {1: "cols-1", 2: "cols-2"}.get(champs, "")
+        titre = re.search(r"<h3>([^<]+)</h3>", bloc)
+        assert classe == attendu, (
+            f"« {section} / {titre.group(1) if titre else '?'} » a {champs} "
+            f"réglage(s) mais une grille {classe or 'automatique'} — attendu "
+            f"{attendu or 'automatique'}."
+        )
+
+
+# ── Pages d'ajout / modification d'une ligne ────────────────────────────
+
+@pytest.mark.django_db
+def test_une_ligne_neuve_ne_montre_pas_de_pastille_modifie():
+    """« Modifié » compare une valeur à un défaut déclaré. Une ligne de liste
+    — un compte, un flux, un modèle — est une donnée : elle n'en a pas.
+
+    Le défaut était silencieux et total : ``RecordField`` ne définissait pas
+    ``is_default``, Django résout un attribut manquant en chaîne vide, donc
+    ``{% if not f.is_default %}`` valait vrai et la pastille s'affichait sur
+    TOUS les champs de TOUTES les lignes.
+    """
+    from django.test import Client
+
+    html = Client().get(
+        "/gestion/configuration/accounts/accounts.users/nouveau/"
+    ).content.decode()
+    assert 'class="field-mod"' not in html
+
+
+@pytest.mark.django_db
+def test_un_champ_attribue_par_le_serveur_est_masque_a_la_creation():
+    """``person_id`` est en lecture seule et attribué à la création du compte.
+
+    Sur la ligne qui n'existe pas encore il n'a aucune valeur à montrer et
+    aucune saisie à recevoir — c'était une case vide et grisée que rien ne
+    remplira. Sur une ligne existante il redevient utile : c'est là qu'on lit
+    sous quelle identité Mika connaît la personne.
+    """
+    from django.contrib.auth import get_user_model
+    from django.test import Client
+
+    client = Client()
+    creation = client.get(
+        "/gestion/configuration/accounts/accounts.users/nouveau/"
+    ).content.decode()
+    assert "person_id" not in creation
+
+    compte = get_user_model().objects.create_user("essai", password="Xk9!vbQ2mzPl")
+    edition = client.get(
+        f"/gestion/configuration/accounts/accounts.users/{compte.pk}/"
+    ).content.decode()
+    assert "person_id" in edition
+
+
+def test_aucune_page_ne_bride_sa_largeur_en_style_en_ligne():
+    """Les formulaires d'ajout et de modification occupent la carte.
+
+    Deux d'entre eux portaient un ``max-width`` en style en ligne (62rem pour
+    une ligne de liste, 68rem pour un projet), ce qui laissait un tiers de
+    l'écran vide. La grille interne borne déjà chaque colonne ; brider le
+    conteneur par-dessus ne fait que déplacer le vide.
+
+    Les ``min-width`` sont épargnés : ce sont des indications de colonne de
+    tableau, qui empêchent une cellule de texte de s'écraser.
+    """
+    gabarits = (BACKEND / "GestionSysteme" / "templates").rglob("*.html")
+    fautifs = [
+        chemin.name for chemin in gabarits
+        if "max-width" in chemin.read_text(encoding="utf-8")
+    ]
+    assert not fautifs, (
+        f"largeur bridée en style en ligne : {fautifs}. La largeur se décide "
+        "dans la feuille de style, pas gabarit par gabarit."
+    )

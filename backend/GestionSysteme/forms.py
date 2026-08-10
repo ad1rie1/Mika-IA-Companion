@@ -135,6 +135,10 @@ class BoundField:
     def step(self) -> str:
         return "1" if self.item.type == "int" else "any"
 
+    #: Un réglage se compare à un défaut déclaré au registre — la pastille
+    #: « modifié » a donc un sens ici. Voir ``RecordField`` pour l'autre cas.
+    porte_un_defaut = True
+
     @property
     def is_default(self) -> bool:
         """La valeur affichée est-elle celle du schéma ?
@@ -281,6 +285,17 @@ class RecordField:
     # dépendent d'un autre champ et d'un appel réseau.
     dynamic_options: list[tuple[str, str]] | None = None
 
+    #: Une ligne de liste est une DONNÉE, pas un réglage : un compte, un flux
+    #: RSS, un modèle déclaré. Il n'existe aucun « défaut déclaré » auquel la
+    #: comparer, donc la pastille « modifié » n'a rien à dire ici.
+    #:
+    #: L'attribut est déclaré plutôt que déduit parce que son absence ne se
+    #: voyait pas : le gabarit testait ``is_default``, que cette classe ne
+    #: définissait pas, et Django résout un attribut manquant en chaîne vide —
+    #: donc faux, donc « modifié » s'affichait sur TOUS les champs de toutes
+    #: les lignes. Un attribut nommé rend l'oubli impossible à répéter.
+    porte_un_defaut = False
+
     @property
     def name(self) -> str:
         return self.item.key
@@ -397,8 +412,18 @@ def build_record_form(
     payload = dict((row or {}).get("payload") or {})
     dynamic = dyn.for_list(item.key)
 
+    nouvelle_ligne = not (row or {}).get("row_id")
+
     fields = []
     for f in (item.record.fields if item.record else ()):
+        # Un champ en lecture seule est attribué par le serveur (``person_id``
+        # l'est à la création du compte). Sur une ligne qui n'existe pas encore
+        # il n'a aucune valeur à montrer et aucune saisie à recevoir : le
+        # rendre affichait une case vide, grisée, que rien ne remplira jamais.
+        # Sur une ligne existante il redevient utile — c'est là qu'on lit
+        # l'identité attribuée.
+        if f.readonly and nouvelle_ligne:
+            continue
         champ = RecordField(item=f, value=payload.get(f.key, f.default))
         if dynamic is not None and f.key == dynamic.field_key and options:
             champ.dynamic_options = options

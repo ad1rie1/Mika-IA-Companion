@@ -480,36 +480,73 @@ a.chip:hover { background: var(--surface-3); color: var(--text); text-decoration
 }
 .form-grid .field-full { grid-column: 1 / -1; }
 
-/* Alignement : les trois pistes d'un champ — libellé, description, contrôle —
-   sont portées par la LIGNE, pas par le champ.
+/* Variantes selon le nombre de champs du bloc.
 
-   Sans cela chaque champ empile librement, et comme les descriptions n'ont pas
-   la même hauteur (aucune, une ligne, deux), les saisies d'une même ligne
-   tombaient à trois hauteurs différentes. La sous-grille donne à chaque piste
-   la hauteur du plus grand de la ligne : les libellés commencent ensemble, les
-   saisies aussi. Rien ici ne dépend du nombre de champs ni de leur type — un
-   ConfigItem ajouté au registre s'y range tout seul.
+   `auto-fill` crée autant de colonnes que la largeur en accepte, qu'elles
+   soient occupées ou non : un bloc de deux réglages en remplissait deux sur
+   trois et laissait la troisième vide, un bloc d'un seul en laissait deux.
+   Le vide se lisait comme un bug d'alignement, pas comme un choix.
+
+   `auto-fit` aurait suffi à faire disparaître les colonnes vides, mais en
+   étirant les champs restants sur toute la largeur — une saisie numérique de
+   huit cents pixels pour écrire « 0 ». On déclare donc le nombre de colonnes,
+   à partir d'un compte que la vue connaît déjà. */
+.form-grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.form-grid.cols-1 { grid-template-columns: minmax(0, 1fr); }
+
+/* Un champ seul ne s'étire pas jusqu'au bord : au-delà d'une certaine largeur
+   une saisie d'une ligne devient illisible, l'œil ne sait plus quelle étiquette
+   la commande. Les zones de texte (`field-full` — `text` et `lines`) sont
+   exemptées : elles, la largeur les sert, c'est de la prose qu'on y écrit. */
+.form-grid.cols-1 > .field:not(.field-full) { max-width: 42rem; }
+
+/* Deux colonnes déclarées ne se replient pas toutes seules : `minmax(0, 1fr)`
+   accepte de descendre sous la largeur du contenu, là où le `minmax(280px, …)`
+   du cas général passait à une colonne de lui-même. Sans cette règle, un bloc
+   de deux réglages restait sur deux colonnes écrasées sur un téléphone. */
+@media (max-width: 900px) {
+  .form-grid.cols-2 { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Alignement : les trois pistes d'un champ — libellé, contrôle, notes — sont
+   portées par la LIGNE, pas par le champ.
+
+   Sans cela chaque champ empile librement, et comme les libellés et les notes
+   n'ont pas la même hauteur, les saisies d'une même ligne tombaient à trois
+   hauteurs différentes. La sous-grille donne à chaque piste la hauteur du plus
+   grand de la ligne : les libellés commencent ensemble, les saisies aussi.
+   Rien ici ne dépend du nombre de champs ni de leur type — un ConfigItem
+   ajouté au registre s'y range tout seul.
+
+   L'ORDRE des pistes est la deuxième moitié du problème, et il a changé. La
+   description était au milieu, entre le libellé et la saisie : un champ sans
+   description héritait alors du trou creusé par le voisin qui en avait trois
+   lignes — libellé en haut, saisie en bas, un grand vide entre les deux. Toute
+   la prose est donc passée en DERNIÈRE piste, sous la saisie. Une piste vide
+   en fin de champ ne pousse plus rien.
 
    Les gabarits `partials/field.html` et `partials/django_field.html` émettent
-   donc toujours les trois emplacements, description comprise même vide : un
-   emplacement absent décalerait le contrôle d'une piste. */
+   toujours les trois emplacements, y compris vides : un emplacement absent
+   décalerait le contrôle d'une piste. */
 .form-grid > .field {
   display: grid;
   grid-template-rows: subgrid;
   grid-row: span 3;
 }
 .field-control { display: flex; flex-direction: column; min-width: 0; }
-/* Une description vide ne doit pas réserver sa marge : sur une ligne où aucun
-   champ n'en a, la piste doit disparaître. */
-.field-desc:empty { margin: 0; }
+/* Un champ sans prose rend un bloc de notes vide. Pas de `:empty` ici : le
+   gabarit y laisse des blancs, donc le sélecteur ne mordrait jamais. C'est la
+   marge portée par le PREMIER ENFANT qui fait le travail — sans enfant, pas
+   de marge, et le bloc mesure zéro. Sur une ligne où aucun champ n'a de
+   prose, la piste disparaît d'elle-même. */
+.field-notes > :first-child { margin-top: var(--sp-2); }
 
-/* Repli sans sous-grille (Safari < 16, Chrome < 117) : le contrôle est poussé
-   en bas du champ. Les saisies d'une ligne s'alignent quand même — jamais pire
-   que l'empilement d'origine, seulement moins exact si un champ porte une
-   note SOUS sa saisie. */
+/* Repli sans sous-grille (Safari < 16, Chrome < 117) : les notes sont poussées
+   en bas du champ, ce qui aligne au moins les saisies par le haut. Jamais pire
+   que l'empilement d'origine. */
 @supports not (grid-template-rows: subgrid) {
   .form-grid > .field { display: flex; flex-direction: column; }
-  .form-grid > .field > .field-control { margin-top: auto; }
+  .form-grid > .field > .field-notes { margin-top: auto; }
 }
 
 .field { display: flex; flex-direction: column; min-width: 0; }
@@ -522,8 +559,30 @@ a.chip:hover { background: var(--surface-3); color: var(--text); text-decoration
   align-items: center;
   gap: var(--sp-2);
   flex-wrap: wrap;
+  /* Cale les lignes EN HAUT de la piste.
+     `align-items: center` centre les pastilles sur le texte à l'intérieur
+     d'une ligne — c'est voulu. Mais la piste du libellé prend la hauteur du
+     plus grand libellé de la RANGÉE : dès qu'un voisin passe sur deux lignes,
+     un libellé d'une seule ligne se retrouvait centré dans une piste deux
+     fois trop haute, donc décalé vers le bas par rapport à ses voisins.
+     `align-content` gouverne le placement des lignes dans le conteneur, et
+     n'a d'effet que parce que `flex-wrap: wrap` est posé juste au-dessus. */
+  align-content: flex-start;
 }
-.field-desc { font-size: var(--fs-xs); color: var(--text-muted); margin-bottom: var(--sp-2); }
+/* Sous la saisie désormais : la marge est en haut, plus en bas. */
+.field-desc { font-size: var(--fs-xs); color: var(--text-muted); margin-top: var(--sp-1); }
+/* Le nom peut se replier sur lui-même ; les pastilles, elles, restent un bloc.
+   Sans ce groupement, un libellé long les séparait — « modifié » accroché à la
+   fin du nom, « à chaud » seul à la ligne suivante. */
+.field-name { flex: 0 1 auto; min-width: 0; }
+.field-flags {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex: 0 0 auto;
+}
+/* Un groupe sans pastille ne doit pas laisser l'espacement du libellé. */
+.field-flags:empty { display: none; }
 .field-hint { font-size: var(--fs-xs); color: var(--text-subtle); margin-top: var(--sp-1); }
 .field-error { font-size: var(--fs-xs); color: var(--danger); margin-top: var(--sp-1); }
 .field.has-error input,
@@ -836,7 +895,10 @@ a.chip:hover { background: var(--surface-3); color: var(--text); text-decoration
 .cfg-bloc { scroll-margin-top: calc(var(--topbar-h) + var(--sp-4)); }
 .cfg-bloc-desc {
   margin: 0 0 var(--sp-5);
-  max-width: 68ch;
+  /* Pas de mesure typographique bridée ici : à 68ch la description occupait la
+     moitié gauche d'une carte large et laissait un vide qui se lisait comme un
+     défaut de rendu, pas comme un choix. Elle suit donc la largeur de la
+     grille de champs qu'elle introduit. */
   color: var(--text-muted);
   font-size: var(--fs-sm);
   line-height: var(--lh-loose);

@@ -24,9 +24,9 @@
   </div></div>
 {% else %}
 
-  {% if section.description %}
-    <div class="alert alert-info mb-4">{{ section.description }}</div>
-  {% endif %}
+  {% comment %} Pas d'encadré de description ici : `page_context` la
+     passe déjà à l'en-tête de page, qui la rend en `.page-desc`. Les deux
+     coexistaient, et la même phrase s'affichait deux fois de suite. {% endcomment %}
 
   {% if not info.enabled or info.status == "cassé" %}
     <div class="alert alert-warn mb-4">

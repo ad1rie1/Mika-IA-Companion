@@ -80,7 +80,18 @@
         </summary>
         <div class="card-body">
           {% if b.description %}<p class="cfg-bloc-desc">{{ b.description }}</p>{% endif %}
-          <div class="form-grid">
+          {% comment %} La grille suit le NOMBRE de champs du bloc.
+
+             Par défaut elle remplit en `auto-fill`, qui crée autant de
+             colonnes que la largeur en accepte — trois sur une carte large.
+             Un bloc de deux réglages occupait donc deux colonnes sur trois et
+             laissait la dernière vide, ce qui se lit comme un défaut de rendu.
+             Un bloc d'un seul réglage était pire : un champ étroit calé à
+             gauche, et les deux tiers de la carte inoccupés.
+
+             Le compte vient du registre, filtres compris : un bloc réduit à
+             deux résultats par une recherche se remet en deux colonnes. {% endcomment %}
+          <div class="form-grid{% if b.total == 1 %} cols-1{% elif b.total == 2 %} cols-2{% endif %}">
             {% for f in b.champs %}
               {% include "gestion/partials/field.html" with f=f marker=1 %}
             {% endfor %}

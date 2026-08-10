@@ -11,9 +11,13 @@
    un modèle Django dans le vocabulaire du registre de configuration.
 {% endcomment %}
 
-{% comment %} Mêmes trois emplacements que `field.html` — libellé, description,
-   contrôle — parce que c'est la grille qui aligne les lignes, et qu'elle
-   n'a pas à savoir laquelle des deux sources a décrit le champ. {% endcomment %}
+{% comment %} Mêmes trois emplacements que `field.html`, dans le même ordre —
+   libellé, contrôle, notes — parce que c'est la grille qui aligne les lignes,
+   et qu'elle n'a pas à savoir laquelle des deux sources a décrit le champ.
+
+   Les deux gabarits doivent bouger ensemble : c'est la même sous-grille qui
+   les met en page, et n'en corriger qu'un donnerait deux hauteurs de saisie
+   sur une ligne qui mélange les deux. {% endcomment %}
 
 {% if field.field.widget.input_type == "checkbox" %}
   <div class="field field-check {% if field.errors %}has-error{% endif %} {% if wide %}field-full{% endif %}">
@@ -21,8 +25,9 @@
       {{ field }}
       <label class="field-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
     </div>
-    <div class="field-desc">{% if field.help_text %}{{ field.help_text }}{% endif %}</div>
-    <div class="field-control">
+    <div class="field-control"></div>
+    <div class="field-notes">
+      {% if field.help_text %}<div class="field-desc">{{ field.help_text }}</div>{% endif %}
       {% for erreur in field.errors %}<div class="field-error">{{ erreur }}</div>{% endfor %}
     </div>
   </div>
@@ -30,12 +35,14 @@
 {% else %}
   <div class="field {% if wide %}field-full{% endif %} {% if field.errors %}has-error{% endif %}">
     <label class="field-label" for="{{ field.id_for_label }}">
-      {{ field.label }}
+      <span class="field-name">{{ field.label }}</span>
       {% if field.field.required %}<span class="field-flag" title="Obligatoire">requis</span>{% endif %}
     </label>
-    <div class="field-desc">{% if field.help_text %}{{ field.help_text }}{% endif %}</div>
     <div class="field-control">
       {{ field }}
+    </div>
+    <div class="field-notes">
+      {% if field.help_text %}<div class="field-desc">{{ field.help_text }}</div>{% endif %}
       {% for erreur in field.errors %}<div class="field-error">{{ erreur }}</div>{% endfor %}
     </div>
   </div>
