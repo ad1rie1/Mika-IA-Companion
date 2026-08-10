@@ -22,8 +22,9 @@ import time
 
 from GestionSysteme import panels as P
 from GestionSysteme.formatting import ago_span, clip, duration
-from modules.plugins.camera import MAX_FRAME_AGE_FOR_ANALYSIS
 
+# Repli de ``camera.panel_observation_chars`` — même valeur que le ``default``
+# déclaré dans ``config_schema.py``. Troncature d'affichage seulement.
 OBSERVATION_MAX = 200
 
 
@@ -80,10 +81,17 @@ def _boucle(module, conf) -> P.Fields:
 
 
 def _tableau(etats, now: float) -> P.Table:
+    from configs.runtime import cfg_int
+    from modules.plugins.camera import CameraModule
+
+    obs_max = cfg_int("camera.panel_observation_chars", OBSERVATION_MAX,
+                      mini=40, maxi=5000)
+    seuil_vivant = CameraModule._max_frame_age()
+
     rows = []
     for state in etats:
         frame_age = now - state.frame_ts
-        vivant = frame_age <= MAX_FRAME_AGE_FOR_ANALYSIS
+        vivant = frame_age <= seuil_vivant
         rows.append(P.Row(cells=(
             P.mono(state.device_id),
             P.text(state.label),
@@ -92,7 +100,7 @@ def _tableau(etats, now: float) -> P.Table:
             P.text(ago_span(frame_age)),
             P.text(_depuis(state.last_analysis_ts, now)),
             P.text(_depuis(state.last_notify_ts, now)),
-            P.text(clip(state.observation, OBSERVATION_MAX) or "—", clamp=True),
+            P.text(clip(state.observation, obs_max) or "—", clamp=True),
             P.text(state.notable_reason or "—", clamp=True),
         )))
 

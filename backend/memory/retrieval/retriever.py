@@ -8,6 +8,7 @@ from datetime import timezone as dt_timezone
 from asgiref.sync import sync_to_async
 from django.utils import timezone
 
+from configs.runtime import cfg_float, cfg_int
 from memory.storage.vector_store import VectorStore, vector_call
 from utils.degradation import degradations
 
@@ -78,12 +79,25 @@ def _mood_congruence(mood_pad, emotion: str) -> float:
 # répète mot pour mot, ce que la saillance devait précisément éviter.
 
 #: Nombre de tours pendant lesquels un souvenir servi reste connu.
+#: Réglable via ``memory.recall_memo_turns`` ; repli quand le registre est
+#: hors d'atteinte.
 RECALL_MEMO_TURNS = 3
 #: Plafond LRU du mémo — un rappel ne doit pas devenir une fuite mémoire.
 RECALL_MEMO_MAX_PERSONS = 32
 #: Voie directe : on DÉMOTE, on n'exclut pas. À la même question posée deux
 #: fois, une mémoire qui ne rend plus rien est pire que la répétition.
+#: Réglable via ``memory.recall_repeat_penalty``.
 RECALL_REPEAT_PENALTY = 0.45
+
+
+def _memo_turns() -> int:
+    return cfg_int("memory.recall_memo_turns", RECALL_MEMO_TURNS, mini=1, maxi=20)
+
+
+def _repeat_penalty() -> float:
+    return cfg_float(
+        "memory.recall_repeat_penalty", RECALL_REPEAT_PENALTY, mini=0.0, maxi=1.0,
+    )
 
 
 class MemoryRetriever:
@@ -125,12 +139,14 @@ class MemoryRetriever:
         seaux = self._servis.get(person_id or "")
         if not seaux:
             return {}
+        penalite = _repeat_penalty()
+        profondeur = _memo_turns()
         penalites: dict = {}
         dernier = len(seaux) - 1
         for rang, (_rid, pks) in enumerate(seaux):
             recul = dernier - rang          # 0 = le tour qui vient de passer
-            facteur = RECALL_REPEAT_PENALTY + (1.0 - RECALL_REPEAT_PENALTY) * (
-                recul / max(1, RECALL_MEMO_TURNS)
+            facteur = penalite + (1.0 - penalite) * (
+                recul / max(1, profondeur)
             )
             for pk in pks:
                 # Servi plusieurs fois : c'est le service le plus RÉCENT qui
@@ -156,7 +172,10 @@ class MemoryRetriever:
         cle = person_id or ""
         seaux = self._servis.get(cle)
         if seaux is None:
-            seaux = deque(maxlen=RECALL_MEMO_TURNS)
+            # `maxlen` est figé à la création du tampon : une personne déjà
+            # mémorisée garde son ancienne profondeur jusqu'au redémarrage.
+            # C'est ce que dit `restart_required` sur le réglage.
+            seaux = deque(maxlen=_memo_turns())
             self._servis[cle] = seaux
         if seaux and rid != "-" and seaux[-1][0] == rid:
             seaux[-1][1].update(pks)
@@ -547,6 +566,10 @@ class MemoryRetriever:
                 if isinstance(demote_pks, dict):
                     score *= demote_pks.get(sid, 1.0)
                 elif sid in demote_pks:
+                    # Voie ensembliste, sans graduation : `_rerank_souvenirs`
+                    # est PURE par contrat (aucune lecture de config), donc
+                    # elle applique la constante. Le chemin vivant passe par
+                    # le dict gradué de `_penalites_repetition`, lui réglable.
                     score *= RECALL_REPEAT_PENALTY
 
             s["_score"] = score

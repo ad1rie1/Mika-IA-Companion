@@ -15,6 +15,8 @@ from modules.plugins.forge import sandbox
 from modules.plugins.forge.api import ForgeAPI
 from modules.plugins.forge.store import ForgeManifest
 
+# Repli de ``forge.load_timeout_s`` — même valeur que le ``default`` déclaré
+# dans ``config_schema.py``, servie quand le registre est hors d'atteinte.
 LOAD_TIMEOUT_S = 10.0
 
 VALID_STATUSES = ("actif", "désactivé", "cassé")
@@ -76,10 +78,14 @@ def load_module(manifest: ForgeManifest, code: str, api: ForgeAPI) -> LoadedForg
             # plafond de lignes par invocation.
             api.log(message)
 
+    from configs.runtime import cfg_float
+
     env = sandbox.build_globals(api, _print)
     compiled = compile(code, f"<forge:{manifest.name}>", "exec")
+    deadline = cfg_float("forge.load_timeout_s", LOAD_TIMEOUT_S,
+                         mini=1.0, maxi=120.0)
     try:
-        sandbox.run_with_deadline(_exec_in, (compiled, env), LOAD_TIMEOUT_S)
+        sandbox.run_with_deadline(_exec_in, (compiled, env), deadline)
     finally:
         api._end_run()
 

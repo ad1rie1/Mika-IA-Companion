@@ -43,6 +43,8 @@ from asgiref.sync import sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.conf import settings
 
+from configs.runtime import cfg_float, cfg_int
+
 logger = logging.getLogger(__name__)
 
 MAX_FRAME_B64_LEN = 2 * 1024 * 1024    # ~1.5 MB image
@@ -52,6 +54,7 @@ MAX_FRAME_BYTES_LEN = 1536 * 1024
 # n'est jamais gratuite (décodage image pour le hash perceptuel) et rien ne
 # bornait ce qu'un device pouvait pousser. 2 frames/s est déjà large : le
 # module n'analyse au mieux qu'une frame toutes les MIN_ANALYSIS_INTERVAL (30 s).
+# Configurables sous ``comm.camera.*`` ; ces constantes restent le repli.
 RATE_LIMIT_MAX_FRAMES = 20
 RATE_LIMIT_WINDOW_SECONDS = 10.0
 
@@ -77,10 +80,24 @@ _last_frame_at: dict[str, float] = {}
 _FRAME_MAX_TRACKED = 500
 
 
+def _frame_window() -> float:
+    return cfg_float(
+        "comm.camera.rate_limit_window_seconds", RATE_LIMIT_WINDOW_SECONDS,
+        mini=0.0,
+    )
+
+
+def _min_frame_interval() -> float:
+    return cfg_float(
+        "comm.camera.min_frame_interval_seconds", MIN_FRAME_INTERVAL_SECONDS,
+        mini=0.0,
+    )
+
+
 def _prune_frame_times(now: float) -> None:
     if len(_last_frame_at) <= _FRAME_MAX_TRACKED:
         return
-    cutoff = now - MIN_FRAME_INTERVAL_SECONDS
+    cutoff = now - _min_frame_interval()
     for device_id in [d for d, t in _last_frame_at.items() if t < cutoff]:
         _last_frame_at.pop(device_id, None)
 
@@ -286,7 +303,7 @@ class CameraConsumer(AsyncWebsocketConsumer):
         """
         now = time.monotonic()
         last = _last_frame_at.get(self.device_id)
-        if last is not None and now - last < MIN_FRAME_INTERVAL_SECONDS:
+        if last is not None and now - last < _min_frame_interval():
             # debug et non warning, même raison que la fenêtre glissante.
             logger.debug(
                 "CameraConsumer: cadence trop rapide (device=%s) — frame ignoree",
@@ -300,11 +317,13 @@ class CameraConsumer(AsyncWebsocketConsumer):
     def _is_rate_limited(self) -> bool:
         """Fenêtre glissante : borne le nombre de frames par connexion."""
         now = time.monotonic()
-        window_start = now - RATE_LIMIT_WINDOW_SECONDS
+        window_start = now - _frame_window()
         self._frame_timestamps = [
             t for t in self._frame_timestamps if t >= window_start
         ]
-        if len(self._frame_timestamps) >= RATE_LIMIT_MAX_FRAMES:
+        if len(self._frame_timestamps) >= cfg_int(
+            "comm.camera.rate_limit_max_frames", RATE_LIMIT_MAX_FRAMES, mini=1,
+        ):
             # debug et non warning : un device mal réglé dépasse à chaque frame,
             # et le refus est déjà dit au client dans l'ack.
             logger.debug(

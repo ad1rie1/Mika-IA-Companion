@@ -34,6 +34,10 @@ DEFAULT_INTERVAL = 3.0
 
 # Below this, a re-render would show the same rounded percentage and move the
 # blend shapes by less than the breathing pulse already does.
+#
+# Repli de ``emotion.sync_min_intensity_delta``. ``DEFAULT_INTERVAL`` juste
+# au-dessus reste un repli lui aussi, mais d'une clé qui existait déjà
+# (``emotion.sync_interval``) : elle n'est pas relue ici.
 MIN_INTENSITY_DELTA = 0.04
 
 
@@ -160,12 +164,17 @@ class EmotionSync:
         previous = self._last_sent.get(person_id)
         if previous is None:
             return True
+        from configs.runtime import cfg_float
+
         label, intensity, blend = signature
         prev_label, prev_intensity, prev_blend = previous
+        seuil = cfg_float(
+            "emotion.sync_min_intensity_delta", MIN_INTENSITY_DELTA, mini=0.0,
+        )
         return (
             label != prev_label
             or blend != prev_blend
-            or abs(intensity - prev_intensity) >= MIN_INTENSITY_DELTA
+            or abs(intensity - prev_intensity) >= seuil
         )
 
 

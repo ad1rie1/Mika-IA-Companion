@@ -52,6 +52,12 @@ EMOTION_PROMPT_FR: dict[str, str] = {
 }
 
 #: Au-delà, l'humeur ne se lit plus « dans la pente naturelle ».
+#:
+#: Comme ``DECLARED_WINDOW_S`` plus bas, la constante reste ici et devient le
+#: REPLI de la clé ``emotion.*`` de même valeur : ce module est chargé très
+#: tôt (``emotion.engine`` → ``conscience``, ``pipeline``, ``projects``), donc
+#: une lecture de configuration doit pouvoir échouer sans rien coûter. Voir
+#: ``configs/runtime.py``.
 MARKED_INTENSITY = 0.6
 
 
@@ -60,6 +66,21 @@ MARKED_INTENSITY = 0.6
 #: défaut (~11 min 30) : au-delà, l'état a réellement bougé et c'est la
 #: position qui dit vrai.
 DECLARED_WINDOW_S: float = 700.0
+
+
+def _declared_window_s() -> float:
+    """Fenêtre de fraîcheur d'une déclaration, réglable."""
+    from configs.runtime import cfg_float
+
+    return cfg_float(
+        "emotion.declared_window_seconds", DECLARED_WINDOW_S, mini=0.0,
+    )
+
+
+def _marked_intensity() -> float:
+    from configs.runtime import cfg_float
+
+    return cfg_float("emotion.marked_intensity", MARKED_INTENSITY, mini=0.0)
 
 
 def _fr(emotion: Emotion) -> str:
@@ -209,21 +230,27 @@ class PersonMood:
         }
 
     def fresh_declaration(
-        self, window_s: float = DECLARED_WINDOW_S,
+        self, window_s: float | None = None,
     ) -> tuple[Emotion, float] | None:
         """Ce qu'elle vient de déclarer, si c'est encore récent.
 
         Au-delà de la fenêtre, ce n'est plus ce qu'elle éprouve : c'est un
         souvenir de tour, et c'est l'oscillateur qui reprend la parole.
+
+        ``window_s=None`` lit le réglage. Le défaut ne peut plus être écrit
+        dans la signature : il serait figé à l'import du module, donc immunisé
+        contre toute modification du curseur.
         """
         if self.last_declared is None:
             return None
+        if window_s is None:
+            window_s = _declared_window_s()
         if time.time() - self.last_declared_at > window_s:
             return None
         return self.last_declared
 
     def to_prompt_description(
-        self, declared_window_s: float = DECLARED_WINDOW_S,
+        self, declared_window_s: float | None = None,
     ) -> str:
         """Ce que le prompt lui dit éprouver envers cette personne.
 
@@ -307,7 +334,7 @@ class GlobalMood:
                 f"{_intensity_label(intensity)} {_fr(label)}, "
                 f"alors que normalement tu es plutôt {_fr(default_mood)}."
             )
-        elif intensity >= MARKED_INTENSITY:
+        elif intensity >= _marked_intensity():
             base = (
                 f"Ton humeur générale est {_fr(label)}, nettement plus "
                 "que d'habitude."

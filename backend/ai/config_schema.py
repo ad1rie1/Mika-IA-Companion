@@ -70,6 +70,19 @@ _HOSTED_CONCURRENCY_HINT = (
     "tours au lieu de les ralentir."
 )
 
+# Avertissement commun aux trois parts de fenêtre. Elles ne sont pas trois
+# réglages indépendants : c'est leur somme qui engage la fenêtre, et rien ne
+# l'empêche de dépasser 1.0.
+_PART_HINT = (
+    "Part de la fenêtre UTILISABLE (fenêtre × part visée − sortie − outils − "
+    "marge). Les trois parts — fil 0.60, relationnel 0.04, rappel 0.06 — sont "
+    "couplées : elles somment aujourd'hui à 0.70, et les 0.30 restants sont "
+    "une réserve délibérée. Rien n'interdit de les faire dépasser 1.0 ; le "
+    "budget promet alors plus de place que la fenêtre n'en contient, et le "
+    "provider tronque PAR LA TÊTE, c'est-à-dire par la personnalité. Vérifier "
+    "la somme des trois avant d'en monter une seule. "
+)
+
 CONFIG_SCHEMA = [
     ConfigSection(
         key="ai_providers", label="IA · Providers", icon="⟠", order=20,
@@ -374,6 +387,117 @@ CONFIG_SCHEMA = [
         default=16384, min=2048, max=2_000_000, hot_reload=True,
         hint="Utilisée quand le modèle déclaré n'a pas de context_window : "
              "la compaction du fil garde ainsi toujours un seuil.",
+    ),
+
+    # ── Répartition du contexte ──────────────────────────────────
+    # Les trois parts sont un seul réglage en trois champs : c'est leur
+    # SOMME qui engage la fenêtre. D'où un avertissement identique sur
+    # chacune — un opérateur qui n'en monte qu'une ne voit que celle-là.
+    ConfigItem(
+        key="ai.context.l3_history_share", type="float", section="ai_context",
+        group="Répartition du contexte", label="Part du fil de conversation",
+        default=0.60, min=0.0, max=1.0, hot_reload=True,
+        hint=_PART_HINT + "Couche L3 : verbatim du fil + résumé roulant. "
+             "C'est la part la plus grosse, et celle qui dimensionne aussi le "
+             "seuil de compaction — les deux lisent le même budget.",
+    ),
+    ConfigItem(
+        key="ai.context.l2_relational_share", type="float", section="ai_context",
+        group="Répartition du contexte", label="Part du contexte relationnel",
+        default=0.04, min=0.0, max=1.0, hot_reload=True,
+        hint=_PART_HINT + "Couche L2 : profil de la personne, engagements en "
+             "cours, historique émotionnel.",
+    ),
+    ConfigItem(
+        key="ai.context.l5_recall_share", type="float", section="ai_context",
+        group="Répartition du contexte", label="Part du rappel mémoire",
+        default=0.06, min=0.0, max=1.0, hot_reload=True,
+        hint=_PART_HINT + "Couche L5 : souvenirs, connaissances et échanges "
+             "passés retrouvés par recherche sémantique.",
+    ),
+    ConfigItem(
+        key="ai.context.safety_margin", type="float", section="ai_context",
+        group="Répartition du contexte", label="Marge de sécurité",
+        default=0.05, min=0.0, max=0.5, hot_reload=True,
+        hint=(
+            "Fraction de la fenêtre gardée libre, retirée deux fois : du "
+            "budget utilisable et de la place physique restante. Elle absorbe "
+            "l'écart entre notre estimation caractères→tokens et le "
+            "tokenizer réel du provider. La descendre rapproche du bord où "
+            "la troncature se fait par la tête."
+        ),
+    ),
+    ConfigItem(
+        key="ai.context.default_max_tokens", type="int", section="ai_context",
+        group="Répartition du contexte", label="Sortie réservée par défaut (tokens)",
+        default=4096, min=256, max=64000, hot_reload=True,
+        hint=(
+            "Place réservée à la RÉPONSE quand la ligne modèle ne déclare pas "
+            "son propre max_tokens : elle est soustraite de la fenêtre avant "
+            "toute répartition. Un max_tokens déclaré sur le modèle gagne "
+            "toujours."
+        ),
+    ),
+    ConfigItem(
+        key="ai.context.l3_floor_chars", type="int", section="ai_context",
+        group="Répartition du contexte", label="Plancher du fil (caractères)",
+        default=4000, min=500, max=200_000, hot_reload=True,
+        hint=(
+            "Le fil n'est jamais borné en dessous, quelle que soit la fenêtre "
+            "déclarée ou l'illisibilité de la configuration : c'est le cap "
+            "historique, devenu plancher. La part ci-dessus le dépasse, elle "
+            "ne le remplace pas."
+        ),
+    ),
+
+    # ── Rendu du fil ─────────────────────────────────────────────
+    ConfigItem(
+        key="ai.chat.history_msg_max_chars", type="int", section="ai_context",
+        group="Rendu du fil", label="Taille max d'un message d'historique",
+        default=4000, min=500, max=100_000, hot_reload=True,
+        hint=(
+            "Le tampon court terme plafonne le NOMBRE de messages, pas leur "
+            "taille : un collage de 50 ko entre verbatim et repart sur le "
+            "réseau à chaque tour jusqu'à sortir du tampon. 4 000 caractères "
+            "(~1 000 tokens) laissent intact n'importe quel message de "
+            "conversation réel."
+        ),
+    ),
+    ConfigItem(
+        key="ai.chat.summary_max_chars", type="int", section="ai_context",
+        group="Rendu du fil", label="Taille max du résumé roulant",
+        default=8000, min=500, max=100_000, hot_reload=True,
+        hint=(
+            "Ceinture sur le résumé de compaction, rendu comme premier tour "
+            "user. Le compactor vise bien plus court ; ce plafond existe pour "
+            "que le résumé ne puisse jamais manger la part du fil vivant."
+        ),
+    ),
+
+    # ── Calibration jetons ───────────────────────────────────────
+    ConfigItem(
+        key="ai.calibration.default_chars_per_token", type="float",
+        section="ai_context", group="Calibration jetons",
+        label="Caractères par token (valeur initiale)",
+        default=4.0, min=1.0, max=12.0, hot_reload=True,
+        hint=(
+            "Point de départ du ratio, avant que la moyenne mobile n'ait vu "
+            "de vrais appels chez ce provider. Le français tourne plutôt "
+            "autour de 3,4–3,9 selon le modèle ; 4.0 reste aligné sur "
+            "l'estimation du contrôle de quota."
+        ),
+    ),
+    ConfigItem(
+        key="ai.calibration.alpha", type="float", section="ai_context",
+        group="Calibration jetons", label="Réactivité de la moyenne mobile",
+        default=0.2, min=0.01, max=1.0, hot_reload=True,
+        hint=(
+            "Poids du dernier échantillon dans la moyenne mobile "
+            "exponentielle : 1.0 = suit le dernier appel et oublie tout le "
+            "reste, 0.01 = ne bouge presque plus. Monter accélère "
+            "l'auto-correction après un changement de modèle, au prix du "
+            "bruit."
+        ),
     ),
 
     ConfigSection(

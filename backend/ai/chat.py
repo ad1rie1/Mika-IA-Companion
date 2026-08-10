@@ -41,6 +41,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from configs.runtime import cfg_int
+
 # Markers wrapping the volatile state when it rides inside the final user
 # turn. Named so the model reads it as ambient system state, not as something
 # the person in front of her actually typed.
@@ -56,6 +58,10 @@ _RESUME_MARKER = "[Reprise de la conversation.]"
 # (20 messages) but not the size: a 50 kB paste enters verbatim and is
 # re-sent on every turn until it rotates out — ~10 turns of dead weight.
 # 4 000 chars (~1 000 tokens) keeps any real conversational message intact.
+# Configurable (``ai.chat.history_msg_max_chars``) ; la constante reste le
+# repli. Lire par ``history_msg_max_chars()`` et non par la constante : un
+# ``from ai.chat import HISTORY_MSG_MAX_CHARS`` fige la valeur à l'import et
+# ne suivrait jamais le réglage.
 HISTORY_MSG_MAX_CHARS = 4000
 _TRUNCATION_MARK = " …[tronqué]"
 
@@ -70,13 +76,33 @@ SUMMARY_MAX_CHARS = 8000
 
 # Borne du nom de locuteur rendu devant un tour d'historique. Le nom vient
 # d'un ``display_name`` en base : un retour à la ligne y forgerait un tour.
+# Garde-fou d'injection, pas un réglage.
 _SPEAKER_MAX_CHARS = 40
 
 
+def history_msg_max_chars() -> int:
+    """Plafond courant d'un message d'historique, réglage inclus.
+
+    Existe comme *fonction* parce que la constante est importée ailleurs
+    (``pipeline/prompt.py``, qui la reprend pour sa comptabilité de poids) :
+    un import lie la valeur une fois pour toutes au chargement du module, et
+    le réglage ne l'atteindrait jamais.
+    """
+    return cfg_int(
+        "ai.chat.history_msg_max_chars", HISTORY_MSG_MAX_CHARS, mini=1,
+    )
+
+
+def summary_max_chars() -> int:
+    """Plafond courant du résumé roulant, réglage inclus."""
+    return cfg_int("ai.chat.summary_max_chars", SUMMARY_MAX_CHARS, mini=1)
+
+
 def _clip_msg(content: str) -> str:
-    if len(content) <= HISTORY_MSG_MAX_CHARS:
+    plafond = history_msg_max_chars()
+    if len(content) <= plafond:
         return content
-    return content[: HISTORY_MSG_MAX_CHARS - len(_TRUNCATION_MARK)].rstrip() + _TRUNCATION_MARK
+    return content[: plafond - len(_TRUNCATION_MARK)].rstrip() + _TRUNCATION_MARK
 
 
 def _speaker_of(m: dict) -> str:
@@ -169,7 +195,10 @@ class ChatPrompt:
             # besoin du marqueur de reprise.
             msgs.insert(0, {
                 "role": "user",
-                "content": f"{SUMMARY_HEADER}\n{self.conversation_summary[:SUMMARY_MAX_CHARS]}",
+                "content": (
+                    f"{SUMMARY_HEADER}\n"
+                    f"{self.conversation_summary[:summary_max_chars()]}"
+                ),
             })
         if msgs and msgs[0]["role"] == "assistant":
             msgs.insert(0, {"role": "user", "content": _RESUME_MARKER})
@@ -199,7 +228,7 @@ class ChatPrompt:
         if self.conversation_summary:
             flat += (
                 f"User: {SUMMARY_HEADER}\n"
-                f"{self.conversation_summary[:SUMMARY_MAX_CHARS]}\n\n"
+                f"{self.conversation_summary[:summary_max_chars()]}\n\n"
             )
         for m in self.history or []:
             role = m.get("role")

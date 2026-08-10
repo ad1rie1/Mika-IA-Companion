@@ -27,6 +27,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 
+from configs.runtime import cfg_int, cfg_list
 from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,10 @@ logger = logging.getLogger(__name__)
 # ignoré silencieusement (le plan reste utilisable).
 RAPPEL_TYPES = ("souvenirs", "connaissances", "echanges_passes")
 
+# Repli de ``ai.preparation.note_max_chars``. Lue à deux endroits — le prompt
+# système qui l'annonce au petit modèle, et le parse qui l'applique — et c'est
+# bien la même valeur : annoncer un plafond qu'on n'applique pas (ou l'inverse)
+# est exactement ce qui rend une note tronquée illisible.
 NOTE_MAX_CHARS = 200
 
 # Lexique small-talk : messages qui ne méritent jamais une passe de
@@ -44,7 +49,11 @@ _SMALL_TALK = {
     "ok", "oui", "non", "merci", "mdr", "lol", "ptdr", "haha", "hihi",
     "bonne nuit", "a plus", "à plus", "bye", "ciao",
     "ca va", "ça va", "et toi", "cool", "super", "top", "d'accord", "daccord",
-}
+}  # repli de ``ai.preparation.small_talk_terms``
+
+def _note_max_chars() -> int:
+    return cfg_int("ai.preparation.note_max_chars", NOTE_MAX_CHARS, mini=1)
+
 
 _PUNCT_RE = re.compile(r"[^\w\sàâäéèêëîïôöùûüç'-]", re.UNICODE)
 _WORD_RE = re.compile(r"\w", re.UNICODE)
@@ -100,7 +109,8 @@ def should_prepare(message: str, person_id: str) -> bool:
         return False  # emoji/ponctuation purs
 
     normalized = _PUNCT_RE.sub("", text.lower()).strip()
-    if normalized in _SMALL_TALK:
+    if normalized in set(cfg_list("ai.preparation.small_talk_terms",
+                                  sorted(_SMALL_TALK))):
         return False
 
     try:
@@ -149,7 +159,7 @@ def _system_prompt(max_rappels: int) -> str:
     return _SYSTEM_PROMPT.format(
         name=getattr(personality, "name", "Mika"),
         max_rappels=max_rappels,
-        note_max=NOTE_MAX_CHARS,
+        note_max=_note_max_chars(),
     )
 
 
@@ -201,7 +211,7 @@ def _parse_plan(raw: str, max_rappels: int) -> PreparationPlan | None:
         if len(rappels) >= max_rappels:
             break
 
-    note = str(data.get("note_de_focus") or "").strip()[:NOTE_MAX_CHARS]
+    note = str(data.get("note_de_focus") or "").strip()[:_note_max_chars()]
 
     # Charge émotionnelle : tolérante (nombre ou chaîne numérique), bornée
     # [0,1]. Toute valeur illisible → 0.0 (tour ordinaire), jamais d'erreur.
@@ -255,7 +265,14 @@ async def prepare(
 
 # ── Exécution du plan ────────────────────────────────────────────
 
+# Repli de ``ai.preparation.exec_budget_ms`` — déclaré en millisecondes comme
+# son voisin ``ai.preparation.deadline_ms``, converti ici.
 EXEC_BUDGET_S = 0.7
+
+
+def _exec_budget_s() -> float:
+    return cfg_int("ai.preparation.exec_budget_ms",
+                   int(EXEC_BUDGET_S * 1000), mini=1) / 1000
 
 
 @dataclass
@@ -265,7 +282,7 @@ class PlanResults:
 
 
 async def execute_plan(plan: PreparationPlan, person_id: str) -> PlanResults:
-    """Exécute les intents du plan, borné par ``EXEC_BUDGET_S``.
+    """Exécute les intents du plan, borné par ``ai.preparation.exec_budget_ms``.
 
     Les intents souvenirs/connaissances ne coûtent rien ici : leurs requêtes
     rejoignent le rappel multi-requêtes du retriever.
@@ -334,7 +351,7 @@ async def execute_plan(plan: PreparationPlan, person_id: str) -> PlanResults:
         pages = await asyncio.wait_for(
             asyncio.gather(*[_one(r) for r in exchange_rappels],
                            return_exceptions=True),
-            timeout=EXEC_BUDGET_S,
+            timeout=_exec_budget_s(),
         )
     except asyncio.TimeoutError:
         degradations.record(

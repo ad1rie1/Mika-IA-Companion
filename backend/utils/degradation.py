@@ -44,7 +44,30 @@ logger = logging.getLogger(__name__)
 
 # Keep the ledger from growing without bound if a caller ever passes a label
 # built from user input. A label is meant to name a *site*, not an instance.
+# Fallback for ``modules.degradation_max_labels`` — same value as that
+# ConfigItem's ``default``, served when the registry is out of reach.
 MAX_LABELS = 256
+
+# ``configs.runtime`` records *its own* read failures in this very ledger, so
+# a config read from inside ``record()`` can call straight back into it. The
+# guard is per-thread rather than a lock: the re-entrant call happens on the
+# same thread, and blocking it would deadlock instead of recursing.
+_lecture_plafond = threading.local()
+
+
+def _max_labels() -> int:
+    """Effective ceiling. Re-entrant reads fall back to the constant."""
+    if getattr(_lecture_plafond, "en_cours", False):
+        return MAX_LABELS
+    _lecture_plafond.en_cours = True
+    try:
+        from configs.runtime import cfg_int
+        return cfg_int("modules.degradation_max_labels", MAX_LABELS,
+                       mini=32, maxi=10000)
+    except Exception:
+        return MAX_LABELS
+    finally:
+        _lecture_plafond.en_cours = False
 
 
 @dataclass
@@ -98,10 +121,12 @@ class DegradationLedger:
         try:
             now = time.time()
             detail = f"{type(exc).__name__}: {exc}" if exc is not None else ""
+            # Hors du verrou : la lecture de configuration peut toucher l'ORM.
+            plafond = _max_labels()
             with self._lock:
                 site = self._sites.get(label)
                 if site is None:
-                    if len(self._sites) >= MAX_LABELS:
+                    if len(self._sites) >= plafond:
                         return
                     site = Degradation(label=label, first_seen=now)
                     self._sites[label] = site

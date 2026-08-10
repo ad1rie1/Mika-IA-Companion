@@ -39,6 +39,9 @@ from modules.plugins.forge import runtime, sandbox, store
 from modules.plugins.forge.api import ForgeAPI, write_log
 
 HANDLER_TIMEOUT_DEFAULT = 10
+# Replis : valeur d'usine identique au ``default`` du ConfigItem, servie
+# lorsque le registre est hors d'atteinte (import avant migrate, base
+# verrouillée). Les clés vivent dans ``config_schema.py``.
 CONTEXT_TIMEOUT_S = 5.0
 POOL_WORKERS = 2
 
@@ -81,7 +84,10 @@ class ForgeModule(BaseModule):
         self._event_tasks: set[asyncio.Task] = set()
         self._breaker_notified: set[str] = set()
         self._ops_lock: asyncio.Lock = asyncio.Lock()
-        # Autant de jetons que de fils : voir _submit().
+        # Autant de jetons que de fils : voir _submit(). La taille réelle est
+        # relue dans ``instantiate()`` — l'exécuteur et ce sémaphore sont
+        # bâtis ensemble, une seule fois, d'où le ``restart_required``.
+        self._pool_workers: int = POOL_WORKERS
         self._pool_slots: asyncio.Semaphore = asyncio.Semaphore(POOL_WORKERS)
 
     # ══ Lifecycle ═════════════════════════════════════════════════
@@ -90,9 +96,14 @@ class ForgeModule(BaseModule):
         return True
 
     async def instantiate(self) -> None:
+        from configs.runtime import cfg_int
+
         self._loop = asyncio.get_running_loop()
+        self._pool_workers = cfg_int("forge.pool_workers", POOL_WORKERS,
+                                     mini=1, maxi=16)
+        self._pool_slots = asyncio.Semaphore(self._pool_workers)
         self._executor = ThreadPoolExecutor(
-            max_workers=POOL_WORKERS, thread_name_prefix="forge",
+            max_workers=self._pool_workers, thread_name_prefix="forge",
         )
         await sync_to_async(self._ensure_dir, thread_sensitive=False)()
         names = await sync_to_async(store.list_module_names,
@@ -417,9 +428,13 @@ class ForgeModule(BaseModule):
     async def _refresh_context(self, lm: runtime.LoadedForgeModule) -> None:
         if not lm.manifest.context or "get_context" not in lm.handlers:
             return
+        from configs.runtime import cfg_float
+
         ok, result, _ = await self._run_handler(
             lm, "get_context", (), source="context",
-            timeout_s=CONTEXT_TIMEOUT_S, count_failure=False,
+            timeout_s=cfg_float("forge.context_timeout_s", CONTEXT_TIMEOUT_S,
+                                mini=0.5, maxi=60.0),
+            count_failure=False,
         )
         if ok and isinstance(result, str):
             lm.context_cache = result.strip()[:500]

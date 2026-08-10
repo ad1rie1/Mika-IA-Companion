@@ -18,11 +18,13 @@ from __future__ import annotations
 import logging
 
 from ai.router import AIRole, ai_router
+from configs.runtime import cfg_int
 
 logger = logging.getLogger(__name__)
 
 # Kept tight on purpose: a thought is a handful of words, and a long one
-# stops sounding like a thought.
+# stops sounding like a thought. Replis de
+# ``pipeline.inner_voice.max_thought_chars`` / ``.timeout_seconds``.
 MAX_THOUGHT_CHARS = 160
 INNER_VOICE_TIMEOUT = 12
 
@@ -63,7 +65,9 @@ def _clean(text: str) -> str:
             thought = thought[len(prefix):].strip()
     # One sentence: a model that ignored "une phrase" gets truncated rather
     # than turning a murmur into a monologue.
-    return thought[:MAX_THOUGHT_CHARS].strip()
+    plafond = cfg_int("pipeline.inner_voice.max_thought_chars",
+                      MAX_THOUGHT_CHARS, mini=1)
+    return thought[:plafond].strip()
 
 
 async def generate_inner_thought(
@@ -97,7 +101,8 @@ async def generate_inner_thought(
                     mood=mood,
                 ),
             ),
-            timeout=INNER_VOICE_TIMEOUT,
+            timeout=cfg_int("pipeline.inner_voice.timeout_seconds",
+                            INNER_VOICE_TIMEOUT, mini=1),
         )
     except asyncio.TimeoutError:
         logger.debug("Inner voice timed out — staying silent")

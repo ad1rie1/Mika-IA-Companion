@@ -29,6 +29,7 @@ from django.utils import timezone
 
 from ai.quota import QuotaExceeded, current_project_id
 from ai.router import AIRole, UnconfiguredRoleError, ai_router
+from configs.runtime import cfg_int
 from projects import context_builder, schedule
 from utils.parsing import strip_markdown_json
 from utils.periodic import PeriodicLoop
@@ -37,7 +38,8 @@ from utils.degradation import degradations
 logger = logging.getLogger(__name__)
 
 
-# Safety caps
+# Safety caps. Configurables sous ``projects.*`` ; ces constantes restent le
+# repli exact quand le registre est hors d'atteinte.
 MAX_ADVANCES_PER_TICK = 3         # at most N advances in a single tick
 LLM_TIMEOUT_SECONDS = 90
 RUNS_SINCE_INPUT_CAP = 10         # beyond this, force a pause until user comes back
@@ -111,7 +113,10 @@ class ProjectRunner:
             return 0
 
         advanced = 0
-        for project_id in due[:MAX_ADVANCES_PER_TICK]:
+        plafond = cfg_int(
+            "projects.max_advances_per_tick", MAX_ADVANCES_PER_TICK, mini=1,
+        )
+        for project_id in due[:plafond]:
             try:
                 success = await self._advance(project_id)
                 if success:
@@ -145,8 +150,9 @@ class ProjectRunner:
             return []
 
         due_ids: list[int] = []
+        cap = cfg_int("projects.runs_since_input_cap", RUNS_SINCE_INPUT_CAP, mini=1)
         for p in projects:
-            if p.runs_since_user_input >= RUNS_SINCE_INPUT_CAP:
+            if p.runs_since_user_input >= cap:
                 # Don't spin forever without user feedback
                 continue
             try:
@@ -203,7 +209,9 @@ class ProjectRunner:
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                 ),
-                timeout=LLM_TIMEOUT_SECONDS,
+                timeout=cfg_int(
+                    "projects.llm_timeout_seconds", LLM_TIMEOUT_SECONDS, mini=1,
+                ),
             )
         except QuotaExceeded as qe:
             logger.warning(

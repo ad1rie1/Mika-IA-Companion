@@ -202,7 +202,15 @@ def detect_name_claim(message: str) -> NameClaim | None:
 
 #: Distinct content words that must overlap before a message counts as
 #: corroborating anything.
+#:
+#: Configurable (``identity.min_overlap_terms``), but resolved by the caller
+#: and passed in: this module runs on *every* inbound message and stays free
+#: of registry reads, so its unit tests keep measuring the declared rule.
 _MIN_OVERLAP_TERMS = 3
+
+#: Nombre de mots communs valant un score plein. Au-dela, la mesure sature —
+#: elle reste un indice soumis a Mika, jamais une promotion automatique.
+_SATURATION_TERMS = 4.0
 
 #: Tokens too common to prove anything about who is speaking.
 _STOPWORDS = frozenset({
@@ -214,7 +222,10 @@ _STOPWORDS = frozenset({
 })
 
 
-def corroboration_score(message: str, known_facts: list[str]) -> tuple[float, str]:
+def corroboration_score(
+    message: str, known_facts: list[str], *,
+    min_terms: int | None = None, saturation: float | None = None,
+) -> tuple[float, str]:
     """How much this message lines up with what Mika knows about a person.
 
     Someone proving they are X by mentioning something only X would bring up
@@ -223,6 +234,9 @@ def corroboration_score(message: str, known_facts: list[str]) -> tuple[float, st
     Mika still has to accept, never an automatic promotion.
 
     Returns ``(score in 0..1, human-readable reason)``.
+
+    ``min_terms`` / ``saturation`` are the configurable knobs, handed over by
+    the caller rather than read here — see the note on ``_MIN_OVERLAP_TERMS``.
     """
     if not message or not known_facts:
         return 0.0, ""
@@ -241,10 +255,12 @@ def corroboration_score(message: str, known_facts: list[str]) -> tuple[float, st
     # One shared word is coincidence, two is a common topic ("aime" +
     # "musique" says nothing about who is typing). Three is the point where
     # they are plausibly talking about the same specific thing.
-    if len(best_overlap) < _MIN_OVERLAP_TERMS:
+    if len(best_overlap) < (min_terms if min_terms is not None
+                            else _MIN_OVERLAP_TERMS):
         return 0.0, ""
 
-    score = min(1.0, len(best_overlap) / 4.0)
+    score = min(1.0, len(best_overlap) / (
+        saturation if saturation else _SATURATION_TERMS))
     shared = ", ".join(sorted(best_overlap)[:4])
     return score, f"recoupe ce que tu sais ({shared}) — « {best_fact[:120]} »"
 

@@ -26,7 +26,11 @@ DEFAULT_WAKE_PROMPT = (
 class WakeModule(BaseModule):
     """Polls for wake requests and triggers AI responses."""
 
-    CRON_INTERVAL = 30  # Check every 30 seconds
+    # Repli de ``wake.check_interval_s``. Réaffecté depuis la configuration à
+    # chaque tour (voir ``worker_cron``), comme le module RSS : le
+    # planificateur relit l'attribut entre deux ticks, donc le réglage vaut à
+    # chaud sans redémarrage.
+    CRON_INTERVAL = 30
     # Chaque requete traitee = un tour de pipeline complet, en serie. Un
     # backlog non borne monopoliserait le provider pendant N appels LLM
     # (jusqu'a 120s chacun) au detriment de la conversation en cours. Le
@@ -35,6 +39,10 @@ class WakeModule(BaseModule):
 
     def __init__(self):
         super().__init__("wake")
+
+    def config_schema(self):
+        from modules.plugins.wake.config_schema import CONFIG_SCHEMA
+        return CONFIG_SCHEMA
 
     def get_models(self) -> list:
         from modules.plugins.wake.models import WakeRequest
@@ -51,6 +59,12 @@ class WakeModule(BaseModule):
     # ── Cron ──────────────────────────────────────────────────────
 
     async def worker_cron(self) -> None:
+        from configs.runtime import cfg_int
+
+        # Relu à chaque tour : le planificateur consulte l'attribut entre deux
+        # ticks, donc la cadence vaut à chaud (même schéma que le module RSS).
+        self.CRON_INTERVAL = cfg_int("wake.check_interval_s", 30,
+                                     mini=5, maxi=3600)
         await self._process_pending()
 
     async def _process_pending(self) -> None:

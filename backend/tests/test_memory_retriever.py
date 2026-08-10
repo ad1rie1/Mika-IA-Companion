@@ -714,8 +714,12 @@ class TestAntiRepetition:
             "memory.retrieval_fetch_multiplier": 3,
             "memory.retrieval_exchanges": 0,
         }
+        # Une clé non modélisée rend le défaut que l'appelant a déclaré, pas 0 :
+        # les réglages de l'anti-répétition (`memory.recall_*`) passent par
+        # `configs.runtime`, qui transmet toujours son repli en `default=`, et
+        # un 0 forfaitaire y ferait passer la démotion pour une exclusion.
         with patch("configs.service.config_service.get",
-                   lambda k, *a, **kw: vals.get(k, 0)), \
+                   lambda k, *a, **kw: vals.get(k, kw.get("default", 0))), \
              patch.object(r, "_enrich_souvenirs",
                           AsyncMock(return_value=[{"id": 7, "content": "déjà dit"}])), \
              patch.object(r, "_enrich_connaissances", AsyncMock(return_value=[])), \

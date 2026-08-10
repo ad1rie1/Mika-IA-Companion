@@ -111,6 +111,56 @@ CONFIG_SCHEMA = [
         ),
     ),
     ConfigItem(
+        key="camera.observation_ttl_s", type="int", section="module_camera",
+        group="Analyse proactive",
+        label="Durée de vie d'une observation dans l'invite (s)",
+        default=600, min=30, max=86400, hot_reload=True,
+        description=(
+            "Au-delà, la description produite par le modèle vision disparaît "
+            "de « CONTEXTE MODULES » : ce qu'une caméra a vu il y a une heure "
+            "n'est plus ce qu'elle voit. "
+            "C'est le dénominateur de l'intervalle d'analyse ci-dessus : "
+            "régler l'intervalle **au-dessus** de cette durée fait expirer "
+            "chaque observation avant l'analyse suivante, donc un contexte "
+            "caméra vide en permanence — pour le prix intégral des appels "
+            "vision, et sans que rien ne le signale. Garder l'intervalle "
+            "nettement en dessous."
+        ),
+    ),
+    ConfigItem(
+        key="camera.max_frame_age_s", type="int", section="module_camera",
+        group="Analyse proactive", label="Âge max d'une frame analysable (s)",
+        default=60, min=5, max=3600, hot_reload=True,
+        description=(
+            "Au-delà, le device est considéré en pause : sa dernière frame "
+            "n'est plus analysée, « camera_see » la refuse, et il disparaît "
+            "de « camera_list_devices ». Analyser une image d'il y a dix "
+            "minutes revient à décrire le passé au présent."
+        ),
+    ),
+    ConfigItem(
+        key="camera.tick_interval_s", type="int", section="module_camera",
+        group="Analyse proactive", label="Cadence du tick (s)",
+        default=10, min=1, max=600, hot_reload=True,
+        description=(
+            "Fréquence à laquelle la boucle regarde si une frame a changé. "
+            "Ce n'est pas la cadence des analyses — celle-ci est bornée par "
+            "l'intervalle minimum ci-dessus. Le planificateur partagé tourne "
+            "à la seconde : c'est le plancher."
+        ),
+    ),
+    ConfigItem(
+        key="camera.device_stale_timeout_s", type="int",
+        section="module_camera", group="Analyse proactive",
+        label="Oubli d'un device muet (s)",
+        default=600, min=30, max=86400, hot_reload=True,
+        description=(
+            "Un device qui n'envoie plus rien depuis ce délai est retiré de "
+            "la liste. Il revient tout seul à sa prochaine frame ; rien n'est "
+            "perdu, l'état d'un device est entièrement en RAM."
+        ),
+    ),
+    ConfigItem(
         key="camera.idle_pause_s", type="int", section="module_camera",
         group="Analyse proactive", label="Pause après inactivité (s)",
         default=900, min=0, max=86400, hot_reload=True,
@@ -156,6 +206,19 @@ CONFIG_SCHEMA = [
             "plancher est bien plus court que l'intervalle d'analyse — mais il "
             "existe : rien n'empêchait le modèle d'enchaîner les appels vision "
             "dans une même boucle d'outils. 0 : aucune limite."
+        ),
+    ),
+
+    # ── Affichage ──────────────────────────────────────────────────────
+    ConfigItem(
+        key="camera.panel_observation_chars", type="int",
+        section="module_camera", group="Affichage",
+        label="Observation affichée dans le panneau (caractères)",
+        default=200, min=40, max=5000, hot_reload=True,
+        description=(
+            "Troncature de la colonne « Observation » de l'espace du module. "
+            "N'a aucun effet sur ce qui est stocké ni sur ce qui entre dans "
+            "l'invite."
         ),
     ),
 ]

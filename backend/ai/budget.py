@@ -36,6 +36,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from configs.runtime import cfg_float, cfg_int
 from utils.degradation import degradations
 
 if TYPE_CHECKING:
@@ -44,11 +45,18 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Parts de la fenêtre utilisable, par couche (voir docs/evolution-contexte.md).
+# Configurables (``ai.context.*``) ; ces constantes restent le repli exact
+# lorsque le registre est hors d'atteinte. Elles sont COUPLÉES : c'est leur
+# somme qui engage la fenêtre, et un dépassement de 1.0 fait tronquer le
+# provider par la tête — le hint de chacune le dit.
 L3_HISTORY_SHARE = 0.60      # fil de conversation (verbatim + résumé roulant)
 L2_RELATIONAL_SHARE = 0.04   # profil, engagements, historique émotionnel
 L5_RECALL_SHARE = 0.06       # rappel sémantique (souvenirs, connaissances, échanges)
 
 _SAFETY_MARGIN = 0.05
+# Sert à DEUX titres : défaut du champ de dataclass (évalué à l'import, donc
+# non configurable — une valeur par défaut de champ est figée à la définition
+# de la classe) et sortie réservée au moment du calcul (configurable).
 _DEFAULT_MAX_TOKENS = 4096
 
 # Plancher L3 en caractères — le cap historique du fil vivant, jamais franchi
@@ -69,15 +77,22 @@ class ContextBudget:
 
     @property
     def l3_history_tokens(self) -> int:
-        return int(self.usable_tokens * L3_HISTORY_SHARE)
+        return int(self.usable_tokens * cfg_float(
+            "ai.context.l3_history_share", L3_HISTORY_SHARE, mini=0.0, maxi=1.0,
+        ))
 
     @property
     def l2_relational_tokens(self) -> int:
-        return int(self.usable_tokens * L2_RELATIONAL_SHARE)
+        return int(self.usable_tokens * cfg_float(
+            "ai.context.l2_relational_share", L2_RELATIONAL_SHARE,
+            mini=0.0, maxi=1.0,
+        ))
 
     @property
     def l5_recall_tokens(self) -> int:
-        return int(self.usable_tokens * L5_RECALL_SHARE)
+        return int(self.usable_tokens * cfg_float(
+            "ai.context.l5_recall_share", L5_RECALL_SHARE, mini=0.0, maxi=1.0,
+        ))
 
     def l3_chars(self) -> int:
         return int(self.l3_history_tokens * self.chars_per_token)
@@ -98,11 +113,15 @@ class ContextBudget:
         que les outils sont comptés), y compris derrière un modèle 200k dont
         l'opérateur n'a simplement pas déclaré la fenêtre.
         """
-        margin = int(self.window_tokens * _SAFETY_MARGIN)
+        margin = int(self.window_tokens * _safety_margin())
         return max(0, self.window_tokens - self.max_tokens - self.tools_tokens - margin)
 
     def window_overflow(self, prompt_tokens: int) -> int:
         return max(0, prompt_tokens - self.window_room())
+
+
+def _safety_margin() -> float:
+    return cfg_float("ai.context.safety_margin", _SAFETY_MARGIN, mini=0.0, maxi=0.5)
 
 
 def _usage_ratio() -> float:
@@ -185,12 +204,14 @@ def build_budget(
 ) -> ContextBudget:
     """Construit un budget à partir d'une fenêtre connue. Pur, testable."""
     ratio = chars_per_token or 4.0
-    output_tokens = max_tokens or _DEFAULT_MAX_TOKENS
+    output_tokens = max_tokens or cfg_int(
+        "ai.context.default_max_tokens", _DEFAULT_MAX_TOKENS, mini=1,
+    )
     tools_tokens = int(tools_chars / ratio)
     usable = int(window_tokens * _usage_ratio())
     usable -= output_tokens
     usable -= tools_tokens
-    usable -= int(window_tokens * _SAFETY_MARGIN)
+    usable -= int(window_tokens * _safety_margin())
     return ContextBudget(
         window_tokens=window_tokens,
         usable_tokens=max(0, usable),
@@ -267,7 +288,8 @@ def conversation_l3_chars(tools_chars: int | None = None) -> int:
         budget = budget_for(AIRole.CONVERSATION, tools_chars=tools_chars)
         if budget is None:
             budget = build_budget(default_window_tokens(), tools_chars=tools_chars)
-        return max(_L3_FLOOR_CHARS, budget.l3_chars())
+        plancher = cfg_int("ai.context.l3_floor_chars", _L3_FLOOR_CHARS, mini=1)
+        return max(plancher, budget.l3_chars())
     except Exception as exc:
         degradations.record("budget: L3 conversation", exc)
         return _L3_ERROR_CHARS

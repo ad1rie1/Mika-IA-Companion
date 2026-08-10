@@ -19,6 +19,7 @@ import time as _time
 from asgiref.sync import sync_to_async
 from django.utils import timezone
 
+from configs.runtime import cfg_int
 from memory.episodic.chunker import build_chunks
 from memory.storage.vector_store import exchange_metadata, vector_call
 from memory.storage.window import user_facing_messages
@@ -27,6 +28,8 @@ from utils.periodic import PeriodicLoop
 
 logger = logging.getLogger(__name__)
 
+# Les deux valeurs ci-dessous sont réglables (``memory.episodic_*``) ; elles
+# restent ici comme repli quand le registre est hors d'atteinte.
 # Un backlog après indisponibilité est absorbé sur plusieurs ticks plutôt
 # qu'en un seul encode géant.
 MAX_MSGS_PER_TICK = 500
@@ -113,6 +116,10 @@ class EpisodicIndexer:
         if not ceiling_id:
             return
 
+        lot_max = cfg_int(
+            "memory.episodic_max_msgs_per_tick", MAX_MSGS_PER_TICK,
+            mini=10, maxi=5000,
+        )
         messages = await sync_to_async(list)(
             user_facing_messages(
                 Message.objects.filter(
@@ -123,12 +130,12 @@ class EpisodicIndexer:
             .values(
                 "id", "role", "content", "created_at",
                 "source", "person_id", "conversation_id",
-            )[:MAX_MSGS_PER_TICK]
+            )[:lot_max]
         )
 
         # Fenêtre bornée : si le lot est plein, le plafond effectif est le
         # dernier message lu, pas le plafond global.
-        if len(messages) == MAX_MSGS_PER_TICK:
+        if len(messages) == lot_max:
             ceiling_id = messages[-1]["id"]
 
         if not messages:
@@ -182,7 +189,11 @@ class EpisodicIndexer:
 
     async def _prune_if_due(self):
         now = _time.monotonic()
-        if now - self._last_prune < PRUNE_INTERVAL_S:
+        periode = cfg_int(
+            "memory.episodic_prune_interval_s", PRUNE_INTERVAL_S,
+            mini=60, maxi=86400,
+        )
+        if now - self._last_prune < periode:
             return
         self._last_prune = now
         await self.prune_expired()

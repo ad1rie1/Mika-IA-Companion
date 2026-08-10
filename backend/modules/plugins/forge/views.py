@@ -24,6 +24,8 @@ from utils.sanitize import STRIPPED_KEYS, sanitize_payload
 
 logger = logging.getLogger("module.forge")
 
+# Repli de ``forge.max_view_payload_kb`` — même valeur que le ``default``
+# déclaré dans ``config_schema.py``.
 MAX_VIEW_PAYLOAD_BYTES = 512 * 1024
 
 # Le même garde-fou s'applique désormais à TOUS les modules (le dashboard le
@@ -59,15 +61,19 @@ def _make_data_handler(host, module_name: str, view_key: str):
 
 
 def _normalize_view_result(result):
+    from configs.runtime import cfg_int
+
     if not isinstance(result, dict):
         result = {"value": result}
     try:
         encoded = json.dumps(result, default=str)
     except (TypeError, ValueError) as exc:
         return {"error": f"payload non sérialisable: {exc}"}
-    if len(encoded.encode("utf-8", errors="replace")) > MAX_VIEW_PAYLOAD_BYTES:
-        return {"error": "payload de vue trop gros (512 Ko max) — pagine "
-                         "avec params['page'] / params['limit']"}
+    plafond_ko = cfg_int("forge.max_view_payload_kb",
+                         MAX_VIEW_PAYLOAD_BYTES // 1024, mini=8, maxi=8192)
+    if len(encoded.encode("utf-8", errors="replace")) > plafond_ko * 1024:
+        return {"error": f"payload de vue trop gros ({plafond_ko} Ko max) — "
+                         "pagine avec params['page'] / params['limit']"}
     return sanitize_view_payload(json.loads(encoded))
 
 

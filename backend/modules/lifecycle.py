@@ -60,14 +60,30 @@ class ModuleLifecycle:
         ``EVENT_PATTERN`` / ``EVENT_MODE`` / ``EVENT_TIMEOUT`` let a module
         narrow what it is woken for and how. The defaults reproduce the old
         behaviour exactly: every event, awaited, unbounded.
+
+        The deadline is the one thing no module actually declares — every
+        ``EVENT_TIMEOUT`` in the tree is ``None``, so every AWAIT subscriber
+        runs unbounded and one hung ``on_event`` stalls the emitter for good.
+        ``modules.event_handler_timeout_s`` puts a floor under that, and
+        defaults to ``0`` (unbounded) so today's behaviour is preserved byte
+        for byte until someone sets it. A module carrying its own value keeps
+        it: a declared deadline is a statement about *that* handler.
         """
+        from configs.runtime import cfg_int
+
+        timeout = getattr(module, "EVENT_TIMEOUT", None)
+        if timeout is None:
+            borne = cfg_int("modules.event_handler_timeout_s", 0,
+                            mini=0, maxi=600)
+            timeout = float(borne) if borne > 0 else None
+
         self._bus.subscribe(
             module.on_event,
             name=module.name,
             pattern=getattr(module, "EVENT_PATTERN", "*"),
             mode=DeliveryMode(getattr(module, "EVENT_MODE", DeliveryMode.AWAIT)),
             priority=getattr(module, "EVENT_PRIORITY", PRIORITY_DEFAULT),
-            timeout=getattr(module, "EVENT_TIMEOUT", None),
+            timeout=timeout,
         )
 
     def _unsubscribe(self, module: BaseModule) -> None:

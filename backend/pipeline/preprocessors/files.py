@@ -21,11 +21,14 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from configs.runtime import cfg_int
 from pipeline.perception import Part
 
 logger = logging.getLogger(__name__)
 
 
+# Les trois valeurs ci-dessous sont le repli des réglages ``pipeline.files.*``
+# (section « Tour · Pièces jointes »).
 # Ceiling on extracted text injected into the prompt.
 MAX_EXTRACT_CHARS = 8000
 # PDF pages beyond this are skipped (each page is an extraction pass).
@@ -61,7 +64,8 @@ async def process(part: Part) -> Part:
     try:
         extracted, method = await asyncio.wait_for(
             asyncio.to_thread(_extract, data, name=name, mime=mime, ext=ext),
-            timeout=EXTRACT_TIMEOUT_SECONDS,
+            timeout=cfg_int("pipeline.files.extract_timeout_seconds",
+                            EXTRACT_TIMEOUT_SECONDS, mini=1),
         )
     except asyncio.TimeoutError:
         logger.warning("Extraction fichier trop longue (%s, %s)", name, mime)
@@ -69,8 +73,10 @@ async def process(part: Part) -> Part:
 
     truncated = False
     if extracted:
-        if len(extracted) > MAX_EXTRACT_CHARS:
-            extracted = extracted[:MAX_EXTRACT_CHARS].rstrip() + "\n[...tronqué]"
+        plafond = cfg_int("pipeline.files.max_extract_chars",
+                          MAX_EXTRACT_CHARS, mini=1)
+        if len(extracted) > plafond:
+            extracted = extracted[:plafond].rstrip() + "\n[...tronqué]"
             truncated = True
         content = (
             f"[fichier joint: {name} ({mime}) — contenu ci-dessous]\n"
@@ -158,16 +164,18 @@ def _extract_pdf(data: bytes, *, name: str) -> tuple[str, str]:
 
     import io
     try:
+        pages_max = cfg_int("pipeline.files.max_pdf_pages",
+                            MAX_PDF_PAGES, mini=1)
         reader = pypdf.PdfReader(io.BytesIO(data))
         total_pages = len(reader.pages)
         chunks = []
-        for page in reader.pages[:MAX_PDF_PAGES]:
+        for page in reader.pages[:pages_max]:
             chunks.append(page.extract_text() or "")
         text = "\n".join(chunks).strip()
         if not text:
             return "", "PDF sans texte extractible (scanné ?)"
-        if total_pages > MAX_PDF_PAGES:
-            text += f"\n[...{total_pages - MAX_PDF_PAGES} pages non lues]"
+        if total_pages > pages_max:
+            text += f"\n[...{total_pages - pages_max} pages non lues]"
         return text, "pdf"
     except Exception:
         logger.warning("Extraction PDF échouée (%s)", name, exc_info=True)

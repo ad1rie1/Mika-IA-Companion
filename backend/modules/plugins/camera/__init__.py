@@ -62,6 +62,10 @@ MAX_OBSERVATION_AGE = 600  # 10 min
 MAX_FRAME_AGE_FOR_ANALYSIS = 60
 # Délai avant de supprimer un device inactif (secondes)
 DEVICE_STALE_TIMEOUT = 600  # 10 min
+# Les trois ci-dessus sont les replis de ``camera.observation_ttl_s``,
+# ``camera.max_frame_age_s`` et ``camera.device_stale_timeout_s`` — mêmes
+# valeurs que les ``default`` déclarés dans ``config_schema.py``, servies
+# lorsque le registre est hors d'atteinte.
 
 # Hash perceptuel — taille de la miniature et pas de quantification
 _THUMB_SIZE = 16    # 16×16 px après resize
@@ -113,12 +117,19 @@ class CameraSettings:
     notify_enabled: bool = True
     notify_cooldown: int = NOTIFY_COOLDOWN_S
     see_min_interval: int = SEE_MIN_INTERVAL_S
+    tick_interval: int = 10
+    device_stale_timeout: int = DEVICE_STALE_TIMEOUT
+    max_frame_age: int = MAX_FRAME_AGE_FOR_ANALYSIS
 
 
 class CameraModule(BaseModule):
     """Pipeline de perception visuelle proactive multi-device."""
 
-    CRON_INTERVAL = 10  # tick toutes les 10s pour la détection de changement
+    # Repli de ``camera.tick_interval_s`` : tick toutes les 10 s pour la
+    # détection de changement. Réaffecté depuis la configuration à chaque
+    # tour (voir ``worker_cron``), comme le module RSS — le planificateur
+    # relit l'attribut entre deux ticks, donc le réglage vaut à chaud.
+    CRON_INTERVAL = 10
 
     def __init__(self):
         super().__init__("camera")
@@ -204,6 +215,11 @@ class CameraModule(BaseModule):
             notify_enabled=bool(lire("camera.notify_enabled", True)),
             notify_cooldown=int(lire("camera.notify_cooldown_s", NOTIFY_COOLDOWN_S)),
             see_min_interval=int(lire("camera.see_min_interval_s", SEE_MIN_INTERVAL_S)),
+            tick_interval=int(lire("camera.tick_interval_s", 10)),
+            device_stale_timeout=int(
+                lire("camera.device_stale_timeout_s", DEVICE_STALE_TIMEOUT)),
+            max_frame_age=int(
+                lire("camera.max_frame_age_s", MAX_FRAME_AGE_FOR_ANALYSIS)),
         )
 
     # ── Public API (appelée par CameraConsumer) ────────────────────
@@ -255,18 +271,25 @@ class CameraModule(BaseModule):
     async def worker_cron(self) -> None:
         now = time.time()
 
-        # FIX #7 : nettoyage des devices inactifs
-        stale = [d for d, s in self._devices.items() if now - s.frame_ts > DEVICE_STALE_TIMEOUT]
-        for device_id in stale:
-            del self._devices[device_id]
-            self.logger.info("Device caméra supprimé (inactif) : %s", device_id)
-
         # Rien à regarder : pas la peine de payer une lecture de configuration
-        # toutes les 10 s pour un module enregistré sur toutes les installations.
+        # toutes les 10 s pour un module enregistré sur toutes les
+        # installations. Sans device il n'y a rien non plus à oublier, donc le
+        # nettoyage ci-dessous ne perd rien à passer après ce retour.
         if not self._devices:
             return
 
         conf = await self._settings()
+        # Relu à chaque tour : le planificateur consulte l'attribut entre deux
+        # ticks, donc la cadence vaut à chaud (même schéma que le module RSS).
+        self.CRON_INTERVAL = conf.tick_interval
+
+        # FIX #7 : nettoyage des devices inactifs
+        stale = [d for d, s in self._devices.items()
+                 if now - s.frame_ts > conf.device_stale_timeout]
+        for device_id in stale:
+            del self._devices[device_id]
+            self.logger.info("Device caméra supprimé (inactif) : %s", device_id)
+
         if not conf.proactive_enabled:
             return
         if not self._analysis_allowed(conf):
@@ -274,7 +297,7 @@ class CameraModule(BaseModule):
 
         for device_id, state in list(self._devices.items()):
             # Ne pas analyser une frame trop ancienne (device en pause)
-            if now - state.frame_ts > MAX_FRAME_AGE_FOR_ANALYSIS:
+            if now - state.frame_ts > conf.max_frame_age:
                 continue
             # FIX #3 : analyser seulement si la frame a changé depuis la dernière analyse
             if not state.frame_changed_since_analysis:
@@ -310,7 +333,8 @@ class CameraModule(BaseModule):
         Deux gardes du même ordre que celles du cycle de sommeil et de la
         conscience, que la boucle ignorait : elle analysait à l'identique
         pendant que Mika dormait et pendant les heures où personne ne lui
-        parlait. Or une observation expire au bout de MAX_OBSERVATION_AGE ;
+        parlait. Or une observation expire au bout de
+        ``camera.observation_ttl_s`` ;
         produite après une heure de silence, elle est jetée sans qu'aucune
         invite ne l'ait jamais lue — un appel vision par frame, pour rien.
 
@@ -498,13 +522,17 @@ class CameraModule(BaseModule):
     # ── Context injection ──────────────────────────────────────────
 
     def get_context(self, person_id: str = "") -> str:
+        from configs.runtime import cfg_int
+
         now = time.time()
+        ttl = cfg_int("camera.observation_ttl_s", MAX_OBSERVATION_AGE,
+                      mini=30, maxi=86400)
         lines = []
         for state in self._devices.values():
             if not state.observation:
                 continue
             age = now - state.observation_ts
-            if age > MAX_OBSERVATION_AGE:
+            if age > ttl:
                 continue
             age_str = _format_age(age)
             notable_tag = f" ⚠ {state.notable_reason}" if state.notable_reason else ""
@@ -573,7 +601,7 @@ class CameraModule(BaseModule):
 
         now = time.time()
         age = now - state.frame_ts
-        if age > MAX_FRAME_AGE_FOR_ANALYSIS:
+        if age > self._max_frame_age():
             return {"error": f"La frame de '{state.label}' est trop ancienne ({int(age)}s)."}
 
         # Un regard demandé n'était borné que par « pas deux analyses en
@@ -627,9 +655,10 @@ class CameraModule(BaseModule):
         now = time.time()
         # FIX #11 : filtrer les devices inactifs
         devices = []
+        plafond = self._max_frame_age()
         for state in self._devices.values():
             frame_age = int(now - state.frame_ts)
-            if frame_age > MAX_FRAME_AGE_FOR_ANALYSIS:
+            if frame_age > plafond:
                 continue  # device déconnecté, ne pas polluer la liste
             devices.append({
                 "device_id": state.device_id,
@@ -643,12 +672,26 @@ class CameraModule(BaseModule):
 
     # ── Helpers ────────────────────────────────────────────────────
 
+    @staticmethod
+    def _max_frame_age() -> int:
+        """``camera.max_frame_age_s`` — âge au-delà duquel un device est muet.
+
+        Lu au lieu d'être figé : les trois sites qui s'en servent (le regard
+        actif, la liste des devices, la résolution du device par défaut)
+        doivent répondre à la *même* question, et une seule d'entre elles
+        dispose d'un ``CameraSettings`` complet.
+        """
+        from configs.runtime import cfg_int
+        return cfg_int("camera.max_frame_age_s", MAX_FRAME_AGE_FOR_ANALYSIS,
+                       mini=5, maxi=3600)
+
     def _get_device(self, device_id: str) -> DeviceState | None:
         if device_id and device_id in self._devices:
             return self._devices[device_id]
         now = time.time()
+        plafond = self._max_frame_age()
         for state in self._devices.values():
-            if now - state.frame_ts <= MAX_FRAME_AGE_FOR_ANALYSIS:
+            if now - state.frame_ts <= plafond:
                 return state
         return None
 

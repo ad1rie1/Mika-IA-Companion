@@ -21,19 +21,24 @@ from __future__ import annotations
 import logging
 import time
 
+from configs.runtime import cfg_float
 from drives.state import (
-    DEFAULT_PARAMS,
     DriveKind,
     DriveState,
     dominant_drive,
     drive_prompt_description,
     log_growth,
+    params_for,
 )
 from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
 
+# Les constantes qui suivent restent le REPLI des clés ``drives.*`` (section
+# « Pulsions » du dashboard) : même valeur, servie quand le registre est hors
+# d'atteinte. Voir ``configs/runtime.py``.
+#
 # Activity tracking for REST drive.
 # REST grows proportionally to "activity density" in the last window.
 _ACTIVITY_WINDOW_SECONDS = 600.0   # 10 min rolling window
@@ -50,6 +55,13 @@ _REST_PRESSURE_PER_EVENT = 0.04    # each act/observation adds this to rest
 # sommeil redevient la voie principale de récupération, ce que le
 # commentaire de `SLEEP_REST_RECOVERY` affirmait déjà.
 _REST_NATURAL_DECAY = 0.0001
+
+# Mélange des deux sources d'énergie : energie = circadien × 0.7 + (1 − REST)
+# × 0.3. C'étaient deux littéraux nus au milieu de `energy_level`, alors que
+# ce sont eux qui décident si Mika est « une personne qui a des journées » ou
+# « une personne qui a des coups de fatigue ».
+ENERGY_CIRCADIAN_WEIGHT = 0.7
+ENERGY_REST_WEIGHT = 0.3
 
 
 class DriveEngine:
@@ -77,12 +89,15 @@ class DriveEngine:
 
         for kind, state in self.states.items():
             dt = max(0.0, now - state.last_update)
-            params = DEFAULT_PARAMS[kind]
+            params = params_for(kind)
 
             if kind is DriveKind.REST:
                 # Always consume pending activity events, even if dt=0.
                 pressure = self._rest_pressure(now)
-                decay = _REST_NATURAL_DECAY * dt
+                decay = cfg_float(
+                    "drives.rest.natural_decay_per_second",
+                    _REST_NATURAL_DECAY, mini=0.0,
+                ) * dt
                 state.tension += pressure - decay
             elif params.growth_horizon:
                 # `max` et non `=` : après un assouvissement partiel
@@ -103,7 +118,9 @@ class DriveEngine:
             state.last_update = now
 
         # Prune old activity events outside the window
-        cutoff = now - _ACTIVITY_WINDOW_SECONDS
+        cutoff = now - cfg_float(
+            "drives.activity_window_seconds", _ACTIVITY_WINDOW_SECONDS, mini=0.0,
+        )
         self._activity = [(t, w) for t, w in self._activity if t >= cutoff]
 
     def _rest_pressure(self, now: float) -> float:
@@ -118,9 +135,12 @@ class DriveEngine:
         # events are "one-shot" — added here when first seen, then drained.
         total = 0.0
         remaining: list[tuple[float, float]] = []
+        pression = cfg_float(
+            "drives.rest.pressure_per_event", _REST_PRESSURE_PER_EVENT, mini=0.0,
+        )
         for t, w in self._activity:
             # Consume: this event contributes once.
-            total += _REST_PRESSURE_PER_EVENT * w
+            total += pression * w
             # Keep it in the history for context reporting (not re-counted)
             remaining.append((t, 0.0))
         self._activity = remaining
@@ -136,7 +156,7 @@ class DriveEngine:
         """
         self.update()
         state = self.states[kind]
-        params = DEFAULT_PARAMS[kind]
+        params = params_for(kind)
         decay = params.decay_on_satisfy * max(0.0, min(1.0, amount))
         state.tension *= (1.0 - decay)
         state.clamp()
@@ -212,7 +232,7 @@ class DriveEngine:
         parts = []
 
         for kind, state in self.states.items():
-            params = DEFAULT_PARAMS[kind]
+            params = params_for(kind)
             if state.tension < params.satisfy_threshold:
                 continue
 
@@ -244,7 +264,7 @@ class DriveEngine:
         Le scoring l'applique donc après avoir plafonné les positives.
         """
         self.update()
-        params = DEFAULT_PARAMS[DriveKind.REST]
+        params = params_for(DriveKind.REST)
         tension = self.states[DriveKind.REST].tension
         if tension < params.satisfy_threshold:
             return 0.0
@@ -312,7 +332,12 @@ class DriveEngine:
         rest_tension = self.states[DriveKind.REST].tension
         rest_energy = max(0.0, 1.0 - rest_tension)
 
-        combined = 0.7 * circadian_energy + 0.3 * rest_energy
+        combined = (
+            cfg_float("drives.energy.circadian_weight",
+                      ENERGY_CIRCADIAN_WEIGHT, mini=0.0) * circadian_energy
+            + cfg_float("drives.energy.rest_weight",
+                        ENERGY_REST_WEIGHT, mini=0.0) * rest_energy
+        )
         return max(0.0, min(1.0, combined))
 
     # ── Persistence ───────────────────────────────────────────────

@@ -22,6 +22,7 @@ from django.conf import settings
 
 from communication import history
 from communication.presence import person_group, presence_registry
+from configs.runtime import cfg_float, cfg_int
 from pipeline.media import validate_attachments
 from pipeline.perception import Intent, Perception
 from pipeline.turns import turn_queue
@@ -29,6 +30,10 @@ from pipeline.turns import turn_queue
 logger = logging.getLogger(__name__)
 
 BROADCAST_GROUP = "vtuber_broadcast"
+# Les bornes de débit et de taille sont configurables sous ``comm.web.*`` ;
+# les constantes restent le repli exact. Ce qui suit (longueurs d'identifiant,
+# préfixes réservés, plafonds de purge) ne l'est pas : ce sont des invariants
+# de protocole et des garde-fous, pas des préférences.
 MAX_MESSAGE_LENGTH = 2000
 MAX_PERSON_ID_LENGTH = 64
 MAX_CLIENT_MSG_ID_LENGTH = 64
@@ -77,10 +82,26 @@ _last_greeted: dict[str, float] = {}
 _GREETED_MAX_TRACKED = 500
 
 
+def _max_message_length() -> int:
+    return cfg_int("comm.web.max_message_length", MAX_MESSAGE_LENGTH, mini=1)
+
+
+def _rate_window() -> float:
+    return cfg_float(
+        "comm.web.rate_limit_window_seconds", RATE_LIMIT_WINDOW_SECONDS, mini=0.0,
+    )
+
+
+def _greeting_cooldown() -> float:
+    return cfg_float(
+        "comm.web.greeting_cooldown_seconds", GREETING_COOLDOWN_SECONDS, mini=0.0,
+    )
+
+
 def _prune_greeted(now: float) -> None:
     if len(_last_greeted) <= _GREETED_MAX_TRACKED:
         return
-    cutoff = now - GREETING_COOLDOWN_SECONDS
+    cutoff = now - _greeting_cooldown()
     for person_id in [p for p, t in _last_greeted.items() if t < cutoff]:
         _last_greeted.pop(person_id, None)
 
@@ -369,7 +390,7 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
         # full text it painted itself while the server held a shortened
         # version — two different sentences, one marked delivered, diverging
         # forever. Saying no lets the sender edit what they actually wrote.
-        if len(clean_message) > MAX_MESSAGE_LENGTH:
+        if len(clean_message) > _max_message_length():
             await self._send_ack(client_msg_id, "too_long")
             return
 
@@ -642,7 +663,7 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
             return
         now = time.monotonic()
         last = _last_greeted.get(self.person_id)
-        if last is not None and now - last < GREETING_COOLDOWN_SECONDS:
+        if last is not None and now - last < _greeting_cooldown():
             # Already said hello recently. Mark this connection as done so
             # the first chat turn does not try again either.
             self._greeted = True
@@ -694,9 +715,11 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
     def _is_rate_limited(self) -> bool:
         """Sliding-window rate limit: cap messages per connection."""
         now = time.monotonic()
-        window_start = now - RATE_LIMIT_WINDOW_SECONDS
+        window_start = now - _rate_window()
         self._msg_timestamps = [t for t in self._msg_timestamps if t >= window_start]
-        if len(self._msg_timestamps) >= RATE_LIMIT_MAX_MESSAGES:
+        if len(self._msg_timestamps) >= cfg_int(
+            "comm.web.rate_limit_max_messages", RATE_LIMIT_MAX_MESSAGES, mini=1,
+        ):
             return True
         self._msg_timestamps.append(now)
         return False
@@ -712,11 +735,13 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
         sending twelve syncs in ten seconds is not waiting on the twelfth.
         """
         now = time.monotonic()
-        window_start = now - RATE_LIMIT_WINDOW_SECONDS
+        window_start = now - _rate_window()
         self._control_timestamps = [
             t for t in self._control_timestamps if t >= window_start
         ]
-        if len(self._control_timestamps) >= RATE_LIMIT_MAX_CONTROL:
+        if len(self._control_timestamps) >= cfg_int(
+            "comm.web.rate_limit_max_control", RATE_LIMIT_MAX_CONTROL, mini=1,
+        ):
             logger.warning(
                 "Control-frame flood from %s — dropping", self.person_id,
             )

@@ -24,11 +24,15 @@ import logging
 
 from asgiref.sync import sync_to_async
 
+from configs.runtime import cfg_float, cfg_int
 from utils.degradation import degradations
 from utils.periodic import PeriodicLoop
 
 logger = logging.getLogger(__name__)
 
+# Les trois valeurs réglables ci-dessous (``memory.compaction_*``) restent
+# écrites ici comme REPLI : la valeur servie quand le registre est hors
+# d'atteinte (import avant `migrate`, base verrouillée, collecte des tests).
 # Part du texte replié qui survit dans le résumé (estimation du repli).
 SURVIVAL_FACTOR = 0.15
 # Le résumé lui-même ne doit jamais manger la part du fil vivant.
@@ -146,6 +150,10 @@ class ConversationCompactor:
         récence. Le buffer est chronologique : le premier message non
         repliable arrête la sélection (pas de trous dans le résumé).
         """
+        survie = cfg_float(
+            "memory.compaction_survival_factor", SURVIVAL_FACTOR,
+            mini=0.01, maxi=1.0,
+        )
         fold: list[dict] = []
         projected = measured
         for m in buffer[:-keep_last] if keep_last else buffer:
@@ -153,7 +161,7 @@ class ConversationCompactor:
             if not isinstance(mid, int) or mid > checkpoint:
                 break
             fold.append(m)
-            projected -= int((1 - SURVIVAL_FACTOR) * self._weight(m))
+            projected -= int((1 - survie) * self._weight(m))
             if projected <= low:
                 break
         return fold
@@ -211,6 +219,14 @@ class ConversationCompactor:
         from ai.router import AIRole, UnconfiguredRoleError, ai_router
         from config.personality import personality
 
+        cible = cfg_int(
+            "memory.compaction_summary_target_chars", SUMMARY_TARGET_CHARS,
+            mini=500, maxi=30000,
+        )
+        budget = cfg_float(
+            "memory.compaction_llm_timeout", _LLM_TIMEOUT_S, mini=5.0, maxi=600.0,
+        )
+
         lines = [
             "RÉSUMÉ EXISTANT :",
             prev_summary or "(aucun — début de conversation)",
@@ -226,10 +242,10 @@ class ConversationCompactor:
                 role=AIRole.COMPACTION,
                 system_prompt=self._SYSTEM_PROMPT.format(
                     name=getattr(personality, "name", "Mika"),
-                    max_chars=SUMMARY_TARGET_CHARS,
+                    max_chars=cible,
                 ),
                 user_prompt="\n".join(lines),
-                timeout=_LLM_TIMEOUT_S,
+                timeout=budget,
                 max_tokens=2000,
             )
         except UnconfiguredRoleError:
@@ -250,6 +266,6 @@ class ConversationCompactor:
             raise DegenerateSummary(
                 f"{len(text)} caracteres pour un plancher de {floor}"
             )
-        if len(text) > SUMMARY_TARGET_CHARS:
-            text = text[: SUMMARY_TARGET_CHARS - 1].rstrip() + "…"
+        if len(text) > cible:
+            text = text[: cible - 1].rstrip() + "…"
         return text

@@ -54,6 +54,9 @@ from modules.types import (
 
 logger = logging.getLogger(__name__)
 
+# Replis de ``rss.max_feed_kb`` et ``rss.user_agent`` — mêmes valeurs que les
+# ``default`` déclarés dans ``config_schema.py``, servies quand le registre
+# est hors d'atteinte.
 # Un flux est une liste de titres ; au-delà, ce n'en est pas un.
 MAX_FEED_BYTES = 5 * 1024 * 1024
 USER_AGENT = "vtuber-rss/2.0 (+https://localhost)"
@@ -238,6 +241,13 @@ class RSSModule(BaseModule):
     def _fetch(self, url: str, timeout: int, etag: str, modified: str):
         """Télécharge un flux. Renvoie ``(octets|None, etag, last_modified)``.
 
+        La taille lue et le User-Agent sont relus ici (``rss.max_feed_kb`` /
+        ``rss.user_agent``) plutôt que passés en argument : cette méthode est
+        *la* frontière réseau du module — celle que les tests remplacent — et
+        élargir sa signature ferait payer un détail de configuration à chaque
+        remplaçante. L'appel tourne dans un fil de l'exécuteur, contexte
+        synchrone, donc la lecture atteint bien la base.
+
         ``None`` signifie **304 Non modifié** : rien à analyser, et c'est le
         cas le plus fréquent sur un flux relevé toutes les dix minutes.
 
@@ -251,8 +261,17 @@ class RSSModule(BaseModule):
         import urllib.error
         import urllib.request
 
+        from configs.runtime import cfg_int, cfg_str
+
+        max_bytes = cfg_int("rss.max_feed_kb", MAX_FEED_BYTES // 1024,
+                            mini=64, maxi=51200) * 1024
+        # Un User-Agent vide n'est pas un réglage : certains éditeurs refusent
+        # la requête, et vider le champ veut dire « reprends la valeur
+        # d'usine », pas « n'envoie pas d'en-tête ».
+        user_agent = cfg_str("rss.user_agent", USER_AGENT).strip() or USER_AGENT
+
         headers = {
-            "User-Agent": USER_AGENT,
+            "User-Agent": user_agent,
             "Accept": "application/rss+xml, application/atom+xml, application/xml;q=0.9, */*;q=0.8",
         }
         if etag:
@@ -263,7 +282,7 @@ class RSSModule(BaseModule):
         request = urllib.request.Request(url, headers=headers)
         try:
             with urllib.request.urlopen(request, timeout=timeout) as resp:
-                raw = resp.read(MAX_FEED_BYTES)
+                raw = resp.read(max_bytes)
                 return (
                     raw,
                     (resp.headers.get("ETag") or "")[:200],
@@ -365,7 +384,7 @@ class RSSModule(BaseModule):
         # L'analyse quitte la boucle pour la même raison que le
         # téléchargement. ``parser.parse`` est du Python pur — SAX, désinfection
         # HTML de chaque résumé, deux regex et un ``unescape`` par article — sur
-        # une entrée bornée seulement par ``MAX_FEED_BYTES`` (5 Mo) : un flux à
+        # une entrée bornée seulement par ``rss.max_feed_kb`` (5 Mo) : un flux à
         # contenu intégral tient la boucle plusieurs centaines de millisecondes,
         # et cette boucle sert tous les WebSocket, la conscience et le
         # ``TurnQueue``. Un ``pong`` manqué suffit à faire reconnecter un client.

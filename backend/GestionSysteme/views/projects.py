@@ -227,6 +227,7 @@ def _premier_message(form) -> str:
 
 def project_detail(request, project_id: int):
     from projects.models import ProjectLog, ProjectPendingAction, ProjectTask
+    from configs.runtime import cfg_int
     from projects.runner import RUNS_SINCE_INPUT_CAP
 
     from GestionSysteme.project_forms import ProjectTaskForm
@@ -259,7 +260,11 @@ def project_detail(request, project_id: int):
         "task_statuses": ProjectTask.Status.choices,
         # Le plafond vient du lanceur : la fiche annonce « n / plafond » et
         # décide d'afficher la reprise, elle n'a pas à en garder sa copie.
-        "runs_cap": RUNS_SINCE_INPUT_CAP,
+        # Lu dans la configuration, pas sur la constante : celle-ci n'est plus
+        # que le repli, et une fiche qui annonce « 7 / 10 » pendant que le
+        # lanceur s'arrête à 5 se lit comme un projet bloqué sans raison.
+        "runs_cap": cfg_int(
+            "projects.runs_since_input_cap", RUNS_SINCE_INPUT_CAP, mini=1),
     })
     return render(request, "gestion/projects/detail.html", ctx)
 

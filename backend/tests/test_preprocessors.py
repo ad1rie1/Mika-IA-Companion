@@ -86,8 +86,14 @@ class TestVisionPreprocessor:
         async def hang(*a, **k):
             await asyncio.sleep(10)
 
+        # L'échéance vient désormais du registre
+        # (``pipeline.vision.timeout_seconds``), dont le défaut déclaré vaut
+        # 30 s : patcher la constante du module ne remplacerait qu'un repli
+        # que personne ne lit, et le test attendrait vraiment. On patche donc
+        # la lecture.
         with patch("pipeline.preprocessors.vision.ai_router") as router, \
-             patch("pipeline.preprocessors.vision.VISION_TIMEOUT_SECONDS", 0.05):
+             patch("pipeline.preprocessors.vision.timeout_seconds",
+                   return_value=0):
             router.complete = hang  # so wait_for times out
             result = await vision.process(part)
 

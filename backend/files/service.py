@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from asgiref.sync import sync_to_async
+from configs.runtime import cfg_int
 from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 # antérieurs à cette borne (le max_length du modèle n'est pas appliqué par
 # SQLite). Volontairement pas importé de pipeline.media : le rendu se défend
 # seul, même si l'écriture change.
+# Repli de ``files.max_name_chars``.
 MAX_NAME_CHARS = 80
 
 # Plafond d'entrées listées inline dans le prompt système. Le bloc repart à
@@ -41,6 +43,7 @@ MAX_NAME_CHARS = 80
 # une journée de tri de documents y ajoutait une ligne par fichier déposé,
 # de façon permanente. Le détail complet reste joignable par files_list,
 # exactement comme pour les fichiers plus anciens.
+# Repli de ``files.max_today_lines``.
 MAX_TODAY_LINES = 6
 
 # Plafonds de la réponse de files_list. Un résultat d'outil ne coûte pas un
@@ -50,14 +53,32 @@ MAX_TODAY_LINES = 6
 # par peser plus lourd que le prompt système lui-même. La troncature est dite,
 # pas subie : la réponse porte `total` à côté de `shown` et la façon d'aller
 # chercher la suite.
+# Replis de ``files.default_list_limit`` / ``files.max_list_limit``. Les deux
+# réglages sont ``restart_required`` : ils sont interpolés dans la
+# *description* de l'outil MCP au moment de l'enregistrement, donc le schéma
+# annoncé au modèle ne suit qu'au démarrage.
 DEFAULT_LIST_LIMIT = 25
 MAX_LIST_LIMIT = 50
+
+
+def list_limits() -> tuple[int, int]:
+    """(défaut, plafond) de files_list — lus ensemble parce qu'ils se
+    contraignent : un défaut au-dessus du plafond n'aurait aucun sens, et
+    ``_as_int`` clampe de toute façon le premier dans le second."""
+    plafond = cfg_int("files.max_list_limit", MAX_LIST_LIMIT, mini=1)
+    defaut = cfg_int("files.default_list_limit", DEFAULT_LIST_LIMIT, mini=1)
+    return min(defaut, plafond), plafond
 
 # Plafond de chargement du registre en mémoire au démarrage. Le registre sert
 # aussi de table de résolution à files_read / analyze / move / delete : la
 # borne est donc large — elle empêche une base pathologique de tout charger en
 # RAM, pas l'usage normal.
+# Repli de ``files.max_registry_load``.
 MAX_REGISTRY_LOAD = 2000
+
+
+def _max_registry_load() -> int:
+    return cfg_int("files.max_registry_load", MAX_REGISTRY_LOAD, mini=1)
 
 
 def _as_data(raw: Any) -> str:
@@ -68,10 +89,11 @@ def _as_data(raw: Any) -> str:
     consigne. On le ramène à une ligne unique, bornée, sans guillemet double
     pour qu'il reste enfermé dans son encadrement.
     """
+    plafond = cfg_int("files.max_name_chars", MAX_NAME_CHARS, mini=8, maxi=255)
     text = "".join(c if c.isprintable() else " " for c in str(raw or ""))
     text = " ".join(text.split()).replace('"', "'")
-    if len(text) > MAX_NAME_CHARS:
-        text = text[: MAX_NAME_CHARS - 3].rstrip() + "..."
+    if len(text) > plafond:
+        text = text[: plafond - 3].rstrip() + "..."
     return text
 
 
@@ -115,11 +137,12 @@ class FilesService:
         for f in files:
             self._register_in_memory(f)
         logger.info("FilesService: %d file(s) loaded from DB", len(files))
-        if len(files) >= MAX_REGISTRY_LOAD:
+        plafond_registre = _max_registry_load()
+        if len(files) >= plafond_registre:
             logger.warning(
                 "FilesService: registre plafonné à %d entrées — les fichiers plus "
                 "anciens ne sont plus résolus par leur ID.",
-                MAX_REGISTRY_LOAD,
+                plafond_registre,
             )
         self._loaded = True
 
@@ -150,17 +173,18 @@ class FilesService:
         ]
         if not today_files:
             return ""
+        plafond_lignes = cfg_int("files.max_today_lines", MAX_TODAY_LINES, mini=0)
         recents = sorted(today_files, key=lambda x: x["uploaded_at"], reverse=True)
         lines = [f"Fichiers uploadés aujourd'hui ({len(today_files)}) :"]
         # L'UUID est indispensable pour appeler les outils, la catégorie dit
         # lequel appeler ; la taille ne sert à aucune décision et coûte un
         # tiers de la ligne.
-        for r in recents[:MAX_TODAY_LINES]:
+        for r in recents[:plafond_lignes]:
             lines.append(
                 f'  - ID={r["id"]}  nom="{_as_data(r.get("name"))}"'
                 f"  type={r['category']}"
             )
-        reste = len(recents) - MAX_TODAY_LINES
+        reste = len(recents) - plafond_lignes
         if reste > 0:
             pluriel = "s" if reste > 1 else ""
             lines.append(
@@ -222,7 +246,8 @@ class FilesService:
             return {"files": [], "message": "Aucun fichier correspondant."}
 
         total = len(files)
-        limit = _as_int(limit, DEFAULT_LIST_LIMIT, 1, MAX_LIST_LIMIT)
+        defaut, plafond = list_limits()
+        limit = _as_int(limit, defaut, 1, plafond)
         offset = _as_int(offset, 0, 0, total)
         page = sorted(files, key=lambda x: x["uploaded_at"], reverse=True)[
             offset : offset + limit
@@ -319,7 +344,7 @@ class FilesService:
             q = question or "Décris cette image en détail."
             from ai.client import ai_client
             from ai.router import AIRole
-            from pipeline.preprocessors.vision import VISION_TIMEOUT_SECONDS
+            from pipeline.preprocessors.vision import timeout_seconds
 
             # Même rôle que le préprocesseur vision : le rôle CONVERSATION peut
             # pointer un modèle texte-seul, et une pièce jointe image envoyée à
@@ -337,7 +362,7 @@ class FilesService:
                     role=AIRole.VISION_CAPTION,
                     attachments=[att],
                 ),
-                timeout=VISION_TIMEOUT_SECONDS,
+                timeout=timeout_seconds(),
             )
             return {"description": description, "file_id": record["id"], "name": record["name"]}
         # Avant le except large : depuis Python 3.11 asyncio.TimeoutError est
@@ -368,10 +393,10 @@ class FilesService:
             # Même borne que le préprocesseur audio : rien en aval ne limite
             # l'appel STT, et un tour bloqué jusqu'au timeout global échoue
             # au lieu de rendre « transcription indisponible ».
-            from pipeline.preprocessors.audio import TRANSCRIBE_TIMEOUT_SECONDS
+            from pipeline.preprocessors.audio import transcribe_timeout_seconds
             text = await asyncio.wait_for(
                 provider.transcribe_audio(audio_bytes, record["name"]),
-                timeout=TRANSCRIBE_TIMEOUT_SECONDS,
+                timeout=transcribe_timeout_seconds(),
             )
             return {"transcription": text, "file_id": record["id"], "name": record["name"]}
         except asyncio.TimeoutError:
@@ -444,7 +469,9 @@ class FilesService:
         from files.models import UploadedFile
         # ``Meta.ordering`` trie déjà du plus récent au plus ancien : la borne
         # garde les N derniers, les seuls qu'une conversation cite encore.
-        return list(UploadedFile.objects.filter(is_deleted=False)[:MAX_REGISTRY_LOAD])
+        return list(
+            UploadedFile.objects.filter(is_deleted=False)[:_max_registry_load()]
+        )
 
     def _register_in_memory(self, db_obj: Any) -> None:
         self._registry[str(db_obj.file_id)] = {

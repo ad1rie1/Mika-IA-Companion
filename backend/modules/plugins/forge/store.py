@@ -36,11 +36,20 @@ VIEW_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{1,31}$")
 CONFIG_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{1,31}$")
 EVENT_PATTERN_RE = re.compile(r"^[\w.\-]+(\.\*)?$")
 
+# Replis des trois plafonds réglables (``forge.max_manifest_kb``,
+# ``forge.max_versions_kept``, ``forge.max_trash_kept``) : mêmes valeurs que
+# les ``default`` déclarés dans ``config_schema.py``.
 MAX_MANIFEST_BYTES = 16 * 1024
 MAX_VERSIONS_KEPT = 10
 # La corbeille est un filet de sécurité, pas une archive : sans plafond, une
 # boucle write→erase la ferait grossir indéfiniment sur le disque.
 MAX_TRASH_KEPT = 20
+
+
+def _max_manifest_bytes() -> int:
+    from configs.runtime import cfg_int
+    return cfg_int("forge.max_manifest_kb", MAX_MANIFEST_BYTES // 1024,
+                   mini=1, maxi=256) * 1024
 
 _CONFIG_TYPES = {"str", "text", "int", "float", "bool", "secret",
                  "select", "list", "record_list"}
@@ -290,8 +299,9 @@ def read_module(name: str) -> dict:
     manifest_path = mdir / "manifest.yaml"
     code_path = mdir / "module.py"
     raw = manifest_path.read_text(encoding="utf-8") if manifest_path.exists() else ""
-    if len(raw.encode()) > MAX_MANIFEST_BYTES:
-        raise StoreError(f"manifest trop long (max {MAX_MANIFEST_BYTES // 1024} Ko)")
+    plafond = _max_manifest_bytes()
+    if len(raw.encode()) > plafond:
+        raise StoreError(f"manifest trop long (max {plafond // 1024} Ko)")
     try:
         manifest_raw = yaml.safe_load(raw) or {}
     except yaml.YAMLError as exc:
@@ -374,9 +384,13 @@ def _prune_versions(name: str) -> None:
     vroot = _module_dir(name) / "_versions"
     if not vroot.exists():
         return
+    from configs.runtime import cfg_int
+
     versions = sorted((p for p in vroot.iterdir() if p.is_dir()),
                       key=lambda p: p.name)
-    for old in versions[:-MAX_VERSIONS_KEPT]:
+    garde = cfg_int("forge.max_versions_kept", MAX_VERSIONS_KEPT,
+                    mini=1, maxi=200)
+    for old in versions[:-garde]:
         shutil.rmtree(old, ignore_errors=True)
 
 
@@ -423,7 +437,9 @@ def erase(name: str) -> str:
 
 
 def _prune_trash() -> None:
-    """Ne garde que les MAX_TRASH_KEPT suppressions les plus récentes."""
+    """Ne garde que les ``forge.max_trash_kept`` suppressions les plus récentes."""
+    from configs.runtime import cfg_int
+
     trash = forge_dir() / "_trash"
     if not trash.is_dir():
         return
@@ -433,5 +449,6 @@ def _prune_trash() -> None:
         (p for p in trash.iterdir() if p.is_dir()),
         key=lambda p: p.stat().st_mtime,
     )
-    for old in entries[:-MAX_TRASH_KEPT]:
+    garde = cfg_int("forge.max_trash_kept", MAX_TRASH_KEPT, mini=1, maxi=200)
+    for old in entries[:-garde]:
         shutil.rmtree(old, ignore_errors=True)

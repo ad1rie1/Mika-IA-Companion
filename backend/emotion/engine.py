@@ -8,6 +8,7 @@ from datetime import date, timedelta
 
 from django.conf import settings
 
+from configs.runtime import cfg_float, cfg_int
 from emotion import dynamics, pad
 from emotion.dynamics import OscillatorParams
 from emotion.pad import Vec3
@@ -36,6 +37,21 @@ _MAX_SUBSTEP_DT = 0.5
 # limit. The window before it stays fine-grained so a normal tick is exact.
 _FINE_WINDOW_S = 60.0
 _COARSE_SUBSTEP_DT = 5.0
+# ── Réglages rapatriés en configuration ──────────────────────────────
+#
+# Les constantes qui suivent restent déclarées ici et gardent leur valeur :
+# elles sont le REPLI de la clé ``emotion.*`` correspondante (section Émotion
+# du dashboard), servi quand le registre est hors d'atteinte — import avant
+# ``migrate``, base verrouillée, collecte des tests. Le défaut déclaré dans
+# ``emotion/config_schema.py`` vaut exactement la constante, donc une
+# installation neuve se comporte à l'identique ; ce qui change, c'est
+# seulement l'origine de la valeur. Voir ``configs/runtime.py``.
+#
+# Ce qui n'est PAS configurable, et ne doit pas le devenir : les pas
+# d'intégration (`_MAX_SUBSTEP_DT`, `_FINE_WINDOW_S`, `_COARSE_SUBSTEP_DT`).
+# Ce ne sont pas des réglages mais la condition de stabilité du schéma d'Euler
+# semi-implicite — un curseur y règle la justesse du calcul, pas le caractère.
+
 # Upper bound on the total time advanced in a single _apply_decay call.
 # Invisible while the time constant was ~7s (the old 30s cap was already four
 # time constants); with a τ counted in minutes it froze the state of a machine
@@ -80,6 +96,12 @@ GLOBAL_GAIN_SLOPE = 1.6
 GLOBAL_GAIN_MAX_FACTOR = 2.0
 GLOBAL_RATCHET_MAX = 0.5
 
+# Part de l'humeur par défaut dans le point de repos commun : home =
+# default_mood × ce poids + teinte circadienne. C'était un littéral nu au
+# milieu de ``_home_vector``, alors que c'est exactement le curseur qui décide
+# de la place du personnage dans son propre repos.
+HOME_DEFAULT_MOOD_WEIGHT = 0.15
+
 # Ancrage personnel : part du point de repos d'une personne qui vient de ce
 # qu'elle a déjà provoqué, contre le repos circadien commun.
 PERSON_ANCHOR_WEIGHT = 0.6
@@ -118,11 +140,29 @@ class TurnEmotionView:
     declared: bool
 
 
+def _heal_half_life_seconds() -> float:
+    """Demi-vie de la guérison d'une stance, en secondes.
+
+    Le réglage est exposé en JOURS — c'est l'unité dans laquelle on raisonne
+    (« une brouille du lundi est-elle encore là mercredi ? »), pas en secondes
+    où la valeur par défaut s'écrit 259 200. La conversion vit ici, une fois,
+    plutôt qu'à chacun des deux sites de lecture.
+    """
+    return cfg_float(
+        "emotion.anchor_heal_half_life_days",
+        ANCHOR_HEAL_HALF_LIFE_S / 86400.0,
+        mini=1e-6,
+    ) * 86400.0
+
+
 def _clamp_anchor(vector: Vec3) -> Vec3:
+    limite = cfg_float(
+        "emotion.anchor_max_norm", ANCHOR_MAX_NORM, mini=0.0,
+    )
     magnitude = pad.norm(vector)
-    if magnitude <= ANCHOR_MAX_NORM:
+    if magnitude <= limite:
         return vector
-    return pad.scale(vector, ANCHOR_MAX_NORM / magnitude)
+    return pad.scale(vector, limite / magnitude)
 
 
 class EmotionEngine:
@@ -259,9 +299,9 @@ class EmotionEngine:
         recovery = max(0.05, min(1.0, t.recovery_speed))
         mass = max(0.25, min(4.0, 1.0 / volatility))
 
-        tau = PERSON_TAU_SLOW * (PERSON_TAU_FAST / PERSON_TAU_SLOW) ** (
-            (recovery - 0.05) / 0.95
-        )
+        tau_fast = cfg_float("emotion.person_tau_fast", PERSON_TAU_FAST, mini=1e-3)
+        tau_slow = cfg_float("emotion.person_tau_slow", PERSON_TAU_SLOW, mini=1e-3)
+        tau = tau_slow * (tau_fast / tau_slow) ** ((recovery - 0.05) / 0.95)
         zeta = 1.0 - 0.35 * volatility
         omega0 = 1.0 / (zeta * tau)
 
@@ -270,8 +310,9 @@ class EmotionEngine:
             stiffness=mass * omega0 * omega0,
             damping=2.0 * mass / tau,
             impulse_gain=min(
-                RATCHET_MAX,
-                RATCHET_BASE * max(0.1, t.intensity_base) * (0.5 + 0.5 * volatility),
+                cfg_float("emotion.ratchet_max", RATCHET_MAX, mini=0.0),
+                cfg_float("emotion.ratchet_base", RATCHET_BASE, mini=0.0)
+                * max(0.1, t.intensity_base) * (0.5 + 0.5 * volatility),
             ),
         )
 
@@ -281,14 +322,36 @@ class EmotionEngine:
         # gain is turning that factor off. No floor either: the cursor promises
         # "à 0 elle compartimente entièrement".
         global_mass = mass * 1.5
-        global_tau = tau * GLOBAL_TAU_FACTOR
+        global_tau = tau * cfg_float(
+            "emotion.global_tau_factor", GLOBAL_TAU_FACTOR, mini=1e-3,
+        )
         global_omega0 = 1.0 / (0.9 * global_tau)
         bleed = max(0.0, t.global_bleed)
+        # Le plafond du gain global est lu ICI et dans
+        # ``_global_impulse_params`` : il y était écrit deux fois, dont une en
+        # littéral nu (``min(0.5, …)``). Deux plafonds pour une seule garde,
+        # c'est deux plafonds qui divergent au premier réglage — les deux
+        # sites lisent donc la même clé.
+        plafond_global = self._global_ratchet_max()
         self._global_params = OscillatorParams(
             mass=global_mass,
             stiffness=global_mass * global_omega0 * global_omega0,
             damping=2.0 * global_mass / global_tau,
-            impulse_gain=0.0 if bleed <= 0.0 else min(0.5, RATCHET_GLOBAL * bleed),
+            impulse_gain=(
+                0.0 if bleed <= 0.0
+                else min(
+                    plafond_global,
+                    cfg_float("emotion.ratchet_global", RATCHET_GLOBAL, mini=0.0)
+                    * bleed,
+                )
+            ),
+        )
+
+    @staticmethod
+    def _global_ratchet_max() -> float:
+        """Le plafond du gain d'impulsion vers l'humeur de fond, une fois."""
+        return cfg_float(
+            "emotion.global_ratchet_max", GLOBAL_RATCHET_MAX, mini=0.0,
         )
 
     # ------------------------------------------------------------------
@@ -431,7 +494,7 @@ class EmotionEngine:
             # Au-delà du seuil, une ligne ne produit plus aucune humeur : la
             # borne appartient au WHERE, pas à une boucle Python qui aurait
             # d'abord fait grouper tout l'historique de la table.
-            cutoff = date.today() - timedelta(days=self._SUMMARY_DECAY_DAYS)
+            cutoff = date.today() - timedelta(days=self._summary_decay_days())
 
             # Une seule requête, servie par l'index (person_id, -period_start) :
             # les lignes arrivent groupées par personne, la plus récente en
@@ -483,6 +546,17 @@ class EmotionEngine:
             logger.debug("Failed to restore from summaries", exc_info=True)
             return 0
 
+    def _summary_decay_days(self) -> int:
+        """Horizon d'exploitation d'un ``EmotionalSummary``, en jours.
+
+        L'attribut de classe reste le repli. ``_SNAPSHOT_DECAY_DAYS``, lui,
+        est déjà chargé une fois à l'``initialize()`` : c'est une rétention
+        de table, pas un curseur qu'on essaie en regardant l'humeur bouger.
+        """
+        return cfg_int(
+            "emotion.summary_retention_days", self._SUMMARY_DECAY_DAYS, mini=1,
+        )
+
     def _faded_mood(
         self,
         period_start: date,
@@ -495,11 +569,14 @@ class EmotionEngine:
         au démarrage et le chargement paresseux par personne lisent la même
         règle, et ne peuvent donc plus en garder deux versions.
         """
+        # Lu une fois : le seuil et le ratio doivent parler du même horizon,
+        # y compris si le réglage change entre les deux lignes.
+        horizon = self._summary_decay_days()
         age_days = (date.today() - period_start).days
-        if age_days >= self._SUMMARY_DECAY_DAYS:
+        if age_days >= horizon:
             return None
 
-        time_factor = max(0.0, 1.0 - age_days / self._SUMMARY_DECAY_DAYS)
+        time_factor = max(0.0, 1.0 - age_days / horizon)
         intensity = dominant_intensity * time_factor
 
         if intensity < 0.05:
@@ -553,11 +630,14 @@ class EmotionEngine:
             from asgiref.sync import sync_to_async
             from memory.models import EmotionSnapshot
 
+            echantillon = cfg_int(
+                "emotion.anchor_sample", ANCHOR_SAMPLE, mini=1,
+            )
             snaps = await sync_to_async(
                 lambda: list(
                     EmotionSnapshot.objects
                     .filter(person_id=mood.person_id)
-                    .order_by("-created_at")[:ANCHOR_SAMPLE]
+                    .order_by("-created_at")[:echantillon]
                 )
             )()
             ancre = self._anchor_from_snapshots(snaps) if snaps else None
@@ -601,11 +681,14 @@ class EmotionEngine:
 
             # Same query, same (person_id, -created_at) index: the newest row
             # still gives the position, the tail gives the personal anchor.
+            echantillon = cfg_int(
+                "emotion.anchor_sample", ANCHOR_SAMPLE, mini=1,
+            )
             snaps = await sync_to_async(
                 lambda: list(
                     EmotionSnapshot.objects
                     .filter(person_id=person_id)
-                    .order_by("-created_at")[:ANCHOR_SAMPLE]
+                    .order_by("-created_at")[:echantillon]
                 )
             )()
 
@@ -727,9 +810,10 @@ class EmotionEngine:
         if mood.anchor is None:
             mood.anchor = _clamp_anchor(position)
             return
+        alpha = cfg_float("emotion.anchor_alpha", ANCHOR_ALPHA, mini=0.0, maxi=1.0)
         mood.anchor = _clamp_anchor(pad.add(
-            pad.scale(mood.anchor, 1.0 - ANCHOR_ALPHA),
-            pad.scale(position, ANCHOR_ALPHA),
+            pad.scale(mood.anchor, 1.0 - alpha),
+            pad.scale(position, alpha),
         ))
 
     def _anchor_from_snapshots(self, rows) -> Vec3 | None:
@@ -772,7 +856,7 @@ class EmotionEngine:
             recent = max(dates, default=None)
             if recent is not None:
                 age = max(0.0, time.time() - recent.timestamp())
-                part = 1.0 - 0.5 ** (age / ANCHOR_HEAL_HALF_LIFE_S)
+                part = 1.0 - 0.5 ** (age / _heal_half_life_seconds())
                 if part > 0.0:
                     home = self._home_vector()
                     ancre = _clamp_anchor(pad.add(
@@ -809,7 +893,11 @@ class EmotionEngine:
         """
         from emotion import circadian
 
-        base = pad.label_to_pad(self.temperament.default_mood, 0.15)
+        base = pad.label_to_pad(
+            self.temperament.default_mood,
+            cfg_float("emotion.home_default_mood_weight", HOME_DEFAULT_MOOD_WEIGHT,
+                      mini=0.0),
+        )
 
         try:
             from config.personality import personality
@@ -819,7 +907,15 @@ class EmotionEngine:
             profile = None
 
         state = circadian.current_state(profile=profile)
-        bias = circadian.phase_bias(state.phase, profile=profile)
+        # ``phase_bias`` reste une fonction PURE : c'est ici, au site d'appel,
+        # que la configuration est lue, et l'amplitude lui est passée. Faire
+        # lire la base à ``emotion/circadian.py`` aurait rendu impur un module
+        # dont toute la testabilité tient à ce qu'il ne l'est pas.
+        bias = circadian.phase_bias(
+            state.phase,
+            profile=profile,
+            magnitude=circadian.configured_bias_magnitude(),
+        )
 
         return pad.add(base, bias)
 
@@ -836,7 +932,7 @@ class EmotionEngine:
         """
         if mood.anchor is None or dt <= 0.0:
             return
-        part = 1.0 - 0.5 ** (dt / ANCHOR_HEAL_HALF_LIFE_S)
+        part = 1.0 - 0.5 ** (dt / _heal_half_life_seconds())
         if part <= 0.0:
             return
         mood.anchor = _clamp_anchor(pad.add(
@@ -861,9 +957,13 @@ class EmotionEngine:
             base = self._home_vector()
         if mood.anchor is None:
             return base
+        poids = cfg_float(
+            "emotion.person_anchor_weight", PERSON_ANCHOR_WEIGHT,
+            mini=0.0, maxi=1.0,
+        )
         return pad.add(
-            pad.scale(mood.anchor, PERSON_ANCHOR_WEIGHT),
-            pad.scale(base, 1.0 - PERSON_ANCHOR_WEIGHT),
+            pad.scale(mood.anchor, poids),
+            pad.scale(base, 1.0 - poids),
         )
 
     # ------------------------------------------------------------------
@@ -882,10 +982,21 @@ class EmotionEngine:
         if base.impulse_gain <= 0.0:
             return base
         force = max(0.0, min(1.0, intensity))
+        # INVARIANT : plancher + pente == facteur maximal (0.4 + 1.6 = 2.0).
+        # Les trois sont réglables séparément parce qu'ils décrivent trois
+        # choses (le seuil d'effleurement, la sensibilité, le plafond), mais
+        # les désaccorder fait mordre le plafond avant l'intensité 1.0 — ou le
+        # rend inatteignable, ce qui revient à le supprimer.
         gain = min(
-            GLOBAL_RATCHET_MAX,
-            base.impulse_gain * GLOBAL_GAIN_MAX_FACTOR,
-            base.impulse_gain * (GLOBAL_GAIN_FLOOR + GLOBAL_GAIN_SLOPE * force),
+            self._global_ratchet_max(),
+            base.impulse_gain * cfg_float(
+                "emotion.global_gain_max_factor", GLOBAL_GAIN_MAX_FACTOR, mini=0.0,
+            ),
+            base.impulse_gain * (
+                cfg_float("emotion.global_gain_floor", GLOBAL_GAIN_FLOOR, mini=0.0)
+                + cfg_float("emotion.global_gain_slope", GLOBAL_GAIN_SLOPE, mini=0.0)
+                * force
+            ),
         )
         return dataclasses.replace(base, impulse_gain=gain)
 
@@ -1116,10 +1227,14 @@ class EmotionEngine:
     def _is_anchored(self, mood: PersonMood) -> bool:
         """Whether a stance was built by several agreeing turns, not just one."""
         position = mood.dynamic.position
-        if pad.norm(position) < ANCHORED_MIN_NORM:
+        if pad.norm(position) < cfg_float(
+            "emotion.anchored_min_norm", ANCHORED_MIN_NORM, mini=0.0,
+        ):
             return False
 
-        cutoff = time.time() - ANCHORED_WINDOW_S
+        cutoff = time.time() - cfg_float(
+            "emotion.anchored_window_seconds", ANCHORED_WINDOW_S, mini=0.0,
+        )
         agreeing = 0
         for entry in mood.history:
             if entry.timestamp < cutoff:
@@ -1127,7 +1242,9 @@ class EmotionEngine:
             if pad.dot(pad.EMOTION_ANCHORS[entry.emotion], position) > 0:
                 agreeing += 1
 
-        return agreeing >= ANCHORED_MIN_IMPULSES
+        return agreeing >= cfg_int(
+            "emotion.anchored_min_impulses", ANCHORED_MIN_IMPULSES, mini=1,
+        )
 
     # ------------------------------------------------------------------
     # State dict for WebSocket
@@ -1160,9 +1277,25 @@ class EmotionEngine:
                 logger.exception("Emotion decay loop error")
 
     @staticmethod
-    def _advance(dynamic, home: Vec3, params: OscillatorParams, total_dt: float) -> None:
-        """Advance an oscillator by total_dt seconds in stable sub-steps."""
-        remaining = min(total_dt, _MAX_ADVANCE_SECONDS)
+    def _advance(
+        dynamic,
+        home: Vec3,
+        params: OscillatorParams,
+        total_dt: float,
+        max_advance: float | None = None,
+    ) -> None:
+        """Advance an oscillator by total_dt seconds in stable sub-steps.
+
+        ``max_advance`` est lu UNE fois par passe par ``_apply_decay`` et
+        passé ici : la passe traverse toutes les personnes en RAM, et le
+        plafond doit valoir la même chose pour toutes celles d'un même tick.
+        ``None`` = lire le réglage (appel isolé, tests).
+        """
+        if max_advance is None:
+            max_advance = cfg_float(
+                "emotion.max_advance_seconds", _MAX_ADVANCE_SECONDS, mini=0.0,
+            )
+        remaining = min(total_dt, max_advance)
         fine = _FINE_WINDOW_S
         while remaining > 1e-6:
             substep = _MAX_SUBSTEP_DT if fine > 0.0 else _COARSE_SUBSTEP_DT
@@ -1175,6 +1308,13 @@ class EmotionEngine:
         """Step the physics forward. Sub-divides into stable chunks."""
         now = time.time()
         home = self._home_vector()
+        # Un seul plafond et un seul seuil d'éviction pour toute la passe.
+        plafond = cfg_float(
+            "emotion.max_advance_seconds", _MAX_ADVANCE_SECONDS, mini=0.0,
+        )
+        eviction = cfg_int(
+            "emotion.idle_eviction_seconds", self._IDLE_EVICTION_SECONDS, mini=1,
+        )
 
         # Step person moods
         expired_persons = []
@@ -1185,11 +1325,14 @@ class EmotionEngine:
 
             self._heal_anchor(person, home, dt)
             person_home = self._person_home(person, home)
-            self._advance(person.dynamic, person_home, self._person_params, dt)
+            self._advance(
+                person.dynamic, person_home, self._person_params, dt,
+                max_advance=plafond,
+            )
             person.last_update = now
 
             if (
-                now - person.last_interaction > self._IDLE_EVICTION_SECONDS
+                now - person.last_interaction > eviction
                 and pad.distance(person.dynamic.position, person_home) < 0.05
             ):
                 expired_persons.append(pid)
@@ -1203,7 +1346,10 @@ class EmotionEngine:
         # Step global mood
         dt = max(0.0, now - self.global_mood.last_update)
         if dt > 0.0:
-            self._advance(self.global_mood.dynamic, home, self._global_params, dt)
+            self._advance(
+                self.global_mood.dynamic, home, self._global_params, dt,
+                max_advance=plafond,
+            )
             self.global_mood.last_update = now
 
         # Spontaneous mood drift: tiny random nudge so the global mood
@@ -1214,12 +1360,19 @@ class EmotionEngine:
         #   - volatility (stoic personas barely drift, explosive ones do
         #                 — matches temperament personality)
         volatility_scale = max(0.0, self.temperament.volatility)
-        if volatility_scale > 0.25 and random.random() < _SPONTANEOUS_NUDGE_PROBABILITY:
+        probabilite = cfg_float(
+            "emotion.spontaneous_nudge_probability",
+            _SPONTANEOUS_NUDGE_PROBABILITY, mini=0.0, maxi=1.0,
+        )
+        if volatility_scale > 0.25 and random.random() < probabilite:
             distance = pad.distance(self.global_mood.dynamic.position, home)
             stillness = max(0.0, 1.0 - distance * 3.0)  # 0 when far, 1 when at home
             if stillness > 0.2:
                 magnitude = (
-                    _SPONTANEOUS_NUDGE_MAX
+                    cfg_float(
+                        "emotion.spontaneous_nudge_max",
+                        _SPONTANEOUS_NUDGE_MAX, mini=0.0,
+                    )
                     * stillness
                     * volatility_scale
                     * random.random()

@@ -22,6 +22,9 @@ from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
+# Replis de ``email.keep_per_account`` et ``email.tick_timeout_s`` — mêmes
+# valeurs que les ``default`` déclarés dans ``config_schema.py``, servies
+# lorsque le registre est hors d'atteinte.
 MAX_EMAILS_PER_ACCOUNT = 200
 
 # Ceiling on one account's fetch+process pass. Generous: an initial sync
@@ -38,6 +41,10 @@ DEFAULT_MAX_PER_TICK = 15
 class EmailModule(BaseModule):
     """Multi-account IMAP/SMTP module with email storage, contacts, and AI triage."""
 
+    # Repli de ``email.poll_interval``. Réaffecté depuis la configuration à
+    # chaque tick (voir ``worker_cron``), comme le module RSS : le
+    # planificateur relit l'attribut entre deux tours, donc le réglage vaut
+    # à chaud sans redémarrage.
     CRON_INTERVAL = 60
 
     def __init__(self):
@@ -126,19 +133,28 @@ class EmailModule(BaseModule):
         recovered it: the tick never returned, and this module never polled
         again for the lifetime of the process.
         """
+        from configs.runtime import cfg_int
+
+        # Relu à chaque tour : le planificateur consulte l'attribut entre deux
+        # ticks, donc la cadence vaut à chaud (même schéma que le module RSS).
+        self.CRON_INTERVAL = cfg_int("email.poll_interval", 60,
+                                     mini=30, maxi=86400)
+        budget = cfg_int("email.tick_timeout_s", IMAP_TICK_TIMEOUT,
+                         mini=30, maxi=1800)
+
         self.logger.debug("Email cron tick — checking %d account(s)", len(self._accounts))
         for account_id, entry in list(self._accounts.items()):
             try:
                 await asyncio.wait_for(
                     self._check_account(account_id, entry),
-                    timeout=IMAP_TICK_TIMEOUT,
+                    timeout=budget,
                 )
             except asyncio.TimeoutError:
                 # Drop the connection so the next tick reconnects rather than
                 # awaiting the same dead socket again.
                 self.logger.warning(
                     "IMAP tick timed out after %ss for account %s — "
-                    "reconnecting next tick", IMAP_TICK_TIMEOUT, account_id,
+                    "reconnecting next tick", budget, account_id,
                 )
                 try:
                     await asyncio.wait_for(entry["imap"].disconnect(), timeout=5)
@@ -278,8 +294,9 @@ class EmailModule(BaseModule):
         if new_count > 0:
             self.logger.info("[%s] %d new email(s) processed", account.name, new_count)
             # Jamais pendant la synchro initiale : l'élagage supprimerait les
-            # lignes qui servent de curseur, et tout ce qui dépasse les 200
-            # plus récents reviendrait au tour suivant comme « nouveau » —
+            # lignes qui servent de curseur, et tout ce qui dépasse
+            # ``email.keep_per_account`` reviendrait au tour suivant comme
+            # « nouveau » —
             # une boucle d'écriture/suppression permanente sur SQLite.
             if account.initial_sync_done:
                 await self._prune_emails(account)
@@ -497,11 +514,21 @@ class EmailModule(BaseModule):
 
         await sync_to_async(_ecrire)()
 
-    async def _prune_emails(self, account, keep: int = MAX_EMAILS_PER_ACCOUNT):
-        """Keep only the most recent emails per account."""
+    async def _prune_emails(self, account, keep: int | None = None):
+        """Keep only the most recent emails per account.
+
+        ``keep`` non renseigné = ``email.keep_per_account``. Un défaut
+        d'argument est figé à l'import : le lire ici est ce qui rend le
+        réglage vivant, tout en laissant un appelant imposer sa valeur.
+        """
         from asgiref.sync import sync_to_async
 
+        from configs.runtime import cfg_int
         from modules.plugins.email.models import Email
+
+        if keep is None:
+            keep = cfg_int("email.keep_per_account", MAX_EMAILS_PER_ACCOUNT,
+                           mini=20, maxi=100000)
 
         total = await sync_to_async(Email.objects.filter(account=account).count)()
         if total <= keep:

@@ -46,6 +46,7 @@ from django.conf import settings
 from django.utils import timezone as tz
 
 from ai.router import AIRole, UnconfiguredRoleError, ai_router
+from configs.runtime import cfg_float, cfg_int
 from utils.parsing import strip_markdown_json
 from utils.periodic import PeriodicLoop
 from utils.degradation import degradations, degraded
@@ -54,6 +55,11 @@ logger = logging.getLogger(__name__)
 
 
 # ── Configuration ────────────────────────────────────────────────
+#
+# Les constantes de ce bloc portant une clé ``memory.*`` sont réglables depuis
+# le tableau de bord ; ce qui reste écrit ici est le REPLI, servi quand le
+# registre est hors d'atteinte (import avant `migrate`, base verrouillée,
+# collecte des tests). Un repli vaut exactement le ``default`` déclaré.
 
 # Sleep phase gates
 NIGHT_START_HOUR = 23       # phase gate opens at 23h
@@ -88,7 +94,15 @@ JOURNAL_ATTEMPT_INTERVAL_S = 30 * 60
 JOURNAL_MAX_ATTEMPTS_PER_NIGHT = 3
 
 # Dream generation
-DREAM_PROBABILITY = 0.6              # per-check chance of producing a dream
+# `_DREAM_PROBABILITY_DEFAUT` est la valeur DÉCLARÉE ; `DREAM_PROBABILITY` est
+# la variable de module que le point de dev `/api/dev/sleep/dream` réassigne à
+# 1.0 le temps de forcer un rêve (communication/debug_views.py, hors de cette
+# zone). Les deux sont distinctes pour que `_maybe_dream` puisse comparer la
+# variable à sa valeur déclarée et savoir si quelqu'un l'a écrasée : intacte,
+# le réglage `memory.dream_probability` gouverne ; réassignée, l'écrasement
+# gagne — sinon forcer un rêve n'aurait plus aucun effet.
+_DREAM_PROBABILITY_DEFAUT = 0.6      # per-check chance of producing a dream
+DREAM_PROBABILITY = _DREAM_PROBABILITY_DEFAUT
 MAX_DREAMS_PER_NIGHT = 2
 DREAM_MIN_SOUVENIRS = 2              # need at least this many souvenirs to dream
 # Real REM episodes are ~90 min apart. Beyond realism, this keeps the sleep
@@ -362,7 +376,10 @@ class SleepCycle:
                 self._dreams_this_night = 0
                 self._last_dream_night = current_night
                 self._last_dream_attempt = 0.0
-            if self._dreams_this_night < MAX_DREAMS_PER_NIGHT and self._rem_is_due():
+            max_reves = cfg_int(
+                "memory.dream_max_per_night", MAX_DREAMS_PER_NIGHT, mini=0, maxi=10,
+            )
+            if self._dreams_this_night < max_reves and self._rem_is_due():
                 self._last_dream_attempt = monotonic()
                 await self._set_phase(SleepPhase.REM)
                 await self._maybe_dream(current_night)
@@ -370,8 +387,9 @@ class SleepCycle:
             logger.exception("Sleep: dream phase failed (non-fatal)")
 
         # Phase 3: deep sleep — digest ruminations (after 03h, once per night)
+        fin_de_nuit = self._night_end_hour()
         try:
-            if 3 <= now_dt.hour < NIGHT_END_HOUR:
+            if 3 <= now_dt.hour < fin_de_nuit:
                 if self._last_digestion_night != current_night:
                     await self._set_phase(SleepPhase.DEEP_SLEEP)
                     await self._digest_ruminations()
@@ -384,7 +402,7 @@ class SleepCycle:
         # par nuit, après la digestion). Même profil d'isolement que les
         # autres phases : un échec ne coûte que sa nuit.
         try:
-            if 3 <= now_dt.hour < NIGHT_END_HOUR:
+            if 3 <= now_dt.hour < fin_de_nuit:
                 if self._last_reorg_night != current_night:
                     await self._set_phase(SleepPhase.DEEP_SLEEP)
                     from memory.reorg import nightly_reorg
@@ -425,11 +443,19 @@ class SleepCycle:
         renonce jusqu'à la nuit suivante — un modèle qui a échoué trois
         fois de suite ne réussira pas la quatrième.
         """
-        if self._journal_attempts >= JOURNAL_MAX_ATTEMPTS_PER_NIGHT:
+        max_tentatives = cfg_int(
+            "memory.journal_max_attempts_per_night", JOURNAL_MAX_ATTEMPTS_PER_NIGHT,
+            mini=1, maxi=20,
+        )
+        if self._journal_attempts >= max_tentatives:
             return False
         if not self._last_journal_attempt:
             return True
-        return (monotonic() - self._last_journal_attempt) >= JOURNAL_ATTEMPT_INTERVAL_S
+        espacement = cfg_int(
+            "memory.journal_attempt_interval_s", JOURNAL_ATTEMPT_INTERVAL_S,
+            mini=60, maxi=21600,
+        )
+        return (monotonic() - self._last_journal_attempt) >= espacement
 
     @staticmethod
     def _llm_timeout() -> int:
@@ -448,13 +474,36 @@ class SleepCycle:
         """Space REM episodes out instead of retrying on every tick."""
         if not self._last_dream_attempt:
             return True
-        return (monotonic() - self._last_dream_attempt) >= DREAM_ATTEMPT_INTERVAL_S
+        espacement = cfg_int(
+            "memory.dream_attempt_interval_s", DREAM_ATTEMPT_INTERVAL_S,
+            mini=60, maxi=21600,
+        )
+        return (monotonic() - self._last_dream_attempt) >= espacement
 
     @staticmethod
-    def _is_night(now: datetime, start_hour: int = NIGHT_START_HOUR) -> bool:
-        """Night phase wraps across midnight: [start_hour, 06h)."""
+    def _night_end_hour() -> int:
+        return cfg_int(
+            "memory.sleep_night_end_hour", NIGHT_END_HOUR, mini=0, maxi=12,
+        )
+
+    @staticmethod
+    def _nominal_night_start_hour() -> int:
+        return cfg_int(
+            "memory.sleep_night_start_hour", NIGHT_START_HOUR, mini=12, maxi=23,
+        )
+
+    @staticmethod
+    def _is_night(now: datetime, start_hour: int | None = None) -> bool:
+        """Night phase wraps across midnight: [start_hour, 06h).
+
+        ``start_hour`` non fourni = l'heure nominale configurée. Lue dans le
+        corps et non en défaut d'argument : un défaut est évalué à l'import,
+        donc avant que la base soit joignable, et ne changerait plus jamais.
+        """
+        if start_hour is None:
+            start_hour = SleepCycle._nominal_night_start_hour()
         h = now.hour
-        return h >= start_hour or h < NIGHT_END_HOUR
+        return h >= start_hour or h < SleepCycle._night_end_hour()
 
     def _night_start_hour(self, already_asleep: bool) -> int:
         """L'heure à laquelle la nuit s'ouvre ce soir, avancée par la fatigue.
@@ -463,8 +512,13 @@ class SleepCycle:
         pendant le sommeil (c'est ce à quoi il sert), donc une heure calculée
         sur elle refermerait le gate et la réveillerait vers 22h.
         """
+        nominale = self._nominal_night_start_hour()
+        avance_max = cfg_int(
+            "memory.sleep_early_night_max_advance_hours",
+            EARLY_NIGHT_MAX_ADVANCE_HOURS, mini=0, maxi=6,
+        )
         if already_asleep:
-            return NIGHT_START_HOUR - EARLY_NIGHT_MAX_ADVANCE_HOURS
+            return nominale - avance_max
 
         try:
             from drives.engine import drive_engine
@@ -477,13 +531,13 @@ class SleepCycle:
             degradations.record("sommeil: tension REST illisible", exc)
             tension = 0.0
 
-        avance = EARLY_NIGHT_MAX_ADVANCE_HOURS * max(0.0, min(1.0, tension))
-        return NIGHT_START_HOUR - int(round(avance))
+        avance = avance_max * max(0.0, min(1.0, tension))
+        return nominale - int(round(avance))
 
     @staticmethod
     def _night_of(now: datetime) -> date:
         """A dream at 03h on the 18th belongs to the night *of* the 17th."""
-        if now.hour < NIGHT_END_HOUR:
+        if now.hour < SleepCycle._night_end_hour():
             return (now - timedelta(days=1)).date()
         return now.date()
 
@@ -499,7 +553,10 @@ class SleepCycle:
             degradations.record("sommeil: temps d'inactivite illisible", exc)
             idle_seconds = 0.0
 
-        return idle_seconds >= IDLE_SECONDS_THRESHOLD
+        return idle_seconds >= cfg_int(
+            "memory.sleep_idle_seconds_threshold", IDLE_SECONDS_THRESHOLD,
+            mini=60, maxi=21600,
+        )
 
     def _maybe_reset_counters(self, today: date) -> None:
         """Outside night window — reset per-night state once per day."""
@@ -706,7 +763,17 @@ class SleepCycle:
 
     async def _maybe_dream(self, current_night: date) -> None:
         """Produce a Dream with given probability, respecting the nightly cap."""
-        if random.random() >= DREAM_PROBABILITY:
+        # Un écrasement du global (point de dev « forcer un rêve ») gagne sur
+        # le réglage ; sans écrasement, c'est le réglage qui gouverne.
+        probabilite = (
+            DREAM_PROBABILITY
+            if DREAM_PROBABILITY != _DREAM_PROBABILITY_DEFAUT
+            else cfg_float(
+                "memory.dream_probability", _DREAM_PROBABILITY_DEFAUT,
+                mini=0.0, maxi=1.0,
+            )
+        )
+        if random.random() >= probabilite:
             return
 
         fragments = await self._gather_dream_fragments()
@@ -925,7 +992,15 @@ class SleepCycle:
         except ImportError:
             return 0
 
-        cutoff = tz.now() - timedelta(minutes=DIGESTION_MIN_AGE_MINUTES)
+        age_min = cfg_int(
+            "memory.digestion_min_age_minutes", DIGESTION_MIN_AGE_MINUTES,
+            mini=5, maxi=1440,
+        )
+        seuil_souvenir = cfg_float(
+            "memory.digestion_to_souvenir_threshold", DIGESTION_TO_SOUVENIR_THRESHOLD,
+            mini=0.0, maxi=1.0,
+        )
+        cutoff = tz.now() - timedelta(minutes=age_min)
         try:
             aging = await sync_to_async(
                 lambda: list(
@@ -985,7 +1060,7 @@ class SleepCycle:
             # Les lourdes deviennent un souvenir réflexif — après l'écriture,
             # pour que l'aller-retour ChromaDB soit hors de la fenêtre de course.
             old_intensity, emotion = frais
-            if old_intensity >= DIGESTION_TO_SOUVENIR_THRESHOLD:
+            if old_intensity >= seuil_souvenir:
                 try:
                     # Passe par le manager, qui cree *et* indexe dans ChromaDB.
                     # C'est l'insight avec lequel on se reveille : ecrit

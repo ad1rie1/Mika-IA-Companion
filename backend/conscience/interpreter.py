@@ -12,6 +12,7 @@ import json
 import logging
 
 from ai.router import AIRole, UnconfiguredRoleError, ai_router
+from configs.runtime import cfg_float, cfg_int
 from utils.degradation import degradations
 from utils.parsing import strip_markdown_json
 from conscience.types import InterpretedSignal
@@ -20,6 +21,27 @@ from modules.types import ModuleEvent
 logger = logging.getLogger(__name__)
 
 INTERPRETATION_TIMEOUT = 15  # seconds
+
+# Pertinences du chemin heuristique — celui qui ne coûte pas d'appel LLM.
+# Les constantes restent le repli exact de la clé correspondante ; voir
+# ``conscience/config_schema.py``, groupe « Pertinence sans appel LLM ».
+#
+# ATTENTION sur ``PERTINENCE_CHAT_MESSAGE`` : l'urgence accumulée du moteur
+# (``_build_context``) ne somme que les observations de pertinence
+# **strictement** supérieure à 0.3. À la valeur par défaut, un message de chat
+# contribue donc exactement zéro à ce facteur. Comportement d'origine, gardé
+# tel quel — mais c'est la première chose à savoir avant de toucher la clé.
+PERTINENCE_CHAT_MESSAGE = 0.3
+PERTINENCE_CHAT_PRESENCE = 0.1
+PERTINENCE_TELEGRAM_MESSAGE = 0.4
+PERTINENCE_RSS_MATCHED = 0.45
+PERTINENCE_RSS_UNMATCHED = 0.2
+PERTINENCE_FORGE_EVENT = 0.2
+PERTINENCE_FALLBACK = 0.3
+
+
+def _pertinence(cle: str, repli: float) -> float:
+    return cfg_float(f"conscience.pertinence.{cle}", repli, mini=0.0, maxi=1.0)
 
 # fmt: off
 INTERPRETATION_SYSTEM_PROMPT = """\
@@ -81,7 +103,7 @@ def _heuristic_chat_message(data: dict) -> InterpretedSignal:
     return InterpretedSignal(
         summary=f"Message de {person} via {source}",
         category="communication",
-        pertinence=0.3,
+        pertinence=_pertinence("chat_message", PERTINENCE_CHAT_MESSAGE),
         emotional_reaction="",
         emotional_intensity=0.0,
         themes=_extract_themes_from_text(text),
@@ -94,7 +116,7 @@ def _heuristic_chat_connect(data: dict) -> InterpretedSignal:
     return InterpretedSignal(
         summary="Un utilisateur s'est connecte",
         category="system",
-        pertinence=0.1,
+        pertinence=_pertinence("chat_presence", PERTINENCE_CHAT_PRESENCE),
         emotional_reaction="",
         emotional_intensity=0.0,
         themes=[],
@@ -107,7 +129,7 @@ def _heuristic_chat_disconnect(data: dict) -> InterpretedSignal:
     return InterpretedSignal(
         summary="Un utilisateur s'est deconnecte",
         category="system",
-        pertinence=0.1,
+        pertinence=_pertinence("chat_presence", PERTINENCE_CHAT_PRESENCE),
         emotional_reaction="",
         emotional_intensity=0.0,
         themes=[],
@@ -124,7 +146,7 @@ def _heuristic_telegram_message(data: dict) -> InterpretedSignal:
     return InterpretedSignal(
         summary=f"Message Telegram de {user}: {text[:80]}",
         category="communication",
-        pertinence=0.4,
+        pertinence=_pertinence("telegram_message", PERTINENCE_TELEGRAM_MESSAGE),
         emotional_reaction="",
         emotional_intensity=0.0,
         themes=_extract_themes_from_text(text),
@@ -155,7 +177,10 @@ def _heuristic_rss_entry(data: dict) -> InterpretedSignal:
 
     # Matching a theme Mika cares about is the whole signal here; without one
     # this is background noise she happens to subscribe to.
-    pertinence = 0.45 if themes else 0.2
+    pertinence = (
+        _pertinence("rss_matched", PERTINENCE_RSS_MATCHED) if themes
+        else _pertinence("rss_unmatched", PERTINENCE_RSS_UNMATCHED)
+    )
     return InterpretedSignal(
         summary=f"[{feed}] {title[:120]}",
         category="information",
@@ -179,7 +204,7 @@ def _heuristic_forge_event(data: dict) -> InterpretedSignal:
     return InterpretedSignal(
         summary=f"Un de tes modules a signale: {str(data)[:160]}",
         category="system",
-        pertinence=0.2,
+        pertinence=_pertinence("forge_event", PERTINENCE_FORGE_EVENT),
         emotional_reaction="",
         emotional_intensity=0.0,
         themes=[],
@@ -246,7 +271,10 @@ class SignalInterpreter:
         try:
             signal = await asyncio.wait_for(
                 self._interpret_with_llm(event),
-                timeout=INTERPRETATION_TIMEOUT,
+                timeout=cfg_int(
+                    "conscience.interpretation_timeout_seconds",
+                    INTERPRETATION_TIMEOUT, mini=1,
+                ),
             )
             logger.info(
                 "Interpreted (LLM): %s → %s (p=%.1f, emotion=%s)",
@@ -338,7 +366,7 @@ class SignalInterpreter:
         return InterpretedSignal(
             summary=f"Signal non interprete: {event.event_type}",
             category="system",
-            pertinence=0.3,
+            pertinence=_pertinence("fallback", PERTINENCE_FALLBACK),
             emotional_reaction="",
             emotional_intensity=0.0,
             should_remember=False,

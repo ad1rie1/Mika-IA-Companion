@@ -23,6 +23,7 @@ conscience reste une app cœur, seule sa surface d'outils passe par le bus.
 
 from __future__ import annotations
 
+from configs.runtime import cfg_int
 from modules.base import BaseModule
 from modules.types import (
     ModuleCapability,
@@ -39,12 +40,21 @@ class ConscienceToolsModule(BaseModule):
     SYSTEM = True
 
     # Le compte des actions en attente change hors du module : la conscience
-    # sonde et exécute les siennes toutes les 30s. Même cadence ici, sinon
-    # l'invite annonce une action déjà partie.
+    # sonde et exécute les siennes à chaque cycle de décision. Même cadence
+    # ici, sinon l'invite annonce une action déjà partie — et « même cadence »
+    # se lit désormais dans la *même clé*, pas dans un commentaire demandant
+    # de recopier une valeur à la main. Reste la valeur de repli du moteur.
     CRON_INTERVAL = 30
 
     def __init__(self) -> None:
         super().__init__("conscience_tools")
+        # Attribut d'instance : il masque la constante de classe, que le
+        # planificateur et la page Modules relisent par ``getattr``. Lu une
+        # fois à la construction, comme l'intervalle de la boucle de décision
+        # lui-même (``restart_required``).
+        self.CRON_INTERVAL = cfg_int(
+            "conscience.decision_interval", type(self).CRON_INTERVAL, mini=1,
+        )
         # Instantané pour l'invite système. Tenu en RAM et rafraîchi par le
         # cron, pas relu en base au moment de bâtir l'invite :
         # ``collect_context`` est appelé depuis une coroutine, où toute requête

@@ -12,14 +12,25 @@ from __future__ import annotations
 
 import logging
 
+from configs.runtime import cfg_float
+
 logger = logging.getLogger(__name__)
 
 # Aligné sur ai.quota.estimate_tokens_from_chars (chars // 4).
+# Configurables (``ai.calibration.*``) ; ces constantes restent le repli.
 DEFAULT_CHARS_PER_TOKEN = 4.0
 _ALPHA = 0.2
 # Sous ce volume l'échantillon est du bruit (et le repli d'estimation du
-# routeur serait circulaire).
+# routeur serait circulaire). PAS un réglage : une mauvaise valeur ici est un
+# bug de justesse de l'estimateur, pas une préférence.
 _MIN_TOKENS_SAMPLE = 50
+
+
+def _default_ratio() -> float:
+    return cfg_float(
+        "ai.calibration.default_chars_per_token", DEFAULT_CHARS_PER_TOKEN,
+        mini=1.0, maxi=12.0,
+    )
 
 
 class TokenCalibration:
@@ -34,11 +45,12 @@ class TokenCalibration:
         # face à un prompt court, etc.) ne doit pas déformer la moyenne.
         if not (1.0 <= sample <= 12.0):
             return
-        current = self._ratios.get(provider, DEFAULT_CHARS_PER_TOKEN)
-        self._ratios[provider] = (1 - _ALPHA) * current + _ALPHA * sample
+        alpha = cfg_float("ai.calibration.alpha", _ALPHA, mini=0.01, maxi=1.0)
+        current = self._ratios.get(provider, _default_ratio())
+        self._ratios[provider] = (1 - alpha) * current + alpha * sample
 
     def ratio(self, provider: str) -> float:
-        return self._ratios.get(provider, DEFAULT_CHARS_PER_TOKEN)
+        return self._ratios.get(provider, _default_ratio())
 
 
 calibration = TokenCalibration()

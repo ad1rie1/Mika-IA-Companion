@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from configs.runtime import cfg_int
 from modules.base import BaseModule
 from modules.types import ModuleTool, ToolParameter, ToolParameterType
 from utils.degradation import degradations
@@ -26,6 +27,7 @@ from utils.degradation import degradations
 logger = logging.getLogger(__name__)
 
 # Ceilings so a tool answer never blows up the conversation budget.
+# Réglables (``memory.tools_*``) ; ce qui reste ici est le repli.
 MAX_SEARCH_RESULTS = 8
 MAX_JOURNALS = 7
 
@@ -231,15 +233,18 @@ class MemoryToolsModule(BaseModule):
             return {"error": "query vide"}
         kind = (params.get("kind") or "all").strip().lower()
 
+        plafond = cfg_int(
+            "memory.tools_max_search_results", MAX_SEARCH_RESULTS, mini=1, maxi=50,
+        )
         souvenirs: list[dict] = []
         connaissances: list[dict] = []
         if kind in ("all", "souvenirs"):
             souvenirs = await memory_manager.search_related_souvenirs(
-                query, n=MAX_SEARCH_RESULTS
+                query, n=plafond
             )
         if kind in ("all", "connaissances"):
             connaissances = await memory_manager.search_related_connaissances(
-                query, n=MAX_SEARCH_RESULTS
+                query, n=plafond
             )
 
         perimetre = await _perimetre()
@@ -313,12 +318,15 @@ class MemoryToolsModule(BaseModule):
             return {"message": REFUS_JOURNAL}
 
         date_str = (params.get("date") or "").strip()
+        max_journaux = cfg_int(
+            "memory.tools_max_journals", MAX_JOURNALS, mini=1, maxi=50,
+        )
 
         def _fetch() -> list[DailyJournal]:
             qs = DailyJournal.objects.order_by("-date")
             if date_str:
                 return list(qs.filter(date=date_str)[:1])
-            limit = max(1, min(MAX_JOURNALS, int(params.get("limit") or 3)))
+            limit = max(1, min(max_journaux, int(params.get("limit") or 3)))
             return list(qs[:limit])
 
         try:

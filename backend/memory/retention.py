@@ -164,12 +164,19 @@ async def _expire_pending_claims() -> int:
     """
     from django.apps import apps
 
-    from identity.trust import PENDING_CLAIM_TTL_DAYS
+    from identity.resolver import politique_confiance
 
     IdentityClaim = apps.get_model("identity", "IdentityClaim")
 
+    # Le même TTL que celui qu'applique le résolveur, lu à la même source.
+    # Les deux doivent tomber d'accord : le résolveur cesse d'afficher une
+    # revendication passé ce délai, le balayage la ferme. S'ils divergent, une
+    # revendication invisible dans le prompt reste comptée comme pendante —
+    # elle badge la barre latérale et bloque une seconde revendication.
+    ttl_jours = politique_confiance().pending_claim_ttl_days
+
     def _expire() -> int:
-        cutoff = timezone.now() - timedelta(days=PENDING_CLAIM_TTL_DAYS)
+        cutoff = timezone.now() - timedelta(days=ttl_jours)
         ids = list(
             IdentityClaim.objects.filter(
                 status=IdentityClaim.Status.PENDING,

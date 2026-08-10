@@ -32,6 +32,8 @@ import logging
 from dataclasses import dataclass
 from typing import Protocol
 
+from configs.runtime import cfg_float, cfg_int
+
 logger = logging.getLogger(__name__)
 
 
@@ -67,6 +69,8 @@ class VoiceProfile:
     gain: float
 
 
+# Repli des réglages ``voice.profile.<persona>.<pitch|rate|gain>`` — mêmes
+# valeurs au bit près, servies quand le registre est hors d'atteinte.
 VOICE_PROFILES: dict[str, VoiceProfile] = {
     VoicePersona.SPEAKING: VoiceProfile(pitch=1.0, rate=1.0, gain=1.0),
     # Murmured: a touch lower and slower, clearly quieter.
@@ -75,7 +79,19 @@ VOICE_PROFILES: dict[str, VoiceProfile] = {
 
 
 def profile_for(persona: str) -> VoiceProfile:
-    return VOICE_PROFILES.get(persona, VOICE_PROFILES[VoicePersona.SPEAKING])
+    """Les multiplicateurs de la persona, tels que configurés.
+
+    Une persona inconnue retombe sur SPEAKING : un profil est un réglage de
+    rendu, jamais une raison de ne pas parler.
+    """
+    if persona not in VOICE_PROFILES:
+        persona = VoicePersona.SPEAKING
+    repli = VOICE_PROFILES[persona]
+    return VoiceProfile(
+        pitch=cfg_float(f"voice.profile.{persona}.pitch", repli.pitch, mini=0.0),
+        rate=cfg_float(f"voice.profile.{persona}.rate", repli.rate, mini=0.0),
+        gain=cfg_float(f"voice.profile.{persona}.gain", repli.gain, mini=0.0),
+    )
 
 
 # Sources that mean "Mika acted on her own initiative", i.e. thinking aloud
@@ -100,6 +116,7 @@ def persona_for_source(source: str, *, addressed: bool = False) -> str:
 
 
 # Hours during which a SPEAKER must stay quiet (open-air sound only).
+# Replis de ``voice.quiet_hours_start`` / ``voice.quiet_hours_end``.
 QUIET_HOURS_START = 22
 QUIET_HOURS_END = 8
 
@@ -113,8 +130,16 @@ class VoiceDecision:
 
 
 def in_quiet_hours(hour: int) -> bool:
-    """Quiet window wraps midnight: [22h, 08h)."""
-    return hour >= QUIET_HOURS_START or hour < QUIET_HOURS_END
+    """Quiet window wraps midnight: [22h, 08h) par défaut.
+
+    L'expression suppose que la fenêtre **enjambe minuit** (``heure >= début
+    OU heure < fin``). Un couple qui ne l'enjambe pas — début 8, fin 22 —
+    n'est pas refusé, il inverse le sens : ce sont alors les heures de
+    journée qui deviennent calmes. Les deux réglages le disent.
+    """
+    debut = cfg_int("voice.quiet_hours_start", QUIET_HOURS_START, mini=0, maxi=23)
+    fin = cfg_int("voice.quiet_hours_end", QUIET_HOURS_END, mini=0, maxi=23)
+    return hour >= debut or hour < fin
 
 
 def decide_voice(

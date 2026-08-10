@@ -19,11 +19,15 @@ from dataclasses import dataclass
 
 from asgiref.sync import sync_to_async
 
+from configs.runtime import cfg_float
+
 logger = logging.getLogger(__name__)
 
 
 # Below this confidence we don't surface the project in the prompt — too
 # much risk of false match. The project still runs on its own schedule.
+# Configurable (``projects.match_confidence_threshold``) ; la constante reste
+# le repli.
 MATCH_CONFIDENCE_THRESHOLD = 0.4
 
 
@@ -146,7 +150,11 @@ async def detect_project_for_message(
 
     if best is None:
         return None
-    if best.confidence < MATCH_CONFIDENCE_THRESHOLD:
+    seuil = cfg_float(
+        "projects.match_confidence_threshold", MATCH_CONFIDENCE_THRESHOLD,
+        mini=0.0, maxi=1.0,
+    )
+    if best.confidence < seuil:
         logger.debug(
             "Project match below threshold: %s (%.2f)",
             best.title, best.confidence,

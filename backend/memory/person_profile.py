@@ -26,12 +26,16 @@ from django.db.models import Count, F, Q
 from django.utils import timezone
 
 from ai.router import AIRole, UnconfiguredRoleError, ai_router
+from configs.runtime import cfg_int
 from utils.degradation import degradations
 from utils.parsing import strip_markdown_json
 
 logger = logging.getLogger(__name__)
 
 
+# Toutes les valeurs de ce bloc sont réglables (``memory.profile_*``) ; elles
+# restent déclarées ici comme REPLI, servi quand le registre est hors
+# d'atteinte (import avant `migrate`, base verrouillée, collecte des tests).
 # Minimum age of an existing profile before it's worth regenerating.
 PROFILE_MIN_AGE_HOURS = 24
 # Minimum new souvenirs mentioning the person since the last profile
@@ -132,19 +136,41 @@ class PersonProfileGenerator:
     # ── Entity selection ──────────────────────────────────────────
 
     @staticmethod
-    async def select_due_entities(limit: int = MAX_PERSONS_PER_CYCLE) -> list:
+    async def select_due_entities(limit: int | None = None) -> list:
         """Pick person-entities that need a (re)generated profile.
 
         An entity is due when:
           - it's been mentioned in a souvenir within ACTIVITY_WINDOW_DAYS, AND
           - either has no profile yet, OR profile is >24h old AND has ≥N new
             mentioning souvenirs since last generation.
+
+        ``limit`` non fourni = le réglage ``memory.profile_max_persons_per_cycle``.
+        Lu dans le corps et non en défaut d'argument : un défaut est évalué à
+        l'import, donc avant que la base soit joignable, et ne changerait
+        ensuite plus jamais.
         """
         from memory.models import Entity
 
+        if limit is None:
+            limit = cfg_int(
+                "memory.profile_max_persons_per_cycle", MAX_PERSONS_PER_CYCLE,
+                mini=1, maxi=50,
+            )
+        fenetre_jours = cfg_int(
+            "memory.profile_activity_window_days", PROFILE_ACTIVITY_WINDOW_DAYS,
+            mini=1, maxi=365,
+        )
+        age_min_h = cfg_int(
+            "memory.profile_min_age_hours", PROFILE_MIN_AGE_HOURS, mini=1, maxi=720,
+        )
+        souvenirs_min = cfg_int(
+            "memory.profile_min_new_souvenirs", PROFILE_MIN_NEW_SOUVENIRS,
+            mini=1, maxi=100,
+        )
+
         now = timezone.now()
-        activity_cutoff = now - timedelta(days=PROFILE_ACTIVITY_WINDOW_DAYS)
-        regen_cutoff = now - timedelta(hours=PROFILE_MIN_AGE_HOURS)
+        activity_cutoff = now - timedelta(days=fenetre_jours)
+        regen_cutoff = now - timedelta(hours=age_min_h)
 
         def _collect():
             # Une seule requête agrégée. La boucle précédente faisait deux
@@ -182,14 +208,14 @@ class PersonProfileGenerator:
                 profile = getattr(e, "profile", None)
                 if profile is None:
                     # New profile — needs at least N souvenirs to bootstrap
-                    if e.recent_count >= PROFILE_MIN_NEW_SOUVENIRS:
+                    if e.recent_count >= souvenirs_min:
                         due.append((e, None, e.recent_count))
                     continue
 
                 if profile.generated_at and profile.generated_at > regen_cutoff:
                     continue  # too recent
 
-                if e.new_count >= PROFILE_MIN_NEW_SOUVENIRS:
+                if e.new_count >= souvenirs_min:
                     due.append((e, profile, e.new_count))
 
             # Highest new-material count first
@@ -205,10 +231,19 @@ class PersonProfileGenerator:
         """Pull souvenirs + connaissances linked to this entity."""
         from memory.models import Connaissance, Souvenir
 
+        max_souvenirs = cfg_int(
+            "memory.profile_max_souvenirs", MAX_SOUVENIRS_PER_PROFILE,
+            mini=1, maxi=100,
+        )
+        max_connaissances = cfg_int(
+            "memory.profile_max_connaissances", MAX_CONNAISSANCES_PER_PROFILE,
+            mini=1, maxi=100,
+        )
+
         souvenir_rows = await sync_to_async(
             lambda: list(
                 Souvenir.objects.filter(entities=entity)
-                .order_by("-importance", "-occurred_at")[:MAX_SOUVENIRS_PER_PROFILE]
+                .order_by("-importance", "-occurred_at")[:max_souvenirs]
                 .prefetch_related("themes")
             )
         )()
@@ -226,7 +261,7 @@ class PersonProfileGenerator:
         connaissance_rows = await sync_to_async(
             lambda: list(
                 Connaissance.objects.filter(entities=entity, is_valid=True)
-                .order_by("-confidence", "-updated_at")[:MAX_CONNAISSANCES_PER_PROFILE]
+                .order_by("-confidence", "-updated_at")[:max_connaissances]
                 .prefetch_related("themes")
             )
         )()
@@ -271,7 +306,10 @@ class PersonProfileGenerator:
                     system_prompt="Tu modelises comment quelqu'un en percoit un autre.",
                     user_prompt=user_prompt,
                 ),
-                timeout=PROFILE_TIMEOUT_SECONDS,
+                timeout=cfg_int(
+                    "memory.profile_timeout_seconds", PROFILE_TIMEOUT_SECONDS,
+                    mini=5, maxi=600,
+                ),
             )
         except asyncio.TimeoutError:
             logger.warning("Profile generation timed out for %s", pool.entity_name)

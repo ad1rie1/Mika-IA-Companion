@@ -21,7 +21,7 @@ import logging
 import re
 from dataclasses import dataclass
 
-from ai.chat import HISTORY_MSG_MAX_CHARS, ChatPrompt, VolatileBlock
+from ai.chat import ChatPrompt, VolatileBlock, history_msg_max_chars
 from config.personality import personality
 from emotion.types import Emotion
 from pipeline.context import ConversationContext
@@ -73,8 +73,12 @@ def _trim_history_to_l3(history: list[dict], max_chars: int) -> tuple[list[dict]
         return list(history), 0
     kept_rev: list[dict] = []
     used = 0
+    # Lu une fois par appel, pas une fois par message : les deux plafonds
+    # doivent parler du même chiffre, et le budget d'un tour ne peut pas
+    # changer au milieu du fil qu'il découpe.
+    plafond_message = history_msg_max_chars()
     for m in reversed(history):
-        weight = min(len(m.get("content") or ""), HISTORY_MSG_MAX_CHARS)
+        weight = min(len(m.get("content") or ""), plafond_message)
         if kept_rev and used + weight > max_chars:
             break
         kept_rev.append(m)

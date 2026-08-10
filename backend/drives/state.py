@@ -98,6 +98,63 @@ DEFAULT_PARAMS: dict[DriveKind, DriveParams] = {
 }
 
 
+#: Tension minimale pour qu'une pulsion soit déclarée dominante.
+DOMINANT_MIN_TENSION = 0.2
+
+
+def params_for(kind: DriveKind) -> DriveParams:
+    """Les paramètres EFFECTIFS d'une pulsion : la table ci-dessus, recouverte
+    par la configuration (section « Pulsions » du dashboard).
+
+    La table reste le repli, champ par champ, et les défauts déclarés dans
+    ``drives/config_schema.py`` lui sont identiques — une installation neuve
+    calcule donc exactement les mêmes tensions.
+
+    Un seul accesseur parce que ``DEFAULT_PARAMS[kind]`` était relu à chaque
+    appel dans cinq fonctions différentes : sans point de passage unique, il
+    aurait fallu recouvrir la table cinq fois, et les cinq auraient divergé.
+
+    Les deux champs de croissance logarithmique ne sont relus que pour les
+    pulsions qui en déclarent une (``growth_horizon`` non nul dans la table).
+    Ailleurs la clé n'existe pas, et une clé inconnue n'est pas mise en cache
+    par ``config_service`` : ce serait une requête par appel, sur un chemin
+    appelé à chaque tour.
+
+    L'import est local : ce module est documenté « pure dataclasses, no Django
+    dependency » et doit rester importable sans registre d'applications.
+    """
+    from configs.runtime import cfg_float
+
+    base = DEFAULT_PARAMS[kind]
+    prefixe = f"drives.{kind.value}."
+
+    tau, horizon = base.growth_tau, base.growth_horizon
+    if base.growth_horizon:
+        tau = cfg_float(prefixe + "growth_tau", base.growth_tau, mini=0.0)
+        # Exposé en JOURS : c'est l'unité dans laquelle « une absence de trois
+        # semaines » se pense, pas 2 592 000 s.
+        horizon = cfg_float(
+            prefixe + "growth_horizon_days",
+            base.growth_horizon / 86400.0,
+            mini=0.0,
+        ) * 86400.0
+
+    return DriveParams(
+        growth_rate=cfg_float(
+            prefixe + "growth_rate", base.growth_rate, mini=0.0),
+        decay_on_satisfy=cfg_float(
+            prefixe + "decay_on_satisfy", base.decay_on_satisfy,
+            mini=0.0, maxi=1.0),
+        weight=cfg_float(
+            prefixe + "weight", base.weight, mini=0.0, maxi=1.0),
+        satisfy_threshold=cfg_float(
+            prefixe + "satisfy_threshold", base.satisfy_threshold,
+            mini=0.0, maxi=1.0),
+        growth_tau=tau,
+        growth_horizon=horizon,
+    )
+
+
 @dataclass
 class DriveState:
     """One drive's current tension + bookkeeping."""
@@ -114,8 +171,12 @@ def dominant_drive(states: dict[DriveKind, DriveState]) -> DriveState | None:
     """Return the drive with the highest tension, or None if all are quiet."""
     if not states:
         return None
+    from configs.runtime import cfg_float
+
     winner = max(states.values(), key=lambda s: s.tension)
-    if winner.tension < 0.2:
+    if winner.tension < cfg_float(
+        "drives.dominant_min_tension", DOMINANT_MIN_TENSION, mini=0.0, maxi=1.0,
+    ):
         return None
     return winner
 
@@ -129,7 +190,7 @@ def drive_prompt_description(states: dict[DriveKind, DriveState]) -> str:
     """
     active = []
     for kind, state in states.items():
-        params = DEFAULT_PARAMS[kind]
+        params = params_for(kind)
         if state.tension < params.satisfy_threshold:
             continue
         active.append((kind, state.tension))

@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from configs.runtime import cfg_int
 from pipeline.perception import Part, Perception
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,15 @@ logger = logging.getLogger(__name__)
 # transcription = 225 s. Une borne qui plafonne un lot entier n'a pas à se
 # régler indépendamment des échéances unitaires qu'elle couvre, elle reste
 # donc une constante comme VISION_TIMEOUT_SECONDS et TRANSCRIBE_TIMEOUT_SECONDS.
+# Repli de ``pipeline.preprocess.timeout_seconds`` — déclaré dans la même
+# section que les échéances unitaires qu'il couvre, ce qui est ce qui rend
+# l'arbitrage lisible.
 PREPROCESS_TIMEOUT_SECONDS = 60
+
+
+def _timeout_seconds() -> int:
+    return cfg_int("pipeline.preprocess.timeout_seconds",
+                   PREPROCESS_TIMEOUT_SECONDS, mini=1)
 
 
 async def run_preprocessors(perception: Perception) -> None:
@@ -75,15 +84,16 @@ async def run_preprocessors(perception: Perception) -> None:
     if not pending:
         return
 
+    echeance = _timeout_seconds()
     try:
         await asyncio.wait_for(
             asyncio.gather(*pending.values(), return_exceptions=True),
-            timeout=PREPROCESS_TIMEOUT_SECONDS,
+            timeout=echeance,
         )
     except asyncio.TimeoutError:
         logger.warning(
             "Prétraitement abandonné après %ss (%d part(s) en vol)",
-            PREPROCESS_TIMEOUT_SECONDS, len(pending),
+            echeance, len(pending),
         )
 
     new_parts = list(perception.parts)

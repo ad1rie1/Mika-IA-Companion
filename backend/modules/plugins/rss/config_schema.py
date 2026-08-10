@@ -97,6 +97,27 @@ CONFIG_SCHEMA = [
         default=200, min=20, max=5000, hot_reload=True,
         description="Les plus anciens sont supprimés au-delà. La déduplication n'en souffre pas.",
     ),
+    ConfigItem(
+        key="rss.max_feed_kb", type="int", section="module_rss",
+        group="Relevé", label="Taille max téléchargée par flux (Ko)",
+        default=5120, min=64, max=51200, hot_reload=True,
+        description=(
+            "Un flux est une liste de titres ; au-delà, ce n'en est pas un. "
+            "La lecture s'arrête à cette taille, et c'est la seule borne de "
+            "ce que l'analyseur reçoit — un flux à contenu intégral tient "
+            "déjà un fil plusieurs centaines de millisecondes."
+        ),
+    ),
+    ConfigItem(
+        key="rss.user_agent", type="str", section="module_rss",
+        group="Relevé", label="User-Agent",
+        default="vtuber-rss/2.0 (+https://localhost)", hot_reload=True,
+        description=(
+            "Envoyé à chaque requête. Certains éditeurs refusent un client "
+            "anonyme ou inconnu ; d'autres demandent une adresse de contact. "
+            "Vidé, la valeur d'usine reprend la main."
+        ),
+    ),
 
     # ── Attention ──────────────────────────────────────────────────────
     ConfigItem(

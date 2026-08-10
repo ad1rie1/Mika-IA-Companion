@@ -9,6 +9,7 @@ import logging
 import time as _time
 from dataclasses import dataclass, field
 
+from configs.runtime import cfg_float, cfg_int
 from drives.engine import drive_engine
 from emotion.engine import emotion_engine
 from identity.resolver import identity_resolver
@@ -252,7 +253,9 @@ async def gather_context(
     # mais leur somme (Forge inclus, qui concatène tous ses mini-modules)
     # n'a aucune limite globale.
     module_context = _clip(
-        module_manager.collect_context(person_id), _MODULE_CONTEXT_MAX_CHARS,
+        module_manager.collect_context(person_id),
+        cfg_int("pipeline.context.module_context_max_chars",
+                _MODULE_CONTEXT_MAX_CHARS, mini=1),
     )
 
     # Conversation history — annotee de qui parle quand ce n'est pas la
@@ -471,8 +474,25 @@ async def own_handles(person_id: str) -> list[str]:
 # En deçà, deux messages sont la même conversation : le cas nominal ne doit
 # pas payer une ligne de prompt à chaque tour, et un fil continu ne doit pas
 # se retrouver tapissé de marqueurs.
+#
+# Deux cadrans distincts malgré la valeur identique, et ils le restent en
+# configuration (``pipeline.context.gap_mention_floor_hours`` et
+# ``pipeline.context.history_gap_hours``) : le premier décide si Mika *dit* à
+# quelqu'un qu'on ne s'est pas parlé depuis un moment, le second date un
+# segment de l'historique rejoué au modèle. Les fusionner ferait dépendre une
+# phrase adressée à une personne d'un réglage de mise en forme du fil.
 _ECART_PLANCHER_S = 6 * 3600
 _HISTORY_GAP_SECONDS = 6 * 3600
+
+
+def _ecart_plancher_s() -> int:
+    return cfg_int("pipeline.context.gap_mention_floor_hours",
+                   _ECART_PLANCHER_S // 3600, mini=1) * 3600
+
+
+def _history_gap_seconds() -> int:
+    return cfg_int("pipeline.context.history_gap_hours",
+                   _HISTORY_GAP_SECONDS // 3600, mini=1) * 3600
 
 _EN_LETTRES = {
     2: "deux", 3: "trois", 4: "quatre", 5: "cinq", 6: "six",
@@ -506,7 +526,7 @@ def _duree_approx(seconds: float) -> str:
 
 def _phrase_ecart(seconds: float) -> str:
     """Le temps écoulé depuis le dernier échange, ou '' s'il est négligeable."""
-    if seconds < _ECART_PLANCHER_S:
+    if seconds < _ecart_plancher_s():
         return ""
     if seconds < 86400:
         return "Vous vous etes deja parle plus tot dans la journee."
@@ -572,6 +592,7 @@ async def _stamp_history_gaps(history: list[dict]) -> list[dict]:
         }
 
         now = timezone.now()
+        ecart_min = _history_gap_seconds()
         stamped: list[dict] = []
         previous = None
         for msg in history:
@@ -580,7 +601,7 @@ async def _stamp_history_gaps(history: list[dict]) -> list[dict]:
             current = dates.get(msg.get("id")) or now
             if previous is not None:
                 gap = (current - previous).total_seconds()
-                if gap >= _HISTORY_GAP_SECONDS:
+                if gap >= ecart_min:
                     msg = {
                         **msg,
                         "content": f"[il y a {_duree_approx(gap)}] "
@@ -601,11 +622,28 @@ async def _stamp_history_gaps(history: list[dict]) -> list[dict]:
 # bavard, un projet aux consignes fleuves — gonfle chaque tour en silence.
 # Les valeurs sont larges : le but est d'empêcher la dérive, pas de rogner
 # le cas nominal.
+# Ces cinq valeurs sont le repli des réglages ``pipeline.context.*``
+# (section « Tour · Contexte ») et leur sont identiques au bit près.
 _SELF_CONCEPT_MAX_CHARS = 1600
 _MODULE_CONTEXT_MAX_CHARS = 1800
 _PROJECT_TEXT_MAX_CHARS = 300
 _PROJECT_LIST_ITEMS_MAX = 8
 _IDENTITY_CLAIMS_MAX = 5
+
+
+def _plafond_texte_projet() -> int:
+    return cfg_int("pipeline.context.project_text_max_chars",
+                   _PROJECT_TEXT_MAX_CHARS, mini=1)
+
+
+def _plafond_liste_projet() -> int:
+    return cfg_int("pipeline.context.project_list_items_max",
+                   _PROJECT_LIST_ITEMS_MAX, mini=1)
+
+
+def _plafond_revendications() -> int:
+    return cfg_int("pipeline.context.identity_claims_max",
+                   _IDENTITY_CLAIMS_MAX, mini=1)
 
 
 def _clip(text: str, limit: int) -> str:
@@ -639,12 +677,13 @@ def _format_identity_block(ctx) -> str:
         lines.append("")
         # Compte borné : chaque ligne coûte à chaque tour, et au-delà de
         # quelques revendications simultanées le modèle n'arbitre plus rien.
-        for claim in ctx.pending_claims[:_IDENTITY_CLAIMS_MAX]:
+        plafond_revendications = _plafond_revendications()
+        for claim in ctx.pending_claims[:plafond_revendications]:
             lines.append(
                 f"- Revendication #{claim['id']} : se presente comme "
                 f"« {claim['name']} » (« {claim['evidence'][:140]} »)"
             )
-        hidden = len(ctx.pending_claims) - _IDENTITY_CLAIMS_MAX
+        hidden = len(ctx.pending_claims) - plafond_revendications
         if hidden > 0:
             lines.append(f"- (+{hidden} autre(s) revendication(s) en attente)")
         lines.append(
@@ -671,21 +710,23 @@ def _format_project_block(data: dict) -> str:
     not descriptive. When emotion_policy is OFF the block explicitly
     reminds the model to drop emoji / informal markers.
     """
+    plafond_texte = _plafond_texte_projet()
+    plafond_liste = _plafond_liste_projet()
     lines: list[str] = [f"Titre : {data['title']}"]
     if data.get("description"):
-        lines.append(f"Cadre : {_clip(data['description'], 2 * _PROJECT_TEXT_MAX_CHARS)}")
+        lines.append(f"Cadre : {_clip(data['description'], 2 * plafond_texte)}")
     if data.get("tone_directive"):
-        lines.append(f"Ton à utiliser : {_clip(data['tone_directive'], _PROJECT_TEXT_MAX_CHARS)}")
+        lines.append(f"Ton à utiliser : {_clip(data['tone_directive'], plafond_texte)}")
     instr = data.get("instructions") or []
     if instr:
         lines.append("Consignes :")
-        for i in instr[:_PROJECT_LIST_ITEMS_MAX]:
-            lines.append(f"  - {_clip(i, _PROJECT_TEXT_MAX_CHARS)}")
+        for i in instr[:plafond_liste]:
+            lines.append(f"  - {_clip(i, plafond_texte)}")
     oos = data.get("out_of_scope") or []
     if oos:
         lines.append("Hors de portée :")
-        for o in oos[:_PROJECT_LIST_ITEMS_MAX]:
-            lines.append(f"  - {_clip(o, _PROJECT_TEXT_MAX_CHARS)}")
+        for o in oos[:plafond_liste]:
+            lines.append(f"  - {_clip(o, plafond_texte)}")
 
     policy = data.get("emotion_policy", "off")
     if policy == "off":
@@ -759,9 +800,11 @@ def _fatigue_fog_context() -> str:
 # Dream-recall window: after waking, for how many hours is last night's
 # dream eligible to surface in the prompt. Keeps the residue morning-
 # bound — a dream from last night shouldn't pop up at 21h.
+# Repli de ``pipeline.context.dream_recall_window_hours``.
 _DREAM_RECALL_WINDOW_HOURS = 8
 # Only dreams above this vividness are mentionable at all — faint ones
 # stay purely internal (they still nudged the self-narrative elsewhere).
+# Repli de ``pipeline.context.dream_vividness_threshold``.
 _DREAM_VIVIDNESS_THRESHOLD = 0.6
 
 
@@ -781,13 +824,23 @@ async def _fetch_dream_context() -> tuple[str, object | None]:
     from memory.sleep import NIGHT_END_HOUR
 
     now = datetime.now()
-    # Only eligible in the morning window [NIGHT_END_HOUR, +WINDOW]
-    if not (NIGHT_END_HOUR <= now.hour < NIGHT_END_HOUR + _DREAM_RECALL_WINDOW_HOURS):
+    # La fin de nuit appartient au cycle de sommeil : on lit *son* réglage,
+    # avec la constante importée comme repli. Le bloc reste correct que ce
+    # réglage soit déclaré ou non.
+    fin_de_nuit = cfg_int("memory.sleep_night_end_hour", NIGHT_END_HOUR,
+                          mini=0, maxi=23)
+    fenetre = cfg_int("pipeline.context.dream_recall_window_hours",
+                      _DREAM_RECALL_WINDOW_HOURS, mini=1)
+    # Only eligible in the morning window [fin de nuit, +fenêtre]
+    if not (fin_de_nuit <= now.hour < fin_de_nuit + fenetre):
         return "", None
 
     try:
         dream = await read.dream_of_last_night(
-            unrecalled_only=True, min_vividness=_DREAM_VIVIDNESS_THRESHOLD,
+            unrecalled_only=True,
+            min_vividness=cfg_float(
+                "pipeline.context.dream_vividness_threshold",
+                _DREAM_VIVIDNESS_THRESHOLD, mini=0.0, maxi=1.0),
         )
     except Exception as exc:
         degradations.record("prompt: dream context", exc)
@@ -816,6 +869,7 @@ async def _fetch_dream_context() -> tuple[str, object | None]:
 
 # Cap on the journal narrative injected into the prompt — the recap is
 # a thread, not a transcript.
+# Repli de ``pipeline.context.journal_max_chars``.
 _JOURNAL_MAX_CHARS = 450
 
 
@@ -872,9 +926,11 @@ async def _fetch_journal_context(may_disclose: bool = True) -> str:
     if not journal or not journal.narrative:
         return ""
 
+    plafond = cfg_int("pipeline.context.journal_max_chars",
+                      _JOURNAL_MAX_CHARS, mini=1)
     narrative = journal.narrative.strip()
-    if len(narrative) > _JOURNAL_MAX_CHARS:
-        narrative = narrative[:_JOURNAL_MAX_CHARS].rstrip() + "..."
+    if len(narrative) > plafond:
+        narrative = narrative[:plafond].rstrip() + "..."
 
     persons = [p for p in (journal.persons_interacted or []) if p]
 
@@ -1056,7 +1112,9 @@ async def _fetch_self_concept() -> str:
     try:
         latest = await read.latest_self_narrative()
         if latest and latest.content:
-            return _clip(latest.content, _SELF_CONCEPT_MAX_CHARS)
+            return _clip(latest.content,
+                         cfg_int("pipeline.context.self_concept_max_chars",
+                                 _SELF_CONCEPT_MAX_CHARS, mini=1))
         return ""
     except Exception as exc:
         degradations.record("prompt: self-concept", exc)

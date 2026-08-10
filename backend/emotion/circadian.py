@@ -62,6 +62,13 @@ _DEFAULT_PHASE_ANCHORS: dict[CircadianPhase, Emotion] = {
 
 # How strongly each phase tints the home vector. Small so the base
 # default_mood remains recognizable (home = default_mood × 0.15 + bias × 0.35).
+#
+# Réglable via ``emotion.circadian_bias_magnitude`` — mais la lecture ne se
+# fait PAS ici : ce module est documenté « zero side effects, zero state » et
+# c'est ce qui le rend testable à n'importe quelle heure sans base de données.
+# ``phase_bias`` reçoit donc l'amplitude en paramètre, et
+# ``configured_bias_magnitude()`` en dessous est le seul point de contact avec
+# la configuration — isolé, jamais appelé par une fonction pure.
 _BIAS_MAGNITUDE: float = 0.35
 
 # Default phase boundaries (start hour, inclusive). Can be overridden per
@@ -154,18 +161,36 @@ def current_state(
     )
 
 
+def configured_bias_magnitude() -> float:
+    """L'amplitude réglée de la teinte circadienne.
+
+    Volontairement séparée de ``phase_bias`` : c'est la SEULE fonction du
+    module qui lise quoi que ce soit, et elle ne calcule rien. Un appelant qui
+    veut la physique sans la configuration appelle ``phase_bias`` directement.
+    """
+    from configs.runtime import cfg_float
+
+    return cfg_float(
+        "emotion.circadian_bias_magnitude", _BIAS_MAGNITUDE, mini=0.0,
+    )
+
+
 def phase_bias(
     phase: CircadianPhase,
     profile: CircadianProfile | None = None,
+    magnitude: float | None = None,
 ) -> Vec3:
     """Return a small PAD vector that nudges the home position for this phase.
 
-    Magnitude is bounded by ``_BIAS_MAGNITUDE`` so the character's
+    Magnitude defaults to ``_BIAS_MAGNITUDE`` so the character's
     default_mood remains dominant — the phase just colors the baseline.
+    Le moteur lui passe la valeur configurée ; la fonction, elle, reste pure.
     """
     profile = profile or CircadianProfile()
     anchor = profile.phase_anchors[phase]
-    return pad.label_to_pad(anchor, _BIAS_MAGNITUDE)
+    if magnitude is None:
+        magnitude = _BIAS_MAGNITUDE
+    return pad.label_to_pad(anchor, magnitude)
 
 
 def energy_level(

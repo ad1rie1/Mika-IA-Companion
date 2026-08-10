@@ -74,9 +74,20 @@ async def host(tmp_path, settings):
     await module.instantiate()
     yield module
     await module.shutdown()
-    # nettoie les sections de config dynamiques
+    # Nettoie les sections de config dynamiques — celles des apps forgées
+    # pendant le test.
+    #
+    # Le préfixe est volontairement large parce que les noms d'apps sont
+    # inventés par les tests, mais il emporte aussi les réglages **de l'hôte**
+    # (`forge.handler_timeout_s`, `forge.max_modules`, `forge.pool_workers`…),
+    # qui vivent sous le même préfixe et ne sont déclarés qu'une fois, à
+    # l'enregistrement du module. Le registre étant un singleton de session,
+    # tout test s'exécutant après celui-ci trouvait la Forge sans aucun
+    # réglage. C'était déjà vrai avant, sans témoin : le schéma de l'hôte est
+    # donc redéclaré ici, et non « restauré » (rien ne l'avait sauvegardé).
     from configs.registry import registry
     registry.unregister(key_prefix="forge.")
+    registry.register(module.config_schema())
 
 
 async def _create_basic(host, name="compteur_test", **overrides):

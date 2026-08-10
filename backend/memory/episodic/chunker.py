@@ -24,10 +24,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+from configs.runtime import cfg_int
 from identity.trust import is_internal_person
 
 # Un message individuel démesuré (collage) est borné dans le *document*
 # indexé : le SQL garde l'intégralité, le deux-temps la restitue.
+# Réglable via ``memory.episodic_message_text_cap`` ; la valeur ci-dessous est
+# le repli servi quand le registre est hors d'atteinte.
 MESSAGE_TEXT_CAP = 2000
 _CAP_MARK = " …[tronqué]"
 
@@ -69,18 +72,28 @@ class _Pair:
         return self.msgs[-1]
 
 
-def _clip(content: str) -> str:
+def _message_text_cap() -> int:
+    return cfg_int(
+        "memory.episodic_message_text_cap", MESSAGE_TEXT_CAP, mini=200, maxi=20000,
+    )
+
+
+def _clip(content: str, cap: int | None = None) -> str:
+    if cap is None:
+        cap = _message_text_cap()
     content = (content or "").strip()
-    if len(content) <= MESSAGE_TEXT_CAP:
+    if len(content) <= cap:
         return content
-    return content[: MESSAGE_TEXT_CAP - len(_CAP_MARK)].rstrip() + _CAP_MARK
+    return content[: cap - len(_CAP_MARK)].rstrip() + _CAP_MARK
 
 
-def _pair_text(pair: _Pair) -> str:
+def _pair_text(pair: _Pair, cap: int | None = None) -> str:
+    if cap is None:
+        cap = _message_text_cap()
     lines = []
     for m in pair.msgs:
         label = "Mika" if m.get("role") == "assistant" else "Lui"
-        content = _clip(m.get("content") or "")
+        content = _clip(m.get("content") or "", cap)
         if content:
             lines.append(f"{label}: {content}")
     return "\n".join(lines)
@@ -172,9 +185,11 @@ def build_chunks(
             consumed_up_to = int(open_pair.first["id"]) - 1
 
     # Fusion avant : paires consécutives, même handle, même conversation.
+    # La troncature par message est lue une fois pour toute la fenêtre.
+    cap = _message_text_cap()
     chunks: list[ExchangeChunk] = []
     for pair in pairs:
-        text = _pair_text(pair)
+        text = _pair_text(pair, cap)
         if not text:
             continue
         if chunks:

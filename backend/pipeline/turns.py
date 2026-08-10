@@ -39,6 +39,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from configs.runtime import cfg_int
 from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
@@ -48,12 +49,24 @@ DEFAULT_WORKERS = 1
 # Bound on the backlog. Reached only if turns arrive faster than they can be
 # answered, which for a personal install means something is already wrong;
 # refusing loudly beats accumulating an hour of replies nobody waits for.
+# Repli de ``pipeline.turns.max_pending``.
 MAX_PENDING = 100
 
 # Ceiling on how many interrupted turns a boot will replay. A restart in the
 # middle of a busy minute should resume a conversation, not open with a
 # burst of stale answers to questions the person has moved on from.
+# Repli de ``pipeline.turns.max_resumed``.
 MAX_RESUMED = 10
+
+
+def _max_pending() -> int:
+    """Taille de la file, lue à sa construction — et seulement là.
+
+    Le réglage est ``restart_required`` pour cette raison : ``maxsize`` est
+    figé dans l'``asyncio.Queue``, changer la valeur à chaud ne toucherait
+    pas la file déjà en service.
+    """
+    return cfg_int("pipeline.turns.max_pending", MAX_PENDING, mini=1)
 
 
 class TurnQueue:
@@ -116,7 +129,7 @@ class TurnQueue:
         # eagerly when it lazily starts the pool, and swapping it here would
         # drop exactly the perception that triggered the start.
         if self._queue is None:
-            self._queue = asyncio.Queue(maxsize=MAX_PENDING)
+            self._queue = asyncio.Queue(maxsize=_max_pending())
         self._workers = [
             asyncio.create_task(self._run(), name=f"turn-worker-{i}")
             for i in range(max(1, workers))
@@ -166,7 +179,7 @@ class TurnQueue:
             # coroutine we cannot await from here — so create the queue now
             # and let start() adopt it rather than build its own.
             if self._queue is None:
-                self._queue = asyncio.Queue(maxsize=MAX_PENDING)
+                self._queue = asyncio.Queue(maxsize=_max_pending())
             try:
                 asyncio.get_running_loop().create_task(self.start())
             except RuntimeError:
@@ -179,7 +192,7 @@ class TurnQueue:
         except asyncio.QueueFull:
             logger.warning(
                 "Turn queue full (%d) — refusing turn from %s",
-                MAX_PENDING, getattr(perception, "person_id", "?"),
+                self._queue.maxsize, getattr(perception, "person_id", "?"),
             )
             return False
         self._idle.clear()
@@ -279,6 +292,7 @@ async def resume_interrupted_turns() -> int:
     # getattr défensif : les tests substituent le manager par un mock.
     window = getattr(memory_manager, "resume_window_minutes", 120)
     cutoff = timezone.now() - timedelta(minutes=window)
+    plafond = cfg_int("pipeline.turns.max_resumed", MAX_RESUMED, mini=0)
 
     try:
         # Purger d'abord : c'est ce qui libère les places de MAX_RESUMED pour
@@ -301,7 +315,7 @@ async def resume_interrupted_turns() -> int:
             async for row in Message.objects.filter(
                 awaiting_reply=True, role="user", is_internal=False,
                 created_at__gte=cutoff,
-            ).order_by("pk")[:MAX_RESUMED]
+            ).order_by("pk")[:plafond]
         ]
     except Exception:
         logger.exception("Could not look for interrupted turns")

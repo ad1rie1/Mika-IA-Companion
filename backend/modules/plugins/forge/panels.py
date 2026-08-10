@@ -27,6 +27,8 @@ from GestionSysteme import tables
 
 logger = logging.getLogger("module.forge")
 
+# Repli de ``forge.panel_code_chars`` — même valeur que le ``default``
+# déclaré dans ``config_schema.py``. Troncature d'affichage seulement.
 MAX_CODE = 8000
 
 _TONS_STATUT = {
@@ -154,6 +156,7 @@ def _source(nom: str) -> tuple[str, str]:
     """
     import yaml
 
+    from configs.runtime import cfg_int
     from modules.plugins.forge import store
 
     try:
@@ -167,8 +170,10 @@ def _source(nom: str) -> tuple[str, str]:
     except Exception as exc:
         manifeste = f"(non sérialisable : {exc})"
     code = data.get("code") or ""
-    if len(code) > MAX_CODE:
-        code = code[:MAX_CODE] + "\n… (tronqué)"
+    plafond = cfg_int("forge.panel_code_chars", MAX_CODE,
+                      mini=500, maxi=200000)
+    if len(code) > plafond:
+        code = code[:plafond] + "\n… (tronqué)"
     return manifeste, code
 
 

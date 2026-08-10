@@ -25,6 +25,7 @@ from telegram.ext import (
 )
 
 from config.personality import personality
+from configs.runtime import cfg_float, cfg_int
 from pipeline.voice import VoiceSink
 from utils.degradation import degradations
 
@@ -34,6 +35,12 @@ logger = logging.getLogger(__name__)
 # volontairement : c'est le même coût de l'autre côté. La différence est la
 # clé — le web compte par *connexion*, ici il n'y en a pas, alors on compte
 # par compte Telegram.
+#
+# Deux clés distinctes malgré cette égalité (``telegram.*`` et ``comm.web.*``) :
+# les deux canaux n'ont ni la même exposition ni le même public, et les fondre
+# en une seule interdirait de border l'un sans border l'autre. Corollaire à
+# retenir en réglant l'une : l'égalité de départ était voulue, et la bouger
+# ici ne bouge PAS le web.
 RATE_LIMIT_MAX_MESSAGES = 20
 RATE_LIMIT_WINDOW_SECONDS = 10.0
 
@@ -55,14 +62,26 @@ def _is_rate_limited(person_id: str) -> bool:
     pipeline complet.
     """
     now = time.monotonic()
-    window_start = now - RATE_LIMIT_WINDOW_SECONDS
+    window_start = now - cfg_float(
+        "telegram.rate_limit_window_seconds", RATE_LIMIT_WINDOW_SECONDS, mini=0.0,
+    )
     stamps = [t for t in _msg_timestamps.get(person_id, ()) if t >= window_start]
     _msg_timestamps[person_id] = stamps
-    if len(stamps) >= RATE_LIMIT_MAX_MESSAGES:
+    if len(stamps) >= cfg_int(
+        "telegram.rate_limit_max_messages", RATE_LIMIT_MAX_MESSAGES, mini=1,
+    ):
         return True
     stamps.append(now)
     _prune_rate_window(window_start)
     return False
+
+
+def _mo(octets: int) -> str:
+    """Un nombre d'octets, dit comme un humain le dirait (« 5 », « 7,5 »)."""
+    valeur = octets / (1024 * 1024)
+    if abs(valeur - round(valeur)) < 0.05:
+        return str(int(round(valeur)))
+    return f"{valeur:.1f}".replace(".", ",")
 
 
 def _prune_rate_window(window_start: float) -> None:
@@ -389,11 +408,18 @@ class TelegramChannel:
         Returns a validated ``MediaAttachment`` or None (unsupported type,
         oversized payload, or download failure — all logged, none fatal).
         """
-        from pipeline.media import (
-            MAX_FILE_SIZE_BYTES,
-            MediaAttachment,
-            _categorize,
-        )
+        from pipeline.media import MAX_FILE_SIZE_BYTES, MediaAttachment, _categorize
+
+        # Le plafond est un réglage côté ``pipeline.media`` : le lire par son
+        # accesseur, la constante étant figée à l'import. L'import est gardé
+        # pour que ce canal continue de fonctionner devant une version de
+        # ``pipeline.media`` qui ne l'expose pas encore.
+        try:
+            from pipeline.media import max_file_size_bytes
+
+            taille_max = int(max_file_size_bytes())
+        except Exception:
+            taille_max = MAX_FILE_SIZE_BYTES
 
         if message.voice:
             media = message.voice
@@ -415,13 +441,16 @@ class TelegramChannel:
             return None
 
         size = getattr(media, "file_size", None)
-        if size and size > MAX_FILE_SIZE_BYTES:
+        if size and size > taille_max:
             logger.info(
                 "Telegram media ignoré (trop grand): %s (%d o)", name, size
             )
             try:
+                # Le chiffre annoncé est DÉRIVÉ du plafond appliqué : écrire
+                # « 5 Mo » en dur, c'était promettre à l'expéditeur une limite
+                # qui cessait d'être vraie dès que le réglage bougeait.
                 await message.reply_text(
-                    "(fichier trop lourd pour moi — 5 Mo max)"
+                    f"(fichier trop lourd pour moi — {_mo(taille_max)} Mo max)"
                 )
             except Exception as exc:
                 degradations.record("communication.channels.telegram._download_media", exc)

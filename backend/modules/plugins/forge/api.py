@@ -25,6 +25,9 @@ from datetime import datetime
 
 logger = logging.getLogger("module.forge")
 
+# Replis des trois plafonds réglables (``forge.max_http_calls_per_run``,
+# ``forge.max_log_calls_per_run``, ``forge.log_keep_per_module``) : mêmes
+# valeurs que les ``default`` déclarés dans ``config_schema.py``.
 MAX_HTTP_CALLS_PER_RUN = 10
 MAX_LOG_CALLS_PER_RUN = 200
 MAX_KEY_LEN = 128
@@ -46,11 +49,15 @@ def _limit(key: str, default):
 
 
 def prune_logs(module_name: str) -> None:
+    from configs.runtime import cfg_int
     from modules.plugins.forge.models import ForgeLog
+
+    garde = cfg_int("forge.log_keep_per_module", LOG_KEEP_PER_MODULE,
+                    mini=20, maxi=10000)
     ids = list(
         ForgeLog.objects.filter(module_name=module_name)
         .order_by("-created_at")
-        .values_list("id", flat=True)[LOG_KEEP_PER_MODULE:]
+        .values_list("id", flat=True)[garde:]
     )
     if ids:
         ForgeLog.objects.filter(id__in=ids).delete()
@@ -278,6 +285,10 @@ class ForgeAPI:
         self._http_calls_this_run = 0
         self._log_calls_this_run = 0
         self._logs_dropped_this_run = 0
+        # Les deux budgets par invocation sont relus dans ``_begin_run`` :
+        # une fois par handler, jamais par ligne de journal.
+        self._log_budget = MAX_LOG_CALLS_PER_RUN
+        self._http_budget = MAX_HTTP_CALLS_PER_RUN
         self.storage = ForgeStorage(module_name)
         self.config = ForgeConfig(module_name, manifest.config)
         self.state: dict = {}                 # RAM, vidé au reload
@@ -313,7 +324,7 @@ class ForgeAPI:
         réussit, elle est seulement bavarde. Le surplus est compté et dit
         par ``_end_run``, jamais silencieux.
         """
-        if self._log_calls_this_run >= MAX_LOG_CALLS_PER_RUN:
+        if self._log_calls_this_run >= self._log_budget:
             self._logs_dropped_this_run += 1
             return
         self._log_calls_this_run += 1
@@ -394,9 +405,9 @@ class ForgeAPI:
         Retourne {status, text, truncated, url}.
         """
         self._http_calls_this_run += 1
-        if self._http_calls_this_run > MAX_HTTP_CALLS_PER_RUN:
+        if self._http_calls_this_run > self._http_budget:
             raise ForgeAPIError(
-                f"trop d'appels http dans ce handler (max {MAX_HTTP_CALLS_PER_RUN})"
+                f"trop d'appels http dans ce handler (max {self._http_budget})"
             )
         parsed = urllib.parse.urlparse(url)
         if parsed.scheme not in ("http", "https"):
@@ -436,10 +447,16 @@ class ForgeAPI:
 
     def _begin_run(self, loop) -> None:
         """Appelé par le runtime avant chaque invocation de handler."""
+        from configs.runtime import cfg_int
+
         self._loop = loop
         self._http_calls_this_run = 0
         self._log_calls_this_run = 0
         self._logs_dropped_this_run = 0
+        self._log_budget = cfg_int("forge.max_log_calls_per_run",
+                                   MAX_LOG_CALLS_PER_RUN, mini=10, maxi=5000)
+        self._http_budget = cfg_int("forge.max_http_calls_per_run",
+                                    MAX_HTTP_CALLS_PER_RUN, mini=1, maxi=200)
 
     def _end_run(self) -> None:
         """Appelé par le runtime après chaque invocation : dit la troncature.
@@ -457,7 +474,7 @@ class ForgeAPI:
             write_log(
                 self._module, "warning", "system",
                 f"journal tronqué : {dropped} appel(s) ignoré(s) au-delà de "
-                f"{MAX_LOG_CALLS_PER_RUN} lignes pour cette exécution",
+                f"{self._log_budget} lignes pour cette exécution",
             )
         except Exception:
             logger.debug("ligne de troncature non écrite pour %s", self._module)

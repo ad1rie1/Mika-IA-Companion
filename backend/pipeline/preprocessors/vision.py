@@ -25,6 +25,7 @@ import asyncio
 import logging
 
 from ai.router import AIRole, ai_router
+from configs.runtime import cfg_int
 from pipeline.media import MediaAttachment
 from pipeline.perception import Part
 
@@ -47,11 +48,25 @@ VISION_USER_PROMPT = "Decris cette image."
 
 # Hard ceiling on caption length so a rogue model doesn't blow up the
 # downstream prompt budget.
+# Repli de ``pipeline.vision.max_caption_chars``.
 MAX_CAPTION_CHARS = 600
 
 # Timeout per image (seconds). A single image description shouldn't take
 # anywhere near this long; caller can cap if invoking many at once.
+# Repli de ``pipeline.vision.timeout_seconds``, que
+# ``files_service.op_analyze_image`` lit aussi : c'est le même appel, borné
+# par le même réglage.
 VISION_TIMEOUT_SECONDS = 30
+
+
+def timeout_seconds() -> int:
+    """Échéance d'une légende, telle que configurée.
+
+    Exposée plutôt qu'inlinée : l'outil ``files_analyze_image`` appelle le
+    même rôle et doit se borner pareil, sans redéclarer la valeur.
+    """
+    return cfg_int("pipeline.vision.timeout_seconds",
+                   VISION_TIMEOUT_SECONDS, mini=1)
 
 
 async def process(part: Part) -> Part:
@@ -97,7 +112,7 @@ async def _caption(part: Part, *, name: str, mime: str) -> str:
                 user_prompt=VISION_USER_PROMPT,
                 attachments=[attachment],
             ),
-            timeout=VISION_TIMEOUT_SECONDS,
+            timeout=timeout_seconds(),
         )
     except asyncio.TimeoutError:
         logger.warning("Vision caption timed out (name=%s, mime=%s)", name, mime)
@@ -137,9 +152,11 @@ def _clean_caption(raw: str, *, name: str) -> str:
     """Trim, cap length, and ensure the caption fits the '[image: ...]' shape."""
     if not raw:
         return ""
+    plafond = cfg_int("pipeline.vision.max_caption_chars",
+                      MAX_CAPTION_CHARS, mini=4)
     cleaned = raw.strip()
-    if len(cleaned) > MAX_CAPTION_CHARS:
-        cleaned = cleaned[: MAX_CAPTION_CHARS - 3].rstrip() + "...]"
+    if len(cleaned) > plafond:
+        cleaned = cleaned[: plafond - 3].rstrip() + "...]"
     # Some models wrap in quotes or forget the opening marker — normalize.
     if not cleaned.startswith("[image"):
         cleaned = f"[image: {name} — {cleaned.lstrip('[').rstrip(']')}]"

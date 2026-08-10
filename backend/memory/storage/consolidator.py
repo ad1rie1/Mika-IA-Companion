@@ -8,6 +8,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
+from configs.runtime import cfg_float, cfg_int
 from emotion.types import Emotion
 from memory.extraction.extractor import MemoryExtractor
 from memory.storage.vector_store import (
@@ -32,7 +33,14 @@ from memory.storage.window import INTERNAL_MESSAGE_SOURCES, user_facing_messages
 
 # Une tranche d'extraction ne dépasse jamais ce volume : au-delà, le backlog
 # est découpé sur les frontières de messages (voir _extract_and_store).
-EXTRACTION_MAX_CHARS = 8000
+# `_EXTRACTION_MAX_CHARS_DEFAUT` est la valeur DÉCLARÉE ; `EXTRACTION_MAX_CHARS`
+# est la variable de module, que des appelants réassignent pour forcer un
+# découpage (les tests de découpe du backlog). Les deux sont distinctes pour
+# que le site de lecture sache distinguer « personne n'y a touché » (le réglage
+# `memory.extraction_max_chars` gouverne) de « quelqu'un l'a écrasée » (son
+# écrasement gagne, sinon il n'aurait plus aucun effet).
+_EXTRACTION_MAX_CHARS_DEFAUT = 8000
+EXTRACTION_MAX_CHARS = _EXTRACTION_MAX_CHARS_DEFAUT
 
 # Plafond de la fenêtre lue par passe. Le checkpoint ne bouge plus quand
 # l'extraction est indisponible : sans ce plafond, un backlog resté au-dessus
@@ -281,11 +289,15 @@ class MemoryConsolidator:
         """
         from memory.models import Message
 
+        plafond_fenetre = cfg_int(
+            "memory.consolidation_max_window_messages", MAX_WINDOW_MESSAGES,
+            mini=10, maxi=5000,
+        )
         window_ids = await sync_to_async(
             lambda: list(
                 Message.objects.filter(id__gt=self._last_processed_id)
                 .order_by("id")
-                .values_list("id", flat=True)[:MAX_WINDOW_MESSAGES]
+                .values_list("id", flat=True)[:plafond_fenetre]
             )
         )()
         if not window_ids:
@@ -347,7 +359,15 @@ class MemoryConsolidator:
 
         counts = {"souvenirs": 0, "connaissances": 0, "commitments": 0}
         extracted_through: int | None = None
-        for batch in _split_batches(messages, EXTRACTION_MAX_CHARS):
+        taille_tranche = (
+            EXTRACTION_MAX_CHARS
+            if EXTRACTION_MAX_CHARS != _EXTRACTION_MAX_CHARS_DEFAUT
+            else cfg_int(
+                "memory.extraction_max_chars", _EXTRACTION_MAX_CHARS_DEFAUT,
+                mini=500, maxi=100000,
+            )
+        )
+        for batch in _split_batches(messages, taille_tranche):
             msg_dicts = [{"role": m["role"], "content": m["content"]} for m in batch]
             extractions = await self.extractor.analyze_messages(
                 msg_dicts, pending_commitments=pending_commitments,
@@ -741,7 +761,9 @@ class MemoryConsolidator:
         """
         now = _time.monotonic()
         last = getattr(self, "_last_decay", 0.0)
-        if last and (now - last) < DECAY_INTERVAL_S:
+        if last and (now - last) < cfg_int(
+            "memory.decay_interval_s", DECAY_INTERVAL_S, mini=60, maxi=86400,
+        ):
             # Commitment expiry is a pair of cheap indexed UPDATEs and is
             # what stops a stale promise being re-asserted in every prompt,
             # so it keeps running on its own cadence.
@@ -772,7 +794,10 @@ class MemoryConsolidator:
                     status="pending", due_at__isnull=False, due_at__lt=now,
                 ).update(status="dropped", resolved_at=now)
             )()
-            cutoff = now - timedelta(days=COMMITMENT_MAX_AGE_DAYS)
+            cutoff = now - timedelta(days=cfg_int(
+                "memory.commitment_max_age_days", COMMITMENT_MAX_AGE_DAYS,
+                mini=1, maxi=365,
+            ))
             dropped += await sync_to_async(
                 lambda: Commitment.objects.filter(
                     status="pending", created_at__lt=cutoff,
@@ -792,7 +817,10 @@ class MemoryConsolidator:
         """
         now = _time.monotonic()
         last = getattr(self, "_last_retention_sweep", 0.0)
-        if last and (now - last) < RETENTION_SWEEP_INTERVAL_S:
+        if last and (now - last) < cfg_int(
+            "memory.retention_sweep_interval_s", RETENTION_SWEEP_INTERVAL_S,
+            mini=60, maxi=86400,
+        ):
             return
         self._last_retention_sweep = now
         try:
@@ -838,7 +866,9 @@ class MemoryConsolidator:
             Souvenir.objects.filter(importance__gt=dormant_floor)
             .filter(Q(decayed_at__isnull=True) | Q(decayed_at__lt=cutoff))
             .order_by("decayed_at")
-            .prefetch_related("themes")[:DECAY_BATCH]
+            .prefetch_related("themes")[:cfg_int(
+                "memory.decay_batch", DECAY_BATCH, mini=10, maxi=10000,
+            )]
         )
         if not souvenirs:
             return
@@ -964,7 +994,9 @@ class MemoryConsolidator:
                 updated_at__lt=grace_cutoff,
             )
             .filter(Q(decayed_at__isnull=True) | Q(decayed_at__lt=anchor_cutoff))
-            .order_by("decayed_at")[:DECAY_BATCH]
+            .order_by("decayed_at")[:cfg_int(
+                "memory.decay_batch", DECAY_BATCH, mini=10, maxi=10000,
+            )]
         )
 
         for conn in connaissances:
@@ -1017,7 +1049,10 @@ class MemoryConsolidator:
 
         monotonic = _time.monotonic()
         last = getattr(self, "_last_aggregation", 0.0)
-        if last and (monotonic - last) < EMOTION_AGGREGATION_INTERVAL_S:
+        if last and (monotonic - last) < cfg_int(
+            "memory.emotion_aggregation_interval_s", EMOTION_AGGREGATION_INTERVAL_S,
+            mini=30, maxi=86400,
+        ):
             return
         self._last_aggregation = monotonic
 
@@ -1254,7 +1289,10 @@ class MemoryConsolidator:
             return "cooling"
         if sub_ratios is not None:
             spread = max(sub_ratios) - min(sub_ratios) if sub_ratios else 0.0
-            return "volatile" if spread > WEEKLY_VOLATILE_SPREAD else "stable"
+            return "volatile" if spread > cfg_float(
+                "memory.weekly_volatile_spread", WEEKLY_VOLATILE_SPREAD,
+                mini=0.0, maxi=2.0,
+            ) else "stable"
         if len(dist) > 4 and abs(delta) > 0.05:
             return "volatile"
         return "stable"
@@ -1281,7 +1319,10 @@ class MemoryConsolidator:
 
             checked = 0
             for r in raw:
-                if checked >= MAX_CONTRADICTION_CHECKS:
+                if checked >= cfg_int(
+                    "memory.max_contradiction_checks", MAX_CONTRADICTION_CHECKS,
+                    mini=0, maxi=10,
+                ):
                     break
 
                 try:

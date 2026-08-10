@@ -30,12 +30,15 @@ from datetime import date, datetime, time as dt_time, timedelta
 from asgiref.sync import sync_to_async
 from django.utils import timezone
 
+from configs.runtime import cfg_int
 from memory.storage.vector_store import souvenir_metadata, vector_call
 from memory.storage.window import user_facing_messages
 from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
+# Les quatre valeurs ci-dessous sont réglables (``memory.reorg_*``) ; elles
+# restent déclarées ici comme repli quand le registre est hors d'atteinte.
 MAX_CLUSTERS = 20
 # Volume max de verbatim envoyé à l'extraction pour UN cluster.
 MAX_CLUSTER_CHARS = 6000
@@ -44,10 +47,22 @@ MIN_CLUSTER_CHARS = 200
 MAX_MERGES_PER_NIGHT = 50
 
 
-def _cluster_greedy(chunks: list[dict], threshold: float) -> list[list[dict]]:
+def _cluster_greedy(
+    chunks: list[dict], threshold: float, max_clusters: int | None = None,
+) -> list[list[dict]]:
     """Clustering greedy cosinus sur embeddings stockés. Pur, déterministe
-    (ordre chronologique par ts)."""
+    (ordre chronologique par ts).
+
+    ``max_clusters`` non fourni = le réglage ``memory.reorg_max_clusters``. Il
+    est lu dans le corps et non en défaut d'argument, un défaut étant évalué à
+    l'import — donc avant que la base soit joignable.
+    """
     import numpy as np
+
+    if max_clusters is None:
+        max_clusters = cfg_int(
+            "memory.reorg_max_clusters", MAX_CLUSTERS, mini=1, maxi=200,
+        )
 
     ordered = sorted(
         (c for c in chunks if c.get("embedding") is not None),
@@ -63,7 +78,7 @@ def _cluster_greedy(chunks: list[dict], threshold: float) -> list[list[dict]]:
             sim = float(v @ cl["centroid"])
             if sim > best_sim:
                 best, best_sim = cl, sim
-        if best is not None and (best_sim >= threshold or len(clusters) >= MAX_CLUSTERS):
+        if best is not None and (best_sim >= threshold or len(clusters) >= max_clusters):
             best["items"].append(c)
             best["sum"] = best["sum"] + v
             s_norm = float(np.linalg.norm(best["sum"])) or 1.0
@@ -124,11 +139,14 @@ class NightlyReorg:
 
         checkpoint = await self._extraction_checkpoint()
 
+        plancher_cluster = cfg_int(
+            "memory.reorg_min_cluster_chars", MIN_CLUSTER_CHARS, mini=0, maxi=5000,
+        )
         extracted = 0
         used_clusters = 0
         for items in clusters:
             total_chars = sum(len(c.get("content") or "") for c in items)
-            if total_chars < MIN_CLUSTER_CHARS:
+            if total_chars < plancher_cluster:
                 continue
             messages = await self._fetch_cluster_messages(
                 items, min_message_id=checkpoint,
@@ -188,6 +206,10 @@ class NightlyReorg:
         if not ranges:
             return []
 
+        plafond = cfg_int(
+            "memory.reorg_max_cluster_chars", MAX_CLUSTER_CHARS, mini=500, maxi=50000,
+        )
+
         def _fetch():
             q = Q()
             for first, last in ranges:
@@ -202,7 +224,7 @@ class NightlyReorg:
             out, size = [], 0
             for r in rows:
                 size += len(r.get("content") or "")
-                if size > MAX_CLUSTER_CHARS:
+                if size > plafond:
                     break
                 out.append(r)
             return out
@@ -257,10 +279,14 @@ class NightlyReorg:
             )
         )()
 
+        max_fusions = cfg_int(
+            "memory.reorg_max_merges_per_night", MAX_MERGES_PER_NIGHT,
+            mini=0, maxi=1000,
+        )
         merges = 0
         merged_away: set[int] = set()
         for row in todays:
-            if merges >= MAX_MERGES_PER_NIGHT:
+            if merges >= max_fusions:
                 break
             if row["id"] in merged_away:
                 continue

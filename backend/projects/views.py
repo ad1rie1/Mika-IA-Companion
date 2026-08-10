@@ -45,6 +45,19 @@ except Exception:  # pragma: no cover - defensive fallback
     RUNS_SINCE_INPUT_CAP = 10
 
 
+def _runs_cap() -> int:
+    """Plafond d'avances sans retour humain, tel que le runner l'applique.
+
+    Lu au moment du rendu et non figé à l'import : ce que l'API annonce doit
+    être ce que ``_list_due`` vient de comparer. Le repli ci-dessus n'est plus
+    qu'un repli — recopier 10 à la main donnait un chiffre qui ne suivait ni
+    le réglage ni le runner.
+    """
+    from configs.runtime import cfg_int
+
+    return cfg_int("projects.runs_since_input_cap", RUNS_SINCE_INPUT_CAP, mini=1)
+
+
 # ── Helpers ──────────────────────────────────────────────────────
 
 
@@ -68,7 +81,7 @@ def _project_to_dict(p: Project, *, include_tasks: bool = False, quota: dict | N
         "next_run_at": p.next_run_at.isoformat() if p.next_run_at else None,
         "last_run_at": p.last_run_at.isoformat() if p.last_run_at else None,
         "runs_since_user_input": p.runs_since_user_input,
-        "max_runs_without_input": RUNS_SINCE_INPUT_CAP,
+        "max_runs_without_input": _runs_cap(),
         "monthly_token_budget": p.monthly_token_budget,
         "keywords": list(p.keywords or []),
         "owner": p.owner.name if p.owner_id else None,

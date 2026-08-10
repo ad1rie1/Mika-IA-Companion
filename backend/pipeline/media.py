@@ -20,8 +20,14 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+from configs.runtime import cfg_int, cfg_list
+
 logger = logging.getLogger(__name__)
 
+# Les valeurs ci-dessous sont le *repli* des réglages homonymes déclarés dans
+# `pipeline/config_schema.py` (section « Tour · Pièces jointes »). Elles ne
+# servent que si le registre est hors d'atteinte, et valent son `default` au
+# bit près.
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 ALLOWED_AUDIO_TYPES = {
     "audio/mpeg", "audio/mp3", "audio/wav", "audio/ogg",
@@ -43,6 +49,30 @@ MAX_ATTACHMENTS = 5
 # Le max_length=255 du modèle ne protège pas : SQLite n'applique pas les
 # longueurs de varchar et objects.create() ne passe pas par full_clean().
 MAX_FILENAME_CHARS = 80
+
+
+def max_file_size_bytes() -> int:
+    """Taille maximale d'une pièce jointe, en octets.
+
+    Accesseur plutôt que constante : le réglage est déclaré en mégaoctets
+    (`pipeline.media.max_file_size_mb`, ce qu'un administrateur lit), et les
+    appelants — la validation ici, le canal Telegram qui refuse un envoi trop
+    lourd — ont besoin d'octets. La conversion vit donc à un seul endroit, et
+    `MAX_FILE_SIZE_BYTES` reste le repli.
+    """
+    return cfg_int("pipeline.media.max_file_size_mb",
+                   MAX_FILE_SIZE_BYTES // (1024 * 1024), mini=1) * 1024 * 1024
+
+
+def max_attachments() -> int:
+    return cfg_int("pipeline.media.max_attachments", MAX_ATTACHMENTS, mini=1)
+
+
+def _max_filename_chars() -> int:
+    # Plafonné à 255 : au-delà, la colonne ne suit plus (max_length=255) et
+    # rien d'autre ne le défend (SQLite n'applique pas les longueurs).
+    return cfg_int("pipeline.media.max_filename_chars", MAX_FILENAME_CHARS,
+                   mini=8, maxi=255)
 
 
 @dataclass
@@ -87,11 +117,15 @@ class RejectedAttachment:
 
 
 def _categorize(media_type: str) -> str:
-    if media_type in ALLOWED_IMAGE_TYPES:
+    if media_type in cfg_list("pipeline.media.allowed_image_types",
+                              sorted(ALLOWED_IMAGE_TYPES)):
         return "image"
-    if media_type in ALLOWED_AUDIO_TYPES:
+    if media_type in cfg_list("pipeline.media.allowed_audio_types",
+                              sorted(ALLOWED_AUDIO_TYPES)):
         return "audio"
-    if media_type in ALLOWED_TEXT_TYPES or media_type.startswith("text/"):
+    if media_type in cfg_list("pipeline.media.allowed_text_types",
+                              sorted(ALLOWED_TEXT_TYPES)) \
+            or media_type.startswith("text/"):
         return "text"
     return "unknown"
 
@@ -103,10 +137,11 @@ def sanitize_filename(raw: str) -> str:
     direction Unicode deviennent des espaces, les blancs consécutifs sont
     fusionnés, et le résultat est tronqué à MAX_FILENAME_CHARS.
     """
+    limite = _max_filename_chars()
     name = "".join(c if c.isprintable() else " " for c in str(raw))
     name = " ".join(name.split())
-    if len(name) > MAX_FILENAME_CHARS:
-        name = name[: MAX_FILENAME_CHARS - 3].rstrip() + "..."
+    if len(name) > limite:
+        name = name[: limite - 3].rstrip() + "..."
     return name or "fichier"
 
 
@@ -143,15 +178,19 @@ def validate_attachments(
     """
     if not raw_list or not isinstance(raw_list, list):
         return [], []
+    # Lus une fois : les deux plafonds arbitrent le même envoi, et une
+    # relecture par pièce jointe pourrait les voir changer en cours de lot.
+    plafond_nombre = max_attachments()
+    plafond_taille = max_file_size_bytes()
     result: list[MediaAttachment] = []
     rejected: list[RejectedAttachment] = []
-    for raw in raw_list[:MAX_ATTACHMENTS]:
+    for raw in raw_list[:plafond_nombre]:
         if not isinstance(raw, dict):
             rejected.append(RejectedAttachment(name="fichier", reason="invalid"))
             continue
         try:
             att = MediaAttachment.from_ws_dict(raw)
-            if att.size_bytes() > MAX_FILE_SIZE_BYTES:
+            if att.size_bytes() > plafond_taille:
                 logger.warning("Pièce jointe ignorée (trop grande) : %s (%d o)", att.name, att.size_bytes())
                 rejected.append(
                     RejectedAttachment(name=sanitize_filename(att.name), reason="too_large")
@@ -161,9 +200,9 @@ def validate_attachments(
         except Exception:
             logger.warning("Pièce jointe invalide ignorée", exc_info=True)
             rejected.append(RejectedAttachment(name=_raw_name(raw), reason="invalid"))
-    # Le surplus au-delà du plafond : `raw_list[:MAX_ATTACHMENTS]` le coupait
-    # sans que personne ne l'apprenne.
-    for raw in raw_list[MAX_ATTACHMENTS:]:
+    # Le surplus au-delà du plafond : la troncature le coupait sans que
+    # personne ne l'apprenne.
+    for raw in raw_list[plafond_nombre:]:
         rejected.append(RejectedAttachment(name=_raw_name(raw), reason="too_many"))
     return result, rejected
 

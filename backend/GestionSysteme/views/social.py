@@ -38,6 +38,19 @@ from identity.trust import Certainty, ChannelTrust
 logger = logging.getLogger(__name__)
 
 
+def _politique() -> trust_policy.TrustTuning:
+    """La politique de confiance **effective**, réglages du tableau de bord compris.
+
+    Cet écran existe pour que la barre de divulgation affichée soit celle qui
+    tourne. Lire les constantes du module reviendrait à afficher la calibration
+    déclarée pendant que le prompt applique la configurée — la divergence
+    écran/prompt que la page est censée rendre impossible. La lecture passe par
+    le résolveur, seul propriétaire de la traduction réglage → politique.
+    """
+    from identity.resolver import politique_confiance
+    return politique_confiance()
+
+
 def social(request, tab: str | None = None):
     item = item_for("social")
     current = item.tab(tab)
@@ -99,7 +112,7 @@ def _decide(identity, handles):
     stored = float(identity.certainty or 0.0)
     effective = max(stored, trust_policy.floor_for(channel_trust))
     name = (identity.entity.name if identity.entity_id else "") or identity.display_name
-    return handle, trust_policy.evaluate(effective, channel_trust, name)
+    return handle, trust_policy.evaluate(effective, channel_trust, name, tuning=_politique())
 
 
 # ── Identités ───────────────────────────────────────────────────────────
@@ -173,7 +186,7 @@ def _identities(request) -> dict:
             "total": total,
             "bound": bound,
             "disclosing": disclosing,
-            "threshold": trust_policy.PRIVATE_CONTEXT_THRESHOLD,
+            "threshold": _politique().private_context_threshold,
         },
     }
 
@@ -216,7 +229,7 @@ def identity_detail(request, identity_id: int, tab: str | None = None):
         "primary_handle": primary,
         "decision": decision,
         "stored": float(identity.certainty or 0.0),
-        "threshold": trust_policy.PRIVATE_CONTEXT_THRESHOLD,
+        "threshold": _politique().private_context_threshold,
         "identity_tabs": IDENTITY_TABS,
         "active_identity_tab": current.key,
         "identity_counts": _identity_counts(identity, person_ids),
@@ -275,7 +288,7 @@ def _identity_verdict(request, identity, handles, person_ids) -> dict:
         # « j'ai enregistré trois preuves et rien ne bouge » a une réponse.
         "capped_by_ceiling": floored > trust_policy.ceiling_for(trust),
         "raised_by_floor": trust_policy.floor_for(trust) > stored,
-        "confident_threshold": trust_policy.CONFIDENT_THRESHOLD,
+        "confident_threshold": _politique().confident_threshold,
         "ledger_total": claims.filter(status="accepted").aggregate(
             total=Sum("applied_weight"),
         )["total"] or 0.0,
@@ -386,9 +399,9 @@ def _identity_preuves(request, identity, handles, person_ids) -> dict:
     return {
         "filterset": fs,
         "page": tables.paginate(request, qs.order_by("-created_at"), per_page=fs.per_page),
-        "evidence_weights": trust_policy.EVIDENCE_WEIGHTS,
-        "counter_weights": trust_policy.COUNTER_EVIDENCE_WEIGHTS,
-        "accept_kinds": sorted(trust_policy.EVIDENCE_WEIGHTS),
+        "evidence_weights": _politique().evidence_weights,
+        "counter_weights": _politique().counter_evidence_weights,
+        "accept_kinds": sorted(_politique().evidence_weights),
     }
 
 
@@ -397,10 +410,10 @@ def _identity_preuves(request, identity, handles, person_ids) -> dict:
 def _identity_actions(request, identity, handles, person_ids) -> dict:
     return {
         "evidence_kinds": sorted(
-            set(trust_policy.EVIDENCE_WEIGHTS) | set(trust_policy.COUNTER_EVIDENCE_WEIGHTS)
+            set(_politique().evidence_weights) | set(_politique().counter_evidence_weights)
         ),
-        "evidence_weights": trust_policy.EVIDENCE_WEIGHTS,
-        "counter_weights": trust_policy.COUNTER_EVIDENCE_WEIGHTS,
+        "evidence_weights": _politique().evidence_weights,
+        "counter_weights": _politique().counter_evidence_weights,
         "acting_person_id": _person_id_for(identity),
     }
 
@@ -492,7 +505,7 @@ def identity_action(request, identity_id: int):
 
     elif action == "preuve":
         kind = (request.POST.get("kind") or "").strip()
-        known = set(trust_policy.EVIDENCE_WEIGHTS) | set(trust_policy.COUNTER_EVIDENCE_WEIGHTS)
+        known = set(_politique().evidence_weights) | set(_politique().counter_evidence_weights)
         if kind not in known:
             messages.error(request, f"Type de preuve inconnu : {kind or '(vide)'}")
             return redirect(back)
@@ -571,7 +584,7 @@ def _claims(request) -> dict:
     return {
         "filterset": fs,
         "page": tables.paginate(request, qs, per_page=fs.per_page),
-        "evidence_kinds": sorted(trust_policy.EVIDENCE_WEIGHTS),
+        "evidence_kinds": sorted(_politique().evidence_weights),
     }
 
 
@@ -766,7 +779,7 @@ def _person_synthese(request, entity, identities, person_ids) -> dict:
         # avoir un profil complet, il n'est jamais injecté — et rien ailleurs
         # sur cette page ne le dirait.
         "may_disclose": any(v["decision"].may_disclose for v in verdicts),
-        "threshold": trust_policy.PRIVATE_CONTEXT_THRESHOLD,
+        "threshold": _politique().private_context_threshold,
         "affects": _live_affects(person_ids),
         "projects": list(
             Project.objects.filter(owner=entity).order_by("-updated_at")[:10],
@@ -988,10 +1001,10 @@ def _policy(request) -> dict:
             for level in Certainty
         ],
         "evidence_weights": sorted(
-            trust_policy.EVIDENCE_WEIGHTS.items(), key=lambda kv: -kv[1],
+            _politique().evidence_weights.items(), key=lambda kv: -kv[1],
         ),
         "counter_weights": sorted(
-            trust_policy.COUNTER_EVIDENCE_WEIGHTS.items(), key=lambda kv: kv[1],
+            _politique().counter_evidence_weights.items(), key=lambda kv: kv[1],
         ),
         "channels": [
             {
@@ -1001,8 +1014,8 @@ def _policy(request) -> dict:
             }
             for t in ChannelTrust
         ],
-        "confident_threshold": trust_policy.CONFIDENT_THRESHOLD,
-        "private_threshold": trust_policy.PRIVATE_CONTEXT_THRESHOLD,
+        "confident_threshold": _politique().confident_threshold,
+        "private_threshold": _politique().private_context_threshold,
         "claim_kinds": list(IdentityClaim.Kind.choices),
         "internal_ids": sorted(p for p in trust_policy.INTERNAL_PERSON_IDS if p),
         "ephemeral_prefix": trust_policy.EPHEMERAL_PERSON_PREFIX,

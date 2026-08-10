@@ -18,16 +18,30 @@ import asyncio
 import base64
 import logging
 
+from configs.runtime import cfg_int
 from pipeline.perception import Part
 
 logger = logging.getLogger(__name__)
 
 # Whisper handles long clips, but an inline chat voice note is capped at
 # 5 MB upstream — 45s covers the upload + inference round-trip.
+# Repli de ``pipeline.audio.transcribe_timeout_seconds``, que
+# ``files_service.op_transcribe`` lit aussi.
 TRANSCRIBE_TIMEOUT_SECONDS = 45
+
+
+def transcribe_timeout_seconds() -> int:
+    """Échéance d'une transcription, telle que configurée.
+
+    Exposée plutôt qu'inlinée : l'outil ``files_transcribe`` fait le même
+    appel STT et se borne pareil, sans redéclarer la valeur.
+    """
+    return cfg_int("pipeline.audio.transcribe_timeout_seconds",
+                   TRANSCRIBE_TIMEOUT_SECONDS, mini=1)
 
 # Ceiling on the transcript injected into the prompt. A voice note that
 # transcribes longer than this is truncated, not dropped.
+# Repli de ``pipeline.audio.max_transcript_chars``.
 MAX_TRANSCRIPT_CHARS = 2000
 
 
@@ -78,7 +92,7 @@ async def _transcribe(part: Part, *, mime: str) -> str:
     try:
         raw = await asyncio.wait_for(
             provider.transcribe_audio(data, filename),
-            timeout=TRANSCRIBE_TIMEOUT_SECONDS,
+            timeout=transcribe_timeout_seconds(),
         )
     except asyncio.TimeoutError:
         logger.warning("Audio transcription timed out (mime=%s, %d bytes)", mime, len(data))
@@ -87,9 +101,11 @@ async def _transcribe(part: Part, *, mime: str) -> str:
         logger.exception("Audio transcription failed (mime=%s)", mime)
         return ""
 
+    plafond = cfg_int("pipeline.audio.max_transcript_chars",
+                      MAX_TRANSCRIPT_CHARS, mini=4)
     cleaned = (raw or "").strip()
-    if len(cleaned) > MAX_TRANSCRIPT_CHARS:
-        cleaned = cleaned[: MAX_TRANSCRIPT_CHARS - 3].rstrip() + "..."
+    if len(cleaned) > plafond:
+        cleaned = cleaned[: plafond - 3].rstrip() + "..."
     return cleaned
 
 

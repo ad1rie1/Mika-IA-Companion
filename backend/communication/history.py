@@ -32,15 +32,38 @@ from __future__ import annotations
 
 import logging
 
+from configs.runtime import cfg_int
+
 logger = logging.getLogger(__name__)
 
 # What a fresh client is shown. Matches ChatOverlay's MAX_MESSAGES ceiling
 # so the wire never carries bubbles the UI would immediately evict.
+# Configurable (``comm.history.default_limit``) ; la constante reste le repli.
 DEFAULT_LIMIT = 50
 
 # Hard ceiling on a catch-up. A client away for a week does not need the
 # week — it needs the tail, plus the honest statement that it is a tail.
+# Configurable (``comm.history.max_limit``) ; la constante reste le repli.
 MAX_LIMIT = 200
+
+
+def _default_limit() -> int:
+    return cfg_int("comm.history.default_limit", DEFAULT_LIMIT, mini=1)
+
+
+def _max_limit() -> int:
+    """Plafond dur, jamais sous la fenêtre d'ouverture.
+
+    Les deux réglages sont indépendants dans le formulaire, mais le second
+    borne le premier (``min(limit, MAX_LIMIT)``) : déclaré plus bas, il
+    rognerait silencieusement la fenêtre qu'on vient de demander. Une paire
+    incohérente rend donc le repli plutôt que d'appliquer à moitié ce qui a
+    été écrit.
+    """
+    plafond = cfg_int("comm.history.max_limit", MAX_LIMIT, mini=1)
+    if plafond < _default_limit():
+        return MAX_LIMIT
+    return plafond
 
 
 def _visible(queryset):
@@ -79,16 +102,23 @@ def _serialize(row) -> dict:
     }
 
 
-async def recent_for(person_id: str, limit: int = DEFAULT_LIMIT) -> list[dict]:
+async def recent_for(person_id: str, limit: int | None = None) -> list[dict]:
     """The tail of this person's conversation, oldest first.
 
     Empty for a person_id that has never spoken — which is a fact, not a
     failure: a first-time visitor has no history and the client renders an
     empty thread rather than an error.
+
+    ``limit=None`` (défaut) lit le réglage. Le défaut n'est pas écrit dans la
+    signature : une valeur par défaut est évaluée à l'import du module, donc
+    figée pour la vie du processus, et le réglage n'aurait jamais atteint les
+    appelants qui ne passent pas l'argument — c'est-à-dire tous.
     """
     if not person_id:
         return []
-    limit = max(1, min(int(limit), MAX_LIMIT))
+    if limit is None:
+        limit = _default_limit()
+    limit = max(1, min(int(limit), _max_limit()))
 
     from memory.models import Message
 
@@ -103,7 +133,7 @@ async def recent_for(person_id: str, limit: int = DEFAULT_LIMIT) -> list[dict]:
 
 
 async def after_for(
-    person_id: str, after_id: int, limit: int = MAX_LIMIT,
+    person_id: str, after_id: int, limit: int | None = None,
 ) -> tuple[list[dict], bool]:
     """Everything this person missed since ``after_id``, oldest first.
 
@@ -114,10 +144,16 @@ async def after_for(
     jump over messages that were never rendered, re-creating the hole
     this whole path exists to fill, and it would look exactly like a
     complete sync.
+
+    ``limit=None`` (défaut) lit le réglage — même raison que
+    :func:`recent_for` : un défaut de signature est figé à l'import.
     """
     if not person_id:
         return [], False
-    limit = max(1, min(int(limit), MAX_LIMIT))
+    plafond = _max_limit()
+    if limit is None:
+        limit = plafond
+    limit = max(1, min(int(limit), plafond))
 
     from memory.models import Message
 

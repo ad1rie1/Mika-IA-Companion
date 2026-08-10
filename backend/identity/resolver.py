@@ -31,7 +31,9 @@ from datetime import timedelta
 from asgiref.sync import sync_to_async
 from django.utils import timezone
 
+from configs.runtime import cfg_float, cfg_int
 from identity import trust as trust_policy
+from identity import detection as detection_defaults
 from identity.detection import NameClaim, corroboration_score, detect_name_claim
 from identity.trust import (
     Certainty,
@@ -50,6 +52,64 @@ MAX_CORROBORATION_FACTS = 12
 #: n'aide plus Mika a trancher : elle noie le bloc identite (chaque ligne
 #: coute ~50 tokens, renvoyes a chaque tour).
 MAX_PENDING_CLAIMS_SHOWN = 3
+
+
+# ── Le bord ou la configuration est lue ──────────────────────────
+#
+# ``identity/trust.py`` et ``identity/detection.py`` restent purs : aucune
+# lecture de registre, aucune base. Les valeurs rapatriees en configuration
+# sont resolues *ici*, dans la couche qui touche deja l'ORM, et passees en
+# parametre. Les constantes de module de ces deux fichiers restent le repli
+# exact, ce qui laisse a leurs tests unitaires leur sens : ils mesurent la
+# calibration declaree, pas ce que contient la base de la machine qui les
+# execute.
+
+
+def politique_confiance() -> trust_policy.TrustTuning:
+    """La politique de confiance effective, defauts declares compris."""
+    d = trust_policy.DEFAULT_TUNING
+    return trust_policy.TrustTuning(
+        private_context_threshold=cfg_float(
+            "identity.private_context_threshold",
+            d.private_context_threshold, mini=0.0, maxi=1.0),
+        confident_threshold=cfg_float(
+            "identity.confident_threshold",
+            d.confident_threshold, mini=0.0, maxi=1.0),
+        evidence_weights={
+            kind: cfg_float(f"identity.evidence_weight.{kind}", poids,
+                            mini=0.0, maxi=1.0)
+            for kind, poids in d.evidence_weights.items()
+        },
+        counter_evidence_weights={
+            kind: cfg_float(f"identity.counter_weight.{kind}", poids,
+                            mini=-1.0, maxi=0.0)
+            for kind, poids in d.counter_evidence_weights.items()
+        },
+        pending_claim_ttl_days=cfg_int(
+            "identity.pending_claim_ttl_days", d.pending_claim_ttl_days, mini=1),
+    )
+
+
+def _corroboration_reglages() -> tuple[int, float]:
+    """(mots communs requis, saturation) pour ``corroboration_score``."""
+    # Les replis sont les constantes du detecteur lui-meme : une seule valeur
+    # declaree par reglage, jamais une copie qui puisse deriver.
+    return (
+        cfg_int("identity.min_overlap_terms",
+                detection_defaults._MIN_OVERLAP_TERMS, mini=1),
+        cfg_float("identity.corroboration_saturation_terms",
+                  detection_defaults._SATURATION_TERMS, mini=1.0),
+    )
+
+
+def _max_pending_claims() -> int:
+    return cfg_int(
+        "identity.max_pending_claims_shown", MAX_PENDING_CLAIMS_SHOWN, mini=1)
+
+
+def _max_corroboration_facts() -> int:
+    return cfg_int(
+        "identity.max_corroboration_facts", MAX_CORROBORATION_FACTS, mini=1)
 
 
 @dataclass
@@ -312,7 +372,9 @@ class IdentityResolver:
         except Exception as exc:
             degradations.record("identity.resolver.resolve_context", exc)
             logger.debug("resolve_context failed for %s", person_id, exc_info=True)
-            decision = trust_policy.evaluate(0.0, ChannelTrust.PUBLIC)
+            decision = trust_policy.evaluate(
+                0.0, ChannelTrust.PUBLIC, tuning=politique_confiance(),
+            )
             ctx.may_disclose = decision.may_disclose
             ctx.description = decision.description
             return ctx
@@ -326,6 +388,7 @@ class IdentityResolver:
             "identity", "identity__entity",
         ).filter(person_id=person_id).order_by("-last_seen").first()
 
+        politique = politique_confiance()
         stored_trust = _as_trust(handle.trust) if handle else None
         resolved_trust = trust_policy.channel_trust(
             channel=channel or (handle.channel if handle else ""),
@@ -354,6 +417,7 @@ class IdentityResolver:
         if handle is None:
             decision = trust_policy.evaluate(
                 trust_policy.floor_for(resolved_trust), resolved_trust,
+                tuning=politique,
             )
             ctx.certainty = decision.certainty
             ctx.may_disclose = decision.may_disclose
@@ -379,7 +443,7 @@ class IdentityResolver:
         # elle revenait dans le prompt a chaque tour indefiniment, et faisait
         # basculer la description en niveau CLAIMED avec elle.
         cutoff = timezone.now() - timedelta(
-            days=trust_policy.PENDING_CLAIM_TTL_DAYS,
+            days=politique.pending_claim_ttl_days,
         )
         ctx.pending_claims = [
             {
@@ -392,7 +456,7 @@ class IdentityResolver:
             for c in IdentityClaim.objects.filter(
                 identity=identity, status=IdentityClaim.Status.PENDING,
                 created_at__gte=cutoff,
-            ).order_by("-created_at")[:MAX_PENDING_CLAIMS_SHOWN]
+            ).order_by("-created_at")[:_max_pending_claims()]
         ]
 
         # Name her the person by the strongest label available: the binding
@@ -400,7 +464,9 @@ class IdentityResolver:
         claimed_name = ctx.pending_claims[0]["name"] if ctx.pending_claims else ""
         name = ctx.entity_name or ctx.display_name or claimed_name
 
-        decision = trust_policy.evaluate(certainty, resolved_trust, name)
+        decision = trust_policy.evaluate(
+            certainty, resolved_trust, name, tuning=politique,
+        )
         ctx.certainty = decision.certainty
         ctx.may_disclose = decision.may_disclose
         ctx.description = decision.description
@@ -514,6 +580,7 @@ class IdentityResolver:
         """
         from identity.models import IdentityClaim
 
+        politique = politique_confiance()
         IdentityClaim.objects.create(
             identity=identity,
             handle=handle,
@@ -523,12 +590,13 @@ class IdentityResolver:
             evidence=claim.evidence,
             channel=channel or handle.channel,
             trust=resolved_trust.value,
-            applied_weight=trust_policy.COUNTER_EVIDENCE_WEIGHTS["denied"],
+            applied_weight=politique.counter_evidence_weights["denied"],
             resolution_note="Denegation prise en compte immediatement",
             resolved_at=timezone.now(),
         )
         identity.certainty = trust_policy.apply_evidence(
             float(identity.certainty or 0.0), "denied", trust=resolved_trust,
+            tuning=politique,
         )
         fields = ["certainty", "last_seen"]
         bound_name = identity.entity.name.lower() if identity.entity else ""
@@ -566,7 +634,10 @@ class IdentityResolver:
             degradations.record("identity.resolver.check_corroboration", exc)
             logger.debug("corroboration lookup failed", exc_info=True)
             return 0.0, ""
-        return corroboration_score(message, facts)
+        min_terms, saturation = _corroboration_reglages()
+        return corroboration_score(
+            message, facts, min_terms=min_terms, saturation=saturation,
+        )
 
     @staticmethod
     def _facts_about(entity_name: str) -> list[str]:
@@ -577,12 +648,13 @@ class IdentityResolver:
         ).first()
         if entity is None:
             return []
+        plafond = _max_corroboration_facts()
         facts = list(
             Connaissance.objects.filter(entities=entity, is_valid=True)
             .order_by("-confidence")
-            .values_list("content", flat=True)[:MAX_CORROBORATION_FACTS]
+            .values_list("content", flat=True)[:plafond]
         )
-        remaining = MAX_CORROBORATION_FACTS - len(facts)
+        remaining = plafond - len(facts)
         if remaining > 0:
             facts += list(
                 Souvenir.objects.filter(entities=entity)
@@ -632,10 +704,13 @@ class IdentityResolver:
         # "they said who they are AND proved something only that person would
         # know" lands exactly on it. Scoring the corroboration alone left Mika
         # bound to a person whose history she still wasn't allowed to recall.
-        after = trust_policy.apply_evidence(before, claim.kind, trust=claim_trust)
+        politique = politique_confiance()
+        after = trust_policy.apply_evidence(
+            before, claim.kind, trust=claim_trust, tuning=politique,
+        )
         if evidence_kind and evidence_kind != claim.kind:
             after = trust_policy.apply_evidence(
-                after, evidence_kind, trust=claim_trust,
+                after, evidence_kind, trust=claim_trust, tuning=politique,
             )
 
         entity, _ = Entity.objects.get_or_create(
@@ -727,7 +802,9 @@ class IdentityResolver:
             return {"ok": False, "error": "aucun nom a corroborer — precise `name`"}
 
         before = float(identity.certainty or 0.0)
-        after = trust_policy.apply_evidence(before, kind, trust=handle_trust)
+        after = trust_policy.apply_evidence(
+            before, kind, trust=handle_trust, tuning=politique_confiance(),
+        )
 
         status = IdentityClaim.Status.ACCEPTED
         IdentityClaim.objects.create(

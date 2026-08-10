@@ -133,8 +133,14 @@ class TestTurnQueue:
             await release.wait()
 
         await turn_queue.start(workers=1)
+        # Le plafond vient du registre (``pipeline.turns.max_pending``), dont
+        # le défaut déclaré vaut 100 : patcher la constante du module ne
+        # remplacerait qu'un repli que personne ne lit. On patche la lecture,
+        # qui est aussi ce que le réglage ``restart_required`` décrit — la
+        # valeur est figée dans l'``asyncio.Queue`` à sa construction, d'où le
+        # stop/start ci-dessous.
         with patch("pipeline.router.perceive", new=slow), \
-             patch.object(turns, "MAX_PENDING", 2):
+             patch.object(turns, "_max_pending", return_value=2):
             # Rebuild the queue so the patched ceiling applies.
             await turn_queue.stop()
             await turn_queue.start(workers=1)

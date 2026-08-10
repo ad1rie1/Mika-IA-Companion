@@ -41,7 +41,13 @@ class FilesModule(BaseModule):
         return files_service.list_today_context()
 
     def return_tools(self) -> list[ModuleTool]:
-        from files.service import DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT, files_service
+        # Lues ici, à l'enregistrement : les deux valeurs sont interpolées
+        # dans la description et le schéma de l'outil, ce que le modèle ne
+        # relit pas d'un tour à l'autre. C'est ce qui rend les deux réglages
+        # ``restart_required``.
+        from files.service import files_service, list_limits
+
+        defaut_liste, max_liste = list_limits()
 
         async def _list(params: dict) -> dict:
             return await files_service.op_list(
@@ -77,8 +83,8 @@ class FilesModule(BaseModule):
                 name="files_list",
                 description=(
                     "Liste les fichiers disponibles sur le serveur, du plus récent "
-                    f"au plus ancien, par pages de {DEFAULT_LIST_LIMIT} "
-                    f"({MAX_LIST_LIMIT} au maximum). La réponse dit combien de "
+                    f"au plus ancien, par pages de {defaut_liste} "
+                    f"({max_liste} au maximum). La réponse dit combien de "
                     "fichiers correspondent au total : préfère affiner avec date ou "
                     "catégorie plutôt que de dérouler les pages avec offset. "
                     "Filtre optionnel par date (ex: '2024-01-15') ou catégorie ('image', 'audio', 'text')."
@@ -88,8 +94,8 @@ class FilesModule(BaseModule):
                     ToolParameter("category", ToolParameterType.STRING, "Filtrer par catégorie: image|audio|text|unknown (optionnel)", required=False, default=""),
                     ToolParameter(
                         "limit", ToolParameterType.INTEGER,
-                        f"Nombre de fichiers à retourner (défaut {DEFAULT_LIST_LIMIT}, max {MAX_LIST_LIMIT})",
-                        required=False, default=DEFAULT_LIST_LIMIT,
+                        f"Nombre de fichiers à retourner (défaut {defaut_liste}, max {max_liste})",
+                        required=False, default=defaut_liste,
                     ),
                     ToolParameter(
                         "offset", ToolParameterType.INTEGER,

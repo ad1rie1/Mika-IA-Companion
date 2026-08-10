@@ -22,9 +22,15 @@ from datetime import datetime
 from asgiref.sync import sync_to_async
 from django.conf import settings
 
+from configs.runtime import cfg_float, cfg_int
 from conscience.interpreter import SignalInterpreter
 from conscience.memory_bridge import MemoryBridge
-from conscience.scoring import compute_decision_score
+from conscience.scoring import (
+    SLEEP_PENALTY,
+    SLEEP_WAKE_PERTINENCE,
+    ScoringTuning,
+    compute_decision_score,
+)
 from conscience.types import DecisionContext, InterpretedSignal
 from drives.engine import drive_engine
 from emotion.engine import emotion_engine
@@ -242,7 +248,12 @@ class ConscienceEngine:
         # the decision inline blocked the emitting module's loop for the two
         # LLM calls (_act's recipient selection + the full pipeline) that a
         # pertinent signal triggers.
-        if signal.pertinence > 0.85:
+        # Même barre que le veto de sommeil du scoring, et **une seule clé**
+        # pour les deux : la faire diverger produirait une conscience qui se
+        # réveille pour un signal qu'elle refusera ensuite de traiter.
+        if signal.pertinence > cfg_float(
+            "conscience.sleep_wake_pertinence", SLEEP_WAKE_PERTINENCE,
+        ):
             logger.info(
                 "High-pertinence signal (%.2f), triggering immediate decision",
                 signal.pertinence,
@@ -402,7 +413,10 @@ class ConscienceEngine:
 
     async def _save_drives_if_due(self) -> None:
         now = time.time()
-        if self._last_drive_save and (now - self._last_drive_save) < self._DRIVE_SAVE_INTERVAL_S:
+        intervalle = cfg_int(
+            "conscience.drive_save_interval_seconds", self._DRIVE_SAVE_INTERVAL_S,
+        )
+        if self._last_drive_save and (now - self._last_drive_save) < intervalle:
             return
         self._last_drive_save = now
         await drive_engine.save_state()
@@ -418,6 +432,11 @@ class ConscienceEngine:
         from datetime import timedelta
 
         today_start = tz.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        # Lu ici, hors du thread d'exécuteur, et une seule fois : les deux
+        # usages ci-dessous doivent parler de la même fenêtre, sinon un acte
+        # peut être « répondu » pour la sélection des réponses et « ignoré »
+        # pour le comptage.
+        fenetre = timedelta(minutes=self._ignored_reply_window_minutes())
 
         def _query() -> tuple[int, int]:
             # One round-trip for the whole introspection. This runs on every
@@ -441,7 +460,7 @@ class ConscienceEngine:
             # then answer "was this act followed by a reply within 10 min?"
             # in Python. The window is bounded by definition — 5 acts.
             oldest = recent_act_times[-1]
-            newest_window_end = recent_act_times[0] + timedelta(minutes=10)
+            newest_window_end = recent_act_times[0] + fenetre
             replies = list(
                 Observation.objects.filter(
                     event_type__in=("chat.message", "telegram.message"),
@@ -452,7 +471,7 @@ class ConscienceEngine:
 
             consecutive_ignored = 0
             for act_time in recent_act_times:
-                deadline = act_time + timedelta(minutes=10)
+                deadline = act_time + fenetre
                 if any(act_time < reply <= deadline for reply in replies):
                     break
                 consecutive_ignored += 1
@@ -464,6 +483,90 @@ class ConscienceEngine:
             degradations.record("conscience: introspection", exc)
             return 0, 0
 
+    # ── Réglages rapatriés ────────────────────────────────────────
+    #
+    # Les constantes de module restent en repli (une base injoignable ne doit
+    # pas changer le comportement), et ces accesseurs sont le **bord** où la
+    # configuration est lue : `conscience/scoring.py` reste une fonction pure,
+    # sans registre ni base, et reçoit ses valeurs déjà résolues.
+
+    #: Fenêtre des observations « en attente ». Trois lectures s'y accordent :
+    #: ce que le scoring voit, ce que le balayage périme, et la borne haute de
+    #: la promotion en rumination. Une seule clé, donc.
+    _PENDING_WINDOW_MIN: int = 30
+    #: Délai au-delà duquel une initiative sans réponse compte comme ignorée.
+    _IGNORED_REPLY_WINDOW_MIN: int = 10
+    #: Âge des observations closes avant purge.
+    _OBSERVATION_RETENTION_H: int = 48
+
+    def _pending_window_minutes(self) -> int:
+        return cfg_int(
+            "conscience.pending_window_minutes", self._PENDING_WINDOW_MIN, mini=1,
+        )
+
+    def _ignored_reply_window_minutes(self) -> int:
+        return cfg_int(
+            "conscience.ignored_reply_window_minutes",
+            self._IGNORED_REPLY_WINDOW_MIN, mini=1,
+        )
+
+    def _scoring_tuning(self) -> ScoringTuning:
+        """Les onze facteurs, lus dans la configuration, résolus **ici**.
+
+        `compute_decision_score` ne connaît ni le registre ni la base : elle
+        reçoit une `ScoringTuning` déjà remplie. C'est ce qui laisse aux tests
+        unitaires du scoring leur valeur — ils mesurent la calibration
+        déclarée, pas ce que contient la base de la machine qui les exécute.
+        """
+        d = ScoringTuning()  # les défauts *sont* les replis
+        f = lambda cle, repli: cfg_float(f"conscience.{cle}", repli)  # noqa: E731
+        i = lambda cle, repli: cfg_int(f"conscience.{cle}", repli)    # noqa: E731
+        return ScoringTuning(
+            sleep_wake_pertinence=f("sleep_wake_pertinence", d.sleep_wake_pertinence),
+            sleep_penalty=f("sleep_penalty", d.sleep_penalty),
+            pertinence_gate=f("factor.pertinence_gate", d.pertinence_gate),
+            pertinence_weight=f("factor.pertinence_weight", d.pertinence_weight),
+            urgency_gate=f("factor.urgency_gate", d.urgency_gate),
+            urgency_weight=f("factor.urgency_weight", d.urgency_weight),
+            urgency_cap=f("factor.urgency_cap", d.urgency_cap),
+            mood_gate=f("factor.mood_gate", d.mood_gate),
+            mood_bonus=f("factor.mood_bonus", d.mood_bonus),
+            idle_gate_minutes=i("factor.idle_gate_minutes", d.idle_gate_minutes),
+            # Une rampe nulle ferait une division par zéro sur le chemin de la
+            # boucle de fond : hors bornes, `cfg_int` rend le repli plutôt que
+            # de propager l'exception.
+            idle_ramp_minutes=cfg_int(
+                "conscience.factor.idle_ramp_minutes", d.idle_ramp_minutes, mini=1,
+            ),
+            idle_cap=f("factor.idle_cap", d.idle_cap),
+            greeting_bonus=f("factor.greeting_bonus", d.greeting_bonus),
+            scheduled_weight=f("factor.scheduled_weight", d.scheduled_weight),
+            pressure_min_waits=i("factor.pressure_min_waits", d.pressure_min_waits),
+            pressure_per_wait=f("factor.pressure_per_wait", d.pressure_per_wait),
+            pressure_cap=f("factor.pressure_cap", d.pressure_cap),
+            ignored_min_acts=i("factor.ignored_min_acts", d.ignored_min_acts),
+            ignored_per_act=f("factor.ignored_per_act", d.ignored_per_act),
+            ignored_cap=f("factor.ignored_cap", d.ignored_cap),
+            drives_floor=f("factor.drives_floor", d.drives_floor),
+            drives_cap=f("factor.drives_cap", d.drives_cap),
+            drives_deadband=f("factor.drives_deadband", d.drives_deadband),
+            rumination_gate=f("factor.rumination_gate", d.rumination_gate),
+            rumination_weight=f("factor.rumination_weight", d.rumination_weight),
+            rumination_cap=f("factor.rumination_cap", d.rumination_cap),
+            fatigue_gate=f("factor.fatigue_gate", d.fatigue_gate),
+            fatigue_slope=f("factor.fatigue_slope", d.fatigue_slope),
+            fatigue_cap=f("factor.fatigue_cap", d.fatigue_cap),
+            daily_acts_cap=i("daily_acts_cap", d.daily_acts_cap),
+            suppress_after_ignored=i(
+                "suppress_after_ignored", d.suppress_after_ignored),
+            suppressed_score=f("suppressed_score", d.suppressed_score),
+            morning_start=i("greeting.morning_start", d.morning_start),
+            morning_end=i("greeting.morning_end", d.morning_end),
+            evening_start=i("greeting.evening_start", d.evening_start),
+            evening_end=i("greeting.evening_end", d.evening_end),
+            night_start=i("greeting.night_start", d.night_start),
+        )
+
     async def _build_context(self) -> DecisionContext:
         """Gather all context needed for a decision."""
         from conscience.models import Observation
@@ -471,11 +574,11 @@ class ConscienceEngine:
 
         now = time.time()
 
-        # Pending observations (not acted upon, last 30 minutes)
+        # Pending observations (not acted upon, inside the pending window)
         from django.utils import timezone as tz
         from datetime import timedelta
 
-        cutoff = tz.now() - timedelta(minutes=30)
+        cutoff = tz.now() - timedelta(minutes=self._pending_window_minutes())
         pending = await sync_to_async(
             lambda: list(
                 Observation.objects.filter(
@@ -652,6 +755,9 @@ class ConscienceEngine:
     # toutes les 30 s dans l'humeur globale — l'ancienne cadence n'était
     # tolérable que parce que la pensée mourait en 22 minutes.
     _RUMINATION_BLEED_INTERVAL_S: float = 600.0
+    #: Part de l'intensité d'une pensée effectivement versée dans l'humeur.
+    #: Elle teinte, elle n'impose pas.
+    _RUMINATION_BLEED_INTENSITY: float = 0.15
 
     #: Plafond de l'espacement, quoi qu'il arrive : au-delà d'une demi-journée
     #: sans un mot, se taire davantage n'est plus de la retenue, c'est une
@@ -683,7 +789,10 @@ class ConscienceEngine:
         except Exception:
             facteur = 2.5
         facteur = max(1.0, facteur)
-        return min(self._COOLDOWN_MAX_S, base * (facteur ** consecutive_ignored))
+        plafond = cfg_float(
+            "conscience.cooldown_max_seconds", self._COOLDOWN_MAX_S, mini=1.0,
+        )
+        return min(plafond, base * (facteur ** consecutive_ignored))
 
     def _rumination_tuning(self) -> tuple[float, float]:
         """(demi-vie en heures, délai de dérive en heures), depuis la config."""
@@ -801,10 +910,18 @@ class ConscienceEngine:
             return
         from emotion.types import Emotion, EmotionData
 
+        espacement = cfg_float(
+            "conscience.rumination_bleed_interval_seconds",
+            self._RUMINATION_BLEED_INTERVAL_S, mini=0.0,
+        )
+        part = cfg_float(
+            "conscience.rumination_bleed_intensity",
+            self._RUMINATION_BLEED_INTENSITY, mini=0.0, maxi=1.0,
+        )
         maintenant = time.monotonic()
         for etiquette, intensite in saignees:
             dernier = self._rumination_bleed_at.get(etiquette, 0.0)
-            if maintenant - dernier < self._RUMINATION_BLEED_INTERVAL_S:
+            if maintenant - dernier < espacement:
                 continue
             try:
                 emo = Emotion(etiquette)
@@ -812,7 +929,7 @@ class ConscienceEngine:
                 continue  # étiquette inconnue sur une vieille ligne
             try:
                 emotion_engine.process_emotion(
-                    EmotionData(emotion=emo, intensity=intensite * 0.15),
+                    EmotionData(emotion=emo, intensity=intensite * part),
                     "conscience_mika",
                 )
                 self._rumination_bleed_at[etiquette] = maintenant
@@ -835,7 +952,7 @@ class ConscienceEngine:
         from django.utils import timezone as tz
         from datetime import timedelta
 
-        cutoff = tz.now() - timedelta(minutes=30)
+        cutoff = tz.now() - timedelta(minutes=self._pending_window_minutes())
         window_start = tz.now() - timedelta(hours=2)
 
         try:
@@ -923,6 +1040,7 @@ class ConscienceEngine:
         """
         score, reason, periods, date = compute_decision_score(
             ctx, self._greeted_periods, self._greeted_date,
+            self._scoring_tuning(),
         )
         self._pending_greeted = (periods, date)
         return score, reason
@@ -1027,10 +1145,14 @@ class ConscienceEngine:
         from datetime import timedelta
 
         now = time.monotonic()
+        cadence = cfg_int(
+            "conscience.stale_sweep_interval_seconds",
+            self._STALE_SWEEP_INTERVAL_S, mini=1,
+        )
         if (not self._last_stale_sweep
-                or (now - self._last_stale_sweep) >= self._STALE_SWEEP_INTERVAL_S):
+                or (now - self._last_stale_sweep) >= cadence):
             self._last_stale_sweep = now
-            cutoff = tz.now() - timedelta(minutes=30)
+            cutoff = tz.now() - timedelta(minutes=self._pending_window_minutes())
 
             def _perimer() -> int:
                 ids = list(
@@ -1081,11 +1203,17 @@ class ConscienceEngine:
         from datetime import timedelta
 
         now = time.monotonic()
-        if self._last_cleanup and (now - self._last_cleanup) < self._CLEANUP_INTERVAL_S:
+        cadence = cfg_int(
+            "conscience.cleanup_interval_seconds", self._CLEANUP_INTERVAL_S, mini=1,
+        )
+        if self._last_cleanup and (now - self._last_cleanup) < cadence:
             return
         self._last_cleanup = now
 
-        cutoff = tz.now() - timedelta(hours=48)
+        cutoff = tz.now() - timedelta(hours=cfg_int(
+            "conscience.observation_retention_hours",
+            self._OBSERVATION_RETENTION_H, mini=1,
+        ))
         # `status__in` plutot que `exclude(status="pending")` : l'index
         # ["status", "-created_at"] a sa colonne de tete filtree par `!=`
         # dans la seconde forme, donc inexploitable — c'etait un balayage
@@ -1334,6 +1462,9 @@ class ConscienceEngine:
             "ne rien dire a personne pour l'instant."
         )
 
+        budget = cfg_int(
+            "conscience.recipient_timeout_seconds", self._RECIPIENT_TIMEOUT_S, mini=1,
+        )
         try:
             from ai.client import ai_client
             from ai.router import AIRole
@@ -1344,13 +1475,13 @@ class ConscienceEngine:
                     user_prompt=prompt,
                     role=AIRole.SIGNAL_INTERPRETATION,
                 ),
-                timeout=self._RECIPIENT_TIMEOUT_S,
+                timeout=budget,
             )
         except asyncio.TimeoutError as exc:
             degradations.record("conscience: choix du destinataire expire", exc)
             logger.warning(
                 "Recipient selection timed out after %ds; staying internal",
-                self._RECIPIENT_TIMEOUT_S,
+                budget,
             )
             return None
         except Exception as exc:
@@ -1563,6 +1694,14 @@ class ConscienceEngine:
         "jealous":      ("melancholic", "Ta reaction te reste un peu sur le coeur : \"{excerpt}\"."),
     }
 
+    #: Barre au-dessous de laquelle une réponse ne se rejoue pas mentalement,
+    #: puis la rampe qui en tire l'intensité de la micro-rumination. Replis :
+    #: les mêmes valeurs qu'avant le rapatriement en configuration.
+    _AUDIT_MIN_INTENSITY: float = 0.55
+    _AUDIT_BASE_INTENSITY: float = 0.2
+    _AUDIT_SLOPE: float = 0.5
+    _AUDIT_MAX_INTENSITY: float = 0.45
+
     async def _audit_completed_turn(self, event) -> None:
         """Bus adapter for ``post_action_audit``.
 
@@ -1599,7 +1738,11 @@ class ConscienceEngine:
         Skipped for internal-trigger speech (conscience already acted,
         would cause a feedback loop of self-ruminations).
         """
-        if intensity < 0.55:
+        seuil = cfg_float(
+            "conscience.audit.min_intensity", self._AUDIT_MIN_INTENSITY,
+            mini=0.0, maxi=1.0,
+        )
+        if intensity < seuil:
             return
         if person_id == "conscience_mika":
             return
@@ -1614,7 +1757,14 @@ class ConscienceEngine:
         summary = template.format(excerpt=excerpt)
         # Intensity starts modest — a normal person doesn't obsess, just
         # replays once or twice. Scales with how emotional the reply was.
-        rumination_intensity = round(min(0.45, 0.2 + (intensity - 0.55) * 0.5), 3)
+        rumination_intensity = round(min(
+            cfg_float("conscience.audit.max_intensity",
+                      self._AUDIT_MAX_INTENSITY, mini=0.0, maxi=1.0),
+            cfg_float("conscience.audit.base_intensity",
+                      self._AUDIT_BASE_INTENSITY, mini=0.0, maxi=1.0)
+            + (intensity - seuil) * cfg_float(
+                "conscience.audit.slope", self._AUDIT_SLOPE, mini=0.0),
+        ), 3)
 
         try:
             from conscience.models import Rumination

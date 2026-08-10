@@ -28,11 +28,16 @@ from asgiref.sync import sync_to_async
 from django.utils import timezone
 
 from ai.router import AIRole, UnconfiguredRoleError, ai_router
+from configs.runtime import cfg_int
 from utils.degradation import degradations
 from utils.parsing import strip_markdown_json
 
 logger = logging.getLogger(__name__)
 
+
+# Toutes les valeurs de ce bloc sont réglables (``memory.narrative_*``) ;
+# elles restent déclarées ici comme REPLI, servi quand le registre est hors
+# d'atteinte (import avant `migrate`, base verrouillée, collecte des tests).
 
 # How long an already-generated narrative stays "fresh enough" to skip
 # regeneration even if new material accumulated. Mika's self-concept
@@ -157,6 +162,15 @@ class NarrativeGenerator:
         """
         from memory.models import SelfNarrative, Souvenir
 
+        souvenirs_min = cfg_int(
+            "memory.narrative_min_new_souvenirs", NARRATIVE_MIN_NEW_SOUVENIRS,
+            mini=1, maxi=100,
+        )
+        age_min_h = cfg_int(
+            "memory.narrative_min_age_hours", NARRATIVE_MIN_AGE_HOURS,
+            mini=1, maxi=720,
+        )
+
         latest = await sync_to_async(
             lambda: SelfNarrative.objects.order_by("-created_at").first()
         )()
@@ -164,18 +178,18 @@ class NarrativeGenerator:
         souvenir_count = await sync_to_async(Souvenir.objects.count)()
 
         if latest is None:
-            if souvenir_count >= NARRATIVE_MIN_NEW_SOUVENIRS:
+            if souvenir_count >= souvenirs_min:
                 return True, f"first_narrative (have {souvenir_count} souvenirs)"
             return False, f"not_enough_material ({souvenir_count} souvenirs)"
 
         age = timezone.now() - latest.created_at
-        if age < timedelta(hours=NARRATIVE_MIN_AGE_HOURS):
+        if age < timedelta(hours=age_min_h):
             return False, f"too_recent (age={age})"
 
         new_since = await sync_to_async(
             lambda: Souvenir.objects.filter(id__gt=latest.last_souvenir_id).count()
         )()
-        if new_since < NARRATIVE_MIN_NEW_SOUVENIRS:
+        if new_since < souvenirs_min:
             return False, f"not_enough_new ({new_since} new souvenirs)"
 
         return True, f"age={age}, new={new_since}"
@@ -193,6 +207,22 @@ class NarrativeGenerator:
 
         from memory.models import Connaissance, EmotionalSummary, SelfNarrative, Souvenir
 
+        fenetre_jours = cfg_int(
+            "memory.narrative_window_days", NARRATIVE_WINDOW_DAYS, mini=1, maxi=365,
+        )
+        max_recents = cfg_int(
+            "memory.narrative_max_recent_souvenirs", MAX_RECENT_SOUVENIRS,
+            mini=1, maxi=100,
+        )
+        max_ancres = cfg_int(
+            "memory.narrative_max_anchor_souvenirs", MAX_ANCHOR_SOUVENIRS,
+            mini=0, maxi=100,
+        )
+        max_connaissances = cfg_int(
+            "memory.narrative_max_connaissances", MAX_CONNAISSANCES_IN_PROMPT,
+            mini=0, maxi=100,
+        )
+
         def _sample():
             last_id = (
                 SelfNarrative.objects.order_by("-created_at")
@@ -200,15 +230,15 @@ class NarrativeGenerator:
                 .first()
                 or 0
             )
-            cutoff = timezone.now() - timedelta(days=NARRATIVE_WINDOW_DAYS)
+            cutoff = timezone.now() - timedelta(days=fenetre_jours)
             recent = list(
                 Souvenir.objects.filter(Q(id__gt=last_id) | Q(occurred_at__gte=cutoff))
-                .order_by("-occurred_at")[:MAX_RECENT_SOUVENIRS]
+                .order_by("-occurred_at")[:max_recents]
                 .prefetch_related("themes", "entities")
             )
             anchors = list(
                 Souvenir.objects.exclude(pk__in=[s.pk for s in recent])
-                .order_by("-importance", "-occurred_at")[:MAX_ANCHOR_SOUVENIRS]
+                .order_by("-importance", "-occurred_at")[:max_ancres]
                 .prefetch_related("themes", "entities")
             )
             return recent + anchors
@@ -229,7 +259,7 @@ class NarrativeGenerator:
         connaissance_rows = await sync_to_async(
             lambda: list(
                 Connaissance.objects.filter(is_valid=True)
-                .order_by("-confidence", "-updated_at")[:MAX_CONNAISSANCES_IN_PROMPT]
+                .order_by("-confidence", "-updated_at")[:max_connaissances]
                 .prefetch_related("themes", "entities")
             )
         )()
@@ -285,6 +315,10 @@ class NarrativeGenerator:
             .replace("{mood_trend}", pool.mood_trend or "pas de tendance marquee")
         )
 
+        budget = cfg_int(
+            "memory.narrative_timeout_seconds", NARRATIVE_TIMEOUT_SECONDS,
+            mini=5, maxi=600,
+        )
         try:
             raw = await asyncio.wait_for(
                 ai_router.complete(
@@ -292,10 +326,10 @@ class NarrativeGenerator:
                     system_prompt="Tu synthetises une identite narrative.",
                     user_prompt=user_prompt,
                 ),
-                timeout=NARRATIVE_TIMEOUT_SECONDS,
+                timeout=budget,
             )
         except asyncio.TimeoutError:
-            logger.warning("Narrative generation timed out after %ds", NARRATIVE_TIMEOUT_SECONDS)
+            logger.warning("Narrative generation timed out after %ds", budget)
             return None
         except UnconfiguredRoleError as exc:
             logger.warning("Narrative ignoré — IA non configurée: %s", exc)

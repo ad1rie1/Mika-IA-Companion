@@ -16,12 +16,21 @@ that person would know, or Mika simply decides to believe them.
 
 Everything here is a pure function over primitives, so the whole policy is
 unit-testable without a database, a request, or a running engine.
+
+**That purity survived the move of the weights into the configuration.** The
+thresholds and evidence weights below are configurable, but nothing here
+reads the registry: the values arrive through an optional ``TrustTuning``
+that the *caller* resolves (``identity/resolver.py``). Omitting it reproduces
+the historical policy exactly, which is what keeps ``test_identity_trust.py``
+meaningful — it measures the calibration this file *declares*, not whatever
+the database of the machine running the tests happens to hold.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
+from typing import Mapping
 
 
 #: person_ids that are Mika's own plumbing, not people to identify: her
@@ -219,15 +228,22 @@ def ceiling_for(trust: ChannelTrust) -> float:
     return float(_CHANNEL_CEILING.get(trust, Certainty.UNKNOWN))
 
 
-def apply_evidence(current: float, kind: str, *, trust: ChannelTrust) -> float:
+def apply_evidence(
+    current: float, kind: str, *, trust: ChannelTrust,
+    tuning: "TrustTuning | None" = None,
+) -> float:
     """Return the new certainty after one piece of evidence.
 
     Unknown evidence kinds contribute nothing rather than raising: this runs
     on LLM-supplied tool arguments, and a typo must not break a turn.
+
+    ``tuning`` carries the configured weights when the caller resolved them;
+    omitted, the declared calibration applies.
     """
-    delta = EVIDENCE_WEIGHTS.get(kind)
+    t = tuning or DEFAULT_TUNING
+    delta = t.evidence_weights.get(kind)
     if delta is None:
-        delta = COUNTER_EVIDENCE_WEIGHTS.get(kind, 0.0)
+        delta = t.counter_evidence_weights.get(kind, 0.0)
     return clamp(current + delta, trust=trust)
 
 
@@ -253,7 +269,38 @@ CONFIDENT_THRESHOLD = float(Certainty.CORROBORATED)
 PRIVATE_CONTEXT_THRESHOLD = float(Certainty.CORROBORATED)
 
 
-def may_disclose_private_context(certainty: float, trust: ChannelTrust) -> bool:
+@dataclass(frozen=True)
+class TrustTuning:
+    """La politique de confiance, telle qu'elle *peut* être réglée.
+
+    Les défauts sont les constantes du module — c'est-à-dire la calibration
+    documentée — et un ``TrustTuning()`` sans argument redonne mot pour mot le
+    comportement d'avant le rapatriement en configuration.
+
+    Ce que cette dataclasse **ne porte pas**, délibérément : les planchers et
+    plafonds de canal. Qu'une affirmation faite dans un salon public ne puisse
+    jamais valoir une session authentifiée n'est pas un réglage.
+    """
+
+    private_context_threshold: float = PRIVATE_CONTEXT_THRESHOLD
+    confident_threshold: float = CONFIDENT_THRESHOLD
+    #: ``default_factory`` et non une valeur : une dataclasse refuse un
+    #: ``dict`` en défaut direct.
+    evidence_weights: Mapping[str, float] = field(
+        default_factory=lambda: EVIDENCE_WEIGHTS)
+    counter_evidence_weights: Mapping[str, float] = field(
+        default_factory=lambda: COUNTER_EVIDENCE_WEIGHTS)
+    pending_claim_ttl_days: int = PENDING_CLAIM_TTL_DAYS
+
+
+#: Politique déclarée, partagée par tous les appels qui n'en fournissent pas.
+DEFAULT_TUNING = TrustTuning()
+
+
+def may_disclose_private_context(
+    certainty: float, trust: ChannelTrust,
+    tuning: TrustTuning | None = None,
+) -> bool:
     """Whether per-person memory (profile, commitments, shared history) may
     be injected into the prompt for this interlocutor.
 
@@ -274,7 +321,7 @@ def may_disclose_private_context(certainty: float, trust: ChannelTrust) -> bool:
         return False
     if trust is ChannelTrust.AUTHENTICATED:
         return True
-    return certainty >= PRIVATE_CONTEXT_THRESHOLD
+    return certainty >= (tuning or DEFAULT_TUNING).private_context_threshold
 
 
 def describe_fr(certainty: float, trust: ChannelTrust, name: str = "") -> str:
@@ -334,19 +381,33 @@ class TrustDecision:
     level: Certainty
     may_disclose: bool
     description: str
+    #: Barre de « je m'adresse a elle sans reserve », portee par la decision
+    #: plutot que relue depuis le module : c'est ce qui permet a l'appelant de
+    #: fournir une valeur configuree sans qu'aucune lecture de registre
+    #: n'entre ici.
+    confident_threshold: float = CONFIDENT_THRESHOLD
 
     @property
     def is_confident(self) -> bool:
-        return self.certainty >= CONFIDENT_THRESHOLD
+        return self.certainty >= self.confident_threshold
 
 
-def evaluate(certainty: float, trust: ChannelTrust, name: str = "") -> TrustDecision:
-    """Bundle a raw certainty into everything downstream layers need."""
+def evaluate(
+    certainty: float, trust: ChannelTrust, name: str = "",
+    tuning: TrustTuning | None = None,
+) -> TrustDecision:
+    """Bundle a raw certainty into everything downstream layers need.
+
+    ``tuning`` is resolved by the caller (see the module docstring); omitted,
+    the declared policy applies.
+    """
+    t = tuning or DEFAULT_TUNING
     bounded = clamp(certainty, trust=trust)
     return TrustDecision(
         certainty=bounded,
         trust=trust,
         level=label_for(bounded),
-        may_disclose=may_disclose_private_context(bounded, trust),
+        may_disclose=may_disclose_private_context(bounded, trust, t),
         description=describe_fr(bounded, trust, name),
+        confident_threshold=t.confident_threshold,
     )

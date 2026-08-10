@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from configs.runtime import cfg_int
 from conscience.types import InterpretedSignal
 from utils.degradation import degradations
 
@@ -261,13 +262,17 @@ class MemoryBridge:
             if not candidates:
                 return results
 
+            budget = cfg_int(
+                "conscience.validity_timeout_seconds",
+                self._VALIDITY_TIMEOUT_S, mini=1,
+            )
             for conn in candidates:
                 try:
                     still_valid, new_confidence = await asyncio.wait_for(
                         extractor.check_connaissance_validity(
                             conn.content, new_info
                         ),
-                        timeout=self._VALIDITY_TIMEOUT_S,
+                        timeout=budget,
                     )
                 except asyncio.TimeoutError as exc:
                     degradations.record(
@@ -275,7 +280,7 @@ class MemoryBridge:
                     )
                     logger.warning(
                         "Validity check timed out after %ds for connaissance #%d",
-                        self._VALIDITY_TIMEOUT_S, conn.pk,
+                        budget, conn.pk,
                     )
                     continue
                 except Exception as exc:

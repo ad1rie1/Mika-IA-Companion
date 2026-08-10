@@ -146,7 +146,10 @@ def _drives(request) -> dict:
     import time
 
     from drives.engine import drive_engine
-    from drives.state import DEFAULT_PARAMS
+    # ``params_for`` et non ``DEFAULT_PARAMS`` : la table est le repli, pas ce
+    # qui tourne. Lire la table afficherait les défauts déclarés pendant que le
+    # moteur applique les valeurs réglées dans « Pulsions ».
+    from drives.state import params_for
 
     drive_engine.update()
     # `last_satisfied` est un horodatage epoch (``time.time()``), pas un
@@ -159,7 +162,7 @@ def _drives(request) -> dict:
 
     rows = []
     for kind, state in drive_engine.states.items():
-        params = DEFAULT_PARAMS[kind]
+        params = params_for(kind)
         rows.append({
             "kind": kind.value,
             "label": _DRIVE_FR.get(kind.value, kind.value),
