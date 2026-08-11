@@ -16,6 +16,25 @@ from conscience.types import DecisionContext
 SLEEP_WAKE_PERTINENCE = 0.85
 SLEEP_PENALTY = 0.30
 
+#: Priorité minimale d'une action programmée pour qu'elle vaille un réveil.
+#:
+#: Le veto de sommeil se levait sur la simple *existence* d'une action due,
+#: sans regarder sa priorité — or `_poll_scheduled_actions` remonte tout ce qui
+#: est `pending` et échu. Un « pense à relire ce brouillon » programmé pour
+#: 23 h la réveillait donc exactement comme une urgence. Un acte non urgent,
+#: la nuit, n'est pas une initiative : c'est un réveil.
+SLEEP_WAKE_SCHEDULED_PRIORITY = 0.8
+
+#: Inactivité au-delà de laquelle le frein quotidien s'applique encore.
+#:
+#: Le frein dur (`acts_today >= 5` ET `consecutive_ignored >= 3`) n'avait
+#: aucune sortie : `consecutive_ignored` ne retombe qu'en produisant de
+#: nouveaux actes, ce que la suppression interdit. Seul le changement de jour
+#: libérait — et l'utilisateur qui arrivait à 18 h ne débloquait rien, ses
+#: messages ne tombant pas dans la fenêtre de dix minutes post-acte. Quelqu'un
+#: qui parle est la seule preuve que le silence imposé n'a plus lieu d'être.
+SUPPRESS_RELEASE_IDLE_SECONDS = 600.0
+
 
 @dataclass(frozen=True)
 class ScoringTuning:
@@ -35,6 +54,7 @@ class ScoringTuning:
 
     # Facteur 12 (veto) et malus de sommeil
     sleep_wake_pertinence: float = SLEEP_WAKE_PERTINENCE
+    sleep_wake_scheduled_priority: float = SLEEP_WAKE_SCHEDULED_PRIORITY
     sleep_penalty: float = SLEEP_PENALTY
     # F1 pertinence
     pertinence_gate: float = 0.7
@@ -58,8 +78,14 @@ class ScoringTuning:
     pressure_min_waits: int = 3
     pressure_per_wait: float = 0.035
     pressure_cap: float = 0.25
-    # F8 « on m'ignore »
-    ignored_min_acts: int = 2
+    # F8 « on m'ignore » — la pénalité s'ouvre dès la **première** initiative
+    # restée sans réponse. À deux, la première ne coûtait rien : elle relançait
+    # au cooldown nominal, et les trois premiers actes de la journée tombaient
+    # en une demi-heure (mesuré à 19, 24 et 29 min) avant que quoi que ce soit
+    # ne la freine. Le backoff du cooldown, lui, comptait déjà dès la première
+    # (`_effective_cooldown`, `consecutive_ignored > 0`) : les deux moitiés du
+    # même mécanisme ne partaient pas au même moment.
+    ignored_min_acts: int = 1
     ignored_per_act: float = 0.1
     ignored_cap: float = 0.3
     # F9 pulsions
@@ -78,6 +104,7 @@ class ScoringTuning:
     daily_acts_cap: int = 5
     suppress_after_ignored: int = 3
     suppressed_score: float = 0.1
+    suppress_release_idle_seconds: float = SUPPRESS_RELEASE_IDLE_SECONDS
     # Salutations (bornes de fin exclues)
     morning_start: int = 7
     morning_end: int = 10
@@ -120,9 +147,18 @@ def compute_decision_score(
     # ici un réveil, pas une initiative. Le veto passe avant le Facteur 5 :
     # `check_time_trigger` marque une période comme saluée dès la passe de
     # scoring, et le salut de 23 h ne doit pas être brûlé par un cycle endormi.
+    # Une action programmée ne lève le veto que si elle est **prioritaire** :
+    # `_poll_scheduled_actions` remonte tout ce qui est dû, et la simple
+    # existence d'une ligne suffisait, quelle que soit sa priorité.
+    # `getattr` plutôt qu'un accès direct : ce module ne connaît pas l'ORM, et
+    # les appelants de test passent des doubles.
     asleep = ctx.sleep_phase != "awake"
     if asleep and not (
-        ctx.max_pertinence >= t.sleep_wake_pertinence or ctx.scheduled_actions
+        ctx.max_pertinence >= t.sleep_wake_pertinence
+        or any(
+            getattr(a, "priority", 0.0) >= t.sleep_wake_scheduled_priority
+            for a in ctx.scheduled_actions
+        )
     ):
         return 0.0, f"asleep({ctx.sleep_phase})", greeted_periods, greeted_date
 
@@ -226,9 +262,17 @@ def compute_decision_score(
         score -= t.sleep_penalty
         parts.append(f"sommeil(-{t.sleep_penalty:.2f})")
 
-    # Hard cap: too many ignored acts today -> suppress
-    if (ctx.acts_today >= t.daily_acts_cap
-            and ctx.consecutive_ignored_acts >= t.suppress_after_ignored):
+    # Frein quotidien — **avec une sortie**. Les deux premières conditions ne
+    # peuvent se défaire d'elles-mêmes : `consecutive_ignored` ne retombe qu'en
+    # produisant un acte suivi d'une réponse, et c'est précisément ce que la
+    # suppression interdit. Le verrou ne s'ouvrait donc qu'au changement de
+    # jour. La troisième est la sortie : quelqu'un vient de parler, le motif du
+    # silence imposé n'existe plus.
+    if (
+        ctx.acts_today >= t.daily_acts_cap
+        and ctx.consecutive_ignored_acts >= t.suppress_after_ignored
+        and ctx.idle_seconds >= t.suppress_release_idle_seconds
+    ):
         score = min(score, t.suppressed_score)
         parts.append("suppressed(too_many_ignored)")
 

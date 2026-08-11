@@ -82,6 +82,44 @@ class ConscienceLog(models.Model):
     decision = models.CharField(max_length=30)  # "act" | "wait" | "skip" | "failed"
     reason = models.CharField(max_length=200, blank=True, default="")
     memory_actions = models.JSONField(default=list)
+    # Les modules dont les outils ont réellement accompagné cet acte.
+    #
+    # Sans cette trace, « elle n'a pas utilisé ses outils » et « on ne lui en a
+    # donné aucun » sont indiscernables après coup — et c'était le second cas,
+    # systématiquement, dès qu'une initiative ne venait pas d'une observation.
+    # Vide sur un cycle qui n'a pas agi, ce qui est une information et non un
+    # trou.
+    trousse = models.JSONField(default=list, blank=True)
+    #: La conduite retenue par le cycle — parler, poursuivre un travail, en
+    #: ouvrir un, ou se taire. `decision` ne distinguait que « act / wait /
+    #: skip / failed » : un cycle qui fait avancer un chantier en silence y
+    #: était indiscernable d'un cycle qui n'a rien fait.
+    conduite = models.CharField(max_length=20, blank=True, default="")
+
+    # ── Ce qu'il faut pour reconstituer une décision après coup ──────
+    #
+    # Rien de tout ceci n'était persisté : le score n'existait qu'interpolé
+    # dans `reason`, et l'écran fait pour répondre à « pourquoi elle n'a rien
+    # dit depuis trois jours » ne pouvait pas y répondre.
+    #
+    # `score` est NULLABLE et non 0.0 : écrire zéro dans les dizaines de
+    # milliers de lignes déjà en base affirmerait un fait faux, ce qui est
+    # exactement le mensonge que ces colonnes retirent. « Pas mesuré » et
+    # « mesuré à zéro » sont deux choses différentes.
+    score = models.FloatField(null=True, blank=True)
+    cooldown_restant_s = models.IntegerField(null=True, blank=True)
+    acts_today = models.IntegerField(null=True, blank=True)
+    consecutive_ignored = models.IntegerField(null=True, blank=True)
+    energie = models.FloatField(null=True, blank=True)
+    sleep_phase = models.CharField(max_length=15, blank=True, default="")
+    #: À qui elle a parlé. Vide sur un cycle qui n'a pas parlé.
+    person_id = models.CharField(max_length=100, blank=True, default="")
+    #: Ce qu'elle a dit. Sans lui, le journal dit qu'elle a parlé sans dire
+    #: quoi, et il faut recouper avec la table des messages pour le savoir.
+    texte = models.TextField(blank=True, default="")
+    #: Bilan des appels d'outils : leurs noms ET leur issue.
+    outils = models.CharField(max_length=300, blank=True, default="")
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -156,6 +194,90 @@ class Rumination(models.Model):
         return self.decayed_at or self.created_at
 
 
+class Travail(models.Model):
+    """Un chantier qu'elle s'est ouvert, et qui vieillit tout seul.
+
+    C'est la pièce qui manquait pour que « aller au bout » veuille dire quelque
+    chose : jusqu'ici aucun modèle ne portait un travail — ni progression, ni
+    résultat, ni raison de blocage — si bien que chaque cycle de décision
+    repartait de la base et qu'aucune intention ne survivait au tour suivant.
+
+    Il est délibérément **plus léger qu'un `Project`** et n'en est pas une
+    variante allégée : un projet porte un mandat professionnel, avec
+    `emotion_policy=OFF` par défaut et une détection par mots-clés qui le fait
+    remonter dans une conversation ordinaire sous la bannière « PROJET EN
+    COURS ». Y loger « j'ai envie de lire les news » obligerait à réinjecter la
+    personnalité dans un prompt qui l'a volontairement retirée.
+
+    **L'envie décroît en temps d'horloge, sur une ancre qui n'avance qu'à
+    l'écriture** — même idiome que `Rumination.decayed_at`, et pour la même
+    raison : une décroissance par tour de boucle lie la durée de vie d'une
+    intention à la cadence du moteur, alors que tous ses lecteurs raisonnent en
+    heures. Le temps passé sous le seuil d'écriture s'accumule au lieu d'être
+    perdu.
+    """
+
+    class Statut(models.TextChoices):
+        EN_COURS = "en_cours"
+        ABOUTIE = "aboutie"
+        BLOQUEE = "bloquee"
+        ABANDONNEE = "abandonnee"     # l'envie est tombée sous le plancher
+
+    class Origine(models.TextChoices):
+        OBSERVATION = "observation"   # le dehors a produit quelque chose
+        PENSEE = "pensee"             # une rumination qui insiste
+        PULSION = "pulsion"           # une envie endogène, sans objet extérieur
+
+    titre = models.CharField(max_length=200)
+    origine = models.CharField(max_length=20, choices=Origine.choices)
+    #: Ce qui permet de retrouver la ligne d'origine — pk d'Observation, pk de
+    #: Rumination, ou nom de pulsion. Stocké en texte parce que les trois
+    #: natures ne partagent aucune table ; sert surtout à la déduplication.
+    reference = models.CharField(max_length=100, blank=True, default="")
+    themes = models.JSONField(default=list, blank=True)
+
+    #: Envie **telle qu'écrite**. La valeur courante se calcule en la faturant
+    #: du temps écoulé depuis l'ancre : ne jamais la lire seule.
+    envie = models.FloatField(default=0.5)
+    #: L'ancre. Les deux moitiés du même geste — valeur et ancre — ne doivent
+    #: jamais s'écrire séparément : la valeur sans l'ancre re-facture le même
+    #: temps au tour suivant, l'ancre sans la valeur efface la décroissance.
+    #: C'est exactement ce qui est arrivé à `Connaissance`, ancrée sur un
+    #: `auto_now` que Django ne rafraîchit pas sous `update_fields`.
+    ancre_envie = models.DateTimeField(null=True, blank=True)
+
+    statut = models.CharField(
+        max_length=15, choices=Statut.choices, default=Statut.EN_COURS,
+    )
+    raison_blocage = models.TextField(blank=True, default="")
+    resultat = models.TextField(blank=True, default="")
+
+    pas_effectues = models.IntegerField(default=0)
+    pas_max = models.IntegerField(default=5)
+    dernier_pas_le = models.DateTimeField(null=True, blank=True)
+    #: Bloqué en attente de quelqu'un : un pas de plus reposerait la même
+    #: question. Aucun producteur pour l'instant — voir la note du lot D.
+    en_attente_de_reponse = models.BooleanField(default=False)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-envie", "-created_at"]
+        indexes = [
+            models.Index(fields=["statut", "-envie"]),
+            models.Index(fields=["statut", "origine", "reference"]),
+        ]
+
+    def __str__(self):
+        return f"[{self.statut}:{self.envie:.2f}] {self.titre[:60]}"
+
+    @property
+    def ancre(self):
+        """Depuis quand le temps n'a pas encore été facturé à cette envie."""
+        return self.ancre_envie or self.created_at
+
+
 class ScheduledAction(models.Model):
     """A deferred action scheduled by the conscience or Claude.
 
@@ -168,12 +290,24 @@ class ScheduledAction(models.Model):
         PENDING = "pending"
         EXECUTED = "executed"
         CANCELLED = "cancelled"
+        #: Tentée assez de fois pour qu'on cesse d'y croire. Le filtre de
+        #: l'écran proposait déjà « échouée » — une valeur qui ne correspondait
+        #: à aucun statut de l'énumération, donc un filtre qui ne rendait
+        #: jamais rien.
+        FAILED = "failed"
 
     scheduled_at = models.DateTimeField()
     prompt = models.TextField()
     priority = models.FloatField(default=0.5)
     source = models.CharField(max_length=50)
     context_data = models.JSONField(default=dict)
+    #: Ce que l'acte a produit. « Exécutée » sans résultat ne prouve rien : le
+    #: statut ne disait que « l'appel IA n'a pas planté », pas que le
+    #: rendez-vous avait été honoré. `ProjectTask` porte ces deux champs depuis
+    #: toujours ; l'asymétrie n'avait aucune raison d'être.
+    resultat = models.TextField(blank=True, default="")
+    raison_echec = models.TextField(blank=True, default="")
+    tentatives = models.IntegerField(default=0)
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.PENDING,
     )

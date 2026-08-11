@@ -204,6 +204,30 @@ class BaseModule(ABC):
         ``CONTEXT_VISIBILITY`` it prevents private info leaking to guests."""
         return ""
 
+    def propose_sujets(self) -> list[str]:
+        """De quoi nourrir une curiosité, si ce module a quelque chose à offrir.
+
+        Opt-in, comme tout le reste ici : un module qui ne propose rien répond
+        par une liste vide et n'a rien à écrire.
+
+        Ce que ça répare : la curiosité montait à 1.0, poussait le score,
+        produisait une phrase disant qu'elle était curieuse — et **rien ne
+        choisissait de quoi**. Une envie sans objet ne peut ouvrir aucun
+        chantier ; elle ne pouvait que se dire, indéfiniment.
+
+        Trois contraintes, toutes issues du chemin d'appel :
+
+        * **en mémoire, sans requête** — c'est lu depuis la boucle de décision,
+          qui tourne 2 880 fois par jour. Un module qui devrait interroger la
+          base pour répondre doit tenir un cache et rendre ce cache ;
+        * **des sujets, pas des ordres** — « les trois articles non lus sur la
+          diffusion », pas « lis tes flux ». C'est elle qui décide quoi en
+          faire ;
+        * **ne lève jamais** : l'appelant compte la dégradation et continue
+          sans ce module.
+        """
+        return []
+
     # ── Outbound delivery ─────────────────────────────────────────
     #
     # `deliver()` used to live here, returning False. Measured: no module

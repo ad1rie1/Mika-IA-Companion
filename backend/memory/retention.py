@@ -55,8 +55,15 @@ class Policy:
 POLICIES: tuple[Policy, ...] = (
     # Written every decision cycle, mostly "skip" — the only table whose
     # growth is independent of user activity.
-    Policy("conscience", "ConscienceLog", keep_days=30, keep_rows=50_000,
-           note="decision audit trail"),
+    # 2 880 lignes par jour à l'intervalle par défaut : le plafond de 50 000
+    # coupait donc à ~17 jours, pas aux 30 déclarés. Deux bornes qui ne
+    # racontent pas la même histoire, c'est la seconde qui gagne en silence —
+    # et l'écran affichait « 30 jours » en toute bonne foi.
+    #
+    # Le plafond suit maintenant la cadence : 30 j × 2 880 = 86 400, arrondi
+    # au-dessus pour absorber les cycles rapides du fast-path.
+    Policy("conscience", "ConscienceLog", keep_days=30, keep_rows=90_000,
+           note="journal des décisions ; le plafond suit les 30 jours déclarés"),
     # One row per consolidation tick, and only the latest is ever read
     # (checkpoint resume). Everything older is pure weight.
     Policy("memory", "ConsolidationLog", date_field="ran_at",
@@ -71,6 +78,13 @@ POLICIES: tuple[Policy, ...] = (
            note="only the newest row is read, for the episodic checkpoint"),
     # Faded ruminations are done being turned over; active/resolved ones
     # are still referenced by journals and digestion.
+    # Les chantiers clos. Ceux qui tournent sont protégés : un travail en cours
+    # supprimé pour cause d'âge serait un abandon silencieux, et l'abandon est
+    # précisément ce qu'on veut voir plutôt que subir. Quatre-vingt-dix jours
+    # comme les pensées — c'est la même matière, une intention qui a duré.
+    Policy("conscience", "Travail", date_field="created_at", keep_days=90,
+           keep_rows=5_000, protect={"statut": "en_cours"},
+           note="chantiers clos ; ceux qui tournent ne sont jamais purgés"),
     Policy("conscience", "Rumination", date_field="created_at", keep_days=90,
            protect={"status__in": ("active", "resolved")},
            note="faded thoughts only"),

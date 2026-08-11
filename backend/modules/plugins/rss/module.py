@@ -869,6 +869,19 @@ class RSSModule(BaseModule):
         suite = f"\n(et {reste} autre(s) — outil list_rss_entries)" if reste > 0 else ""
         return f"{self._unread_total} article(s) non lu(s) dans tes flux :\n{titres}{suite}"
 
+    def propose_sujets(self) -> list[str]:
+        """Les titres non lus, tels quels — c'est déjà un sujet.
+
+        Même source RAM que `get_context` (`_headlines`, alimenté par le
+        sondage) : aucune requête, et donc utilisable depuis la boucle de
+        décision. La différence est la forme — ici pas de préambule ni de
+        compte, seulement de quoi ouvrir un chantier.
+        """
+        return [
+            f"lire ce qui se dit sur « {h['title'][:110]} »"
+            for h in (self._headlines or ())
+        ]
+
     # ── État ──────────────────────────────────────────────────────
 
     def get_status(self) -> ModuleStatus:

@@ -143,8 +143,42 @@ CONFIG_SCHEMA = [
 
     *_drive_items(
         "curiosity", CURIOSITY_GROUP,
-        growth_rate=0.0008, decay_on_satisfy=0.6,
+        growth_rate=0.0, decay_on_satisfy=0.6,
         weight=0.30, satisfy_threshold=0.35,
+        growth_hint=(
+            "Laissé à 0.0 : la curiosité croît en LOG-TEMPS, via les deux "
+            "réglages ci-dessous. En linéaire elle saturait en 20 min 50, et "
+            "comme son poids et celui de l'expression somment à 0.55 — au-delà "
+            "du plafond du facteur « pulsions » (+0.50) — passé la demi-heure "
+            "ce facteur valait la constante +0.50 quoi qu'il arrive."
+        ),
+    ),
+    ConfigItem(
+        key="drives.observation_curiosity_gate", type="float", section="drives",
+        group=CURIOSITY_GROUP, label="Pertinence qui assouvit la curiosité",
+        default=0.50, min=0.0, max=1.0, hot_reload=True,
+        hint="Un signal observé au moins aussi pertinent que cette valeur "
+             "calme un peu la curiosité. Réglée SOUS le plafond du chemin "
+             "d'interprétation sans LLM (0.55 pour un article RSS apparié) : "
+             "au-dessus, seul un e-mail — le seul signal payant un appel LLM — "
+             "pouvait la franchir, et sur une installation sans compte mail "
+             "apprendre quelque chose du monde ne la calmait jamais.",
+    ),
+    ConfigItem(
+        key="drives.curiosity.growth_tau", type="float", section="drives",
+        group=CURIOSITY_GROUP, label="Échelle du début de courbe (s)",
+        default=120.0, min=0.0, max=86400.0, hot_reload=True,
+        hint="Plus ce paramètre est petit, plus les premières minutes comptent.",
+    ),
+    ConfigItem(
+        key="drives.curiosity.growth_horizon_days", type="float",
+        section="drives", group=CURIOSITY_GROUP,
+        label="Horizon de saturation (jours)",
+        default=0.5, min=0.0, max=3650.0, hot_reload=True,
+        hint="Temps au bout duquel la curiosité vaut 1.0. Courbe obtenue au "
+             "défaut : 10 min → 0.30, 21 min → 0.42, 1 h → 0.58, 12 h → 1.0. "
+             "À 0.0 la croissance logarithmique est DÉSACTIVÉE et « Croissance "
+             "par seconde » reprend la main.",
     ),
 
     *_drive_items(
@@ -179,8 +213,28 @@ CONFIG_SCHEMA = [
 
     *_drive_items(
         "expression", EXPRESSION_GROUP,
-        growth_rate=0.0007, decay_on_satisfy=0.8,
+        growth_rate=0.0, decay_on_satisfy=0.8,
         weight=0.25, satisfy_threshold=0.45,
+        growth_hint=(
+            "Laissé à 0.0 : l'expression croît en LOG-TEMPS, via les deux "
+            "réglages ci-dessous. En linéaire elle saturait en 23 min 49."
+        ),
+    ),
+    ConfigItem(
+        key="drives.expression.growth_tau", type="float", section="drives",
+        group=EXPRESSION_GROUP, label="Échelle du début de courbe (s)",
+        default=180.0, min=0.0, max=86400.0, hot_reload=True,
+    ),
+    ConfigItem(
+        key="drives.expression.growth_horizon_days", type="float",
+        section="drives", group=EXPRESSION_GROUP,
+        label="Horizon de saturation (jours)",
+        default=0.375, min=0.0, max=3650.0, hot_reload=True,
+        hint="Temps au bout duquel l'envie de dire quelque chose vaut 1.0. "
+             "Horizon plus court que la curiosité : une envie de s'exprimer se "
+             "constitue dans la journée, pas sur trois semaines comme une "
+             "absence. Courbe obtenue au défaut : 10 min → 0.28, 24 min → "
+             "0.42, 1 h → 0.59, 9 h → 1.0.",
     ),
 
     *_drive_items(

@@ -145,38 +145,32 @@ class WakeModule(BaseModule):
     # ── Capabilities & Tools ────────────────────────────────────────
 
     def get_capabilities(self) -> list[ModuleCapability]:
-        return [
-            ModuleCapability(
-                description="Programmer un reveil spontane pour parler plus tard",
-                tool_names=["trigger_wake"],
-            ),
-        ]
+        # Plus aucune capacité déclarée : elle nommerait `trigger_wake`, qui
+        # n'est plus servi. Annoncer un outil qu'on ne fournit pas est le
+        # défaut même que la trousse répare.
+        return []
 
     def return_tools(self) -> list[ModuleTool]:
-        return [
-            ModuleTool(
-                name="trigger_wake",
-                description=(
-                    "Trigger a wake event to make the VTuber spontaneously speak. "
-                    "Useful to schedule a self-wake or initiate a new topic."
-                ),
-                parameters=[
-                    ToolParameter(
-                        name="prompt",
-                        type=ToolParameterType.STRING,
-                        description="Optional prompt for the wake message",
-                        required=False,
-                    ),
-                    ToolParameter(
-                        name="source",
-                        type=ToolParameterType.STRING,
-                        description="Source identifier (default: ai_tool)",
-                        required=False,
-                    ),
-                ],
-                handler=self._tool_trigger_wake,
-            ),
-        ]
+        """Aucun outil — et c'est une fermeture délibérée.
+
+        `trigger_wake` était le seul chemin par lequel le modèle pouvait
+        rentrer dans le pipeline complet depuis l'intérieur d'une boucle
+        d'outils : `trigger_wake` → `WakeRequest` → cron 30 s → `notify_ai` →
+        `perceive()` → `gather_context(include_tools=True)`, c'est-à-dire la
+        trousse entière — celle que la conscience venait précisément de borner.
+        Personne n'avait conçu ce chemin et aucun test ne le couvrait.
+
+        Il faisait par ailleurs doublon : programmer un réveil pour plus tard,
+        c'est `schedule_action`, et tout le cycle de vie des actions différées
+        a déjà déménagé du wake vers `conscience_tools` — arrêter cet
+        accessoire retirait autrefois la moitié du cycle en laissant l'autre
+        tourner.
+
+        Ce qui NE bouge pas : la route HTTP, le cron, `WakeRequest` et
+        `trigger_wake()` en Python. Le module continue de réveiller Mika ;
+        c'est la surface *appelable par le modèle* qui se ferme.
+        """
+        return []
 
     async def _tool_trigger_wake(self, args: dict) -> dict:
         wake_id = await self.trigger_wake(

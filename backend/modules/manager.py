@@ -137,6 +137,9 @@ class ModuleManager:
     def collect_capabilities_summary(self) -> str:
         return self.collectors.capabilities_summary()
 
+    def collect_sujets(self) -> list[tuple[str, str]]:
+        return self.collectors.sujets()
+
     def collect_context(self, person_id: str = "") -> str:
         return self.collectors.context(person_id)
 

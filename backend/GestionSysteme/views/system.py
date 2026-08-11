@@ -57,9 +57,21 @@ def _health(request) -> dict:
         logger.exception("statistiques du bus indisponibles")
         bus = {"emitted": 0, "subscriptions": []}
 
+    # L'état du murmure : sans lui, « elle n'a rien à dire » et « le quota est
+    # épuisé », « personne n'est connecté » ou « le rôle n'est pas mappé » sont
+    # rigoureusement indiscernables depuis l'extérieur — c'est un mécanisme
+    # dont le comportement normal est le silence.
+    try:
+        from conscience.murmure import etat_murmure
+        murmure = etat_murmure()
+    except Exception:
+        logger.exception("état du murmure indisponible")
+        murmure = {}
+
     subscriptions = bus.get("subscriptions", [])
     boucles = _loops_snapshot()
     return {
+        "murmure": murmure,
         "sites_page": tables.paginate(request, sites, per_page=50),
         "total_events": degradations.total(),
         "distinct_sites": len(sites),

@@ -61,11 +61,23 @@ def log_growth(elapsed: float, tau: float, horizon: float) -> float:
 # valait la constante +0.50, et le bloc de prompt repetait indefiniment les
 # trois memes phrases en « fortement » sans rien apprendre au modele.
 DEFAULT_PARAMS: dict[DriveKind, DriveParams] = {
+    # CURIOSITY et EXPRESSION passent en log-temps pour la même raison que
+    # SOCIAL avant elles : en linéaire, 0.0008/s saturait la curiosité en
+    # 20 min 50 et 0.0007/s l'expression en 23 min 49. Or leurs poids
+    # (0.30 + 0.25 = 0.55) dépassent à eux seuls le plafond du Facteur 9
+    # (+0.50) : passé la demi-heure, ce facteur valait donc la constante
+    # +0.50 quoi qu'il arrive, et ni une heure ni trois jours de silence ne
+    # changeaient plus rien au score. Le plafond n'est pas touché — il reste
+    # dans l'invariant qui le fait sommer au seuil d'action ; c'est la courbe
+    # qui cesse de s'y écraser en vingt minutes.
+    # Courbe obtenue (curiosité) : 10 min 0.30, 21 min 0.42, 1 h 0.58, 12 h 1.0.
     DriveKind.CURIOSITY: DriveParams(
-        growth_rate=0.0008,
+        growth_rate=0.0,
         decay_on_satisfy=0.6,
         weight=0.30,
         satisfy_threshold=0.35,
+        growth_tau=120.0,
+        growth_horizon=12 * 3600.0,
     ),
     # SOCIAL est la seule pulsion qui parle d'*absence*, donc la seule dont
     # l'échelle de temps doit dépasser le quart d'heure : le linéaire la
@@ -81,11 +93,16 @@ DEFAULT_PARAMS: dict[DriveKind, DriveParams] = {
         growth_tau=300.0,
         growth_horizon=30 * 86400.0,
     ),
+    # Courbe obtenue (expression) : 10 min 0.28, 24 min 0.42, 1 h 0.59, 9 h 1.0.
+    # Horizon plus court que la curiosité : l'envie de dire quelque chose se
+    # constitue dans la journée, pas sur trois semaines comme une absence.
     DriveKind.EXPRESSION: DriveParams(
-        growth_rate=0.0007,
+        growth_rate=0.0,
         decay_on_satisfy=0.8,
         weight=0.25,
         satisfy_threshold=0.45,
+        growth_tau=180.0,
+        growth_horizon=9 * 3600.0,
     ),
     DriveKind.REST: DriveParams(
         # Rest drive grows only when Mika has been very active recently.
@@ -181,49 +198,15 @@ def dominant_drive(states: dict[DriveKind, DriveState]) -> DriveState | None:
     return winner
 
 
-def drive_prompt_description(states: dict[DriveKind, DriveState]) -> str:
-    """French description of current drive state for the system prompt.
-
-    Keeps only drives above their satisfy_threshold (otherwise they're
-    noise). Describes intensity in natural language so Claude can feel
-    the pull without seeing numbers.
-    """
-    active = []
-    for kind, state in states.items():
-        params = params_for(kind)
-        if state.tension < params.satisfy_threshold:
-            continue
-        active.append((kind, state.tension))
-
-    if not active:
-        return ""
-
-    active.sort(key=lambda x: -x[1])
-    lines = []
-    for kind, tension in active[:3]:
-        lines.append(_describe_drive(kind, tension))
-
-    return "Tes pulsions interieures: " + " ".join(lines)
-
-
-def _describe_drive(kind: DriveKind, tension: float) -> str:
-    adverb = (
-        "legerement" if tension < 0.5
-        else "clairement" if tension < 0.75
-        else "fortement"
-    )
-    descriptions = {
-        DriveKind.CURIOSITY: (
-            f"tu ressens {adverb} l'envie d'apprendre, de comprendre, de poser des questions."
-        ),
-        DriveKind.SOCIAL: (
-            f"tu as {adverb} besoin de contact, d'etre reconnue, d'echanger."
-        ),
-        DriveKind.EXPRESSION: (
-            f"tu as {adverb} envie de dire quelque chose, une pensee qui te traverse."
-        ),
-        DriveKind.REST: (
-            f"tu te sens {adverb} fatiguee, tu aimerais un moment de calme."
-        ),
-    }
-    return descriptions[kind]
+# `drive_prompt_description` et `_describe_drive` ont été supprimées ici.
+#
+# Quatre pulsions × trois adverbes = douze phrases pour toute la vie
+# intérieure, et le bloc de prompt répétait indéfiniment les trois mêmes en
+# « fortement » — le palier haut s'ouvrait à 0.75, que les pulsions positives
+# atteignaient en vingt minutes. `drives/phrasing.py` les remplace par 112
+# variantes réparties sur quatre paliers, avec un tirage qui amortit les
+# répétitions. Le point d'entrée reste `DriveEngine.get_context()`.
+#
+# Elles ne laissent pas de repli : une fonction gardée « au cas où » aurait
+# figé ici une seconde vérité sur ce que ressent Mika, ce que ce module tout
+# entier existe pour éviter.

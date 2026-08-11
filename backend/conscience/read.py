@@ -13,7 +13,37 @@ reason for two implementations.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from asgiref.sync import sync_to_async
+from django.conf import settings
+
+
+def debut_du_jour_local() -> datetime:
+    """Minuit, à l'horloge à laquelle le reste du moteur date ses journées.
+
+    `timezone.now().replace(hour=0, …)` rend **minuit UTC** sous `USE_TZ=True`
+    — deux heures d'écart l'été à Paris. `_introspect` comptait donc les actes
+    d'une journée commençant à 02 h locales : une initiative prise entre minuit
+    et 02 h était imputée à la veille, puis jamais décomptée du jour qui
+    s'ouvrait, si bien que le frein quotidien (`acts_today >= 5`) et le
+    compteur affiché ne parlaient pas du même jour que tout le reste.
+
+    Or `scoring.check_time_trigger` et `memory.sleep` datent l'un et l'autre
+    depuis `datetime.now()` naïf local. Une seule horloge, et c'est celle-là.
+
+    Ce n'est pas une requête, et cette couche n'en héberge d'ordinaire pas
+    d'autres — mais c'est bien une question de lecture (« quand commence
+    aujourd'hui ? ») dont trois appelants ont besoin de la *même* réponse ;
+    la garder dans `engine.py` en referait une arithmétique locale, ce qui est
+    exactement la forme du bug.
+
+    Le retour est *aware* parce qu'il borne `created_at` (`auto_now_add`,
+    stocké aware sous `USE_TZ=True`) : `.astimezone()` sans argument attache
+    le décalage local du système, celui-là même que `datetime.now()` a lu.
+    """
+    minuit = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    return minuit.astimezone() if settings.USE_TZ else minuit
 
 
 async def active_ruminations(*, limit: int = 5, min_intensity: float = 0.0) -> list:

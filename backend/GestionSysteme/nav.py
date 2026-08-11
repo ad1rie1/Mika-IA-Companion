@@ -81,6 +81,7 @@ INNER = NavItem(
         Tab("emotions", "Émotions"),
         Tab("drives", "Drives"),
         Tab("ruminations", "Ruminations", count_key="ruminations"),
+        Tab("chantiers", "Chantiers", count_key="chantiers"),
         Tab("rythme", "Rythme & sommeil"),
         Tab("historique", "Historique affectif"),
     ),

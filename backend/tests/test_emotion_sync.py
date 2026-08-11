@@ -28,11 +28,34 @@ PERSON = "web_sync_test"
 
 @pytest.fixture(autouse=True)
 def _clean_registry():
-    """The presence registry and the mood table are process-wide singletons."""
+    """The presence registry and the mood table are process-wide singletons.
+
+    L'humeur GLOBALE en fait partie, et elle n'était pas remise à zéro : ces
+    tests passaient seuls et échouaient en suite complète, selon ce qui avait
+    tourné avant. La cause est physique et non fortuite — `_home_vector()`
+    compose l'humeur globale, donc une humeur globale héritée déplace le point
+    d'équilibre vers lequel la position dérive. Un état déjà *à* son repos ne
+    bouge plus : `test_impulse_est_visible_immediatement` mesurait alors une
+    dérive nulle et concluait à une régression qui n'existait pas.
+
+    Remis à zéro **avant et après** : un test ne doit ni hériter ni léguer.
+    """
+    _reset_humeur_globale()
     yield
     presence_registry.unregister(PERSON, "web")
     presence_registry.unregister("tg_42", "telegram")
     emotion_engine.person_moods.pop(PERSON, None)
+    _reset_humeur_globale()
+
+
+def _reset_humeur_globale() -> None:
+    import time as _time
+
+    from emotion import pad
+
+    emotion_engine.global_mood.dynamic.position = pad.zero()
+    emotion_engine.global_mood.dynamic.velocity = pad.zero()
+    emotion_engine.global_mood.last_update = _time.time()
 
 
 def _connect(person_id: str = PERSON, channel: str = "web", kind: str = "consumer"):
@@ -150,9 +173,22 @@ class TestOnlyWhenItMoved:
         # La dérive se compte maintenant en minutes, pas en secondes : c'est
         # tout l'objet du correctif B2, et c'est ce qui fait qu'une trame ne
         # part que quand il y a vraiment quelque chose à dire.
+        #
+        # Mesurée sur la POSITION et non sur le couple (émotion, intensité).
+        # Ce couple sort de `pad_to_label`, qui arrondit l'intensité à deux
+        # décimales : avec une constante de temps de ~11,6 min, 120 s de dérive
+        # tombent parfois sous l'arrondi selon le point de départ. Le test
+        # échouait donc en suite complète et passait seul, en accusant une
+        # régression qui n'existait pas — alors que le tempérament et les
+        # paramètres d'oscillateur étaient rigoureusement identiques dans les
+        # deux ordres. Un test qui mesure un arrondi mesure l'arrondi.
+        position_avant = emotion_engine.person_moods[PERSON].dynamic.position
         _advance(120.0)
-        moved = emotion_engine.compute_message_emotion(PERSON)
-        assert (moved.emotion, moved.intensity) != (after.emotion, after.intensity)
+        position_apres = emotion_engine.person_moods[PERSON].dynamic.position
+        assert position_apres != position_avant, (
+            "l'état doit continuer de dériver après l'impulsion — c'est la "
+            "seule chose que la boucle de synchronisation a à rapporter"
+        )
 
     async def test_intensity_drift_below_threshold_stays_silent(self):
         _connect()

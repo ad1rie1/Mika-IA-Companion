@@ -507,15 +507,26 @@ class ProjectRunner:
     async def _murmur(self, ctx, summary: str, data: dict) -> None:
         """Voice a short inner thought about this tick. Silence is fine.
 
-        Rien à dire quand le projet tourne en `emotion_policy=off` — le
-        défaut, mode professionnel, « aucun raisonnement affectif ». Sans
-        cette porte, chaque avance d'un projet pro diffusait un marmonnement
-        affectif au groupe global et coûtait un second appel LLM.
-        """
-        if ctx.emotion_policy == "off":
-            return
+        Délégation à `conscience.murmure`, qui porte désormais les six gardes
+        et l'unique chemin de diffusion. Deux changements de comportement, tous
+        deux voulus :
 
-        from pipeline.inner_voice import generate_inner_thought
+        1. La porte `emotion_policy == "off"` n'est pas supprimée — elle change
+           de main. Elle devient la première des six gardes et, contrairement au
+           `return` sec d'avant, elle se **journalise** : `etat_murmure()` dit
+           « mode_professionnel » au lieu de ne rien dire du tout.
+        2. Le runner hérite des cinq autres gardes, dont deux qui comptent ici :
+           l'audience (il diffusait jusqu'ici vers un groupe potentiellement
+           vide, en payant l'appel pour ça) et le quota, désormais partagé avec
+           la conscience — c'est le même personnage qui pense à voix haute, et
+           un quota par appelant n'aurait aucun sens.
+
+        `_broadcast_inner_thought` a été supprimée : `murmure._diffuser` la
+        reproduit au champ près. La garder, c'était garder un second chemin de
+        diffusion sans aucune garde devant.
+        """
+        from conscience.murmure import murmurer
+        from conscience.murmure_reglage import tuning as murmure_tuning
 
         # Le murmure part APRÈS le `reset` du ContextVar de `_advance` : sans
         # cette repose, l'appel INNER_VOICE sort avec project_id=None et
@@ -527,37 +538,15 @@ class ProjectRunner:
                 or (data.get("new_tasks") or [""])[0]
                 or f"avancer sur « {ctx.title} »"
             )
-            thought = await generate_inner_thought(intended, summary)
-            if not thought:
-                return
-            await self._broadcast_inner_thought(ctx, thought)
+            await murmurer(
+                intended, summary,
+                mode_professionnel=(ctx.emotion_policy == "off"),
+                tuning=murmure_tuning(),
+            )
         except Exception as exc:
             degradations.record("projects: inner thought failed (non-fatal)", exc)
         finally:
             current_project_id.reset(token)
-
-    async def _broadcast_inner_thought(self, ctx, thought: str) -> None:
-        """Push the murmur out through the normal speech routing.
-
-        ``source="conscience"`` is what makes ``pipeline.voice`` treat it as
-        the INNER persona: murmured profile, allowed on the room speaker,
-        never mailed to anyone as a voice note.
-        """
-        from emotion.types import Emotion, EmotionData
-        from pipeline.broadcast import broadcast_to_websocket
-        from pipeline.processor import SpeechOutput
-
-        await broadcast_to_websocket(
-            SpeechOutput(
-                text=thought,
-                emotion_data=EmotionData(Emotion.THINKING, 0.3),
-                emotion_name="thinking",
-                emotion_intensity=0.3,
-                emotion_state={},
-                tool_calls=[],
-            ),
-            source="conscience",
-        )
 
     # ── Persistence helpers ──────────────────────────────────────
 

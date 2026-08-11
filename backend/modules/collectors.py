@@ -15,11 +15,26 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import time
 
 from django.urls import path
 
 from modules.registry import ModuleRegistry
 from modules.types import ModuleCapability, ModuleTool
+from utils.degradation import degraded
+from utils.tool_trace import noter_appel
+
+
+def _signale_une_erreur(resultat) -> bool:
+    """Un résultat qui dit lui-même avoir échoué, sans avoir levé.
+
+    Convention MCP (`isError`), telle que le fournisseur Claude la relit déjà
+    pour poser `is_error` sur le `tool_result`. Les deux orthographes existent
+    dans le dépôt selon les modules.
+    """
+    if not isinstance(resultat, dict):
+        return False
+    return bool(resultat.get("isError") or resultat.get("is_error"))
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +112,16 @@ class ModuleCollectors:
         owner_of: dict[str, str] = {}
         for module_name in wanted:
             module = self._registry.get(module_name)
-            if module is None or not module.is_running:
+            if module is None:
+                # Un nom qu'aucun module ne porte repartait sans un mot. C'est
+                # ainsi que la conscience demandait « frontend » et
+                # « telegram » — les valeurs de `Observation.source`, qui ne
+                # sont des modules ni l'un ni l'autre — et repartait avec une
+                # trousse vide en croyant l'avoir remplie.
+                with degraded(f"modules: outils demandes a un inconnu ({module_name})"):
+                    raise LookupError(module_name)
+                continue
+            if not module.is_running:
                 continue
             try:
                 owner_of.update({t.name: module_name for t in module.return_tools()})
@@ -110,16 +134,43 @@ class ModuleCollectors:
 
     @staticmethod
     def _wrap_handler(name: str, handler):
-        """Wrap a tool handler with call/return/error logging."""
+        """Journalise l'appel, son issue et sa durée — un seul étage.
+
+        Ce point de passage est partagé par la conversation, la conscience, le
+        lanceur de projets et la forge : instrumenter ici plutôt que chez
+        chaque appelant est ce qui évite quatre copies qui divergeraient.
+
+        Il répare un aveuglement précis : la boucle d'outils ne remonte que
+        `block.name`, sans résultat ni marqueur d'erreur, si bien que trois
+        outils qui plantent satisfont la curiosité exactement comme trois
+        réussites. Le carnet rend l'issue lisible sans changer le contrat de
+        la boucle — un `raise` reste un `raise`, le modèle reçoit toujours son
+        `is_error`.
+
+        Un outil qui signale son échec à la façon MCP (un dict portant
+        `isError`) n'a jamais levé : sans cette lecture, la moitié des échecs
+        resterait comptée comme des succès.
+        """
         async def logged_handler(params):
             logger.info("tool called: %s (params=%s)", name, params)
+            debut = time.monotonic()
             try:
                 result = await handler(params)
-                logger.info("tool %s returned: %s", name, str(result)[:200])
-                return result
-            except Exception:
+            except Exception as exc:
+                noter_appel(
+                    name, ok=False, extrait=f"{type(exc).__name__}: {exc}",
+                    ms=(time.monotonic() - debut) * 1000.0,
+                )
                 logger.exception("tool %s failed", name)
                 raise
+            logger.info("tool %s returned: %s", name, str(result)[:200])
+            noter_appel(
+                name,
+                ok=not _signale_une_erreur(result),
+                extrait=result,
+                ms=(time.monotonic() - debut) * 1000.0,
+            )
+            return result
         return logged_handler
 
     # ── Capabilities ──────────────────────────────────────────────
@@ -152,6 +203,31 @@ class ModuleCollectors:
         )
 
     # ── Prompt context ────────────────────────────────────────────
+
+    def sujets(self) -> list[tuple[str, str]]:
+        """``(module, sujet)`` pour tout ce que les modules ont à proposer.
+
+        Lu depuis la boucle de décision : chaque module répond **de mémoire**,
+        sans requête (voir `BaseModule.propose_sujets`). Un module qui lève est
+        compté et sauté — une curiosité ne doit pas tomber parce qu'un flux est
+        cassé.
+
+        Pas de filtre de visibilité, contrairement à `context()` : ces sujets
+        ne partent dans aucun prompt destiné à quelqu'un. Ils servent à ce
+        qu'elle décide, pour elle-même, de quoi elle a envie de s'occuper.
+        """
+        out: list[tuple[str, str]] = []
+        for module in self._registry.running():
+            try:
+                proposes = module.propose_sujets() or []
+            except Exception:
+                logger.exception("propose_sujets() failed for module %s", module.name)
+                continue
+            for sujet in proposes:
+                texte = str(sujet).strip()
+                if texte:
+                    out.append((module.name, texte))
+        return out
 
     def context(self, person_id: str = "") -> str:
         """Per-person context strings from all running modules.

@@ -529,6 +529,20 @@ CONFIG_SCHEMA = [
              "est ce qu'il faut de silence pour se rendormir.",
     ),
     ConfigItem(
+        key="memory.sleep_endogenous_wake_grace_seconds", type="int",
+        section="memory", group="Sommeil",
+        label="Grâce après un réveil (s)",
+        default=180, min=0, max=3600, hot_reload=True,
+        hint="Délai pendant lequel un réveil tient même si personne n'a rien "
+             "dit. L'inactivité ne compte que ce que les AUTRES font : une "
+             "initiative nocturne la réveillait un tick, puis la porte la "
+             "rendormait pendant qu'elle parlait — et la voix se tait en "
+             "sommeil, si bien que le message s'affichait, muet, prononcé par "
+             "quelqu'un que l'écran montrait endormi. Assez long pour qu'un "
+             "tour aboutisse (l'appel IA est borné à 120 s), pas au point de "
+             "faire une insomnie.",
+    ),
+    ConfigItem(
         key="memory.sleep_early_night_max_advance_hours", type="int", section="memory",
         group="Sommeil", label="Avance max du coucher par la fatigue (h)",
         default=2, min=0, max=6, hot_reload=True,

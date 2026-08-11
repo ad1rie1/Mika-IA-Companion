@@ -70,13 +70,33 @@ def _observations(request) -> dict:
     }
 
 
+#: Les six issues d'un cycle, en français. Le filtre n'en couvrait que trois,
+#: et deux d'entre elles — poursuivre un chantier, en ouvrir un — n'existaient
+#: pas encore : un cycle qui fait avancer un travail en silence était
+#: indiscernable d'un cycle qui n'a rien fait.
+_DECISION_FR = {
+    "act": "parler",
+    "poursuivre": "avancer un chantier",
+    "ouvrir": "ouvrir un chantier",
+    "wait": "attendre",
+    "skip": "rien à faire",
+    "failed": "échouée",
+}
+_DECISION_TONS = {
+    "act": "ok",
+    "poursuivre": "ok",
+    "ouvrir": "ok",
+    "failed": "danger",
+    "wait": "warn",
+}
+
+
 def _decisions(request) -> dict:
     from conscience.models import ConscienceLog
 
     fs = tables.FilterSet(per_page=tables.read_per_page(request))
     decision = fs.add(tables.select_filter(
-        request, "decision", "Décision",
-        [("act", "agir"), ("wait", "attendre"), ("failed", "échouée")],
+        request, "decision", "Conduite", list(_DECISION_FR.items()),
     ))
 
     qs = ConscienceLog.objects.order_by("-created_at")
@@ -84,17 +104,26 @@ def _decisions(request) -> dict:
         qs = qs.filter(decision=decision.value)
 
     idle = None
+    seuil = None
     try:
         from conscience.engine import conscience_engine
         idle = conscience_engine.get_idle_seconds()
+        # Servi par le moteur et non écrit en dur : le gabarit affichait
+        # « 0,50 » quoi que dise la configuration, donc l'écran qui existe pour
+        # expliquer pourquoi elle se tait pouvait afficher un seuil qui n'est
+        # pas celui qu'elle applique.
+        seuil = conscience_engine._threshold
     except Exception:
-        logger.debug("compteur d'inactivité indisponible", exc_info=True)
+        logger.debug("état du moteur de conscience indisponible", exc_info=True)
 
     return {
         "filterset": fs,
         "page": tables.paginate(request, qs, per_page=fs.per_page),
         "idle_seconds": idle,
+        "act_threshold": seuil,
         "total_logs": ConscienceLog.objects.count(),
+        "decision_labels": _DECISION_FR,
+        "decision_tones": _DECISION_TONS,
     }
 
 

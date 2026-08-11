@@ -15,7 +15,7 @@
   </div>
   <div class="stat">
     <div class="stat-label">Seuil d'action</div>
-    <div class="stat-value">0,50</div>
+    <div class="stat-value">{{ act_threshold|num }}</div>
     <div class="stat-sub">11 facteurs pondérés</div>
   </div>
 </section>
@@ -37,8 +37,10 @@
           <thead>
             <tr>
               <th class="fit">Quand</th>
-              <th class="fit">Décision</th>
-              <th style="min-width: 26rem;">Motif</th>
+              <th class="fit">Conduite</th>
+              <th style="min-width: 22rem;">Motif</th>
+              <th class="num">Score</th>
+              <th>Trousse</th>
               <th class="num">Observations</th>
               <th class="num">Pertinence max</th>
               <th>Humeur</th>
@@ -51,9 +53,33 @@
               <tr>
                 <td class="fit muted" title="{{ l.created_at|dt_full }}">{{ l.created_at|ago }}</td>
                 <td class="fit">
-                  <span class="badge {% if l.decision == 'act' %}badge-ok{% elif l.decision == 'failed' %}badge-danger{% endif %}">{{ l.decision }}</span>
+                  <span class="badge {% with tone=decision_tones|get:l.decision %}{% if tone %}badge-{{ tone }}{% endif %}{% endwith %}">{% with label=decision_labels|get:l.decision %}{{ label|default:l.decision }}{% endwith %}</span>
                 </td>
-                <td><div class="cell-clamp">{{ l.reason }}</div></td>
+                <td>
+                  <div class="cell-clamp">{{ l.reason }}</div>
+                  {% if l.texte %}
+                    <div class="cell-clamp text-xs muted">« {{ l.texte|truncatechars:120 }} »</div>
+                  {% endif %}
+                  {% if l.cooldown_restant_s %}
+                    <span class="badge badge-warn text-xs">encore {{ l.cooldown_restant_s|duration }}</span>
+                  {% endif %}
+                </td>
+                <td class="num tabular">
+                  {% if l.score is not None %}{{ l.score|num }}{% else %}<span class="muted">—</span>{% endif %}
+                </td>
+                <td class="text-xs">
+                  {% comment %}
+                    Ce qu'elle avait réellement en main. Vide sur un cycle qui
+                    n'a rien tenté — c'est une information, pas un trou : sans
+                    cette colonne, « elle n'a pas utilisé ses outils » et « on
+                    ne lui en a donné aucun » sont indiscernables après coup.
+                  {% endcomment %}
+                  {% if l.trousse %}
+                    <span class="chips">
+                      {% for m in l.trousse %}<span class="chip">{{ m }}</span>{% endfor %}
+                    </span>
+                  {% else %}<span class="muted">—</span>{% endif %}
+                </td>
                 <td class="num">{{ l.observations_count }}</td>
                 <td class="num">{{ l.max_pertinence|num }}</td>
                 <td>

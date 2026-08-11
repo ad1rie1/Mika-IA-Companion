@@ -15,6 +15,7 @@ from django.shortcuts import render
 from GestionSysteme import formatting as fmt, tables
 from GestionSysteme.nav import item_for
 from GestionSysteme.shell import page_context
+from utils.degradation import degraded
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,7 @@ def inner(request, tab: str | None = None):
         "emotions": _emotions,
         "drives": _drives,
         "ruminations": _ruminations,
+        "chantiers": _travaux,
         "rythme": _rhythm,
         "historique": _history,
     }[current.key]
@@ -208,6 +210,80 @@ def _ruminations(request) -> dict:
         "page": tables.paginate(request, qs, per_page=fs.per_page),
         "status_tones": {"active": "warn", "resolved": "ok", "faded": ""},
         "status_labels": _RUMINATION_FR,
+    }
+
+
+# ── Chantiers ───────────────────────────────────────────────────────────
+
+_TRAVAIL_FR = {
+    "en_cours": "en cours",
+    "aboutie": "menée au bout",
+    "bloquee": "bloquée",
+    "abandonnee": "abandonnée",
+}
+_TRAVAIL_TONS = {
+    "en_cours": "warn", "aboutie": "ok", "bloquee": "danger", "abandonnee": "",
+}
+_ORIGINE_FR = {
+    "observation": "le dehors",
+    "pensee": "une pensée qui insiste",
+    "pulsion": "une envie",
+}
+
+
+def _travaux(request) -> dict:
+    """Ce qu'elle a entrepris, et où ça en est.
+
+    L'envie affichée est **calculée**, jamais celle stockée en base : cette
+    dernière n'est qu'un couple (valeur, ancre) dont la valeur seule est
+    périmée dès la seconde suivante. Montrer le champ brut ferait dire à
+    l'écran l'inverse de ce que le moteur applique — un chantier « à 0,80 »
+    que la boucle vient d'abandonner.
+    """
+    from conscience.conduite import TravailEnCours, envie_courante
+    from conscience.models import Travail
+    from django.utils import timezone as tz
+
+    fs = tables.FilterSet(per_page=tables.read_per_page(request))
+    statut = fs.add(tables.select_filter(
+        request, "statut", "État", tuple(_TRAVAIL_FR.items()),
+    ))
+
+    qs = Travail.objects.order_by("-envie", "-created_at")
+    if statut.value:
+        qs = qs.filter(statut=statut.value)
+
+    page = tables.paginate(request, qs, per_page=fs.per_page)
+
+    maintenant = tz.now()
+    lignes = []
+    for row in page.rows:
+        vue = TravailEnCours(
+            identifiant=row.pk, titre=row.titre, envie=row.envie,
+            ancre_envie=row.ancre,
+        )
+        # Le repli est la valeur stockée : périmée, mais lisible. Laisser la
+        # variable non liée ferait tomber la page entière sur un seul chantier
+        # dont l'ancre serait malformée.
+        courante = row.envie
+        with degraded("gestion: envie courante d'un chantier"):
+            courante = envie_courante(vue, maintenant)
+        lignes.append({
+            "row": row,
+            "envie": courante,
+            "progression": (
+                row.pas_effectues / row.pas_max if row.pas_max else 0.0
+            ),
+        })
+
+    return {
+        "filterset": fs,
+        "page": page,
+        "lignes": lignes,
+        "statut_labels": _TRAVAIL_FR,
+        "statut_tones": _TRAVAIL_TONS,
+        "origine_labels": _ORIGINE_FR,
+        "en_cours": Travail.objects.filter(statut="en_cours").count(),
     }
 
 

@@ -34,7 +34,7 @@ class TestEligibilityHysteresis:
 
         with patch("conscience.engine.conscience_engine") as ce:
             ce.get_idle_seconds.return_value = 99999
-            eligible = await SleepCycle._is_eligible_to_sleep()
+            eligible = await SleepCycle()._is_eligible_to_sleep()
         assert eligible is True
 
     async def test_staying_asleep_ignores_rest_gate(self):
@@ -47,14 +47,14 @@ class TestEligibilityHysteresis:
 
         with patch("conscience.engine.conscience_engine") as ce:
             ce.get_idle_seconds.return_value = 99999
-            eligible = await SleepCycle._is_eligible_to_sleep()
+            eligible = await SleepCycle()._is_eligible_to_sleep()
         assert eligible is True
 
     async def test_interaction_always_wakes(self):
         """Idle gate applies even mid-sleep: someone talking wakes her."""
         with patch("conscience.engine.conscience_engine") as ce:
             ce.get_idle_seconds.return_value = 10.0
-            eligible = await SleepCycle._is_eligible_to_sleep()
+            eligible = await SleepCycle()._is_eligible_to_sleep()
         assert eligible is False
 
 

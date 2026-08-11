@@ -24,7 +24,6 @@ from drives.engine import DriveEngine
 from drives.state import (
     DEFAULT_PARAMS,
     DriveKind,
-    drive_prompt_description,
     dominant_drive,
 )
 
@@ -62,26 +61,42 @@ class TestTensionGrowth:
         for kind in DriveKind:
             assert engine.states[kind].tension == 0.0
 
-    def test_curiosity_grows_linearly_with_time(self, engine):
-        """After 300s at 0.0008/s, curiosity should be ~0.24."""
+    def test_curiosity_monte_des_les_premieres_minutes(self, engine):
+        """~0.21 au bout de 300 s, en temps logarithmique.
+
+        Le nom disait « linearly » et la docstring « 0.0008/s » : les deux sont
+        faux depuis le passage en log-temps, et la valeur attendue est restée
+        juste par coïncidence. Un test dont le nom ment survit aux relectures
+        en racontant l'inverse de ce que fait le code.
+        """
         _backdate(engine, 300.0)
         engine.update()
         tension = engine.states[DriveKind.CURIOSITY].tension
         assert 0.20 < tension < 0.30
 
-    def test_social_ne_sature_plus_avec_curiosity(self, engine):
-        """Le pin change avec P7.
+    def test_aucune_pulsion_positive_ne_sature_en_une_heure(self, engine):
+        """Le pin change une seconde fois, et pour la même raison qu'à P7.
 
-        Il disait « SOCIAL monte plus vite que CURIOSITY », ce qui n'était vrai
-        que pendant les 17 min avant que les deux ne saturent ensemble. C'est
-        exactement le défaut : passé ce quart d'heure, une heure et trois
-        semaines rendaient la même ligne de prompt. SOCIAL est maintenant la
-        seule pulsion qui a encore quelque chose à dire au bout d'une heure.
+        Il affirmait alors que CURIOSITY valait exactement 1.0 au bout d'une
+        heure — ce qui était vrai, et qui était le défaut : sa propriété
+        (« SOCIAL est la seule qui a encore quelque chose à dire ») ne tenait
+        qu'à la saturation des deux autres. Elle est maintenant vraie de
+        personne, ce qui est mieux : les poids de CURIOSITY et EXPRESSION
+        somment à 0.55, au-delà du plafond du Facteur 9 (+0.50), si bien que
+        leur saturation figeait ce facteur sur une constante passé la
+        demi-heure. Aucune des trois ne doit plus être au plafond à une heure.
         """
         _backdate(engine, 3600.0)
         engine.update()
-        assert engine.states[DriveKind.CURIOSITY].tension == pytest.approx(1.0)
-        assert engine.states[DriveKind.SOCIAL].tension < 0.5
+        for kind in (DriveKind.CURIOSITY, DriveKind.SOCIAL, DriveKind.EXPRESSION):
+            assert engine.states[kind].tension < 1.0, kind
+        # …et elles restent ordonnées par leur horizon : l'expression (9 h)
+        # devant la curiosité (12 h), toutes deux devant l'absence (30 j).
+        assert (
+            engine.states[DriveKind.EXPRESSION].tension
+            > engine.states[DriveKind.CURIOSITY].tension
+            > engine.states[DriveKind.SOCIAL].tension
+        )
 
     def test_tension_clamps_at_one(self, engine):
         _backdate(engine, 10_000.0)  # way beyond saturation
@@ -180,30 +195,49 @@ class TestPromptContext:
         assert engine.get_context() == ""
 
     def test_active_drives_appear_in_french(self, engine):
+        """Le pin passe du LEXIQUE à la PROPRIÉTÉ.
+
+        Il cherchait « contact », « reconnue » ou « echanger », les mots exacts
+        de l'une des douze phrases figées. Avec 112 variantes tirées, un pin
+        sur trois mots est un pari qui rougit au hasard — et il rougirait pour
+        une raison qui n'apprend rien. Ce qu'on veut vraiment savoir, c'est
+        qu'une pulsion saillante est dite, et qu'elle est dite en français.
+        """
         engine.states[DriveKind.SOCIAL].tension = 0.7
         engine.update()
         ctx = engine.get_context()
         assert ctx
-        assert "contact" in ctx or "reconnue" in ctx or "echanger" in ctx
+        from drives.phrasing import PREFIXE_PROMPT
+        assert ctx.startswith(PREFIXE_PROMPT)
+        assert len(ctx) > len(PREFIXE_PROMPT) + 10
 
     def test_intensity_adverbs_scale_correctly(self, engine):
-        # Mild
-        engine.states[DriveKind.CURIOSITY].tension = 0.40
-        ctx_mild = drive_prompt_description(engine.states)
-        # Strong
-        engine.states[DriveKind.CURIOSITY].tension = 0.85
-        ctx_strong = drive_prompt_description(engine.states)
-        # At minimum the adverbs should differ
-        assert ctx_mild != ctx_strong
+        """Deux tensions éloignées ne tombent pas dans le même palier.
+
+        Mesuré sur `palier_pour` plutôt que sur deux rendus comparés : le
+        tirage est amorti, donc deux appels successifs diffèrent déjà par la
+        variante choisie — l'ancienne assertion aurait passé même si les
+        paliers avaient fusionné.
+        """
+        from drives.phrasing import palier_pour
+
+        assert palier_pour(0.40) is not palier_pour(0.85)
 
     def test_top_three_cap_on_description(self, engine):
-        """Only top 3 drives appear in the prompt, even if all are active."""
+        """Au plus trois pulsions dites, même quand les quatre sont au plafond.
+
+        Le comptage des « tu » est abandonné : il était déjà faux dès qu'une
+        variante commence par « il y a » ou « l'envie de », et le vivier en
+        contient. On compte les phrases, ce qui est la propriété.
+        """
+        from drives.phrasing import MAX_PULSIONS_DITES, PREFIXE_PROMPT
+
         for kind in DriveKind:
-            engine.states[kind].tension = 0.9
-        ctx = drive_prompt_description(engine.states)
-        # Count occurrences of "tu" (each drive line starts with "tu")
-        # Should be 3, not 4
-        assert ctx.count("tu ") + ctx.count("Tu ") <= 5
+            engine.states[kind].tension = 0.95
+        engine.update()
+        ctx = engine.get_context()
+        corps = ctx[len(PREFIXE_PROMPT):]
+        assert 0 < corps.count(".") <= MAX_PULSIONS_DITES
 
 
 # ---------------------------------------------------------------------------
@@ -384,13 +418,15 @@ class TestEchellesDeTemps:
         une_heure = self._apres(3600.0)
         trois_semaines = self._apres(21 * 86400.0)
 
+        from drives.phrasing import palier_pour
+
         t1 = une_heure.states[DriveKind.SOCIAL].tension
         t2 = trois_semaines.states[DriveKind.SOCIAL].tension
         assert t2 - t1 >= 0.5
-        assert (
-            drive_prompt_description(une_heure.states)
-            != drive_prompt_description(trois_semaines.states)
-        )
+        # Sur le PALIER et non sur deux rendus comparés : le tirage est amorti,
+        # donc deux rendus diffèrent de toute façon par la variante choisie.
+        # C'est le palier qui porte « ça ne se lit pas pareil ».
+        assert palier_pour(t1) is not palier_pour(t2)
 
     def test_social_est_monotone_et_bornee(self):
         echelles = [300.0, 3600.0, 86400.0, 7 * 86400.0, 21 * 86400.0]
@@ -407,11 +443,45 @@ class TestEchellesDeTemps:
         e.update()
         assert e.states[DriveKind.SOCIAL].tension < avant
 
-    def test_la_croissance_lineaire_reste_pour_curiosity(self):
-        """Le mécanisme est opt-in : `growth_horizon = 0` garde l'ancien calcul."""
-        assert DEFAULT_PARAMS[DriveKind.CURIOSITY].growth_horizon == 0.0
-        e = self._apres(300.0)
-        assert 0.20 < e.states[DriveKind.CURIOSITY].tension < 0.30
+    def test_la_croissance_lineaire_reste_disponible_pour_rest(self):
+        """Le mécanisme reste opt-in : `growth_horizon = 0` garde l'ancien calcul.
+
+        Le test visait CURIOSITY, qui vient de passer en log-temps — son nom
+        mentait donc désormais, et un test dont le nom ment est pire qu'un test
+        rouge. La propriété qu'il mesure (l'opt-in existe et se lit sur la
+        table) n'a pas disparu : REST la porte, avec l'avantage de ne pas
+        risquer de rebasculer au prochain calibrage, sa croissance venant de
+        l'activité et non du temps.
+        """
+        assert DEFAULT_PARAMS[DriveKind.REST].growth_horizon == 0.0
+        assert DEFAULT_PARAMS[DriveKind.REST].growth_tau == 0.0
+
+    def test_curiosity_et_expression_sont_en_log_temps(self):
+        """Les deux pulsions désaturées déclarent bien un horizon.
+
+        Sans horizon non nul dans la table, `params_for` ne relit ni tau ni
+        horizon depuis la configuration (`drives/state.py`) : les ConfigItem
+        déclarés seraient inertes, et la croissance resterait linéaire tout en
+        affichant des réglages qui ne pilotent rien.
+        """
+        for kind, horizon in (
+            (DriveKind.CURIOSITY, 12 * 3600.0),
+            (DriveKind.EXPRESSION, 9 * 3600.0),
+        ):
+            assert DEFAULT_PARAMS[kind].growth_rate == 0.0, kind
+            assert DEFAULT_PARAMS[kind].growth_horizon == horizon, kind
+            assert DEFAULT_PARAMS[kind].growth_tau > 0.0, kind
+
+    def test_la_curiosite_ne_sature_plus_en_vingt_minutes(self):
+        """Le défaut mesuré : 0.0008/s la mettait à 1.0 en 20 min 50."""
+        e = self._apres(1260.0)  # 21 min
+        assert 0.35 < e.states[DriveKind.CURIOSITY].tension < 0.50
+        # …et elle continue de monter bien après, au lieu d'être plafonnée.
+        tard = self._apres(3600.0)
+        assert (
+            tard.states[DriveKind.CURIOSITY].tension
+            > e.states[DriveKind.CURIOSITY].tension
+        )
 
 
 class TestLogGrowth:

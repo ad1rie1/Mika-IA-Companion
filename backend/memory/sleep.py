@@ -65,6 +65,12 @@ logger = logging.getLogger(__name__)
 NIGHT_START_HOUR = 23       # phase gate opens at 23h
 NIGHT_END_HOUR = 6          # closes at 6h
 IDLE_SECONDS_THRESHOLD = 900  # 15 min without interaction
+#: Délai pendant lequel un réveil tient, même si personne n'a rien dit.
+#:
+#: Assez long pour qu'un tour complet aboutisse — l'appel IA est borné à 120 s
+#: par `ai.call_timeout_seconds` — sans être une insomnie : passé ce délai,
+#: l'inactivité reprend la main et elle se rendort.
+ENDOGENOUS_WAKE_GRACE_SECONDS = 180
 # REST n'INTERDIT plus de dormir, il AVANCE l'heure du coucher. Le gate
 # exigeait `rest_tension >= 0.5` : REST ne croît que par événement d'activité
 # et décroît pendant les 900 s d'idle que le gate impose d'abord, si bien
@@ -243,6 +249,16 @@ class SleepCycle:
         # the REST gate governs falling asleep, not staying asleep (sleep
         # drains REST, and draining it must not bounce her awake).
         self._asleep_night: date | None = None
+        # Dernier réveil demandé (`monotonic()`), ou 0.0 si jamais.
+        #
+        # La porte d'endormissement ne lit que l'inactivité, et l'inactivité ne
+        # compte que ce que les *autres* font : un acte de la conscience ne
+        # touche pas `_last_activity`, à dessein. La nuit, une initiative la
+        # réveillait donc pour un tick, puis la porte la rendormait 60 s plus
+        # tard — pendant qu'elle parlait. Et `pipeline/voice.py` refuse la
+        # parole en sommeil : le message s'affichait, muet, prononcé par
+        # quelqu'un que l'écran montrait endormi.
+        self._dernier_reveil: float = 0.0
         # Diffusions de réveil détachées, tenues pour ne pas être collectées
         # en vol (même motif que `ConscienceEngine._fastpath_tasks`).
         self._wake_tasks: set[asyncio.Task] = set()
@@ -287,6 +303,11 @@ class SleepCycle:
         Idempotente, ne lève jamais — elle est appelée sur le chemin chaud,
         éventuellement depuis un thread sans boucle.
         """
+        # Horodaté avant le court-circuit : la grâce compte depuis le *dernier*
+        # réveil demandé, y compris quand elle était déjà éveillée. Sans quoi
+        # deux actes rapprochés verraient le second repartir sur la grâce du
+        # premier, presque écoulée.
+        self._dernier_reveil = monotonic()
         if self._phase == SleepPhase.AWAKE and self._asleep_night is None:
             return
         self._phase = SleepPhase.AWAKE
@@ -541,11 +562,26 @@ class SleepCycle:
             return (now - timedelta(days=1)).date()
         return now.date()
 
-    @staticmethod
-    async def _is_eligible_to_sleep() -> bool:
-        """Idle time, and nothing else — an interaction wakes her whatever
-        the hour. L'heure d'entrée, elle, est modulée par la fatigue
-        (`_night_start_hour`)."""
+    async def _is_eligible_to_sleep(self) -> bool:
+        """Inactivité, plus une grâce après tout réveil.
+
+        L'heure d'entrée, elle, est modulée par la fatigue
+        (`_night_start_hour`).
+
+        Méthode d'instance et non plus statique : la grâce est un état, et
+        c'est le seul moyen de distinguer « personne ne lui a parlé depuis
+        15 min » — vrai en permanence la nuit — de « elle vient de se
+        réveiller pour faire quelque chose ». `get_idle_seconds()` ne peut pas
+        répondre à la seconde question : il ne mesure que ce que les autres
+        font, et un acte endogène le laisse volontairement intact.
+        """
+        grace = cfg_int(
+            "memory.sleep_endogenous_wake_grace_seconds",
+            ENDOGENOUS_WAKE_GRACE_SECONDS, mini=0, maxi=3600,
+        )
+        if self._dernier_reveil and (monotonic() - self._dernier_reveil) < grace:
+            return False
+
         try:
             from conscience.engine import conscience_engine
             idle_seconds = conscience_engine.get_idle_seconds()

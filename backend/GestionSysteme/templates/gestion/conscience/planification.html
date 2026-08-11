@@ -16,6 +16,7 @@
               <th class="num">Priorité</th>
               <th class="fit">Source</th>
               <th class="fit">État</th>
+              <th style="min-width: 16rem;">Ce que ça a donné</th>
               <th class="fit">Exécutée</th>
             </tr>
           </thead>
@@ -31,6 +32,16 @@
                 <td class="fit"><span class="badge">{{ a.source|default:"—" }}</span></td>
                 <td class="fit">
                   <span class="badge {% if a.status == 'pending' %}badge-warn{% elif a.status == 'executed' %}badge-ok{% elif a.status == 'failed' %}badge-danger{% endif %}">{{ a.status }}</span>
+                  {% if a.tentatives %}<span class="text-xs muted">{{ a.tentatives }} tentative{{ a.tentatives|pluralize }}</span>{% endif %}
+                </td>
+                <td class="text-xs">
+                  {% if a.raison_echec %}
+                    <span class="muted">{{ a.raison_echec }}</span>
+                  {% elif a.resultat %}
+                    <div class="cell-clamp muted">{{ a.resultat|truncatechars:140 }}</div>
+                  {% else %}
+                    <span class="muted">—</span>
+                  {% endif %}
                 </td>
                 <td class="fit muted">{% if a.executed_at %}{{ a.executed_at|ago }}{% else %}—{% endif %}</td>
               </tr>

@@ -38,6 +38,12 @@ _GROUPE_PENSEES = "Pensées qui trottent"
 _GROUPE_INITIATIVE = "Initiative"
 _GROUPE_SOMMEIL = "Sommeil"
 _GROUPE_BUDGETS = "Budgets d'appel"
+_GROUPE_PORTES = "Portes de pertinence"
+_GROUPE_TROUSSE = "Trousse d'un acte"
+_GROUPE_VECU = "Ce qu'elle se raconte"
+_GROUPE_MURMURE = "Ce qu'on l'entend se dire"
+_GROUPE_TRAVAIL = "Ce qu'elle entreprend"
+_GROUPE_TRAVAIL_CAL = "Ce qu'elle entreprend · calibrage"
 
 CONFIG_SCHEMA = [
     ConfigSection(
@@ -116,6 +122,395 @@ CONFIG_SCHEMA = [
                     "que l'interprétation tourne en série dans la boucle du "
                     "module qui émet : cinq flux RSS, c'était ~75 appels à la "
                     "suite avec l'ordonnanceur figé.",
+    ),
+    ConfigGroup(
+        section="conscience", key=_GROUPE_TROUSSE, order=22,
+        description="Quels outils elle a réellement sous la main quand elle "
+                    "prend la parole d'elle-même. La trousse se dérivait des "
+                    "seules sources d'observation — or l'inactivité, une "
+                    "salutation, un débordement d'humeur, une pulsion ou une "
+                    "pensée qui insiste n'en créent aucune : le seul cas où "
+                    "elle agissait spontanément était aussi le seul où elle "
+                    "n'avait aucune main, pendant que le prompt lui énumérait "
+                    "tout ce que le système sait faire.",
+    ),
+    ConfigItem(
+        key="conscience.trousse.socle", type="list",
+        section="conscience", group=_GROUPE_TROUSSE,
+        label="Modules toujours chargés pour un acte spontané",
+        default=["conscience_tools", "memory_tools"], hot_reload=True,
+        hint="Jamais coupés par le plafond : les couper reviendrait au défaut "
+             "d'origine par une autre porte.",
+    ),
+    ConfigItem(
+        key="conscience.trousse.curiosite", type="list",
+        section="conscience", group=_GROUPE_TROUSSE,
+        label="Modules ajoutés quand la curiosité est saillante",
+        default=["rss", "files"], hot_reload=True,
+        hint="Les surfaces où quelque chose de neuf peut être TROUVÉ plutôt "
+             "qu'inventé — la mémoire, déjà au socle, ne rend que du "
+             "déjà-vécu.",
+    ),
+    ConfigItem(
+        key="conscience.trousse.social", type="list",
+        section="conscience", group=_GROUPE_TROUSSE,
+        label="Modules ajoutés quand le besoin de contact est saillant",
+        default=["email", "identity_tools"], hot_reload=True,
+        hint="L'e-mail est le seul canal sortant qu'elle peut ouvrir d'elle-"
+             "même ; l'identité va avec, joindre quelqu'un suppose de savoir "
+             "de qui on parle.",
+    ),
+    ConfigItem(
+        key="conscience.trousse.plafond_caracteres", type="int",
+        section="conscience", group=_GROUPE_TROUSSE,
+        label="Plafond de la trousse (caractères de déclaration)",
+        default=8000, min=0, max=60000, hot_reload=True,
+        hint="Une déclaration d'outil est du PROMPT, re-payé à chaque "
+             "itération de la boucle d'outils. Mesuré : le socle pèse ~2 900 "
+             "caractères, les dix modules ~20 600. Le plafond se consomme "
+             "module par module et jamais outil par outil — une demi-trousse "
+             "est un piège, le modèle voyant « envoyer un mail » sans « lire "
+             "les mails » conclut qu'il peut écrire à l'aveugle.",
+    ),
+    ConfigItem(
+        key="conscience.trousse.porte_pulsion", type="float",
+        section="conscience", group=_GROUPE_TROUSSE,
+        label="Tension à partir de laquelle une pulsion élargit la trousse",
+        default=0.50, min=0.0, max=1.0, hot_reload=True,
+        hint="Alignée sur la porte d'assouvissement de la curiosité et "
+             "volontairement sous le plafond du chemin sans LLM (0.55) : une "
+             "porte qu'aucun signal ne franchit est une porte fermée.",
+    ),
+    ConfigGroup(
+        section="conscience", key=_GROUPE_VECU, order=23,
+        description="Ce qu'elle se dit à elle-même quand elle décide de "
+                    "parler. Un cycle cumule souvent plusieurs motifs — une "
+                    "salutation ET une humeur qui déborde — et ils sont "
+                    "maintenant tous dits. Les portes d'inactivité, d'humeur "
+                    "et de pensée ne sont PAS réglables ici : elles sont "
+                    "reprises telles quelles du bloc de pondération, pour "
+                    "qu'il soit impossible d'annoncer dans le prompt un motif "
+                    "que le score n'a pas compté.",
+    ),
+    ConfigItem(
+        key="conscience.vecu.porte_pulsion", type="float",
+        section="conscience", group=_GROUPE_VECU,
+        label="Tension à partir de laquelle une pulsion se dit",
+        default=0.6, min=0.0, max=1.0, hot_reload=True,
+        hint="Propre au récit, contrairement aux trois autres portes : le "
+             "score pondère les quatre pulsions ensemble, là où une phrase ne "
+             "peut nommer que celle qui domine.",
+    ),
+    ConfigItem(
+        key="conscience.vecu.pulsion_forte", type="float",
+        section="conscience", group=_GROUPE_VECU,
+        label="Tension au-dessus de laquelle l'envie se dit plus fort",
+        default=0.85, min=0.0, max=1.0, hot_reload=True,
+        hint="Change le registre de la phrase, pas le fait de la dire.",
+    ),
+    ConfigGroup(
+        section="conscience", key=_GROUPE_MURMURE, order=24,
+        description="Ce qu'on l'entend se dire à elle-même avant d'agir — "
+                    "« oh tiens, si j'allais voir… ». Diffusé au groupe "
+                    "global, sans destinataire : une pensée adressée à "
+                    "quelqu'un partirait en note vocale. Les six gardes sont "
+                    "toutes évaluées AVANT l'appel au modèle, donc un quota "
+                    "épuisé ou une absence de public ne coûtent rien.",
+    ),
+    ConfigItem(
+        key="conscience.murmure.quota_quotidien", type="int",
+        section="conscience", group=_GROUPE_MURMURE,
+        label="Murmures par jour",
+        default=8, min=0, max=200, hot_reload=True,
+        hint="Compté sur la journée locale, et partagé entre la conscience et "
+             "le lanceur de projets : c'est le même personnage qui pense à "
+             "voix haute. À 0, elle ne murmure jamais.",
+    ),
+    ConfigItem(
+        key="conscience.murmure.delai_min_secondes", type="float",
+        section="conscience", group=_GROUPE_MURMURE,
+        label="Délai minimal entre deux tentatives (s)",
+        default=600.0, min=0.0, max=86400.0, hot_reload=True,
+        hint="S'applique même quand le modèle n'a rien rendu — sinon un modèle "
+             "en échec serait rappelé à chacun des tours de conscience, toutes "
+             "les 30 s.",
+    ),
+    ConfigItem(
+        key="conscience.murmure.longueur_max", type="int",
+        section="conscience", group=_GROUPE_MURMURE,
+        label="Longueur maximale d'un murmure (caractères)",
+        default=160, min=1, max=2000, hot_reload=True,
+        hint="Coupe de sécurité côté sortie : la voix intérieure plafonne déjà, "
+             "mais depuis SA configuration, et le murmure ne doit pas grandir "
+             "parce qu'un autre réglage a bougé.",
+    ),
+    ConfigItem(
+        key="conscience.murmure.fenetre_repetition_secondes", type="float",
+        section="conscience", group=_GROUPE_MURMURE,
+        label="Fenêtre anti-répétition (s)",
+        default=3600.0, min=0.0, max=86400.0, hot_reload=True,
+        hint="Deux intentions identiques dans cette fenêtre ne donnent qu'un "
+             "murmure. C'est ce qui empêche de dépenser le quota du jour en "
+             "huit variantes d'une même pensée.",
+    ),
+    ConfigItem(
+        key="conscience.murmure.endormie", type="bool",
+        section="conscience", group=_GROUPE_MURMURE,
+        label="Murmurer aussi pendant le sommeil",
+        default=False, hot_reload=True,
+        hint="Ce n'est PAS un doublon de la politique vocale : celle-ci laisse "
+             "délibérément passer une pensée intérieure même endormie — c'est "
+             "ce qui rend la nuit habitée plutôt que muette — et ne refuse que "
+             "la parole adressée. Le silence nocturne ne peut donc se décider "
+             "qu'ici, seul endroit qui précède la dépense.",
+    ),
+    ConfigGroup(
+        section="conscience", key=_GROUPE_TRAVAIL, order=26,
+        description="Ce qui lui ouvre un chantier, et combien elle en mène de "
+                    "front. Une pensée qui insiste ou une curiosité saillante "
+                    "devient une amorce ; au-delà d'un certain désir, l'amorce "
+                    "devient un travail qui persiste en base, décroît en temps "
+                    "d'horloge, s'essouffle et finit par être abandonné. C'est "
+                    "ce qui manquait pour qu'« aller au bout » veuille dire "
+                    "quelque chose : aucun modèle ne portait un travail, donc "
+                    "chaque cycle repartait de zéro.",
+    ),
+    ConfigGroup(
+        section="conscience", key=_GROUPE_TRAVAIL_CAL, order=27, advanced=True,
+        description="Les seuils fins de la récolte et de la poursuite. La "
+                    "porte des amorces se lit CONTRE le plafond du chemin sans "
+                    "LLM (0.55) : au-dessus, aucune observation ne peut ouvrir "
+                    "de chantier ; trop bas, chaque message qu'on lui adresse "
+                    "en ouvre un.",
+    ),
+    ConfigItem(
+        key="conscience.travail.travaux_actifs_max", type="int",
+        section="conscience", group=_GROUPE_TRAVAIL,
+        label="Chantiers menés de front",
+        default=3, min=0, max=20, hot_reload=True,
+        hint="À 0, elle n'entreprend plus rien — les chantiers déjà ouverts "
+             "continuent de vieillir et de s'abandonner.",
+    ),
+    ConfigItem(
+        key="conscience.travail.ouverture_envie_min", type="float",
+        section="conscience", group=_GROUPE_TRAVAIL,
+        label="Désir minimal pour ouvrir un chantier",
+        default=0.50, min=0.0, max=1.0, hot_reload=True,
+        hint="Une amorce sous cette barre reste une amorce. Volontairement "
+             "au-dessus du plafond d'une micro-rumination d'audit (0.425) : se "
+             "repasser sa propre réponse ne doit pas ouvrir de chantier.",
+    ),
+    ConfigItem(
+        key="conscience.travail.envie_demi_vie_s", type="float",
+        section="conscience", group=_GROUPE_TRAVAIL,
+        label="Demi-vie du désir (s)",
+        default=6 * 3600.0, min=60.0, max=30 * 86400.0, hot_reload=True,
+        hint="En temps d'horloge, sur une ancre qui n'avance qu'à l'écriture — "
+             "même idiome que les pensées. Une décroissance par tour de boucle "
+             "lierait la durée de vie d'une intention à la cadence du moteur, "
+             "alors que tous ses lecteurs raisonnent en heures.",
+    ),
+    ConfigItem(
+        key="conscience.travail.pas_max", type="int",
+        section="conscience", group=_GROUPE_TRAVAIL,
+        label="Pas maximum par chantier",
+        default=5, min=1, max=100, hot_reload=True,
+        hint="Un travail sans terme n'est pas un travail.",
+    ),
+    ConfigItem(
+        key="conscience.travail.pas_intervalle_min_s", type="float",
+        section="conscience", group=_GROUPE_TRAVAIL,
+        label="Silence minimal entre deux pas (s)",
+        default=900.0, min=0.0, max=86400.0, hot_reload=True,
+        hint="La boucle tourne toutes les 30 s : sans espacement, un chantier "
+             "brûlerait tous ses pas en quelques minutes.",
+    ),
+    ConfigItem(
+        key="conscience.travail.graine_obs_pertinence", type="float",
+        section="conscience", group=_GROUPE_TRAVAIL_CAL,
+        label="Pertinence d'une observation qui peut ouvrir un chantier",
+        default=0.45, min=0.0, max=1.0, hot_reload=True,
+        hint="Laisse passer un article RSS apparié (0.55) et refuse un message "
+             "Telegram (0.40). Descendre sous 0.40 fait ouvrir un chantier à "
+             "chaque phrase qu'on lui adresse.",
+    ),
+    ConfigItem(
+        key="conscience.travail.graine_pensee_intensite", type="float",
+        section="conscience", group=_GROUPE_TRAVAIL_CAL,
+        label="Intensité d'une pensée qui peut ouvrir un chantier",
+        default=0.40, min=0.0, max=1.0, hot_reload=True,
+    ),
+    ConfigItem(
+        key="conscience.travail.graine_pulsion_tension", type="float",
+        section="conscience", group=_GROUPE_TRAVAIL_CAL,
+        label="Tension d'une pulsion qui peut ouvrir un chantier",
+        default=0.50, min=0.0, max=1.0, hot_reload=True,
+        hint="Seules la curiosité et l'expression fécondent : le besoin de "
+             "contact veut une personne, pas un chantier, et le repos ne veut "
+             "rien entreprendre.",
+    ),
+    ConfigItem(
+        key="conscience.travail.graines_max", type="int",
+        section="conscience", group=_GROUPE_TRAVAIL_CAL,
+        label="Amorces retenues par cycle",
+        default=5, min=1, max=50, hot_reload=True,
+    ),
+    ConfigItem(
+        key="conscience.travail.envie_poursuite_min", type="float",
+        section="conscience", group=_GROUPE_TRAVAIL_CAL,
+        label="Désir sous lequel un chantier n'avance plus",
+        default=0.25, min=0.0, max=1.0, hot_reload=True,
+    ),
+    ConfigItem(
+        key="conscience.travail.envie_plancher_abandon", type="float",
+        section="conscience", group=_GROUPE_TRAVAIL_CAL,
+        label="Désir sous lequel un chantier est abandonné",
+        default=0.10, min=0.0, max=1.0, hot_reload=True,
+        hint="Abandonné, pas supprimé : la ligne reste lisible à l'écran. "
+             "L'inachevé est une information sur elle.",
+    ),
+    ConfigItem(
+        key="conscience.travail.diffusion_notable_min", type="float",
+        section="conscience", group=_GROUPE_TRAVAIL_CAL,
+        label="Notabilité d'un résultat qui vaut d'être dit",
+        default=0.80, min=0.0, max=1.0, hot_reload=True,
+        hint="Un pas de chantier est muet par défaut : quatre travaux à cinq "
+             "pas feraient vingt monologues par jour, et ceux-là passeraient "
+             "HORS du frein quotidien des initiatives.",
+    ),
+    ConfigItem(
+        key="conscience.travail.diffusion_intervalle_min_s", type="float",
+        section="conscience", group=_GROUPE_TRAVAIL_CAL,
+        label="Silence minimal entre deux annonces de chantier (s)",
+        default=4 * 3600.0, min=0.0, max=86400.0, hot_reload=True,
+    ),
+    ConfigItem(
+        key="conscience.verdict.delai_defaut_s", type="float",
+        section="conscience", group=_GROUPE_TRAVAIL_CAL,
+        label="Délai retenu quand elle dit « attendre » sans préciser (s)",
+        default=300.0, min=0.0, max=86400.0, hot_reload=True,
+    ),
+    ConfigItem(
+        key="conscience.verdict.delai_max_s", type="float",
+        section="conscience", group=_GROUPE_TRAVAIL_CAL,
+        label="Délai maximum qu'un verdict peut demander (s)",
+        default=86400.0, min=1.0, max=30 * 86400.0, hot_reload=True,
+        hint="Borne d'un lecteur face à une sortie de modèle : « reprends dans "
+             "dix ans » se ramène ici.",
+    ),
+    ConfigItem(
+        key="conscience.brief.observations_max", type="int",
+        section="conscience", group=_GROUPE_TRAVAIL_CAL,
+        label="Observations montrées au modèle par acte",
+        default=5, min=0, max=50, hot_reload=True,
+        hint="C'est aussi le nombre qui sera CLOS : l'acte ne marque comme "
+             "traité que ce qu'il a mis sous les yeux. Le prompt en montrait "
+             "cinq et l'acte en clôturait vingt.",
+    ),
+    ConfigItem(
+        key="conscience.brief.actions_max", type="int",
+        section="conscience", group=_GROUPE_TRAVAIL_CAL,
+        label="Actions programmées montrées au modèle par acte",
+        default=3, min=0, max=50, hot_reload=True,
+    ),
+    ConfigItem(
+        key="conscience.scheduled.tentatives_max", type="int",
+        section="conscience", group=_GROUPE_TRAVAIL_CAL,
+        label="Tentatives d'une action programmée avant abandon",
+        default=3, min=1, max=50, hot_reload=True,
+    ),
+    ConfigItem(
+        key="conscience.cycles_sautes_max", type="int",
+        section="conscience", group=_GROUPE_TRAVAIL_CAL,
+        label="Cycles sautés d'affilée avant de signaler un blocage",
+        default=6, min=1, max=1000, hot_reload=True,
+        hint="Un acte tient le verrou de décision jusqu'à ~135 s, soit quatre "
+             "cycles : en sauter quelques-uns est normal. Au-delà, la boucle "
+             "compte un échec — sinon « figée » et « en bonne santé » sont "
+             "indiscernables sur l'écran fait pour les distinguer.",
+    ),
+    ConfigItem(
+        key="conscience.travail.graines_modules_max", type="int",
+        section="conscience", group=_GROUPE_TRAVAIL_CAL,
+        label="Sujets retenus parmi ceux que les modules proposent",
+        default=3, min=0, max=50, hot_reload=True,
+        hint="Quand la curiosité est saillante, les modules qui ont quelque "
+             "chose à offrir (articles non lus, par exemple) proposent des "
+             "sujets — c'est ce qui donne un OBJET à une envie qui, sinon, ne "
+             "pouvait que se redire. À 0, la curiosité retombe sur une amorce "
+             "générique.",
+    ),
+    ConfigGroup(
+        section="conscience", key=_GROUPE_PORTES, order=75, advanced=True,
+        description="À partir de quelle pertinence un signal déclenche chacun "
+                    "des mécanismes qui en dépendent. Ces portes se lisent "
+                    "CONTRE le bloc précédent : le chemin sans LLM ne produit "
+                    "au mieux que 0.55, et tant qu'une porte est au-dessus, "
+                    "seul un e-mail — le seul signal payant un appel — peut la "
+                    "franchir. C'est ainsi que six mécanismes sont restés "
+                    "inertes en permanence sur une installation sans compte "
+                    "mail : rien ne devenait une pensée, aucun souvenir n'était "
+                    "ravivé, rien ne la réveillait entre deux cycles.",
+    ),
+    ConfigItem(
+        key="conscience.promotion.rumination_pertinence", type="float",
+        section="conscience", group=_GROUPE_PORTES,
+        label="Pertinence qui fait d'une observation une pensée",
+        default=0.45, min=0.0, max=1.0, hot_reload=True,
+        hint="Une observation restée sans suite jusqu'à péremption, au moins "
+             "aussi pertinente que cette valeur, devient une rumination.",
+    ),
+    ConfigItem(
+        key="conscience.promotion.rumination_actives_max", type="int",
+        section="conscience", group=_GROUPE_PORTES,
+        label="Pensées actives au-delà desquelles on ne promeut plus",
+        default=6, min=1, max=50, hot_reload=True,
+        hint="Une pensée de plus n'est pas une pensée mieux pensée. Sans ce "
+             "plafond, ouvrir la porte ci-dessus installe une pression "
+             "permanente sur le facteur « ruminations ».",
+    ),
+    ConfigItem(
+        key="conscience.maintenance.boost_pertinence", type="float",
+        section="conscience", group=_GROUPE_PORTES,
+        label="Pertinence qui ravive les souvenirs d'un thème",
+        default=0.50, min=0.0, max=1.0, hot_reload=True,
+    ),
+    ConfigItem(
+        key="conscience.maintenance.contradiction_pertinence", type="float",
+        section="conscience", group=_GROUPE_PORTES,
+        label="Pertinence qui déclenche une vérification de cohérence",
+        default=0.80, min=0.0, max=1.0, hot_reload=True,
+        hint="Volontairement HAUTE, contrairement aux autres portes : cette "
+             "branche coûte jusqu'à cinq appels IA, et seuls le chat et "
+             "Telegram la visent.",
+    ),
+    ConfigItem(
+        key="conscience.rumination_pressure_full", type="float",
+        section="conscience", group=_GROUPE_PORTES,
+        label="Somme d'intensités valant une pression pleine",
+        default=2.5, min=0.01, max=20.0, hot_reload=True,
+        hint="La pression des pensées est cette somme rapportée à 1.0. À 1.0, "
+             "deux pensées à 0.5 saturaient déjà le facteur, qui cessait alors "
+             "d'informer.",
+    ),
+    ConfigItem(
+        key="conscience.sleep_wake_scheduled_priority", type="float",
+        section="conscience", group=_GROUPE_PORTES,
+        label="Priorité d'une action programmée qui vaut un réveil",
+        default=0.8, min=0.0, max=1.0, hot_reload=True,
+        hint="La nuit, une action programmée ne lève le veto de sommeil que si "
+             "elle est au moins aussi prioritaire. Sans cette barre, un « pense "
+             "à relire ce brouillon » la réveillait comme une urgence.",
+    ),
+    ConfigItem(
+        key="conscience.suppress_release_idle_seconds", type="float",
+        section="conscience", group=_GROUPE_PORTES,
+        label="Inactivité en deçà de laquelle le frein quotidien se lève (s)",
+        default=600.0, min=0.0, max=86400.0, hot_reload=True,
+        hint="Le frein quotidien n'a aucune sortie propre : le compteur "
+             "d'initiatives ignorées ne retombe qu'en agissant, ce que le frein "
+             "interdit. Quelqu'un qui vient de parler est la seule preuve que "
+             "le silence imposé n'a plus lieu d'être.",
     ),
     ConfigGroup(
         section="conscience", key=_GROUPE_BUDGETS, order=80, advanced=True,
@@ -296,6 +691,25 @@ CONFIG_SCHEMA = [
         default=0.3, min=0.0, max=1.0, hot_reload=True,
     ),
     ConfigItem(
+        key="conscience.factor.urgency_observation_gate", type="float",
+        section="conscience", group=_GROUPE_FACTEURS,
+        label="F2 · Urgence accumulée : pertinence minimale d'une observation",
+        default=0.3, min=0.0, max=1.0, hot_reload=True,
+        hint="Une observation ne compte dans la somme que si elle DÉPASSE "
+             "cette valeur, strictement. Au défaut, un message de chat — dont "
+             "la pertinence sans LLM vaut exactement 0.3 — pèse donc "
+             "rigoureusement zéro dans ce facteur.",
+    ),
+    ConfigItem(
+        key="conscience.factor.urgency_per_observation", type="float",
+        section="conscience", group=_GROUPE_FACTEURS,
+        label="F2 · Urgence accumulée : poids d'une observation dans la somme",
+        default=0.5, min=0.0, max=2.0, hot_reload=True,
+        hint="Chaque observation retenue apporte sa pertinence multipliée par "
+             "cette valeur. À ne pas confondre avec « poids » ci-dessus, qui "
+             "convertit la somme obtenue en points de score.",
+    ),
+    ConfigItem(
         key="conscience.factor.mood_gate", type="float",
         section="conscience", group=_GROUPE_FACTEURS,
         label="F3 · Débordement d'humeur : seuil d'entrée",
@@ -368,7 +782,12 @@ CONFIG_SCHEMA = [
         key="conscience.factor.ignored_min_acts", type="int",
         section="conscience", group=_GROUPE_FACTEURS,
         label="F8 · On m'ignore : relances sans réponse requises",
-        default=2, min=1, max=100, hot_reload=True,
+        default=1, min=1, max=100, hot_reload=True,
+        hint="À 2, la toute première initiative restée sans réponse ne coûtait "
+             "rien : elle relançait au délai nominal, et les trois premiers "
+             "actes de la journée tombaient en une demi-heure. Le backoff du "
+             "délai, lui, comptait déjà dès la première — les deux moitiés du "
+             "même mécanisme ne partaient pas au même moment.",
     ),
     ConfigItem(
         key="conscience.factor.ignored_per_act", type="float",
@@ -512,7 +931,12 @@ CONFIG_SCHEMA = [
         key="conscience.pertinence.rss_matched", type="float",
         section="conscience", group=_GROUPE_PERTINENCE,
         label="Article RSS touchant un de ses thèmes",
-        default=0.45, min=0.0, max=1.0, hot_reload=True,
+        default=0.55, min=0.0, max=1.0, hot_reload=True,
+        hint="Seule pertinence de ce bloc qui porte un intérêt APPARIÉ : "
+             "l'article touche un thème qu'elle suit. C'est aussi le plafond "
+             "de tout le chemin sans LLM — les portes du bloc « Portes de "
+             "pertinence » se règlent en dessous, sinon elles sont "
+             "inatteignables sur une installation sans compte mail.",
     ),
     ConfigItem(
         key="conscience.pertinence.rss_unmatched", type="float",

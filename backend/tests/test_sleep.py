@@ -558,13 +558,24 @@ class TestPersistDream:
 
 
 class TestEligibleToSleep:
+    """`_is_eligible_to_sleep` est passée de statique à méthode d'instance.
+
+    La grâce de réveil est un état, et c'est le seul moyen de distinguer
+    « personne ne lui a parlé depuis 15 min » — vrai en permanence la nuit —
+    de « elle vient de se réveiller pour faire quelque chose ».
+    `get_idle_seconds()` ne peut pas répondre à la seconde question : il ne
+    mesure que ce que les *autres* font, et un acte endogène le laisse
+    volontairement intact. Les trois cas ci-dessous instancient donc un cycle
+    neuf, dont la grâce n'a jamais couru.
+    """
+
     @pytest.mark.asyncio
     async def test_not_eligible_when_busy(self):
         from memory.sleep import SleepCycle
 
         with patch("conscience.engine.conscience_engine") as mock_cons:
             mock_cons.get_idle_seconds.return_value = 30.0  # well under 900
-            assert await SleepCycle._is_eligible_to_sleep() is False
+            assert await SleepCycle()._is_eligible_to_sleep() is False
 
     @pytest.mark.asyncio
     async def test_le_repos_non_merite_n_interdit_plus_de_dormir(self):
@@ -589,7 +600,7 @@ class TestEligibleToSleep:
             from drives.state import DriveKind
             mock_drives.states = {DriveKind.REST: mock_rest}
 
-            assert await SleepCycle._is_eligible_to_sleep() is True
+            assert await SleepCycle()._is_eligible_to_sleep() is True
 
     @pytest.mark.asyncio
     async def test_eligible_when_idle_and_tired(self):
@@ -598,7 +609,7 @@ class TestEligibleToSleep:
         with patch("conscience.engine.conscience_engine") as mock_cons:
             mock_cons.get_idle_seconds.return_value = 1200.0
 
-            assert await SleepCycle._is_eligible_to_sleep() is True
+            assert await SleepCycle()._is_eligible_to_sleep() is True
 
 
 # ---------------------------------------------------------------------------

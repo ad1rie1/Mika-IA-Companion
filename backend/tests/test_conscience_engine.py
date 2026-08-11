@@ -86,37 +86,146 @@ class TestFeedEmotion:
 
 
 # ===================================================================
-# _pick_relevant_modules
+# _pick_relevant_modules — SUPPRIMÉ, et le détail compte
+# ===================================================================
+#
+# `TestPickRelevantModules` (5 cas) a disparu avec la fonction qu'il couvrait.
+# Ce n'est pas un dommage collatéral : trois de ses cinq cas épinglaient un
+# défaut, c'est-à-dire décrivaient le bug comme s'il était la spécification.
+#
+#   test_no_obs_returns_empty       affirmait qu'un acte SANS observation part
+#                                   avec une trousse vide. C'était le défaut
+#                                   bloquant n°1 : inactivité, salutation,
+#                                   humeur, pulsions et ruminations ne créent
+#                                   aucune Observation, donc le seul cas où
+#                                   elle agissait d'elle-même était le seul où
+#                                   elle n'avait aucune main. La propriété
+#                                   INVERSE est désormais épinglée dans
+#                                   `test_conscience_trousse.py`.
+#   test_sources_included           affirmait `"telegram" in result`. Or
+#                                   `TelegramChannel` n'est pas un module —
+#                                   `collectors.tools_for` le jetait en
+#                                   silence. Le test mesurait donc une liste
+#                                   d'intentions, jamais une trousse réelle.
+#   test_wake_added_for_high_...    testait une porte à 0.6 que le chemin
+#                                   d'interprétation sans LLM ne pouvait pas
+#                                   franchir (plafond 0.55) : mécanisme mort,
+#                                   supprimé sans remplacement.
+#
+# Les deux derniers (`wake` ajouté pour une action programmée, non dupliqué)
+# portaient un comportement voulu ; ils sont traduits sans perte dans la suite
+# de la trousse, où le socle contient `conscience_tools` — lequel porte
+# désormais tout le cycle de vie des actions différées.
+#
+# `_make_engine` et `_make_ctx` restent : les tests suivants les utilisent.
+
+
+# ===================================================================
+# La trousse, branchée pour de vrai
 # ===================================================================
 
-class TestPickRelevantModules:
+class TestTrousseBranchee:
+    """La propriété pour laquelle tout le lot existe, mesurée sur le MOTEUR.
 
-    def test_sources_included(self):
-        e = _make_engine()
-        ctx = _make_ctx(sources=["email", "telegram"])
-        result = e._pick_relevant_modules(ctx)
-        assert "email" in result
-        assert "telegram" in result
+    `test_conscience_trousse.py` couvre la fonction pure ; ici on vérifie le
+    câblage — que le moteur passe bien au calcul ce qu'il faut, et surtout
+    qu'il lui passe `disponibles`. Sans cet argument le filtrage s'éteint en
+    silence, les noms inconnus repartent vers `get_tools_for_modules` et sont
+    jetés comme avant : le correctif serait à moitié mort sans qu'aucun test
+    pur ne le voie.
+    """
 
-    def test_wake_added_for_scheduled(self):
-        e = _make_engine()
-        ctx = _make_ctx(sources=["email"], has_scheduled=True)
-        assert "wake" in e._pick_relevant_modules(ctx)
+    def test_un_acte_sans_observation_part_avec_des_outils(self):
+        """L'exact inverse de l'ancien `test_no_obs_returns_empty`.
 
-    def test_wake_added_for_high_pertinence(self):
+        Inactivité, salutation, humeur, pulsions et ruminations ne créent
+        aucune Observation. C'était donc le cas le plus fréquent d'initiative,
+        et le seul où elle n'avait aucune main.
+        """
         e = _make_engine()
-        ctx = _make_ctx(sources=["email"], high_pertinence=True)
-        assert "wake" in e._pick_relevant_modules(ctx)
+        trousse = e._preparer_trousse(_make_ctx())
+        assert trousse.modules, "un acte endogène doit avoir une trousse"
+        from conscience.trousse import SOCLE
+        for nom in SOCLE:
+            assert nom in trousse.modules
 
-    def test_wake_not_duplicated(self):
-        e = _make_engine()
-        ctx = _make_ctx(sources=["wake"], has_scheduled=True)
-        result = e._pick_relevant_modules(ctx)
-        assert result.count("wake") == 1
+    def test_le_socle_survit_a_un_plafond_absurde(self):
+        """Le couper reviendrait au défaut d'origine par une autre porte."""
+        from conscience.trousse import SOCLE, TrousseTuning
 
-    def test_no_obs_returns_empty(self):
         e = _make_engine()
-        assert e._pick_relevant_modules(_make_ctx()) == []
+        e._trousse_tuning = lambda: TrousseTuning(plafond_caracteres=0)
+        trousse = e._preparer_trousse(_make_ctx())
+        assert set(SOCLE).issubset(set(trousse.modules))
+
+    def test_une_source_qui_n_est_pas_un_module_ne_disparait_plus(self):
+        """« frontend » et « telegram » sont les valeurs réelles de
+        `Observation.source` pour un message de chat, et ne sont des modules ni
+        l'un ni l'autre : `collectors.tools_for` les jetait sans un mot."""
+        e = _make_engine()
+        trousse = e._preparer_trousse(_make_ctx(sources=["frontend", "telegram"]))
+        assert "frontend" not in trousse.modules
+        assert "telegram" not in trousse.modules
+        # …et la trousse n'est pas vide pour autant : le socle tient.
+        assert trousse.modules
+
+    def test_le_moteur_passe_bien_disponibles(self):
+        """Sans `disponibles`, `inconnus` reste vide et le filtrage s'éteint."""
+        import inspect
+
+        from conscience.engine import ConscienceEngine
+
+        source = inspect.getsource(ConscienceEngine._preparer_trousse)
+        assert "disponibles=" in source
+
+    def test_l_inventaire_ne_lit_pas_la_base(self):
+        """L'accesseur en mémoire, pas celui qui interroge `ModuleState`.
+
+        Sur l'AST et non sur le texte : le commentaire du moteur cite
+        l'accesseur à ne PAS employer, et une recherche textuelle prendrait la
+        mise en garde pour l'infraction.
+        """
+        import ast
+        import inspect
+        import textwrap
+
+        from conscience.engine import ConscienceEngine
+
+        source = textwrap.dedent(
+            inspect.getsource(ConscienceEngine._modules_enregistres)
+        )
+        appels = {
+            n.func.attr
+            for n in ast.walk(ast.parse(source))
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        }
+        assert "all_registered" in appels
+        assert "list_all" not in appels
+
+    def test_le_prompt_ne_promet_plus_ce_qu_il_ne_donne_pas(self):
+        """B3 : le catalogue annoncé et la trousse fournie sont le même fait.
+
+        `collect_capabilities_summary()` énumérait tout ce qui tourne sous
+        « ce que tu peux faire » pendant que la trousse était vide.
+        """
+        import inspect
+
+        from conscience.engine import ConscienceEngine
+
+        # Sur la SIGNATURE, pas sur le texte : la docstring explique le
+        # remplacement et cite donc l'ancien nom.
+        parametres = inspect.signature(
+            ConscienceEngine._build_action_prompt
+        ).parameters
+        assert "capabilities_summary" not in parametres, (
+            "le bloc unique doit avoir cédé la place aux deux blocs "
+            "« en main » / « ailleurs »"
+        )
+        assert "en_main" in parametres and "a_demander" in parametres
+        # Et ils sont keyword-only : les inverser à l'appel donnerait un prompt
+        # qui promet ce qu'il fournit et fournit ce qu'il promet, à l'envers.
+        for nom in ("en_main", "a_demander"):
+            assert parametres[nom].kind is inspect.Parameter.KEYWORD_ONLY
 
 
 # ===================================================================
@@ -255,3 +364,101 @@ class TestComputeScore:
         e._greeted_periods = {"morning", "evening"}
         e._commit_greeting()  # nothing pending → must not roll back
         assert e._greeted_periods == {"morning", "evening"}
+
+
+# ===================================================================
+# Un outil qui plante n'assouvit plus rien (M2)
+# ===================================================================
+
+class TestIssueDesOutils:
+    """`output.tool_calls` est une liste de NOMS, remplie par la boucle avant
+    même de savoir ce que le handler a rendu (`claude.py` fait
+    `calls.append(block.name)`). `had_tools=bool(output.tool_calls)` récompensait
+    donc trois échecs exactement comme trois réussites — et la curiosité est la
+    pulsion la plus difficile à satisfaire du moteur.
+    """
+
+    def test_le_moteur_lit_les_reussites_et_non_les_noms(self):
+        import ast
+        import inspect
+        import textwrap
+
+        from conscience.engine import ConscienceEngine
+
+        source = textwrap.dedent(inspect.getsource(ConscienceEngine._act))
+        arbre = ast.parse(source)
+        appels = [
+            n for n in ast.walk(arbre)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "on_act"
+        ]
+        assert len(appels) == 1, "un seul site doit assouvir les pulsions"
+        had = next(k for k in appels[0].keywords if k.arg == "had_tools")
+        rendu = ast.unparse(had.value)
+        assert "tool_calls" not in rendu, (
+            f"had_tools se lit encore sur les noms d'outils : {rendu}"
+        )
+        assert "reussi" in rendu.lower()
+
+    def test_un_handler_qui_leve_est_compte_en_echec(self):
+        import asyncio
+
+        from modules.collectors import ModuleCollectors
+        from utils.tool_trace import journal_outils
+
+        async def _boom(params):
+            raise RuntimeError("indisponible")
+
+        enveloppe = ModuleCollectors._wrap_handler("outil_casse", _boom)
+
+        async def _run():
+            with journal_outils() as carnet:
+                with pytest.raises(RuntimeError):
+                    await enveloppe({})
+                return carnet.reussites, carnet.echecs
+
+        reussites, echecs = asyncio.run(_run())
+        assert (reussites, echecs) == (0, 1)
+
+    def test_un_echec_annonce_a_la_facon_mcp_compte_aussi(self):
+        """Un handler qui rend `{"isError": True}` n'a jamais levé.
+
+        C'est la forme que `claude.py` relit déjà pour poser `is_error` sur le
+        `tool_result` : sans cette lecture, la moitié des échecs resterait
+        comptée comme des succès.
+        """
+        import asyncio
+
+        from modules.collectors import ModuleCollectors
+        from utils.tool_trace import journal_outils
+
+        async def _poli(params):
+            return {"isError": True, "content": "quota depasse"}
+
+        enveloppe = ModuleCollectors._wrap_handler("outil_poli", _poli)
+
+        async def _run():
+            with journal_outils() as carnet:
+                await enveloppe({})
+                return carnet.reussites, carnet.echecs
+
+        assert asyncio.run(_run()) == (0, 1)
+
+    def test_un_succes_reste_un_succes(self):
+        import asyncio
+
+        from modules.collectors import ModuleCollectors
+        from utils.tool_trace import journal_outils
+
+        async def _ok(params):
+            return {"content": "trois articles"}
+
+        enveloppe = ModuleCollectors._wrap_handler("outil_ok", _ok)
+
+        async def _run():
+            with journal_outils() as carnet:
+                await enveloppe({})
+                return carnet.reussites, carnet.echecs
+
+        assert asyncio.run(_run()) == (1, 0)

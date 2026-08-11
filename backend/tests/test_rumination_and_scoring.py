@@ -283,9 +283,10 @@ class TestConscienceRuminationHelpers:
     async def test_rumination_snapshot_with_empty_db(self):
         from conscience.engine import ConscienceEngine
         engine = ConscienceEngine()
-        pressure, count = await engine._rumination_snapshot()
+        pressure, count, lignes = await engine._rumination_snapshot()
         assert pressure == 0.0
         assert count == 0
+        assert lignes == []
 
     @pytest.mark.asyncio
     async def test_rumination_snapshot_aggregates_active(self):
@@ -304,10 +305,23 @@ class TestConscienceRuminationHelpers:
         )
 
         engine = ConscienceEngine()
-        pressure, count = await engine._rumination_snapshot()
-        # Only active ones counted: 0.4 + 0.3 = 0.7 (clamped <= 1.0)
-        assert abs(pressure - 0.7) < 0.01
+        pressure, count, lignes = await engine._rumination_snapshot()
+        # Seules les actives comptent : 0.4 + 0.3 = 0.7, rapportés à la somme
+        # valant pression pleine (2.5) → 0.28.
+        #
+        # Le pin passe de 0.7 à 0.28 parce que la mesure a changé de nature :
+        # la somme brute était comparée à 1.0, donc deux pensées à 0.5
+        # saturaient déjà le Facteur 10. Avec une promotion plus ouverte
+        # (pertinence 0.45 au lieu de 0.5), la saturation serait devenue l'état
+        # permanent et le facteur aurait cessé d'informer.
+        from conscience.engine import RUMINATION_PRESSION_PLEINE
+        assert abs(pressure - 0.7 / RUMINATION_PRESSION_PLEINE) < 0.01
         assert count == 2
+        # Le troisième élément existe dès maintenant, avant tout lecteur : le
+        # lot qui branchera le contenu des pensées sur le choix du sujet n'aura
+        # pas à revenir réécrire cette requête.
+        assert [ligne["summary"] for ligne in lignes] == ["a", "b"]
+        assert lignes[0]["themes"] == []
 
     @pytest.mark.asyncio
     async def test_resolve_ruminations_halves_intensity(self):

@@ -19,6 +19,7 @@ import logging
 
 from ai.router import AIRole, ai_router
 from configs.runtime import cfg_int
+from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
@@ -107,8 +108,17 @@ async def generate_inner_thought(
     except asyncio.TimeoutError:
         logger.debug("Inner voice timed out — staying silent")
         return None
-    except Exception:
+    except Exception as exc:
         # Quota, provider error, anything: a failed thought is just silence.
+        #
+        # Silencieux mais COMPTÉ : sur une installation où le rôle
+        # `inner_voice` n'est pas mappé — et le dépôt démarre non configuré
+        # exprès — `UnconfiguredRoleError` tombe ici à chaque tentative, et
+        # l'état du murmure continuait d'afficher « ok » pendant que rien ne
+        # sortait jamais. « Elle n'a rien à dire » et « le rôle n'existe pas »
+        # sont deux faits différents ; seul le registre de dégradations les
+        # sépare.
+        degradations.record("voix interieure: generation", exc)
         logger.debug("Inner voice generation failed — staying silent",
                      exc_info=True)
         return None

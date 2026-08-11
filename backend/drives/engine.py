@@ -22,15 +22,21 @@ import logging
 import time
 
 from configs.runtime import cfg_float
+from drives.phrasing import ReglagePhrasing as ReglagePulsions
+from drives.phrasing import composer_ligne_pulsions, pulsions_saillantes
 from drives.state import (
     DriveKind,
     DriveState,
     dominant_drive,
-    drive_prompt_description,
     log_growth,
     params_for,
 )
 from utils.degradation import degradations
+
+# `ReglagePhrasing` est aliasé : `utils.phrasing` en expose un homonyme, aux
+# champs entièrement différents, et les deux se croisent dans ce chantier.
+# Aucun cycle d'import : `drives.phrasing` n'importe que `drives.state`, donc
+# engine → phrasing → state est un graphe acyclique.
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +61,14 @@ _REST_PRESSURE_PER_EVENT = 0.04    # each act/observation adds this to rest
 # sommeil redevient la voie principale de récupération, ce que le
 # commentaire de `SLEEP_REST_RECOVERY` affirmait déjà.
 _REST_NATURAL_DECAY = 0.0001
+
+# Pertinence à partir de laquelle observer le monde assouvit un peu la
+# curiosité. À 0.6 — et en comparaison stricte — la porte était au-dessus du
+# plafond du chemin heuristique de l'interpréteur (0.55 pour un article RSS
+# apparié) : seul `email.received`, qui paie un appel LLM, pouvait la
+# franchir. CURIOSITY n'avait donc, sur une installation sans compte mail,
+# aucune voie de relâche par l'observation.
+_OBSERVATION_CURIOSITY_GATE = 0.50
 
 # Mélange des deux sources d'énergie : energie = circadien × 0.7 + (1 − REST)
 # × 0.3. C'étaient deux littéraux nus au milieu de `energy_level`, alors que
@@ -207,7 +221,15 @@ class DriveEngine:
 
     def on_observation(self, pertinence: float) -> None:
         """Called when a pertinent signal is observed (email, RSS, etc.)."""
-        if pertinence > 0.6:
+        # Porte descendue de 0.6 à 0.50, en `>=` : le chemin heuristique de
+        # l'interpréteur ne produit au mieux que 0.55, si bien que seul un
+        # e-mail — le seul signal payant un appel LLM — pouvait assouvir la
+        # curiosité. Sur une installation sans compte mail, apprendre quelque
+        # chose du monde ne la calmait jamais : elle avait soif, le disait, et
+        # avait toujours soif.
+        if pertinence >= cfg_float(
+            "drives.observation_curiosity_gate", _OBSERVATION_CURIOSITY_GATE,
+        ):
             # Learning about the world satisfies curiosity a bit.
             self.satisfy(DriveKind.CURIOSITY, pertinence * 0.4)
 
@@ -276,10 +298,43 @@ class DriveEngine:
 
     # ── Prompt context ────────────────────────────────────────────
 
+    def reglage_phrasing(self) -> ReglagePulsions:
+        """Les seuils de saillance EFFECTIFS, passés au module de phrasé.
+
+        Lus par `params_for`, donc recouverts par la configuration, et non
+        recopiés depuis la table du module : régler un seuil au dashboard
+        changerait sinon le score sans changer la phrase, et l'écran
+        montrerait un réglage qui ne pilote que la moitié de ce qu'il nomme.
+        C'est la divergence que cinq écrans avaient déjà accumulée.
+        """
+        return ReglagePulsions(
+            saillance={
+                kind: params_for(kind).satisfy_threshold for kind in DriveKind
+            },
+        )
+
+    def pulsion_saillante(self) -> DriveKind | None:
+        """La pulsion qui domine vraiment, ou None si aucune ne mérite un mot.
+
+        Le tri se fait sur l'EXCÈS au-dessus du seuil et non sur la tension
+        brute — les seuils diffèrent d'une pulsion à l'autre, si bien qu'un
+        classement sur la tension ferait passer une fatigue naissante devant
+        une solitude installée depuis deux jours.
+        """
+        self.update()
+        try:
+            retenues = pulsions_saillantes(self.states, self.reglage_phrasing())
+        except Exception as exc:
+            degradations.record("drives: pulsion saillante", exc)
+            return None
+        return retenues[0][0] if retenues else None
+
     def get_context(self) -> str:
         """French sentence(s) for the system prompt."""
         self.update()
-        return drive_prompt_description(self.states)
+        return composer_ligne_pulsions(
+            self.states, reglage=self.reglage_phrasing(),
+        )
 
     def get_dominant(self) -> DriveState | None:
         """Drive with highest tension (or None if all quiet)."""

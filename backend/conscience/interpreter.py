@@ -34,7 +34,14 @@ INTERPRETATION_TIMEOUT = 15  # seconds
 PERTINENCE_CHAT_MESSAGE = 0.3
 PERTINENCE_CHAT_PRESENCE = 0.1
 PERTINENCE_TELEGRAM_MESSAGE = 0.4
-PERTINENCE_RSS_MATCHED = 0.45
+# Seule pertinence heuristique portant un intérêt **apparié** : l'article
+# touche un thème que Mika suit. C'était aussi le plafond de tout le chemin
+# sans LLM (0.45), et il tombait sous chacune des portes qui en dépendent —
+# promotion en pensée, ravivement de souvenirs, réveil. Sur une installation
+# sans compte mail, seul signal passant par le LLM, aucune n'était jamais
+# franchie. Les six autres pertinences ne bougent pas : rien ne dit qu'un
+# message de chat ou un événement de forge vaut davantage qu'avant.
+PERTINENCE_RSS_MATCHED = 0.55
 PERTINENCE_RSS_UNMATCHED = 0.2
 PERTINENCE_FORGE_EVENT = 0.2
 PERTINENCE_FALLBACK = 0.3

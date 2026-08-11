@@ -44,6 +44,12 @@ class DecisionContext:
     # Rumination: unresolved thoughts that persist beyond observations.
     rumination_pressure: float = 0.0   # 0..1, sum of active rumination intensities
     rumination_count: int = 0
+    # Les pensées elles-mêmes : `{id, summary, themes, intensity, emotion}`,
+    # les plus fortes d'abord. `_rumination_snapshot` les rend depuis L1 et
+    # personne ne les lisait — la pression disait COMBIEN ça pèse sans jamais
+    # dire QUOI, si bien qu'une pensée qui la travaille depuis quatre heures
+    # faisait monter le score et ne choisissait jamais le sujet.
+    rumination_lignes: list = field(default_factory=list)
     # Energy level from DriveEngine.energy_level() — combines circadian
     # phase + REST drive. Low energy = less likely to speak spontaneously.
     energy: float = 1.0

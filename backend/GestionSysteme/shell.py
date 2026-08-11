@@ -80,6 +80,11 @@ def sidebar_counts() -> dict[str, int]:
         from conscience.models import Rumination
         return Rumination.objects.filter(status="active").count()
 
+    def _chantiers() -> int:
+        """Ceux qui tournent. Un chantier clos n'attend rien de personne."""
+        from conscience.models import Travail
+        return Travail.objects.filter(statut="en_cours").count()
+
     def _commitments() -> int:
         from memory.models import Commitment
         return Commitment.objects.filter(status="pending").count()
@@ -109,6 +114,7 @@ def sidebar_counts() -> dict[str, int]:
     safe("claims", _identity_claims)
     safe("observations", _observations)
     safe("ruminations", _ruminations)
+    safe("chantiers", _chantiers)
     safe("commitments", _commitments)
     safe("pending_actions", _pending_actions)
     safe("degradations", _degradations)

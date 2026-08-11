@@ -25,6 +25,41 @@
   </div>
 </section>
 
+{% comment %}
+  Le murmure est un mécanisme dont le comportement NORMAL est le silence :
+  sans cet encart, « elle n'a rien à dire », « le quota est épuisé »,
+  « personne n'est connecté » et « le rôle n'est pas mappé » sont
+  rigoureusement indiscernables depuis l'extérieur.
+{% endcomment %}
+{% if murmure %}
+<section class="card mb-6">
+  <div class="card-head">
+    <h2 class="card-title">Ce qu'on l'entend se dire</h2>
+    <span class="muted text-xs">état du murmure intérieur</span>
+  </div>
+  <div class="card-body">
+    <div class="grid c3">
+      <div>
+        <div class="stat-label">Murmures aujourd'hui</div>
+        <div class="stat-value">{{ murmure.emis_ce_jour|default:"0" }}</div>
+        <div class="stat-sub">journée du {{ murmure.jour|default:"—" }}</div>
+      </div>
+      <div>
+        <div class="stat-label">Dernière raison</div>
+        <div class="stat-value text-sm">
+          <span class="badge {% if murmure.derniere_raison == 'murmur_ok' %}badge-ok{% elif murmure.derniere_raison %}badge-warn{% endif %}">{{ murmure.derniere_raison|default:"—" }}</span>
+        </div>
+        <div class="stat-sub">pourquoi le dernier tour n'a rien produit</div>
+      </div>
+      <div>
+        <div class="stat-label">Dernière intention</div>
+        <div class="stat-sub">{{ murmure.derniere_intention|default:"—" }}</div>
+      </div>
+    </div>
+  </div>
+</section>
+{% endif %}
+
 <div class="alert alert-info mb-4">
   Ce compteur ne change <strong>pas</strong> le fait que les pannes sont
   avalées — il les rend visibles. Un site dont le premier passage remonte au
