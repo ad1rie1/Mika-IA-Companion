@@ -935,6 +935,33 @@ class ForgeModule(BaseModule):
         summary = f"{len(self._loaded)} module(s) forgé(s) actif(s)"
         return summary + (" | " + " | ".join(parts) if parts else "")
 
+    def propose_sujets(self) -> list[str]:
+        """Ses applications cassées, comme sujets de chantier.
+
+        Même contrat que le RSS : lecture RAM pure (``_load_errors`` et
+        ``_breaker_notified`` sont tenus par le host), appelable depuis la
+        boucle de décision. C'est ce qui rend « continuer un module de la
+        forge » atteignable par sa vie spontanée : les événements ``forge.*``
+        sont interprétés à 0.2 de pertinence, sous toutes les portes de
+        graine — sans cette offre, réparer une app ne pouvait arriver qu'en
+        conversation. Le chantier ouvert emportera les outils du host
+        (``Graine.modules``), donc ``forge_read_module`` → correction →
+        ``forge_command(enable)``.
+        """
+        sujets: list[str] = []
+        for name, err in list(self._load_errors.items())[:3]:
+            sujets.append(
+                f"réparer mon application « {name} » "
+                f"(elle ne charge plus : {str(err)[:60]})"
+            )
+        for name in sorted(self._breaker_notified)[:3]:
+            if name not in self._load_errors:
+                sujets.append(
+                    f"réparer mon application « {name} », "
+                    "arrêtée après des échecs répétés"
+                )
+        return sujets
+
     def get_status(self) -> ModuleStatus:
         status = super().get_status()
         status.details = {

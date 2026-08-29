@@ -116,6 +116,16 @@ class ConscienceToolsModule(BaseModule):
                         description="Priority 0.0-1.0 (default 0.5). Higher = more likely to trigger alone",
                         required=False,
                     ),
+                    ToolParameter(
+                        name="modules",
+                        type=ToolParameterType.ARRAY,
+                        description=(
+                            "Module names whose tools you will need when the "
+                            "action fires (e.g. [\"email\"], [\"rss\"], "
+                            "[\"forge\"]). They will be loaded for that turn."
+                        ),
+                        required=False,
+                    ),
                 ],
                 handler=self._tool_schedule_action,
             ),
@@ -152,11 +162,22 @@ class ConscienceToolsModule(BaseModule):
         priority = max(0.0, min(1.0, args.get("priority", 0.5)))
         scheduled_at = timezone.now() + timedelta(minutes=delay)
 
+        # Argument fourni par un modèle : borné et nettoyé, jamais cru sur
+        # parole. Un nom qu'aucun module ne porte finira simplement dans
+        # `Trousse.inconnus` au moment de l'acte — visible, pas fatal.
+        brut = args.get("modules") or []
+        if isinstance(brut, str):
+            brut = [brut]
+        modules = [
+            str(m).strip() for m in list(brut)[:5] if str(m or "").strip()
+        ]
+
         action = await sync_to_async(ScheduledAction.objects.create)(
             scheduled_at=scheduled_at,
             prompt=args["prompt"],
             priority=priority,
             source="ai_tool",
+            modules=modules,
         )
 
         self.logger.info(

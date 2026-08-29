@@ -212,6 +212,36 @@ class MemoryBridge:
             importance=signal.pertinence,
         )
 
+    #: Importance d'un travail mené au bout. Modeste et au-dessus du défaut
+    #: d'extraction (0.5) : finir quelque chose qu'on a soi-même entrepris
+    #: marque plus qu'un fait moyen, moins qu'un moment fort de conversation.
+    _COMPLETED_WORK_IMPORTANCE = 0.55
+
+    async def remember_completed_work(self, titre: str, essence: str = ""):
+        """Un chantier abouti devient un souvenir à la première personne.
+
+        C'est la moitié mémoire de « aller au bout » : sans elle, un travail
+        terminé n'existait que dans sa ligne ``Travail`` — invisible du
+        rappel, du récit de soi et des fiches. ``proud`` parce que c'est
+        l'émotion que la diffusion d'un travail fini déclare déjà
+        (``_peut_etre_dire_le_travail``) : une seule vérité émotionnelle pour
+        un même événement.
+        """
+        from memory.manager import memory_manager
+
+        titre = str(titre or "").strip()
+        if not titre:
+            return None
+        contenu = f"J'ai mené au bout quelque chose que j'avais entrepris : {titre}."
+        essence = str(essence or "").strip()
+        if essence:
+            contenu += f" {essence}"
+        return await memory_manager.create_souvenir(
+            content=contenu[:600],
+            emotion="proud",
+            importance=self._COMPLETED_WORK_IMPORTANCE,
+        )
+
     # ── Write: Modify Importance ─────────────────────────────────
 
     async def boost_related_souvenirs(

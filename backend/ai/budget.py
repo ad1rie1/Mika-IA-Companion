@@ -345,6 +345,7 @@ _TRIM_ORDER: tuple[tuple[str, int], ...] = (
     ("journal_context", 0),
     ("dream_context", 0),
     ("rumination_context", 0),
+    ("travaux_context", 0),
     ("circadian_context", 0),
     ("fatigue_fog", 0),
     ("user_mood_hint", 0),

@@ -1055,7 +1055,19 @@ class ConscienceEngine:
             vivants: list[TravailEnCours] = []
             semees: set[tuple[str, str]] = set()
             a_abandonner: list = []
+            a_reveiller: list = []
             for row in Travail.objects.filter(statut=Travail.Statut.EN_COURS):
+                # Une attente échue cesse d'en être une — ICI, parce que
+                # c'est la seule relecture périodique des chantiers. Une
+                # échéance absente (ligne d'avant la migration, verdict
+                # tronqué) se relève aussi : un drapeau sans échéance est le
+                # cul-de-sac exact que `reprendre_le` existe pour fermer.
+                if row.en_attente_de_reponse and (
+                    row.reprendre_le is None or row.reprendre_le <= maintenant
+                ):
+                    row.en_attente_de_reponse = False
+                    row.reprendre_le = None
+                    a_reveiller.append(row)
                 vue = TravailEnCours(
                     identifiant=row.pk,
                     titre=row.titre,
@@ -1075,6 +1087,10 @@ class ConscienceEngine:
                 semees.add((row.origine, str(row.reference)))
             if a_abandonner:
                 Travail.objects.bulk_update(a_abandonner, ["statut"])
+            if a_reveiller:
+                Travail.objects.bulk_update(
+                    a_reveiller, ["en_attente_de_reponse", "reprendre_le"],
+                )
             return vivants, semees
 
         try:
@@ -1127,10 +1143,15 @@ class ConscienceEngine:
         `reference` porte le nom du module et le sujet, ce qui suffit à la
         déduplication : le même titre RSS ne rouvre pas de chantier tant que le
         premier vit.
-        """
-        from conscience.conduite import Graine
 
-        if pulsion is None or getattr(pulsion, "value", "") != "curiosity":
+        Les deux pulsions **fécondes** sollicitent (`PULSIONS_FECONDES`), pas
+        la seule curiosité : l'expression veut produire quelque chose, et la
+        forge — qui propose « réparer mon application » — est exactement une
+        offre pour elle. SOCIAL et REST restent muets, comme dans la récolte.
+        """
+        from conscience.conduite import PULSIONS_FECONDES, Graine
+
+        if pulsion is None or getattr(pulsion, "value", "") not in PULSIONS_FECONDES:
             return []
         tension = pulsions[0][1] if pulsions else 0.0
         if tension < self._conduite_tuning().graine_pulsion_tension:
@@ -1153,6 +1174,10 @@ class ConscienceEngine:
                 reference=f"{nom}:{sujet[:60]}",
                 intitule=sujet,
                 poids=tension,
+                # Le module qui propose un sujet est celui dont le chantier
+                # aura besoin pour le traiter : figé ici, il survit à la
+                # retombée de la pulsion après le premier pas.
+                modules=(nom,),
             )
             for nom, sujet in sujets[:plafond]
         ]
@@ -1168,6 +1193,10 @@ class ConscienceEngine:
                 origine=graine.origine,
                 reference=str(graine.reference)[:100],
                 themes=list(graine.themes),
+                # La trousse du chantier, figée à l'ouverture : c'est elle que
+                # chaque pas rechargera, indépendamment de la tension de
+                # pulsion du moment (que le premier pas réussi fait retomber).
+                modules=[str(m) for m in (getattr(graine, "modules", ()) or ())],
                 envie=max(0.0, min(1.0, graine.poids)),
                 ancre_envie=tz.now(),
                 pas_max=cfg_int("conscience.travail.pas_max", _TRAVAIL_PAS_MAX,
@@ -2084,10 +2113,21 @@ class ConscienceEngine:
         return True
 
     def _preparer_trousse_travail(self, row):
-        """La trousse d'un pas : le socle, plus ce que les thèmes appellent."""
+        """La trousse d'un pas : le socle, plus ce que LE CHANTIER demande.
+
+        ``row.modules`` — figé à l'ouverture depuis la graine — passe en
+        demande explicite, le rang le plus fort après le socle. C'est ce qui
+        garantit qu'un chantier garde ses mains toute sa vie : la version
+        précédente ne dérivait la trousse que des pulsions *du moment*, or le
+        premier pas réussi assouvit la curiosité (``on_act``, −0.5), si bien
+        que le pas suivant partait sans les outils qui avaient ouvert le
+        chantier. L'élargissement par pulsion reste, en plus, jamais à la
+        place.
+        """
         return preparer(
             sources=(),
             drives=drive_engine.states,
+            demandes=tuple(str(m) for m in (row.modules or ())),
             poids=self._poids_module,
             disponibles=self._modules_enregistres(),
             tuning=self._trousse_tuning(),
@@ -2164,6 +2204,12 @@ class ConscienceEngine:
         Un verdict illisible n'est pas une erreur, c'est un état : il se
         compte, et au bout de quelques-uns le chantier se bloque plutôt que de
         tourner indéfiniment sans jamais savoir où il en est.
+
+        Un chantier qui ABOUTIT laisse un souvenir — hors du callable
+        synchrone, parce que la création passe par le vector store. Sans lui,
+        elle passait ses journées à mener des choses au bout dont il ne
+        restait rien : ni dans le rappel, ni dans le récit de soi, ni dans ce
+        qu'elle peut répondre à « tu as fait quoi aujourd'hui ? ».
         """
         from conscience.models import Rumination, Travail
         from django.utils import timezone as tz
@@ -2171,10 +2217,10 @@ class ConscienceEngine:
         t = self._conduite_tuning()
         maintenant = tz.now()
 
-        def _ecrire() -> None:
+        def _ecrire() -> dict | None:
             row = Travail.objects.filter(pk=identifiant).first()
             if row is None:
-                return
+                return None
 
             journal = (row.resultat + "\n\n" + dit).strip() if dit else row.resultat
             row.resultat = journal[-6000:]
@@ -2185,7 +2231,19 @@ class ConscienceEngine:
                 row.statut = Travail.Statut.BLOQUEE
                 row.raison_blocage = verdict.motif_blocage[:500]
             elif verdict.etat is EtatVerdict.ATTENDRE:
+                # Le drapeau et son échéance sont les deux moitiés d'un même
+                # geste (le motif de l'envie et son ancre) : le drapeau seul
+                # était un cul-de-sac — posé ici, relevé par personne,
+                # « attendre » signifiait « se faner jusqu'à l'abandon » et
+                # `delai_s`, soigneusement borné par le lecteur, n'avait
+                # aucun consommateur. `is not None` et non `or` : 0 s est un
+                # délai légal (« tout de suite »), pas une absence.
+                from datetime import timedelta
+                delai = (
+                    verdict.delai_s if verdict.delai_s is not None else 300.0
+                )
                 row.en_attente_de_reponse = True
+                row.reprendre_le = maintenant + timedelta(seconds=delai)
             elif verdict.etat is EtatVerdict.ILLISIBLE:
                 # Compté sur le journal plutôt que dans un champ : le lot ne
                 # gagne pas une colonne pour un compteur qu'un seul endroit
@@ -2215,7 +2273,7 @@ class ConscienceEngine:
             row.envie, row.ancre_envie = facturer_envie(vue, maintenant, t)
             row.save(update_fields=[
                 "resultat", "statut", "raison_blocage", "en_attente_de_reponse",
-                "envie", "ancre_envie", "updated_at",
+                "reprendre_le", "envie", "ancre_envie", "updated_at",
             ])
 
             # Un chantier né d'une pensée et mené au bout résout la pensée.
@@ -2231,8 +2289,27 @@ class ConscienceEngine:
                     pk=int(row.reference), status="active",
                 ).update(status="resolved")
 
+            if row.statut == Travail.Statut.ABOUTIE:
+                return {"titre": row.titre}
+            return None
+
+        aboutie = None
         with degraded("conscience: application d'un verdict"):
-            await sync_to_async(_ecrire, thread_sensitive=True)()
+            aboutie = await sync_to_async(_ecrire, thread_sensitive=True)()
+
+        if aboutie:
+            # `verdict.resume` d'abord : c'est la phrase que le bloc demande
+            # (« ce que tu viens de faire »). `dit` en repli, borné — le pas
+            # entier n'est pas un souvenir, c'est un journal. `getattr` comme
+            # `_pending_greeted` : les tests construisent le moteur par
+            # `__new__`, donc sans pont mémoire.
+            essence = (verdict.resume or dit or "").strip()[:300]
+            bridge = getattr(self, "memory", None)
+            if bridge is not None:
+                with degraded("conscience: souvenir d'un travail abouti"):
+                    await bridge.remember_completed_work(
+                        aboutie["titre"], essence,
+                    )
 
     #: Plafond de l'inactivité restaurée au démarrage. Au-delà, la mesure ne
     #: dit plus rien d'utile : trois jours ou trois mois de silence produisent
@@ -2592,6 +2669,20 @@ class ConscienceEngine:
         via a ``[TO:person_id]`` tag. The candidate prompt is privacy-safe — only
         names + channels, never another person's private memory content.
         Returns a reachable ``person_id`` or None (keep it internal/broadcast).
+
+        Le signal se lit sur les observations, PUIS sur les ruminations : les
+        cinq déclencheurs endogènes — inactivité, salutation, humeur, pulsion,
+        rumination — ne créent aucune Observation, si bien que la sélection
+        rendait ``None`` avant même de chercher. C'était le miroir exact du
+        défaut B1 de la trousse : au moment précis où SOCIAL déborde (« envie
+        de parler à quelqu'un »), elle était structurellement incapable de
+        choisir un quelqu'un.
+
+        Et quand la mémoire ne désigne personne, les personnes **présentes**
+        restent des candidates : saluer celui qui est là plutôt que parler
+        dans le vide est ce qu'une personne fait. Le dernier mot reste au
+        modèle (``[TO:none]`` est une réponse valide), et le backoff des
+        relances ignorées borne déjà la fréquence.
         """
         from conscience.recipients import parse_to_tag
 
@@ -2599,9 +2690,18 @@ class ConscienceEngine:
             o.summary for o in ctx.pending_observations if o.pertinence > 0.3
         ).strip()
         if not signal:
-            return None
+            lignes = getattr(ctx, "rumination_lignes", None) or []
+            signal = " ".join(
+                str(ligne.get("summary", ""))[:160]
+                for ligne in lignes[:3]
+                if ligne.get("summary")
+            ).strip()
 
-        candidates = await self.memory.who_is_concerned(signal, n=5)
+        candidates = (
+            await self.memory.who_is_concerned(signal, n=5) if signal else []
+        )
+        if not candidates:
+            candidates = self._candidats_presents()
         if not candidates:
             return None
 
@@ -2662,6 +2762,47 @@ class ConscienceEngine:
         )
         return target
 
+    #: Personnes présentes proposées au choix du destinataire. Petit : c'est
+    #: une salutation possible, pas un annuaire.
+    _PRESENTS_MAX = 5
+
+    def _candidats_presents(self) -> list[dict]:
+        """Les personnes identifiables joignables MAINTENANT, forme candidate.
+
+        Même contrat de retour que ``who_is_concerned`` (nom + handles), pour
+        que la passe de confirmation n'ait pas deux formes à lire. Uniquement
+        les personnes identifiables : un socket ``anon_*`` reste couvert par
+        le broadcast global, et la tuyauterie interne n'est pas quelqu'un.
+
+        Ne lève jamais — chemin d'un acte, boucle sans superviseur.
+        """
+        from communication.presence import presence_registry
+        from identity.trust import is_identifiable_person
+
+        candidats: list[dict] = []
+        vus: set[str] = set()
+        try:
+            for inter in presence_registry.reachable():
+                pid = inter.person_id
+                if pid in vus or not is_identifiable_person(pid):
+                    continue
+                vus.add(pid)
+                candidats.append({
+                    "name": inter.display_name or pid,
+                    "score": 0.0,
+                    "handles": [{
+                        "person_id": pid,
+                        "channel": inter.channel,
+                        "kind": inter.kind,
+                    }],
+                })
+                if len(candidats) >= self._PRESENTS_MAX:
+                    break
+        except Exception as exc:
+            degradations.record("conscience: candidats presents", exc)
+            return []
+        return candidats
+
     def _modules_enregistres(self) -> list[str]:
         """Qui EXISTE, et non qui tourne.
 
@@ -2718,12 +2859,25 @@ class ConscienceEngine:
         inactivité, salutation, débordement d'humeur, pulsions, ruminations —
         ne créent aucune Observation, si bien que le seul cas où elle agissait
         d'elle-même était aussi le seul où elle n'avait aucune main.
+
+        Les actions programmées dues passent leurs ``modules`` en demandes
+        explicites — le rang que ``souhaits`` réserve à « une intention déjà
+        formée ». Ce paramètre existait depuis le premier jour de la trousse
+        et n'avait AUCUN appelant : « vérifie tes emails demain matin »
+        partait sans l'outil email, le prompt lui interdisait de raconter, et
+        le rendez-vous était marqué honoré quand même.
         """
         from modules.manager import module_manager
 
+        demandes = [
+            str(nom)
+            for action in ctx.scheduled_actions
+            for nom in (getattr(action, "modules", None) or ())
+        ]
         trousse = preparer(
             sources=[obs.source for obs in ctx.pending_observations],
             drives=drive_engine.states,
+            demandes=demandes,
             poids=self._poids_module,
             disponibles=self._modules_enregistres(),
             tuning=self._trousse_tuning(),

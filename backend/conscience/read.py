@@ -57,3 +57,43 @@ async def active_ruminations(*, limit: int = 5, min_intensity: float = 0.0) -> l
         return list(qs.order_by("-intensity")[:limit])
 
     return await sync_to_async(_query)()
+
+
+async def travaux_en_cours(*, limit: int = 3) -> list:
+    """Les chantiers qu'elle a ouverts et pas terminés, les plus vifs d'abord.
+
+    Le prompt et le tableau de bord posent la même question ; seul l'appétit
+    diffère (3 pour le prompt — au-delà ce n'est plus « ce que j'ai en
+    train », c'est un inventaire). L'envie stockée n'est pas rendue : c'est
+    la moitié d'un couple (valeur, ancre) et elle est fausse une seconde plus
+    tard — les lecteurs n'ont besoin ici que du titre et de la progression.
+    """
+    from conscience.models import Travail
+
+    def _query():
+        return list(
+            Travail.objects.filter(statut=Travail.Statut.EN_COURS)
+            .order_by("-envie", "-created_at")[:limit]
+        )
+
+    return await sync_to_async(_query)()
+
+
+async def travaux_aboutis_depuis(depuis: datetime, *, limit: int = 2) -> list:
+    """Les chantiers menés au bout depuis ``depuis`` (typiquement minuit).
+
+    Question distincte de ``travaux_en_cours`` — « qu'est-ce que je fais » et
+    « qu'est-ce que j'ai fini aujourd'hui » n'ont pas la même fenêtre, et les
+    fusionner referait le piège des deux questions du journal.
+    """
+    from conscience.models import Travail
+
+    def _query():
+        return list(
+            Travail.objects.filter(
+                statut=Travail.Statut.ABOUTIE,
+                updated_at__gte=depuis,
+            ).order_by("-updated_at")[:limit]
+        )
+
+    return await sync_to_async(_query)()

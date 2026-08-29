@@ -55,6 +55,11 @@ class ConversationContext:
     # Active ruminations — unresolved pertinent thoughts still on her mind.
     # Was previously surfaced only inside _act(); now visible every turn.
     rumination_context: str = ""
+    # Les chantiers qu'elle a ouverts (conscience.Travail) — en cours et
+    # aboutis du jour. Sans ce bloc, « tu fais quoi en ce moment ? » était la
+    # seule question sur sa propre vie à laquelle elle ne savait pas
+    # répondre : le tableau de bord voyait ses chantiers, elle non.
+    travaux_context: str = ""
     # Best-effort heuristic read of the user's emotional tone (caps, emojis,
     # length, keywords). Gives Mika something to react to, not just declare.
     user_mood_hint: str = ""
@@ -276,6 +281,11 @@ async def gather_context(
     # Active ruminations — now visible every turn, not only during _act()
     rumination_context = await _fetch_rumination_context()
 
+    # Ce qu'elle a en train — mêmes règles d'injection que les ruminations :
+    # tous les tours, y compris les siens (un acte spontané doit savoir ce
+    # qu'elle a déjà entrepris, ou il rouvre ce qui existe).
+    travaux_context = await _fetch_travaux_context()
+
     # User mood heuristic — a best-effort read of the user's emotional tone
     # from the raw message. Gated on the *intent*, not only on the person: an
     # internal trigger aimed at a real person carries their handle, so the
@@ -351,6 +361,7 @@ async def gather_context(
         circadian_context=circadian_context,
         fatigue_fog=fatigue_fog,
         rumination_context=rumination_context,
+        travaux_context=travaux_context,
         user_mood_hint=user_mood_hint,
         dream_context=dream_context,
         journal_context=journal_context,
@@ -992,6 +1003,52 @@ async def _fetch_rumination_context() -> str:
     return (
         "Meme si tu reponds a ce qui arrive maintenant, ces pensees restent "
         "en arriere-plan et colorent subtilement ton humeur :\n"
+        + "\n".join(lines)
+    )
+
+
+async def _fetch_travaux_context() -> str:
+    """Un court bloc français : ses chantiers en cours, et ceux finis du jour.
+
+    Même couche de lecture que le tableau de bord (`conscience.read`), jamais
+    une requête directe ici — la règle qui a déjà servi aux ruminations et au
+    journal. Aucun nombre destiné à être relu par une machine : le prompt dit
+    « presque au bout », pas « pas 4/5 à envie 0.31 ».
+    """
+    from conscience import read as conscience_read
+
+    try:
+        en_cours = await conscience_read.travaux_en_cours(limit=3)
+        aboutis = await conscience_read.travaux_aboutis_depuis(
+            conscience_read.debut_du_jour_local(), limit=2,
+        )
+    except Exception as exc:
+        degradations.record("prompt: travaux context", exc)
+        return ""
+
+    if not en_cours and not aboutis:
+        return ""
+
+    lines = []
+    for t in en_cours:
+        etape = ""
+        if t.pas_max:
+            if t.pas_effectues <= 0:
+                etape = " (tu n'as pas encore commence)"
+            elif t.pas_effectues >= t.pas_max - 1:
+                etape = " (presque au bout)"
+            else:
+                etape = " (en cours)"
+        attente = (
+            " Tu attends une reponse pour continuer."
+            if t.en_attente_de_reponse else ""
+        )
+        lines.append(f"- Tu as entrepris : {t.titre[:140]}{etape}.{attente}")
+    for t in aboutis:
+        lines.append(f"- Tu as mene au bout aujourd'hui : {t.titre[:140]}.")
+    return (
+        "Ce sont TES chantiers — des choses que tu as decide de faire de "
+        "toi-meme. Tu peux en parler si on te demande ce que tu fais :\n"
         + "\n".join(lines)
     )
 

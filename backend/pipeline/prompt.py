@@ -141,6 +141,16 @@ _LAYERS: tuple[_Layer, ...] = (
         "rumination_context", "--- CE QUI TE TROTTE DANS LA TETE ---",
         muted_by_project=True,
     ),
+    # Ses chantiers (conscience.Travail) — juste après les pensées, dont ils
+    # sont la forme agie : une rumination qui insiste devient un chantier, et
+    # les deux blocs racontent ensemble ce qui l'occupe. Coupé en mode
+    # professionnel comme les ruminations : « je lisais un truc sur les
+    # modèles de diffusion » n'a pas sa place à trois lignes d'une directive
+    # « ton factuel et posé uniquement ».
+    _Layer(
+        "travaux_context", "--- CE QUE TU AS EN TRAIN ---",
+        muted_by_project=True,
+    ),
     _Layer(
         "dream_context", "--- CE QUE TU AS REVE CETTE NUIT ---",
         muted_by_project=True,

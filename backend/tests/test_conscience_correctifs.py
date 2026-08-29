@@ -184,9 +184,11 @@ class TestSujetsProposes:
         c._registry = registre
         assert c.sujets() == [("sain", "lire un truc")]
 
-    def test_la_curiosite_seule_sollicite_les_modules(self):
-        """Pas d'appétit, pas de sollicitation : le social veut une personne,
-        le repos ne veut rien entreprendre."""
+    def test_seules_les_pulsions_fecondes_sollicitent_les_modules(self):
+        """Curiosité ET expression sollicitent (les deux `PULSIONS_FECONDES`) :
+        la forge propose « réparer mon application », qui est une offre pour
+        l'expression, pas pour la curiosité. Le social veut une personne, le
+        repos ne veut rien entreprendre — eux restent muets."""
         from drives.state import DriveKind
 
         e = _engine()
@@ -196,7 +198,23 @@ class TestSujetsProposes:
             assert rien == []
             quelque = e._graines_des_modules(
                 DriveKind.CURIOSITY, [("curiosity", 0.9)])
+            aussi = e._graines_des_modules(
+                DriveKind.EXPRESSION, [("expression", 0.9)])
         assert [g.intitule for g in quelque] == ["lire un article"]
+        assert [g.intitule for g in aussi] == ["lire un article"]
+
+    def test_un_sujet_propose_emporte_son_module(self):
+        """La trousse du chantier se fige à la récolte : le module qui propose
+        un sujet est celui dont chaque pas aura besoin — y compris après que
+        le premier pas réussi a fait retomber la pulsion (`on_act`, −0.5)."""
+        from drives.state import DriveKind
+
+        e = _engine()
+        with patch("modules.manager.module_manager") as mm:
+            mm.collect_sujets.return_value = [("forge", "réparer mon application « meteo »")]
+            graines = e._graines_des_modules(
+                DriveKind.EXPRESSION, [("expression", 0.9)])
+        assert graines[0].modules == ("forge",)
 
     def test_sous_la_porte_rien_n_est_demande(self):
         from drives.state import DriveKind

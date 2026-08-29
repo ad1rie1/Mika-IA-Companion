@@ -235,6 +235,13 @@ class Travail(models.Model):
     #: natures ne partagent aucune table ; sert surtout à la déduplication.
     reference = models.CharField(max_length=100, blank=True, default="")
     themes = models.JSONField(default=list, blank=True)
+    #: Les modules dont les outils accompagnent CHAQUE pas de ce chantier,
+    #: figés à l'ouverture (depuis ``Graine.modules``). Sans eux, la trousse
+    #: d'un pas se dérivait de la tension de pulsion du moment — que le
+    #: premier pas réussi fait retomber (``on_act`` assouvit la curiosité de
+    #: 0.5) : le chantier perdait ses mains en cours de route et finissait
+    #: « bloquée » au lieu d'« aboutie ».
+    modules = models.JSONField(default=list, blank=True)
 
     #: Envie **telle qu'écrite**. La valeur courante se calcule en la faturant
     #: du temps écoulé depuis l'ancre : ne jamais la lire seule.
@@ -255,9 +262,16 @@ class Travail(models.Model):
     pas_effectues = models.IntegerField(default=0)
     pas_max = models.IntegerField(default=5)
     dernier_pas_le = models.DateTimeField(null=True, blank=True)
-    #: Bloqué en attente de quelqu'un : un pas de plus reposerait la même
-    #: question. Aucun producteur pour l'instant — voir la note du lot D.
+    #: Bloqué en attente : un pas de plus reposerait la même question.
+    #: Posé par le verdict ATTENDRE (`_appliquer_verdict`), relâché par la
+    #: lecture des travaux quand `reprendre_le` est passé.
     en_attente_de_reponse = models.BooleanField(default=False)
+    #: Quand une attente cesse d'en être une. TOUJOURS posé avec le booléen :
+    #: un drapeau sans échéance est un cul-de-sac — le verdict ATTENDRE le
+    #: posait et rien ne le relevait jamais, si bien qu'« attendre » voulait
+    #: dire « se faner jusqu'à l'abandon ». Le lecteur de verdict garantit un
+    #: délai (défaut 300 s, plafond 24 h), donc l'échéance existe toujours.
+    reprendre_le = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -301,6 +315,14 @@ class ScheduledAction(models.Model):
     priority = models.FloatField(default=0.5)
     source = models.CharField(max_length=50)
     context_data = models.JSONField(default=dict)
+    #: Les modules dont l'acte aura besoin pour honorer ce rendez-vous —
+    #: la « demande explicite » que ``trousse.souhaits`` classe juste après
+    #: le socle. Sans ce champ, « vérifie tes emails demain matin » partait
+    #: sans l'outil email (sauf coïncidence de pulsion), le prompt lui
+    #: interdisait de raconter, et l'action était quand même marquée
+    #: exécutée : une intention différée pouvait être « honorée » sans avoir
+    #: jamais été possible.
+    modules = models.JSONField(default=list, blank=True)
     #: Ce que l'acte a produit. « Exécutée » sans résultat ne prouve rien : le
     #: statut ne disait que « l'appel IA n'a pas planté », pas que le
     #: rendez-vous avait été honoré. `ProjectTask` porte ces deux champs depuis

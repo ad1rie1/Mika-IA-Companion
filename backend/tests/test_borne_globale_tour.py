@@ -392,6 +392,8 @@ _CAPS_LIBRES = {
     "circadian_context": 300,
     "fatigue_fog": 400,
     "rumination_context": 1_200,
+    # 3 en-cours (titre ≤140 + habillage) + 2 aboutis du jour + l'intro.
+    "travaux_context": 1_200,
     "dream_context": 600,
     "journal_context": 700,
     "emotion_context": 900,

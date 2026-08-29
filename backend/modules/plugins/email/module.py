@@ -1028,6 +1028,21 @@ class EmailModule(BaseModule):
                 parts.append(f"{account_name}: {count} nouveau(x) email(s)")
         return "\n".join(parts) if parts else ""
 
+    def propose_sujets(self) -> list[str]:
+        """Un courrier en attente est un sujet de chantier.
+
+        Même source RAM que `get_context` (`_unread_counts`, tenu par le
+        sondage) : aucune requête, donc lisible depuis la boucle de décision.
+        Le sujet reste au niveau du compte — les objets des messages sont en
+        base, pas en RAM, et c'est le chantier (qui emporte les outils email
+        via `Graine.modules`) qui ira les lire avec `list_recent_emails`.
+        """
+        return [
+            f"m'occuper des {count} email(s) en attente sur {account_name}"
+            for account_name, count in self._unread_counts.items()
+            if count > 0
+        ]
+
     # ── Status ────────────────────────────────────────────────────
 
     def get_status(self) -> ModuleStatus:

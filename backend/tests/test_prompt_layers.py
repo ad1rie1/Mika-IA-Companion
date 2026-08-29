@@ -74,6 +74,7 @@ class TestTableIntegrity:
             "user_mood_hint",
             "fatigue_fog",
             "rumination_context",
+            "travaux_context",
             "dream_context",
             "emotion_context",
         ]

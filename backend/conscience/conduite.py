@@ -38,6 +38,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
+from conscience.trousse import CURIOSITE, modules_pour_source
 from utils.degradation import degradations
 
 # ---------------------------------------------------------------------------
@@ -199,6 +200,14 @@ class Graine:
     intitule: str
     poids: float          # 0..1 — pertinence, intensité ou tension selon l'origine
     themes: tuple[str, ...] = ()
+    #: Les modules que cette amorce appelle — figés À LA RÉCOLTE, pas au pas.
+    #:
+    #: C'est ce qui permet à un chantier de garder ses mains toute sa vie :
+    #: la trousse d'un pas se dérivait de la tension de pulsion *du moment*,
+    #: or le premier pas réussi assouvit la curiosité (``on_act``), si bien
+    #: que le pas suivant partait sans les outils qui avaient ouvert le
+    #: chantier — elle ne pouvait pas finir de lire ce qu'elle avait commencé.
+    modules: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -421,6 +430,11 @@ def recolter_graines(
                 ),
                 poids=min(1.0, max(0.0, pertinence)),
                 themes=_themes(getattr(obs, "themes", ())),
+                # La source de l'observation dit quels outils le chantier
+                # gardera : une graine RSS emporte `rss`, une graine forge
+                # emporte `forge`. Traduit ici parce que la source n'existe
+                # plus au moment du pas — seul le chantier survit.
+                modules=modules_pour_source(getattr(obs, "source", "")),
             ))
         except Exception as exc:
             # Une observation malformée ne doit pas emporter la récolte
@@ -457,6 +471,12 @@ def recolter_graines(
                 intitule=f"envie de {nom}",
                 poids=min(1.0, max(0.0, tension)),
                 themes=(),
+                # La curiosité emporte ses surfaces d'exploration (`rss`,
+                # `files`) pour toute la vie du chantier — la même liste que
+                # l'élargissement de trousse, mais figée à la récolte plutôt
+                # que relue sur une tension que le premier pas fait retomber.
+                # L'expression n'emporte rien : formuler se fait avec le socle.
+                modules=tuple(CURIOSITE) if nom == "curiosity" else (),
             ))
         except Exception as exc:
             degradations.record("conduite: pulsion illisible en graine", exc)
