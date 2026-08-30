@@ -62,18 +62,25 @@ _REST_PRESSURE_PER_EVENT = 0.04    # each act/observation adds this to rest
 # commentaire de `SLEEP_REST_RECOVERY` affirmait déjà.
 _REST_NATURAL_DECAY = 0.0001
 
-# Plafond du gain de REST consommé en UNE passe. Sans lui, une pulsion
-# passive suffit à saturer la fatigue : `conscience.observe()` appelle
-# `drive_engine.on_observation()` pour CHAQUE signal externe, et un relevé
-# RSS de 9 flux en produit ~119 d'un coup. Mesuré sur un premier démarrage :
-# 119 × 0.04 × 0.42 = +2.00 de tension d'un seul tenant, REST écrêté à 1.00
-# quarante secondes après le boot, sans qu'elle ait rien fait. Au-delà de
-# ~4 entrées par relevé la montée dépasse déjà la décroissance de la fenêtre
-# (0.06 / 10 min), donc REST restait épinglé en permanence : énergie plafonnée
-# à 0.7 × circadien, brouillard de fatigue dans le prompt à toute heure — elle
-# se disait « crevée » à chaque phrase — et coucher rabattu sur le plancher de
-# 21 h tous les soirs. Le plafond garde la lecture voulue : lire l'actualité
-# fatigue un peu, une rafale reste UN moment de charge, pas cent dix-neuf.
+# Plafond du gain de REST consommé en UNE passe. `conscience.observe()`
+# appelle `drive_engine.on_observation()` pour CHAQUE signal externe, donc la
+# fatigue suit le NOMBRE d'événements, pas la charge qu'ils représentent.
+#
+# En régime établi ce n'est pas un problème : mesuré sur une installation
+# réelle, l'actualité tombe au fil de l'eau — médiane 1 entrée/heure sur les
+# neuf flux, moyenne 3.4, pic horaire à 23 — soit ~0.2 entrée par relevé de
+# 10 min, loin sous la décroissance de la fenêtre (0.06). Rien ne sature.
+#
+# Le plafond borne l'autre régime : le DÉMARRAGE À FROID et la REPRISE APRÈS
+# COUPURE, où tout le retard arrive en un seul relevé. Mesuré sur un premier
+# boot, base vide : 119 entrées × 0.04 × 0.42 = +2.00 d'un seul tenant, REST
+# écrêté à 1.00 quarante secondes après le lancement sans qu'elle ait rien
+# fait — puis ~2 h 45 pour redescendre, pendant lesquelles l'énergie est
+# plafonnée à 0.7 × circadien, le prompt affiche le brouillard de fatigue à
+# toute heure (elle se dit « crevée » à chaque phrase) et le coucher tombe sur
+# son plancher de 21 h. Une machine éteinte une nuit reproduit la même chose
+# en plus petit. Le plafond garde la lecture voulue : lire l'actualité fatigue
+# un peu, et un rattrapage reste UN moment de charge, pas cent dix-neuf.
 _REST_MAX_GAIN_PER_UPDATE = 0.15
 
 # Pertinence à partir de laquelle observer le monde assouvit un peu la

@@ -423,6 +423,16 @@ CONFIG_SCHEMA = [
              "recommandé derrière un modèle local lent.",
     ),
     ConfigItem(
+        key="ai.role.project_work", type="select", section="ai_roles",
+        group="Conversation",
+        label="Travail de projet (atelier outillé)",
+        hint="Le rôle qui écrit, exécute et teste dans l'atelier d'un projet. "
+             "C'est une boucle d'outils : elle consomme davantage que les "
+             "autres et demande un modèle capable. Non mappé = repli sur "
+             "« Extraction mémoire », ce que faisait le lanceur avant d'être "
+             "outillé.",
+    ),
+    ConfigItem(
         key="ai.role.memory_extraction", type="select", section="ai_roles",
         group="Mémoire & consolidation",
         label="Extraction mémoire",

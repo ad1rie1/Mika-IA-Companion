@@ -236,6 +236,19 @@ def _fige(conf: PollSettings):
     return _lire
 
 
+def _sans_bornes(**kw) -> PollSettings:
+    """Réglages avec le rattrapage désarmé.
+
+    Pour les tests qui portent sur AUTRE CHOSE que le rattrapage : les
+    fixtures RSS sont datées de juillet et tout s'y joue au premier relevé,
+    donc les trois bornes les écarteraient toutes pour une raison sans
+    rapport avec ce qu'ils vérifient.
+    """
+    kw.setdefault("seed_silently", False)
+    kw.setdefault("emit_max_age_hours", 0)
+    return PollSettings(**kw)
+
+
 def _feed(**kw):
     from modules.plugins.rss.models import RSSFeed
     params = {"name": "Exemple", "url": "https://exemple.test/feed"}
@@ -245,7 +258,15 @@ def _feed(**kw):
 
 @pytest.mark.django_db(transaction=True)
 class TestPoll:
-    async def test_premier_releve_stocke_et_publie(self, module, monkeypatch):
+    async def test_premier_releve_engrange_sans_publier(self, module, monkeypatch):
+        """La découverte d'un flux est un fonds, pas une actualité.
+
+        Tout est stocké — le filet ne perd rien — mais rien ne vient la
+        chercher : la page d'accueil d'un flux qu'on vient d'ajouter contient
+        l'arriéré de l'éditeur, et un premier démarrage à neuf flux en a déjà
+        produit 119 d'un coup, autant d'``Observation``, de diffusions sur le
+        bus et de fatigue accumulée.
+        """
         from asgiref.sync import sync_to_async
         from modules.plugins.rss.models import RSSEntry
 
@@ -257,7 +278,21 @@ class TestPoll:
 
         assert report.new_entries == 2
         assert report.failed == 0
-        assert await sync_to_async(RSSEntry.objects.count)() == 2
+        assert await sync_to_async(RSSEntry.objects.count)() == 2, \
+            "engranger n'est pas ignorer : les articles sont bien là"
+        assert emis == []
+
+    async def test_le_premier_releve_publie_si_on_le_demande(self, module, monkeypatch):
+        """C'est la règle qui fait taire le premier relevé, pas une panne."""
+        from asgiref.sync import sync_to_async
+
+        monkeypatch.setattr(module, "_settings", _fige(_sans_bornes()))
+        feed = await sync_to_async(_feed)()
+        _sans_reseau(module, monkeypatch, {feed.url: RSS2})
+        emis = _capture_evenements(monkeypatch)
+
+        await module.poll()
+
         assert [e.event_type for e in emis] == ["rss.new_entry"] * 2
         assert emis[0].data["feed_name"] == "Exemple"
 
@@ -371,6 +406,7 @@ class TestPoll:
         from asgiref.sync import sync_to_async
         from modules.plugins.rss.models import RSSEntry
 
+        monkeypatch.setattr(module, "_settings", _fige(_sans_bornes()))
         feed = await sync_to_async(_feed)(keywords="esperluette")
         _sans_reseau(module, monkeypatch, {feed.url: RSS2})
         emis = _capture_evenements(monkeypatch)
@@ -386,7 +422,7 @@ class TestPoll:
         from asgiref.sync import sync_to_async
 
         monkeypatch.setattr(module, "_settings", _fige(
-            PollSettings(alert_keywords=("esperluette",), max_alerts=5),
+            _sans_bornes(alert_keywords=("esperluette",), max_alerts=5),
         ))
         feed = await sync_to_async(_feed)()
         _sans_reseau(module, monkeypatch, {feed.url: RSS2})
@@ -410,7 +446,7 @@ class TestPoll:
         from asgiref.sync import sync_to_async
 
         monkeypatch.setattr(module, "_settings", _fige(
-            PollSettings(alert_keywords=("article", "titre"), max_alerts=1),
+            _sans_bornes(alert_keywords=("article", "titre"), max_alerts=1),
         ))
         feed = await sync_to_async(_feed)()
         _sans_reseau(module, monkeypatch, {feed.url: RSS2})
@@ -765,3 +801,119 @@ class TestEspace:
         )
         assert client.post(url).status_code in (302, 200)
         assert RSSEntry.objects.filter(is_read=False).count() == 0
+
+
+def _flux_date(articles) -> bytes:
+    """Construit un RSS2 dont les dates sont relatives à maintenant.
+
+    ``articles`` est une suite de ``(uid, heures_avant, titre)`` ; une valeur
+    ``None`` pour les heures produit un article sans ``pubDate``.
+    """
+    from datetime import datetime, timedelta, timezone as tz
+
+    items = []
+    for uid, heures, titre in articles:
+        date = ""
+        if heures is not None:
+            quand = datetime.now(tz.utc) - timedelta(hours=heures)
+            date = f"      <pubDate>{quand.strftime('%a, %d %b %Y %H:%M:%S +0000')}</pubDate>\n"
+        items.append(
+            f"    <item>\n"
+            f"      <title>{titre}</title>\n"
+            f"      <link>https://exemple.test/{uid}</link>\n"
+            f"      <guid>urn:{uid}</guid>\n"
+            f"      <description>Resume.</description>\n"
+            f"{date}"
+            f"    </item>\n"
+        )
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0">\n  <channel>\n'
+        "    <title>Journal d'exemple</title>\n" + "".join(items) +
+        "  </channel>\n</rss>\n"
+    ).encode()
+
+
+@pytest.mark.django_db(transaction=True)
+class TestBornesDuRattrapage:
+    """Ce qui vient la chercher est borné ; ce qu'elle peut lire ne l'est pas.
+
+    L'actualité tombe normalement au fil de l'eau — mesuré sur une
+    installation réelle, ~0.2 entrée par relevé de 10 min sur neuf flux. Ces
+    bornes visent l'autre régime : la reprise après coupure, où l'arriéré
+    arrive d'un bloc et où chaque article coûte une ``Observation``, une
+    diffusion sur le bus et une part de fatigue.
+    """
+
+    async def test_un_article_d_hier_est_stocke_sans_etre_signale(
+        self, module, monkeypatch,
+    ):
+        from asgiref.sync import sync_to_async
+        from modules.plugins.rss.models import RSSEntry
+
+        # Fenêtre à 12 h, premier relevé déjà passé : seule la fraîcheur joue.
+        monkeypatch.setattr(module, "_settings", _fige(
+            PollSettings(seed_silently=False, emit_max_age_hours=12),
+        ))
+        feed = await sync_to_async(_feed)()
+        flux = _flux_date([
+            ("frais", 2, "Tout juste publie"),
+            ("vieux", 40, "Publie avant-hier"),
+        ])
+        _sans_reseau(module, monkeypatch, {feed.url: flux})
+        emis = _capture_evenements(monkeypatch)
+
+        await module.poll()
+
+        assert await sync_to_async(RSSEntry.objects.count)() == 2, \
+            "les deux sont enregistrés — la borne ne perd aucun article"
+        assert [e.data["title"] for e in emis] == ["Tout juste publie"]
+
+    async def test_une_date_illisible_compte_comme_recente(self, module, monkeypatch):
+        """Ne pas savoir n'est pas savoir que c'est vieux."""
+        from asgiref.sync import sync_to_async
+
+        monkeypatch.setattr(module, "_settings", _fige(
+            PollSettings(seed_silently=False, emit_max_age_hours=12),
+        ))
+        feed = await sync_to_async(_feed)()
+        flux = _flux_date([("sansdate", None, "Article sans date")])
+        _sans_reseau(module, monkeypatch, {feed.url: flux})
+        emis = _capture_evenements(monkeypatch)
+
+        await module.poll()
+
+        assert [e.data["title"] for e in emis] == ["Article sans date"]
+
+    async def test_le_plafond_borne_un_editeur_bavard(self, module, monkeypatch):
+        """Dix articles légitimement récents restent dix articles à lire,
+        mais pas dix interruptions."""
+        from asgiref.sync import sync_to_async
+        from modules.plugins.rss.models import RSSEntry
+
+        monkeypatch.setattr(module, "_settings", _fige(PollSettings(
+            seed_silently=False, emit_max_age_hours=0, emit_max_per_poll=3,
+        )))
+        feed = await sync_to_async(_feed)()
+        flux = _flux_date([(f"a{i}", 1, f"Article {i}") for i in range(10)])
+        _sans_reseau(module, monkeypatch, {feed.url: flux})
+        emis = _capture_evenements(monkeypatch)
+
+        await module.poll()
+
+        assert await sync_to_async(RSSEntry.objects.count)() == 10
+        assert len(emis) == 3
+
+    async def test_plafond_a_zero_leve_la_borne(self, module, monkeypatch):
+        from asgiref.sync import sync_to_async
+
+        monkeypatch.setattr(module, "_settings", _fige(PollSettings(
+            seed_silently=False, emit_max_age_hours=0, emit_max_per_poll=0,
+        )))
+        feed = await sync_to_async(_feed)()
+        flux = _flux_date([(f"b{i}", 1, f"Article {i}") for i in range(8)])
+        _sans_reseau(module, monkeypatch, {feed.url: flux})
+        emis = _capture_evenements(monkeypatch)
+
+        await module.poll()
+
+        assert len(emis) == 8

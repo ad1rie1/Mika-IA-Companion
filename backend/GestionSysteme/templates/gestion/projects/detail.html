@@ -200,6 +200,44 @@
   </div>
 </section>
 
+{% if atelier %}
+<section class="card mb-6">
+  <div class="card-head">
+    <h3>Atelier</h3>
+    <span class="muted mono">{{ atelier.racine }}</span>
+  </div>
+  <div class="card-body">
+    <div class="split">
+      <div>
+        <h4 class="muted">Fichiers</h4>
+        {% if atelier.fichiers %}
+          <ul class="plain mono small">
+            {% for f in atelier.fichiers %}<li>{{ f }}</li>{% endfor %}
+          </ul>
+        {% else %}
+          <div class="empty">L'atelier est encore vide.</div>
+        {% endif %}
+        {% if atelier.erreur_fichiers %}
+          <p class="muted small">Lecture impossible : {{ atelier.erreur_fichiers }}</p>
+        {% endif %}
+      </div>
+      <div>
+        <h4 class="muted">Derniers enregistrements</h4>
+        {% if atelier.historique %}
+          <div class="table-scroll"><pre class="mono small">{{ atelier.historique }}</pre></div>
+        {% else %}
+          <div class="empty">Aucun enregistrement.</div>
+        {% endif %}
+      </div>
+    </div>
+    {% if atelier.diff %}
+      <h4 class="muted mt-4">Modifications non enregistrées</h4>
+      <div class="table-scroll"><pre class="mono small">{{ atelier.diff }}</pre></div>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
 <section class="card">
   <div class="card-head"><h3>Journal d'exécution</h3></div>
   {% if logs_page.rows %}

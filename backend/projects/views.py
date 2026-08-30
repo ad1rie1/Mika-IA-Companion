@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
 
 from asgiref.sync import async_to_sync
 from django.http import JsonResponse
@@ -244,8 +243,18 @@ def project_detail(request, project_id: int):
         return JsonResponse(data)
 
     if request.method == "DELETE":
+        # L'atelier part en corbeille, il n'est pas effacé — comme la Forge
+        # fait de ses modules. Supprimer un projet supprimait des lignes en
+        # base ; il supprime maintenant du travail, et le travail ne se jette
+        # pas sur un clic.
+        from projects import workspace
+        try:
+            corbeille = workspace.mettre_en_corbeille(p.id, p.title)
+        except Exception as exc:  # noqa: BLE001 — la fiche part quand même
+            logger.warning("Atelier du projet %s non déplacé : %s", p.id, exc)
+            corbeille = ""
         p.delete()
-        return JsonResponse({"ok": True})
+        return JsonResponse({"ok": True, "atelier_en_corbeille": corbeille})
 
     # PATCH — partial update
     body = _parse_body(request)
@@ -387,8 +396,9 @@ def approve_pending(request, action_id: int):
     Payload execution is dispatched by `payload.kind`. Supported kinds:
       - "send_email": real send through the email module; a send failure
         marks the action FAILED with the reason, never "executed".
-      - Unknown kinds → execution is skipped, action marked executed with
-        the payload recorded (audit only).
+      - Unknown kinds / no kind → rien n'est exécuté, et l'action RESTE
+        ``approved``. Elle était marquée ``executed``, ce qui contredisait
+        la règle énoncée juste au-dessus.
     """
     try:
         a = ProjectPendingAction.objects.select_related("project").get(pk=action_id)
@@ -407,8 +417,11 @@ def approve_pending(request, action_id: int):
 
     # Execute
     try:
-        result = _execute_pending_payload(a)
-        a.status = ProjectPendingAction.Status.EXECUTED
+        a_agi, result = _execute_pending_payload(a)
+        a.status = (
+            ProjectPendingAction.Status.EXECUTED if a_agi
+            else ProjectPendingAction.Status.APPROVED
+        )
         a.execution_result = str(result)[:2000]
     except Exception as e:
         logger.exception("Execution of pending action %s failed", action_id)
@@ -534,16 +547,26 @@ def project_prompt_history(request, project_id: int):
 # ── Payload dispatch ────────────────────────────────────────────
 
 
-def _execute_pending_payload(a: ProjectPendingAction) -> str:
-    """Dispatch on `payload.kind`. Returns a short audit string.
+def _execute_pending_payload(a: ProjectPendingAction) -> tuple[bool, str]:
+    """Dispatch on `payload.kind`. Returns ``(a_agi, ligne d'audit)``.
 
     Raising marks the action FAILED (with the reason as execution_result)
     — an approved action whose side effect did not happen must never show
     a green "executed" badge.
+
+    ``a_agi`` fait tenir cette règle dans l'AUTRE cas, celui qui ne lève
+    pas : une charge sans ``kind``, ou d'un ``kind`` sans exécuteur, ne
+    fait rien du tout. Elle était pourtant marquée « executed », l'API
+    répondait ``ok: true`` et le badge passait au vert. Observé en
+    conditions réelles sur un projet logiciel : le runner propose « créer
+    csv2json.py » avec le code en charge utile, l'utilisateur approuve,
+    l'écran annonce l'exécution — et aucun fichier n'existe. Approuvée
+    sans exécuteur, l'action reste APPROVED : elle a été acceptée, elle
+    n'a pas eu lieu, et les deux se lisent.
     """
     kind = (a.payload or {}).get("kind")
     if not kind:
-        return "no-kind payload (audit-only)"
+        return False, "charge sans 'kind' : rien à exécuter (trace seulement)"
 
     if kind == "send_email":
         # Delegate to the email module's real send path. Schema:
@@ -563,7 +586,7 @@ def _execute_pending_payload(a: ProjectPendingAction) -> str:
         )
         if not ok:
             raise RuntimeError(message or "email send failed")
-        return message or f"email sent to {a.payload.get('to', '')}"
+        return True, message or f"email sent to {a.payload.get('to', '')}"
 
     # Unknown kinds: audit-only
-    return f"unsupported payload kind '{kind}' — logged for audit"
+    return False, f"aucun exécuteur pour le type '{kind}' : rien n'a eu lieu"

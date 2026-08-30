@@ -559,15 +559,16 @@ class TestPersistance:
 
 
 class TestRafaleDeSignauxPassifs:
-    """Une rafale d'observations ne doit pas saturer la fatigue.
+    """Un rattrapage d'observations ne doit pas saturer la fatigue.
 
-    ``conscience.observe()`` appelle ``on_observation()`` pour CHAQUE signal
-    externe, et un relevé RSS de neuf flux en produit une centaine d'un coup.
-    Mesuré sur un premier démarrage réel : 119 entrées × 0.04 × 0.42 = +2.00
-    de tension d'un seul tenant, REST écrêté à 1.00 quarante secondes après
-    le boot sans qu'elle ait rien fait — énergie plafonnée à 0.7 × circadien
-    toute la journée, brouillard de fatigue dans le prompt à toute heure, et
-    coucher rabattu sur son plancher de 21 h tous les soirs.
+    Le régime visé n'est PAS l'actualité au fil de l'eau — mesurée sur une
+    installation réelle, elle tombe à ~0.2 entrée par relevé de 10 min et ne
+    sature rien. C'est le démarrage à froid et la reprise après coupure, où
+    tout le retard arrive en un seul relevé : mesuré sur un premier boot base
+    vide, 119 entrées × 0.04 × 0.42 = +2.00 d'un seul tenant, REST écrêté à
+    1.00 quarante secondes après le lancement sans qu'elle ait rien fait, puis
+    ~2 h 45 à redescendre — énergie plafonnée, brouillard de fatigue dans le
+    prompt et coucher sur son plancher de 21 h pendant tout ce temps.
     """
 
     def test_une_rafale_ne_sature_pas_la_fatigue(self):

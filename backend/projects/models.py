@@ -114,7 +114,19 @@ class Project(models.Model):
     )
     resource_paths = models.JSONField(
         default=list, blank=True,
-        help_text="Filesystem / logical paths relevant to this project.",
+        help_text=(
+            "Chemins EXTÉRIEURS à l'atelier que ce projet peut consulter, en "
+            "plus de sa propre racine. Le travail lui-même vit dans "
+            "data/projects/<id>-<slug>/ ; ce champ sert à pointer une source "
+            "de référence qu'on ne veut pas recopier."
+        ),
+    )
+    test_command = models.CharField(
+        max_length=300, blank=True, default="",
+        help_text=(
+            "Commande lancée par l'outil project_test, par exemple "
+            "'pytest -q'. Vide = l'outil demande la commande à chaque fois."
+        ),
     )
     contacts = models.JSONField(
         default=list, blank=True,

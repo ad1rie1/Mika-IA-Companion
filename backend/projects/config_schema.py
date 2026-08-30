@@ -37,6 +37,27 @@ CONFIG_SCHEMA = [
                     "attend une réponse.",
     ),
     ConfigGroup(
+        section="projects", key="Atelier", order=25,
+        description="Un projet est un dossier réel, séparé du moteur, avec de "
+                    "quoi le manipuler. C'est la symétrie inverse de la Forge : "
+                    "celle-ci est confinée PARCE QU'ELLE tourne dans le "
+                    "processus de Mika ; un atelier est capable PARCE QU'IL "
+                    "est dehors. Ce que la trousse écrit reste sous la racine, "
+                    "toujours.",
+    ),
+    ConfigGroup(
+        section="projects", key="Exécution", order=26,
+        description="La frontière retenue est le sous-processus borné : pas de "
+                    "shell, exécutables déclarés, dossier verrouillé, "
+                    "environnement reconstruit et non hérité (sans quoi un "
+                    "script écrit par le modèle recevrait CONFIG_ENCRYPTION_KEY "
+                    "et DJANGO_SECRET_KEY), entrée fermée, délai qui tue tout "
+                    "le groupe de processus. ⚠ Elle protège de l'accident, pas "
+                    "d'un adversaire : le programme lancé tourne avec les "
+                    "droits du serveur et peut lire le disque. N'expose pas "
+                    "Mika à d'autres personnes tant que c'est ce mode.",
+    ),
+    ConfigGroup(
         section="projects", key="Traçabilité", order=40, advanced=True,
         description="Le tampon roulant qui garde le prompt envoyé et la "
                     "réponse brute de chaque avance, relisible sur la fiche du "
@@ -111,5 +132,76 @@ CONFIG_SCHEMA = [
             "qui n'ont rien à voir ; le monter lui fait oublier le projet "
             "dont on est en train de lui parler."
         ),
+    ),
+    # ── Atelier ───────────────────────────────────────────────────
+    ConfigItem(
+        key="projects.workspace.root", type="str", section="projects",
+        group="Atelier", label="Dossier des ateliers",
+        default="data/projects", restart_required=True,
+        hint="Où vivent les dossiers de travail. Un chemin relatif part de la "
+             "racine du dépôt ; un chemin absolu sort les ateliers du dépôt, "
+             "ce qui est le bon réglage si tu ne veux pas mélanger le travail "
+             "aux données du moteur. Un atelier n'est créé qu'au premier "
+             "fichier écrit : un projet qui ne produit rien n'a pas de dossier.",
+    ),
+    ConfigItem(
+        key="projects.workspace.max_file_bytes", type="int", section="projects",
+        group="Atelier", label="Taille maximale d'un fichier lu (octets)",
+        default=400000, min=1000, max=5000000, hot_reload=True,
+        hint="Au-delà, la lecture est tronquée et le dit. Borne ce qu'un "
+             "fichier peut occuper dans l'invite du tour suivant.",
+    ),
+    ConfigItem(
+        key="projects.workspace.max_tree_entries", type="int", section="projects",
+        group="Atelier", label="Entrées maximum dans une arborescence",
+        default=400, min=10, max=5000, hot_reload=True,
+        hint="Un dossier de dépendances installées compte des milliers de "
+             "fichiers ; les lister noierait la réponse.",
+    ),
+    ConfigItem(
+        key="projects.max_tool_turns_per_advance", type="int", section="projects",
+        group="Garde-fous d'autonomie", label="Tours de boucle d'outils par avance",
+        default=12, min=1, max=60, hot_reload=True,
+        hint="Une avance est devenue une boucle d'outils : à chaque tour le "
+             "modèle appelle des outils et relit leurs réponses. Sans borne, "
+             "une boucle qui tourne en rond consomme un budget entier sur un "
+             "seul tick. Le défaut des providers est 10 ; un projet en demande "
+             "un peu plus, parce que lire un fichier avant de l'éditer coûte "
+             "déjà deux tours.",
+    ),
+
+    # ── Exécution ─────────────────────────────────────────────────
+    ConfigItem(
+        key="projects.exec.allowed_commands", type="list", section="projects",
+        group="Exécution", label="Exécutables autorisés",
+        default=["python", "python3", "pytest", "node", "npm", "npx", "git",
+                 "ls", "cat", "head", "tail", "wc", "grep", "find",
+                 "mkdir", "cp", "mv"],
+        hot_reload=True,
+        hint="Comparé au nom du programme, jamais au chemin complet. Tout ce "
+             "qui n'est pas dans la liste est refusé, et le refus dit au "
+             "modèle ce qui est disponible.",
+    ),
+    ConfigItem(
+        key="projects.exec.timeout_seconds", type="int", section="projects",
+        group="Exécution", label="Délai d'une commande (s)",
+        default=120, min=1, max=1800, hot_reload=True,
+        hint="À l'échéance, c'est tout le groupe de processus qui est tué — "
+             "tuer le seul enfant laisserait ses petits-enfants tourner.",
+    ),
+    ConfigItem(
+        key="projects.exec.max_output_chars", type="int", section="projects",
+        group="Exécution", label="Sortie maximale d'une commande",
+        default=20000, min=200, max=200000, hot_reload=True,
+        hint="Le début et la fin sont gardés, le milieu coupé — c'est aux deux "
+             "bouts que se lit un échec de test.",
+    ),
+    ConfigItem(
+        key="projects.exec.block_network", type="bool", section="projects",
+        group="Exécution", label="Couper le réseau des commandes",
+        default=True, hot_reload=True,
+        hint="Utilise `unshare -rn` quand la machine le permet. Si le noyau "
+             "refuse les espaces de noms, la coupure N'A PAS LIEU et la "
+             "commande le signale plutôt que de le taire.",
     ),
 ]

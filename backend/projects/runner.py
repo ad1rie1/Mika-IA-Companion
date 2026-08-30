@@ -3,17 +3,28 @@
 Integration: the runner owns its own background loop (started from ASGI
 lifespan, cadence ``projects.runner_interval``). Each tick:
   1. Lists projects whose schedule is due
-  2. For each, assembles a ProjectRunContext and calls the LLM
+  2. For each, assembles a ProjectRunContext, ouvre l'atelier du projet et
+     appelle la BOUCLE D'OUTILS avec la trousse de cet atelier
   3. Parses the structured output, applies task updates, creates
      new tasks, queues pending actions (if `requires_approval`),
-     and records a ProjectLog
+     enregistre le travail dans git et records a ProjectLog
   4. Bumps `next_run_at` via ``schedule.compute_next_run``
+
+**Le lanceur agit, il ne décrit plus.** Il appelait ``ai_router.complete`` —
+une complétion texte, aucun outil transmis — et son seul canal vers le monde
+était ``proposed_action``, dont un seul ``kind`` était câblé (``send_email``).
+Un projet logiciel s'arrêtait donc sur du code correct déposé dans un
+``JSONField`` que rien n'exécutait. Il tient maintenant une trousse bornée à
+l'atelier du projet (voir :mod:`projects.toolkit`), et ``proposed_action``
+redevient ce qu'il aurait dû être : le sas de ce qui SORT de la machine.
 
 This is the "silent" Mika — no WS broadcast of her internal thinking,
 unless `report_to_user` is produced (then we push a notification).
 
 Bulk-safety: max `MAX_ADVANCES_PER_TICK` projects advanced per call to
-avoid LLM bursts if a dozen projects fire at once.
+avoid LLM bursts if a dozen projects fire at once, et
+``MAX_TOOL_TURNS`` tours de boucle d'outils par avance — une boucle qui
+tourne en rond consommerait sinon un budget entier sur un seul tick.
 """
 from __future__ import annotations
 
@@ -24,13 +35,13 @@ import time
 from typing import Optional
 
 from asgiref.sync import sync_to_async
-from django.conf import settings
 from django.utils import timezone
 
+from ai.chat import ChatPrompt
 from ai.quota import QuotaExceeded, current_project_id
 from ai.router import AIRole, UnconfiguredRoleError, ai_router
 from configs.runtime import cfg_int
-from projects import context_builder, schedule
+from projects import context_builder, schedule, toolkit, workspace
 from utils.parsing import strip_markdown_json
 from utils.periodic import PeriodicLoop
 from utils.degradation import degradations
@@ -42,6 +53,10 @@ logger = logging.getLogger(__name__)
 # repli exact quand le registre est hors d'atteinte.
 MAX_ADVANCES_PER_TICK = 3         # at most N advances in a single tick
 LLM_TIMEOUT_SECONDS = 90
+# Tours de boucle d'outils qu'une avance s'autorise. Le défaut des
+# providers est 10 ; lire un fichier avant de l'éditer en coûte déjà deux,
+# donc un atelier en demande un peu plus qu'une conversation.
+MAX_TOOL_TURNS = 12
 RUNS_SINCE_INPUT_CAP = 10         # beyond this, force a pause until user comes back
 
 
@@ -198,16 +213,37 @@ class ProjectRunner:
         raw = ""
         outcome = "ok"
         started = time.time()
+        outils_appeles: list[str] = []
+
+        # L'atelier : un dossier réel, créé à la volée. Un projet qui n'écrit
+        # jamais rien n'a jamais de dossier — rien à migrer sur une
+        # installation existante.
+        atelier = await sync_to_async(workspace.atelier_de)(project_id, ctx.title)
+        await atelier.git_initialiser()
+        trousse = toolkit.construire_trousse(
+            atelier, commande_de_test=ctx.test_command,
+        )
 
         # Attribute this LLM call to the project so the quota tracker
         # charges `Project.monthly_token_budget`.
         token = current_project_id.set(project_id)
         try:
-            raw = await asyncio.wait_for(
-                ai_router.complete(
-                    role=AIRole.MEMORY_EXTRACTION,  # re-use light model
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
+            raw, outils_appeles = await asyncio.wait_for(
+                ai_router.chat_with_tools(
+                    role=self._role_de_travail(),
+                    prompt=ChatPrompt(
+                        # Le cadre d'un projet ne bouge pas d'un tick à
+                        # l'autre ; l'état du chantier, si. Les séparer fait
+                        # tomber le cadre du bon côté du point de césure du
+                        # cache, gratuitement.
+                        system_stable=system_prompt,
+                        message=user_prompt,
+                    ),
+                    tools=trousse,
+                    max_turns=cfg_int(
+                        "projects.max_tool_turns_per_advance",
+                        MAX_TOOL_TURNS, mini=1,
+                    ),
                 ),
                 timeout=cfg_int(
                     "projects.llm_timeout_seconds", LLM_TIMEOUT_SECONDS, mini=1,
@@ -329,8 +365,54 @@ class ProjectRunner:
             duration_ms=duration_ms,
         )
         await self._apply_structured(ctx, structured, raw=raw)
+        await self._enregistrer_le_travail(
+            atelier, structured.get("summary") or "travail", outils_appeles,
+        )
         await self._bump_next_run(project_id)
         return True
+
+    @staticmethod
+    def _role_de_travail() -> AIRole:
+        """``PROJECT_WORK`` s'il est mappé, sinon celui d'avant.
+
+        Le lanceur empruntait ``MEMORY_EXTRACTION`` avec le commentaire
+        « re-use light model » : un petit modèle suffit à remplir un JSON, il
+        ne suffit pas à tenir une boucle d'outils. Le rôle dédié existe donc —
+        mais exiger son mappage casserait toute installation qui met à jour,
+        au moment précis où ses projets se mettent à travailler. Le repli est
+        la continuité, pas un défaut de conception.
+        """
+        try:
+            ai_router._resolve(AIRole.PROJECT_WORK)  # noqa: SLF001 — sonde de mappage
+        except UnconfiguredRoleError:
+            return AIRole.MEMORY_EXTRACTION
+        except Exception:  # noqa: BLE001 — un registre illisible ne doit pas bloquer
+            return AIRole.MEMORY_EXTRACTION
+        return AIRole.PROJECT_WORK
+
+    async def _enregistrer_le_travail(
+        self, atelier, resume: str, outils: list[str],
+    ) -> None:
+        """Un commit par tick AYANT modifié quelque chose.
+
+        Pas de commit vide : un historique où chaque tick laisse une trace ne
+        se relit plus, et c'est justement la relecture qu'on cherche — c'est
+        elle qui transforme « approuver une charge utile JSON » en « relire un
+        diff ».
+        """
+        try:
+            sha = await atelier.git_commit(resume)
+        except Exception as exc:  # noqa: BLE001 — l'historique n'est pas le travail
+            degradations.record("projects: commit de l'atelier", exc)
+            return
+        if not sha:
+            return
+        suffixe = f" · outils : {', '.join(outils[:8])}" if outils else ""
+        await self._record_log(
+            atelier.project_id,
+            action="committed",
+            summary=f"[{sha}] {resume[:200]}{suffixe}",
+        )
 
     # ── Prompt history buffer ────────────────────────────────────
 
@@ -442,10 +524,12 @@ class ProjectRunner:
                 degradations.record("projects: create task", exc)
 
         # 3. Proposed action (if the LLM output includes one) → pending queue
-        # `proposed_action` is the *only* channel a text-only runner has to
-        # reach ProjectPendingAction, and the prompt declares it on projects
-        # requiring approval. Anywhere else there is no queue to land in, so
-        # the proposal is logged rather than silently dropped.
+        # `proposed_action` n'est plus le seul canal d'action du lanceur — il
+        # écrit et exécute lui-même dans son atelier — mais il reste le sas de
+        # ce qui SORT de la machine, et c'est le sens qu'il aurait dû avoir
+        # depuis le début. Le prompt ne le déclare que sur un projet qui exige
+        # une validation : ailleurs il n'y a pas de file où atterrir, donc la
+        # proposition est journalisée plutôt que perdue en silence.
         proposed = data.get("proposed_action")
         if isinstance(proposed, dict) and ctx.requires_approval:
             try:

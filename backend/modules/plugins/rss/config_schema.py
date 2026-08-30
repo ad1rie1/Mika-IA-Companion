@@ -53,6 +53,19 @@ CONFIG_SCHEMA = [
                     "d'un bloc.",
     ),
     ConfigGroup(
+        section="module_rss", key="Rattrapage", order=25,
+        description="Ce qui se passe quand l'arriéré arrive d'un bloc : premier "
+                    "relevé d'un flux, ou reprise après une coupure. "
+                    "L'actualité tombe normalement au fil de l'eau — mesuré "
+                    "ici, une entrée par heure environ sur l'ensemble des flux "
+                    "— mais un démarrage à froid en a déjà produit 119 d'un "
+                    "coup, autant d'observations et de réveils de la conscience, "
+                    "et une fatigue saturée pour deux heures. Ces bornes ne "
+                    "retirent RIEN de ce qu'elle peut lire : les articles sont "
+                    "stockés, listables et proposables comme avant. Elles "
+                    "bornent seulement ce qui vient la chercher.",
+    ),
+    ConfigGroup(
         section="module_rss", key="Attention", order=30,
         description="Le droit d'interrompre. Un article signalé passe par la "
                     "conscience, qui décide ; un article en mot-clé d'alerte "
@@ -183,6 +196,38 @@ CONFIG_SCHEMA = [
             "(notify_ai) au lieu d'attendre qu'elle y prête attention. "
             "À garder très court. Ne s'applique qu'aux articles qu'un flux a "
             "le droit de signaler : un flux décoché reste muet, alerte comprise."
+        ),
+    ),
+    ConfigItem(
+        key="rss.seed_silently", type="bool", section="module_rss",
+        group="Rattrapage", label="Premier relevé silencieux",
+        default=True, hot_reload=True,
+        description=(
+            "À la découverte d'un flux, toute sa page est un fonds, pas une "
+            "actualité. Les articles sont engrangés et rien n'est signalé ; "
+            "le flux ne parle qu'à partir du relevé suivant."
+        ),
+    ),
+    ConfigItem(
+        key="rss.emit_max_age_hours", type="int", section="module_rss",
+        group="Rattrapage", label="Âge maximum d'un article signalé (h)",
+        default=12, min=0, max=168, hot_reload=True,
+        description=(
+            "Au-delà, l'article est enregistré sans être signalé : un titre "
+            "d'avant-hier découvert aujourd'hui n'est pas un événement qui "
+            "arrive. 0 désactive la fenêtre. Un article sans date lisible est "
+            "traité comme récent — ne pas savoir n'est pas savoir que c'est "
+            "vieux."
+        ),
+    ),
+    ConfigItem(
+        key="rss.emit_max_per_poll", type="int", section="module_rss",
+        group="Rattrapage", label="Articles signalés au maximum, par flux et par tour",
+        default=5, min=0, max=50, hot_reload=True,
+        description=(
+            "Borne un éditeur qui publie vingt articles d'un coup, tous "
+            "légitimement récents. Les suivants sont enregistrés sans être "
+            "signalés. 0 lève le plafond."
         ),
     ),
     ConfigItem(

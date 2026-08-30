@@ -160,8 +160,21 @@ def project_resume(request, project_id: int):
 def project_delete(request, project_id: int):
     projet = _project_or_404(project_id)
     titre = projet.title
+    from projects import workspace
+    try:
+        corbeille = workspace.mettre_en_corbeille(projet.pk, titre)
+    except Exception as exc:  # noqa: BLE001 — la fiche part quand même
+        logger.warning("Atelier du projet %s non déplacé : %s", projet.pk, exc)
+        corbeille = ""
     projet.delete()
-    messages.success(request, f"Projet « {titre} » supprimé.")
+    if corbeille:
+        messages.success(
+            request,
+            f"Projet « {titre} » supprimé. Son atelier a été mis en corbeille "
+            f"({corbeille}) — rien n'a été effacé.",
+        )
+    else:
+        messages.success(request, f"Projet « {titre} » supprimé.")
     return redirect("gestionsysteme:projects")
 
 
@@ -225,6 +238,41 @@ def _premier_message(form) -> str:
     return ""
 
 
+def _lire_atelier(project) -> dict | None:
+    """L'état du dossier de travail, ou None s'il n'existe pas encore.
+
+    Sans cet écran, le travail existerait sur disque et resterait invisible :
+    c'est exactement l'écart que ce sous-système avait déjà — un code correct
+    dans un JSONField que personne ne regardait. Chaque lecture est isolée :
+    on ouvre cette page justement quand quelque chose ne va pas.
+    """
+    from asgiref.sync import async_to_sync
+
+    from projects import workspace
+
+    try:
+        atelier = workspace.atelier_existant(project.pk, project.title)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Atelier du projet %s illisible : %s", project.pk, exc)
+        return None
+    if atelier is None:
+        return None
+
+    infos: dict = {"racine": str(atelier.racine)}
+    try:
+        infos["fichiers"] = atelier.arborescence()
+    except Exception as exc:  # noqa: BLE001
+        infos["fichiers"] = []
+        infos["erreur_fichiers"] = str(exc)
+    for cle, appel in (("diff", atelier.git_diff), ("historique", atelier.git_journal)):
+        try:
+            infos[cle] = async_to_sync(appel)()
+        except Exception as exc:  # noqa: BLE001
+            infos[cle] = ""
+            infos[f"erreur_{cle}"] = str(exc)
+    return infos
+
+
 def project_detail(request, project_id: int):
     from projects.models import ProjectLog, ProjectPendingAction, ProjectTask
     from configs.runtime import cfg_int
@@ -265,6 +313,7 @@ def project_detail(request, project_id: int):
         # lanceur s'arrête à 5 se lit comme un projet bloqué sans raison.
         "runs_cap": cfg_int(
             "projects.runs_since_input_cap", RUNS_SINCE_INPUT_CAP, mini=1),
+        "atelier": _lire_atelier(project),
     })
     return render(request, "gestion/projects/detail.html", ctx)
 
@@ -323,10 +372,21 @@ def pending_action(request, action_id: int):
         # l'action « failed », jamais « exécutée ».
         from projects.views import _execute_pending_payload
         try:
-            result = _execute_pending_payload(action)
-            action.status = ProjectPendingAction.Status.EXECUTED
+            a_agi, result = _execute_pending_payload(action)
+            action.status = (
+                ProjectPendingAction.Status.EXECUTED if a_agi
+                else ProjectPendingAction.Status.APPROVED
+            )
             action.execution_result = str(result)[:2000]
-            messages.success(request, "Action approuvée et exécutée.")
+            if a_agi:
+                messages.success(request, "Action approuvée et exécutée.")
+            else:
+                # Approuvée sans exécuteur : le dire, plutôt que d'annoncer
+                # une exécution qui n'a pas eu lieu.
+                messages.warning(
+                    request,
+                    f"Action approuvée, mais rien n'a été exécuté : {result}",
+                )
         except Exception as exc:
             logger.exception("exécution de l'action %s en échec", action_id)
             action.status = ProjectPendingAction.Status.FAILED

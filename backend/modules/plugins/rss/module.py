@@ -94,6 +94,12 @@ class PollSettings:
     alert_keywords: tuple[str, ...] = ()
     max_alerts: int = 2
     context_items: int = 4
+    # Bornes du rattrapage. Un article *stocké* n'est pas un article *signalé* :
+    # ces trois règles ne retirent rien de ce que Mika peut lire, elles bornent
+    # seulement ce qui vient la chercher.
+    seed_silently: bool = True
+    emit_max_age_hours: int = 12
+    emit_max_per_poll: int = 5
 
 
 @dataclass
@@ -234,6 +240,9 @@ class RSSModule(BaseModule):
             alert_keywords=tuple(m.strip().lower() for m in mots if str(m).strip()),
             max_alerts=int(lire("rss.max_alerts_per_poll", 2)),
             context_items=int(lire("rss.context_items", 4)),
+            seed_silently=bool(lire("rss.seed_silently", True)),
+            emit_max_age_hours=int(lire("rss.emit_max_age_hours", 12)),
+            emit_max_per_poll=int(lire("rss.emit_max_per_poll", 5)),
         )
 
     # ── Téléchargement ────────────────────────────────────────────
@@ -415,6 +424,8 @@ class RSSModule(BaseModule):
         n'apprendre presque jamais rien, sur une base SQLite que six boucles de
         fond écrivent en permanence.
         """
+        from django.utils import timezone
+
         from modules.plugins.rss.models import RSSEntry
 
         candidats = []
@@ -435,6 +446,30 @@ class RSSModule(BaseModule):
         mots_alerte = conf.alert_keywords
         emettre = conf.emit_events and feed.emit_events
 
+        # ── Bornes du rattrapage ─────────────────────────────────────
+        #
+        # L'actualité tombe au fil de l'eau : mesuré sur une installation
+        # réelle, médiane 1 entrée/heure sur neuf flux, soit ~0.2 par relevé.
+        # Le régime que ces bornes visent est l'autre : le PREMIER relevé d'un
+        # flux, et la REPRISE APRÈS COUPURE, où l'arriéré arrive d'un bloc. Un
+        # premier démarrage base vide en produisait 119 d'un coup — 119 lignes
+        # ``Observation``, 119 diffusions sur le bus, et la fatigue saturée
+        # (chaque signal externe appelle ``drive_engine.on_observation``).
+        #
+        # Rien n'est perdu : les articles sont stockés comme avant, restent
+        # lisibles par ``list_rss_entries``, comptés dans le bloc de contexte
+        # et offerts par ``propose_sujets``. Ce qui est borné, c'est ce qui
+        # vient la CHERCHER — un titre d'avant-hier n'est pas un événement.
+        premier_releve = feed.last_success_at is None
+        if premier_releve and conf.seed_silently:
+            # Une découverte de flux est un fonds, pas une actualité : on
+            # l'engrange en silence et on ne signale qu'à partir de la suite.
+            emettre = False
+        maintenant = timezone.now()
+        limite_h = max(0, conf.emit_max_age_hours)
+        plafond = max(0, conf.emit_max_per_poll)
+        emis = 0
+
         lignes, sorties = [], []
         for empreinte, entry in candidats:
             if empreinte in connus:
@@ -452,6 +487,22 @@ class RSSModule(BaseModule):
             # l'événement se laisse ignorer — ce serait rendre un canal plus
             # intrusif que celui qu'on vient justement de retirer.
             signalable = emettre and retenu
+            if signalable and limite_h and entry.published_at is not None:
+                publie = entry.published_at
+                try:
+                    if timezone.is_naive(publie):
+                        publie = timezone.make_aware(
+                            publie, timezone.get_default_timezone(),
+                        )
+                    if (maintenant - publie).total_seconds() > limite_h * 3600:
+                        signalable = False
+                except (TypeError, ValueError, OverflowError):
+                    # Date illisible : on ne conclut pas qu'elle est vieille.
+                    pass
+            if signalable and plafond and emis >= plafond:
+                signalable = False
+            if signalable:
+                emis += 1
 
             lignes.append(RSSEntry(
                 feed=feed,

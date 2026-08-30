@@ -391,7 +391,18 @@ class TestPendingEndpoints:
         assert pending[0]["proposal"] == "send email"
 
     def test_approve_unknown_payload_kind(self, client: Client):
-        """Approval of an unknown-kind payload should succeed in audit mode."""
+        """Approuver ce que rien ne sait exécuter n'est pas l'exécuter.
+
+        L'approbation reste un succès — elle ne doit pas rendre 500 pour une
+        charge que le dispatcheur ne connaît pas — mais l'action s'arrête à
+        APPROVED. Elle était marquée EXECUTED, ce qui contredisait la règle
+        que ``_execute_pending_payload`` énonce dans son propre docstring :
+        « une action approuvée dont l'effet n'a pas eu lieu ne doit jamais
+        afficher un badge vert *executed* ». Observé en conditions réelles :
+        le runner propose « créer csv2json.py » avec le code en charge utile,
+        l'utilisateur approuve, l'écran annonce l'exécution, aucun fichier
+        n'existe.
+        """
         from projects.models import Project, ProjectPendingAction
         p = Project.objects.create(title="X")
         a = ProjectPendingAction.objects.create(
@@ -408,8 +419,28 @@ class TestPendingEndpoints:
                                data="{}", content_type="application/json")
         assert resp.status_code == 200
         a.refresh_from_db()
-        assert a.status == ProjectPendingAction.Status.EXECUTED
-        assert "unsupported" in a.execution_result
+        assert a.status == ProjectPendingAction.Status.APPROVED
+        assert "unsupported_xyz" in a.execution_result
+
+    def test_approve_payload_sans_kind_reste_approuvee(self, client: Client):
+        """Le cas rencontré en vrai : le runner propose un fichier à écrire,
+        la charge porte ``filename``/``content`` et aucun ``kind``."""
+        from projects.models import Project, ProjectPendingAction
+        p = Project.objects.create(title="Csv2Json")
+        a = ProjectPendingAction.objects.create(
+            project=p, proposal="Créer le fichier csv2json.py",
+            payload={"filename": "csv2json.py", "content": "import csv\n"},
+        )
+        with patch("pipeline.broadcast.broadcast_inner_state_update") as mock_bc:
+            async def _noop(*_a, **_k): return None
+            mock_bc.side_effect = _noop
+            resp = client.post(f"/api/projects/pending/{a.pk}/approve",
+                               data="{}", content_type="application/json")
+
+        assert resp.status_code == 200
+        a.refresh_from_db()
+        assert a.status == ProjectPendingAction.Status.APPROVED
+        assert a.status != ProjectPendingAction.Status.EXECUTED
 
     def test_reject(self, client: Client):
         from projects.models import Project, ProjectLog, ProjectPendingAction

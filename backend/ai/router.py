@@ -65,6 +65,14 @@ class AIRole(str, Enum):
     # Compaction conversationnelle : replie les segments anciens du fil en
     # résumé roulant, hors tour (lot B). Non mappé = compaction désactivée.
     COMPACTION = "compaction"
+    # Travail de projet : la boucle outillée qui écrit, exécute et teste dans
+    # l'atelier d'un projet. Distinct de `conversation_tools` parce que ce
+    # n'est pas une conversation — pas d'émotion, pas d'interlocuteur, un
+    # cadre professionnel — et distinct de `memory_extraction`, que le
+    # lanceur empruntait faute de mieux : un petit modèle suffit à remplir un
+    # JSON, il ne suffit pas à tenir une boucle d'outils. Non mappé = repli
+    # sur `memory_extraction`, donc une installation existante ne casse pas.
+    PROJECT_WORK = "project_work"
 
 
 # Config-key prefixes that carry a provider's credentials. A change under one

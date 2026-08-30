@@ -37,6 +37,9 @@ class ProjectRunContext:
     recent_logs: list[dict]           # last 5 logs, most recent first
     pending_actions_count: int
     runs_since_user_input: int
+    # Commande lancée par project_test. En fin de dataclass parce que les
+    # champs qui précèdent sont sans défaut.
+    test_command: str = ""
 
 
 async def build(project_id: int) -> ProjectRunContext | None:
@@ -118,6 +121,7 @@ async def build(project_id: int) -> ProjectRunContext | None:
         resource_paths=list(p.resource_paths or []),
         contacts=list(p.contacts or []),
         requires_approval=p.requires_approval,
+        test_command=(p.test_command or "").strip(),
         todo_tasks=todos,
         in_progress_tasks=in_progress,
         blocked_tasks=blocked,
@@ -153,27 +157,45 @@ def to_system_prompt(ctx: ProjectRunContext) -> str:
         lines += ["HORS DE PORTÉE (n'y touche JAMAIS) :"]
         lines += [f"  - {o}" for o in ctx.out_of_scope]
         lines += [""]
-    # Périmètre outillé du projet. L'appel du lanceur est une complétion
-    # texte pure : aucun outil ne lui est transmis. La liste borne donc ce
-    # qu'il peut *proposer*, et ne pas la rendre la laissait invisible du
-    # modèle — le champ ne cadrait rien.
-    if ctx.allowed_modules:
+    # L'atelier. Ce bloc a changé de nature le jour où le lanceur a reçu des
+    # outils : il disait « tu ne les appelles pas toi-même ici », ce qui est
+    # devenu faux pour les fichiers et vrai pour les modules.
+    lines += [
+        "TON ATELIER :",
+        "  Ce projet a un dossier de travail à lui, séparé du reste du "
+        "moteur. Tes outils project_* y écrivent, y lisent, y exécutent et "
+        "y testent. Tout chemin est relatif à sa racine ; tu ne peux pas en "
+        "sortir, et tu n'as pas à essayer.",
+        "  Commence par project_list_files avant d'écrire quoi que ce soit : "
+        "ce que tu as déjà fait aux tours précédents est encore là.",
+        "  Fais le travail, ne le décris pas. Écrire le contenu d'un fichier "
+        "dans ta réponse au lieu de l'écrire avec project_write_file, c'est "
+        "un tour perdu — rien ne sera enregistré.",
+        "",
+    ]
+    if ctx.test_command:
         lines += [
-            "MODULES DANS LE PÉRIMÈTRE (tu ne les appelles pas toi-même ici : "
-            "tu peux seulement proposer une action qui les utilise) :",
-            "  " + ", ".join(ctx.allowed_modules),
+            f"  Commande de test du projet : {ctx.test_command} "
+            "(project_test la lance).",
             "",
         ]
-    else:
+
+    # `allowed_modules` reste un périmètre de PROPOSITION, délibérément : la
+    # trousse de l'atelier n'a aucun effet hors du dossier, alors qu'un
+    # module en a — envoyer un e-mail sort de la machine. Lui donner ces
+    # outils directement court-circuiterait `requires_approval`, qui est
+    # précisément le sas de ce qui sort.
+    if ctx.allowed_modules:
         lines += [
-            "MODULES DANS LE PÉRIMÈTRE : aucun. Ce projet n'autorise aucun "
-            "outil — limite-toi à faire avancer les tâches.",
+            "AU-DELÀ DE L'ATELIER (tu ne les appelles pas toi-même : tu "
+            "proposes une action, et quelqu'un valide) :",
+            "  " + ", ".join(ctx.allowed_modules),
             "",
         ]
 
     if ctx.resource_paths:
         lines += [
-            "RESSOURCES :",
+            "RESSOURCES EXTÉRIEURES (en lecture, hors de ton atelier) :",
             "  " + ", ".join(ctx.resource_paths),
             "",
         ]
@@ -219,14 +241,18 @@ def to_system_prompt(ctx: ProjectRunContext) -> str:
         ]
 
     if ctx.requires_approval:
-        # Aucun outil n'est transmis à cet appel : la file d'attente se
-        # remplit par la clé `proposed_action` du JSON de sortie, la seule
-        # que le lanceur sache lire (`runner._apply_structured`).
+        # Le sas ne garde plus QUE l'égress. Il gardait tout, parce que le
+        # lanceur n'avait aucun outil : l'ancienne consigne disait « écrire un
+        # fichier doit être soumis à validation, n'exécute RIEN directement »,
+        # ce qui annule mot pour mot la trousse de l'atelier. Laissée en
+        # place, elle ramènerait le comportement qu'on vient de réparer — le
+        # code correct déposé dans une charge utile JSON que rien n'exécute.
         lines += [
-            "IMPORTANT : toute action à effet de bord (envoyer un mail, "
-            "écrire un fichier, etc.) doit être soumise à l'utilisateur "
-            "via la clé `proposed_action` du JSON de sortie. "
-            "N'exécute RIEN directement.",
+            "VALIDATION : dans ton atelier, tu agis librement — écrire, "
+            "exécuter, tester, enregistrer. Ce qui SORT de la machine "
+            "(envoyer un mail, écrire hors de l'atelier, contacter "
+            "quelqu'un) passe par la clé `proposed_action` du JSON de "
+            "sortie et attend un accord.",
             "",
         ]
 
@@ -234,8 +260,9 @@ def to_system_prompt(ctx: ProjectRunContext) -> str:
     # validation : ailleurs, la proposition n'a aucune file où atterrir.
     lines += [
         "CE QUE TU DOIS FAIRE MAINTENANT :",
-        "  1. Avance d'UNE étape sur ce projet — au choix : marquer une "
-        "tâche terminée, en commencer une nouvelle, "
+        "  1. Avance d'UNE étape sur ce projet — au choix : faire le travail "
+        "dans l'atelier avec tes outils, marquer une tâche terminée, en "
+        "commencer une nouvelle, "
         + ("proposer une action à valider, " if ctx.requires_approval else "")
         + "déclarer un blocage, ou créer de nouvelles tâches.",
         "  2. Termine par un JSON structuré décrivant ce que tu as fait :",
