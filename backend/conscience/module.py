@@ -208,7 +208,10 @@ class ConscienceToolsModule(BaseModule):
             lambda: list(
                 ScheduledAction.objects.filter(status="pending")
                 .order_by("scheduled_at")
-                .values("id", "prompt", "scheduled_at", "priority", "source")[:20]
+                .values(
+                    "id", "prompt", "scheduled_at", "priority", "source",
+                    "modules",
+                )[:20]
             )
         )()
 
@@ -220,9 +223,17 @@ class ConscienceToolsModule(BaseModule):
             delta = a["scheduled_at"] - now
             mins = int(delta.total_seconds() / 60)
             status = f"dans {mins}min" if mins > 0 else "DUE"
+            # Les modules que le rendez-vous emportera : sans eux dans la
+            # liste, elle ne peut pas relire ce qu'elle s'est promis d'avoir
+            # en main — ni corriger un oubli en annulant/reprogrammant.
+            outils = ""
+            if a.get("modules"):
+                outils = " [outils: " + ", ".join(
+                    str(m) for m in a["modules"]
+                ) + "]"
             lines.append(
                 f"- [#{a['id']}] ({status}, priorite {a['priority']}) "
-                f"{a['prompt'][:80]} [source: {a['source']}]"
+                f"{a['prompt'][:80]} [source: {a['source']}]{outils}"
             )
         return {"content": [{"type": "text", "text": "\n".join(lines)}]}
 

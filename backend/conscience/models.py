@@ -22,6 +22,13 @@ class Observation(models.Model):
     source = models.CharField(max_length=100)
     event_type = models.CharField(max_length=100)
     raw_data = models.JSONField(default=dict)
+    #: Les thèmes de l'interprétation — un CHAMP, plus une convention. Ils
+    #: vivaient dans ``raw_data["themes"]`` et se relisaient par ``getattr``
+    #: à trois endroits : un quatrième lecteur qui ignorait la convention
+    #: recevait un tuple vide EN SILENCE — le mode de panne précis que ce
+    #: moteur passe son temps à chasser. Les lignes d'avant la migration ont
+    #: ``[]`` ici ; ``engine._themes_de`` retombe alors sur ``raw_data``.
+    themes = models.JSONField(default=list, blank=True)
 
     # Interpretation (filled by interpreter pipeline)
     summary = models.TextField(blank=True)
@@ -272,6 +279,11 @@ class Travail(models.Model):
     #: dire « se faner jusqu'à l'abandon ». Le lecteur de verdict garantit un
     #: délai (défaut 300 s, plafond 24 h), donc l'échéance existe toujours.
     reprendre_le = models.DateTimeField(null=True, blank=True)
+    #: QUI elle attend, tel que le verdict le nomme (prénom ou person_id).
+    #: Vide = attente purement temporelle. Un message de cette personne —
+    #: résolu par la couche identité au réveil, jamais par égalité de nom au
+    #: moment de l'écriture — relève l'attente avant l'échéance.
+    attend_qui = models.CharField(max_length=100, blank=True, default="")
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

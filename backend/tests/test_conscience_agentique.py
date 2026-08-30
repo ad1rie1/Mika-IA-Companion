@@ -125,7 +125,7 @@ class TestTrousseDuChantier:
         `rss` — parce que c'est LE CHANTIER qui le demande."""
         e = self._moteur(["conscience_tools", "memory_tools", "rss"])
         row = SimpleNamespace(modules=["rss"])
-        with patch("conscience.engine.drive_engine") as de:
+        with patch("conscience.travaux.drive_engine") as de:
             de.states = {}
             trousse = e._preparer_trousse_travail(row)
         assert "rss" in trousse.modules
@@ -135,7 +135,7 @@ class TestTrousseDuChantier:
     def test_un_module_fantome_est_compte_pas_charge(self):
         e = self._moteur(["conscience_tools", "memory_tools"])
         row = SimpleNamespace(modules=["fantome"])
-        with patch("conscience.engine.drive_engine") as de:
+        with patch("conscience.travaux.drive_engine") as de:
             de.states = {}
             trousse = e._preparer_trousse_travail(row)
         assert "fantome" not in trousse.modules
@@ -146,7 +146,7 @@ class TestTrousseDuChantier:
         se comporter exactement comme avant le lot."""
         e = self._moteur(["conscience_tools", "memory_tools"])
         row = SimpleNamespace(modules=[])
-        with patch("conscience.engine.drive_engine") as de:
+        with patch("conscience.travaux.drive_engine") as de:
             de.states = {}
             trousse = e._preparer_trousse_travail(row)
         assert set(trousse.modules) == {"conscience_tools", "memory_tools"}
@@ -207,6 +207,20 @@ class TestOutilScheduleActionModules:
         assert row.modules[:2] == ["email", "rss"]
         assert len(row.modules) <= 5
 
+    async def test_la_liste_montre_les_outils_promis(self):
+        """Sans eux dans la liste, elle ne peut pas relire ce qu'elle s'est
+        promis d'avoir en main quand le rendez-vous sonnera."""
+        from conscience.module import ConscienceToolsModule
+
+        m = ConscienceToolsModule()
+        await m._tool_schedule_action({
+            "prompt": "vérifier mes mails", "delay_minutes": 10,
+            "modules": ["email"],
+        })
+        reponse = await m._tool_list_scheduled({})
+        texte = reponse["content"][0]["text"]
+        assert "outils: email" in texte
+
     async def test_sans_argument_le_champ_reste_vide(self):
         from conscience.models import ScheduledAction
         from conscience.module import ConscienceToolsModule
@@ -229,7 +243,10 @@ class TestOutilScheduleActionModules:
 class TestDestinataireEndogene:
 
     def _memoire(self, candidats):
-        return SimpleNamespace(who_is_concerned=AsyncMock(return_value=candidats))
+        return SimpleNamespace(
+            who_is_concerned=AsyncMock(return_value=candidats),
+            who_misses_contact=AsyncMock(return_value=[]),
+        )
 
     async def test_les_ruminations_font_signal_quand_rien_n_est_observe(self):
         """Les cinq déclencheurs endogènes ne créent aucune Observation : le
@@ -282,6 +299,29 @@ class TestDestinataireEndogene:
         assert "web_42" in prompt_envoye
         assert "anon_42" not in prompt_envoye
         assert "conscience_mika" not in prompt_envoye
+
+    async def test_un_handle_module_n_est_pas_une_presence(self):
+        """`reachable()` contient aussi les handles Telegram, réinscrits à
+        chaque boot : les compter « présents » court-circuiterait le manque
+        en permanence — le propriétaire serait « là » à chaque acte, sans
+        rythme ni anti-double-texte. Présent = un socket vivant."""
+        e = _engine()
+        e.memory = self._memoire([])
+        module_handle = SimpleNamespace(
+            person_id="tg_9", channel="telegram", kind="module",
+            display_name="Adrien",
+        )
+        with patch(
+            "communication.presence.presence_registry.reachable",
+            return_value=[module_handle],
+        ), patch(
+            "ai.client.ai_client.complete", new=AsyncMock(),
+        ) as complete:
+            cible = await e._select_recipient(_ctx())
+        assert cible is None
+        complete.assert_not_awaited()
+        # C'est bien le maillon du manque qui a eu la main, pas la présence.
+        e.memory.who_misses_contact.assert_awaited_once()
 
     async def test_personne_nulle_part_aucun_appel_llm(self):
         e = _engine()
@@ -364,6 +404,35 @@ class TestChantierAboutiLaisseUnSouvenir:
         assert titre == row.titre
         assert essence == "trois articles lus"
 
+    async def test_fini_se_ressent_pas_seulement_se_memorise(self):
+        """Sans l'impulsion, le souvenir disait « proud » pendant que le
+        visage et l'humeur n'en savaient rien — se souvenir d'avoir été
+        fière sans l'avoir jamais été."""
+        from conscience.verdict import lire_verdict
+        from emotion.types import Emotion
+
+        row = await _travail()
+        e = _engine()
+        e.memory = SimpleNamespace(remember_completed_work=AsyncMock())
+        verdict = lire_verdict(VERDICT_FINI)
+        with patch("conscience.travaux.emotion_engine") as moteur:
+            await e._appliquer_verdict(row.pk, verdict, "trois articles lus", "")
+        moteur.process_emotion.assert_called_once()
+        data, personne = moteur.process_emotion.call_args.args
+        assert data.emotion is Emotion.PROUD
+        assert personne == "conscience_mika"
+
+    async def test_un_pas_intermediaire_ne_ressent_rien(self):
+        from conscience.verdict import lire_verdict
+
+        row = await _travail()
+        e = _engine()
+        e.memory = SimpleNamespace(remember_completed_work=AsyncMock())
+        verdict = lire_verdict('--- VERDICT ---\n{"etat": "continue"}\n--- FIN VERDICT ---')
+        with patch("conscience.travaux.emotion_engine") as moteur:
+            await e._appliquer_verdict(row.pk, verdict, "j'avance", "")
+        moteur.process_emotion.assert_not_called()
+
     async def test_un_pas_intermediaire_ne_memorise_rien(self):
         from conscience.verdict import lire_verdict
 
@@ -397,6 +466,693 @@ class TestChantierAboutiLaisseUnSouvenir:
             mm.create_souvenir = AsyncMock()
             assert await bridge.remember_completed_work("", "essence") is None
         mm.create_souvenir.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# 3-bis. Reprendre des nouvelles de qui lui manque
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db(transaction=True)
+class TestQuiLuiManque:
+    """Le manque v2 : le silence se mesure au rythme propre du lien, elle
+    pense à UNE personne, préfère les proches au fond chaud, et ne
+    double-texte jamais. La date du dernier échange se lit sur `Message` via
+    les handles, jamais sur `PersonProfile.last_interaction_at` (écrit à la
+    régénération de fiche seulement — « sans nouvelles depuis 12 jours » à
+    propos de quelqu'un qui a écrit hier rend le personnage bête)."""
+
+    @pytest.fixture(autouse=True)
+    def _purger(self):
+        from conscience.models import Rumination
+        from memory.models import Conversation, Entity, Message, PersonProfile
+        for model in (Message, Conversation, PersonProfile, Entity, Rumination):
+            model.objects.all().delete()
+        yield
+        for model in (Message, Conversation, PersonProfile, Entity, Rumination):
+            model.objects.all().delete()
+
+    async def _amie(self, nom="Alice", closeness="friend"):
+        from memory.models import Entity, PersonProfile
+
+        entity = await sync_to_async(Entity.objects.create)(
+            name=nom, entity_type="person",
+        )
+        await sync_to_async(PersonProfile.objects.create)(
+            entity=entity, closeness=closeness,
+        )
+        return entity
+
+    async def _messages(self, person_id, jours, role="user"):
+        """Un message par entrée de `jours` (en jours d'ancienneté)."""
+        from datetime import timedelta
+
+        from memory.models import Conversation, Message
+
+        conv = await sync_to_async(Conversation.objects.create)()
+        for il_y_a in jours:
+            msg = await sync_to_async(Message.objects.create)(
+                conversation=conv, role=role, content="salut",
+                person_id=person_id,
+            )
+            # `created_at` est auto_now_add : on antidate par update().
+            await sync_to_async(
+                lambda pk=msg.pk, j=il_y_a: Message.objects.filter(pk=pk).update(
+                    created_at=tz.now() - timedelta(days=j),
+                )
+            )()
+
+    def _handles(self, mapping):
+        return AsyncMock(return_value={
+            nom: [{"person_id": pid, "channel": "telegram", "kind": "module"}]
+            for nom, pid in mapping.items()
+        })
+
+    async def test_une_amie_silencieuse_est_candidate_avec_sa_note(self):
+        """Historique trop mince pour un rythme mesuré → repli ami (7 j),
+        facteur 1.5 → 12 jours de silence manquent."""
+        from conscience.memory_bridge import MemoryBridge
+
+        await self._amie("Alice")
+        await self._messages("tg_9", [12])
+        bridge = MemoryBridge()
+        with patch(
+            "identity.resolver.identity_resolver.handles_for_entity_names",
+            new=self._handles({"Alice": "tg_9"}),
+        ):
+            candidats = await bridge.who_misses_contact()
+        assert len(candidats) == 1
+        assert candidats[0]["name"] == "Alice"
+        assert "12 jour" in candidats[0]["note"]
+
+    async def test_un_echange_recent_ne_manque_pas(self):
+        from conscience.memory_bridge import MemoryBridge
+
+        await self._amie("Alice")
+        await self._messages("tg_9", [1])
+        bridge = MemoryBridge()
+        with patch(
+            "identity.resolver.identity_resolver.handles_for_entity_names",
+            new=self._handles({"Alice": "tg_9"}),
+        ):
+            assert await bridge.who_misses_contact() == []
+
+    async def test_jamais_parle_rien_a_reprendre(self):
+        from conscience.memory_bridge import MemoryBridge
+
+        await self._amie("Alice")
+        bridge = MemoryBridge()
+        with patch(
+            "identity.resolver.identity_resolver.handles_for_entity_names",
+            new=self._handles({"Alice": "tg_9"}),
+        ):
+            assert await bridge.who_misses_contact() == []
+
+    async def test_une_simple_connaissance_n_est_pas_relancee(self):
+        """« Reprendre des nouvelles » suppose une relation : les fiches
+        `stranger`/`acquaintance` ne sont pas des gens qu'on relance."""
+        from conscience.memory_bridge import MemoryBridge
+
+        await self._amie("Bob", closeness="acquaintance")
+        await self._messages("tg_7", [30])
+        bridge = MemoryBridge()
+        with patch(
+            "identity.resolver.identity_resolver.handles_for_entity_names",
+            new=self._handles({"Bob": "tg_7"}),
+        ):
+            assert await bridge.who_misses_contact() == []
+
+    async def test_le_rythme_du_lien_decide_pas_un_seuil_global(self):
+        """Le cœur du modèle : même silence, deux verdicts. Alice écrivait
+        tous les jours — 6 jours de silence, elle manque. Bob écrit toutes
+        les trois semaines — 20 jours de silence, c'est son rythme normal."""
+        from conscience.memory_bridge import MemoryBridge
+
+        await self._amie("Alice")
+        await self._messages("tg_a", list(range(6, 16)))   # 10 jours actifs, écart 1
+        await self._amie("Bob")
+        await self._messages("tg_b", [60, 40, 20])         # écart médian 20
+
+        bridge = MemoryBridge()
+        with patch(
+            "identity.resolver.identity_resolver.handles_for_entity_names",
+            new=self._handles({"Alice": "tg_a", "Bob": "tg_b"}),
+        ):
+            candidats = await bridge.who_misses_contact(n=5)
+        assert [c["name"] for c in candidats] == ["Alice"]
+
+    async def test_on_pense_a_une_personne_la_plus_proche(self):
+        """n=1 par défaut, et la proche gagne : repli 3 j contre 7 j, plus le
+        poids de closeness — au même silence, c'est à elle qu'on pense."""
+        from conscience.memory_bridge import MemoryBridge
+
+        await self._amie("Alice", closeness="friend")
+        await self._messages("tg_a", [12])
+        await self._amie("Carla", closeness="close")
+        await self._messages("tg_c", [12])
+
+        bridge = MemoryBridge()
+        with patch(
+            "identity.resolver.identity_resolver.handles_for_entity_names",
+            new=self._handles({"Alice": "tg_a", "Carla": "tg_c"}),
+        ):
+            candidats = await bridge.who_misses_contact()
+        assert [c["name"] for c in candidats] == ["Carla"]
+
+    async def test_elle_ne_double_texte_pas(self):
+        """Son dernier message est resté sans réponse : la personne n'est
+        re-proposée qu'après un silence bien plus long (facteur × relance),
+        jamais le lendemain."""
+        from conscience.memory_bridge import MemoryBridge
+
+        await self._amie("Alice")
+        await self._messages("tg_9", [50])                     # elle a reçu, il y a 50 j
+        await self._messages("tg_9", [2], role="assistant")    # elle a relancé avant-hier
+
+        bridge = MemoryBridge()
+        with patch(
+            "identity.resolver.identity_resolver.handles_for_entity_names",
+            new=self._handles({"Alice": "tg_9"}),
+        ):
+            assert await bridge.who_misses_contact() == []
+
+    async def test_apres_un_vrai_moment_elle_peut_retenter(self):
+        """La relance ignorée n'exile pas pour toujours : passé
+        rythme × facteur × relance (7 × 1.5 × 3 = 31.5 j), elle peut y
+        repenser."""
+        from conscience.memory_bridge import MemoryBridge
+
+        await self._amie("Alice")
+        await self._messages("tg_9", [50])
+        await self._messages("tg_9", [40], role="assistant")
+
+        bridge = MemoryBridge()
+        with patch(
+            "identity.resolver.identity_resolver.handles_for_entity_names",
+            new=self._handles({"Alice": "tg_9"}),
+        ):
+            candidats = await bridge.who_misses_contact()
+        assert [c["name"] for c in candidats] == ["Alice"]
+
+    async def test_son_propre_brief_ne_compte_pas_comme_un_mot_recu(self):
+        """Le brief interne d'un acte adressé à Alice est un `role="user"`
+        sous SON person_id : sans l'exclusion `is_internal`, le ping de Mika
+        remettrait le silence à zéro — « sans nouvelles depuis 2 jours »
+        à propos de quelqu'un muet depuis 50."""
+        from datetime import timedelta
+
+        from memory.models import Conversation, Message
+        from conscience.memory_bridge import MemoryBridge
+
+        await self._amie("Alice")
+        await self._messages("tg_9", [50])          # son vrai dernier mot
+        # Le brief d'un acte d'avant-hier, machinerie sous son person_id.
+        conv = await sync_to_async(Conversation.objects.create)()
+        brief = await sync_to_async(Message.objects.create)(
+            conversation=conv, role="user", content="[brief interne]",
+            person_id="tg_9", is_internal=True,
+        )
+        await sync_to_async(
+            lambda: Message.objects.filter(pk=brief.pk).update(
+                created_at=tz.now() - timedelta(days=2),
+            )
+        )()
+
+        bridge = MemoryBridge()
+        with patch(
+            "identity.resolver.identity_resolver.handles_for_entity_names",
+            new=self._handles({"Alice": "tg_9"}),
+        ):
+            candidats = await bridge.who_misses_contact()
+        assert len(candidats) == 1
+        assert "50 jour" in candidats[0]["note"]
+
+    async def test_le_manque_hors_d_atteinte_devient_une_pensee(self):
+        """Une amie qui manque mais n'a aucun handle joignable ne s'évapore
+        plus : « j'aimerais avoir des nouvelles d'Alice » devient une
+        rumination — dicible à qui EST là, sous la porte de graine (pas de
+        chantier pour un injoignable)."""
+        from conscience.memory_bridge import MemoryBridge
+        from conscience.models import Rumination
+
+        await self._amie("Alice")
+        await self._messages("web_9", [12])
+        bridge = MemoryBridge()
+        handles = AsyncMock(return_value={
+            # kind consumer et personne connectée : hors d'atteinte.
+            "Alice": [{"person_id": "web_9", "channel": "web",
+                       "kind": "consumer"}],
+        })
+        with patch(
+            "identity.resolver.identity_resolver.handles_for_entity_names",
+            new=handles,
+        ):
+            candidats = await bridge.who_misses_contact()
+        assert candidats == []
+        pensee = await sync_to_async(
+            lambda: Rumination.objects.filter(status="active").first()
+        )()
+        assert pensee is not None
+        assert "Alice" in pensee.summary and "12 jour" in pensee.summary
+        assert pensee.emotion == "nostalgic"
+        assert pensee.intensity < 0.40  # sous la porte de graine
+
+    async def test_la_pensee_pour_un_absent_ne_se_repete_pas(self):
+        from conscience.memory_bridge import MemoryBridge
+        from conscience.models import Rumination
+
+        bridge = MemoryBridge()
+        assert await bridge._penser_a_l_absent("Alice", 12) is True
+        assert await bridge._penser_a_l_absent("Alice", 13) is False
+        n = await sync_to_async(
+            lambda: Rumination.objects.filter(status="active").count()
+        )()
+        assert n == 1
+
+    async def test_le_fond_chaud_departage(self):
+        """« Plus on aime bien quelqu'un, plus on a envie de lui parler À
+        ELLE » : à silence et closeness égaux, l'ancre affective chaude
+        l'emporte."""
+        from conscience.memory_bridge import MemoryBridge
+
+        await self._amie("Tiede", closeness="friend")
+        await self._messages("tg_t", [12])
+        await self._amie("Chaude", closeness="friend")
+        await self._messages("tg_c", [12])
+
+        moods = {"tg_c": SimpleNamespace(anchor=(0.8, 0.0, 0.0))}
+        faux_moteur = SimpleNamespace(
+            ensure_person_loaded=AsyncMock(),
+            person_moods=moods,
+        )
+        bridge = MemoryBridge()
+        with patch(
+            "identity.resolver.identity_resolver.handles_for_entity_names",
+            new=self._handles({"Tiede": "tg_t", "Chaude": "tg_c"}),
+        ), patch("emotion.engine.emotion_engine", faux_moteur):
+            candidats = await bridge.who_misses_contact(n=2)
+        assert [c["name"] for c in candidats] == ["Chaude", "Tiede"]
+
+    async def test_le_manque_est_le_troisieme_maillon(self):
+        """Chaîne complète : mémoire vide, personne présente → l'amie qui
+        manque est proposée, sa note dans le prompt, et le modèle tranche."""
+        e = _engine()
+        e.memory = SimpleNamespace(
+            who_is_concerned=AsyncMock(return_value=[]),
+            who_misses_contact=AsyncMock(return_value=[{
+                "name": "Alice", "score": 1.4,
+                "handles": [{"person_id": "tg_9", "channel": "telegram",
+                             "kind": "module"}],
+                "note": "sans nouvelles depuis 12 jour(s)",
+            }]),
+        )
+        with patch(
+            "communication.presence.presence_registry.reachable",
+            return_value=[],
+        ), patch(
+            "ai.client.ai_client.complete",
+            new=AsyncMock(return_value="[TO:tg_9]"),
+        ) as complete:
+            ctx = _ctx(rumination_lignes=[
+                {"id": 1, "summary": "envie de compagnie", "intensity": 0.5},
+            ])
+            cible = await e._select_recipient(ctx)
+        assert cible == "tg_9"
+        prompt_envoye = complete.await_args.kwargs["user_prompt"]
+        assert "sans nouvelles depuis 12 jour(s)" in prompt_envoye
+
+
+class TestIntentionParPulsion:
+    """Le murmure d'un débordement SOCIAL disait « aller voir quelque chose
+    de nouveau » — une envie d'explorer au moment précis où elle voulait
+    quelqu'un. L'intention se spécialise par la pulsion dominante."""
+
+    def _ctx_pulsion(self, e, nom, tension=0.9):
+        from drives.state import DriveKind
+
+        kind = DriveKind(nom)
+        etat = SimpleNamespace(tension=tension)
+        patcher = patch("conscience.engine.drive_engine")
+        de = patcher.start()
+        de.pulsion_saillante.return_value = kind
+        de.states = {kind: etat}
+        return patcher, _ctx()
+
+    def test_social_veut_quelqu_un(self):
+        e = _engine()
+        patcher, ctx = self._ctx_pulsion(e, "social")
+        try:
+            assert e._intention_de_lacte(ctx) == "reprendre des nouvelles de quelqu'un"
+        finally:
+            patcher.stop()
+
+    def test_la_curiosite_garde_son_intention_d_avant(self):
+        e = _engine()
+        patcher, ctx = self._ctx_pulsion(e, "curiosity")
+        try:
+            assert e._intention_de_lacte(ctx) == "aller voir quelque chose de nouveau"
+        finally:
+            patcher.stop()
+
+
+class TestGigueDuCooldown:
+    """Un métronome se remarque : la gigue, tirée une fois par acte,
+    désynchronise les relances sans jamais dépasser le plafond."""
+
+    def _moteur(self):
+        e = _engine()
+        e._cooldown_seconds = 300
+        return e
+
+    def test_la_gigue_s_applique_au_silence(self):
+        e = self._moteur()
+        e._gigue_cooldown = 1.2
+        assert e._effective_cooldown(0) == 300 * 1.2
+
+    def test_le_plafond_reste_une_promesse(self):
+        e = self._moteur()
+        e._gigue_cooldown = 1.5
+        assert e._effective_cooldown(50) == e._COOLDOWN_MAX_S
+
+    def test_le_tirage_reste_dans_l_amplitude(self):
+        e = self._moteur()
+        for _ in range(20):
+            e._tirer_gigue_cooldown()
+            assert 0.85 <= e._gigue_cooldown <= 1.15
+
+    def test_sans_tirage_l_exactitude_historique_tient(self):
+        """Attribut de classe à 1.0 : un moteur construit par `__new__` —
+        comme tous ceux des tests existants — garde les valeurs exactes."""
+        e = self._moteur()
+        assert e._effective_cooldown(0) == 300.0
+
+
+class TestEnnui:
+    """Le vide prolongé a une couleur : `bored` existe dans les 29 émotions
+    et rien ne le produisait — une après-midi sans rien laissait l'humeur là
+    où le matin l'avait posée."""
+
+    def _moteur(self):
+        e = _engine()
+        e._dernier_ennui = 0.0
+        return e
+
+    def test_le_vide_prolonge_glisse_vers_l_ennui(self):
+        from emotion.types import Emotion
+
+        e = self._moteur()
+        ctx = _ctx(idle_seconds=3 * 3600)
+        with patch("conscience.engine.emotion_engine") as moteur:
+            e._peut_etre_s_ennuyer(ctx, travaux=[])
+        data, personne = moteur.process_emotion.call_args.args
+        assert data.emotion is Emotion.BORED
+        assert personne == "conscience_mika"
+
+    def test_travailler_n_est_pas_s_ennuyer(self):
+        e = self._moteur()
+        ctx = _ctx(idle_seconds=3 * 3600)
+        with patch("conscience.engine.emotion_engine") as moteur:
+            e._peut_etre_s_ennuyer(ctx, travaux=[object()])
+        moteur.process_emotion.assert_not_called()
+
+    def test_dormir_n_est_pas_s_ennuyer(self):
+        e = self._moteur()
+        ctx = _ctx(idle_seconds=3 * 3600, sleep_phase="deep_sleep")
+        with patch("conscience.engine.emotion_engine") as moteur:
+            e._peut_etre_s_ennuyer(ctx, travaux=[])
+        moteur.process_emotion.assert_not_called()
+
+    def test_l_ennui_teinte_il_ne_matraque_pas(self):
+        """Une impulsion par demi-heure au plus — pas une par tour de 30 s."""
+        e = self._moteur()
+        ctx = _ctx(idle_seconds=3 * 3600)
+        with patch("conscience.engine.emotion_engine") as moteur:
+            e._peut_etre_s_ennuyer(ctx, travaux=[])
+            e._peut_etre_s_ennuyer(ctx, travaux=[])
+        assert moteur.process_emotion.call_count == 1
+
+    def test_une_conversation_recente_n_ennuie_pas(self):
+        e = self._moteur()
+        ctx = _ctx(idle_seconds=600)
+        with patch("conscience.engine.emotion_engine") as moteur:
+            e._peut_etre_s_ennuyer(ctx, travaux=[])
+        moteur.process_emotion.assert_not_called()
+
+
+class TestNiveauDeRecit:
+    """La table des confidences (`conscience/recit.py`, pure) : le degré de
+    détail suit le lien, à la manière d'un humain — l'owner reçoit tout, le
+    proche du même domaine aussi, l'ami la mention, l'inconnu rien."""
+
+    def test_la_table_des_liens(self):
+        from conscience.recit import NiveauRecit, niveau_de_recit
+
+        assert niveau_de_recit(est_owner=True) is NiveauRecit.INTEGRAL
+        assert niveau_de_recit(closeness="close", concerne=True) is NiveauRecit.INTEGRAL
+        assert niveau_de_recit(closeness="close") is NiveauRecit.ESSENTIEL
+        assert niveau_de_recit(closeness="friend", concerne=True) is NiveauRecit.ESSENTIEL
+        assert niveau_de_recit(closeness="friend") is NiveauRecit.MENTION
+        assert niveau_de_recit(closeness="acquaintance") is NiveauRecit.RIEN
+        assert niveau_de_recit() is NiveauRecit.RIEN
+
+    def test_la_mention_ne_fuit_jamais_le_contenu(self):
+        """C'est la définition du niveau : le titre est ce qu'un ami reçoit,
+        le contenu ne sort pas par un gabarit."""
+        from conscience.recit import NiveauRecit, composer_recit
+
+        texte = composer_recit(
+            NiveauRecit.MENTION,
+            dit="Alice m'a confié un secret que j'ai recoupé",
+            resume="secret recoupé",
+            titre="creuser un sujet",
+        )
+        assert "creuser un sujet" in texte
+        assert "secret" not in texte
+
+    def test_l_essentiel_prefere_le_resume_du_verdict(self):
+        from conscience.recit import NiveauRecit, composer_recit
+
+        texte = composer_recit(
+            NiveauRecit.ESSENTIEL,
+            dit="long journal de pas " * 30,
+            resume="deux idées retenues",
+            titre="lire les news",
+        )
+        assert "deux idées retenues" in texte
+        assert "long journal" not in texte
+
+    def test_l_integral_est_le_recit_complet(self):
+        from conscience.recit import NiveauRecit, composer_recit
+
+        assert composer_recit(
+            NiveauRecit.INTEGRAL, dit="tout le récit", titre="t",
+        ) == "tout le récit"
+
+
+class TestRecitAdresse:
+    """Un chantier fini notable est raconté à QUELQU'UN quand un lien le
+    permet — persona SPEAKING, Telegram possible — et gradué selon le lien.
+    Personne d'assez lié → le murmure global d'avant, mot pour mot."""
+
+    def _confident(self, niveau, pid="tg_9"):
+        from conscience.recit import NiveauRecit
+
+        return {"person_id": pid, "channel": "telegram",
+                "concerne": True, "niveau": NiveauRecit(niveau)}
+
+    async def _dire(self, e, verdict_txt, confident):
+        from conscience.verdict import lire_verdict
+
+        verdict = lire_verdict(verdict_txt)
+        with patch(
+            "conscience.travaux._choisir_confident",
+            new=AsyncMock(return_value=confident),
+        ), patch(
+            "pipeline.broadcast.broadcast_to_websocket", new=AsyncMock(),
+        ) as diffusion:
+            await e._peut_etre_dire_le_travail(
+                verdict, "voilà ce que j'ai fait", "un titre", ("theme",),
+            )
+        return diffusion
+
+    async def test_le_recit_part_vers_sa_personne(self):
+        e = _engine()
+        e._derniere_diffusion_travail = None
+        diffusion = await self._dire(
+            e,
+            '--- VERDICT ---\n{"etat": "fini", "resume": "ok"}\n--- FIN VERDICT ---',
+            self._confident("integral"),
+        )
+        diffusion.assert_awaited_once()
+        assert diffusion.await_args.kwargs["person_id"] == "tg_9"
+        sortie = diffusion.await_args.args[0]
+        assert sortie.text == "voilà ce que j'ai fait"
+
+    async def test_un_ami_recoit_la_mention_pas_le_contenu(self):
+        e = _engine()
+        e._derniere_diffusion_travail = None
+        diffusion = await self._dire(
+            e,
+            '--- VERDICT ---\n{"etat": "fini", "resume": "secret"}\n--- FIN VERDICT ---',
+            self._confident("mention"),
+        )
+        sortie = diffusion.await_args.args[0]
+        assert "un titre" in sortie.text
+        assert "voilà ce que j'ai fait" not in sortie.text
+
+    async def test_sans_confident_le_murmure_global_d_avant(self):
+        e = _engine()
+        e._derniere_diffusion_travail = None
+        diffusion = await self._dire(
+            e,
+            '--- VERDICT ---\n{"etat": "fini", "resume": "ok"}\n--- FIN VERDICT ---',
+            None,
+        )
+        diffusion.assert_awaited_once()
+        assert diffusion.await_args.kwargs["person_id"] is None
+        assert diffusion.await_args.args[0].text == "voilà ce que j'ai fait"
+
+    async def test_les_gardes_passent_avant_le_confident(self):
+        """Un fini peu notable ne cherche même pas à qui parler : les gardes
+        décident SI on raconte, le confident À QUI et COMBIEN."""
+        from conscience.verdict import lire_verdict
+
+        e = _engine()
+        verdict = lire_verdict(
+            '--- VERDICT ---\n{"etat": "fini", "notable": 0.2}\n--- FIN VERDICT ---'
+        )
+        with patch(
+            "conscience.travaux._choisir_confident", new=AsyncMock(),
+        ) as choix, patch(
+            "pipeline.broadcast.broadcast_to_websocket", new=AsyncMock(),
+        ) as diffusion:
+            await e._peut_etre_dire_le_travail(verdict, "ok", "t", ())
+        choix.assert_not_awaited()
+        diffusion.assert_not_awaited()
+
+
+@pytest.mark.django_db(transaction=True)
+class TestChoixDuConfident:
+    """Owner > proche concerné > proche > ami concerné > ami ; un handle
+    module quelconque n'entre jamais (surface de spam) sauf owner ou
+    concerné par le sujet."""
+
+    def _moteur(self, concernes=()):
+        e = _engine()
+        e.memory = SimpleNamespace(
+            who_is_concerned=AsyncMock(return_value=list(concernes)),
+        )
+        return e
+
+    async def test_l_owner_gagne_et_recoit_tout(self):
+        from conscience.recit import NiveauRecit
+        from conscience.travaux import _choisir_confident
+
+        e = self._moteur()
+        presents = [SimpleNamespace(person_id="tg_owner", channel="telegram",
+                                    kind="module")]
+        with patch(
+            "communication.presence.presence_registry.reachable",
+            return_value=presents,
+        ), patch(
+            "conscience.travaux._closeness_de",
+            new=AsyncMock(return_value=""),
+        ), patch(
+            "modules.collectors.is_owner",
+            side_effect=lambda pid: pid == "tg_owner",
+        ):
+            confident = await _choisir_confident(e, "un titre", ())
+        assert confident["person_id"] == "tg_owner"
+        assert confident["niveau"] is NiveauRecit.INTEGRAL
+
+    async def test_un_module_non_owner_non_concerne_n_entre_pas(self):
+        from conscience.travaux import _choisir_confident
+
+        e = self._moteur()
+        presents = [SimpleNamespace(person_id="tg_inconnu", channel="telegram",
+                                    kind="module")]
+        with patch(
+            "communication.presence.presence_registry.reachable",
+            return_value=presents,
+        ), patch(
+            "modules.collectors.is_owner", return_value=False,
+        ):
+            assert await _choisir_confident(e, "un titre", ()) is None
+
+    async def test_le_concerne_du_meme_domaine_est_trouve(self):
+        from conscience.recit import NiveauRecit
+        from conscience.travaux import _choisir_confident
+
+        e = self._moteur(concernes=[{
+            "name": "Alice",
+            "handles": [{"person_id": "tg_a", "channel": "telegram",
+                         "kind": "module"}],
+        }])
+        with patch(
+            "communication.presence.presence_registry.reachable",
+            return_value=[],
+        ), patch(
+            "conscience.travaux._closeness_de",
+            new=AsyncMock(return_value="friend"),
+        ), patch(
+            "modules.collectors.is_owner", return_value=False,
+        ):
+            confident = await _choisir_confident(e, "un titre", ("vrm",))
+        assert confident["person_id"] == "tg_a"
+        assert confident["niveau"] is NiveauRecit.ESSENTIEL
+
+    async def test_une_simple_connaissance_ne_recoit_rien(self):
+        from conscience.travaux import _choisir_confident
+
+        e = self._moteur(concernes=[{
+            "name": "Bob",
+            "handles": [{"person_id": "tg_b", "channel": "telegram",
+                         "kind": "module"}],
+        }])
+        with patch(
+            "communication.presence.presence_registry.reachable",
+            return_value=[],
+        ), patch(
+            "conscience.travaux._closeness_de",
+            new=AsyncMock(return_value="acquaintance"),
+        ), patch(
+            "modules.collectors.is_owner", return_value=False,
+        ):
+            assert await _choisir_confident(e, "un titre", ()) is None
+
+
+class TestNotabiliteDeLaDiffusion:
+    """Un chantier fini n'est plus décrété notable d'office : le verdict
+    peut se juger (« notable: 0.2 ») et finir en silence."""
+
+    async def test_un_fini_juge_peu_notable_reste_muet(self):
+        from conscience.verdict import lire_verdict
+
+        e = _engine()
+        verdict = lire_verdict(
+            '--- VERDICT ---\n'
+            '{"etat": "fini", "resume": "ok", "notable": 0.2}\n'
+            '--- FIN VERDICT ---'
+        )
+        with patch(
+            "pipeline.broadcast.broadcast_to_websocket", new=AsyncMock(),
+        ) as diffusion:
+            await e._peut_etre_dire_le_travail(verdict, "ok", "un titre")
+        diffusion.assert_not_awaited()
+
+    async def test_sans_avis_le_comportement_d_avant_tient(self):
+        from conscience.verdict import lire_verdict
+
+        e = _engine()
+        e._derniere_diffusion_travail = None
+        verdict = lire_verdict(
+            '--- VERDICT ---\n{"etat": "fini", "resume": "ok"}\n--- FIN VERDICT ---'
+        )
+        with patch(
+            "pipeline.broadcast.broadcast_to_websocket", new=AsyncMock(),
+        ) as diffusion:
+            await e._peut_etre_dire_le_travail(verdict, "ok", "un titre")
+        diffusion.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
@@ -463,6 +1219,135 @@ class TestAttenteAvecEcheance:
         await _travail(en_attente_de_reponse=True, reprendre_le=None)
         e = _engine()
         vivants, _ = await e._travaux_en_cours(tz.now())
+        assert vivants[0].en_attente_de_reponse is False
+
+
+@pytest.mark.django_db(transaction=True)
+class TestAttenteNominative:
+    """« J'attends la réponse d'Adrien » n'est plus la même attente aveugle
+    que « je reprends dans une heure » : un message de la personne nommée
+    relève l'attente avant l'échéance. Résolution par la couche identité au
+    réveil — jamais par égalité de nom à l'écriture."""
+
+    @pytest.fixture(autouse=True)
+    def _purger(self):
+        from conscience.models import Travail
+        from memory.models import Conversation, Message
+        for model in (Travail, Message, Conversation):
+            model.objects.all().delete()
+        yield
+        for model in (Travail, Message, Conversation):
+            model.objects.all().delete()
+
+    async def _attente(self, qui="Adrien", pas_il_y_a_min=30):
+        from datetime import timedelta
+
+        return await _travail(
+            en_attente_de_reponse=True,
+            reprendre_le=tz.now() + timedelta(hours=6),
+            attend_qui=qui,
+            dernier_pas_le=tz.now() - timedelta(minutes=pas_il_y_a_min),
+        )
+
+    async def _message(self, person_id, il_y_a_min=5, interne=False):
+        from datetime import timedelta
+
+        from memory.models import Conversation, Message
+
+        conv = await sync_to_async(Conversation.objects.create)()
+        msg = await sync_to_async(Message.objects.create)(
+            conversation=conv, role="user", content="me voilà",
+            person_id=person_id, is_internal=interne,
+        )
+        await sync_to_async(
+            lambda: Message.objects.filter(pk=msg.pk).update(
+                created_at=tz.now() - timedelta(minutes=il_y_a_min),
+            )
+        )()
+
+    def _resolveur(self, mapping):
+        return AsyncMock(return_value={
+            nom: [{"person_id": pid, "channel": "telegram", "kind": "module"}]
+            for nom, pid in mapping.items()
+        })
+
+    async def test_le_verdict_ecrit_qui_il_attend(self):
+        from conscience.verdict import lire_verdict
+
+        row = await _travail()
+        e = _engine()
+        verdict = lire_verdict(
+            '--- VERDICT ---\n'
+            '{"etat": "attendre", "delai_s": 600, "qui": "Adrien"}\n'
+            '--- FIN VERDICT ---'
+        )
+        await e._appliquer_verdict(row.pk, verdict, "je lui ai demandé", "")
+        row = await sync_to_async(type(row).objects.get)(pk=row.pk)
+        assert row.attend_qui == "Adrien"
+        assert row.en_attente_de_reponse is True
+
+    async def test_un_message_de_la_personne_releve_l_attente(self):
+        from conscience.models import Travail
+
+        row = await self._attente("Adrien")
+        await self._message("tg_9", il_y_a_min=5)
+        e = _engine()
+        with patch(
+            "identity.resolver.identity_resolver.handles_for_entity_names",
+            new=self._resolveur({"Adrien": "tg_9"}),
+        ):
+            vivants, _ = await e._travaux_en_cours(tz.now())
+        assert vivants[0].en_attente_de_reponse is False
+        row = await sync_to_async(Travail.objects.get)(pk=row.pk)
+        assert row.attend_qui == ""
+
+    async def test_quelqu_un_d_autre_ne_releve_rien(self):
+        row = await self._attente("Adrien")
+        await self._message("tg_autre", il_y_a_min=5)
+        e = _engine()
+        with patch(
+            "identity.resolver.identity_resolver.handles_for_entity_names",
+            new=self._resolveur({"Adrien": "tg_9"}),
+        ):
+            vivants, _ = await e._travaux_en_cours(tz.now())
+        assert vivants[0].en_attente_de_reponse is True
+
+    async def test_un_message_d_avant_le_pas_ne_compte_pas(self):
+        """La question a été posée APRÈS ce message : il n'y répond pas."""
+        row = await self._attente("Adrien", pas_il_y_a_min=30)
+        await self._message("tg_9", il_y_a_min=60)
+        e = _engine()
+        with patch(
+            "identity.resolver.identity_resolver.handles_for_entity_names",
+            new=self._resolveur({"Adrien": "tg_9"}),
+        ):
+            vivants, _ = await e._travaux_en_cours(tz.now())
+        assert vivants[0].en_attente_de_reponse is True
+
+    async def test_le_brief_interne_n_est_pas_une_reponse(self):
+        """Son propre pas persiste un rôle user sous le person_id visé :
+        sans l'exclusion, elle se répondrait à elle-même."""
+        row = await self._attente("Adrien")
+        await self._message("tg_9", il_y_a_min=5, interne=True)
+        e = _engine()
+        with patch(
+            "identity.resolver.identity_resolver.handles_for_entity_names",
+            new=self._resolveur({"Adrien": "tg_9"}),
+        ):
+            vivants, _ = await e._travaux_en_cours(tz.now())
+        assert vivants[0].en_attente_de_reponse is True
+
+    async def test_un_person_id_direct_marche_aussi(self):
+        """Le modèle écrit parfois le handle qu'il a sous les yeux : égalité
+        de TRANSPORT, pas l'égalité de nom que la couche identité remplace."""
+        row = await self._attente("tg_9")
+        await self._message("tg_9", il_y_a_min=5)
+        e = _engine()
+        with patch(
+            "identity.resolver.identity_resolver.handles_for_entity_names",
+            new=AsyncMock(return_value={}),
+        ):
+            vivants, _ = await e._travaux_en_cours(tz.now())
         assert vivants[0].en_attente_de_reponse is False
 
 
@@ -586,6 +1471,80 @@ class TestForgeProposeSujets:
         assert m.propose_sujets() == []
 
 
+@pytest.mark.django_db(transaction=True)
+class TestMemoireProposeSujets:
+    """La curiosité épistémique : une connaissance érodée — crue à moitié,
+    pas invalidée — est un doute qui a un objet. Servie en RAM depuis un
+    recompte cron, comme le contrat de `propose_sujets` l'exige."""
+
+    @pytest.fixture(autouse=True)
+    def _purger(self):
+        from memory.models import Connaissance
+        Connaissance.objects.all().delete()
+        yield
+        Connaissance.objects.all().delete()
+
+    def _module(self):
+        import logging
+
+        from memory.module import MemoryToolsModule
+
+        m = MemoryToolsModule.__new__(MemoryToolsModule)
+        m._sujets = []
+        m.logger = logging.getLogger("test.memory_tools")
+        return m
+
+    async def _connaissance(self, contenu, confidence, valide=True):
+        from memory.models import Connaissance
+
+        return await sync_to_async(Connaissance.objects.create)(
+            content=contenu, confidence=confidence, is_valid=valide,
+        )
+
+    async def test_une_connaissance_erodee_devient_un_doute(self):
+        await self._connaissance("Thomas travaille chez Dassault", 0.4)
+        m = self._module()
+        await sync_to_async(m._rafraichir_sujets)()
+        sujets = m.propose_sujets()
+        assert len(sujets) == 1
+        assert "toujours vrai" in sujets[0] and "Dassault" in sujets[0]
+
+    async def test_la_bande_de_confiance_est_fermee_des_deux_cotes(self):
+        """Sous 0.25 le doute n'a plus d'objet, au-dessus de 0.55 la
+        croyance se porte bien, et l'invalidée n'est plus une croyance."""
+        await self._connaissance("presque morte", 0.1)
+        await self._connaissance("bien portante", 0.9)
+        await self._connaissance("invalidee", 0.4, valide=False)
+        m = self._module()
+        await sync_to_async(m._rafraichir_sujets)()
+        assert m.propose_sujets() == []
+
+    async def test_le_reservoir_est_borne(self):
+        for i in range(5):
+            await self._connaissance(f"croyance {i}", 0.4)
+        m = self._module()
+        await sync_to_async(m._rafraichir_sujets)()
+        assert len(m.propose_sujets()) == 2
+
+    def test_proposer_ne_paie_aucune_requete(self):
+        """Lecture RAM pure — appelable depuis la boucle de décision."""
+        m = self._module()
+        m._sujets = ["vérifier un truc"]
+        assert m.propose_sujets() == ["vérifier un truc"]
+
+    async def test_un_recompte_rate_garde_le_dernier_reservoir(self):
+        """Vider sur panne rendrait la panne indiscernable d'une mémoire
+        sereine."""
+        m = self._module()
+        m._sujets = ["vérifier un truc"]
+        with patch(
+            "memory.models.Connaissance.objects",
+        ) as objets:
+            objets.filter.side_effect = RuntimeError("base fermée")
+            await sync_to_async(m._rafraichir_sujets)()
+        assert m.propose_sujets() == ["vérifier un truc"]
+
+
 class TestEmailProposeSujets:
 
     def test_le_courrier_en_attente_est_un_sujet(self):
@@ -604,3 +1563,64 @@ class TestEmailProposeSujets:
         m = EmailModule.__new__(EmailModule)
         m._unread_counts = {}
         assert m.propose_sujets() == []
+
+
+class TestSalutationsCircadiennes:
+    """Les fenêtres de salutation dérivent du profil circadien — les cinq
+    clés `conscience.greeting.*` cohabitaient avec `personality.circadian.*`,
+    deux sources de vérité pour « quand commence son matin » : un personnage
+    nocturne saluait « le matin » à 7 h en dormant."""
+
+    def _profil(self, matin=6, soir=18, nuit=23):
+        from emotion.circadian import CircadianPhase, CircadianProfile
+
+        return CircadianProfile(phase_hours={
+            CircadianPhase.MORNING: matin,
+            CircadianPhase.AFTERNOON: 12,
+            CircadianPhase.EVENING: soir,
+            CircadianPhase.NIGHT: nuit,
+        })
+
+    def test_un_personnage_nocturne_salue_son_matin_a_lui(self):
+        e = _engine()
+        with patch(
+            "config.personality.Personality.circadian_profile",
+            new=property(lambda s: self._profil(matin=11)),
+        ):
+            fenetres = e._fenetres_de_salutation()
+        assert fenetres[0] == 11 and fenetres[1] == 14
+
+    def test_les_durees_des_fenetres_sont_celles_d_avant(self):
+        """Le profil dit QUAND ; la durée d'un bonjour (3 h / 2 h) est une
+        politique du lecteur et reproduit les fenêtres historiques."""
+        e = _engine()
+        with patch(
+            "config.personality.Personality.circadian_profile",
+            new=property(lambda s: self._profil()),
+        ):
+            fenetres = e._fenetres_de_salutation()
+        assert fenetres == (6, 9, 18, 20, 23)
+
+    def test_un_profil_illisible_retombe_sur_l_historique(self):
+        from conscience.scoring import ScoringTuning
+
+        e = _engine()
+        with patch(
+            "config.personality.Personality.circadian_profile",
+            new=property(lambda s: (_ for _ in ()).throw(RuntimeError("boom"))),
+        ):
+            fenetres = e._fenetres_de_salutation()
+        d = ScoringTuning()
+        assert fenetres == (
+            d.morning_start, d.morning_end,
+            d.evening_start, d.evening_end, d.night_start,
+        )
+
+    def test_le_scoring_recoit_les_fenetres_du_profil(self):
+        e = _engine()
+        with patch(
+            "config.personality.Personality.circadian_profile",
+            new=property(lambda s: self._profil(matin=11)),
+        ):
+            t = e._scoring_tuning()
+        assert t.morning_start == 11 and t.morning_end == 14

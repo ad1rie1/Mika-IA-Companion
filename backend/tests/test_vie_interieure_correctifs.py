@@ -601,9 +601,15 @@ class TestFrontiereIntime:
 
     async def test_le_journal_garde_son_fil_sans_nommer_les_gens(self):
         from memory.models import DailyJournal
+        from memory.read import yesterday
         from pipeline.context import _fetch_journal_context
 
-        hier = (timezone.now() - timedelta(days=1)).date()
+        # L'horloge du LECTEUR, jamais `timezone.now()` : entre minuit et
+        # 02 h (été, Europe/Paris) la date UTC est encore sur la veille, et
+        # « hier » calculé en UTC vise l'avant-veille — le test mesurait
+        # alors l'heure de la machine, pas la rédaction du fil. C'est la
+        # règle « one clock » que memory/read.py documente.
+        hier = yesterday()
         await sync_to_async(DailyJournal.objects.update_or_create)(
             date=hier, defaults=dict(
                 narrative="Thomas m'a raconte que sa mere etait hospitalisee.",

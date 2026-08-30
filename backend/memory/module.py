@@ -117,16 +117,91 @@ class MemoryToolsModule(BaseModule):
 
     SYSTEM = True
 
+    #: Cadence du rafraîchissement des sujets offerts (voir `propose_sujets`).
+    #: Une connaissance ne s'érode qu'à l'heure : recompter plus souvent ne
+    #: mesurerait que le même état.
+    CRON_INTERVAL = 1800
+
+    #: Bande de confiance d'une connaissance « à vérifier ». Sous 0.25 elle
+    #: est presque morte (le doute n'a plus d'objet), au-dessus de 0.55 elle
+    #: se porte bien — entre les deux vit exactement le « je crois savoir,
+    #: mais est-ce encore vrai ? » qui fait une curiosité épistémique.
+    _DOUTE_CONFIANCE_MIN = 0.25
+    _DOUTE_CONFIANCE_MAX = 0.55
+    #: Sujets offerts au plus. Une curiosité, pas un inventaire — même règle
+    #: que la récolte des graines.
+    _SUJETS_MAX = 2
+
     def __init__(self) -> None:
         super().__init__("memory_tools")
+        # Instantané pour la boucle de décision. Tenu en RAM et rafraîchi par
+        # le cron, jamais lu en base au moment de proposer : `propose_sujets`
+        # est appelé depuis le cycle de décision (2 880 tours/jour), où toute
+        # requête ORM depuis une coroutine lève `SynchronousOnlyOperation` —
+        # même motif que les compteurs RSS et email.
+        self._sujets: list[str] = []
 
     async def instantiate(self) -> None:
-        # The memory engine is initialized by the ASGI lifespan; the
-        # tool facade has no state of its own.
-        return None
+        from asgiref.sync import sync_to_async
+
+        # Sans ça, le réservoir n'existe qu'après le premier tick de cron,
+        # soit trente minutes de « rien à proposer » à chaque redémarrage.
+        await sync_to_async(self._rafraichir_sujets)()
 
     async def shutdown(self) -> None:
         return None
+
+    async def worker_cron(self) -> None:
+        from asgiref.sync import sync_to_async
+
+        await sync_to_async(self._rafraichir_sujets)()
+
+    def _rafraichir_sujets(self) -> None:
+        """Recompte ce que sa mémoire offre à sa curiosité. Sous `sync_to_async`.
+
+        Une **connaissance érodée** — la confiance a décru sans qu'elle soit
+        invalidée — est un doute qui a un objet : « je croyais savoir X,
+        est-ce encore vrai ? ». C'est le sujet de chantier le plus honnête
+        que la mémoire puisse offrir : le vérifier se fait avec les outils
+        du socle (`memory_search`) et, curiosité aidant, `rss`.
+
+        Un échec garde le dernier réservoir connu plutôt que de le vider :
+        perdre les sujets parce qu'un recompte a raté rendrait la panne
+        indiscernable d'une mémoire sereine. Compté au registre.
+        """
+        from memory.models import Connaissance
+
+        try:
+            douteuses = list(
+                Connaissance.objects.filter(
+                    is_valid=True,
+                    confidence__gte=self._DOUTE_CONFIANCE_MIN,
+                    confidence__lte=self._DOUTE_CONFIANCE_MAX,
+                )
+                # Les plus hautes de la bande d'abord : le doute qui compte
+                # est celui d'une croyance encore à moitié tenue, pas d'une
+                # ligne déjà presque morte. (`Connaissance` n'a pas
+                # d'importance propre — la confiance EST sa mesure.)
+                .order_by("-confidence", "-updated_at")
+                .values_list("content", flat=True)[: self._SUJETS_MAX]
+            )
+            self._sujets = [
+                f"vérifier si c'est toujours vrai : « {contenu[:90]} »"
+                for contenu in douteuses
+                if str(contenu or "").strip()
+            ]
+        except Exception as exc:
+            degradations.record("memory.module._rafraichir_sujets", exc)
+            self.logger.debug("rafraichissement des sujets memoire rate",
+                              exc_info=True)
+
+    def propose_sujets(self) -> list[str]:
+        """Ses doutes, comme sujets de chantier — lecture RAM pure.
+
+        Même contrat que RSS, email et forge : appelable depuis la boucle de
+        décision sans une requête. Le chantier ouvert emporte `memory_tools`
+        via `Graine.modules` — déjà au socle, la demande est inoffensive."""
+        return list(self._sujets)
 
     def return_tools(self) -> list[ModuleTool]:
         return [

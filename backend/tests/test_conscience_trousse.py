@@ -488,3 +488,27 @@ class TestLesNomsCitesExistent:
     def test_la_table_des_sources_ne_cible_que_des_modules_reels(self):
         cibles = {m for v in t._SOURCES_VERS_MODULES.values() for m in v}
         assert cibles <= self._enregistres()
+
+
+class TestTrousseConfigurable:
+    """Les trois listes se lisent depuis le tuning — leurs clés étaient
+    déclarées au registre et lues par personne (la forme `env_fallback`).
+    Tuning personnalisé ≠ défauts : un mutant qui relit les constantes du
+    module tombe ici."""
+
+    def test_le_socle_vient_du_tuning(self):
+        t = TrousseTuning(socle=("memoire_bis",))
+        voulus = souhaits(tuning=t)
+        assert voulus == ["memoire_bis"]
+        assert "conscience_tools" not in voulus
+
+    def test_les_elargissements_viennent_du_tuning(self):
+        t = TrousseTuning(curiosite=("scanner",), social=("pigeon",))
+        v = souhaits(drives={"curiosity": 0.9, "social": 0.9}, tuning=t)
+        assert "scanner" in v and "pigeon" in v
+        assert "rss" not in v and "email" not in v
+
+    def test_preparer_ne_coupe_jamais_le_socle_du_tuning(self):
+        t = TrousseTuning(socle=("gros_module",), plafond_caracteres=10)
+        trousse = preparer(poids=lambda nom: 5000, tuning=t)
+        assert "gros_module" in trousse.modules

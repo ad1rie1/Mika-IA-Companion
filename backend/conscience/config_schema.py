@@ -31,7 +31,6 @@ _INVARIANT_PLAFONDS = (
 _GROUPE_FACTEURS = "Pondération de la décision"
 _GROUPE_PERTINENCE = "Pertinence sans appel LLM"
 _GROUPE_ENTRETIEN = "Cadences d'entretien"
-_GROUPE_SALUT = "Salutations"
 _GROUPE_AUDIT = "Retour sur ce qu'elle vient de dire"
 _GROUPE_BASE = "Seuil et cadence"
 _GROUPE_PENSEES = "Pensées qui trottent"
@@ -86,14 +85,6 @@ CONFIG_SCHEMA = [
                     "temps et teintent son humeur. Cette échelle en heures est "
                     "ce qui permet à une contrariété du soir d'être encore là "
                     "au coucher, donc d'être digérée par la nuit.",
-    ),
-    ConfigGroup(
-        section="conscience", key=_GROUPE_SALUT, order=40,
-        description="Les trois créneaux où un bonjour est de mise, une fois par "
-                    "période et par jour. Le bonus ne suffit jamais seul à la "
-                    "faire parler, délibérément : la période n'est marquée "
-                    "« saluée » que si le cycle décide vraiment d'ouvrir la "
-                    "bouche.",
     ),
     ConfigGroup(
         section="conscience", key=_GROUPE_SOMMEIL, order=50,
@@ -636,6 +627,78 @@ CONFIG_SCHEMA = [
         hint="Doit rester sous le seuil d'action, sinon le frein ne freine "
              "rien.",
     ),
+    ConfigItem(
+        key="conscience.cooldown_jitter", type="float",
+        section="conscience", group="Initiative",
+        label="Gigue du silence entre deux initiatives (± fraction)",
+        default=0.15, min=0.0, max=0.5, hot_reload=True,
+        hint="Un métronome se remarque : à cadence exacte, ses relances "
+             "tombent aux mêmes minutes. Tirée une fois par acte, jamais "
+             "au-delà du plafond de six heures. À 0, cadence exacte.",
+    ),
+    ConfigItem(
+        key="conscience.ennui.idle_minutes", type="int",
+        section="conscience", group=_GROUPE_PENSEES,
+        label="Minutes de vide avant que l'ennui la gagne",
+        default=120, min=5, max=1440, hot_reload=True,
+        hint="Rien à observer, aucun chantier en cours, personne depuis ce "
+             "délai : son humeur glisse doucement vers l'ennui — le visage "
+             "et le murmure prennent la couleur de ces après-midi-là, et "
+             "l'envie d'ouvrir un chantier gagne une raison lisible.",
+    ),
+    ConfigItem(
+        key="conscience.ennui.intensite", type="float",
+        section="conscience", group=_GROUPE_PENSEES,
+        label="Intensité du glissement vers l'ennui",
+        default=0.25, min=0.0, max=1.0, hot_reload=True,
+        hint="Une teinte, pas une crise : sous la porte de débordement "
+             "d'humeur (0.7), l'ennui colore sans jamais forcer une prise "
+             "de parole à lui seul. À 0, l'ennui n'existe pas.",
+    ),
+    ConfigGroup(
+        section="conscience", key="Manque", order=21,
+        description="Quand quelqu'un lui manque. Le silence se mesure au "
+                    "rythme propre de chaque relation — la médiane des écarts "
+                    "entre les jours où la personne écrit — jamais à un seuil "
+                    "global : deux jours inquiètent pour un ami quotidien et "
+                    "ne veulent rien dire pour un ami mensuel. Elle ne pense "
+                    "qu'à UNE personne à la fois, préfère ceux dont elle est "
+                    "proche et vers qui son fond affectif est chaud, et ne "
+                    "relance jamais quelqu'un resté muet sans avoir attendu "
+                    "bien plus longtemps.",
+    ),
+    ConfigItem(
+        key="conscience.recontact_facteur", type="float",
+        section="conscience", group="Manque",
+        label="Silence ressenti comme un manque (× le rythme du lien)",
+        default=1.5, min=0.1, max=10.0, hot_reload=True,
+        hint="À 1.5, un ami qui écrit tous les 2 jours manque après 3 jours "
+             "de silence. Monter la valeur la rend moins demandeuse.",
+    ),
+    ConfigItem(
+        key="conscience.recontact_relance_facteur", type="float",
+        section="conscience", group="Manque",
+        label="Patience après une relance restée sans réponse (×)",
+        default=3.0, min=1.0, max=20.0, hot_reload=True,
+        hint="Si SON dernier message n'a pas eu de réponse, il faut ce "
+             "multiple de silence en plus avant de re-proposer la personne : "
+             "elle re-tente après un vrai moment, elle ne double-texte pas.",
+    ),
+    ConfigItem(
+        key="conscience.recontact_rythme_ami_jours", type="int",
+        section="conscience", group="Manque",
+        label="Rythme supposé d'un ami sans historique (jours)",
+        default=7, min=1, max=365, hot_reload=True,
+        hint="Sert de repli tant que la relation n'a pas trois jours actifs "
+             "d'historique — ensuite le rythme mesuré prend le dessus.",
+    ),
+    ConfigItem(
+        key="conscience.recontact_rythme_proche_jours", type="int",
+        section="conscience", group="Manque",
+        label="Rythme supposé d'un proche sans historique (jours)",
+        default=3, min=1, max=365, hot_reload=True,
+        hint="Un proche manque plus vite qu'un ami : même repli, plus court.",
+    ),
 
     # ── Sommeil ──────────────────────────────────────────────────
     ConfigItem(
@@ -866,39 +929,6 @@ CONFIG_SCHEMA = [
         hint="Un signal vraiment pertinent doit encore passer à 3 h du matin.",
     ),
 
-    # ── Salutations ──────────────────────────────────────────────
-    ConfigItem(
-        key="conscience.greeting.morning_start", type="int",
-        section="conscience", group=_GROUPE_SALUT,
-        label="Matin : début (h)",
-        default=7, min=0, max=23, hot_reload=True,
-        hint="Une salutation par période et par jour. Les bornes de fin sont "
-             "exclues (7 ≤ heure < 10).",
-    ),
-    ConfigItem(
-        key="conscience.greeting.morning_end", type="int",
-        section="conscience", group=_GROUPE_SALUT,
-        label="Matin : fin (h, exclue)",
-        default=10, min=0, max=24, hot_reload=True,
-    ),
-    ConfigItem(
-        key="conscience.greeting.evening_start", type="int",
-        section="conscience", group=_GROUPE_SALUT,
-        label="Soir : début (h)",
-        default=18, min=0, max=23, hot_reload=True,
-    ),
-    ConfigItem(
-        key="conscience.greeting.evening_end", type="int",
-        section="conscience", group=_GROUPE_SALUT,
-        label="Soir : fin (h, exclue)",
-        default=20, min=0, max=24, hot_reload=True,
-    ),
-    ConfigItem(
-        key="conscience.greeting.night_start", type="int",
-        section="conscience", group=_GROUPE_SALUT,
-        label="Nuit : début (h, sans fin)",
-        default=23, min=0, max=23, hot_reload=True,
-    ),
 
     # ── Pertinences heuristiques ─────────────────────────────────
     ConfigItem(

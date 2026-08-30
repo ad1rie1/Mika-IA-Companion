@@ -446,8 +446,10 @@ CONFIG_SCHEMA = [
         default=8, min=1, max=24, hot_reload=True,
         description="Durée après la fin de la nuit pendant laquelle le rêve "
                     "de la nuit peut encore remonter dans le prompt.",
-        hint="Comptée depuis memory.sleep_night_end_hour : le résidu reste "
-             "matinal, un rêve ne resurgit pas à 21h.",
+        hint="Comptée depuis la fin de nuit du profil circadien (phase "
+             "Matin) : le résidu reste matinal, un rêve ne resurgit pas à "
+             "21h — même pour un personnage nocturne, dont le « matin » est "
+             "le sien.",
     ),
     ConfigItem(
         key="pipeline.context.dream_vividness_threshold", type="float",

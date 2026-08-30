@@ -822,7 +822,7 @@ _DREAM_VIVIDNESS_THRESHOLD = 0.6
 async def _fetch_dream_context() -> tuple[str, object | None]:
     """Return ``(residue, dream)`` for last night's dream, or ``("", None)``.
 
-    Gating: current hour must be before NIGHT_END_HOUR + window, the
+    Gating: current hour must be before the profile-derived night end + window, the
     dream must not have been recalled yet, and vividness above threshold.
 
     The dream is *not* marked here. Marking it during context assembly spent
@@ -832,14 +832,15 @@ async def _fetch_dream_context() -> tuple[str, object | None]:
     from datetime import datetime
 
     from memory import read
-    from memory.sleep import NIGHT_END_HOUR
+    from memory.sleep import SleepCycle
 
     now = datetime.now()
-    # La fin de nuit appartient au cycle de sommeil : on lit *son* réglage,
-    # avec la constante importée comme repli. Le bloc reste correct que ce
-    # réglage soit déclaré ou non.
-    fin_de_nuit = cfg_int("memory.sleep_night_end_hour", NIGHT_END_HOUR,
-                          mini=0, maxi=23)
+    # La fin de nuit appartient au cycle de sommeil : on lit SON accesseur —
+    # dérivé du profil circadien (phase MORNING) depuis que la clé
+    # `memory.sleep_night_end_hour` est supprimée. Relire une clé morte ici
+    # aurait fait diverger la fenêtre du rêve de la nuit réelle sur tout
+    # profil nocturne — la divergence exacte que la dérivation supprime.
+    fin_de_nuit = SleepCycle._night_end_hour()
     fenetre = cfg_int("pipeline.context.dream_recall_window_hours",
                       _DREAM_RECALL_WINDOW_HOURS, mini=1)
     # Only eligible in the morning window [fin de nuit, +fenêtre]
@@ -1039,10 +1040,14 @@ async def _fetch_travaux_context() -> str:
                 etape = " (presque au bout)"
             else:
                 etape = " (en cours)"
-        attente = (
-            " Tu attends une reponse pour continuer."
-            if t.en_attente_de_reponse else ""
-        )
+        if not t.en_attente_de_reponse:
+            attente = ""
+        elif getattr(t, "attend_qui", ""):
+            attente = (
+                f" Tu attends une reponse de {t.attend_qui} pour continuer."
+            )
+        else:
+            attente = " Tu attends une reponse pour continuer."
         lines.append(f"- Tu as entrepris : {t.titre[:140]}{etape}.{attente}")
     for t in aboutis:
         lines.append(f"- Tu as mene au bout aujourd'hui : {t.titre[:140]}.")

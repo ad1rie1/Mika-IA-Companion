@@ -106,6 +106,31 @@ class TestCooldown:
         assert score > 0.0
         assert "cooldown" not in reason
 
+    def test_un_rendez_vous_prioritaire_leve_le_cooldown(self):
+        """Le cooldown tombait avant TOUS les facteurs, F6 compris — et le
+        backoff le pousse jusqu'à 6 h : « rappelle-moi dans 30 minutes »
+        sonnait des heures en retard. Même barre que le veto de sommeil :
+        une action assez urgente pour la réveiller rompt aussi son silence."""
+        ctx = make_context(
+            in_cooldown=True,
+            scheduled_actions=[FakeScheduledAction(priority=0.9)],
+        )
+        score, reason, _, _ = _score(ctx)
+        assert score > 0.0
+        assert "cooldown_leve" in reason
+        assert "scheduled" in reason
+
+    def test_un_rendez_vous_ordinaire_attend_le_cooldown(self):
+        """Sous la barre, le cooldown reste un cooldown : un pense-bête de
+        priorité moyenne n'est pas une raison de rompre le silence."""
+        ctx = make_context(
+            in_cooldown=True,
+            scheduled_actions=[FakeScheduledAction(priority=0.5)],
+        )
+        score, reason, _, _ = _score(ctx)
+        assert score == 0.0
+        assert reason == "cooldown"
+
 
 # ===================================================================
 # PERTINENCE
@@ -394,3 +419,29 @@ class TestTimeTrigger:
         # Greeted set should be reset (it's a new day)
         # Whether trigger fires depends on current time
         assert gdate == date.today()
+
+
+class TestHorlogeInjectable:
+    """`now` se passe, comme `maintenant` dans conduite.py : l'horloge
+    implicite était la seule impureté du module, payée par le pré-marquage
+    des périodes dans chaque test."""
+
+    def test_le_matin_injecte_declenche_la_salutation(self):
+        trigger, periods, _ = check_time_trigger(
+            set(), date.today(), now=datetime(2026, 8, 30, 8, 0),
+        )
+        assert trigger == "morning"
+        assert "morning" in periods
+
+    def test_l_apres_midi_injecte_ne_salue_pas(self):
+        trigger, _, _ = check_time_trigger(
+            set(), date.today(), now=datetime(2026, 8, 30, 14, 0),
+        )
+        assert trigger is None
+
+    def test_le_score_transmet_l_horloge(self):
+        ctx = make_context()
+        score, reason, _, _ = compute_decision_score(
+            ctx, set(), date.today(), now=datetime(2026, 8, 30, 8, 0),
+        )
+        assert "time(morning)" in reason

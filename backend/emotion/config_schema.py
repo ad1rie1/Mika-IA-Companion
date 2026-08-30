@@ -256,6 +256,15 @@ CONFIG_SCHEMA = [
              "dépasser. Ce gain est ensuite modulé par le tempérament.",
     ),
     ConfigItem(
+        key="emotion.resonance_strength", type="float", section="emotion",
+        group=OSC_GROUP, label="Résonance avec le fond du tempérament",
+        default=0.45, min=0.0, max=2.0, hot_reload=True,
+        hint="Une émotion alignée sur l'humeur par défaut du personnage frappe "
+             "plus fort : gain × (1 + k·cos), amplification seulement — les "
+             "émotions contraires ne sont jamais atténuées. À 0, un "
+             "mélancolique ne vibre pas plus à la tristesse qu'un neutre.",
+    ),
+    ConfigItem(
         key="emotion.ratchet_max", type="float", section="emotion",
         group=OSC_GROUP, label="Plafond du gain d'impulsion",
         default=0.75, min=0.05, max=1.0, hot_reload=True,

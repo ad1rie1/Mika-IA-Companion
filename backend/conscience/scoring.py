@@ -123,6 +123,7 @@ def compute_decision_score(
     greeted_periods: set[str],
     greeted_date: object | None,
     tuning: ScoringTuning | None = None,
+    now: datetime | None = None,
 ) -> tuple[float, str, set[str], object]:
     """Unified scoring. Returns (score, reason, updated_greeted_periods, updated_greeted_date).
 
@@ -137,9 +138,23 @@ def compute_decision_score(
     historical calculation exactly.
     """
     t = tuning or DEFAULT_TUNING
-    # Cooldown check (in-memory, no DB query)
+    # Cooldown check (in-memory, no DB query).
+    #
+    # Un rendez-vous PRIORITAIRE passe au travers — même barre que le veto de
+    # sommeil (`sleep_wake_scheduled_priority`), délibérément : une action
+    # assez urgente pour la réveiller est assez urgente pour rompre un
+    # silence qu'elle s'impose. Sans cette sortie, le cooldown tombait avant
+    # tous les facteurs, F6 compris, et le backoff le pousse jusqu'à 6 h :
+    # « rappelle-moi dans 30 minutes » sonnait des heures en retard pendant
+    # qu'elle se taisait pour une raison sans rapport. Une clé unique pour
+    # les deux portes : les faire diverger produirait un rendez-vous qui la
+    # réveille la nuit mais attend le cooldown le jour.
     if ctx.in_cooldown:
-        return 0.0, "cooldown", greeted_periods, greeted_date
+        if not any(
+            getattr(a, "priority", 0.0) >= t.sleep_wake_scheduled_priority
+            for a in ctx.scheduled_actions
+        ):
+            return 0.0, "cooldown", greeted_periods, greeted_date
 
     # Facteur 12 : elle dort. Aucun facteur au-dessus ne le savait, et dormir
     # *vide* REST — donc annule la pénalité de fatigue : la nuit la rendait
@@ -164,6 +179,12 @@ def compute_decision_score(
 
     score = 0.0
     parts = []
+
+    # Arriver ici en cooldown signifie qu'un rendez-vous prioritaire l'a
+    # levé : le motif doit le dire, ou le journal montrera un acte pendant
+    # un silence censé être tenu — indiscernable d'un cooldown cassé.
+    if ctx.in_cooldown:
+        parts.append("cooldown_leve(rdv_prioritaire)")
 
     # Factor 1: High-pertinence observations
     if ctx.max_pertinence > t.pertinence_gate:
@@ -194,7 +215,7 @@ def compute_decision_score(
 
     # Factor 5: Time-based greeting
     time_trigger, greeted_periods, greeted_date = check_time_trigger(
-        greeted_periods, greeted_date, t,
+        greeted_periods, greeted_date, t, now=now,
     )
     if time_trigger:
         score += t.greeting_bonus
@@ -284,15 +305,20 @@ def check_time_trigger(
     greeted_periods: set[str],
     greeted_date: object | None,
     tuning: ScoringTuning | None = None,
+    now: datetime | None = None,
 ) -> tuple[str | None, set[str], object]:
     """Check for time-based greeting triggers (once per period per day).
 
     Returns (trigger_name_or_None, updated_greeted_periods, updated_greeted_date).
     Pure function — the period bounds come in with the tuning, they are never
-    read from the config here.
+    read from the config here. ``now`` se passe, comme ``maintenant`` dans
+    ``conduite.py`` : l'horloge implicite était la seule impureté du module,
+    et son prix se payait dans chaque test de scoring, contraint de
+    pré-marquer toutes les périodes saluées pour s'isoler de l'heure de la
+    machine. L'omettre garde le comportement historique.
     """
     t = tuning or DEFAULT_TUNING
-    now = datetime.now()
+    now = now if now is not None else datetime.now()
     hour = now.hour
     today = now.date()
 

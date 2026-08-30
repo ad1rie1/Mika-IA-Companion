@@ -754,3 +754,58 @@ class TestSingleton:
             SleepPhase.REM,
             SleepPhase.DEEP_SLEEP,
         )
+
+
+class TestNuitDuProfilCircadien:
+    """Les bornes de la nuit dérivent du profil circadien — les clés
+    `memory.sleep_night_*` cohabitaient avec `personality.circadian.*`,
+    deux sources de vérité pour « quand commence sa nuit » : un personnage
+    nocturne dormait aux heures d'un autre."""
+
+    def _profil(self, nuit=23, matin=6):
+        from emotion.circadian import CircadianPhase, CircadianProfile
+
+        return CircadianProfile(phase_hours={
+            CircadianPhase.MORNING: matin,
+            CircadianPhase.AFTERNOON: 12,
+            CircadianPhase.EVENING: 18,
+            CircadianPhase.NIGHT: nuit,
+        })
+
+    def test_un_personnage_nocturne_dort_sa_nuit_a_lui(self):
+        from unittest.mock import patch
+
+        from memory.sleep import SleepCycle
+
+        with patch(
+            "config.personality.Personality.circadian_profile",
+            new=property(lambda s: self._profil(nuit=21, matin=9)),
+        ):
+            assert SleepCycle._nominal_night_start_hour() == 21
+            assert SleepCycle._night_end_hour() == 9
+
+    def test_un_profil_illisible_retombe_sur_l_historique(self):
+        from unittest.mock import patch
+
+        from memory.sleep import SleepCycle
+
+        with patch(
+            "config.personality.Personality.circadian_profile",
+            new=property(lambda s: (_ for _ in ()).throw(RuntimeError("boom"))),
+        ):
+            assert SleepCycle._nominal_night_start_hour() == 23
+            assert SleepCycle._night_end_hour() == 6
+
+    def test_les_gardes_du_lecteur_bornent_un_profil_extreme(self):
+        """Une « nuit » déclarée à 2 h du matin sort du domaine que le cycle
+        sait traiter ([12, 23]) : ramenée dans la borne, jamais propagée."""
+        from unittest.mock import patch
+
+        from memory.sleep import SleepCycle
+
+        with patch(
+            "config.personality.Personality.circadian_profile",
+            new=property(lambda s: self._profil(nuit=2, matin=14)),
+        ):
+            assert SleepCycle._nominal_night_start_hour() == 12
+            assert SleepCycle._night_end_hour() == 12

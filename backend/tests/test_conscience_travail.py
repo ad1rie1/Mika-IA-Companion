@@ -229,10 +229,12 @@ class TestVieillissementEtMort:
         import inspect
         import textwrap
 
-        from conscience.engine import ConscienceEngine
+        from conscience import travaux
 
+        # Le délégué du moteur ne porte plus le corps : la propriété vit
+        # dans `travaux.travaux_en_cours`.
         arbre = ast.parse(textwrap.dedent(
-            inspect.getsource(ConscienceEngine._travaux_en_cours)
+            inspect.getsource(travaux.travaux_en_cours)
         ))
         internes = [
             n for n in ast.walk(arbre)

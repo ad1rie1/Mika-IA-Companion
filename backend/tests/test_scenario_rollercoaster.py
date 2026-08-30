@@ -191,29 +191,29 @@ class TestRollercoasterWithMelancholicTemperament:
     def test_melancholic_resonates_with_sadness(self, melancholic_engine):
         """Melancholic temperament should amplify sad moments.
 
-        DELIBERATELY LEFT RED. The assertion is unchanged: it names a property
-        the engine does not implement, and softening it would only hide that.
-        Measured on this exact conversation, turns 1 and 5:
+        GREEN since the temperament resonance landed — the assertion never
+        moved. It stayed deliberately red for as long as the engine lacked the
+        property it names: melancholic and default sat 4.7 % apart, the whole
+        gap coming from `intensity_base` feeding the ratchet gain, nothing
+        from `default_mood` (which only entered the physics through the
+        resting point — under 1 % per turn gap at τ = 1059 s). The 0.2 bar
+        read reactivity, never melancholy: only `explosive` cleared it, on
+        gain alone.
 
-          melancholic  0.1627 / 0.0971      default  0.1554 / 0.0914
-          stoic        0.0608 / 0.0728      explosive 0.3254 / 0.2235
+        `EmotionEngine._person_impulse_params` implements the property: an
+        impulse aligned with the `default_mood` anchor is amplified —
+        gain × (1 + k·cos), amplification only, cos kept only when positive
+        (attenuating contrary impulses would armor a happy fond against
+        sadness, which `recovery_speed` and the resting point already express
+        as *resistance*). Measured on this exact conversation, turns 1 and 5,
+        at k = 0.45:
 
-        Melancholic and default sit 4.7 % apart, and that whole gap comes from
-        `intensity_base` (0.7 vs 0.6) feeding the ratchet gain — nothing comes
-        from `default_mood`. The temperament's mood only enters the physics
-        through the resting point, which reaches the position via relaxation
-        alone; with τ = 1059 s and turns 2-8 s apart it contributes under 1 %
-        per gap. The only temperament clearing the 0.2 bar is `explosive`, on
-        gain (0.75) — so the bar reads reactivity, never melancholy.
+          melancholic  0.3597 / 0.2569      default  0.1475 / 0.0554
+          stoic        0.0608 / 0.0728      explosive 0.2852 / 0.1903
 
-        It is not a stale pin either. Under the pre-B2 engine it passed while
-        reading `excited` 0.6075 at turn 1 and `hopeful` 0.7430 at turn 5 —
-        positions pointing 0.90 *away* from the sad target, i.e. the leftover
-        of the previous turns, since a velocity impulse moved nothing at the
-        instant `play_conversation` reads. It asserted "any(i > 0.2)" on a
-        state that was neither melancholic nor sad, and `default` satisfied it
-        just as well (0.6334 / 0.5863). B2 is what made the readout honest,
-        and the honest readout says the property was never there.
+        Both sad turns clear the bar for melancholic; stoic (neutral fond,
+        null anchor) is untouched by construction; and melancholic now beats
+        explosive on sadness — the bar finally reads melancholy.
         """
         snapshots = play_conversation(
             melancholic_engine, "chaotic_user", ROLLERCOASTER_CONVERSATION

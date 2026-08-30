@@ -501,17 +501,46 @@ class SleepCycle:
         )
         return (monotonic() - self._last_dream_attempt) >= espacement
 
+    # Les deux bornes de la nuit DÉRIVENT du profil circadien, comme les
+    # fenêtres de salutation de la conscience, et pour la même raison : les
+    # clés `memory.sleep_night_*` cohabitaient avec `personality.circadian.*`
+    # — deux sources de vérité pour « quand commence sa nuit », et un
+    # personnage configuré nocturne dormait aux heures d'un autre. Les clés
+    # sont supprimées, pas doublées ; les bornes de lecture ([12, 23] et
+    # [0, 12]) restent des gardes du lecteur, et les constantes historiques
+    # (23 h / 6 h — identiques aux défauts du profil) le repli d'un profil
+    # illisible.
+
     @staticmethod
     def _night_end_hour() -> int:
-        return cfg_int(
-            "memory.sleep_night_end_hour", NIGHT_END_HOUR, mini=0, maxi=12,
-        )
+        """La nuit se ferme quand SON matin commence (phase MORNING)."""
+        try:
+            from config.personality import personality
+            from emotion.circadian import CircadianPhase
+
+            h = int(personality.circadian_profile.phase_hours.get(
+                CircadianPhase.MORNING, NIGHT_END_HOUR,
+            ))
+        except Exception as exc:
+            degradations.record("sommeil: heure de matin du profil", exc)
+            h = NIGHT_END_HOUR
+        return max(0, min(12, h))
 
     @staticmethod
     def _nominal_night_start_hour() -> int:
-        return cfg_int(
-            "memory.sleep_night_start_hour", NIGHT_START_HOUR, mini=12, maxi=23,
-        )
+        """La nuit s'ouvre quand SA phase NIGHT commence — avant l'avance
+        par la fatigue (`_night_start_hour`)."""
+        try:
+            from config.personality import personality
+            from emotion.circadian import CircadianPhase
+
+            h = int(personality.circadian_profile.phase_hours.get(
+                CircadianPhase.NIGHT, NIGHT_START_HOUR,
+            ))
+        except Exception as exc:
+            degradations.record("sommeil: heure de nuit du profil", exc)
+            h = NIGHT_START_HOUR
+        return max(12, min(23, h))
 
     @staticmethod
     def _is_night(now: datetime, start_hour: int | None = None) -> bool:

@@ -48,11 +48,12 @@ from utils.degradation import degradations
 
 # ── Le socle et les deux extensions ───────────────────────────────────────
 #
-# Des **listes** et non des tuples, volontairement : ces trois valeurs sont
-# destinées à devenir des `ConfigItem` de type `list`, et la garde AST de
-# `tests/test_config_rapatriement.py` compare `item.default == repli` — or
-# `["a"] != ("a",)`. Un tuple ici ferait échouer la suite le jour de la
-# déclaration, très loin de sa cause.
+# Des **listes** et non des tuples, volontairement : ces trois valeurs SONT
+# les replis des `ConfigItem` de type `list` (`conscience.trousse.socle` /
+# `.curiosite` / `.social`, lus par `ConscienceEngine._trousse_tuning` via
+# `cfg_list`), et la garde AST de `tests/test_config_rapatriement.py`
+# compare `item.default == repli` — or `["a"] != ("a",)`. Un tuple ici
+# ferait échouer la suite, très loin de sa cause.
 
 #: Ce qu'un acte endogène a besoin d'avoir en main, toujours.
 #:
@@ -109,15 +110,24 @@ PORTE_PULSION = 0.50
 
 @dataclass(frozen=True)
 class TrousseTuning:
-    """Les deux seuls réglages, avec les constantes du module pour défauts.
+    """Les réglages de la trousse, avec les constantes du module pour défauts.
 
     ``TrousseTuning()`` sans argument reproduit le comportement déclaré, ce
     qui laisse leur sens aux tests : ils mesurent la calibration écrite ici,
     jamais celle de la base locale.
+
+    Les trois listes sont ICI et plus en lecture directe des constantes :
+    leurs clés (`conscience.trousse.socle` / `.curiosite` / `.social`)
+    étaient déclarées au registre et lues par personne — une configuration
+    que l'opérateur modifiait sans aucun effet, en silence : la forme exacte
+    du bug `env_fallback`. Le moteur les résout dans `_trousse_tuning()`.
     """
 
     plafond_caracteres: int = PLAFOND_CARACTERES
     porte_pulsion: float = PORTE_PULSION
+    socle: tuple[str, ...] = tuple(SOCLE)
+    curiosite: tuple[str, ...] = tuple(CURIOSITE)
+    social: tuple[str, ...] = tuple(SOCIAL)
 
 
 DEFAULT_TUNING = TrousseTuning()
@@ -278,7 +288,7 @@ def souhaits(
             if nom and nom not in voulus:
                 voulus.append(nom)
 
-    _ajouter(SOCLE)
+    _ajouter(tuning.socle)
     _ajouter(demandes or ())
 
     for source in sources or ():
@@ -286,9 +296,9 @@ def souhaits(
 
     # Les pulsions en dernier : elles élargissent, elles ne commandent pas.
     if _tension(drives, "curiosity") >= tuning.porte_pulsion:
-        _ajouter(CURIOSITE)
+        _ajouter(tuning.curiosite)
     if _tension(drives, "social") >= tuning.porte_pulsion:
-        _ajouter(SOCIAL)
+        _ajouter(tuning.social)
 
     return voulus
 
@@ -333,7 +343,7 @@ def preparer(
     if disponibles is not None:
         connus = {str(n).strip() for n in disponibles if str(n or "").strip()}
 
-    socle = [n for n in SOCLE if str(n).strip()]
+    socle = [n for n in tuning.socle if str(n).strip()]
     retenus: list[str] = []
     ecartes: list[str] = []
     inconnus: list[str] = []

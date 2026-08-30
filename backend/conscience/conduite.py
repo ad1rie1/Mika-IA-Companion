@@ -362,7 +362,7 @@ def _flottant(valeur: Any, defaut: float = 0.0) -> float:
 def _themes(valeur: Any) -> tuple[str, ...]:
     """Les thèmes d'une ligne, quels qu'ils soient dans la base.
 
-    ``Observation.themes`` n'existe pas, ``Rumination.themes`` est un JSONField
+    ``Observation.themes`` et ``Rumination.themes`` sont des JSONField
     qu'un modèle local a déjà rempli avec autre chose qu'une liste de chaînes
     (le consolidateur a connu exactement ce cas). On normalise plutôt que de
     faire confiance.

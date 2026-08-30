@@ -82,6 +82,17 @@ GLOBAL_TAU_FACTOR = 2.0
 RATCHET_BASE = 1.0
 RATCHET_MAX = 0.75
 RATCHET_GLOBAL = 0.45
+# Résonance de tempérament : une impulsion alignée sur le fond du personnage
+# (l'ancre PAD de `default_mood`) est amplifiée — gain × (1 + k·cos), cos
+# retenu seulement s'il est positif. AMPLIFICATION SEULEMENT, jamais
+# d'armure : atténuer les impulsions contraires rendrait un fond heureux
+# structurellement intouchable par la tristesse, alors que « résister » est
+# déjà ce que `recovery_speed` et le point de repos expriment. C'est la
+# propriété que `test_melancholic_resonates_with_sadness` nommait en restant
+# volontairement rouge : mélancolique et défaut ne différaient que par
+# `intensity_base`, le fond n'entrait dans la physique que par le point de
+# repos — sous 1 % par tour à τ = 1059 s.
+RESONANCE_STRENGTH = 0.45
 # Modulation du gain global par l'intensité déclarée : gain_effectif =
 # gain_base × (PLANCHER + PENTE × intensité), plafonné. À 0.2 d'intensité une
 # émotion effleure l'humeur générale, à 1.0 elle la traverse. Un gain fixe
@@ -1000,6 +1011,36 @@ class EmotionEngine:
         )
         return dataclasses.replace(base, impulse_gain=gain)
 
+    def _person_impulse_params(self, target: Vec3) -> OscillatorParams:
+        """Le gain de CETTE impulsion, accordé au fond du tempérament.
+
+        cos entre la cible déclarée et l'ancre de ``default_mood`` : une
+        mélancolique vibre plus fort à la tristesse, une explosive à
+        l'exaltation. Retenu **seulement positif** — voir la note de
+        ``RESONANCE_STRENGTH`` : la résistance au contraire existe déjà
+        (rappel + point de repos), la redoubler ici blinderait le personnage.
+
+        Un ``default_mood`` neutre a une ancre nulle : cos indéfini, gain
+        inchangé — un tempérament sans fond marqué ne résonne avec rien, ce
+        qui est la définition du stoïque. Le plafond est 1.0, l'invariant du
+        cliquet lui-même, et non ``ratchet_max`` : celui-ci borne ce qu'un
+        *tempérament* peut se déclarer, pas ce qu'un événement qui tombe
+        juste dans son grain peut lui faire.
+        """
+        base = self._person_params
+        k = cfg_float("emotion.resonance_strength", RESONANCE_STRENGTH, mini=0.0)
+        if k <= 0.0 or base.impulse_gain <= 0.0:
+            return base
+        ancre = pad.label_to_pad(self.temperament.default_mood, 1.0)
+        n_ancre, n_cible = pad.norm(ancre), pad.norm(target)
+        if n_ancre <= 1e-9 or n_cible <= 1e-9:
+            return base
+        cos = pad.dot(ancre, target) / (n_ancre * n_cible)
+        if cos <= 0.0:
+            return base
+        gain = min(1.0, base.impulse_gain * (1.0 + k * cos))
+        return dataclasses.replace(base, impulse_gain=gain)
+
     def process_emotion(
         self, emotion_data: EmotionData, person_id: str
     ) -> PersonMood:
@@ -1016,7 +1057,7 @@ class EmotionEngine:
         person = self._get_person_mood(person_id)
 
         target = pad.label_to_pad(emotion_data.emotion, emotion_data.intensity)
-        person.dynamic.impulse_toward(target, self._person_params)
+        person.dynamic.impulse_toward(target, self._person_impulse_params(target))
         # Ce qu'elle vient de dire éprouver, gardé tel quel à côté de la
         # position. Le prompt du tour suivant le relit plutôt que de demander
         # à `pad_to_label` de renommer un vecteur mélangé.

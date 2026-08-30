@@ -478,3 +478,51 @@ class TestPurete:
         v = lire_verdict("[SUITE:fini]")
         with pytest.raises(Exception):
             v.etat = EtatVerdict.CONTINUE  # type: ignore[misc]
+
+
+class TestNotabilite:
+    """Le champ `notable` : l'auto-évaluation qui décide QUOI diffuser,
+    pas seulement quand. `None` = non prononcé — l'appelant choisit son
+    défaut, et l'absence reproduit le comportement d'avant."""
+
+    def test_notable_lu_dans_le_bloc(self):
+        from conscience.verdict import lire_verdict
+
+        v = lire_verdict(
+            '--- VERDICT ---\n'
+            '{"etat": "fini", "resume": "ok", "notable": 0.9}\n'
+            '--- FIN VERDICT ---'
+        )
+        assert v.notable == 0.9
+
+    def test_absent_vaut_none_jamais_zero(self):
+        from conscience.verdict import lire_verdict
+
+        v = lire_verdict(
+            '--- VERDICT ---\n{"etat": "fini", "resume": "ok"}\n--- FIN VERDICT ---'
+        )
+        assert v.notable is None
+
+    def test_hors_domaine_ramene_dans_la_borne(self):
+        from conscience.verdict import lire_verdict
+
+        v = lire_verdict(
+            '--- VERDICT ---\n{"etat": "fini", "notable": 3}\n--- FIN VERDICT ---'
+        )
+        assert v.notable == 1.0
+
+    def test_illisible_vaut_none(self):
+        from conscience.verdict import lire_verdict
+
+        v = lire_verdict(
+            '--- VERDICT ---\n{"etat": "fini", "notable": "beaucoup"}\n--- FIN VERDICT ---'
+        )
+        assert v.notable is None
+
+    def test_la_consigne_produit_toujours_un_bloc_lisible(self):
+        """L'exemple de la consigne — champ notable compris — se relit."""
+        from conscience.verdict import CONSIGNE_VERDICT, NiveauVerdict, lire_verdict
+
+        v = lire_verdict(CONSIGNE_VERDICT)
+        assert v.niveau is NiveauVerdict.BLOC
+        assert v.notable == 0.3

@@ -509,19 +509,6 @@ CONFIG_SCHEMA = [
 
     # ── Sommeil : les portes de la nuit ──────────────────────────
     ConfigItem(
-        key="memory.sleep_night_start_hour", type="int", section="memory",
-        group="Sommeil", label="Heure nominale d'ouverture de la nuit",
-        default=23, min=12, max=23, hot_reload=True,
-        hint="Heure de coucher avant avance par la fatigue.",
-    ),
-    ConfigItem(
-        key="memory.sleep_night_end_hour", type="int", section="memory",
-        group="Sommeil", label="Heure de fermeture de la nuit",
-        default=6, min=0, max=12, hot_reload=True,
-        hint="Borne haute, exclue. Elle date aussi les nuits : un rêve à 3 h "
-             "le 18 appartient à la nuit DU 17.",
-    ),
-    ConfigItem(
         key="memory.sleep_idle_seconds_threshold", type="int", section="memory",
         group="Sommeil", label="Inactivité exigée pour s'endormir (s)",
         default=900, min=60, max=21600, hot_reload=True,

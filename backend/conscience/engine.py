@@ -35,29 +35,17 @@ from conscience.trousse import (
     resume_capacites,
 )
 from conscience.scoring import (
-    SLEEP_PENALTY,
     SLEEP_WAKE_PERTINENCE,
-    SLEEP_WAKE_SCHEDULED_PRIORITY,
-    SUPPRESS_RELEASE_IDLE_SECONDS,
     ScoringTuning,
     compute_decision_score,
 )
+from conscience import travaux
 from conscience.conduite import (
     Conduite,
-    decider_diffusion,
     ConduiteTuning,
-    TravailEnCours,
     choisir_conduite,
-    est_essouffle,
-    facturer_envie,
-    recolter_graines,
 )
-from conscience.verdict import (
-    CONSIGNE_VERDICT,
-    EtatVerdict,
-    VerdictTuning,
-    depouiller_verdict,
-)
+from conscience.verdict import VerdictTuning
 from conscience.murmure import murmurer
 from conscience.murmure_reglage import tuning as murmure_tuning
 from conscience.types import DecisionContext, InterpretedSignal
@@ -72,7 +60,7 @@ from conscience.vecu import (
 )
 from drives.engine import drive_engine
 from emotion.engine import emotion_engine
-from modules.types import ModuleEvent, ModuleNotification
+from modules.types import ModuleEvent
 from utils.degradation import degradations, degraded
 from utils.tool_trace import journal_outils
 from utils.periodic import PeriodicLoop
@@ -114,18 +102,12 @@ CONTRADICTION_PERTINENCE = 0.80
 URGENCY_OBSERVATION_GATE = 0.3
 #: Poids d'une observation dans cette somme.
 URGENCY_PER_OBSERVATION = 0.5
-#: Pas maximum d'un chantier avant qu'il soit clos d'office. Un travail sans
-#: terme n'est pas un travail.
-_TRAVAIL_PAS_MAX = 5
 #: Observations et actions programmées effectivement montrées au modèle.
 #:
 #: Ce sont les bornes qui rendent le marquage honnête possible : jusqu'ici le
 #: prompt en montrait 5 et 3 pendant que l'acte en clôturait 20 et 10.
 _BRIEF_OBSERVATIONS_MAX = 5
 _BRIEF_ACTIONS_MAX = 3
-#: Sujets retenus parmi ceux que les modules proposent. Petit : c'est une
-#: curiosité, pas un inventaire — et chacun concourt aux trois places.
-_GRAINES_MODULES_MAX = 3
 #: Cycles sautés d'affilée avant que la boucle compte un échec. Un acte tient
 #: le verrou jusqu'à ~135 s, soit quatre cycles : en sauter trois est normal.
 _CYCLES_SAUTES_MAX = 6
@@ -434,11 +416,10 @@ class ConscienceEngine:
         from conscience.models import Observation
 
         try:
-            # Les themes produits par l'interpretation n'ont pas de champ
-            # dedie : ils sont fusionnes dans raw_data, seul endroit ou
-            # _memory_maintenance et _promote_stale_to_ruminations vont les
-            # relire. Aucun emetteur d'evenement ne pose de cle "themes",
-            # donc sans cette fusion les deux lectures renvoient toujours [].
+            # Les thèmes ont leur champ (migration conscience/0013) ET
+            # restent recopiés dans raw_data : les lignes d'avant migration
+            # n'ont que raw_data, et `_themes_de` lit les deux dans cet
+            # ordre — le champ d'abord, la convention en repli.
             raw_data = dict(event.data or {})
             raw_data["themes"] = signal.themes
             # Les entités nommées par l'interprétation mouraient à la
@@ -451,6 +432,7 @@ class ConscienceEngine:
                 source=event.source_module,
                 event_type=event.event_type,
                 raw_data=raw_data,
+                themes=list(signal.themes or []),
                 summary=signal.summary,
                 category=signal.category,
                 pertinence=signal.pertinence,
@@ -663,6 +645,10 @@ class ConscienceEngine:
             # chaque cycle qui ouvre ou poursuit un chantier — c'est-à-dire
             # précisément aux cycles où elle a le plus de matière.
             await self._mark_stale_observations()
+            # Le vide prolongé a une couleur. `bored` fait partie des 29
+            # émotions et rien ne le produisait : une après-midi sans rien
+            # laissait l'humeur là où le matin l'avait posée.
+            self._peut_etre_s_ennuyer(ctx, travaux)
 
         # Log the decision — written after the act, whose outcome is part of
         # what the cycle decided (and what _introspect / _restore_cooldown read).
@@ -678,6 +664,62 @@ class ConscienceEngine:
         # couvrirait pas un `kill -9`, qui est exactement le cas où la fatigue
         # de la soirée disparaissait avec la nuit qu'elle devait déclencher.
         await self._save_drives_if_due()
+
+    #: Replis de l'ennui — clés `conscience.ennui.*`.
+    _ENNUI_IDLE_MINUTES = 120
+    _ENNUI_INTENSITE = 0.25
+    #: Espacement des glissements (RAM). L'ennui teinte, il ne matraque pas :
+    #: sans cet espacement, la boucle enverrait une impulsion toutes les 30 s
+    #: pendant toute l'après-midi vide — même leçon que la saignée des
+    #: ruminations.
+    _ENNUI_INTERVAL_S = 1800.0
+    #: Horodatage monotone du dernier glissement. Attribut de CLASSE : les
+    #: tests construisent le moteur par `__new__` (voir `_cycles_sautes`).
+    _dernier_ennui: float = 0.0
+
+    def _peut_etre_s_ennuyer(self, ctx: DecisionContext, travaux: list) -> None:
+        """Le vide prolongé glisse l'humeur vers l'ennui. Ne lève jamais.
+
+        Quatre conditions, toutes nécessaires : éveillée (dormir n'est pas
+        s'ennuyer), rien à observer, aucun chantier en cours (travailler
+        n'est pas s'ennuyer), et un long silence. L'intensité reste sous la
+        porte de débordement d'humeur : l'ennui colore le visage, le murmure
+        et le vécu — il ne force jamais une prise de parole à lui seul, mais
+        il donne à « ouvrir un chantier » la raison lisible qui manquait.
+        """
+        try:
+            if ctx.sleep_phase != "awake":
+                return
+            if ctx.pending_observations or travaux:
+                return
+            porte_s = cfg_int(
+                "conscience.ennui.idle_minutes", self._ENNUI_IDLE_MINUTES,
+                mini=1,
+            ) * 60
+            if ctx.idle_seconds < porte_s:
+                return
+            intensite = cfg_float(
+                "conscience.ennui.intensite", self._ENNUI_INTENSITE,
+                mini=0.0, maxi=1.0,
+            )
+            if intensite <= 0.0:
+                return
+            maintenant = time.monotonic()
+            if (
+                self._dernier_ennui
+                and maintenant - self._dernier_ennui < self._ENNUI_INTERVAL_S
+            ):
+                return
+            self._dernier_ennui = maintenant
+
+            from emotion.types import Emotion, EmotionData
+
+            emotion_engine.process_emotion(
+                EmotionData(Emotion.BORED, intensite), "conscience_mika",
+            )
+            logger.debug("Ennui: glissement d'humeur (%.2f)", intensite)
+        except Exception as exc:
+            degradations.record("conscience: glissement d'ennui", exc)
 
     _DRIVE_SAVE_INTERVAL_S = 300
 
@@ -770,6 +812,12 @@ class ConscienceEngine:
     #: forme casse dès qu'un singleton est reconstruit autrement.
     _cycles_sautes: int = 0
     _derniere_diffusion_travail = None
+    #: La salutation déclenchée par le dernier scoring. Attribut de classe
+    #: pour la même raison que ses voisins : lue par `_declencheurs` — donc
+    #: par l'intention du murmure et le vécu — sur des moteurs construits par
+    #: `__new__`, où l'`AttributeError` était avalé par le `degraded` de
+    #: l'appelant et rendait l'intention vide EN SILENCE.
+    _salutation_en_attente: str | None = None
 
     #: Fenêtre des observations « en attente ». Trois lectures s'y accordent :
     #: ce que le scoring voit, ce que le balayage périme, et la borne haute de
@@ -802,6 +850,7 @@ class ConscienceEngine:
         d = ScoringTuning()  # les défauts *sont* les replis
         f = lambda cle, repli: cfg_float(f"conscience.{cle}", repli)  # noqa: E731
         i = lambda cle, repli: cfg_int(f"conscience.{cle}", repli)    # noqa: E731
+        fenetres = self._fenetres_de_salutation()
         return ScoringTuning(
             sleep_wake_pertinence=f("sleep_wake_pertinence", d.sleep_wake_pertinence),
             sleep_wake_scheduled_priority=f(
@@ -845,12 +894,56 @@ class ConscienceEngine:
             suppressed_score=f("suppressed_score", d.suppressed_score),
             suppress_release_idle_seconds=f(
                 "suppress_release_idle_seconds", d.suppress_release_idle_seconds),
-            morning_start=i("greeting.morning_start", d.morning_start),
-            morning_end=i("greeting.morning_end", d.morning_end),
-            evening_start=i("greeting.evening_start", d.evening_start),
-            evening_end=i("greeting.evening_end", d.evening_end),
-            night_start=i("greeting.night_start", d.night_start),
+            morning_start=fenetres[0],
+            morning_end=fenetres[1],
+            evening_start=fenetres[2],
+            evening_end=fenetres[3],
+            night_start=fenetres[4],
         )
+
+    #: Durées des fenêtres de salutation, en heures. Politique du LECTEUR,
+    #: pas du personnage : le profil circadien dit quand SON matin commence,
+    #: ces constantes disent combien de temps un bonjour reste un bonjour.
+    #: Les valeurs reproduisent les fenêtres historiques (7–10 = 3 h,
+    #: 18–20 = 2 h).
+    _SALUT_MATIN_DUREE_H = 3
+    _SALUT_SOIR_DUREE_H = 2
+
+    def _fenetres_de_salutation(self) -> tuple[int, int, int, int, int]:
+        """Les fenêtres de salutation, DÉRIVÉES du profil circadien.
+
+        Les cinq clés `conscience.greeting.*` sont supprimées, pas doublées :
+        elles cohabitaient avec `personality.circadian.*` — deux sources de
+        vérité pour « quand commence son matin », et un personnage configuré
+        nocturne saluait « le matin » à 7 h en dormant. Le profil est le
+        personnage ; la salutation le suit. `(matin, fin_matin, soir,
+        fin_soir, nuit)` — une fin peut dépasser 24 sans danger,
+        `check_time_trigger` compare des heures ∈ [0, 23].
+
+        Ne lève jamais : profil illisible → les fenêtres historiques
+        (défauts de `ScoringTuning`).
+        """
+        d = ScoringTuning()
+        try:
+            from config.personality import personality
+            from emotion.circadian import CircadianPhase
+
+            heures = personality.circadian_profile.phase_hours
+            matin = int(heures.get(CircadianPhase.MORNING, d.morning_start))
+            soir = int(heures.get(CircadianPhase.EVENING, d.evening_start))
+            nuit = int(heures.get(CircadianPhase.NIGHT, d.night_start))
+            return (
+                matin, matin + self._SALUT_MATIN_DUREE_H,
+                soir, soir + self._SALUT_SOIR_DUREE_H,
+                nuit,
+            )
+        except Exception as exc:
+            degradations.record("conscience: fenetres de salutation", exc)
+            return (
+                d.morning_start, d.morning_end,
+                d.evening_start, d.evening_end,
+                d.night_start,
+            )
 
     def _vecu_tuning(self) -> VecuTuning:
         """Les seuils de ce qu'elle se raconte.
@@ -892,6 +985,18 @@ class ConscienceEngine:
         "pulsion": "aller voir quelque chose de nouveau",
         "rumination": "reparler de ce qui me trotte dans la tête",
     }
+    #: Le motif « pulsion » se spécialise par la pulsion dominante : « aller
+    #: voir quelque chose de nouveau » convient à la curiosité et pas du tout
+    #: au manque de contact — le murmure d'un débordement SOCIAL disait une
+    #: envie d'explorer au moment précis où elle voulait quelqu'un. Membres
+    #: d'énumération, donc stables : la garde anti-répétition du murmure
+    #: compare ces chaînes d'un tour à l'autre.
+    _INTENTION_PAR_PULSION: dict[str, str] = {
+        "curiosity": "aller voir quelque chose de nouveau",
+        "social": "reprendre des nouvelles de quelqu'un",
+        "expression": "raconter ou fabriquer quelque chose",
+        "rest": "",
+    }
 
     def _intention_de_lacte(self, ctx: DecisionContext) -> str:
         """Ce qu'elle s'apprête à faire, en une phrase, pour le murmure.
@@ -928,6 +1033,11 @@ class ConscienceEngine:
             declencheurs = self._declencheurs(ctx)
             if declencheurs:
                 motif = getattr(declencheurs[0].motif, "value", "")
+                if motif == "pulsion":
+                    pulsion = drive_engine.pulsion_saillante()
+                    nom = getattr(pulsion, "value", "")
+                    if nom in self._INTENTION_PAR_PULSION:
+                        return self._INTENTION_PAR_PULSION[nom]
                 return self._INTENTION_PAR_MOTIF.get(motif, "")
             return ""
         except Exception as exc:
@@ -1003,210 +1113,24 @@ class ConscienceEngine:
     # ── Les chantiers ─────────────────────────────────────────────
 
     def _conduite_tuning(self) -> ConduiteTuning:
-        """Les seuils de la conduite, résolus **ici** — `conduite.py` est pur."""
-        d = ConduiteTuning()
-        f = lambda cle, repli: cfg_float(f"conscience.{cle}", repli)  # noqa: E731
-        i = lambda cle, repli: cfg_int(f"conscience.{cle}", repli)    # noqa: E731
-        return ConduiteTuning(
-            graine_obs_pertinence=f(
-                "travail.graine_obs_pertinence", d.graine_obs_pertinence),
-            graine_pensee_intensite=f(
-                "travail.graine_pensee_intensite", d.graine_pensee_intensite),
-            graine_pulsion_tension=f(
-                "travail.graine_pulsion_tension", d.graine_pulsion_tension),
-            graines_max=i("travail.graines_max", d.graines_max),
-            envie_demi_vie_s=f("travail.envie_demi_vie_s", d.envie_demi_vie_s),
-            envie_plancher_abandon=f(
-                "travail.envie_plancher_abandon", d.envie_plancher_abandon),
-            envie_poursuite_min=f(
-                "travail.envie_poursuite_min", d.envie_poursuite_min),
-            ouverture_envie_min=f(
-                "travail.ouverture_envie_min", d.ouverture_envie_min),
-            travaux_actifs_max=i(
-                "travail.travaux_actifs_max", d.travaux_actifs_max),
-            pas_intervalle_min_s=f(
-                "travail.pas_intervalle_min_s", d.pas_intervalle_min_s),
-            diffusion_notable_min=f(
-                "travail.diffusion_notable_min", d.diffusion_notable_min),
-            diffusion_intervalle_min_s=f(
-                "travail.diffusion_intervalle_min_s",
-                d.diffusion_intervalle_min_s),
-        )
+        """Délégué — le monde des chantiers vit dans `conscience/travaux.py`."""
+        return travaux.conduite_tuning()
 
     async def _travaux_en_cours(self, maintenant) -> tuple[list, set]:
-        """Les chantiers vivants, et les amorces déjà semées.
-
-        Le second élément est la clé de déduplication `(origine, reference)` :
-        sans elle, une `Observation` reste « en attente » trente minutes et
-        rouvrirait le même chantier à chaque cycle — trois places saturées en
-        quatre-vingt-dix secondes.
-
-        L'abandon des essoufflés se fait **dans le même callable synchrone**
-        que la lecture. `sync_to_async(thread_sensitive=True)` sérialise sur un
-        seul thread d'exécuteur : lire, boucler en RAM puis réécrire laisserait
-        un autre écrivain s'intercaler entre les deux — le piège exact
-        documenté sur `_decay_ruminations`.
-        """
-        from conscience.models import Travail
-
-        t = self._conduite_tuning()
-
-        def _passe() -> tuple[list, set]:
-            vivants: list[TravailEnCours] = []
-            semees: set[tuple[str, str]] = set()
-            a_abandonner: list = []
-            a_reveiller: list = []
-            for row in Travail.objects.filter(statut=Travail.Statut.EN_COURS):
-                # Une attente échue cesse d'en être une — ICI, parce que
-                # c'est la seule relecture périodique des chantiers. Une
-                # échéance absente (ligne d'avant la migration, verdict
-                # tronqué) se relève aussi : un drapeau sans échéance est le
-                # cul-de-sac exact que `reprendre_le` existe pour fermer.
-                if row.en_attente_de_reponse and (
-                    row.reprendre_le is None or row.reprendre_le <= maintenant
-                ):
-                    row.en_attente_de_reponse = False
-                    row.reprendre_le = None
-                    a_reveiller.append(row)
-                vue = TravailEnCours(
-                    identifiant=row.pk,
-                    titre=row.titre,
-                    envie=row.envie,
-                    ancre_envie=row.ancre,
-                    dernier_pas_le=row.dernier_pas_le,
-                    pas_effectues=row.pas_effectues,
-                    pas_max=row.pas_max,
-                    en_attente_de_reponse=row.en_attente_de_reponse,
-                    themes=tuple(row.themes or ()),
-                )
-                if est_essouffle(vue, maintenant, t):
-                    row.statut = Travail.Statut.ABANDONNEE
-                    a_abandonner.append(row)
-                    continue
-                vivants.append(vue)
-                semees.add((row.origine, str(row.reference)))
-            if a_abandonner:
-                Travail.objects.bulk_update(a_abandonner, ["statut"])
-            if a_reveiller:
-                Travail.objects.bulk_update(
-                    a_reveiller, ["en_attente_de_reponse", "reprendre_le"],
-                )
-            return vivants, semees
-
-        try:
-            return await sync_to_async(_passe, thread_sensitive=True)()
-        except Exception as exc:
-            degradations.record("conscience: lecture des travaux", exc)
-            return [], set()
+        """Délégué — voir `travaux.travaux_en_cours`."""
+        return await travaux.travaux_en_cours(maintenant)
 
     def _recolter(self, ctx: DecisionContext, semees: set) -> list:
-        """Les amorces que l'état courant contient, moins celles déjà semées.
-
-        La déduplication passe **avant** `choisir_conduite` et non après : une
-        amorce déjà transformée en chantier n'est plus une amorce, et la
-        laisser concourir ferait choisir OUVRIR sur un objet qui existe déjà.
-        """
-        try:
-            pulsion = drive_engine.pulsion_saillante()
-            pulsions = (
-                [(pulsion.value, drive_engine.states[pulsion].tension)]
-                if pulsion else []
-            )
-            graines = recolter_graines(
-                observations=ctx.pending_observations,
-                pensees=ctx.rumination_lignes,
-                pulsions=pulsions,
-                tuning=self._conduite_tuning(),
-            )
-            graines = list(graines) + self._graines_des_modules(pulsion, pulsions)
-            return [
-                g for g in graines
-                if (g.origine, str(g.reference)) not in semees
-            ]
-        except Exception as exc:
-            degradations.record("conscience: recolte des graines", exc)
-            return []
+        """Délégué — voir `travaux.recolter`."""
+        return travaux.recolter(ctx, semees)
 
     def _graines_des_modules(self, pulsion, pulsions: list) -> list:
-        """Ce que le monde propose, quand la curiosité a de quoi s'en saisir.
-
-        C'est la moitié manquante de H1. `recolter_graines` savait déjà tirer
-        une amorce d'une pulsion, mais son intitulé ne pouvait être qu'une
-        formule générique — « aller voir quelque chose de nouveau » — parce que
-        rien ne lui disait ce qu'il y avait à voir. Une envie sans objet ne
-        peut ouvrir aucun chantier ; elle ne peut que se redire.
-
-        Les modules répondent **de mémoire** (`propose_sujets`), donc ceci
-        coûte zéro requête, et n'est demandé que lorsque la curiosité franchit
-        déjà sa porte : pas d'appétit, pas de sollicitation.
-
-        `reference` porte le nom du module et le sujet, ce qui suffit à la
-        déduplication : le même titre RSS ne rouvre pas de chantier tant que le
-        premier vit.
-
-        Les deux pulsions **fécondes** sollicitent (`PULSIONS_FECONDES`), pas
-        la seule curiosité : l'expression veut produire quelque chose, et la
-        forge — qui propose « réparer mon application » — est exactement une
-        offre pour elle. SOCIAL et REST restent muets, comme dans la récolte.
-        """
-        from conscience.conduite import PULSIONS_FECONDES, Graine
-
-        if pulsion is None or getattr(pulsion, "value", "") not in PULSIONS_FECONDES:
-            return []
-        tension = pulsions[0][1] if pulsions else 0.0
-        if tension < self._conduite_tuning().graine_pulsion_tension:
-            return []
-
-        try:
-            from modules.manager import module_manager
-
-            sujets = module_manager.collect_sujets()
-        except Exception as exc:
-            degradations.record("conscience: sujets proposes par les modules", exc)
-            return []
-
-        plafond = cfg_int(
-            "conscience.travail.graines_modules_max", _GRAINES_MODULES_MAX, mini=0,
-        )
-        return [
-            Graine(
-                origine="pulsion",
-                reference=f"{nom}:{sujet[:60]}",
-                intitule=sujet,
-                poids=tension,
-                # Le module qui propose un sujet est celui dont le chantier
-                # aura besoin pour le traiter : figé ici, il survit à la
-                # retombée de la pulsion après le premier pas.
-                modules=(nom,),
-            )
-            for nom, sujet in sujets[:plafond]
-        ]
+        """Délégué — voir `travaux.graines_des_modules`."""
+        return travaux.graines_des_modules(pulsion, pulsions)
 
     async def _ouvrir_travail(self, graine) -> bool:
-        """Poser un chantier en base. Aucun pas n'est fait ici."""
-        from conscience.models import Travail
-        from django.utils import timezone as tz
-
-        try:
-            await sync_to_async(Travail.objects.create)(
-                titre=graine.intitule[:200],
-                origine=graine.origine,
-                reference=str(graine.reference)[:100],
-                themes=list(graine.themes),
-                # La trousse du chantier, figée à l'ouverture : c'est elle que
-                # chaque pas rechargera, indépendamment de la tension de
-                # pulsion du moment (que le premier pas réussi fait retomber).
-                modules=[str(m) for m in (getattr(graine, "modules", ()) or ())],
-                envie=max(0.0, min(1.0, graine.poids)),
-                ancre_envie=tz.now(),
-                pas_max=cfg_int("conscience.travail.pas_max", _TRAVAIL_PAS_MAX,
-                                mini=1),
-            )
-            logger.info("Travail ouvert [%s]: %s", graine.origine, graine.intitule[:80])
-            return True
-        except Exception as exc:
-            degradations.record("conscience: ouverture d'un travail", exc)
-            return False
+        """Délégué — voir `travaux.ouvrir_travail`."""
+        return await travaux.ouvrir_travail(graine)
 
     def _composer_vecu(self, ctx: DecisionContext) -> str:
         """Ce qui la pousse à parler, dit en une phrase — tous les motifs.
@@ -1224,6 +1148,23 @@ class ConscienceEngine:
         except Exception as exc:
             degradations.record("conscience: composition du vecu", exc)
             return ""
+
+    @staticmethod
+    def _themes_de(obs) -> list:
+        """Les thèmes d'une observation — le champ, puis la convention.
+
+        Le champ (migration conscience/0013) d'abord ; ``raw_data["themes"]``
+        en repli pour les lignes d'avant. Ne lève jamais : boucle sans
+        superviseur.
+        """
+        try:
+            champ = getattr(obs, "themes", None)
+            if champ:
+                return list(champ)
+            return list(obs.raw_data.get("themes", []) or [])
+        except Exception as exc:
+            degradations.record("conscience: themes d'une observation", exc)
+            return []
 
     async def _build_context(self) -> DecisionContext:
         """Gather all context needed for a decision."""
@@ -1246,18 +1187,12 @@ class ConscienceEngine:
             )
         )()
 
-        # `Observation` n'a PAS de champ `themes` — celui du modèle appartient
-        # à `Rumination`. `recolter_graines` les lit en
-        # `getattr(obs, "themes", ())` et rendrait un tuple vide *en silence*
-        # pour toute amorce venue du dehors : un chantier ouvert sur une news
-        # naîtrait sans aucun thème, donc sans prise pour la mémoire. On les
-        # hydrate depuis `raw_data`, où l'interpréteur les a écrits.
+        # `themes` est un champ depuis la migration conscience/0013 ; les
+        # lignes d'avant n'ont que la convention `raw_data["themes"]`.
+        # L'hydratation aligne les deux : après elle, tout lecteur voit le
+        # champ rempli, y compris `recolter_graines` qui le lit par `getattr`.
         for obs in pending:
-            try:
-                obs.themes = obs.raw_data.get("themes", []) or []
-            except Exception as exc:
-                degradations.record("conscience: themes d'une observation", exc)
-                obs.themes = []
+            obs.themes = self._themes_de(obs)
 
         # Emotional state
         glob = emotion_engine.global_mood
@@ -1460,6 +1395,24 @@ class ConscienceEngine:
     #: sans un mot, se taire davantage n'est plus de la retenue, c'est une
     #: panne. Le frein dur (`acts_today >= 5`) reste la borne du jour.
     _COOLDOWN_MAX_S: float = 6 * 3600.0
+    #: Amplitude de la gigue du cooldown (± cette fraction). Un métronome se
+    #: remarque : à cadence exacte, ses relances tombent aux mêmes minutes et
+    #: la signature mécanique perce. Repli de `conscience.cooldown_jitter`.
+    _COOLDOWN_JITTER: float = 0.15
+    #: Le tirage courant, fait UNE fois par acte (`_tirer_gigue_cooldown`) et
+    #: non à chaque lecture : `_cooldown_restant` doit afficher un compte qui
+    #: descend, pas un nombre qui tremble. Attribut de classe — les tests
+    #: construisent le moteur par `__new__`, et 1.0 reproduit l'exactitude
+    #: historique.
+    _gigue_cooldown: float = 1.0
+
+    def _tirer_gigue_cooldown(self) -> None:
+        """Tire la gigue de CE silence-ci. Appelé à l'acte, jamais ailleurs."""
+        j = cfg_float(
+            "conscience.cooldown_jitter", self._COOLDOWN_JITTER,
+            mini=0.0, maxi=0.5,
+        )
+        self._gigue_cooldown = random.uniform(1.0 - j, 1.0 + j) if j > 0 else 1.0
 
     def _effective_cooldown(self, consecutive_ignored: int) -> float:
         """Le silence qu'elle s'impose avant de relancer, allongé à chaque fois.
@@ -1476,9 +1429,12 @@ class ConscienceEngine:
         suivante. C'est tout ce que fait ce facteur, et il suffit à étaler les
         mêmes cinq tentatives sur la journée.
         """
+        # La gigue multiplie AVANT le plafond : « jamais plus de six heures »
+        # est une promesse, pas une moyenne.
+        gigue = getattr(self, "_gigue_cooldown", 1.0)
         base = float(self._cooldown_seconds)
         if consecutive_ignored <= 0:
-            return base
+            return base * gigue
         from configs.service import config_service
 
         try:
@@ -1489,7 +1445,7 @@ class ConscienceEngine:
         plafond = cfg_float(
             "conscience.cooldown_max_seconds", self._COOLDOWN_MAX_S, mini=1.0,
         )
-        return min(plafond, base * (facteur ** consecutive_ignored))
+        return min(plafond, base * (facteur ** consecutive_ignored) * gigue)
 
     def _rumination_tuning(self) -> tuple[float, float]:
         """(demi-vie en heures, délai de dérive en heures), depuis la config."""
@@ -1697,7 +1653,7 @@ class ConscienceEngine:
             try:
                 await sync_to_async(Rumination.objects.create)(
                     summary=obs.summary,
-                    themes=obs.raw_data.get("themes", []),
+                    themes=self._themes_de(obs),
                     intensity=min(1.0, obs.pertinence),
                     emotion=obs.emotional_reaction or "",
                     observation=obs,
@@ -1828,7 +1784,7 @@ class ConscienceEngine:
             if obs.pertinence >= cfg_float(
                 "conscience.maintenance.boost_pertinence", BOOST_PERTINENCE,
             ):
-                themes = obs.raw_data.get("themes", [])
+                themes = self._themes_de(obs)
                 if themes:
                     count = await self.memory.boost_related_souvenirs(themes, 0.1)
                     if count:
@@ -1992,324 +1948,37 @@ class ConscienceEngine:
     # ── 4. ACT ────────────────────────────────────────────────────
 
     def _verdict_tuning(self) -> VerdictTuning:
-        """Les deux bornes de délai. Les quatre bornes de recopie ne sont pas
-        déclarées : ce sont des gardes d'un lecteur face à une sortie hostile,
-        même famille que la taille maximale d'un source forgé."""
-        d = VerdictTuning()
-        return VerdictTuning(
-            delai_defaut_s=cfg_float(
-                "conscience.verdict.delai_defaut_s", d.delai_defaut_s),
-            delai_max_s=cfg_float(
-                "conscience.verdict.delai_max_s", d.delai_max_s),
-        )
+        """Délégué — voir `travaux.verdict_tuning`."""
+        return travaux.verdict_tuning()
 
     async def _build_work_prompt(self, row) -> str:
-        """Le prompt d'un pas de chantier.
-
-        Délibérément **distinct** de `_build_action_prompt`, qui répond à une
-        autre question : « pourquoi je prends la parole maintenant ». Ici la
-        question est « où j'en suis et quel est le pas suivant ». Réutiliser
-        l'autre ferait arriver dans un travail silencieux les salutations,
-        l'auto-évaluation des relances ignorées et l'injonction à être brève —
-        c'est-à-dire tout ce qui n'a de sens que devant quelqu'un.
-        """
-        parts = [
-            f"Tu avances sur quelque chose que tu as décidé de faire : "
-            f"« {row.titre} ».",
-        ]
-        if row.themes:
-            parts.append("Thèmes : " + ", ".join(str(t) for t in row.themes[:6]) + ".")
-        if row.pas_effectues:
-            parts.append(
-                f"Tu en es au pas {row.pas_effectues + 1} sur {row.pas_max}."
-            )
-        if row.resultat:
-            # Sa mémoire du chantier. Nettoyée de la prosodie, que le
-            # processeur n'applique qu'au texte destiné à une voix : sans ça,
-            # les `[SIGH]` d'un pas précédent reviendraient dans le prompt du
-            # suivant et finiraient dans les souvenirs.
-            from emotion.types import strip_prosody
-            parts.append("Ce que tu as déjà fait :\n" + strip_prosody(row.resultat)[-1200:])
-        parts.append(
-            "Fais UN pas, un seul — le plus utile maintenant. Tu peux te "
-            "servir de tes outils. Personne ne te lit : c'est un travail, pas "
-            "une conversation."
-        )
-        parts.append(CONSIGNE_VERDICT)
-        return "\n\n".join(parts)
+        """Délégué — voir `travaux.build_work_prompt`."""
+        return await travaux.build_work_prompt(row)
 
     async def _faire_un_pas(self, identifiant) -> bool:
-        """Faire avancer un chantier d'un pas. Rend True si le pas a eu lieu.
-
-        Muet par défaut : un pas ne diffuse ni ne persiste. Quatre travaux à
-        cinq pas feraient vingt monologues par jour, et ceux-là passeraient
-        **hors** du frein quotidien des initiatives — le compteur qui existe
-        précisément pour qu'elle ne devienne pas envahissante.
-        """
-        from conscience.models import Travail
-        from django.utils import timezone as tz
-
-        maintenant = tz.now()
-
-        def _prendre():
-            """Marquer le pas AVANT l'appel, et sous condition.
-
-            `filter(dernier_pas_le=…)` fait de la prise un test-and-set : deux
-            cycles concurrents ne peuvent pas partir sur le même chantier. Et
-            le compteur monte **à la prise**, pas au succès — sinon un pas qui
-            tue le process serait rejoué indéfiniment au redémarrage, ce que
-            `resume_interrupted_turns` a déjà appris à ses dépens.
-            """
-            pris = Travail.objects.filter(
-                pk=identifiant, statut=Travail.Statut.EN_COURS,
-            ).update(
-                pas_effectues=F("pas_effectues") + 1,
-                dernier_pas_le=maintenant,
-            )
-            if not pris:
-                return None
-            return Travail.objects.filter(pk=identifiant).first()
-
-        try:
-            row = await sync_to_async(_prendre, thread_sensitive=True)()
-        except Exception as exc:
-            degradations.record("conscience: prise d'un pas", exc)
-            return False
-        if row is None:
-            return False
-
-        prompt = await self._build_work_prompt(row)
-        trousse = self._preparer_trousse_travail(row)
-
-        try:
-            output, bilan, reussites = await self._appeler_le_modele(
-                prompt,
-                person_id="conscience_mika",
-                modules=list(trousse.modules),
-                metadata={"travail": identifiant, "titre": row.titre},
-                broadcast=False,
-                persist=False,
-            )
-        except Exception as exc:
-            degradations.record("conscience: pas de travail", exc)
-            return False
-
-        if output.ai_failed:
-            # Le pas n'a pas eu lieu : on rend son crédit. Sans ça, sur une
-            # installation dont le rôle n'est pas mappé — et le dépôt démarre
-            # non configuré exprès — cinq `UnconfiguredRoleError` consommeraient
-            # les cinq pas, et elle serait frustrée d'un travail jamais tenté.
-            await self._rendre_le_pas(identifiant)
-            return False
-
-        dit, verdict = depouiller_verdict(output.text, self._verdict_tuning())
-        await self._appliquer_verdict(identifiant, verdict, dit, bilan)
-        await self._peut_etre_dire_le_travail(verdict, dit, row.titre)
-        drive_engine.on_act(had_tools=reussites > 0, word_count=len(dit.split()))
-        logger.info(
-            "Pas de travail #%s [%s] outils=%s : %s",
-            identifiant, verdict.etat.value, bilan or "aucun", dit[:80],
-        )
-        return True
+        """Délégué — voir `travaux.faire_un_pas`, qui orchestre à travers la
+        surface du moteur pour que les patchs de test continuent de porter."""
+        return await travaux.faire_un_pas(self, identifiant)
 
     def _preparer_trousse_travail(self, row):
-        """La trousse d'un pas : le socle, plus ce que LE CHANTIER demande.
+        """Délégué — voir `travaux.preparer_trousse_travail`."""
+        return travaux.preparer_trousse_travail(self, row)
 
-        ``row.modules`` — figé à l'ouverture depuis la graine — passe en
-        demande explicite, le rang le plus fort après le socle. C'est ce qui
-        garantit qu'un chantier garde ses mains toute sa vie : la version
-        précédente ne dérivait la trousse que des pulsions *du moment*, or le
-        premier pas réussi assouvit la curiosité (``on_act``, −0.5), si bien
-        que le pas suivant partait sans les outils qui avaient ouvert le
-        chantier. L'élargissement par pulsion reste, en plus, jamais à la
-        place.
-        """
-        return preparer(
-            sources=(),
-            drives=drive_engine.states,
-            demandes=tuple(str(m) for m in (row.modules or ())),
-            poids=self._poids_module,
-            disponibles=self._modules_enregistres(),
-            tuning=self._trousse_tuning(),
+    async def _peut_etre_dire_le_travail(
+        self, verdict, dit: str, titre: str, themes=(),
+    ) -> None:
+        """Délégué — voir `travaux.peut_etre_dire_le_travail`."""
+        return await travaux.peut_etre_dire_le_travail(
+            self, verdict, dit, titre, themes,
         )
-
-    async def _peut_etre_dire_le_travail(self, verdict, dit: str, titre: str) -> None:
-        """Un chantier mené au bout mérite-t-il d'être dit ? Par défaut, non.
-
-        Un pas est muet — sans quoi quatre travaux à cinq pas font vingt
-        monologues par jour, hors du frein quotidien des initiatives. Mais un
-        travail *terminé* et jamais mentionné reste invisible : elle aurait
-        passé la journée à faire des choses dont personne n'entend parler.
-
-        `decider_diffusion` porte les deux gardes — notabilité, et un silence
-        minimal entre deux annonces — et c'est le seul producteur de son
-        entrée : « avoir mené quelque chose au bout » est ce qui vaut la peine
-        d'être dit.
-        """
-        from django.utils import timezone as tz
-
-        if verdict.etat is not EtatVerdict.FINI or not dit:
-            return
-
-        maintenant = tz.now()
-        decision = decider_diffusion(
-            Conduite.POURSUIVRE,
-            resultat_notable=1.0,
-            derniere_diffusion_le=self._derniere_diffusion_travail,
-            maintenant=maintenant,
-            tuning=self._conduite_tuning(),
-        )
-        if not decision.diffuser:
-            logger.debug("Travail fini, non diffusé : %s", decision.motif)
-            return
-
-        self._derniere_diffusion_travail = maintenant
-        with degraded("conscience: diffusion d'un travail fini"):
-            from emotion.types import Emotion, EmotionData
-            from pipeline.broadcast import broadcast_to_websocket
-            from pipeline.processor import SpeechOutput
-
-            await broadcast_to_websocket(
-                SpeechOutput(
-                    text=dit,
-                    emotion_data=EmotionData(Emotion.PROUD, 0.4),
-                    emotion_name="proud",
-                    emotion_intensity=0.4,
-                    emotion_state={},
-                    tool_calls=[],
-                ),
-                source="conscience",
-            )
 
     async def _rendre_le_pas(self, identifiant) -> None:
-        """Rendre le crédit d'un pas qui n'a pas eu lieu."""
-        from conscience.models import Travail
-
-        with degraded("conscience: restitution d'un pas"):
-            await sync_to_async(
-                lambda: Travail.objects.filter(pk=identifiant).update(
-                    pas_effectues=F("pas_effectues") - 1,
-                ),
-                thread_sensitive=True,
-            )()
+        """Délégué — voir `travaux.rendre_le_pas`."""
+        return await travaux.rendre_le_pas(identifiant)
 
     async def _appliquer_verdict(self, identifiant, verdict, dit, bilan) -> None:
-        """Écrire ce que le pas a produit — **un seul callable synchrone**.
-
-        Lire, décider en RAM puis réécrire laisserait un autre écrivain
-        s'intercaler : `sync_to_async(thread_sensitive=True)` sérialise tout
-        sur un thread unique, et c'est le piège documenté sur
-        `_decay_ruminations`, où la digestion nocturne se faisait écraser.
-
-        Un verdict illisible n'est pas une erreur, c'est un état : il se
-        compte, et au bout de quelques-uns le chantier se bloque plutôt que de
-        tourner indéfiniment sans jamais savoir où il en est.
-
-        Un chantier qui ABOUTIT laisse un souvenir — hors du callable
-        synchrone, parce que la création passe par le vector store. Sans lui,
-        elle passait ses journées à mener des choses au bout dont il ne
-        restait rien : ni dans le rappel, ni dans le récit de soi, ni dans ce
-        qu'elle peut répondre à « tu as fait quoi aujourd'hui ? ».
-        """
-        from conscience.models import Rumination, Travail
-        from django.utils import timezone as tz
-
-        t = self._conduite_tuning()
-        maintenant = tz.now()
-
-        def _ecrire() -> dict | None:
-            row = Travail.objects.filter(pk=identifiant).first()
-            if row is None:
-                return None
-
-            journal = (row.resultat + "\n\n" + dit).strip() if dit else row.resultat
-            row.resultat = journal[-6000:]
-
-            if verdict.etat is EtatVerdict.FINI:
-                row.statut = Travail.Statut.ABOUTIE
-            elif verdict.etat is EtatVerdict.BLOQUE:
-                row.statut = Travail.Statut.BLOQUEE
-                row.raison_blocage = verdict.motif_blocage[:500]
-            elif verdict.etat is EtatVerdict.ATTENDRE:
-                # Le drapeau et son échéance sont les deux moitiés d'un même
-                # geste (le motif de l'envie et son ancre) : le drapeau seul
-                # était un cul-de-sac — posé ici, relevé par personne,
-                # « attendre » signifiait « se faner jusqu'à l'abandon » et
-                # `delai_s`, soigneusement borné par le lecteur, n'avait
-                # aucun consommateur. `is not None` et non `or` : 0 s est un
-                # délai légal (« tout de suite »), pas une absence.
-                from datetime import timedelta
-                delai = (
-                    verdict.delai_s if verdict.delai_s is not None else 300.0
-                )
-                row.en_attente_de_reponse = True
-                row.reprendre_le = maintenant + timedelta(seconds=delai)
-            elif verdict.etat is EtatVerdict.ILLISIBLE:
-                # Compté sur le journal plutôt que dans un champ : le lot ne
-                # gagne pas une colonne pour un compteur qu'un seul endroit
-                # lit. Trois passes sans verdict lisible et le chantier se
-                # bloque — un travail qui ne sait jamais dire où il en est ne
-                # peut pas se terminer.
-                if row.resultat.count("[verdict illisible]") >= 2:
-                    row.statut = Travail.Statut.BLOQUEE
-                    row.raison_blocage = "aucun verdict lisible après trois pas"
-                else:
-                    row.resultat = (row.resultat + "\n[verdict illisible]")[-6000:]
-
-            if row.statut == Travail.Statut.EN_COURS and row.pas_effectues >= row.pas_max:
-                row.statut = Travail.Statut.BLOQUEE
-                row.raison_blocage = "nombre de pas épuisé"
-
-            # Envie et ancre dans le MÊME `update_fields` : écrire la valeur
-            # sans avancer l'ancre re-facturerait le même temps au tour
-            # suivant, l'ancre sans la valeur effacerait la décroissance. Les
-            # deux moitiés du même geste ne doivent pas pouvoir se séparer —
-            # c'est ce qui est arrivé à `Connaissance`, ancrée sur un
-            # `auto_now` que Django ne rafraîchit pas sous `update_fields`.
-            vue = TravailEnCours(
-                identifiant=row.pk, titre=row.titre, envie=row.envie,
-                ancre_envie=row.ancre,
-            )
-            row.envie, row.ancre_envie = facturer_envie(vue, maintenant, t)
-            row.save(update_fields=[
-                "resultat", "statut", "raison_blocage", "en_attente_de_reponse",
-                "reprendre_le", "envie", "ancre_envie", "updated_at",
-            ])
-
-            # Un chantier né d'une pensée et mené au bout résout la pensée.
-            # C'est la boucle du regret refermée par l'autre côté : elle
-            # n'oublie pas parce que le temps passe, elle oublie parce qu'elle
-            # a fait la chose.
-            if (
-                row.statut == Travail.Statut.ABOUTIE
-                and row.origine == Travail.Origine.PENSEE
-                and str(row.reference).isdigit()
-            ):
-                Rumination.objects.filter(
-                    pk=int(row.reference), status="active",
-                ).update(status="resolved")
-
-            if row.statut == Travail.Statut.ABOUTIE:
-                return {"titre": row.titre}
-            return None
-
-        aboutie = None
-        with degraded("conscience: application d'un verdict"):
-            aboutie = await sync_to_async(_ecrire, thread_sensitive=True)()
-
-        if aboutie:
-            # `verdict.resume` d'abord : c'est la phrase que le bloc demande
-            # (« ce que tu viens de faire »). `dit` en repli, borné — le pas
-            # entier n'est pas un souvenir, c'est un journal. `getattr` comme
-            # `_pending_greeted` : les tests construisent le moteur par
-            # `__new__`, donc sans pont mémoire.
-            essence = (verdict.resume or dit or "").strip()[:300]
-            bridge = getattr(self, "memory", None)
-            if bridge is not None:
-                with degraded("conscience: souvenir d'un travail abouti"):
-                    await bridge.remember_completed_work(
-                        aboutie["titre"], essence,
-                    )
+        """Délégué — voir `travaux.appliquer_verdict`."""
+        return await travaux.appliquer_verdict(self, identifiant, verdict, dit, bilan)
 
     #: Plafond de l'inactivité restaurée au démarrage. Au-delà, la mesure ne
     #: dit plus rien d'utile : trois jours ou trois mois de silence produisent
@@ -2360,30 +2029,8 @@ class ConscienceEngine:
             )
 
     async def _reprendre_travaux(self) -> None:
-        """Au démarrage, refermer les pas que l'arrêt a coupés en vol.
-
-        Un pas est marqué **à la prise**, donc un process tué au milieu laisse
-        un chantier dont le compteur a monté sans qu'aucun verdict ne soit
-        écrit. On ne le rejoue pas : on le laisse simplement redevenir
-        éligible. Rendre le crédit ici rouvrirait la boucle de plantage que
-        `resume_interrupted_turns` a appris à éviter — un pas qui tue le
-        process deux fois doit finir par coûter ses pas, pas les regagner.
-        """
-        from conscience.models import Travail
-
-        def _passe() -> int:
-            return Travail.objects.filter(
-                statut=Travail.Statut.EN_COURS,
-                pas_effectues__gte=F("pas_max"),
-            ).update(
-                statut=Travail.Statut.BLOQUEE,
-                raison_blocage="pas épuisés — interrompu au redémarrage",
-            )
-
-        with degraded("conscience: reprise des travaux"):
-            n = await sync_to_async(_passe, thread_sensitive=True)()
-            if n:
-                logger.info("Reprise: %d chantier(s) clos au redémarrage", n)
+        """Délégué — voir `travaux.reprendre_travaux`."""
+        return await travaux.reprendre_travaux()
 
     async def _appeler_le_modele(
         self,
@@ -2475,6 +2122,10 @@ class ConscienceEngine:
         from pipeline.processor import process_message
 
         self._last_action_time = time.time()
+        # La gigue de CE silence-ci, tirée maintenant et gardée jusqu'au
+        # prochain acte, pour que le compte à rebours affiché descende sans
+        # trembler.
+        self._tirer_gigue_cooldown()
 
         # Recall relevant memories
         queries = [o.summary for o in ctx.pending_observations if o.pertinence > 0.3]
@@ -2678,11 +2329,12 @@ class ConscienceEngine:
         de parler à quelqu'un »), elle était structurellement incapable de
         choisir un quelqu'un.
 
-        Et quand la mémoire ne désigne personne, les personnes **présentes**
-        restent des candidates : saluer celui qui est là plutôt que parler
-        dans le vide est ce qu'une personne fait. Le dernier mot reste au
-        modèle (``[TO:none]`` est une réponse valide), et le backoff des
-        relances ignorées borne déjà la fréquence.
+        Et quand la mémoire ne désigne personne, deux maillons de repli :
+        les personnes **présentes** (saluer celui qui est là plutôt que
+        parler dans le vide), puis celles qui **manquent** — un ami joignable
+        en différé et sans nouvelles depuis des jours (`who_misses_contact`).
+        Le dernier mot reste au modèle (``[TO:none]`` est une réponse
+        valide), et le backoff des relances ignorées borne déjà la fréquence.
         """
         from conscience.recipients import parse_to_tag
 
@@ -2703,6 +2355,10 @@ class ConscienceEngine:
         if not candidates:
             candidates = self._candidats_presents()
         if not candidates:
+            # n=1 : quand on a envie de parler, on pense à QUELQU'UN — la
+            # personne au plus fort manque — pas à une liste de contacts.
+            candidates = await self.memory.who_misses_contact(n=1)
+        if not candidates:
             return None
 
         lines: list[str] = []
@@ -2714,7 +2370,11 @@ class ConscienceEngine:
             pid = handles[0]["person_id"]
             channel = handles[0]["channel"]
             allowed.append(pid)
-            lines.append(f"  [{pid}] {c['name']} ({channel})")
+            # La note donne au modèle sa raison de choisir — « sans nouvelles
+            # depuis 12 jour(s) » est un motif, un nom nu n'en est pas un.
+            note = str(c.get("note") or "").strip()
+            suffixe = f" — {note}" if note else ""
+            lines.append(f"  [{pid}] {c['name']} ({channel}){suffixe}")
 
         if not allowed:
             return None
@@ -2767,12 +2427,20 @@ class ConscienceEngine:
     _PRESENTS_MAX = 5
 
     def _candidats_presents(self) -> list[dict]:
-        """Les personnes identifiables joignables MAINTENANT, forme candidate.
+        """Les personnes identifiables PRÉSENTES — un socket vivant, forme candidate.
 
         Même contrat de retour que ``who_is_concerned`` (nom + handles), pour
         que la passe de confirmation n'ait pas deux formes à lire. Uniquement
         les personnes identifiables : un socket ``anon_*`` reste couvert par
         le broadcast global, et la tuyauterie interne n'est pas quelqu'un.
+
+        **Consumers seulement, jamais les handles modules.** ``reachable()``
+        contient aussi les handles durables (Telegram), réinscrits à chaque
+        boot par ``restore_module_presence`` : les compter « présents »
+        ferait de ce maillon un court-circuit permanent du manque — le
+        propriétaire Telegram serait « là » à chaque acte endogène, sans
+        rythme, sans préférence, sans anti-double-texte. Être joignable en
+        différé est précisément la juridiction de ``who_misses_contact``.
 
         Ne lève jamais — chemin d'un acte, boucle sans superviseur.
         """
@@ -2784,6 +2452,8 @@ class ConscienceEngine:
         try:
             for inter in presence_registry.reachable():
                 pid = inter.person_id
+                if getattr(inter, "kind", "") != "consumer":
+                    continue
                 if pid in vus or not is_identifiable_person(pid):
                     continue
                 vus.add(pid)
@@ -2827,7 +2497,16 @@ class ConscienceEngine:
             return []
 
     def _trousse_tuning(self) -> TrousseTuning:
-        """Le réglage de la trousse, résolu **ici** — `trousse.py` reste pur."""
+        """Le réglage de la trousse, résolu **ici** — `trousse.py` reste pur.
+
+        Les trois listes se lisent enfin : leurs clés étaient déclarées au
+        registre (éditables au dashboard) et lues par personne — un réglage
+        que l'opérateur modifiait sans effet, la forme exacte du bug
+        `env_fallback`.
+        """
+        from configs.runtime import cfg_list
+        from conscience.trousse import CURIOSITE, SOCIAL, SOCLE
+
         d = TrousseTuning()
         return TrousseTuning(
             plafond_caracteres=cfg_int(
@@ -2837,6 +2516,9 @@ class ConscienceEngine:
             porte_pulsion=cfg_float(
                 "conscience.trousse.porte_pulsion", d.porte_pulsion,
             ),
+            socle=tuple(cfg_list("conscience.trousse.socle", SOCLE)),
+            curiosite=tuple(cfg_list("conscience.trousse.curiosite", CURIOSITE)),
+            social=tuple(cfg_list("conscience.trousse.social", SOCIAL)),
         )
 
     def _poids_module(self, nom: str) -> int:

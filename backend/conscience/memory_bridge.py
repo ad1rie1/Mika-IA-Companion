@@ -9,11 +9,64 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from configs.runtime import cfg_int
+from configs.runtime import cfg_float, cfg_int
 from conscience.types import InterpretedSignal
-from utils.degradation import degradations
+from utils.degradation import degradations, degraded
 
 logger = logging.getLogger(__name__)
+
+#: Le manque se mesure au RYTHME propre de chaque relation, jamais à un
+#: seuil global : trois jours de silence inquiètent pour un ami quotidien et
+#: ne veulent rien dire pour un ami mensuel. Le rythme est la médiane des
+#: écarts entre les jours où la personne a écrit (90 j d'historique) ; une
+#: relation trop récente pour avoir un rythme retombe sur le défaut de sa
+#: closeness — l'ancien seuil unique devient le repli, plus le juge.
+#: Constantes au niveau module : replis des clés `conscience.recontact_*`.
+
+#: Le silence « manque » quand il dépasse ce multiple du rythme du lien.
+RECONTACT_FACTEUR = 1.5
+#: Multiple supplémentaire quand ELLE a parlé en dernier : on ne double-texte
+#: pas quelqu'un qui n'a pas répondu — on re-tente après un vrai moment.
+RECONTACT_RELANCE_FACTEUR = 3.0
+#: Rythme de repli d'un ami / d'un proche sans historique suffisant (jours).
+RECONTACT_RYTHME_AMI_JOURS = 7
+RECONTACT_RYTHME_PROCHE_JOURS = 3
+
+#: Bornes du rythme mesuré — des gardes de lecteur, pas des réglages : un
+#: rythme sous un jour ferait « manquer » chaque nuit, au-delà d'un mois la
+#: médiane ne mesure plus une habitude.
+_RYTHME_MIN_JOURS = 1.0
+_RYTHME_MAX_JOURS = 30.0
+_RYTHME_HISTORIQUE_JOURS = 90
+#: Jours actifs minimum pour qu'une médiane veuille dire quelque chose.
+_RYTHME_JOURS_ACTIFS_MIN = 3
+#: Part de la chaleur de l'ancre affective dans la priorité (voir
+#: ``_chaleur_pour``).
+_CHALEUR_POIDS = 0.5
+#: Fiches examinées par passage. Une relance est une pensée pour quelqu'un,
+#: pas un publipostage.
+_RECONTACT_PROFILS_MAX = 10
+
+
+def _rythme_naturel(
+    jours_actifs, closeness: str, *, ami_jours: float, proche_jours: float,
+) -> float:
+    """Le rythme du lien, en jours — médiane des écarts entre jours actifs.
+
+    Pure, pour être mesurable seule. Moins de ``_RYTHME_JOURS_ACTIFS_MIN``
+    jours actifs → le repli de la closeness : deux messages ne font pas une
+    habitude. Bornée dans les deux cas — le repli aussi, car il vient de la
+    configuration.
+    """
+    import statistics
+
+    repli = float(proche_jours if closeness == "close" else ami_jours)
+    jours = sorted(set(jours_actifs or ()))
+    if len(jours) < _RYTHME_JOURS_ACTIFS_MIN:
+        return max(_RYTHME_MIN_JOURS, min(_RYTHME_MAX_JOURS, repli))
+    ecarts = [(b - a).days for a, b in zip(jours, jours[1:])]
+    rythme = float(statistics.median(ecarts))
+    return max(_RYTHME_MIN_JOURS, min(_RYTHME_MAX_JOURS, rythme))
 
 
 class MemoryBridge:
@@ -160,6 +213,277 @@ class MemoryBridge:
 
         results.sort(key=lambda r: r["score"], reverse=True)
         return results
+
+    async def who_misses_contact(self, n: int = 1) -> list[dict]:
+        """QUI lui manque — au rythme du lien, pas à un seuil global.
+
+        Troisième maillon de la chaîne du destinataire (mémoire → présents →
+        manque). Amis et proches seulement (``PersonProfile.closeness``) —
+        « reprendre des nouvelles » suppose une relation, pas une fiche.
+        ``n`` vaut 1 par défaut : quand on a envie de parler, on pense à
+        quelqu'un, pas à une liste.
+
+        Trois règles, chacune contre une façon d'être inhumaine :
+
+        * **le silence se mesure au rythme du lien** (``_rythme_naturel``) —
+          la médiane des écarts entre les jours où la personne écrit. Un ami
+          quotidien manque au bout de deux jours, un ami mensuel jamais avant
+          des semaines. Le seuil unique était l'arbitraire que ceci remplace ;
+        * **elle ne double-texte pas** : si son dernier message à cette
+          personne est resté sans réponse, il faut ``recontact_relance_facteur``
+          fois plus de silence avant de la re-proposer — on re-tente après un
+          vrai moment, on ne harcèle pas ;
+        * **elle pense d'abord à ceux qu'elle aime** : priorité = (silence ÷
+          rythme) × poids de closeness × chaleur de l'ancre affective
+          (``_chaleur_pour``) — le fond chaud attire, la rancune fait reculer.
+
+        La date du dernier échange se lit sur ``Message`` via les handles de
+        la couche identité, jamais sur ``PersonProfile.last_interaction_at`` :
+        celui-ci n'est écrit qu'à la régénération de la fiche (gated ≥24 h),
+        et « sans nouvelles depuis 12 jours » à propos de quelqu'un qui a
+        écrit hier est exactement le genre de faux qui rend le personnage
+        bête. Coût : trois requêtes bornées, sur le chemin d'un acte — jamais
+        dans la boucle de décision, qui n'a donc pas besoin de cache RAM.
+
+        Même contrat de retour que ``who_is_concerned`` (nom + handles
+        joignables + ``note``). Ne lève jamais : rend ``[]``.
+        """
+        from asgiref.sync import sync_to_async
+
+        from communication.presence import presence_registry
+        from identity.resolver import identity_resolver
+
+        facteur = cfg_float(
+            "conscience.recontact_facteur", RECONTACT_FACTEUR, mini=0.1,
+        )
+        relance = cfg_float(
+            "conscience.recontact_relance_facteur", RECONTACT_RELANCE_FACTEUR,
+            mini=1.0,
+        )
+        ami_jours = cfg_int(
+            "conscience.recontact_rythme_ami_jours",
+            RECONTACT_RYTHME_AMI_JOURS, mini=1,
+        )
+        proche_jours = cfg_int(
+            "conscience.recontact_rythme_proche_jours",
+            RECONTACT_RYTHME_PROCHE_JOURS, mini=1,
+        )
+
+        def _profils() -> list[tuple[str, str]]:
+            from memory.models import PersonProfile
+
+            return list(
+                PersonProfile.objects.filter(
+                    closeness__in=[
+                        PersonProfile.Closeness.FRIEND,
+                        PersonProfile.Closeness.CLOSE,
+                    ],
+                )
+                .select_related("entity")
+                .values_list("entity__name", "closeness")[:_RECONTACT_PROFILS_MAX]
+            )
+
+        try:
+            profils = await sync_to_async(_profils)()
+        except Exception as exc:
+            degradations.record("conscience: profils a recontacter", exc)
+            return []
+        if not profils:
+            return []
+
+        try:
+            handle_map = await identity_resolver.handles_for_entity_names(
+                [nom for nom, _ in profils]
+            )
+        except Exception as exc:
+            degradations.record("conscience: handles a recontacter", exc)
+            return []
+
+        tous_pids = [
+            h["person_id"]
+            for handles in handle_map.values()
+            for h in handles
+        ]
+        if not tous_pids:
+            return []
+
+        def _traces() -> tuple[dict, dict, list]:
+            """Dernier mot reçu, dernier mot envoyé, jours actifs — 3 requêtes.
+
+            ``exclude(is_internal=True)`` sur les trois : le brief interne
+            d'un acte adressé à Alice est persisté ``role="user"`` sous SON
+            person_id — sans l'exclusion, le ping de Mika compterait comme un
+            mot reçu d'Alice (le silence se mesurerait depuis sa propre
+            relance, la note mentirait) et ses briefs feraient des « jours
+            actifs » dans le rythme du lien. Côté sortant, la réplique de
+            repli d'un tour échoué est aussi ``is_internal`` : un message
+            jamais vraiment dit ne vaut pas une relance.
+            """
+            from datetime import timedelta
+
+            from django.db.models import Max
+            from django.db.models.functions import TruncDate
+            from django.utils import timezone as tz
+
+            from memory.models import Message
+
+            entrants = {
+                ligne["person_id"]: ligne["dernier"]
+                for ligne in Message.objects.filter(
+                    person_id__in=tous_pids, role="user",
+                ).exclude(is_internal=True)
+                .values("person_id").annotate(dernier=Max("created_at"))
+            }
+            sortants = {
+                ligne["person_id"]: ligne["dernier"]
+                for ligne in Message.objects.filter(
+                    person_id__in=tous_pids, role="assistant",
+                ).exclude(is_internal=True)
+                .values("person_id").annotate(dernier=Max("created_at"))
+            }
+            cutoff = tz.now() - timedelta(days=_RYTHME_HISTORIQUE_JOURS)
+            jours = list(
+                Message.objects.filter(
+                    person_id__in=tous_pids, role="user",
+                    created_at__gte=cutoff,
+                )
+                .exclude(is_internal=True)
+                .annotate(jour=TruncDate("created_at"))
+                .values_list("person_id", "jour")
+                .distinct()
+            )
+            return entrants, sortants, jours
+
+        try:
+            entrants, sortants, jours_par_pid = await sync_to_async(_traces)()
+        except Exception as exc:
+            degradations.record("conscience: traces d'echange par handle", exc)
+            return []
+
+        from django.utils import timezone as tz
+
+        maintenant = tz.now()
+        results: list[dict] = []
+        hors_d_atteinte: list[tuple[float, str, int]] = []
+        for nom, closeness in profils:
+            handles = handle_map.get(nom, [])
+            pids = {h["person_id"] for h in handles}
+            recus = [entrants[p] for p in pids if p in entrants]
+            if not recus:
+                # Jamais un mot reçu : il n'y a rien à « reprendre ».
+                continue
+            dernier_recu = max(recus)
+            silence_j = (maintenant - dernier_recu).total_seconds() / 86400.0
+
+            rythme = _rythme_naturel(
+                [jour for pid, jour in jours_par_pid if pid in pids],
+                closeness, ami_jours=ami_jours, proche_jours=proche_jours,
+            )
+            if silence_j < rythme * facteur:
+                continue
+
+            envoyes = [sortants[p] for p in pids if p in sortants]
+            dernier_envoye = max(envoyes) if envoyes else None
+            if dernier_envoye is not None and dernier_envoye > dernier_recu:
+                attente_j = (maintenant - dernier_envoye).total_seconds() / 86400.0
+                if attente_j < rythme * facteur * relance:
+                    continue
+
+            poids = 1.5 if closeness == "close" else 1.0
+            reachable = [
+                h for h in handles
+                if h["kind"] == "module"
+                or presence_registry.resolve_on(h["person_id"], h["channel"])
+            ]
+            if not reachable:
+                # Le manque sans destinataire ne s'évapore plus : il devient
+                # une pensée (« j'aimerais avoir des nouvelles de… ») qu'elle
+                # pourra dire à qui EST là — le plus fort seulement, après la
+                # boucle.
+                hors_d_atteinte.append(
+                    ((silence_j / rythme) * poids, nom, int(silence_j))
+                )
+                continue
+            chaleur = await self._chaleur_pour([h["person_id"] for h in reachable])
+            results.append({
+                "name": nom,
+                "score": round((silence_j / rythme) * poids * chaleur, 3),
+                "handles": reachable,
+                "note": (
+                    f"sans nouvelles depuis {int(silence_j)} jour(s) — "
+                    f"d'habitude vous vous parlez tous les {rythme:.0f} jour(s)"
+                ),
+            })
+
+        if hors_d_atteinte:
+            _, nom, jours = max(hors_d_atteinte)
+            with degraded("conscience: pensee pour un absent"):
+                await self._penser_a_l_absent(nom, jours)
+
+        results.sort(key=lambda r: r["score"], reverse=True)
+        return results[: max(1, n)]
+
+    #: Intensité de la pensée pour un absent. Volontairement SOUS la porte de
+    #: graine (0.40) : penser à quelqu'un d'injoignable ne doit pas ouvrir un
+    #: chantier — il n'y a rien à y faire — seulement colorer le prompt
+    #: (plancher d'affichage 0.2) et pouvoir se dire à qui est là.
+    _PENSEE_ABSENT_INTENSITE = 0.3
+
+    async def _penser_a_l_absent(self, nom: str, jours: int) -> bool:
+        """« J'aimerais bien avoir des nouvelles de X » — une rumination.
+
+        Dédupliquée sur le nom : une pensée active qui le mentionne déjà
+        suffit, et sa demi-vie (6 h) fait qu'elle ne revient au mieux qu'une
+        fois par demi-journée. Émotion `nostalgic` — le manque d'un absent,
+        pas la solitude (`lonely` parlerait d'elle).
+        """
+        from asgiref.sync import sync_to_async
+
+        from conscience.models import Rumination
+
+        def _ecrire() -> bool:
+            if Rumination.objects.filter(
+                status="active", summary__contains=nom,
+            ).exists():
+                return False
+            Rumination.objects.create(
+                summary=(
+                    f"J'aimerais bien avoir des nouvelles de {nom} — "
+                    f"ça fait {jours} jour(s)."
+                ),
+                themes=[nom],
+                intensity=self._PENSEE_ABSENT_INTENSITE,
+                emotion="nostalgic",
+                status="active",
+            )
+            return True
+
+        return await sync_to_async(_ecrire, thread_sensitive=True)()
+
+    async def _chaleur_pour(self, person_ids: list[str]) -> float:
+        """1 + la chaleur du fond affectif vers cette personne, en [1, 1.5].
+
+        L'ancre de ``PersonMood`` est le fond que les conversations ont
+        installé (et que le temps guérit) : sa composante plaisir positive
+        dit « penser à elle fait du bien ». Une ancre froide ou absente vaut
+        1.0 — la rancune ne *supprime* pas le manque, elle cesse seulement de
+        l'amplifier. ``ensure_person_loaded`` d'abord : lire ``person_moods``
+        à froid est le bug documenté de la fiche affect.
+        """
+        try:
+            from emotion.engine import emotion_engine
+
+            meilleur = 0.0
+            for pid in person_ids[:3]:
+                await emotion_engine.ensure_person_loaded(pid)
+                mood = emotion_engine.person_moods.get(pid)
+                ancre = getattr(mood, "anchor", None)
+                if ancre:
+                    meilleur = max(meilleur, float(ancre[0]))
+            return 1.0 + _CHALEUR_POIDS * max(0.0, min(1.0, meilleur))
+        except Exception as exc:
+            degradations.record("conscience: chaleur du manque", exc)
+            return 1.0
 
     @staticmethod
     def _person_entities_from_matches(

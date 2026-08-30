@@ -314,10 +314,13 @@ class TestLePromptDuTravail:
         import inspect
         import textwrap
 
-        from conscience.engine import ConscienceEngine
+        from conscience import travaux
 
+        # La méthode du moteur est un délégué d'une ligne ; la propriété est
+        # portée par `travaux.faire_un_pas`, qui orchestre à travers la
+        # surface du moteur.
         arbre = ast.parse(textwrap.dedent(
-            inspect.getsource(ConscienceEngine._faire_un_pas)
+            inspect.getsource(travaux.faire_un_pas)
         ))
         appels = {
             n.func.attr for n in ast.walk(arbre)

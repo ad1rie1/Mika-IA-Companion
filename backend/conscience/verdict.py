@@ -154,6 +154,18 @@ class Verdict:
     #: l'appelant ne puisse pas confondre « elle a dit d'attendre 0 s » et
     #: « elle n'a pas parlé d'attente ».
     delai_s: float | None = None
+    #: Pour ``ATTENDRE`` seulement : QUI elle attend, tel que le verdict
+    #: le nomme (un prénom, ou un person_id que le modèle a sous les yeux).
+    #: Vide = attente purement temporelle. La résolution vers des handles
+    #: appartient au réveil (couche identité), jamais à ce lecteur.
+    qui: str = ""
+    #: Auto-évaluation : ce résultat vaut-il d'être raconté sans qu'on le
+    #: demande ? ``None`` = pas prononcé — l'appelant choisit son défaut, et
+    #: l'absence reproduit le comportement d'avant (tout aboutissement était
+    #: « notable », seule la fenêtre d'espacement filtrait). Borné [0, 1] à
+    #: la lecture ; la méfiance documentée reste : un juge qui note son
+    #: propre travail note haut, d'où le seuil de diffusion à 0.80.
+    notable: float | None = None
     niveau: NiveauVerdict = NiveauVerdict.ABSENT
     #: Extrait de ce qui a été trouvé, tronqué. Vide quand il n'y avait rien.
     brut: str = ""
@@ -192,12 +204,16 @@ CONSIGNE_VERDICT = """\
 Termine par un bloc de verdict, et rien après lui :
 
 --- VERDICT ---
-{"etat": "continue", "resume": "ce que tu viens de faire, une phrase", "motif": "", "delai_s": 0}
+{"etat": "continue", "resume": "ce que tu viens de faire, une phrase", "motif": "", "delai_s": 0, "notable": 0.3}
 --- FIN VERDICT ---
 
 `etat` vaut "fini" (le travail est terminé), "continue" (il reste des pas),
 "bloque" (tu ne peux pas avancer — dis pourquoi dans `motif`) ou "attendre"
-(reprendre plus tard — dis dans combien de secondes dans `delai_s`).
+(reprendre plus tard — dis dans combien de secondes dans `delai_s`, et si tu
+attends la réponse de quelqu'un, son nom dans `qui` : un message de cette
+personne te réveillera plus tôt).
+`notable` (0.0-1.0) : est-ce que ce résultat vaut d'être raconté à quelqu'un
+sans qu'on te le demande ? Sois exigeante — la plupart des pas valent 0.2.
 
 Si tu ne peux pas produire ce bloc, écris au moins un marqueur court sur sa
 propre ligne : [SUITE:continue] ou [SUITE:attendre:600] ou [SUITE:bloque:il me
@@ -315,6 +331,8 @@ _CLES_ETAT = ("etat", "state", "statut", "status")
 _CLES_RESUME = ("resume", "summary", "resume_court", "texte", "note")
 _CLES_MOTIF = ("motif", "motif_blocage", "blocage", "reason", "blocked_reason", "raison")
 _CLES_DELAI = ("delai_s", "delai", "delay", "delay_s", "attente_s", "wait_seconds", "delai_secondes")
+_CLES_NOTABLE = ("notable", "notabilite", "noteworthy", "interet", "interest")
+_CLES_QUI = ("qui", "attend", "personne", "who", "waiting_for")
 
 
 def _cle_ligne(corps: str, noms: tuple[str, ...]) -> str | None:
@@ -386,12 +404,41 @@ def _delai(valeur: object, tuning: VerdictTuning) -> float:
     return max(0.0, min(tuning.delai_max_s, nombre))
 
 
+def _notable(valeur: object) -> float | None:
+    """Auto-évaluation de notabilité, ou ``None`` si rien d'exploitable.
+
+    ``None`` et non 0.0 : « il n'a rien dit » laisse l'appelant choisir son
+    défaut, « il a dit zéro » est une opinion. Mêmes pièges que ``_delai`` —
+    texte, booléen, NaN — et la borne [0, 1] parce que la valeur finit dans
+    une comparaison de seuil.
+    """
+    if valeur is None or isinstance(valeur, bool):
+        return None
+    if isinstance(valeur, (int, float)):
+        nombre = float(valeur)
+    elif isinstance(valeur, str):
+        trouve = re.search(r"-?\d+(?:[.,]\d+)?", valeur)
+        if not trouve:
+            return None
+        try:
+            nombre = float(trouve.group(0).replace(",", "."))
+        except ValueError:
+            return None
+    else:
+        return None
+    if not math.isfinite(nombre):
+        return None
+    return max(0.0, min(1.0, nombre))
+
+
 def _assembler(
     etat: EtatVerdict,
     *,
     resume: str,
     motif: str,
     delai_source: object,
+    notable_source: object = None,
+    qui_source: object = None,
     niveau: NiveauVerdict,
     brut: str,
     tuning: VerdictTuning,
@@ -406,6 +453,8 @@ def _assembler(
         resume=_texte(resume, tuning.resume_max_chars),
         motif_blocage=_texte(motif, tuning.motif_max_chars) if etat is EtatVerdict.BLOQUE else "",
         delai_s=delai,
+        qui=_texte(qui_source, 80) if etat is EtatVerdict.ATTENDRE else "",
+        notable=_notable(notable_source),
         niveau=niveau,
         brut=_texte(brut, tuning.brut_max_chars),
     )
@@ -460,6 +509,8 @@ def _lire_bloc(texte: str, tuning: VerdictTuning) -> Verdict | None:
                 resume=_texte(_cle(donnees, _CLES_RESUME), tuning.resume_max_chars),
                 motif=_texte(_cle(donnees, _CLES_MOTIF), tuning.motif_max_chars),
                 delai_source=_cle(donnees, _CLES_DELAI),
+                notable_source=_cle(donnees, _CLES_NOTABLE),
+                qui_source=_cle(donnees, _CLES_QUI),
                 niveau=NiveauVerdict.BLOC,
                 brut=brut,
                 tuning=tuning,
@@ -481,6 +532,8 @@ def _lire_bloc(texte: str, tuning: VerdictTuning) -> Verdict | None:
             resume=_cle_ligne(brut, _CLES_RESUME) or "",
             motif=_cle_ligne(brut, _CLES_MOTIF) or "",
             delai_source=_cle_ligne(brut, _CLES_DELAI),
+            notable_source=_cle_ligne(brut, _CLES_NOTABLE),
+            qui_source=_cle_ligne(brut, _CLES_QUI),
             niveau=NiveauVerdict.BLOC,
             brut=brut,
             tuning=tuning,

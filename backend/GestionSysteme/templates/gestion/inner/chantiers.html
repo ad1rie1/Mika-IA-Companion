@@ -86,11 +86,22 @@
                   <span class="badge {% with tone=statut_tones|get:l.row.statut %}{% if tone %}badge-{{ tone }}{% endif %}{% endwith %}">{% with label=statut_labels|get:l.row.statut %}{{ label|default:l.row.statut }}{% endwith %}</span>
                 </td>
                 <td class="text-xs">
+                  {% if l.row.en_attente_de_reponse %}
+                    {% comment %}
+                      Une attente sans son motif rendait l'écran menteur : le
+                      chantier semblait simplement immobile. Le nom vient du
+                      verdict ; l'échéance est relevée plus tôt si la personne
+                      répond.
+                    {% endcomment %}
+                    <div class="muted">
+                      ⏸ {% if l.row.attend_qui %}attend {{ l.row.attend_qui }}{% else %}en attente{% endif %}{% if l.row.reprendre_le %} · reprise {{ l.row.reprendre_le|dt_full }}{% endif %}
+                    </div>
+                  {% endif %}
                   {% if l.row.raison_blocage %}
                     <span class="muted">{{ l.row.raison_blocage }}</span>
                   {% elif l.row.resultat %}
                     <div class="cell-clamp muted">{{ l.row.resultat|truncatechars:180 }}</div>
-                  {% else %}
+                  {% elif not l.row.en_attente_de_reponse %}
                     <span class="muted">aucun pas encore</span>
                   {% endif %}
                 </td>

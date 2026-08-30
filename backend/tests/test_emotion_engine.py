@@ -338,3 +338,51 @@ class TestArret:
 
         assert {"p0", "p1", "p2"} <= set(ecrits), \
             f"toutes les personnes présentes doivent avoir un relevé : {ecrits}"
+
+
+class TestResonanceDeTemperament:
+    """`_person_impulse_params` : le fond du personnage entre dans la
+    physique de l'impulsion — la propriété que
+    `test_melancholic_resonates_with_sadness` a nommée en restant rouge
+    tant qu'elle n'existait pas."""
+
+    def test_une_impulsion_alignee_porte_plus_loin(self, melancholic_engine):
+        """Tristesse sur fond mélancolique : le gain effectif dépasse le gain
+        du tempérament seul."""
+        e = melancholic_engine
+        cible = pad.label_to_pad(Emotion.SAD, 0.8)
+        assert (
+            e._person_impulse_params(cible).impulse_gain
+            > e._person_params.impulse_gain
+        )
+
+    def test_une_impulsion_contraire_n_est_jamais_attenuee(
+        self, melancholic_engine
+    ):
+        """Amplification seulement : atténuer le contraire blinderait un fond
+        heureux contre la tristesse — la « résistance » est déjà le rôle de
+        `recovery_speed` et du point de repos."""
+        e = melancholic_engine
+        cible = pad.label_to_pad(Emotion.EXCITED, 0.8)
+        assert (
+            e._person_impulse_params(cible).impulse_gain
+            == e._person_params.impulse_gain
+        )
+
+    def test_un_fond_neutre_ne_resonne_avec_rien(self, stoic_engine):
+        """L'ancre de `neutral` est nulle : cos indéfini, gain inchangé —
+        c'est la définition du stoïque, pas un cas d'erreur."""
+        e = stoic_engine
+        for emotion in (Emotion.SAD, Emotion.EXCITED, Emotion.ANGRY):
+            cible = pad.label_to_pad(emotion, 0.8)
+            assert (
+                e._person_impulse_params(cible).impulse_gain
+                == e._person_params.impulse_gain
+            )
+
+    def test_le_gain_resonant_reste_un_cliquet(self, explosive_engine):
+        """Le plafond est 1.0 — l'invariant du cliquet lui-même : même
+        l'explosive en pleine exaltation ne dépasse jamais sa cible."""
+        e = explosive_engine
+        cible = pad.label_to_pad(Emotion.EXCITED, 1.0)
+        assert e._person_impulse_params(cible).impulse_gain <= 1.0
