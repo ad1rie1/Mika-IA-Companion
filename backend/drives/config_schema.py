@@ -255,6 +255,17 @@ CONFIG_SCHEMA = [
              "jusqu'à ×2 avec la longueur).",
     ),
     ConfigItem(
+        key="drives.rest.max_gain_per_update", type="float", section="drives",
+        group=REST_GROUP, label="Fatigue maximale gagnée en une passe",
+        default=0.15, min=0.0, max=1.0, hot_reload=True,
+        hint="Borne ce qu'une rafale de signaux peut ajouter d'un seul coup. "
+             "Un relevé RSS de 9 flux produit une centaine d'observations en "
+             "même temps : sans ce plafond la fatigue saute à fond dès le "
+             "premier relevé, l'énergie reste basse toute la journée et elle "
+             "se couche à 21 h tous les soirs. Une conversation normale reste "
+             "loin sous ce plafond — il ne mord que sur les rafales.",
+    ),
+    ConfigItem(
         key="drives.rest.natural_decay_per_second", type="float",
         section="drives", group=REST_GROUP,
         label="Décroissance naturelle du repos (par seconde)",

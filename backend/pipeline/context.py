@@ -278,6 +278,19 @@ async def gather_context(
     # Fatigue fog — when energy is low, shape the cognitive tone
     fatigue_fog = _fatigue_fog_context()
 
+    # L'estime de soi rejoint l'état cognitif : le doute ou l'assurance sont
+    # une couleur de pensée, pas une émotion du moment. Lue par l'API du
+    # module (`conscience/estime.py` EST sa couche de lecture) — un
+    # sentiment dans le prompt, jamais un nombre. L'équilibre est silencieux.
+    try:
+        from conscience import estime as estime_module
+
+        ligne_estime = estime_module.ligne_de_prompt(await estime_module.lire())
+        if ligne_estime:
+            fatigue_fog = (fatigue_fog + "\n" + ligne_estime).strip()
+    except Exception as exc:
+        degradations.record("prompt: estime de soi", exc)
+
     # Active ruminations — now visible every turn, not only during _act()
     rumination_context = await _fetch_rumination_context()
 

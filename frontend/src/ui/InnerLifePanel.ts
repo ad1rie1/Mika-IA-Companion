@@ -83,6 +83,9 @@ export class InnerLifePanel {
   private sleepBadgeEl: HTMLElement;
   private energyFillEl: HTMLElement;
   private energyValueEl: HTMLElement;
+  private esteemSectionEl: HTMLElement;
+  private esteemFillEl: HTMLElement;
+  private esteemValueEl: HTMLElement;
   private dreamEl: HTMLElement;
   private journalEl: HTMLElement;
   private projectsEl: HTMLElement;
@@ -112,6 +115,15 @@ export class InnerLifePanel {
               <span class="il-energy-fill" style="width:50%"></span>
             </span>
             <span class="il-energy-value">—</span>
+          </div>
+        </section>
+        <section class="il-section" id="il-esteem" hidden>
+          <h4>Estime de soi</h4>
+          <div class="il-energy-row">
+            <span class="il-energy-bar">
+              <span class="il-energy-fill il-esteem-fill" style="width:50%"></span>
+            </span>
+            <span class="il-energy-value il-esteem-value">—</span>
           </div>
         </section>
         <section class="il-section" id="il-dream" hidden>
@@ -160,8 +172,11 @@ export class InnerLifePanel {
     this.profileEl = this.root.querySelector(".il-profile-body")!;
     this.phaseBadgeEl = this.root.querySelector(".il-phase-badge")!;
     this.sleepBadgeEl = this.root.querySelector(".il-sleep-badge")!;
-    this.energyFillEl = this.root.querySelector(".il-energy-fill")!;
-    this.energyValueEl = this.root.querySelector(".il-energy-value")!;
+    this.energyFillEl = this.root.querySelector("#il-energy .il-energy-fill")!;
+    this.energyValueEl = this.root.querySelector("#il-energy .il-energy-value")!;
+    this.esteemSectionEl = this.root.querySelector("#il-esteem")!;
+    this.esteemFillEl = this.root.querySelector(".il-esteem-fill")!;
+    this.esteemValueEl = this.root.querySelector(".il-esteem-value")!;
     this.dreamEl = this.root.querySelector(".il-dream-body")!;
     this.journalEl = this.root.querySelector(".il-journal-body")!;
     this.projectsEl = this.root.querySelector(".il-projects-body")!;
@@ -211,6 +226,7 @@ export class InnerLifePanel {
   applyInnerState(state: InnerState | undefined) {
     if (!state) return;
     this.renderCircadian(state.circadian, state.energy);
+    this.renderEsteem(state.estime);
     this.renderSleepPhase(state.sleep_phase);
     this.renderDream(state.last_dream);
     this.renderJournal(state.today_journal);
@@ -267,6 +283,17 @@ export class InnerLifePanel {
       this.energyFillEl.style.background = `hsl(${hue}, 70%, 50%)`;
       this.energyValueEl.textContent = `${pct}%`;
     }
+  }
+
+  /** La variable lente : doute ↔ assurance, même lecture que l'énergie. */
+  private renderEsteem(estime: number | undefined) {
+    if (typeof estime !== "number") return;
+    this.esteemSectionEl.hidden = false;
+    const pct = Math.max(0, Math.min(100, Math.round(estime * 100)));
+    this.esteemFillEl.style.width = `${pct}%`;
+    const hue = Math.round(estime * 120); // 0 = rouge (doute), 120 = vert
+    this.esteemFillEl.style.background = `hsl(${hue}, 55%, 50%)`;
+    this.esteemValueEl.textContent = `${pct}%`;
   }
 
   // ── Renderers ───────────────────────────────────────────────

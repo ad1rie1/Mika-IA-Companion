@@ -11,6 +11,15 @@
         <span class="meter-val">{{ energy|pct }}</span>
       </div>
       <div class="meter {{ energy_tone }} mb-4"><span style="width: {{ energy|bar_width }}%;"></span></div>
+      {% comment %}
+        L'estime de soi : la variable lente entre le tempérament et l'humeur.
+        Valeur courante (décrue), jamais le champ stocké.
+      {% endcomment %}
+      <div class="meter-row">
+        <span class="meter-label" title="Rappel vers 0,5 en trois jours ; bougée par les aboutissements, les blocages et les relances ignorées">Estime de soi</span>
+        <span class="meter-val">{{ estime|pct }}</span>
+      </div>
+      <div class="meter {{ estime_tone }} mb-4"><span style="width: {{ estime|bar_width }}%;"></span></div>
 
       <dl class="kv">
         <dt>Phase circadienne</dt><dd>{{ phase_fr }} — {{ hour }} h</dd>

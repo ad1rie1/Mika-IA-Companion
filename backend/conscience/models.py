@@ -304,6 +304,28 @@ class Travail(models.Model):
         return self.ancre_envie or self.created_at
 
 
+class EstimeDeSoi(models.Model):
+    """La valeur propre — une ligne, lente, persistée.
+
+    Ni un trait (le tempérament ne bouge pas) ni un état (l'humeur vit en
+    minutes) : une variable qui encaisse les événements par petits coups et
+    rappelle vers le neutre en trois jours. Persistée parce que c'est
+    précisément ce qui doit survivre à un redémarrage — perdre trois jours
+    de confiance avec un reboot serait le contraire de sa définition. Toute
+    la physique vit dans ``conscience/estime.py`` ; le modèle ne porte que
+    le couple (valeur, ancre) — les deux moitiés d'un même geste, comme
+    l'envie d'un ``Travail``.
+    """
+
+    valeur = models.FloatField(default=0.5)
+    #: L'ancre de la décroissance vers le neutre — n'avance qu'à l'écriture.
+    ancre = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"estime {self.valeur:.2f}"
+
+
 class ScheduledAction(models.Model):
     """A deferred action scheduled by the conscience or Claude.
 

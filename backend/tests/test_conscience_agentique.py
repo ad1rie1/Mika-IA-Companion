@@ -815,6 +815,78 @@ class TestIntentionParPulsion:
             patcher.stop()
 
 
+class TestAnticipation:
+    """Le futur cesse d'être un calendrier sans affect : un chantier à un pas
+    du bout ou un rendez-vous proche et prioritaire glissent vers l'espoir."""
+
+    def _moteur(self):
+        e = _engine()
+        e._dernier_espoir = 0.0
+        return e
+
+    def _chantier_presque_fini(self):
+        from conscience.conduite import TravailEnCours
+
+        return TravailEnCours(
+            identifiant=1, titre="lire les news", envie=0.6,
+            pas_effectues=4, pas_max=5,
+        )
+
+    async def test_un_chantier_presque_au_bout_donne_de_l_espoir(self):
+        from emotion.types import Emotion
+
+        e = self._moteur()
+        with patch("conscience.engine.emotion_engine") as moteur:
+            await e._peut_etre_esperer(_ctx(), [self._chantier_presque_fini()])
+        data, personne = moteur.process_emotion.call_args.args
+        assert data.emotion is Emotion.HOPEFUL
+        assert personne == "conscience_mika"
+
+    async def test_un_rendez_vous_proche_et_prioritaire_aussi(self):
+        from emotion.types import Emotion
+
+        e = self._moteur()
+        e._get_upcoming_actions = AsyncMock(return_value=[
+            (SimpleNamespace(priority=0.9, prompt="appeler"), 30),
+        ])
+        with patch("conscience.engine.emotion_engine") as moteur:
+            await e._peut_etre_esperer(_ctx(), [])
+        data, _ = moteur.process_emotion.call_args.args
+        assert data.emotion is Emotion.HOPEFUL
+
+    async def test_un_pense_bete_lointain_ou_tiede_ne_fait_rien(self):
+        e = self._moteur()
+        e._get_upcoming_actions = AsyncMock(return_value=[
+            (SimpleNamespace(priority=0.9, prompt="loin"), 300),
+            (SimpleNamespace(priority=0.3, prompt="tiede"), 10),
+        ])
+        with patch("conscience.engine.emotion_engine") as moteur:
+            await e._peut_etre_esperer(_ctx(), [])
+        moteur.process_emotion.assert_not_called()
+
+    async def test_un_chantier_en_attente_n_espere_pas(self):
+        """Presque au bout mais bloqué sur quelqu'un : ce n'est pas de
+        l'espoir, c'est de l'attente — déjà couverte ailleurs."""
+        from conscience.conduite import TravailEnCours
+
+        e = self._moteur()
+        e._get_upcoming_actions = AsyncMock(return_value=[])
+        gele = TravailEnCours(
+            identifiant=1, titre="t", envie=0.6,
+            pas_effectues=4, pas_max=5, en_attente_de_reponse=True,
+        )
+        with patch("conscience.engine.emotion_engine") as moteur:
+            await e._peut_etre_esperer(_ctx(), [gele])
+        moteur.process_emotion.assert_not_called()
+
+    async def test_l_espoir_est_espace(self):
+        e = self._moteur()
+        with patch("conscience.engine.emotion_engine") as moteur:
+            await e._peut_etre_esperer(_ctx(), [self._chantier_presque_fini()])
+            await e._peut_etre_esperer(_ctx(), [self._chantier_presque_fini()])
+        assert moteur.process_emotion.call_count == 1
+
+
 class TestGigueDuCooldown:
     """Un métronome se remarque : la gigue, tirée une fois par acte,
     désynchronise les relances sans jamais dépasser le plafond."""
@@ -847,55 +919,235 @@ class TestGigueDuCooldown:
         assert e._effective_cooldown(0) == 300.0
 
 
-class TestEnnui:
-    """Le vide prolongé a une couleur : `bored` existe dans les 29 émotions
-    et rien ne le produisait — une après-midi sans rien laissait l'humeur là
-    où le matin l'avait posée."""
+class TestEnnuiEtSolitude:
+    """Le vide prolongé a une couleur — et pas la même selon ce qui manque :
+    rien à faire → `bored` ; quelqu'un (SOCIAL haut) → `lonely`, que la vie
+    interne ne produisait nulle part. S'ennuyer n'est pas se sentir seule."""
 
     def _moteur(self):
         e = _engine()
         e._dernier_ennui = 0.0
         return e
 
-    def test_le_vide_prolonge_glisse_vers_l_ennui(self):
+    def _vide(self, e, ctx, travaux=(), social=0.1):
+        """Un tour de vide avec la tension SOCIAL contrôlée."""
+        from drives.state import DriveKind
+
+        with patch("conscience.engine.emotion_engine") as moteur, patch(
+            "conscience.engine.drive_engine",
+        ) as de:
+            de.states = {DriveKind.SOCIAL: SimpleNamespace(tension=social)}
+            e._peut_etre_s_ennuyer(ctx, travaux=list(travaux))
+        return moteur
+
+    def test_le_vide_sans_manque_social_glisse_vers_l_ennui(self):
         from emotion.types import Emotion
 
         e = self._moteur()
-        ctx = _ctx(idle_seconds=3 * 3600)
-        with patch("conscience.engine.emotion_engine") as moteur:
-            e._peut_etre_s_ennuyer(ctx, travaux=[])
+        moteur = self._vide(e, _ctx(idle_seconds=3 * 3600), social=0.1)
         data, personne = moteur.process_emotion.call_args.args
         assert data.emotion is Emotion.BORED
         assert personne == "conscience_mika"
 
+    def test_le_vide_avec_envie_de_compagnie_est_de_la_solitude(self):
+        from emotion.types import Emotion
+
+        e = self._moteur()
+        moteur = self._vide(e, _ctx(idle_seconds=3 * 3600), social=0.8)
+        data, personne = moteur.process_emotion.call_args.args
+        assert data.emotion is Emotion.LONELY
+        assert personne == "conscience_mika"
+
     def test_travailler_n_est_pas_s_ennuyer(self):
         e = self._moteur()
-        ctx = _ctx(idle_seconds=3 * 3600)
-        with patch("conscience.engine.emotion_engine") as moteur:
-            e._peut_etre_s_ennuyer(ctx, travaux=[object()])
+        moteur = self._vide(e, _ctx(idle_seconds=3 * 3600), travaux=[object()])
         moteur.process_emotion.assert_not_called()
 
     def test_dormir_n_est_pas_s_ennuyer(self):
         e = self._moteur()
-        ctx = _ctx(idle_seconds=3 * 3600, sleep_phase="deep_sleep")
-        with patch("conscience.engine.emotion_engine") as moteur:
-            e._peut_etre_s_ennuyer(ctx, travaux=[])
+        moteur = self._vide(
+            e, _ctx(idle_seconds=3 * 3600, sleep_phase="deep_sleep"),
+        )
         moteur.process_emotion.assert_not_called()
 
-    def test_l_ennui_teinte_il_ne_matraque_pas(self):
+    def test_le_vide_teinte_il_ne_matraque_pas(self):
         """Une impulsion par demi-heure au plus — pas une par tour de 30 s."""
+        from drives.state import DriveKind
+
         e = self._moteur()
         ctx = _ctx(idle_seconds=3 * 3600)
-        with patch("conscience.engine.emotion_engine") as moteur:
+        with patch("conscience.engine.emotion_engine") as moteur, patch(
+            "conscience.engine.drive_engine",
+        ) as de:
+            de.states = {DriveKind.SOCIAL: SimpleNamespace(tension=0.1)}
             e._peut_etre_s_ennuyer(ctx, travaux=[])
             e._peut_etre_s_ennuyer(ctx, travaux=[])
         assert moteur.process_emotion.call_count == 1
 
     def test_une_conversation_recente_n_ennuie_pas(self):
         e = self._moteur()
-        ctx = _ctx(idle_seconds=600)
-        with patch("conscience.engine.emotion_engine") as moteur:
-            e._peut_etre_s_ennuyer(ctx, travaux=[])
+        moteur = self._vide(e, _ctx(idle_seconds=600))
+        moteur.process_emotion.assert_not_called()
+
+
+@pytest.mark.django_db(transaction=True)
+class TestLaCroyanceQuiSEffondre:
+    """Cesser de croire coûte : la secousse (surprise) puis le résidu (une
+    pensée confuse « je croyais que… ») — elle habite la transition au lieu
+    d'affirmer une chose lundi et son contraire mardi sans un mot."""
+
+    @pytest.fixture(autouse=True)
+    def _purger(self):
+        from conscience.models import Rumination
+        Rumination.objects.all().delete()
+        yield
+        Rumination.objects.all().delete()
+
+    async def test_la_revision_se_ressent_et_se_raconte(self):
+        from conscience.memory_bridge import MemoryBridge
+        from conscience.models import Rumination
+        from emotion.types import Emotion
+
+        bridge = MemoryBridge()
+        with patch("emotion.engine.emotion_engine") as moteur:
+            await bridge._ressentir_la_revision(
+                "Thomas travaille chez Dassault",
+            )
+        data, personne = moteur.process_emotion.call_args.args
+        assert data.emotion is Emotion.SURPRISED
+        assert personne == "conscience_mika"
+
+        pensee = await sync_to_async(
+            lambda: Rumination.objects.filter(status="active").first()
+        )()
+        assert pensee is not None
+        assert "Je croyais que" in pensee.summary
+        assert "Dassault" in pensee.summary
+        assert pensee.emotion == "confused"
+        assert pensee.intensity < 0.40  # sous la porte de graine
+
+    async def test_la_meme_revision_ne_se_rumine_pas_en_double(self):
+        from conscience.memory_bridge import MemoryBridge
+        from conscience.models import Rumination
+
+        bridge = MemoryBridge()
+        with patch("emotion.engine.emotion_engine"):
+            await bridge._ressentir_la_revision("le ciel est vert")
+            await bridge._ressentir_la_revision("le ciel est vert")
+        n = await sync_to_async(
+            lambda: Rumination.objects.filter(status="active").count()
+        )()
+        assert n == 1
+
+    async def test_l_invalidation_declenche_le_ressenti(self):
+        """Le câblage : `check_contradictions` appelle `_ressentir_la_revision`
+        exactement quand une connaissance tombe."""
+        import ast
+        import inspect
+        import textwrap
+
+        from conscience.memory_bridge import MemoryBridge
+
+        arbre = ast.parse(textwrap.dedent(
+            inspect.getsource(MemoryBridge.check_contradictions)
+        ))
+        appels = {
+            n.func.attr for n in ast.walk(arbre)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        }
+        assert "_ressentir_la_revision" in appels
+        assert "invalidate_connaissance" in appels
+
+
+@pytest.mark.django_db(transaction=True)
+class TestLEchecFaitMal:
+    """L'asymétrie centrale du dossier psychologique : seul le FINI produisait
+    un affect. Un blocage frustre ET devient une pensée (qui dérivera,
+    saignera et sera digérée — la tuyauterie du regret existe) ; un abandon
+    teinte de mélancolie, sans rumination : l'envie s'est éteinte
+    d'elle-même, c'est sa définition."""
+
+    @pytest.fixture(autouse=True)
+    def _purger(self):
+        from conscience.models import Rumination, Travail
+        Travail.objects.all().delete()
+        Rumination.objects.all().delete()
+        yield
+        Travail.objects.all().delete()
+        Rumination.objects.all().delete()
+
+    async def test_un_blocage_frustre_et_devient_une_pensee(self):
+        from conscience.models import Rumination
+        from conscience.verdict import lire_verdict
+        from emotion.types import Emotion
+
+        row = await _travail()
+        e = _engine()
+        verdict = lire_verdict(
+            '--- VERDICT ---\n'
+            '{"etat": "bloque", "motif": "il me manque la clef API"}\n'
+            '--- FIN VERDICT ---'
+        )
+        with patch("conscience.travaux.emotion_engine") as moteur:
+            await e._appliquer_verdict(row.pk, verdict, "je n'y arrive pas", "")
+
+        data, personne = moteur.process_emotion.call_args.args
+        assert data.emotion is Emotion.FRUSTRATED
+        assert personne == "conscience_mika"
+
+        pensee = await sync_to_async(
+            lambda: Rumination.objects.filter(status="active").first()
+        )()
+        assert pensee is not None
+        assert "Je bloque sur" in pensee.summary
+        assert "clef API" in pensee.summary
+        assert pensee.emotion == "frustrated"
+
+    async def test_les_pas_epuises_frustrent_aussi(self):
+        """Un CONTINUE sur le dernier pas bloque le chantier — même douleur
+        que le blocage déclaré : le but est obstrué dans les deux cas."""
+        from conscience.verdict import lire_verdict
+        from emotion.types import Emotion
+
+        row = await _travail(pas_effectues=3, pas_max=3)
+        e = _engine()
+        verdict = lire_verdict(
+            '--- VERDICT ---\n{"etat": "continue"}\n--- FIN VERDICT ---'
+        )
+        with patch("conscience.travaux.emotion_engine") as moteur:
+            await e._appliquer_verdict(row.pk, verdict, "encore un peu", "")
+        data, _ = moteur.process_emotion.call_args.args
+        assert data.emotion is Emotion.FRUSTRATED
+
+    async def test_un_abandon_teinte_de_melancolie_sans_rumination(self):
+        from datetime import timedelta
+
+        from conscience.models import Rumination
+        from emotion.types import Emotion
+
+        await _travail(envie=0.05, ancre_envie=tz.now() - timedelta(hours=48))
+        e = _engine()
+        with patch("conscience.travaux.emotion_engine") as moteur:
+            vivants, _ = await e._travaux_en_cours(tz.now())
+        assert vivants == []
+        data, personne = moteur.process_emotion.call_args.args
+        assert data.emotion is Emotion.MELANCHOLIC
+        assert personne == "conscience_mika"
+        n = await sync_to_async(
+            lambda: Rumination.objects.filter(status="active").count()
+        )()
+        assert n == 0
+
+    async def test_un_pas_qui_continue_ne_fait_rien_ressentir(self):
+        from conscience.verdict import lire_verdict
+
+        row = await _travail()
+        e = _engine()
+        verdict = lire_verdict(
+            '--- VERDICT ---\n{"etat": "continue"}\n--- FIN VERDICT ---'
+        )
+        with patch("conscience.travaux.emotion_engine") as moteur:
+            await e._appliquer_verdict(row.pk, verdict, "j'avance", "")
         moteur.process_emotion.assert_not_called()
 
 
@@ -1153,6 +1405,608 @@ class TestNotabiliteDeLaDiffusion:
         ) as diffusion:
             await e._peut_etre_dire_le_travail(verdict, "ok", "un titre")
         diffusion.assert_awaited_once()
+
+
+@pytest.mark.django_db(transaction=True)
+class TestIntegrationAffective:
+    """Les mocks prouvent l'appel ; ceci prouve que l'impulsion ATTERRIT
+    dans la physique PAD — la symétrie affective mesurée sur un vrai moteur
+    émotionnel, pas sur un bouchon."""
+
+    @pytest.fixture(autouse=True)
+    def _purger(self):
+        from conscience.models import Rumination, Travail
+        Travail.objects.all().delete()
+        Rumination.objects.all().delete()
+        yield
+        Travail.objects.all().delete()
+        Rumination.objects.all().delete()
+
+    def _moteur_emotionnel(self):
+        from tests.conftest import TEMPERAMENT_DEFAULT, _make_engine
+
+        return _make_engine(TEMPERAMENT_DEFAULT)
+
+    async def test_le_blocage_deplace_vraiment_l_humeur(self):
+        from conscience.verdict import lire_verdict
+
+        emo = self._moteur_emotionnel()
+        row = await _travail()
+        e = _engine()
+        verdict = lire_verdict(
+            '--- VERDICT ---\n{"etat": "bloque", "motif": "mur"}\n--- FIN VERDICT ---'
+        )
+        with patch("conscience.travaux.emotion_engine", emo):
+            await e._appliquer_verdict(row.pk, verdict, "je bloque", "")
+
+        # Sa position PAD envers elle-même a une valence négative : la
+        # frustration s'est réellement inscrite, elle ne s'est pas perdue
+        # dans un appel bouchonné.
+        position = emo.person_moods["conscience_mika"].dynamic.position
+        assert position[0] < -0.05
+
+    async def test_l_aboutissement_deplace_vers_le_positif(self):
+        from conscience.verdict import lire_verdict
+
+        emo = self._moteur_emotionnel()
+        row = await _travail()
+        e = _engine()
+        e.memory = SimpleNamespace(remember_completed_work=AsyncMock())
+        verdict = lire_verdict(
+            '--- VERDICT ---\n{"etat": "fini", "resume": "ok"}\n--- FIN VERDICT ---'
+        )
+        with patch("conscience.travaux.emotion_engine", emo):
+            await e._appliquer_verdict(row.pk, verdict, "voilà", "")
+        position = emo.person_moods["conscience_mika"].dynamic.position
+        assert position[0] > 0.05
+
+    async def test_l_espoir_atterrit_aussi(self):
+        from conscience.conduite import TravailEnCours
+
+        emo = self._moteur_emotionnel()
+        e = _engine()
+        e._dernier_espoir = 0.0
+        presque = TravailEnCours(
+            identifiant=1, titre="t", envie=0.6, pas_effectues=4, pas_max=5,
+        )
+        with patch("conscience.engine.emotion_engine", emo):
+            await e._peut_etre_esperer(_ctx(), [presque])
+        position = emo.person_moods["conscience_mika"].dynamic.position
+        assert position[0] > 0.02
+
+
+@pytest.mark.django_db(transaction=True)
+class TestLesAttentesSeRealisent:
+    """L'embryon du modèle d'attentes : deux prédictions que le système
+    tenait déjà — l'attente nominative, la pensée pour l'absent — se
+    RESSENTENT enfin quand elles se réalisent, au lieu d'être des UPDATE."""
+
+    @pytest.fixture(autouse=True)
+    def _purger(self):
+        from conscience.models import Rumination, Travail
+        from memory.models import Conversation, Message
+        for model in (Rumination, Travail, Message, Conversation):
+            model.objects.all().delete()
+        yield
+        for model in (Rumination, Travail, Message, Conversation):
+            model.objects.all().delete()
+
+    async def _message(self, person_id, il_y_a_min=5, interne=False):
+        from datetime import timedelta
+
+        from memory.models import Conversation, Message
+
+        conv = await sync_to_async(Conversation.objects.create)()
+        msg = await sync_to_async(Message.objects.create)(
+            conversation=conv, role="user", content="me revoilà",
+            person_id=person_id, is_internal=interne,
+        )
+        await sync_to_async(
+            lambda: Message.objects.filter(pk=msg.pk).update(
+                created_at=tz.now() - timedelta(minutes=il_y_a_min),
+            )
+        )()
+
+    async def _pensee_nostalgique(self, nom="Alice", il_y_a_min=60):
+        from datetime import timedelta
+
+        from conscience.models import Rumination
+
+        r = await sync_to_async(Rumination.objects.create)(
+            summary=f"J'aimerais bien avoir des nouvelles de {nom}.",
+            themes=[nom], intensity=0.3, emotion="nostalgic", status="active",
+        )
+        await sync_to_async(
+            lambda: Rumination.objects.filter(pk=r.pk).update(
+                created_at=tz.now() - timedelta(minutes=il_y_a_min),
+            )
+        )()
+        return r
+
+    def _resolveur(self, mapping):
+        return AsyncMock(return_value={
+            nom: [{"person_id": pid, "channel": "telegram", "kind": "module"}]
+            for nom, pid in mapping.items()
+        })
+
+    async def test_la_reponse_attendue_soulage(self):
+        """L'attente nominative exaucée pulse `relieved` — « enfin »."""
+        from datetime import timedelta
+
+        from emotion.types import Emotion
+
+        await _travail(
+            en_attente_de_reponse=True,
+            reprendre_le=tz.now() + timedelta(hours=6),
+            attend_qui="Adrien",
+            dernier_pas_le=tz.now() - timedelta(minutes=30),
+        )
+        await self._message("tg_9", il_y_a_min=5)
+        e = _engine()
+        with patch(
+            "identity.resolver.identity_resolver.handles_for_entity_names",
+            new=self._resolveur({"Adrien": "tg_9"}),
+        ), patch("conscience.travaux.emotion_engine") as moteur:
+            await e._travaux_en_cours(tz.now())
+        emotions = [c.args[0].emotion for c in moteur.process_emotion.call_args_list]
+        assert Emotion.RELIEVED in emotions
+
+    async def test_le_retour_d_un_absent_rejouit_et_resout(self):
+        from conscience.models import Rumination
+        from emotion.types import Emotion
+
+        pensee = await self._pensee_nostalgique("Alice", il_y_a_min=60)
+        await self._message("tg_a", il_y_a_min=5)
+        e = _engine()
+        e._dernier_retour_scan = 0.0
+        with patch(
+            "identity.resolver.identity_resolver.handles_for_entity_names",
+            new=self._resolveur({"Alice": "tg_a"}),
+        ), patch("conscience.engine.emotion_engine") as moteur:
+            await e._le_retour_d_un_absent()
+        data, personne = moteur.process_emotion.call_args.args
+        assert data.emotion is Emotion.HAPPY
+        assert personne == "conscience_mika"
+        pensee = await sync_to_async(Rumination.objects.get)(pk=pensee.pk)
+        assert pensee.status == "resolved"
+
+    async def test_un_message_d_avant_la_pensee_n_est_pas_un_retour(self):
+        from conscience.models import Rumination
+
+        pensee = await self._pensee_nostalgique("Alice", il_y_a_min=30)
+        await self._message("tg_a", il_y_a_min=60)
+        e = _engine()
+        e._dernier_retour_scan = 0.0
+        with patch(
+            "identity.resolver.identity_resolver.handles_for_entity_names",
+            new=self._resolveur({"Alice": "tg_a"}),
+        ), patch("conscience.engine.emotion_engine") as moteur:
+            await e._le_retour_d_un_absent()
+        moteur.process_emotion.assert_not_called()
+        pensee = await sync_to_async(Rumination.objects.get)(pk=pensee.pk)
+        assert pensee.status == "active"
+
+    async def test_son_propre_brief_n_est_pas_le_retour(self):
+        from conscience.models import Rumination
+
+        pensee = await self._pensee_nostalgique("Alice", il_y_a_min=60)
+        await self._message("tg_a", il_y_a_min=5, interne=True)
+        e = _engine()
+        e._dernier_retour_scan = 0.0
+        with patch(
+            "identity.resolver.identity_resolver.handles_for_entity_names",
+            new=self._resolveur({"Alice": "tg_a"}),
+        ), patch("conscience.engine.emotion_engine") as moteur:
+            await e._le_retour_d_un_absent()
+        moteur.process_emotion.assert_not_called()
+
+    async def test_le_scan_est_etrangle(self):
+        import time as _t
+
+        e = _engine()
+        e._dernier_retour_scan = _t.monotonic()
+        with patch("conscience.engine.emotion_engine") as moteur:
+            await e._le_retour_d_un_absent()
+        moteur.process_emotion.assert_not_called()
+
+
+class TestEstimeDeSoiPhysique:
+    """La variable lente entre le tempérament (fixe) et l'humeur (rapide) :
+    rappel vers 0.5 en demi-vie de 3 jours, coups petits et bornés — un seul
+    échec ne fait pas une dépression, c'est l'accumulation qui compte."""
+
+    def test_le_rappel_vers_le_neutre(self):
+        from datetime import datetime, timedelta
+
+        from conscience.estime import valeur_courante
+
+        t0 = datetime(2026, 8, 30, 12, 0)
+        # Après une demi-vie (72 h), la moitié de l'écart au neutre est rendue.
+        assert valeur_courante(0.9, t0, t0 + timedelta(hours=72)) == pytest.approx(0.7)
+        assert valeur_courante(0.1, t0, t0 + timedelta(hours=72)) == pytest.approx(0.3)
+
+    def test_lire_ne_facture_rien(self):
+        from datetime import datetime
+
+        from conscience.estime import valeur_courante
+
+        t0 = datetime(2026, 8, 30, 12, 0)
+        assert valeur_courante(0.9, t0, t0) == 0.9
+
+    def test_les_bornes_tiennent(self):
+        from conscience.estime import PLAFOND, PLANCHER, _borner
+
+        assert _borner(1.4) == PLAFOND
+        assert _borner(-0.2) == PLANCHER
+
+    def test_une_ancre_malformee_ne_tue_pas(self):
+        from datetime import datetime
+
+        from conscience.estime import valeur_courante
+
+        assert valeur_courante(0.8, "pas une date", datetime.now()) == 0.8
+
+
+@pytest.mark.django_db(transaction=True)
+class TestEstimeDeSoiVecue:
+    """Les coups s'accumulent, persistent, et colorent — sans jamais toucher
+    le score de décision."""
+
+    @pytest.fixture(autouse=True)
+    def _purger(self):
+        from conscience.models import EstimeDeSoi, Rumination, Travail
+        for model in (EstimeDeSoi, Rumination, Travail):
+            model.objects.all().delete()
+        yield
+        for model in (EstimeDeSoi, Rumination, Travail):
+            model.objects.all().delete()
+
+    async def test_les_coups_s_accumulent_et_persistent(self):
+        from conscience import estime
+
+        v1 = await estime.ressentir(estime.COUP_TRAVAIL_ABOUTI, "test")
+        v2 = await estime.ressentir(estime.COUP_TRAVAIL_ABOUTI, "test")
+        assert v2 > v1 > estime.BASELINE
+        assert await estime.lire() == pytest.approx(v2, abs=1e-3)
+
+    async def test_un_aboutissement_remonte_un_blocage_entame(self):
+        from conscience import estime
+        from conscience.verdict import lire_verdict
+
+        row = await _travail()
+        e = _engine()
+        e.memory = SimpleNamespace(remember_completed_work=AsyncMock())
+        verdict = lire_verdict(
+            '--- VERDICT ---\n{"etat": "fini", "resume": "ok"}\n--- FIN VERDICT ---'
+        )
+        with patch("conscience.travaux.emotion_engine"):
+            await e._appliquer_verdict(row.pk, verdict, "voilà", "")
+        assert await estime.lire() > estime.BASELINE
+
+        row2 = await _travail()
+        bloque = lire_verdict(
+            '--- VERDICT ---\n{"etat": "bloque", "motif": "mur"}\n--- FIN VERDICT ---'
+        )
+        haut = await estime.lire()
+        with patch("conscience.travaux.emotion_engine"):
+            await e._appliquer_verdict(row2.pk, bloque, "je bloque", "")
+        assert await estime.lire() < haut
+
+    async def test_ignoree_entame_au_changement_jamais_en_boucle(self):
+        import time as _t
+
+        from conscience import estime
+
+        e = _engine()
+        e._ignores_vus = 0
+        e._last_action_time = _t.time() - 3600  # fenêtre écoulée
+        await e._suivre_l_estime_sociale(_ctx(consecutive_ignored_acts=1))
+        apres_un = await estime.lire()
+        assert apres_un < estime.BASELINE
+        # Le même compte relu ne recoûte rien.
+        await e._suivre_l_estime_sociale(_ctx(consecutive_ignored_acts=1))
+        assert await estime.lire() == pytest.approx(apres_un, abs=1e-3)
+
+    async def test_une_reponse_qui_rompt_la_serie_repare(self):
+        import time as _t
+
+        from conscience import estime
+
+        e = _engine()
+        e._ignores_vus = 2
+        e._last_action_time = _t.time() - 3600
+        await e._suivre_l_estime_sociale(_ctx(consecutive_ignored_acts=0))
+        assert await estime.lire() > estime.BASELINE
+
+    async def test_pendant_la_fenetre_aucun_jugement(self):
+        """`_introspect` compte « ignoré » l'acte d'il y a une minute — juger
+        pendant la fenêtre prendrait un coup à CHAQUE initiative."""
+        import time as _t
+
+        from conscience import estime
+
+        e = _engine()
+        e._ignores_vus = 0
+        e._last_action_time = _t.time()  # elle vient d'agir
+        await e._suivre_l_estime_sociale(_ctx(consecutive_ignored_acts=1))
+        assert await estime.lire() == estime.BASELINE
+
+    async def test_le_doute_baisse_le_seuil_de_l_audit(self):
+        """Basse estime → elle se rejoue plus : le premier effet
+        comportemental de la valeur propre — hors du score de décision.
+        Intensité 0.5 : sous le seuil nominal (0.55), mais le doute l'abaisse
+        (~0.43) — le tour se rejoue quand même."""
+        from conscience.models import EstimeDeSoi, Rumination
+
+        await sync_to_async(EstimeDeSoi.objects.create)(
+            valeur=0.1, ancre=tz.now(),
+        )
+        e = _engine()
+        await e.post_action_audit("j'ai dit un truc sec", "angry", 0.5, "web_1")
+        n = await sync_to_async(
+            lambda: Rumination.objects.filter(status="active").count()
+        )()
+        assert n == 1
+
+    async def test_l_assurance_remonte_le_seuil(self):
+        """Sûre d'elle (0.95), un tour à 0.6 — au-dessus du nominal — ne se
+        rejoue plus (~0.685)."""
+        from conscience.models import EstimeDeSoi, Rumination
+
+        await sync_to_async(EstimeDeSoi.objects.create)(
+            valeur=0.95, ancre=tz.now(),
+        )
+        e = _engine()
+        await e.post_action_audit("j'ai dit un truc sec", "angry", 0.6, "web_1")
+        n = await sync_to_async(
+            lambda: Rumination.objects.filter(status="active").count()
+        )()
+        assert n == 0
+
+    def test_la_ligne_de_prompt_dit_un_sentiment_jamais_un_nombre(self):
+        from conscience.estime import ligne_de_prompt
+
+        assert "doutes" in ligne_de_prompt(0.2)
+        assert "sûre de toi" in ligne_de_prompt(0.8)
+        assert ligne_de_prompt(0.5) == ""
+        for v in (0.2, 0.5, 0.8):
+            assert "0." not in ligne_de_prompt(v)
+
+
+class TestHabituationPerceptive:
+    """Le répété s'efface : le quarantième titre du même flux ne pèse pas
+    comme le premier. Fenêtre 10 min, amortissement 0.85^n, plancher 0.4."""
+
+    def _moteur(self):
+        e = _engine()
+        e._habituation = {}
+        return e
+
+    def test_le_premier_signal_pese_plein(self):
+        e = self._moteur()
+        assert e._habituer("rss", "rss.new_entry", 0.55) == 0.55
+
+    def test_la_repetition_s_amortit(self):
+        e = self._moteur()
+        e._habituer("rss", "rss.new_entry", 0.55)
+        deuxieme = e._habituer("rss", "rss.new_entry", 0.55)
+        troisieme = e._habituer("rss", "rss.new_entry", 0.55)
+        assert deuxieme == pytest.approx(0.55 * 0.85)
+        assert troisieme == pytest.approx(0.55 * 0.85 ** 2)
+
+    def test_le_plancher_tient(self):
+        """Du fond sonore, pas du néant."""
+        e = self._moteur()
+        for _ in range(15):
+            dernier = e._habituer("forge", "forge.app.tick", 0.2)
+        assert dernier == pytest.approx(0.2 * 0.4)
+
+    def test_deux_types_s_habituent_separement(self):
+        e = self._moteur()
+        e._habituer("rss", "rss.new_entry", 0.55)
+        assert e._habituer("email", "email.received", 0.7) == 0.7
+
+    def test_la_fenetre_expiree_rend_l_attention(self):
+        import time as _t
+
+        e = self._moteur()
+        e._habituation[("rss", "rss.new_entry")] = [_t.monotonic() - 700]
+        assert e._habituer("rss", "rss.new_entry", 0.55) == 0.55
+
+
+class TestCongruenceDEntree:
+    """L'affect devient un filtre d'entrée : un signal qui va dans le sens de
+    l'humeur pèse un peu plus — borné ±15 %, amorti ×0.5 en humeur négative
+    (le même anti-spirale que le rappel congruent)."""
+
+    def _moteur_avec_humeur(self, position):
+        e = _engine()
+        faux = SimpleNamespace(
+            global_mood=SimpleNamespace(
+                dynamic=SimpleNamespace(position=position),
+            ),
+        )
+        return e, patch("conscience.engine.emotion_engine", faux)
+
+    def test_un_signal_congruent_pese_un_peu_plus(self):
+        from emotion import pad
+        from emotion.types import Emotion
+
+        ancre = pad.EMOTION_ANCHORS[Emotion.EXCITED]
+        e, patcheur = self._moteur_avec_humeur(ancre)  # humeur pile dessus
+        with patcheur:
+            module = e._colorer_par_l_humeur(0.5, "excited")
+        assert module == pytest.approx(0.5 * 1.15)
+
+    def test_un_signal_incongruent_ne_bouge_pas(self):
+        """Jamais d'atténuation : la congruence amplifie, elle ne censure
+        pas — même règle que la résonance de tempérament."""
+        from emotion import pad
+        from emotion.types import Emotion
+
+        e, patcheur = self._moteur_avec_humeur(
+            pad.EMOTION_ANCHORS[Emotion.EXCITED],
+        )
+        with patcheur:
+            assert e._colorer_par_l_humeur(0.5, "sad") == 0.5
+
+    def test_l_humeur_negative_est_amortie(self):
+        """« Sombre → signaux sombres plus pertinents → plus sombre » ne doit
+        pas s'auto-entretenir : poids divisé par deux."""
+        from emotion import pad
+        from emotion.types import Emotion
+
+        ancre = pad.EMOTION_ANCHORS[Emotion.SAD]
+        e, patcheur = self._moteur_avec_humeur(ancre)
+        with patcheur:
+            module = e._colorer_par_l_humeur(0.5, "sad")
+        assert module == pytest.approx(0.5 * (1 + 0.15 * 0.5))
+
+    def test_un_signal_sans_emotion_ne_bouge_pas(self):
+        e = _engine()
+        assert e._colorer_par_l_humeur(0.5, "") == 0.5
+
+    def test_jamais_au_dessus_de_un(self):
+        from emotion import pad
+        from emotion.types import Emotion
+
+        e, patcheur = self._moteur_avec_humeur(
+            pad.EMOTION_ANCHORS[Emotion.EXCITED],
+        )
+        with patcheur:
+            assert e._colorer_par_l_humeur(0.95, "excited") == 1.0
+
+
+class TestReconfort:
+    """La régulation émotionnelle est sociale : une humeur sombre qui DURE
+    pousse vers le proche auprès de qui elle se sent bien — avant le manque,
+    et sans ses portes (avoir parlé hier n'empêche pas d'y aller ce soir)."""
+
+    def _moteur_en_detresse(self):
+        import time as _t
+
+        e = _engine()
+        e._detresse_depuis = _t.monotonic() - 1000
+        return e
+
+    def test_un_pic_sombre_n_est_pas_une_detresse(self):
+        e = _engine()
+        e._detresse_depuis = 0.0
+        e._suivre_la_detresse(_ctx(global_mood="sad", global_intensity=0.7))
+        assert e._detresse_depuis > 0
+        assert e._detresse_soutenue() is False  # pas encore la durée
+
+    def test_l_eclaircie_remet_le_compteur(self):
+        import time as _t
+
+        e = _engine()
+        e._detresse_depuis = _t.monotonic() - 1000
+        e._suivre_la_detresse(_ctx(global_mood="happy", global_intensity=0.6))
+        assert e._detresse_depuis == 0.0
+        assert e._detresse_soutenue() is False
+
+    def test_sombre_et_durable_est_une_detresse(self):
+        e = self._moteur_en_detresse()
+        e._suivre_la_detresse(_ctx(global_mood="sad", global_intensity=0.7))
+        assert e._detresse_soutenue() is True
+
+    async def test_la_detresse_va_vers_le_reconfortant_pas_le_manquant(self):
+        e = self._moteur_en_detresse()
+        e.memory = SimpleNamespace(
+            who_is_concerned=AsyncMock(return_value=[]),
+            who_comforts=AsyncMock(return_value=[{
+                "name": "Adrien", "score": 2.1,
+                "handles": [{"person_id": "tg_9", "channel": "telegram",
+                             "kind": "module"}],
+                "note": "tu ne te sens pas bien — c'est quelqu'un auprès de "
+                        "qui tu te sens bien",
+            }]),
+            who_misses_contact=AsyncMock(return_value=[]),
+        )
+        with patch(
+            "communication.presence.presence_registry.reachable",
+            return_value=[],
+        ), patch(
+            "ai.client.ai_client.complete",
+            new=AsyncMock(return_value="[TO:tg_9]"),
+        ) as complete:
+            cible = await e._select_recipient(_ctx())
+        assert cible == "tg_9"
+        e.memory.who_comforts.assert_awaited_once()
+        e.memory.who_misses_contact.assert_not_awaited()
+        assert "auprès de qui tu te sens bien" in complete.await_args.kwargs["user_prompt"]
+
+    async def test_sans_detresse_le_reconfort_ne_se_consulte_pas(self):
+        e = _engine()
+        e._detresse_depuis = 0.0
+        e.memory = SimpleNamespace(
+            who_is_concerned=AsyncMock(return_value=[]),
+            who_comforts=AsyncMock(return_value=[]),
+            who_misses_contact=AsyncMock(return_value=[]),
+        )
+        with patch(
+            "communication.presence.presence_registry.reachable",
+            return_value=[],
+        ):
+            await e._select_recipient(_ctx())
+        e.memory.who_comforts.assert_not_awaited()
+
+
+@pytest.mark.django_db(transaction=True)
+class TestWhoComforts:
+    """Le réconfortant se classe au lien × la chaleur de l'ancre — sans
+    aucune des portes du manque : pas de rythme, pas de silence minimal."""
+
+    @pytest.fixture(autouse=True)
+    def _purger(self):
+        from memory.models import Entity, PersonProfile
+        for model in (PersonProfile, Entity):
+            model.objects.all().delete()
+        yield
+        for model in (PersonProfile, Entity):
+            model.objects.all().delete()
+
+    async def _amie(self, nom, closeness="friend"):
+        from memory.models import Entity, PersonProfile
+
+        entity = await sync_to_async(Entity.objects.create)(
+            name=nom, entity_type="person",
+        )
+        await sync_to_async(PersonProfile.objects.create)(
+            entity=entity, closeness=closeness,
+        )
+
+    async def test_le_fond_chaud_gagne_sans_condition_de_silence(self):
+        """Aucun Message en base : le réconfort ne regarde pas le rythme du
+        lien, seulement le lien et la chaleur."""
+        from conscience.memory_bridge import MemoryBridge
+
+        await self._amie("Tiede")
+        await self._amie("Chaude")
+        handles = AsyncMock(return_value={
+            "Tiede": [{"person_id": "tg_t", "channel": "telegram",
+                       "kind": "module"}],
+            "Chaude": [{"person_id": "tg_c", "channel": "telegram",
+                        "kind": "module"}],
+        })
+        moods = {"tg_c": SimpleNamespace(anchor=(0.8, 0.0, 0.0))}
+        faux_moteur = SimpleNamespace(
+            ensure_person_loaded=AsyncMock(), person_moods=moods,
+        )
+        bridge = MemoryBridge()
+        with patch(
+            "identity.resolver.identity_resolver.handles_for_entity_names",
+            new=handles,
+        ), patch("emotion.engine.emotion_engine", faux_moteur):
+            resultats = await bridge.who_comforts(n=2)
+        assert [r["name"] for r in resultats] == ["Chaude", "Tiede"]
+        assert "auprès de qui tu te sens bien" in resultats[0]["note"]
+
+    async def test_personne_de_lie_personne_a_voir(self):
+        from conscience.memory_bridge import MemoryBridge
+
+        bridge = MemoryBridge()
+        assert await bridge.who_comforts() == []
 
 
 # ---------------------------------------------------------------------------

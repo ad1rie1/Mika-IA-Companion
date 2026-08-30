@@ -46,6 +46,7 @@ from conscience.verdict import (
     VerdictTuning,
 )
 from conscience.trousse import preparer
+from conscience import estime
 from drives.engine import drive_engine
 from emotion.engine import emotion_engine
 from utils.degradation import degradations, degraded
@@ -62,6 +63,23 @@ _GRAINES_MODULES_MAX = 3
 #: celle que sa diffusion déclare (`peut_etre_dire_le_travail`, proud 0.4) :
 #: une seule vérité émotionnelle pour un même événement.
 _FIERTE_TRAVAIL_ABOUTI = 0.4
+#: L'échec fait mal — c'était l'asymétrie centrale du dossier psychologique :
+#: seul le FINI produisait un affect, un chantier bloqué ou abandonné était
+#: émotionnellement muet. L'appraisal de l'obstruction d'un but est LA source
+#: humaine de la frustration (Lazarus/Scherer), et c'est cette douleur-là qui
+#: rend l'échec racontable. Constantes et non clés de configuration : ces
+#: intensités sont de la même famille que les ancres PAD — la physique du
+#: personnage, pas un réglage d'exploitation.
+_FRUSTRATION_TRAVAIL_BLOQUE = 0.35
+#: L'abandon est plus doux que le blocage : l'envie s'est éteinte d'elle-même,
+#: on ne se cogne pas à un mur — on remarque qu'on a lâché. Une mélancolie
+#: légère, pas une frustration.
+_MELANCOLIE_TRAVAIL_ABANDONNE = 0.25
+#: Le soulagement d'une attente exaucée — la personne qu'un chantier
+#: attendait a répondu. C'est l'embryon du modèle d'attentes : une
+#: prédiction que le système tenait déjà, qui se réalise, et qui enfin SE
+#: RESSENT au lieu de n'être qu'un UPDATE de drapeau.
+_SOULAGEMENT_REPONSE_ATTENDUE = 0.3
 
 
 # ── Réglages, résolus ici — `conduite.py` et `verdict.py` restent purs ────
@@ -176,16 +194,35 @@ async def travaux_en_cours(maintenant) -> tuple[list, set]:
                 a_reveiller,
                 ["en_attente_de_reponse", "reprendre_le", "attend_qui"],
             )
-        return vivants, semees
+        return vivants, semees, len(a_abandonner)
 
     with degraded("conscience: reveil nominatif des attentes"):
         await _reveiller_attentes_nominatives(maintenant)
 
     try:
-        return await sync_to_async(_passe, thread_sensitive=True)()
+        vivants, semees, abandonnes = await sync_to_async(
+            _passe, thread_sensitive=True,
+        )()
     except Exception as exc:
         degradations.record("conscience: lecture des travaux", exc)
         return [], set()
+
+    if abandonnes:
+        # Remarquer qu'on a lâché quelque chose teinte — légèrement. Une
+        # impulsion pour le lot, pas une par chantier : c'est le constat qui
+        # pèse, pas l'inventaire. L'abandon n'ouvre PAS de rumination —
+        # l'envie s'est éteinte d'elle-même, c'est sa définition ; seule la
+        # couleur du moment reste.
+        with degraded("conscience: melancolie d'un abandon"):
+            from emotion.types import Emotion, EmotionData
+
+            emotion_engine.process_emotion(
+                EmotionData(
+                    Emotion.MELANCHOLIC, _MELANCOLIE_TRAVAIL_ABANDONNE,
+                ),
+                "conscience_mika",
+            )
+    return vivants, semees
 
 
 async def _reveiller_attentes_nominatives(maintenant) -> int:
@@ -277,6 +314,17 @@ async def _reveiller_attentes_nominatives(maintenant) -> int:
                 )
         except Exception as exc:
             degradations.record("conscience: relance d'une attente", exc)
+
+    if releves:
+        # « Enfin, il a répondu. » Une impulsion pour la passe : c'est le
+        # soulagement qui compte, pas l'inventaire des attentes.
+        with degraded("conscience: soulagement d'une reponse attendue"):
+            from emotion.types import Emotion, EmotionData
+
+            emotion_engine.process_emotion(
+                EmotionData(Emotion.RELIEVED, _SOULAGEMENT_REPONSE_ATTENDUE),
+                "conscience_mika",
+            )
     return releves
 
 
@@ -655,14 +703,52 @@ async def appliquer_verdict(moteur, identifiant, verdict, dit, bilan) -> None:
             ).update(status="resolved")
 
         if row.statut == Travail.Statut.ABOUTIE:
-            return {"titre": row.titre}
+            return {"issue": "aboutie", "titre": row.titre}
+        if row.statut == Travail.Statut.BLOQUEE:
+            # Le blocage devient une pensée : « je bloque sur… ». C'est elle
+            # qui portera la dérive émotionnelle (frustration → inquiétude),
+            # la saignée d'humeur et la digestion nocturne — toute la
+            # tuyauterie du regret existe déjà, il suffisait d'y verser
+            # l'échec. Écrite dans le même callable synchrone que le statut :
+            # les deux sont un seul fait.
+            Rumination.objects.create(
+                summary=(
+                    f"Je bloque sur « {row.titre[:120]} »"
+                    + (f" — {row.raison_blocage[:140]}"
+                       if row.raison_blocage else "")
+                ),
+                themes=list(row.themes or []),
+                intensity=_FRUSTRATION_TRAVAIL_BLOQUE,
+                emotion="frustrated",
+                status="active",
+            )
+            return {"issue": "bloquee", "titre": row.titre}
         return None
 
-    aboutie = None
+    issue = None
     with degraded("conscience: application d'un verdict"):
-        aboutie = await sync_to_async(_ecrire, thread_sensitive=True)()
+        issue = await sync_to_async(_ecrire, thread_sensitive=True)()
 
-    if aboutie:
+    if issue and issue.get("issue") == "bloquee":
+        # L'échec se ressent, pas seulement l'aboutissement — c'était
+        # l'asymétrie centrale du dossier psychologique : un être qui n'a
+        # jamais mal à ses échecs ne peut pas en parler vrai.
+        with degraded("conscience: frustration du travail bloque"):
+            from emotion.types import Emotion, EmotionData
+
+            emotion_engine.process_emotion(
+                EmotionData(Emotion.FRUSTRATED, _FRUSTRATION_TRAVAIL_BLOQUE),
+                "conscience_mika",
+            )
+        # Et il entame la valeur propre — petit coup, c'est l'accumulation
+        # qui fait l'estime.
+        with degraded("conscience: estime apres blocage"):
+            await estime.ressentir(
+                estime.COUP_TRAVAIL_BLOQUE, "travail bloqué",
+            )
+
+    if issue and issue.get("issue") == "aboutie":
+        aboutie = issue
         # `verdict.resume` d'abord : c'est la phrase que le bloc demande
         # (« ce que tu viens de faire »). `dit` en repli, borné — le pas
         # entier n'est pas un souvenir, c'est un journal. `getattr` comme
@@ -687,6 +773,10 @@ async def appliquer_verdict(moteur, identifiant, verdict, dit, bilan) -> None:
             emotion_engine.process_emotion(
                 EmotionData(Emotion.PROUD, _FIERTE_TRAVAIL_ABOUTI),
                 "conscience_mika",
+            )
+        with degraded("conscience: estime apres aboutissement"):
+            await estime.ressentir(
+                estime.COUP_TRAVAIL_ABOUTI, "travail abouti",
             )
 
 

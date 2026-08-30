@@ -172,6 +172,39 @@ class TestFailedTurnIsRecordedNotPretended:
         persist_a.assert_called_once()
         announce.assert_not_called()
 
+    async def test_an_empty_answer_is_a_failure_not_a_sentence(self):
+        """Une réponse vide n'est pas une réponse.
+
+        Mesuré sur ollama_cloud, ``thinking`` actif, tour outillé : l'API
+        répond 200 avec ``response=0 chars``, sortie pile au plafond — tout
+        le budget est parti dans le raisonnement. Sans garde-fou la trame
+        ``speech`` partait vide *et parlée*, la phrase vide était persistée
+        comme quelque chose que Mika avait dit, et le tour comptait comme
+        réussi : impulsion émotionnelle, événement de chat, annonce
+        ``_turn.completed``.
+        """
+        from pipeline import processor
+        from pipeline.perception import Perception
+
+        vide = ("   ", None, ["memory_search"])
+        with patch.object(processor, "call_ai_and_parse", new=AsyncMock(return_value=vide)), \
+             patch.object(processor, "gather_context", new=AsyncMock(return_value=_fake_context())), \
+             patch.object(processor, "persist_user_message",
+                          new=AsyncMock(return_value=1)), \
+             patch.object(processor, "persist_assistant_message",
+                          new=AsyncMock(return_value=2)) as persist_a, \
+             patch.object(processor, "emit_communication_event", new=AsyncMock()) as event, \
+             patch.object(processor, "publish_turn_completed", new=AsyncMock()) as announce, \
+             patch.object(processor, "broadcast_to_websocket", new=AsyncMock()):
+            perception = Perception.from_text("hey", source="frontend", person_id="p_vide")
+            sortie = await processor.process_message(perception)
+
+        assert sortie.ai_failed is True
+        assert sortie.text.strip()             # jamais une trame vide
+        assert persist_a.call_args.kwargs["is_internal"] is True
+        announce.assert_not_called()
+        event.assert_not_called()
+
     async def test_persist_false_still_wins_over_a_failure(self):
         """``persist=False`` is a caller's explicit choice and outranks the
         new "record failures too" rule."""

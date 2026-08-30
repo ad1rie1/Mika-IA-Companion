@@ -429,6 +429,59 @@ class MemoryBridge:
     #: (plancher d'affichage 0.2) et pouvoir se dire à qui est là.
     _PENSEE_ABSENT_INTENSITE = 0.3
 
+    #: Ce que coûte une croyance qui s'effondre : la secousse (surprise) et
+    #: le résidu (une pensée confuse — « je croyais que… »). Constantes, pas
+    #: des clés : même famille que les ancres PAD, la physique du personnage.
+    _REVISION_SURPRISE = 0.35
+    _REVISION_PENSEE_INTENSITE = 0.3
+
+    async def _ressentir_la_revision(self, contenu: str) -> None:
+        """Une croyance invalidée se ressent et se re-raconte. Ne lève jamais.
+
+        Deux moitiés, comme chez l'humain : la **secousse** — une impulsion
+        `surprised` sur son propre oscillateur — puis le **résidu** — une
+        rumination `confused` (« Je croyais que… — apparemment non ») qui
+        vivra sa demi-vie, teintera l'humeur, pourra se dire à qui est là et
+        sera digérée la nuit. Sous la porte de graine : réviser une croyance
+        est un fait accompli, pas un chantier à ouvrir. Dédupliquée sur
+        l'extrait : la même révision ne se rumine pas en double.
+        """
+        from asgiref.sync import sync_to_async
+
+        with degraded("conscience: surprise d'une revision"):
+            from emotion.engine import emotion_engine
+            from emotion.types import Emotion, EmotionData
+
+            emotion_engine.process_emotion(
+                EmotionData(Emotion.SURPRISED, self._REVISION_SURPRISE),
+                "conscience_mika",
+            )
+
+        extrait = str(contenu or "").strip()[:80]
+        if not extrait:
+            return
+
+        def _ecrire() -> None:
+            from conscience.models import Rumination
+
+            if Rumination.objects.filter(
+                status="active", summary__contains=extrait[:40],
+            ).exists():
+                return
+            Rumination.objects.create(
+                summary=(
+                    f"Je croyais que « {extrait} » — "
+                    "apparemment ce n'est plus vrai."
+                ),
+                themes=[],
+                intensity=self._REVISION_PENSEE_INTENSITE,
+                emotion="confused",
+                status="active",
+            )
+
+        with degraded("conscience: pensee d'une revision"):
+            await sync_to_async(_ecrire, thread_sensitive=True)()
+
     async def _penser_a_l_absent(self, nom: str, jours: int) -> bool:
         """« J'aimerais bien avoir des nouvelles de X » — une rumination.
 
@@ -459,6 +512,78 @@ class MemoryBridge:
             return True
 
         return await sync_to_async(_ecrire, thread_sensitive=True)()
+
+    async def who_comforts(self, n: int = 1) -> list[dict]:
+        """Vers qui aller quand ça ne va pas — le réconfort, pas le manque.
+
+        La régulation émotionnelle humaine est massivement sociale : en
+        détresse, on cherche le proche *auprès de qui on se sent bien* — pas
+        celui qui manque depuis longtemps. Donc AUCUNE des portes du manque
+        (ni rythme, ni silence minimal, ni anti-double-texte) : avoir parlé à
+        quelqu'un hier n'empêche pas d'aller vers lui ce soir quand ça va
+        mal. Le classement est le lien × la chaleur de l'ancre affective —
+        littéralement « je me sens bien avec toi ».
+
+        Même contrat de retour que ``who_is_concerned``. Ne lève jamais.
+        L'appelant ne consulte ceci que sur détresse soutenue, et le backoff
+        des relances ignorées borne déjà la fréquence des actes.
+        """
+        from asgiref.sync import sync_to_async
+
+        from communication.presence import presence_registry
+        from identity.resolver import identity_resolver
+
+        def _profils() -> list[tuple[str, str]]:
+            from memory.models import PersonProfile
+
+            return list(
+                PersonProfile.objects.filter(
+                    closeness__in=[
+                        PersonProfile.Closeness.FRIEND,
+                        PersonProfile.Closeness.CLOSE,
+                    ],
+                )
+                .select_related("entity")
+                .values_list("entity__name", "closeness")[:_RECONTACT_PROFILS_MAX]
+            )
+
+        try:
+            profils = await sync_to_async(_profils)()
+            if not profils:
+                return []
+            handle_map = await identity_resolver.handles_for_entity_names(
+                [nom for nom, _ in profils]
+            )
+        except Exception as exc:
+            degradations.record("conscience: profils de reconfort", exc)
+            return []
+
+        results: list[dict] = []
+        for nom, closeness in profils:
+            handles = handle_map.get(nom, [])
+            reachable = [
+                h for h in handles
+                if h["kind"] == "module"
+                or presence_registry.resolve_on(h["person_id"], h["channel"])
+            ]
+            if not reachable:
+                continue
+            poids = 1.5 if closeness == "close" else 1.0
+            chaleur = await self._chaleur_pour(
+                [h["person_id"] for h in reachable]
+            )
+            results.append({
+                "name": nom,
+                "score": round(poids * chaleur, 3),
+                "handles": reachable,
+                "note": (
+                    "tu ne te sens pas bien — c'est quelqu'un auprès de qui "
+                    "tu te sens bien"
+                ),
+            })
+
+        results.sort(key=lambda r: r["score"], reverse=True)
+        return results[: max(1, n)]
 
     async def _chaleur_pour(self, person_ids: list[str]) -> float:
         """1 + la chaleur du fond affectif vers cette personne, en [1, 1.5].
@@ -654,6 +779,12 @@ class MemoryBridge:
                         "still_valid": False,
                         "new_confidence": new_confidence,
                     })
+                    # Cesser de croire coûte quelque chose. L'invalidation
+                    # était un UPDATE silencieux : elle pouvait affirmer une
+                    # chose lundi, son contraire mardi, sans jamais habiter la
+                    # transition — le « tell » logiciel le plus visible en
+                    # conversation.
+                    await self._ressentir_la_revision(conn.content)
                 # Seulement a la baisse : un controle qui ne contredit rien
                 # n'est pas une reconfirmation, et le modele recopie volontiers
                 # la valeur haute de l'exemple. Une remontee effacerait la

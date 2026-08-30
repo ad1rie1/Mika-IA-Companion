@@ -83,6 +83,11 @@ def _fake_httpx(response, recorder=None, raises=None):
                 raise raises
             return response
 
+        async def post(self, url, **kwargs):
+            # La sonde de credential est un POST depuis que ``/api/ps`` a
+            # cessé de discriminer (voir ``OllamaCloudProvider.test``).
+            return await self.get(url)
+
     return patch("httpx.AsyncClient", _Client)
 
 
@@ -254,6 +259,9 @@ class TestCredentialProbe:
             async def get(self, url):
                 return response_for(url)
 
+            async def post(self, url, **kwargs):
+                return response_for(url)
+
         with _config({"ai.ollama_cloud.api_key": "sk-good"}), \
              patch("httpx.AsyncClient", _Client):
             result = await p.test()
@@ -278,9 +286,12 @@ class TestCredentialProbe:
                 return False
 
             async def get(self, url):
-                if url.endswith("/api/ps"):
+                if url.endswith("/api/me"):
                     return _FakeResponse(404)
                 return _FakeResponse(200, {"models": [{"name": "glm-5.2"}]})
+
+            async def post(self, url, **kwargs):
+                return await self.get(url)
 
         with _config({"ai.ollama_cloud.api_key": "sk-good"}), \
              patch("httpx.AsyncClient", _Client):

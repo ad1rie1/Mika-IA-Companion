@@ -809,3 +809,33 @@ class TestNuitDuProfilCircadien:
         ):
             assert SleepCycle._nominal_night_start_hour() == 12
             assert SleepCycle._night_end_hour() == 12
+
+
+class TestEmotionDeReveCanonique:
+    """Un rêve ne teint jamais l'avatar avec une couleur qui n'existe pas.
+
+    Observé en conditions réelles : un rêve persisté avec ``serenity``, hors
+    des 29 — pas de ``--emo-serenity``, pas de traduction dans
+    ``formatting.EMOTION_FR`` (le dashboard affiche le mot anglais brut) et
+    refus du garde ``isEmotionName`` côté frontend.
+    """
+
+    def test_un_nom_hors_des_29_est_ecarte(self):
+        from memory.sleep import _emotion_canonique
+
+        assert _emotion_canonique("serenity") == ""
+        assert _emotion_canonique("Sérénité") == ""
+
+    def test_les_29_passent(self):
+        from emotion.types import Emotion
+        from memory.sleep import _emotion_canonique
+
+        for e in Emotion:
+            assert _emotion_canonique(e.value) == e.value
+        assert _emotion_canonique("  PROUD  ") == "proud"
+
+    def test_rien_reste_rien(self):
+        from memory.sleep import _emotion_canonique
+
+        assert _emotion_canonique(None) == ""
+        assert _emotion_canonique("") == ""

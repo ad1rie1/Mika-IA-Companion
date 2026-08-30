@@ -229,6 +229,31 @@ class SleepPhase:
     DEEP_SLEEP = "deep_sleep"     # digesting ruminations
 
 
+def _emotion_canonique(brut: object) -> str:
+    """Ramène l'émotion d'un rêve dans les 29, ou rend la chaîne vide.
+
+    ``Dream.emotion`` est un ``CharField`` libre et la valeur venait telle
+    quelle du modèle : observé en conditions réelles, un rêve persisté avec
+    ``serenity`` — hors des 29, donc sans ``--emo-serenity`` côté avatar, sans
+    entrée dans ``formatting.EMOTION_FR`` (le dashboard affiche le mot brut,
+    en anglais) et refusé par le garde ``isEmotionName`` du frontend. Un nom
+    inventé n'est pas une nuance : on préfère ne rien teinter, ce que tous les
+    lecteurs savent déjà faire, à teindre avec une couleur qui n'existe pas.
+    """
+    from emotion.types import Emotion
+
+    nom = (str(brut or "")).strip().lower()
+    if not nom:
+        return ""
+    if nom in {e.value for e in Emotion}:
+        return nom
+    # Pas de `degradations.record` ici : le registre compte des échecs
+    # avalés dans un `except`, et ceci est un refus de validation — rien n'a
+    # échoué, un nom hors nomenclature a simplement été écarté.
+    logger.info("Sleep: emotion de reve hors des 29, ignoree: %r", nom)
+    return ""
+
+
 class SleepCycle:
     """Singleton. Drives Mika's night-time mental work."""
 
@@ -1011,7 +1036,7 @@ class SleepCycle:
             return None
         return {
             "content": content[:800],
-            "emotion": (data.get("emotion") or "").strip()[:30],
+            "emotion": _emotion_canonique(data.get("emotion")),
             "vividness": max(0.0, min(1.0, float(data.get("vividness", 0.5)))),
         }
 

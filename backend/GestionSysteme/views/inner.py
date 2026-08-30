@@ -299,7 +299,25 @@ def _rhythm(request) -> dict:
     energy = drive_engine.energy_level()
     profile = personality.circadian_profile
 
+    # L'estime de soi — la valeur COURANTE, décrue vers le neutre, jamais le
+    # champ stocké (le couple valeur/ancre est faux une heure plus tard).
+    # L'écran lit ce que le moteur lit.
+    estime_valeur = 0.5
+    with degraded("gestion: estime de soi"):
+        from django.utils import timezone as tz
+
+        from conscience.estime import valeur_courante
+        from conscience.models import EstimeDeSoi
+
+        ligne = EstimeDeSoi.objects.first()
+        if ligne is not None:
+            estime_valeur = valeur_courante(
+                ligne.valeur, ligne.ancre or ligne.updated_at, tz.now(),
+            )
+
     return {
+        "estime": estime_valeur,
+        "estime_tone": fmt.tone_for_ratio(estime_valeur),
         "phase": state.phase.value,
         "phase_fr": _PHASE_FR.get(state.phase.value, state.phase.value),
         "hour": state.hour,

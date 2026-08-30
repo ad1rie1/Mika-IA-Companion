@@ -367,6 +367,7 @@ async def _collect_inner_state(person_id: str | None) -> dict:
         ("ruminations", _snapshot_ruminations),
         ("projects", _snapshot_projects),
         ("pending actions", _snapshot_pending_actions),
+        ("estime", _snapshot_estime),
     ):
         await _merge_section(state, label, loader)
 
@@ -413,6 +414,14 @@ async def _merge_section(state: dict, label: str, loader) -> None:
 # Each returns the keys it contributes, or {} for "nothing to report".
 # None of them handle their own errors: _merge_section owns that, so a new
 # section cannot forget to be isolated.
+
+
+async def _snapshot_estime() -> dict:
+    """La valeur propre, décrue à la lecture — le panneau lit ce que le
+    moteur lit."""
+    from conscience import estime
+
+    return {"estime": await estime.lire()}
 
 
 def _snapshot_drives() -> dict:

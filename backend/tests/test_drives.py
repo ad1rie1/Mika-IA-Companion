@@ -556,3 +556,48 @@ class TestPersistance:
         await neuf.restore_state()
         for state in neuf.states.values():
             assert state.tension < 0.01
+
+
+class TestRafaleDeSignauxPassifs:
+    """Une rafale d'observations ne doit pas saturer la fatigue.
+
+    ``conscience.observe()`` appelle ``on_observation()`` pour CHAQUE signal
+    externe, et un relevé RSS de neuf flux en produit une centaine d'un coup.
+    Mesuré sur un premier démarrage réel : 119 entrées × 0.04 × 0.42 = +2.00
+    de tension d'un seul tenant, REST écrêté à 1.00 quarante secondes après
+    le boot sans qu'elle ait rien fait — énergie plafonnée à 0.7 × circadien
+    toute la journée, brouillard de fatigue dans le prompt à toute heure, et
+    coucher rabattu sur son plancher de 21 h tous les soirs.
+    """
+
+    def test_une_rafale_ne_sature_pas_la_fatigue(self):
+        e = DriveEngine()
+        for _ in range(119):
+            e.on_observation(0.42)
+        e.update()
+
+        assert e.states[DriveKind.REST].tension < 0.5, (
+            "un seul relevé RSS suffisait à épingler REST au maximum"
+        )
+
+    def test_une_conversation_ordinaire_fatigue_toujours(self):
+        """Le plafond borne les rafales, il n'annule pas le modèle : parler
+        reste ce qui la fatigue."""
+        e = DriveEngine()
+        for _ in range(8):
+            e.on_reply(word_count=40)
+            e.update()
+
+        assert e.states[DriveKind.REST].tension > 0.3
+
+    def test_l_excedent_n_est_pas_reporte(self):
+        """Une rafale est UN moment de charge. Reporter l'excédent l'étalerait
+        sur les passes suivantes — soit exactement la saturation qu'on borne."""
+        e = DriveEngine()
+        for _ in range(200):
+            e.on_observation(0.5)
+        e.update()
+        apres_la_rafale = e.states[DriveKind.REST].tension
+        e.update()
+
+        assert e.states[DriveKind.REST].tension <= apres_la_rafale

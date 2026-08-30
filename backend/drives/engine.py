@@ -62,6 +62,20 @@ _REST_PRESSURE_PER_EVENT = 0.04    # each act/observation adds this to rest
 # commentaire de `SLEEP_REST_RECOVERY` affirmait déjà.
 _REST_NATURAL_DECAY = 0.0001
 
+# Plafond du gain de REST consommé en UNE passe. Sans lui, une pulsion
+# passive suffit à saturer la fatigue : `conscience.observe()` appelle
+# `drive_engine.on_observation()` pour CHAQUE signal externe, et un relevé
+# RSS de 9 flux en produit ~119 d'un coup. Mesuré sur un premier démarrage :
+# 119 × 0.04 × 0.42 = +2.00 de tension d'un seul tenant, REST écrêté à 1.00
+# quarante secondes après le boot, sans qu'elle ait rien fait. Au-delà de
+# ~4 entrées par relevé la montée dépasse déjà la décroissance de la fenêtre
+# (0.06 / 10 min), donc REST restait épinglé en permanence : énergie plafonnée
+# à 0.7 × circadien, brouillard de fatigue dans le prompt à toute heure — elle
+# se disait « crevée » à chaque phrase — et coucher rabattu sur le plancher de
+# 21 h tous les soirs. Le plafond garde la lecture voulue : lire l'actualité
+# fatigue un peu, une rafale reste UN moment de charge, pas cent dix-neuf.
+_REST_MAX_GAIN_PER_UPDATE = 0.15
+
 # Pertinence à partir de laquelle observer le monde assouvit un peu la
 # curiosité. À 0.6 — et en comparaison stricte — la porte était au-dessus du
 # plafond du chemin heuristique de l'interpréteur (0.55 pour un article RSS
@@ -158,7 +172,13 @@ class DriveEngine:
             # Keep it in the history for context reporting (not re-counted)
             remaining.append((t, 0.0))
         self._activity = remaining
-        return total
+        # L'excédent est jeté, pas reporté : une rafale de signaux passifs est
+        # un moment de charge, et le reporter reviendrait à l'étaler sur les
+        # passes suivantes — soit exactement la saturation qu'on borne ici.
+        return min(total, cfg_float(
+            "drives.rest.max_gain_per_update",
+            _REST_MAX_GAIN_PER_UPDATE, mini=0.0,
+        ))
 
     # ── Satisfaction signals ──────────────────────────────────────
 

@@ -82,16 +82,31 @@ class OllamaCloudProvider(OllamaProvider):
                 ),
             }
 
-        url = f"{self._host.rstrip('/')}/api/ps"
+        # La sonde est ``POST /api/me``, pas ``GET /api/ps``. Mesuré le
+        # 2026-08-30 contre ollama.com, clé valide en main :
+        #
+        #   GET  /api/tags    200 avec clé, 200 sans  → ne discrimine pas
+        #   GET  /api/version 200 / 200               → ne discrimine pas
+        #   GET  /api/ps      401 avec clé, 401 sans  → ne discrimine plus
+        #   POST /api/chat    200 avec clé, 401 sans  → discrimine, mais paie
+        #                                               une génération
+        #   POST /api/me      200 avec clé, 401 sans  → discrimine, gratuit
+        #
+        # ``/api/ps`` répondait 200 sur clé valide quand ce provider a été
+        # écrit ; l'hôte a changé d'avis depuis. Le bouton « tester » déclarait
+        # donc refusée *toute* clé, valide comprise, pendant que les tours de
+        # conversation passaient — le seul écran qui sert à réparer la config
+        # accusait la seule chose qui marchait.
+        url = f"{self._host.rstrip('/')}/api/me"
         try:
             async with httpx.AsyncClient(timeout=10.0, headers=self._headers()) as client:
-                resp = await client.get(url)
+                resp = await client.post(url, json={})
         except Exception as exc:  # noqa: BLE001 — surfaced to the user
             return {"ok": False, "model_count": 0,
                     "error": f"{self._host} injoignable : {exc}"}
 
         # Only an explicit rejection is a failure. A host that doesn't serve
-        # /api/ps (a self-hosted gateway, a future version) answers 404 or
+        # /api/me (a self-hosted gateway, a future version) answers 404 or
         # 405, which says nothing about the credential — don't read it as bad.
         if resp.status_code in (401, 403):
             return {"ok": False, "model_count": 0,

@@ -44,6 +44,8 @@ export interface PendingProjectAction {
 export interface InnerState {
   drives?: Record<string, { tension: number; last_satisfied: number }>;
   energy?: number;
+  /** Estime de soi ∈ [0,1] — la variable lente ; absente si illisible. */
+  estime?: number;
   circadian?: {
     phase: "morning" | "afternoon" | "evening" | "night";
     hour: number;

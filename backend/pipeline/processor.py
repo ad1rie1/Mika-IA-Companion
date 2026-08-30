@@ -32,6 +32,20 @@ from pipeline.broadcast import (
 from pipeline.context import ConversationContext, gather_context
 from pipeline.perception import Intent, Perception
 from pipeline.response import call_ai_and_parse
+
+
+class _ReponseVide(Exception):
+    """L'appel a réussi et n'a produit aucun texte.
+
+    Mesuré sur ollama_cloud : ``thinking`` actif sur un tour outillé, et le
+    plafond de sortie part entièrement dans le raisonnement — l'API répond
+    200 avec ``response=0 chars``, sortie pile au plafond. Sans ce garde-fou
+    la trame ``speech`` partait vide *et parlée*, la phrase vide était
+    persistée comme quelque chose que Mika avait dit, et le tour comptait
+    comme un échange réussi : impulsion émotionnelle, événement de chat,
+    annonce ``_turn.completed``. Une réponse vide n'est pas une réponse.
+    """
+
 from pipeline.signals import publish_turn_completed
 from pipeline.tracing import set_current_person_id, set_new_request_id
 from utils.degradation import degradations
@@ -236,6 +250,11 @@ async def process_message(
             timeout=timeout_seconds,
         )
 
+        if not (response_text or "").strip():
+            raise _ReponseVide(
+                f"{len(tool_calls)} outil(s) appelé(s), aucun texte produit"
+            )
+
     except asyncio.TimeoutError:
         logger.warning(
             "AI call timed out after %ds (person=%s, source=%s)",
@@ -269,6 +288,15 @@ async def process_message(
             "Desolee, j'ai atteint la limite d'usage IA pour le moment. "
             "Reessaie un peu plus tard."
         )
+        emotion_data = None
+    except _ReponseVide as vide:
+        logger.warning(
+            "Réponse vide du modèle (person=%s, source=%s): %s — "
+            "vérifie ai.<provider>.thinking et le plafond de sortie",
+            person_id, source, vide,
+        )
+        ai_failed = True
+        response_text = "Attends... j'ai perdu le fil, je n'ai rien reussi a formuler. Tu redis ?"
         emotion_data = None
     except Exception:
         logger.exception(

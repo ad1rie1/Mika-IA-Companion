@@ -39,7 +39,7 @@ from conscience.scoring import (
     ScoringTuning,
     compute_decision_score,
 )
-from conscience import travaux
+from conscience import estime, travaux
 from conscience.conduite import (
     Conduite,
     ConduiteTuning,
@@ -334,6 +334,19 @@ class ConscienceEngine:
         so the VTuber actually *feels* what she observes.
         """
         signal = await self.interpreter.interpret(event)
+
+        # Percevoir AVEC son état, avant tout le reste : l'habituation
+        # (le répété s'efface) puis la congruence d'humeur (bornée,
+        # anti-spirale). Placées ici, elles gatent tout l'aval — souvenir
+        # immédiat, urgence accumulée, fast-path, graines de chantier —
+        # exactement comme un filtre d'attention humain.
+        signal.pertinence = self._habituer(
+            event.source_module, event.event_type, signal.pertinence,
+        )
+        signal.pertinence = self._colorer_par_l_humeur(
+            signal.pertinence, signal.emotional_reaction,
+        )
+
         observation = await self._store_observation(event, signal)
 
         # Feed emotional reaction into the EmotionEngine
@@ -386,6 +399,100 @@ class ConscienceEngine:
                 signal.pertinence,
             )
             self._spawn_decision()
+
+    # ── L'entrée perçue avec son état ─────────────────────────────
+    #
+    # Le déficit transversal du dossier psychologique : l'affect colorait la
+    # sortie (prompt, voix, rappel) mais jamais l'ENTRÉE. Chez l'humain,
+    # l'émotion est un filtre de perception avant d'être une couleur
+    # d'expression — et le répété s'efface (habituation), l'apprentissage le
+    # plus élémentaire. Constantes de la famille des ancres PAD.
+
+    #: Fenêtre de l'habituation : le même type d'événement de la même source,
+    #: répété dans cette fenêtre, pèse de moins en moins.
+    _HABITUATION_FENETRE_S = 600.0
+    #: Amortissement par répétition (0.85^n), et plancher — le quarantième
+    #: titre n'est pas rien, il est juste devenu du fond sonore.
+    _HABITUATION_AMORTISSEMENT = 0.85
+    _HABITUATION_PLANCHER = 0.4
+    #: Bornes RAM du mémo.
+    _HABITUATION_MAX_OCCURRENCES = 20
+    _HABITUATION_MAX_CLES = 200
+
+    #: Congruence d'humeur à l'entrée : un signal dont la réaction
+    #: émotionnelle va dans le sens de l'humeur courante pèse un peu plus —
+    #: la vigilance anxieuse, l'élargissement joyeux. Borné petit (±15 %) et
+    #: **amorti ×0.5 quand l'humeur est négative** : le même anti-spirale que
+    #: le rappel congruent, sans quoi « sombre → signaux sombres plus
+    #: pertinents → plus sombre » s'auto-entretient.
+    _MOOD_ENTREE_POIDS = 0.15
+    _MOOD_ENTREE_AMORTI_NEGATIF = 0.5
+
+    def _habituer(self, source: str, event_type: str, pertinence: float) -> float:
+        """Amortit la pertinence d'un signal répété. Ne lève jamais.
+
+        Le mémo est en RAM (perdre l'habituation au redémarrage coûte au
+        pire un signal compté plein une fois de trop) et posé par ``getattr``
+        — les tests construisent le moteur par ``__new__``.
+        """
+        try:
+            memo = getattr(self, "_habituation", None)
+            if memo is None:
+                memo = {}
+                self._habituation = memo
+            cle = (str(source), str(event_type))
+            maintenant = time.monotonic()
+            recents = [
+                t for t in memo.get(cle, ())
+                if maintenant - t < self._HABITUATION_FENETRE_S
+            ]
+            deja = len(recents)
+            recents.append(maintenant)
+            memo[cle] = recents[-self._HABITUATION_MAX_OCCURRENCES:]
+            if len(memo) > self._HABITUATION_MAX_CLES:
+                memo.pop(next(iter(memo)))
+            if deja == 0:
+                return pertinence
+            facteur = max(
+                self._HABITUATION_PLANCHER,
+                self._HABITUATION_AMORTISSEMENT ** deja,
+            )
+            return pertinence * facteur
+        except Exception as exc:
+            degradations.record("conscience: habituation", exc)
+            return pertinence
+
+    def _colorer_par_l_humeur(self, pertinence: float, reaction: str) -> float:
+        """Module légèrement la pertinence par la congruence avec l'humeur.
+
+        Ne touche que les signaux émotionnellement typés (la plupart des
+        heuristiques ne le sont pas — modulation conservatrice par
+        construction), n'amplifie jamais de plus de ±15 %, et jamais
+        au-dessus de 1.0. Ne lève jamais.
+        """
+        if not reaction:
+            return pertinence
+        try:
+            from emotion import pad
+            from emotion.types import Emotion
+
+            ancre = pad.EMOTION_ANCHORS.get(Emotion(reaction))
+            humeur = emotion_engine.global_mood.dynamic.position
+            if not ancre:
+                return pertinence
+            na, nh = pad.norm(ancre), pad.norm(humeur)
+            if na < 1e-6 or nh < 1e-6:
+                return pertinence
+            cos = pad.dot(ancre, humeur) / (na * nh)
+            if cos <= 0.0:
+                return pertinence
+            poids = self._MOOD_ENTREE_POIDS
+            if humeur[0] < 0:
+                poids *= self._MOOD_ENTREE_AMORTI_NEGATIF
+            return min(1.0, pertinence * (1.0 + poids * cos))
+        except Exception as exc:
+            degradations.record("conscience: congruence d'entree", exc)
+            return pertinence
 
     @staticmethod
     def _feed_emotion(signal: InterpretedSignal) -> None:
@@ -506,6 +613,12 @@ class ConscienceEngine:
         """Inner decision logic (caller must hold _decision_lock)."""
         resultat = ActeResultat()
         ctx = await self._build_context()
+
+        # La détresse se mesure en durée : le suivi doit tourner même les
+        # cycles muets, sinon « depuis un quart d'heure » n'existe jamais.
+        self._suivre_la_detresse(ctx)
+        # Et l'estime encaisse les changements du social : ignorée / répondu.
+        await self._suivre_l_estime_sociale(ctx)
 
         # Memory maintenance (runs every cycle, even without acting)
         memory_actions = await self._memory_maintenance(ctx)
@@ -649,6 +762,10 @@ class ConscienceEngine:
             # émotions et rien ne le produisait : une après-midi sans rien
             # laissait l'humeur là où le matin l'avait posée.
             self._peut_etre_s_ennuyer(ctx, travaux)
+            # Et ce qui vient en a une aussi : un rendez-vous proche ou un
+            # chantier presque au bout glissent vers l'espoir — le futur
+            # cesse d'être un calendrier sans affect.
+            await self._peut_etre_esperer(ctx, travaux)
 
         # Log the decision — written after the act, whose outcome is part of
         # what the cycle decided (and what _introspect / _restore_cooldown read).
@@ -673,6 +790,15 @@ class ConscienceEngine:
     #: pendant toute l'après-midi vide — même leçon que la saignée des
     #: ruminations.
     _ENNUI_INTERVAL_S = 1800.0
+    #: Tension SOCIAL à partir de laquelle le vide se ressent comme de la
+    #: SOLITUDE plutôt que de l'ennui. `lonely` n'était produit nulle part
+    #: par la vie interne : SOCIAL débordait en *score* (elle agissait),
+    #: jamais en *ressenti* — le parallèle exact de l'ennui d'avant son
+    #: correctif. S'ennuyer, c'est ne rien avoir à faire ; se sentir seule,
+    #: c'est vouloir quelqu'un. Alignée sur la porte d'élargissement de la
+    #: trousse (0.50 la saillance « réelle ») + une marge : la solitude est
+    #: un sentiment plus rare que l'envie de compagnie.
+    _SOLITUDE_PORTE_SOCIAL = 0.6
     #: Horodatage monotone du dernier glissement. Attribut de CLASSE : les
     #: tests construisent le moteur par `__new__` (voir `_cycles_sautes`).
     _dernier_ennui: float = 0.0
@@ -714,12 +840,180 @@ class ConscienceEngine:
 
             from emotion.types import Emotion, EmotionData
 
+            # Le même vide n'a pas la même couleur selon ce qui manque :
+            # rien à faire → ennui ; quelqu'un → solitude. SOCIAL haut
+            # pendant une longue absence, c'est « je veux de la compagnie »,
+            # pas « je veux de l'occupation ».
+            emotion = Emotion.BORED
+            try:
+                from drives.state import DriveKind
+
+                social = float(drive_engine.states[DriveKind.SOCIAL].tension)
+            except Exception as exc:
+                degradations.record("conscience: tension sociale illisible", exc)
+                social = 0.0
+            if social >= self._SOLITUDE_PORTE_SOCIAL:
+                emotion = Emotion.LONELY
+
             emotion_engine.process_emotion(
-                EmotionData(Emotion.BORED, intensite), "conscience_mika",
+                EmotionData(emotion, intensite), "conscience_mika",
             )
-            logger.debug("Ennui: glissement d'humeur (%.2f)", intensite)
+            logger.debug(
+                "Vide prolongé: glissement vers %s (%.2f)",
+                emotion.value, intensite,
+            )
         except Exception as exc:
             degradations.record("conscience: glissement d'ennui", exc)
+
+    #: La détresse — quand ça va mal, on va vers quelqu'un. Les seuils : une
+    #: valence franchement négative (l'ancre PAD de l'humeur), une intensité
+    #: qui se sent, et de la DURÉE — un pic de contrariété n'est pas une
+    #: détresse, un quart d'heure sombre en est une. Constantes de la famille
+    #: des ancres PAD, pas des clés.
+    _DETRESSE_VALENCE_MAX = -0.35
+    _DETRESSE_INTENSITE_MIN = 0.55
+    _DETRESSE_DUREE_MIN_S = 900.0
+    #: Depuis quand l'humeur est sombre (monotone ; 0 = elle ne l'est pas).
+    #: Attribut de classe — moteurs construits par `__new__`.
+    _detresse_depuis: float = 0.0
+
+    def _suivre_la_detresse(self, ctx: DecisionContext) -> None:
+        """Suivre si l'humeur sombre DURE. Appelé à chaque cycle, mutation
+        pure-RAM, ne lève jamais. La détection et la lecture sont séparées :
+        celle-ci doit tourner même les tours où elle ne parle pas, sinon la
+        durée ne se mesure jamais."""
+        try:
+            from emotion import pad
+            from emotion.types import Emotion
+
+            sombre = (
+                pad.valence(Emotion(ctx.global_mood)) <= self._DETRESSE_VALENCE_MAX
+                and ctx.global_intensity >= self._DETRESSE_INTENSITE_MIN
+            )
+        except Exception:
+            sombre = False
+        if sombre:
+            if not self._detresse_depuis:
+                self._detresse_depuis = time.monotonic()
+        else:
+            self._detresse_depuis = 0.0
+
+    def _detresse_soutenue(self) -> bool:
+        """L'humeur est-elle sombre depuis assez longtemps pour chercher du
+        réconfort ?"""
+        return bool(
+            self._detresse_depuis
+            and time.monotonic() - self._detresse_depuis
+            >= self._DETRESSE_DUREE_MIN_S
+        )
+
+    #: Dernier compte d'initiatives ignorées jugé — pour ne prendre le coup
+    #: d'estime qu'au CHANGEMENT, jamais en boucle. Attribut de classe
+    #: (moteurs `__new__`).
+    _ignores_vus: int = 0
+
+    async def _suivre_l_estime_sociale(self, ctx: DecisionContext) -> None:
+        """Être ignorée entame la valeur propre ; une réponse qui rompt la
+        série la répare — un peu plus qu'un coup, le soulagement de « je
+        compte encore ».
+
+        Le jugement attend que la fenêtre de réponse du dernier acte soit
+        écoulée : `_introspect` compte « ignoré » tout acte encore sans
+        réponse, y compris celui d'il y a une minute — juger pendant la
+        fenêtre prendrait un coup d'estime à CHAQUE initiative, réponse ou
+        pas. Ne lève jamais.
+        """
+        try:
+            fenetre_s = self._ignored_reply_window_minutes() * 60
+            if (
+                self._last_action_time
+                and time.time() - self._last_action_time < fenetre_s
+            ):
+                return  # le verdict du dernier acte n'est pas encore tombé
+            vus = self._ignores_vus
+            courant = ctx.consecutive_ignored_acts
+            self._ignores_vus = courant
+            if courant > vus:
+                await estime.ressentir(
+                    estime.COUP_INITIATIVE_IGNOREE, "initiative ignorée",
+                )
+            elif vus > 0 and courant == 0:
+                await estime.ressentir(
+                    estime.COUP_SERIE_ROMPUE, "on m'a répondu",
+                )
+        except Exception as exc:
+            degradations.record("conscience: estime sociale", exc)
+
+    #: L'anticipation — la moitié manquante de la vie émotionnelle : elle
+    #: avait un passé riche (souvenirs, journal, rêves) et aucun futur vécu.
+    #: Un rendez-vous proche et prioritaire, ou un chantier à un pas du bout,
+    #: glisse l'humeur vers l'espoir. Mêmes principes que l'ennui : une
+    #: teinte espacée, jamais un matraquage, et des constantes de la famille
+    #: des ancres PAD.
+    _ESPOIR_INTERVAL_S = 1800.0
+    _ESPOIR_INTENSITE = 0.25
+    #: Un rendez-vous « proche » : dans l'heure, et qui compte vraiment.
+    _ESPOIR_FENETRE_MIN = 60
+    _ESPOIR_PRIORITE_MIN = 0.6
+    #: Horodatage monotone du dernier glissement d'espoir (attribut de
+    #: classe — moteurs construits par `__new__`).
+    _dernier_espoir: float = 0.0
+
+    async def _peut_etre_esperer(self, ctx: DecisionContext, travaux: list) -> None:
+        """Quelque chose de bien approche : l'humeur glisse vers l'espoir.
+
+        Deux sources, la moins chère d'abord : un **chantier à un pas du
+        bout** (gratuit — la liste est déjà en main), sinon un **rendez-vous
+        dans l'heure** assez prioritaire (une requête bornée, payée seulement
+        après l'étranglement). Peut cohabiter avec l'ennui dans le même
+        cycle : une après-midi vide où on attend quelqu'un est exactement ce
+        mélange-là. Ne lève jamais.
+        """
+        try:
+            if ctx.sleep_phase != "awake":
+                return
+            maintenant = time.monotonic()
+            if (
+                self._dernier_espoir
+                and maintenant - self._dernier_espoir < self._ESPOIR_INTERVAL_S
+            ):
+                return
+            # Marqué à la TENTATIVE, pas au succès — la leçon du murmure :
+            # sans ça, chaque cycle sans espoir repaye la requête des
+            # rendez-vous à venir, 2 880 fois par jour.
+            self._dernier_espoir = maintenant
+
+            presque_fini = any(
+                t.pas_max
+                and t.pas_effectues >= t.pas_max - 1
+                and not t.en_attente_de_reponse
+                for t in (travaux or ())
+            )
+            rendez_vous_proche = False
+            if not presque_fini:
+                for action, minutes in await self._get_upcoming_actions():
+                    if (
+                        minutes <= self._ESPOIR_FENETRE_MIN
+                        and getattr(action, "priority", 0.0)
+                        >= self._ESPOIR_PRIORITE_MIN
+                    ):
+                        rendez_vous_proche = True
+                        break
+            if not (presque_fini or rendez_vous_proche):
+                return
+
+            from emotion.types import Emotion, EmotionData
+
+            emotion_engine.process_emotion(
+                EmotionData(Emotion.HOPEFUL, self._ESPOIR_INTENSITE),
+                "conscience_mika",
+            )
+            logger.debug(
+                "Anticipation: glissement vers hopeful (%s)",
+                "chantier presque au bout" if presque_fini else "rendez-vous proche",
+            )
+        except Exception as exc:
+            degradations.record("conscience: glissement d'espoir", exc)
 
     _DRIVE_SAVE_INTERVAL_S = 300
 
@@ -1876,6 +2170,100 @@ class ConscienceEngine:
         await self._promote_stale_to_ruminations()
         # Decay existing ruminations over each cycle.
         await self._decay_ruminations()
+        # Le retour d'un absent se ressent — l'autre moitié de l'embryon du
+        # modèle d'attentes.
+        await self._le_retour_d_un_absent()
+
+    #: Joie du retour de quelqu'un qui manquait, et cadence du balayage.
+    #: La pensée « j'aimerais avoir des nouvelles de X » ne faisait que se
+    #: faner ; quand X redonne signe, elle se RÉSOUT — avec de la joie, pas
+    #: par le temps. C'est une prédiction tenue par le système (le manque)
+    #: qui se réalise et qui, enfin, se ressent.
+    _RETOUR_ABSENT_JOIE = 0.4
+    _RETOUR_SCAN_INTERVAL_S = 300.0
+    _dernier_retour_scan: float = 0.0
+
+    async def _le_retour_d_un_absent(self) -> None:
+        """Résout avec joie les pensées d'absents dont la personne a réécrit.
+
+        Balayage étranglé (5 min) et payé seulement s'il existe des pensées
+        nostalgiques à thème nominal — jamais sur le chemin chaud d'un
+        message entrant. Le nom se résout par la couche identité au moment du
+        scan, jamais à l'écriture ; le brief interne d'un acte est exclu, ou
+        son propre message vers X compterait comme le retour de X. Ne lève
+        jamais.
+        """
+        try:
+            maintenant = time.monotonic()
+            if (
+                self._dernier_retour_scan
+                and maintenant - self._dernier_retour_scan
+                < self._RETOUR_SCAN_INTERVAL_S
+            ):
+                return
+            self._dernier_retour_scan = maintenant
+
+            from conscience.models import Rumination
+
+            def _pensees() -> list[dict]:
+                return list(
+                    Rumination.objects.filter(
+                        status="active", emotion="nostalgic",
+                    )
+                    .exclude(themes=[])
+                    .values("id", "themes", "created_at")[:5]
+                )
+
+            pensees = await sync_to_async(_pensees)()
+            pensees = [p for p in pensees if p.get("themes")]
+            if not pensees:
+                return
+
+            from identity.resolver import identity_resolver
+
+            noms = sorted({str(p["themes"][0]) for p in pensees})
+            handle_map = await identity_resolver.handles_for_entity_names(noms)
+
+            revenus = 0
+            for pensee in pensees:
+                nom = str(pensee["themes"][0])
+                pids = {h["person_id"] for h in handle_map.get(nom, [])}
+                if not pids:
+                    continue
+
+                def _reecrit(pids=tuple(pids), depuis=pensee["created_at"]):
+                    from memory.models import Message
+
+                    return (
+                        Message.objects.filter(
+                            person_id__in=list(pids), role="user",
+                            created_at__gt=depuis,
+                        )
+                        .exclude(is_internal=True)
+                        .exists()
+                    )
+
+                if not await sync_to_async(_reecrit)():
+                    continue
+                fait = await sync_to_async(
+                    lambda pk=pensee["id"]: Rumination.objects.filter(
+                        pk=pk, status="active",
+                    ).update(status="resolved"),
+                    thread_sensitive=True,
+                )()
+                if fait:
+                    revenus += 1
+                    logger.info("Retour d'un absent : %s a redonné signe", nom)
+
+            if revenus:
+                from emotion.types import Emotion, EmotionData
+
+                emotion_engine.process_emotion(
+                    EmotionData(Emotion.HAPPY, self._RETOUR_ABSENT_JOIE),
+                    "conscience_mika",
+                )
+        except Exception as exc:
+            degradations.record("conscience: retour d'un absent", exc)
 
     # Cadence et taille de lot de la purge. La donnee visee a 48h, le cycle de
     # decision tourne toutes les 30s : un passage par heure suffit, sur la
@@ -2354,6 +2742,12 @@ class ConscienceEngine:
         )
         if not candidates:
             candidates = self._candidats_presents()
+        if not candidates and self._detresse_soutenue():
+            # Quand ça va mal depuis un moment et que personne n'est là, on
+            # va vers le proche auprès de qui on se sent bien — la régulation
+            # émotionnelle est sociale. AVANT le manque : la détresse choisit
+            # le réconfortant, pas le plus longtemps silencieux.
+            candidates = await self.memory.who_comforts(n=1)
         if not candidates:
             # n=1 : quand on a envie de parler, on pense à QUELQU'UN — la
             # personne au plus fort manque — pas à une liste de contacts.
@@ -2800,6 +3194,9 @@ class ConscienceEngine:
     #: puis la rampe qui en tire l'intensité de la micro-rumination. Replis :
     #: les mêmes valeurs qu'avant le rapatriement en configuration.
     _AUDIT_MIN_INTENSITY: float = 0.55
+    #: Pente de la modulation par l'estime : à 0.95 d'estime le seuil monte
+    #: de ~0.135 (on se rejoue moins), à 0.05 il descend d'autant.
+    _AUDIT_ESTIME_PENTE: float = 0.3
     _AUDIT_BASE_INTENSITY: float = 0.2
     _AUDIT_SLOPE: float = 0.5
     _AUDIT_MAX_INTENSITY: float = 0.45
@@ -2844,6 +3241,13 @@ class ConscienceEngine:
             "conscience.audit.min_intensity", self._AUDIT_MIN_INTENSITY,
             mini=0.0, maxi=1.0,
         )
+        # L'estime module l'auto-critique : quand elle doute d'elle, elle se
+        # rejoue plus facilement ; sûre d'elle, moins. C'est le premier effet
+        # comportemental de la valeur propre — et il ne touche pas le score.
+        with degraded("conscience: estime dans l'audit"):
+            seuil += (
+                await estime.lire() - estime.BASELINE
+            ) * self._AUDIT_ESTIME_PENTE
         if intensity < seuil:
             return
         if person_id == "conscience_mika":
