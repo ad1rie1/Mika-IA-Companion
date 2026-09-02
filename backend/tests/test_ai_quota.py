@@ -96,14 +96,15 @@ class _patched_router:
 class TestPricingLookup:
 
     def test_exact_match(self):
+        # Tarif Opus depuis 4.6 : $5/$25 le million (skill claude-api).
         in_rate, out_rate = _lookup_pricing("claude", "claude-opus-4-7")
-        assert in_rate == pytest.approx(15 / 1_000_000)
-        assert out_rate == pytest.approx(75 / 1_000_000)
+        assert in_rate == pytest.approx(5 / 1_000_000)
+        assert out_rate == pytest.approx(25 / 1_000_000)
 
     def test_prefix_match_picks_longest(self):
         # "claude-opus-4-99" is unknown, but "claude-opus-4" prefix matches
         in_rate, out_rate = _lookup_pricing("claude", "claude-opus-4-99")
-        assert in_rate == pytest.approx(15 / 1_000_000)
+        assert in_rate == pytest.approx(5 / 1_000_000)
 
     def test_ollama_is_free(self):
         in_rate, out_rate = _lookup_pricing("ollama", "llama3")
@@ -197,8 +198,8 @@ class TestQuotaTrackerRecord:
             role="conversation", provider="claude", model="claude-opus-4-7",
             tokens_in=1000, tokens_out=1000,
         )
-        # 1000 * 15/1M + 1000 * 75/1M = 0.015 + 0.075 = 0.09
-        assert cost == pytest.approx(0.09)
+        # 1000 * 5/1M + 1000 * 25/1M = 0.005 + 0.025 = 0.03
+        assert cost == pytest.approx(0.03)
 
     def test_record_aggregates_across_calls(self):
         tracker = QuotaTracker()

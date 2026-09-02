@@ -229,9 +229,19 @@ class TestHandleRegistration:
         from identity.models import Identity
         from memory.models import Entity
 
+        from django.contrib.auth import get_user_model
+
+        # Le nom de l'Entity vient du compte (règle de /auth/whoami : nom
+        # complet, sinon nom d'utilisateur), jamais de la trame : un compte
+        # connecté pouvait envoyer ``display_name: "Thomas"`` et recevoir le
+        # dossier de Thomas à certitude VERIFIED.
+        user = await sync_to_async(get_user_model().objects.create_user)(
+            username="alice_login", password="Motdepasse-Long-42", first_name="Alice",
+        )
         c = _make_consumer()
+        c.scope = {"user": user}
         c.person_id = "user_7"
-        c.display_name = "Alice"
+        c.display_name = "Mallory"  # ce que la trame prétend — ignoré
         c.authenticated = True
         c._group = "vtuber_person_user_7"
         await c._register_presence()
@@ -242,6 +252,10 @@ class TestHandleRegistration:
             ).first()
         )()
         assert entity is not None, "une session authentifiée EST une personne connue"
+        usurpee = await sync_to_async(
+            lambda: Entity.objects.filter(name="Mallory").exists()
+        )()
+        assert not usurpee, "le nom de la trame ne nomme jamais l'Entity"
 
         identity = await sync_to_async(
             lambda: Identity.objects.filter(entity=entity).first()

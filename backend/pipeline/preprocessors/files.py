@@ -22,6 +22,7 @@ import asyncio
 import logging
 
 from configs.runtime import cfg_int
+from pipeline.media import sanitize_filename
 from pipeline.perception import Part
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,9 @@ _TEXT_MIME_EXACT = {
 async def process(part: Part) -> Part:
     """Convert a file Part into a text Part with the extracted content
     (or a descriptor placeholder when extraction is impossible)."""
-    name = part.metadata.get("name") or "fichier"
+    # Le nom repart dans le tour utilisateur (en-tête et pied du bloc) : borné
+    # ici aussi, quel que soit le chemin qui a construit la Part.
+    name = sanitize_filename(part.metadata.get("name") or "fichier")
     mime = (part.mime_type or "application/octet-stream").lower().split(";")[0].strip()
     ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
 

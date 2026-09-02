@@ -331,15 +331,30 @@ class TestDoubtAndRevocation:
         )
         assert await identity_resolver.entity_for_person("tg_42") is None
 
-    async def test_denial_of_another_name_lowers_without_unbinding(self):
+    async def test_denial_of_an_unrelated_name_changes_nothing(self):
+        """« Je ne suis pas Julie » ne dit rien de la liaison a Thomas.
+
+        Ca retirait −0.50 et ecrivait une ligne « denied » acceptee, donc
+        chaque « c'est pas grave » entamait la certitude. Un nom sans rapport
+        avec la liaison n'est pas une contre-preuve, et rien n'est ecrit.
+        """
+        from identity.models import IdentityClaim, IdentityHandle
+
         await _handle("tg_42")
         await identity_resolver.link_entity("tg_42", "Thomas")
+        certitude = lambda: IdentityHandle.objects.select_related(
+            "identity").get(person_id="tg_42").identity.certainty
+        avant = await sync_to_async(certitude)()
 
         await identity_resolver.ingest_message(
             "tg_42", "je ne suis pas Julie", channel="telegram",
         )
         entity = await identity_resolver.entity_for_person("tg_42")
         assert entity is not None and entity.name == "Thomas"
+        assert await sync_to_async(certitude)() == avant
+        assert await sync_to_async(
+            IdentityClaim.objects.filter(kind=IdentityClaim.Kind.DENIED).count
+        )() == 0
 
     async def test_contradiction_below_threshold_unbinds(self):
         await _handle("tg_42")

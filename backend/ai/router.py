@@ -29,8 +29,10 @@ from ai.quota import (
     estimate_tokens_from_chars,
     quota_tracker,
     _reset_usage,
+    _restore_usage,
     _take_usage,
 )
+from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
@@ -221,18 +223,14 @@ class AIRouter:
         """Read role → internal_name mappings from the config service."""
         from configs.service import config_service
 
-        role_keys = {
-            AIRole.CONVERSATION:          "ai.role.conversation",
-            AIRole.CONVERSATION_TOOLS:    "ai.role.conversation_tools",
-            AIRole.EMAIL_TRIAGE:          "ai.role.email_triage",
-            AIRole.SIGNAL_INTERPRETATION: "ai.role.signal_interpretation",
-            AIRole.MEMORY_EXTRACTION:     "ai.role.memory_extraction",
-            AIRole.VALIDITY_CHECK:        "ai.role.validity_check",
-            AIRole.VISION_CAPTION:        "ai.role.vision_caption",
-            AIRole.INNER_VOICE:           "ai.role.inner_voice",
-            AIRole.PREPARATION:           "ai.role.preparation",
-            AIRole.COMPACTION:            "ai.role.compaction",
-        }
+        # Dérivée de l'énumération, jamais recopiée : la table écrite à la
+        # main listait dix rôles sur onze. ``project_work`` avait sa ligne
+        # dans le tableau de bord et ``_reload_role`` le prenait bien au
+        # changement à chaud — mais au démarrage il n'était pas lu, donc
+        # chaque redémarrage renvoyait le lanceur de projets sur
+        # ``memory_extraction`` sans rien dire. La clé suit ``role.value``,
+        # exactement comme ``_reload_role`` la décode.
+        role_keys = {role: f"ai.role.{role.value}" for role in AIRole}
         for role, cfg_key in role_keys.items():
             name = (config_service.get(cfg_key, default="") or "").strip()
             if name:
@@ -495,10 +493,6 @@ class AIRouter:
             role.value, internal_name, provider_name, model, prompt_chars, project_id,
         )
 
-        # L'usage se cumule d'un tour d'outils à l'autre : on part de zéro
-        # pour ne pas facturer le reliquat d'un appel précédent.
-        _reset_usage()
-
         # Réservation du créneau. Un appel imbriqué réutilise celui de son
         # appelant : il tourne déjà *dans* le créneau qu'il attendrait.
         #
@@ -533,6 +527,16 @@ class AIRouter:
         wait_ms = (t_call - t_wait) * 1000
         remaining_s = max(0.0, timeout_s - (t_call - t_wait))
 
+        # L'usage se cumule d'un tour d'outils à l'autre : on ouvre une
+        # fenêtre de relevé vierge pour ne pas facturer le reliquat d'un
+        # appel précédent. Une *fenêtre*, pas une remise à zéro : un outil
+        # MCP relance le routeur depuis l'intérieur de la boucle d'outils, et
+        # une remise à zéro plate y effaçait ce que la boucle englobante
+        # avait déjà cumulé (OpenAI, GLM, Ollama et Gemini remontent leur
+        # usage itération par itération). Le jeton rend au ``finally`` le
+        # relevé de l'appelant tel qu'il était.
+        usage_token = _reset_usage()
+
         try:
             result, text = await asyncio.wait_for(
                 invoke(provider, model, temperature, max_tokens),
@@ -542,21 +546,25 @@ class AIRouter:
 
             usage = _take_usage()
             if usage:
-                tokens_in = int(usage.get("in", 0))
-                tokens_out = int(usage.get("out", 0))
+                tokens_in, tokens_out, cache_read, cache_write = _split_usage(usage)
                 # Calibration chars→tokens sur l'usage RÉEL uniquement, et
                 # jamais sur une boucle d'outils (son usage cumule les
                 # itérations et les lectures de cache — l'échantillon serait
-                # faux par construction).
+                # faux par construction). Le prompt réel est la somme : un
+                # jeton lu depuis le cache est un jeton du prompt.
                 if calibrate:
                     try:
                         from ai.calibration import calibration
-                        calibration.record(provider_name, prompt_chars, tokens_in)
+                        calibration.record(
+                            provider_name, prompt_chars,
+                            tokens_in + cache_read + cache_write,
+                        )
                     except Exception:
                         pass
             else:
                 tokens_in = expected_in
                 tokens_out = estimate_tokens_from_chars(len(text))
+                cache_read = cache_write = 0
 
             cost_usd = quota_tracker.record(
                 role=role.value,
@@ -565,15 +573,18 @@ class AIRouter:
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
                 project_id=project_id,
+                cache_read_tokens=cache_read,
+                cache_write_tokens=cache_write,
             )
 
             logger.info(
                 "AI call OK     role=%-22s internal=%-18s provider=%-7s model=%-30s "
-                "prompt=%5d chars  response=%5d chars  tok=%d/%d  $%.5f  %7.0f ms "
-                "(attente %.0f ms)",
+                "prompt=%5d chars  response=%5d chars  tok=%d/%d  cache=%d/%d  "
+                "$%.5f  %7.0f ms (attente %.0f ms)",
                 role.value, internal_name, provider_name, model,
                 prompt_chars, len(text),
-                tokens_in, tokens_out, cost_usd, elapsed_ms, wait_ms,
+                tokens_in, tokens_out, cache_read, cache_write,
+                cost_usd, elapsed_ms, wait_ms,
             )
             return result
 
@@ -589,6 +600,9 @@ class AIRouter:
                 role.value, internal_name, provider_name, model,
                 prompt_chars, elapsed_ms, timeout_s, wait_ms,
             )
+            self._record_partial_usage(
+                role, provider_name, model, project_id, note="TIMEOUT",
+            )
             raise
 
         except Exception:
@@ -599,12 +613,62 @@ class AIRouter:
                 role.value, internal_name, provider_name, model,
                 prompt_chars, elapsed_ms, wait_ms,
             )
+            self._record_partial_usage(
+                role, provider_name, model, project_id, note="FAILED",
+            )
             raise
 
         finally:
             if slot_token is not None:
                 _held_providers.reset(slot_token)
                 semaphore.release()
+            _restore_usage(usage_token)
+
+    def _record_partial_usage(
+        self, role: AIRole, provider_name: str, model: str, project_id, *, note: str,
+    ) -> None:
+        """Comptabilise ce qu'un appel raté a quand même consommé.
+
+        Un timeout tombe souvent *après* que le provider a répondu à une ou
+        plusieurs itérations de sa boucle d'outils, et une exception peut
+        suivre une génération complète (un handler qui lève hors boucle, un
+        4xx au second tour) : ces jetons ont été facturés. Ils restaient dans
+        le ContextVar jusqu'à la fenêtre de l'appel suivant, qui les
+        effaçait — le quota ne voyait jamais un appel raté, et un modèle en
+        timeout permanent consommait sans borne sous un compteur immobile.
+        Jamais une exception : la comptabilité ne doit pas masquer l'erreur
+        d'origine, qui est en train de remonter.
+        """
+        try:
+            usage = _take_usage()
+        except Exception as exc:
+            degradations.record("ai.router.partial_usage", exc)
+            return
+        if not usage:
+            return
+        tokens_in, tokens_out, cache_read, cache_write = _split_usage(usage)
+        if not (tokens_in or tokens_out or cache_read or cache_write):
+            return
+        try:
+            cost_usd = quota_tracker.record(
+                role=role.value,
+                provider=provider_name,
+                model=model,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                project_id=project_id,
+                cache_read_tokens=cache_read,
+                cache_write_tokens=cache_write,
+            )
+        except Exception as exc:
+            degradations.record("ai.router.partial_usage", exc)
+            return
+        logger.warning(
+            "AI call %s — usage partiel comptabilisé role=%s provider=%s "
+            "model=%s tok=%d/%d cache=%d/%d $%.5f",
+            note, role.value, provider_name, model,
+            tokens_in, tokens_out, cache_read, cache_write, cost_usd,
+        )
 
     async def complete(
         self,
@@ -738,6 +802,20 @@ class AIRouter:
             extra_prompt_chars=_tools_prompt_chars(tools),
             calibrate=False,
         )
+
+
+def _split_usage(usage: dict) -> tuple[int, int, int, int]:
+    """``(in, out, cache_read, cache_write)`` depuis le relevé du provider.
+
+    Les clés de cache sont optionnelles : seul Claude les remonte, les autres
+    providers ne posent que ``in``/``out``.
+    """
+    return (
+        int(usage.get("in", 0) or 0),
+        int(usage.get("out", 0) or 0),
+        int(usage.get("cache_read", 0) or 0),
+        int(usage.get("cache_write", 0) or 0),
+    )
 
 
 def _tools_prompt_chars(tools: list) -> int:

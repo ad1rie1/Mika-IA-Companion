@@ -364,6 +364,14 @@ class ScheduledAction(models.Model):
     resultat = models.TextField(blank=True, default="")
     raison_echec = models.TextField(blank=True, default="")
     tentatives = models.IntegerField(default=0)
+    #: Pas avant cette date : la dernière tentative a échoué, et
+    #: `_poll_scheduled_actions` ne la remonte plus comme due d'ici là. C'est
+    #: ce qui donne un sens au compteur ci-dessus — sans délai, trois échecs
+    #: à 30 s d'intervalle épuisaient le plafond en une minute et demie pour
+    #: une panne passagère, et un rendez-vous prioritaire levait le cooldown
+    #: et le veto de sommeil à chaque cycle entre-temps. `scheduled_at`, lui,
+    #: reste l'heure qu'elle s'était donnée : on ne réécrit pas l'intention.
+    reessayer_le = models.DateTimeField(null=True, blank=True)
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.PENDING,
     )

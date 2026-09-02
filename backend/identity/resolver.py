@@ -34,7 +34,12 @@ from django.utils import timezone
 from configs.runtime import cfg_float, cfg_int
 from identity import trust as trust_policy
 from identity import detection as detection_defaults
-from identity.detection import NameClaim, corroboration_score, detect_name_claim
+from identity.detection import (
+    NameClaim,
+    corroboration_score,
+    detect_name_claim,
+    same_name,
+)
 from identity.trust import (
     Certainty,
     ChannelTrust,
@@ -190,6 +195,13 @@ class IdentityResolver:
     ):
         from identity.models import Identity, IdentityHandle
 
+        # Nettoyé à l'entrée, pour tous les canaux à la fois : la trame
+        # ``identify`` du navigateur, le ``full_name`` Telegram, un nom de
+        # compte. Ce nom ressort dans ``--- QUI TU AS EN FACE ---`` et dans
+        # le brief de salutation, où un retour à la ligne se lit comme une
+        # consigne — voir ``trust.clean_display_name``.
+        display_name = trust_policy.clean_display_name(display_name)
+
         try:
             handle = IdentityHandle.objects.filter(
                 channel=channel, person_id=person_id
@@ -253,16 +265,33 @@ class IdentityResolver:
         from memory.models import Entity
 
         try:
-            handle = IdentityHandle.objects.select_related("identity").filter(
-                channel=channel, person_id=person_id,
-            ).first()
+            handle = IdentityHandle.objects.select_related(
+                "identity", "identity__entity",
+            ).filter(channel=channel, person_id=person_id).first()
             if handle is None:
                 return None
+
+            identity = handle.identity
+            deja = identity.entity
+            if deja is not None and deja.name != entity_name:
+                # Une identité déjà reliée ne change pas de personne parce
+                # qu'une connexion arrive sous un autre nom. C'était un
+                # ``get_or_create`` inconditionnel : tout compte connecté
+                # pouvait faire relier son handle à l'Entity « Thomas » et
+                # recevoir le dossier, les engagements et le journal de
+                # Thomas à certitude VERIFIED. Le nom vient désormais du
+                # compte côté serveur, mais cette garde tient seule — la
+                # liaison existante est conservée, et on le dit.
+                logger.warning(
+                    "bind_authenticated: %s@%s deja reliee a « %s » — « %s » "
+                    "ignore, liaison conservee",
+                    person_id, channel, deja.name, entity_name,
+                )
+                return identity
 
             entity, _ = Entity.objects.get_or_create(
                 name=entity_name, entity_type="person",
             )
-            identity = handle.identity
             identity.entity = entity
             identity.certainty = float(Certainty.VERIFIED)
             identity.bound_at = timezone.now()
@@ -426,7 +455,11 @@ class IdentityResolver:
 
         identity = handle.identity
         ctx.identity_id = identity.pk
-        ctx.display_name = identity.display_name or handle.display_name
+        # Nettoyé à la lecture aussi : les lignes écrites avant que la
+        # frontière ne filtre sont toujours en base.
+        ctx.display_name = trust_policy.clean_display_name(
+            identity.display_name or handle.display_name,
+        )
         entity = identity.entity
         if entity is not None:
             ctx.entity_id = entity.pk
@@ -580,6 +613,28 @@ class IdentityResolver:
         """
         from identity.models import IdentityClaim
 
+        # Le détecteur lit un nom après « c'est pas » et ne sait rien de la
+        # liaison : « c'est pas grave », « c'est pas vrai », « c'est pas Marie
+        # qui vient ce soir » lui sont des dénégations de Grave, de Vrai et
+        # de Marie. Chacune coûtait −0.50 et une ligne « denied » acceptée
+        # au registre. Une dénégation n'est une preuve contre *cette*
+        # liaison que si le nom nié est un nom sous lequel Mika connaît la
+        # personne — l'entité reliée, le nom affiché, ou une revendication
+        # en attente. Sinon il n'y a rien à retirer, et rien n'est écrit.
+        bound_name = identity.entity.name if identity.entity else ""
+        connue_comme = [bound_name, identity.display_name, handle.display_name]
+        connue_comme += list(
+            IdentityClaim.objects.filter(
+                identity=identity, status=IdentityClaim.Status.PENDING,
+            ).values_list("claimed_name", flat=True)
+        )
+        if not any(same_name(claim.name, nom) for nom in connue_comme if nom):
+            logger.debug(
+                "Denial of %r by %s names nobody Mika knows them as — ignored",
+                claim.name, handle.person_id,
+            )
+            return
+
         politique = politique_confiance()
         IdentityClaim.objects.create(
             identity=identity,
@@ -599,8 +654,7 @@ class IdentityResolver:
             tuning=politique,
         )
         fields = ["certainty", "last_seen"]
-        bound_name = identity.entity.name.lower() if identity.entity else ""
-        if bound_name and bound_name == claim.name.lower():
+        if bound_name and same_name(claim.name, bound_name):
             identity.entity = None
             identity.binding_reason = f"Denegation: « {claim.evidence} »"
             fields += ["entity", "binding_reason"]
@@ -695,7 +749,23 @@ class IdentityResolver:
 
         identity = claim.identity
         claim_trust = _as_trust(claim.trust)
+        entity, _ = Entity.objects.get_or_create(
+            name=claim.claimed_name, entity_type="person",
+        )
         before = float(identity.certainty or 0.0)
+        reliaison = (
+            identity.entity_id is not None and identity.entity_id != entity.pk
+        )
+        if reliaison:
+            # La certitude accumulée l'a été *pour* la personne reliée :
+            # recoupements, preuve partagée, décision de la croire. Elle ne
+            # dit rien de la nouvelle. La reporter faisait qu'un handle relié
+            # à Thomas à 0.70 acceptant « moi c'est Alice » sans la moindre
+            # preuve arrivait à 0.85 — BOUND — sur Alice, au-dessus de la
+            # barre de divulgation, le dossier d'Alice injecté au tour
+            # suivant. On repart de ce que le canal garantit seul, comme
+            # pour un handle jamais relié.
+            before = trust_policy.floor_for(claim_trust)
 
         # The claim was filed but never scored — pending means "not counted
         # yet". Accepting it counts the assertion itself, and then whatever
@@ -713,14 +783,15 @@ class IdentityResolver:
                 after, evidence_kind, trust=claim_trust, tuning=politique,
             )
 
-        entity, _ = Entity.objects.get_or_create(
-            name=claim.claimed_name, entity_type="person",
-        )
         identity.entity = entity
         identity.certainty = after
         identity.bound_at = timezone.now()
         identity.bound_via = claim.channel or identity.bound_via
         identity.binding_reason = reason or f"Claim #{claim.pk} acceptee"
+        if reliaison:
+            identity.binding_reason += (
+                " (reliaison : certitude repartie du plancher du canal)"
+            )
         if not identity.display_name:
             identity.display_name = claim.claimed_name
         identity.save(update_fields=[
@@ -797,7 +868,23 @@ class IdentityResolver:
 
         identity = handle.identity
         handle_trust = _as_trust(handle.trust)
-        target = name or (identity.entity.name if identity.entity else "")
+        bound_name = identity.entity.name if identity.entity else ""
+        if name and bound_name and not same_name(name, bound_name):
+            # Une preuve porte sur la liaison en place. En accepter une au
+            # nom d'une autre personne faisait glisser la certitude d'une
+            # personne à l'autre : un « shared_memory » sur Alice, compté
+            # sur un handle relié à Thomas, montait la certitude de *Thomas*.
+            # Répondu, pas levé : l'argument vient du modèle.
+            return {
+                "ok": False,
+                "error": (
+                    f"ce contact est relie a « {bound_name} », pas a « {name} » "
+                    f"— une preuve ne se reporte pas d'une personne a l'autre. "
+                    f"Revoque d'abord (identity_forget_binding) si tu n'y "
+                    f"crois plus."
+                ),
+            }
+        target = name or bound_name
         if not target:
             return {"ok": False, "error": "aucun nom a corroborer — precise `name`"}
 

@@ -23,8 +23,23 @@ import type {
   ProjectSummary,
   SleepPhase,
 } from "../types";
-import { emotionFr } from "../types";
+import { emotionFr, isSleepPhase } from "../types";
 import { postJson } from "../network/api";
+
+/**
+ * Résout la phase de sommeil reçue par le réseau (payload `inner_state`).
+ *
+ * Le compilateur croit `InnerState["sleep_phase"]` toujours valide, mais
+ * c'est du JSON venu du backend, jamais vérifié à l'exécution — exactement
+ * le défaut qu'`isEmotionName` corrige pour l'émotion dans main.ts. Une
+ * valeur inconnue atteignait directement `SLEEP_PHASE_META[resolved]`,
+ * `undefined`, puis `.icon` : une exception au milieu du handler `speech`
+ * qui coupait aussi le TTS et le lip-sync du même tour. Exportée pour être
+ * testée sans DOM.
+ */
+export function resolveSleepPhase(value: unknown): SleepPhase {
+  return isSleepPhase(value) ? value : "awake";
+}
 
 const PHASE_META: Record<
   "morning" | "afternoon" | "evening" | "night",
@@ -227,7 +242,7 @@ export class InnerLifePanel {
     if (!state) return;
     this.renderCircadian(state.circadian, state.energy);
     this.renderEsteem(state.estime);
-    this.renderSleepPhase(state.sleep_phase);
+    this.renderSleepPhase(resolveSleepPhase(state.sleep_phase));
     this.renderDream(state.last_dream);
     this.renderJournal(state.today_journal);
     this.renderPendingActions(state.pending_project_actions);
@@ -298,11 +313,13 @@ export class InnerLifePanel {
 
   // ── Renderers ───────────────────────────────────────────────
 
-  private renderSleepPhase(phase: SleepPhase | undefined) {
-    const resolved: SleepPhase = phase || "awake";
-    // Badge in the header (hidden when awake to avoid visual noise)
+  private renderSleepPhase(resolved: SleepPhase) {
+    // Badge in the header (hidden when awake to avoid visual noise).
+    // Gardé comme le lookup circadien voisin (renderCircadian) : même si
+    // `resolved` est déjà validé par `resolveSleepPhase` côté appelant,
+    // un lookup non gardé ici referait planter n'importe quel appel direct.
     const meta = SLEEP_PHASE_META[resolved];
-    if (resolved === "awake") {
+    if (resolved === "awake" || !meta) {
       this.sleepBadgeEl.setAttribute("hidden", "");
       this.sleepBadgeEl.textContent = "";
     } else {

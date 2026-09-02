@@ -104,11 +104,18 @@ class OllamaProvider:
         Not every model accepts the parameter, and older Ollama servers
         reject it outright. A provider that cannot talk to half the local
         models is worse than one that occasionally lets a model reason.
+
+        Seul un refus *du paramètre* est repris : ``think`` est toujours
+        envoyé, donc l'ancienne garde « pas de think → relever » ne
+        filtrait rien, et n'importe quelle exception — timeout, connexion
+        refusée, modèle absent — rejouait la génération entière une seconde
+        fois, au double du prix, en ne laissant remonter que la seconde
+        erreur.
         """
         try:
             return await self._client.chat(**kwargs)
         except Exception as exc:
-            if "think" not in kwargs:
+            if "think" not in kwargs or not _is_think_rejection(exc):
                 raise
             logger.debug(
                 "Ollama rejected think=%s (%s) — retrying without it",
@@ -363,17 +370,46 @@ class OllamaProvider:
                         content = json.dumps({"error": str(exc)})
                     called.append(name)
 
-                messages.append({
-                    "role": "tool",
-                    "name": name,
-                    "content": content,
-                })
+                messages.append(_tool_message(name, content))
         else:
             final_text = final_text or "[max_turns atteint avant réponse finale]"
 
         if called:
             logger.info("Ollama tools used in this turn: %s", called)
         return final_text, called
+
+
+def _is_think_rejection(exc: BaseException) -> bool:
+    """Le serveur a-t-il refusé le paramètre ``think`` lui-même ?
+
+    Compte ce qui désigne le paramètre : un message qui le nomme, ou un 400
+    du serveur — un paramètre inconnu est une requête malformée, tout autre
+    statut (404 modèle absent, 500, connexion) dit autre chose et remonte
+    tel quel.
+    """
+    if "think" in str(exc).lower():
+        return True
+    try:
+        from ollama import ResponseError
+    except ImportError:
+        return False
+    return isinstance(exc, ResponseError) and getattr(exc, "status_code", None) == 400
+
+
+def _tool_message(name: str, content: str) -> dict:
+    """Le tour ``tool`` tel que le SDK l'attend.
+
+    Le champ du SDK est ``tool_name`` : envoyé sous ``name``, pydantic
+    l'ignorait sans un mot et le modèle recevait un résultat orphelin, sans
+    savoir quel outil avait répondu. Et un contenu vide voyage comme un
+    texte explicite : un ``{"role": "tool"}`` sans contenu est un message
+    sans résultat, que le modèle lit comme un outil qui n'a rien dit.
+    """
+    return {
+        "role": "tool",
+        "tool_name": name,
+        "content": content or "(résultat vide)",
+    }
 
 
 def _record_ollama_usage(response) -> None:

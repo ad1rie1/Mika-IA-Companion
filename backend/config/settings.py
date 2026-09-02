@@ -141,6 +141,24 @@ CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=CORS_ALLOWED_ORI
 CSRF_COOKIE_HTTPONLY = False
 CSRF_COOKIE_SAMESITE = env("CSRF_COOKIE_SAMESITE", default=SESSION_COOKIE_SAMESITE)
 
+# A cookie marked `Secure` is only ever sent back over TLS. Off by default
+# because the default install is plain http://127.0.0.1:8000 — the browser
+# would accept the cookie and never return it, so every login on a fresh
+# clone would fail with nothing in the logs. Set both to true behind TLS.
+SESSION_COOKIE_SECURE = env.bool("SESSION_COOKIE_SECURE", default=False)
+CSRF_COOKIE_SECURE = env.bool("CSRF_COOKIE_SECURE", default=False)
+
+# Behind a reverse proxy that terminates TLS, Django only ever sees plain
+# HTTP: `request.is_secure()` answers False, so the CSRF origin check
+# compares an https Referer against an http request, and the same-host
+# guard on `retour` redirects demands the wrong scheme. Trusting
+# X-Forwarded-Proto is only safe when the proxy is the sole route to this
+# process and overwrites the header — a client that can reach the port
+# directly would otherwise forge it — hence an explicit opt-in, never a
+# default.
+if env.bool("BEHIND_TLS_PROXY", default=False):
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
 ROOT_URLCONF = "config.urls"
 ASGI_APPLICATION = "config.asgi.application"
 

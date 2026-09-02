@@ -41,6 +41,14 @@ class ValidationError(ValueError):
     pass
 
 
+# Un champ vide n'est pas une valeur pour ces types. ``_coerce`` le rendait
+# ``None``, ``_validate`` laissait passer ``None``, et la base retenait NULL —
+# sous le ``min`` déclaré, hors des ``choices``, et servi tel quel par
+# ``get()`` à tout appelant direct (``int(None)`` au fond d'une boucle sans
+# superviseur). Revenir au défaut a déjà son geste : ``unset``.
+_TYPES_SANS_VIDE = ("int", "float", "select")
+
+
 # ── Async-context safety ────────────────────────────────────────
 #
 # Config reads are synchronous *by design*: they happen in provider
@@ -184,6 +192,11 @@ class ConfigService:
             raise ValidationError("Cette clé est en lecture seule")
 
         coerced = _coerce(item, value)
+        if coerced is None and item.type in _TYPES_SANS_VIDE:
+            raise ValidationError(
+                "Valeur vide refusée : pour revenir au défaut, "
+                "utilisez « réinitialiser »"
+            )
         _validate(item, coerced)
 
         from configs.models import ConfigValue, ConfigChangeLog
@@ -254,7 +267,7 @@ class ConfigService:
                 raise ValidationError(f"Limite atteinte ({item.max_items} éléments)")
         result = backends.resolve(parent_key).add_row(item, payload)
         ConfigChangeLog.objects.create(
-            key=parent_key, row_id=None, action="row_add",
+            key=parent_key, row_id=_row_uuid(result.get("row_id")), action="row_add",
             before=None, after=_scrub_record(item.record, result.get("payload") or {}),
             actor=actor,
         )
@@ -268,10 +281,12 @@ class ConfigService:
         from configs import backends
         from configs.models import ConfigChangeLog
         item = self._require_record_list(parent_key)
-        result = backends.resolve(parent_key).update_row(item, row_id, payload)
+        backend = backends.resolve(parent_key)
+        before = _instantane_de_ligne(backend, item, row_id)
+        result = backend.update_row(item, row_id, payload)
         ConfigChangeLog.objects.create(
-            key=parent_key, row_id=None, action="row_update",
-            before=None, after=_scrub_record(item.record, result.get("payload") or {}),
+            key=parent_key, row_id=_row_uuid(row_id), action="row_update",
+            before=before, after=_scrub_record(item.record, result.get("payload") or {}),
             actor=actor,
         )
         # Invalidate BEFORE notifying: a subscriber that reacts by calling
@@ -284,10 +299,13 @@ class ConfigService:
         from configs import backends
         from configs.models import ConfigChangeLog
         item = self._require_record_list(parent_key)
-        backends.resolve(parent_key).delete_row(item, row_id)
+        backend = backends.resolve(parent_key)
+        # Lu AVANT la suppression : après, il n'y a plus rien à journaliser.
+        before = _instantane_de_ligne(backend, item, row_id)
+        backend.delete_row(item, row_id)
         ConfigChangeLog.objects.create(
-            key=parent_key, row_id=None, action="row_delete",
-            before=None, after=None, actor=actor,
+            key=parent_key, row_id=_row_uuid(row_id), action="row_delete",
+            before=before, after=None, actor=actor,
         )
         # Invalidate BEFORE notifying: a subscriber that reacts by calling
         # get() must not read the pre-change cached value.
@@ -429,6 +447,36 @@ def _scrub_record(record, payload: dict) -> dict:
         if f.sensitive and out.get(f.key) not in (None, ""):
             out[f.key] = "***redacted***"
     return out
+
+
+def _row_uuid(row_id) -> uuid.UUID | None:
+    """L'identifiant de ligne tel que le journal peut le porter.
+
+    La colonne est un UUID — celui de ``ConfigRecordItem``. Un backend qui
+    identifie ses lignes autrement (les comptes d'accès, par clé primaire)
+    laisse la colonne vide : sa charge ``before``/``after`` nomme la ligne.
+    """
+    try:
+        return uuid.UUID(str(row_id))
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def _instantane_de_ligne(backend, item: ConfigItem, row_id) -> dict | None:
+    """La charge d'une ligne AVANT qu'on y touche, épurée pour le journal.
+
+    Le journal notait une suppression sans dire quoi (``before=None``) et une
+    modification sans dire depuis quoi : une piste d'audit qui ne permet pas
+    de retrouver ce qui a été effacé n'en est pas une. Les secrets arrivent
+    déjà masqués de ``list_rows`` et ``_scrub_record`` repasse derrière.
+    """
+    try:
+        for row in backend.list_rows(item):
+            if str(row.get("row_id")) == str(row_id):
+                return _scrub_record(item.record, dict(row.get("payload") or {}))
+    except Exception as exc:  # noqa: BLE001 — le journal ne bloque pas l'écriture
+        degradations.record("configs.service._instantane_de_ligne", exc)
+    return None
 
 
 config_service = ConfigService()

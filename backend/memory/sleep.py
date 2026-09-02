@@ -64,6 +64,10 @@ logger = logging.getLogger(__name__)
 # Sleep phase gates
 NIGHT_START_HOUR = 23       # phase gate opens at 23h
 NIGHT_END_HOUR = 6          # closes at 6h
+# Le sommeil profond (digestion, réorganisation) n'ouvre qu'en fin de nuit —
+# une heure nominale, reculée quand le matin du profil est plus précoce
+# (`_deep_sleep_window`).
+DEEP_SLEEP_START_HOUR = 3
 IDLE_SECONDS_THRESHOLD = 900  # 15 min without interaction
 #: Délai pendant lequel un réveil tient, même si personne n'a rien dit.
 #:
@@ -432,10 +436,10 @@ class SleepCycle:
         except Exception:
             logger.exception("Sleep: dream phase failed (non-fatal)")
 
-        # Phase 3: deep sleep — digest ruminations (after 03h, once per night)
-        fin_de_nuit = self._night_end_hour()
+        # Phase 3: deep sleep — digest ruminations (fin de nuit, once per night)
+        profond = self._en_sommeil_profond(now_dt)
         try:
-            if 3 <= now_dt.hour < fin_de_nuit:
+            if profond:
                 if self._last_digestion_night != current_night:
                     await self._set_phase(SleepPhase.DEEP_SLEEP)
                     await self._digest_ruminations()
@@ -444,11 +448,11 @@ class SleepCycle:
             logger.exception("Sleep: digestion phase failed (non-fatal)")
 
         # Phase 4: réorganisation — clusteriser les échanges du jour,
-        # ré-extraire par thème, dédoublonner les souvenirs (03h+, une fois
-        # par nuit, après la digestion). Même profil d'isolement que les
+        # ré-extraire par thème, dédoublonner les souvenirs (fin de nuit, une
+        # fois par nuit, après la digestion). Même profil d'isolement que les
         # autres phases : un échec ne coûte que sa nuit.
         try:
-            if 3 <= now_dt.hour < fin_de_nuit:
+            if profond:
                 if self._last_reorg_night != current_night:
                     await self._set_phase(SleepPhase.DEEP_SLEEP)
                     from memory.reorg import nightly_reorg
@@ -550,6 +554,39 @@ class SleepCycle:
             degradations.record("sommeil: heure de matin du profil", exc)
             h = NIGHT_END_HOUR
         return max(0, min(12, h))
+
+    @staticmethod
+    def _deep_sleep_window() -> tuple[int, int]:
+        """[début, fin) du sommeil profond, en heures.
+
+        La fin est SON matin (`_night_end_hour`). Le début était écrit « 3 »
+        en dur alors que le matin est un champ du tableau de bord borné à
+        [0, 12] : un personnage dont le matin commence à 3 h ou avant avait une
+        fenêtre vide — ni digestion ni réorganisation, jamais, sans qu'aucun
+        écran ne le dise. Le début recule donc d'une heure devant un matin
+        précoce, plancher minuit ; à matin nul la fenêtre reste vide, et
+        `_en_sommeil_profond` le compte.
+        """
+        fin = SleepCycle._night_end_hour()
+        debut = max(0, min(DEEP_SLEEP_START_HOUR, fin - 1))
+        return debut, fin
+
+    @staticmethod
+    def _en_sommeil_profond(now: datetime) -> bool:
+        """L'heure est-elle dans la fenêtre de sommeil profond ?"""
+        debut, fin = SleepCycle._deep_sleep_window()
+        try:
+            if debut >= fin:
+                raise ValueError(
+                    f"fenêtre de sommeil profond vide (matin du profil à {fin} h)"
+                )
+        except ValueError as exc:
+            # Levée puis rattrapée sur place : le registre des dégradations ne
+            # compte que des exceptions, et une fenêtre vide EST une panne
+            # silencieuse — la nuit passe, rien ne se digère, rien ne le dit.
+            degradations.record("sommeil: fenetre de sommeil profond vide", exc)
+            return False
+        return debut <= now.hour < fin
 
     @staticmethod
     def _nominal_night_start_hour() -> int:

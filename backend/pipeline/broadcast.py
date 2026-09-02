@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import inspect
 import logging
 from typing import TYPE_CHECKING
@@ -130,6 +131,7 @@ async def broadcast_to_websocket(
         return
 
     delivered = False
+    reply_ref = getattr(output, "reply_ref", None)
     for target in targets:
         if target.is_consumer:
             group = target.delivery_ref or _person_group(person_id)
@@ -137,7 +139,9 @@ async def broadcast_to_websocket(
             delivered = True
         elif target.is_module:
             delivered = (
-                await _deliver_via_module(target, output, source) or delivered
+                await _deliver_via_module(
+                    _addressed(target, reply_ref, source), output, source,
+                ) or delivered
             )
 
     if not delivered:
@@ -174,6 +178,23 @@ def _person_group(person_id: str | None) -> str:
     from communication.presence import person_group
 
     return person_group(person_id or "")
+
+
+def _addressed(target, reply_ref, source: str):
+    """La cible d'une réponse réactive : le salon d'où la question est venue.
+
+    L'entrée de présence d'un module porte « le dernier salon où ce compte a
+    été vu », et c'est la bonne adresse pour un envoi proactif. Pour une
+    réponse, non : entre la question et sa réponse, le même compte a pu
+    écrire ailleurs — une question privée en attente derrière l'unique
+    worker, un message dans un groupe, et la réponse privée partait dans le
+    groupe. Quand le tour connaît son salon (``SpeechOutput.reply_ref``) et
+    que la cible est le canal qui l'a posé, la copie remise au canal porte
+    ce salon-là. L'entrée du registre, elle, n'est pas touchée.
+    """
+    if not reply_ref or target.channel != source:
+        return target
+    return dataclasses.replace(target, delivery_ref=str(reply_ref))
 
 
 async def _deliver_via_module(target, output, source: str = "") -> bool:
@@ -726,6 +747,7 @@ async def persist_user_message(
     attachments_meta: list[dict] | None = None,
     is_internal: bool = False,
     awaiting_reply: bool = True,
+    transport_meta: dict | None = None,
 ) -> int | None:
     """Write down what was said, before trying to answer it.
 
@@ -745,13 +767,32 @@ async def persist_user_message(
     brief, a module's notify_ai prompt) rather than something a person
     said. The consolidator skips those so instructions never become
     souvenirs; her reply stays a real memory.
+
+    ``transport_meta`` est ce que le transport prouvait — ``is_public``,
+    ``authenticated``, le salon d'origine — écrit sur la même ligne, pour que
+    la reprise après redémarrage rejoue le tour avec sa confiance d'origine
+    et non avec des drapeaux vides (un message de groupe rejoué en ACCOUNT
+    obtenait la divulgation en public). Seconde écriture plutôt qu'un
+    élargissement de ``add_message`` : la mémoire n'a pas à connaître le
+    transport. Non fatal : un échec ici coûte une reprise fermée par canal,
+    jamais la réponse.
     """
-    return await memory_manager.add_message(
+    user_id = await memory_manager.add_message(
         "user", message, source=source, person_id=person_id,
         attachments_meta=attachments_meta or [],
         is_internal=is_internal,
         awaiting_reply=awaiting_reply,
     )
+    if transport_meta and isinstance(user_id, int):
+        try:
+            from memory.models import Message
+
+            await Message.objects.filter(pk=user_id).aupdate(
+                transport_meta=dict(transport_meta),
+            )
+        except Exception as exc:
+            degradations.record("persist: transport_meta", exc)
+    return user_id
 
 
 async def persist_assistant_message(

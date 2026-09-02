@@ -193,6 +193,34 @@ export function coerceStatus(raw: unknown): MessageStatus | undefined {
     : undefined;
 }
 
+/**
+ * Pourquoi une bulle restaurée « en attente d'envoi » ne peut plus jamais le
+ * devenir : voir `restoredStatus`.
+ */
+export const RESTORED_PENDING_REASON = "non envoyé — recharge de la page";
+
+/**
+ * Ce qu'un statut restauré du localStorage doit devenir à l'ouverture.
+ *
+ * `outbox` (network/WebSocketClient) est en mémoire seulement — une bulle
+ * peinte juste avant l'envoi et jamais confirmée ne dispose plus, après un
+ * rechargement, d'aucun frame vivant susceptible de la faire progresser :
+ * l'ancien onglet qui la portait a disparu avec elle. Sans cette règle un
+ * `pending` restauré affichait « en attente d'envoi » pour toujours, un état
+ * que plus rien ne pouvait faire avancer. Un `sent` ou un `failed` restauré
+ * reste tel quel : le premier a bien été accusé réception, le second porte
+ * déjà sa propre raison.
+ */
+export function restoredStatus(
+  raw: unknown
+): { status: MessageStatus | undefined; reason?: string } {
+  const status = coerceStatus(raw);
+  if (status === "pending") {
+    return { status: "failed", reason: RESTORED_PENDING_REASON };
+  }
+  return { status };
+}
+
 /** Record what the server said became of a message we sent. */
 export function applyAck(
   history: StoredMessage[],

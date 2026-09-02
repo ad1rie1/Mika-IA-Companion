@@ -25,6 +25,7 @@ from django.views.decorators.http import require_POST
 
 from GestionSysteme import tables
 from GestionSysteme.nav import item_for
+from GestionSysteme.retour import retour_sur
 from GestionSysteme.shell import page_context
 
 logger = logging.getLogger(__name__)
@@ -350,8 +351,10 @@ def pending_action(request, action_id: int):
     if action is None:
         raise Http404("Action introuvable")
 
-    back = request.POST.get("retour") or reverse(
-        "gestionsysteme:projects-tab", args=["attente"],
+    # Jamais ``request.POST["retour"]`` tel quel : c'est une redirection
+    # ouverte, et le contrôle existe déjà (``GestionSysteme.retour``).
+    back = retour_sur(
+        request, reverse("gestionsysteme:projects-tab", args=["attente"]),
     )
 
     if action.status != ProjectPendingAction.Status.PENDING:

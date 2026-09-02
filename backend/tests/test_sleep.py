@@ -839,3 +839,108 @@ class TestEmotionDeReveCanonique:
 
         assert _emotion_canonique(None) == ""
         assert _emotion_canonique("") == ""
+
+
+class TestFenetreDeSommeilProfond:
+    """La digestion et la réorganisation ouvraient à « 3 h » en dur, alors
+    que le matin du profil est un champ du tableau de bord borné à [0, 12] :
+    un matin à 3 h ou avant vidait la fenêtre, sans qu'aucun écran ne le
+    dise."""
+
+    def _profil(self, matin, nuit=23):
+        from emotion.circadian import CircadianPhase, CircadianProfile
+
+        return CircadianProfile(phase_hours={
+            CircadianPhase.MORNING: matin,
+            CircadianPhase.AFTERNOON: 12,
+            CircadianPhase.EVENING: 18,
+            CircadianPhase.NIGHT: nuit,
+        })
+
+    def _avec_profil(self, matin, nuit=23):
+        return patch(
+            "config.personality.Personality.circadian_profile",
+            new=property(lambda s: self._profil(matin, nuit)),
+        )
+
+    def test_un_matin_ordinaire_garde_la_fenetre_historique(self):
+        from memory.sleep import SleepCycle
+
+        with self._avec_profil(matin=6):
+            assert SleepCycle._deep_sleep_window() == (3, 6)
+
+    def test_un_matin_precoce_recule_le_debut(self):
+        from memory.sleep import SleepCycle
+
+        with self._avec_profil(matin=3):
+            assert SleepCycle._deep_sleep_window() == (2, 3)
+            assert SleepCycle._en_sommeil_profond(datetime(2026, 4, 18, 2, 30))
+            assert not SleepCycle._en_sommeil_profond(datetime(2026, 4, 18, 3, 0))
+
+    def test_un_matin_a_minuit_laisse_une_fenetre_vide_et_le_dit(self):
+        from memory.sleep import SleepCycle
+        from utils.degradation import degradations
+
+        degradations.reset()
+        with self._avec_profil(matin=0):
+            assert SleepCycle._deep_sleep_window() == (0, 0)
+            assert not SleepCycle._en_sommeil_profond(datetime(2026, 4, 18, 0, 30))
+        assert degradations.count_for("sommeil: fenetre de sommeil profond vide") == 1
+        degradations.reset()
+
+
+@pytest.mark.django_db(transaction=True)
+class TestSommeilProfondSuitLeProfil:
+    @pytest.fixture(autouse=True)
+    def _clean(self):
+        from conscience.models import Rumination
+        from memory.models import DailyJournal, Dream, Souvenir
+        Rumination.objects.all().delete()
+        Souvenir.objects.all().delete()
+        DailyJournal.objects.all().delete()
+        Dream.objects.all().delete()
+        yield
+
+    @pytest.mark.asyncio
+    async def test_la_digestion_et_la_reorg_tournent_avant_un_matin_precoce(self):
+        """Matin du profil à 3 h : « 3 <= heure < 3 » n'était jamais vrai."""
+        from drives.state import DriveKind
+        from emotion.circadian import CircadianPhase, CircadianProfile
+        from memory import reorg as reorg_mod
+        from memory.sleep import SleepCycle, SleepPhase
+
+        profil = CircadianProfile(phase_hours={
+            CircadianPhase.MORNING: 3,
+            CircadianPhase.AFTERNOON: 12,
+            CircadianPhase.EVENING: 18,
+            CircadianPhase.NIGHT: 23,
+        })
+        s = SleepCycle()
+        night = date(2026, 4, 17)
+        # Journal et rêves déjà faits : seule la fin de nuit reste à jouer.
+        s._last_journal_date = night
+        s._last_dream_night = night
+        s._dreams_this_night = 99
+        s._digest_ruminations = AsyncMock(return_value=0)
+
+        with (
+            patch("config.personality.Personality.circadian_profile",
+                  new=property(lambda _s: profil)),
+            patch("memory.sleep.datetime", wraps=datetime) as mock_dt,
+            patch("pipeline.broadcast.broadcast_inner_state_update",
+                  new_callable=AsyncMock),
+            patch("conscience.engine.conscience_engine") as mock_cons,
+            patch("drives.engine.drive_engine") as mock_drives,
+            patch.object(reorg_mod.nightly_reorg, "run",
+                         AsyncMock(return_value={})) as run_reorg,
+        ):
+            mock_dt.now.return_value = datetime(2026, 4, 18, 2, 30)
+            mock_cons.get_idle_seconds.return_value = 3600.0
+            rest = MagicMock()
+            rest.tension = 0.0
+            mock_drives.states = {DriveKind.REST: rest}
+            await s.run_if_due()
+
+        s._digest_ruminations.assert_awaited_once()
+        run_reorg.assert_awaited_once_with(night)
+        assert s.phase == SleepPhase.DEEP_SLEEP

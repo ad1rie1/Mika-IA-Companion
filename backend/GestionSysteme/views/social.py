@@ -26,11 +26,11 @@ from django.contrib import messages
 from django.http import Http404
 from django.shortcuts import redirect, render
 from django.urls import reverse
-from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
 from GestionSysteme import tables
 from GestionSysteme.nav import IDENTITY_TABS, PERSON_TABS, item_for, resolve_tab
+from GestionSysteme.retour import retour_sur
 from GestionSysteme.shell import page_context
 from identity import trust as trust_policy
 from identity.trust import Certainty, ChannelTrust
@@ -448,27 +448,9 @@ def _person_id_for(identity) -> str:
     return handle.person_id if handle else ""
 
 
-def _safe_back(request, default: str) -> str:
-    """Où revenir après une écriture, sans faire confiance au POST.
-
-    ``retour`` porte l'écran d'où l'on vient — c'est ce qui permet de résoudre
-    une revendication depuis la fiche de l'identité et d'y rester, filtres
-    compris. Passé tel quel à ``redirect()``, c'est une redirection ouverte :
-    un formulaire fabriqué renvoie l'opérateur, déjà authentifié, sur un
-    domaine tiers qui n'a plus qu'à imiter l'écran de connexion.
-
-    Le contrôle est celui de Django (même hôte, schéma cohérent), pas une
-    liste d'URL en dur : les onglets, filtres et numéros de page font partie
-    de la valeur, et les énumérer serait à refaire à chaque écran ajouté.
-    """
-    candidate = (request.POST.get("retour") or "").strip()
-    if candidate and url_has_allowed_host_and_scheme(
-        candidate,
-        allowed_hosts={request.get_host()},
-        require_https=request.is_secure(),
-    ):
-        return candidate
-    return default
+# Le contrôle vit dans ``GestionSysteme.retour`` : les projets en ont besoin
+# aussi, et une seconde copie est celle qu'on oublie de corriger.
+_safe_back = retour_sur
 
 
 @require_POST

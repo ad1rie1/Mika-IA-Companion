@@ -60,6 +60,16 @@ EMOTION_PROMPT_FR: dict[str, str] = {
 #: ``configs/runtime.py``.
 MARKED_INTENSITY = 0.6
 
+#: Écart au point de repos sous lequel l'humeur de fond se raconte « comme
+#: d'habitude ». Le repos n'est pas l'origine : ``_home_vector`` vaut
+#: ``default_mood × 0.15 + teinte circadienne × 0.35``, dont le plus proche
+#: voisin n'est jamais ``default_mood`` (à 14 h : ``playful`` 0,40). Brancher
+#: sur le libellé faisait dire toute la journée, au repos, « légèrement
+#: joueuse, alors que normalement tu es plutôt contente ». Le moteur lit la
+#: même borne pour la stance envers une personne (``_at_rest_toward``) :
+#: déclarée ici parce que ``engine`` importe ``state``, jamais l'inverse.
+REST_TOLERANCE = 0.1
+
 
 #: Pendant combien de temps « ce qu'elle vient de déclarer » reste ce qu'elle
 #: éprouve. Calé sur la constante de temps de l'oscillateur au tempérament par
@@ -313,6 +323,17 @@ class GlobalMood:
         _, value = pad.pad_to_label(self.dynamic.position)
         return value
 
+    @property
+    def overflow_intensity(self) -> float:
+        """Intensité pour les portes de la conscience (débordement, détresse).
+
+        Voir ``pad.overflow_intensity`` : rapportée à l'ancre la plus proche,
+        l'échelle que la balise déclare — ``sad`` à son ancre pleine vaut 1,0
+        ici et 0,73 sur ``intensity``. C'est cette valeur que
+        ``global_intensity`` du ``DecisionContext`` devrait porter.
+        """
+        return pad.overflow_intensity(self.dynamic.position)
+
     def to_dict(self) -> dict:
         label, intensity = pad.pad_to_label(self.dynamic.position)
         return {
@@ -320,13 +341,28 @@ class GlobalMood:
             "intensity": round(intensity, 2),
         }
 
-    def to_prompt_description(self, default_mood: Emotion) -> str:
+    def to_prompt_description(
+        self, default_mood: Emotion, home: pad.Vec3 | None = None,
+    ) -> str:
+        """Ce que le prompt dit de l'humeur de fond.
+
+        ``home`` est le point de repos courant (``engine._home_vector()``) :
+        c'est DEPUIS LUI que se mesure « rien de particulier », pas depuis
+        l'origine. Sans lui (appel isolé, tests), l'origine fait office de
+        repos — l'ancien comportement.
+        """
         label, intensity = pad.pad_to_label(self.dynamic.position)
+        repos = home if home is not None else pad.zero()
+        ecart = pad.distance(self.dynamic.position, repos)
         # Brancher sur le seul libellé disait « comme d'habitude » aussi bien
         # d'un tempérament à peine teinté que d'une euphorie pleine : avec le
         # défaut ``happy``, toute l'amplitude dans la direction du personnage
         # était muette dans le prompt pendant que le visage la montrait.
-        if intensity < 0.1:
+        #
+        # Et l'écart se mesure au repos, non à l'origine : au repos, l'humeur
+        # est par définition celle du personnage — « comme d'habitude » —
+        # même si son plus proche voisin PAD est la teinte de l'heure.
+        if ecart < REST_TOLERANCE:
             base = f"Ton humeur générale est {_fr(default_mood)}, comme d'habitude."
         elif label != default_mood:
             base = (

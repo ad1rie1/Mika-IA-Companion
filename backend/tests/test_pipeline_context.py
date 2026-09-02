@@ -402,3 +402,84 @@ async def _run_gather(mocks, *, message="test", person_id="u1", **kwargs):
     finally:
         for p in reversed(patches):
             p.stop()
+
+
+@pytest.mark.asyncio
+class TestLesPropresHandlesNeSontPasDesTiers:
+    """« Un autre » se mesure à l'identité, pas au handle.
+
+    ``_label_history_speakers`` comparait le ``person_id`` brut quand
+    ``_last_contact_gap`` passait déjà par ``own_handles`` : la même personne
+    liée sur le web (``user_5``) et sur Telegram (``tg_9``) voyait ses propres
+    tours Telegram étiquetés comme ceux d'un tiers dans son prompt web.
+    """
+
+    HISTORY = [
+        {"role": "user", "content": "salut", "person_id": "user_5"},
+        {"role": "assistant", "content": "hey"},
+        {"role": "user", "content": "je repasse par telegram",
+         "person_id": "tg_9"},
+    ]
+
+    @staticmethod
+    def _identite(handles=None, *, erreur=None):
+        from pipeline import context
+
+        if erreur is not None:
+            lookup = AsyncMock(side_effect=erreur)
+        else:
+            lookup = AsyncMock(return_value=[
+                {"person_id": h} for h in (handles or [])
+            ])
+        return (
+            patch.object(context.identity_resolver, "handles_for_person",
+                         new=lookup),
+            patch.object(context.identity_resolver, "display_names_for",
+                         new=AsyncMock(return_value={"tg_9": "Thomas"})),
+        )
+
+    async def test_un_handle_de_la_meme_identite_n_est_pas_etiquete(self):
+        from pipeline import context
+
+        lookup, names = self._identite(["user_5", "tg_9"])
+        with lookup, names as names_mock:
+            out = await context._label_history_speakers(self.HISTORY, "user_5")
+
+        assert all("speaker" not in m for m in out)
+        names_mock.assert_not_awaited()
+
+    async def test_un_handle_etranger_reste_etiquete(self):
+        from pipeline import context
+
+        lookup, names = self._identite(["user_5"])
+        with lookup, names:
+            out = await context._label_history_speakers(self.HISTORY, "user_5")
+
+        assert out[2]["speaker"] == "Thomas"
+        assert "speaker" not in out[0]
+
+    async def test_une_identite_illisible_se_replie_sur_le_handle_brut(self):
+        """Fermer plutôt qu'ouvrir : sans périmètre lisible, seul le handle
+        courant est « soi », et l'échec est compté."""
+        from pipeline import context
+        from utils.degradation import degradations
+
+        degradations.reset()
+        lookup, names = self._identite(erreur=RuntimeError("identity down"))
+        with lookup, names:
+            out = await context._label_history_speakers(self.HISTORY, "user_5")
+
+        assert out[2]["speaker"] == "Thomas"
+        assert degradations.count_for("identite: perimetre des handles") == 1
+
+    async def test_le_cas_mono_interlocuteur_ne_consulte_pas_l_identite(self):
+        """Le nominal reste gratuit : pas de requête sans handle étranger."""
+        from pipeline import context
+
+        seul = [m for m in self.HISTORY if m.get("person_id") != "tg_9"]
+        lookup, names = self._identite(["user_5"])
+        with lookup as lookup_mock, names:
+            out = await context._label_history_speakers(seul, "user_5")
+
+        assert out == seul
+        lookup_mock.assert_not_awaited()

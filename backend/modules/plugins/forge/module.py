@@ -89,6 +89,11 @@ class ForgeModule(BaseModule):
         # bâtis ensemble, une seule fois, d'où le ``restart_required``.
         self._pool_workers: int = POOL_WORKERS
         self._pool_slots: asyncio.Semaphore = asyncio.Semaphore(POOL_WORKERS)
+        # Fils épinglés sur un appel C non interruptible (voir _submit) et
+        # génération du pool courant : un fil épinglé qui finit après un
+        # remplacement du pool ne doit pas décompter le pool suivant.
+        self._pinned: int = 0
+        self._pool_gen: int = 0
 
     # ══ Lifecycle ═════════════════════════════════════════════════
 
@@ -327,30 +332,94 @@ class ForgeModule(BaseModule):
         jeton jusqu'à sa fin RÉELLE : le compte doit décrire les fils libres,
         pas les appels qu'on a cessé d'attendre.
 
+        Mais un pool dont **tous** les fils sont épinglés de la sorte ne
+        rendrait plus jamais un jeton : chaque appelant suivant — tick,
+        événement, et l'outil ``forge_test_module`` au milieu d'un tour de
+        conversation — attendrait ici sans fin, et le disjoncteur ne
+        tomberait jamais puisque plus aucun handler ne s'exécute. Mesuré :
+        une regex pathologique de 4 s ou une puissance entière de 6 s
+        passent sous le traceur de 0,2 s sans lever ``ForgeTimeout``. Donc
+        deux bornes : l'acquisition du jeton est elle-même bornée par la
+        deadline (un appelant qui n'obtient pas de fil est refusé, dit
+        pourquoi, et le disjoncteur du module compte l'échec) ; et quand le
+        dernier fil s'épingle, le pool est **remplacé** — les fils zombies
+        finissent leur calcul dans l'ancien exécuteur, personne ne les
+        attend plus, et la forge continue de tourner sur des fils neufs.
+
         Lève ``asyncio.TimeoutError`` au dépassement ; propage telle quelle
         l'exception levée dans le thread.
         """
-        await self._pool_slots.acquire()
+        try:
+            await asyncio.wait_for(self._pool_slots.acquire(), timeout=deadline_s)
+        except asyncio.TimeoutError:
+            raise asyncio.TimeoutError(
+                f"aucun fil libre dans la forge ({self._pinned} fil(s) "
+                "épinglé(s) sur un appel non interruptible)"
+            ) from None
+        slots = self._pool_slots
+        holder = {"pinned": False, "gen": self._pool_gen}
         started = time.monotonic()
         try:
             future = self._loop.run_in_executor(self._executor, fn)
         except RuntimeError:  # pool déjà fermé (arrêt en cours)
-            self._pool_slots.release()
+            slots.release()
             raise
-        future.add_done_callback(self._release_slot)
+        future.add_done_callback(
+            lambda f: self._release_slot(f, slots, holder)
+        )
         done, _ = await asyncio.wait({future}, timeout=deadline_s)
         if not done:
+            holder["pinned"] = True
+            self._pinned += 1
+            self._heal_pool_if_pinned()
             raise asyncio.TimeoutError
         return future.result(), time.monotonic() - started
 
-    def _release_slot(self, future: asyncio.Future) -> None:
+    def _release_slot(self, future: asyncio.Future, slots: asyncio.Semaphore,
+                      holder: dict) -> None:
         """Rend le jeton quand le fil se termine vraiment, et consomme au
         passage l'exception d'un futur abandonné sur deadline — personne ne
         lira plus son résultat et asyncio la journaliserait en
-        « never retrieved »."""
-        self._pool_slots.release()
+        « never retrieved ». Le jeton rendu est celui du pool où le fil a
+        été soumis, jamais celui du pool courant."""
+        slots.release()
+        if holder["pinned"] and holder["gen"] == self._pool_gen:
+            self._pinned = max(0, self._pinned - 1)
         if not future.cancelled():
             future.exception()
+
+    def _heal_pool_if_pinned(self) -> None:
+        """Remplace l'exécuteur quand chaque fil est épinglé.
+
+        Les fils de l'ancien exécuteur ne sont pas tués (impossible en
+        Python) : ils terminent leur appel C dans leur coin, et leur
+        callback rend un jeton au sémaphore de *leur* génération, que plus
+        personne n'écoute. Le compte d'épinglés repart de zéro avec le pool.
+        """
+        if self._pinned < self._pool_workers or self._executor is None:
+            return
+        old = self._executor
+        self._executor = ThreadPoolExecutor(
+            max_workers=self._pool_workers, thread_name_prefix="forge",
+        )
+        self._pool_slots = asyncio.Semaphore(self._pool_workers)
+        self._pool_gen += 1
+        self._pinned = 0
+        old.shutdown(wait=False)
+        self.logger.warning(
+            "forge: les %d fils du pool sont épinglés sur des appels non "
+            "interruptibles — pool remplacé (génération %d)",
+            self._pool_workers, self._pool_gen,
+        )
+        # Compté comme une dégradation (visible sur l'écran de santé) : la
+        # garde AST du dépôt exige que ``record`` vive dans un ``except``.
+        from utils.degradation import degradations
+        try:
+            raise RuntimeError(
+                f"{self._pool_workers} fil(s) épinglé(s), pool remplacé"
+            )
+        except RuntimeError as exc:
+            degradations.record("forge.pool.remplace", exc)
 
     async def _run_handler(
         self,
@@ -385,9 +454,13 @@ class ForgeModule(BaseModule):
 
         try:
             result, elapsed = await self._submit(_runner, timeout + 5)
-        except asyncio.TimeoutError:
-            error = (f"{handler}: thread bloqué au-delà de {timeout:.0f}s "
-                     "(appel C non interruptible ?)")
+        except asyncio.TimeoutError as exc:
+            # Deux causes, deux phrases : le fil a dépassé sa deadline, ou
+            # aucun fil n'était libre (le refus porte alors son motif).
+            error = f"{handler}: " + (
+                str(exc) or f"thread bloqué au-delà de {timeout:.0f}s "
+                            "(appel C non interruptible ?)"
+            )
             await self._record_failure(lm, source, error, count_failure)
             return False, None, error
         except sandbox.ForgeTimeout as exc:

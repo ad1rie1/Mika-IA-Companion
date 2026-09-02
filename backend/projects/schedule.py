@@ -6,7 +6,8 @@ Supported rules (all examples tested):
     "interval:30s"            every 30 seconds
     "cron:0 9 * * MON-FRI"    cron expression — uses croniter if available,
                               else falls back to a minimal 5-field parser
-                              supporting minute-specificity only
+                              (lists, ranges, steps, day/month names, cron
+                              day-of-week numbering: Sunday = 0 or 7)
     "idle:30m"                fires when conscience idle_seconds >= 30 min
     "event:email.new"         fires when the named module event is observed
                               (the bus tags next_run_at; here we just check)
@@ -110,8 +111,8 @@ def compute_next_run(
 
 
 def _next_cron(expr: str, now: datetime) -> Optional[datetime]:
-    """Return next cron fire time after ``now``. Uses croniter if installed,
-    otherwise a tiny fallback that only supports minute-level fields."""
+    """Return next cron fire time after ``now``. Uses croniter if installed
+    (it is pinned in requirements.txt), otherwise the fallback below."""
     try:
         from croniter import croniter  # type: ignore[import-not-found]
     except ImportError:
@@ -130,84 +131,122 @@ def _next_cron(expr: str, now: datetime) -> Optional[datetime]:
         return None
 
 
-def _fallback_cron_next(expr: str, now: datetime) -> Optional[datetime]:
-    """Minimal cron parser for `minute hour dom month dow` — supports:
-      - Exact integers
-      - `*` (any)
-      - Simple comma lists: `0,30` | `MON,WED,FRI` (day-of-week names)
-      - Day-of-week ranges: `MON-FRI`
+# Numérotation CRON, pas Python : dimanche = 0 (ou 7), lundi = 1 … samedi = 6.
+_DOW_NOMS = {"SUN": 0, "MON": 1, "TUE": 2, "WED": 3, "THU": 4, "FRI": 5, "SAT": 6}
+_MOIS_NOMS = {
+    "JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
+    "JUL": 7, "AUG": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12,
+}
 
-    Not a full cron. Used only when croniter isn't installed — a permissive
-    fallback that covers the common "every weekday at 9h" case.
+
+def _valeurs_du_champ(
+    field: str, lo: int, hi: int, noms: dict[str, int] | None = None,
+) -> set[int]:
+    """Développe un champ cron en ensemble d'entiers de ``[lo, hi]``.
+
+    Formes : ``*``, ``*/n``, ``a``, ``a-b``, ``a-b/n``, listes à virgules,
+    noms de jours ou de mois. Lève ``ValueError`` sur une forme illisible :
+    l'appelant en fait un avertissement et ``None``, jamais une échéance
+    fausse.
+    """
+    noms = noms or {}
+
+    def _entier(s: str) -> int:
+        s = s.strip().upper()
+        if s in noms:
+            return noms[s]
+        n = int(s)
+        if not (lo <= n <= hi):
+            raise ValueError(f"{n} hors de [{lo}, {hi}]")
+        return n
+
+    valeurs: set[int] = set()
+    for part in field.split(","):
+        part = part.strip()
+        if not part:
+            raise ValueError("segment vide")
+        pas = 1
+        plage = part
+        if "/" in part:
+            plage, pas_s = part.split("/", 1)
+            pas = int(pas_s)
+            if pas < 1:
+                raise ValueError(f"pas invalide : {pas_s}")
+        if plage == "*":
+            debut, fin = lo, hi
+        elif "-" in plage:
+            a, b = plage.split("-", 1)
+            debut, fin = _entier(a), _entier(b)
+            if fin < debut:
+                raise ValueError(f"plage inversée : {plage}")
+        else:
+            debut = _entier(plage)
+            # ``a/n`` sans plage : cron le lit « de a jusqu'au maximum ».
+            fin = hi if "/" in part else debut
+        valeurs.update(range(debut, fin + 1, pas))
+    return valeurs
+
+
+def _fallback_cron_next(expr: str, now: datetime) -> Optional[datetime]:
+    """Analyseur cron minimal — ``minute heure jour mois jour_semaine``.
+
+    Utilisé seulement quand croniter manque. Il portait deux défauts que
+    croniter masquait sur toute installation qui l'avait : le jour de la
+    semaine était lu en numérotation Python (lundi = 0) alors que cron
+    compte dimanche = 0 — ``0 9 * * 0`` tombait le lundi, ``1-5`` couvrait
+    mardi-samedi et ``7`` ne tombait jamais ; et un pas (``*/5``) ou une
+    plage sur un autre champ que le jour rendait ``None``, c'est-à-dire un
+    ``next_run_at`` vide pour toujours, sans un mot.
+
+    Numérotation cron partout, convertie vers ``weekday()`` à la comparaison.
+    Jour du mois et jour de la semaine se combinent comme dans Vixie cron et
+    croniter : en OU quand les deux sont restreints, en ET sinon.
     """
     fields = expr.split()
     if len(fields) != 5:
         logger.warning("Fallback cron needs 5 fields, got %r", expr)
         return None
-
     minute_f, hour_f, dom_f, month_f, dow_f = fields
 
-    def _matches_int(val: int, field: str) -> bool:
-        if field == "*":
-            return True
-        for part in field.split(","):
-            try:
-                if int(part) == val:
-                    return True
-            except ValueError:
-                pass
-        return False
+    try:
+        minutes = _valeurs_du_champ(minute_f, 0, 59)
+        heures = _valeurs_du_champ(hour_f, 0, 23)
+        jours = _valeurs_du_champ(dom_f, 1, 31)
+        mois = _valeurs_du_champ(month_f, 1, 12, _MOIS_NOMS)
+        # cron : dimanche = 0 ou 7, lundi = 1 … ; Python : lundi = 0 … dimanche = 6
+        jours_semaine = {
+            (n + 6) % 7 for n in _valeurs_du_champ(dow_f, 0, 7, _DOW_NOMS)
+        }
+    except ValueError as exc:
+        logger.warning("Invalid cron expression %r (fallback parser): %s", expr, exc)
+        return None
 
-    _DOW_MAP = {
-        "SUN": 6, "MON": 0, "TUE": 1, "WED": 2, "THU": 3, "FRI": 4, "SAT": 5,
-    }
+    # Vixie : un champ qui commence par ``*`` est « non restreint », même ``*/2``.
+    dom_restreint = not dom_f.startswith("*")
+    dow_restreint = not dow_f.startswith("*")
 
-    def _matches_dow(val_mon_based: int, field: str) -> bool:
-        # `val_mon_based` uses Python weekday() where Monday=0..Sunday=6
-        if field == "*":
-            return True
-        parts = field.split(",")
-        for part in parts:
-            part = part.strip().upper()
-            if "-" in part:
-                # split once: anything beyond a single hyphen is malformed
-                segs = part.split("-", 1)
-                if len(segs) != 2 or not segs[0] or not segs[1] or "-" in segs[1]:
-                    continue
-                lo, hi = segs[0], segs[1]
-                lo_i = _DOW_MAP.get(lo, _parse_int(lo))
-                hi_i = _DOW_MAP.get(hi, _parse_int(hi))
-                if lo_i is None or hi_i is None:
-                    continue
-                if lo_i <= val_mon_based <= hi_i:
-                    return True
-            else:
-                num = _DOW_MAP.get(part, _parse_int(part))
-                if num is not None and num == val_mon_based:
-                    return True
-        return False
+    def _jour_ok(c: datetime) -> bool:
+        ok_dom, ok_dow = c.day in jours, c.weekday() in jours_semaine
+        if dom_restreint and dow_restreint:
+            return ok_dom or ok_dow
+        return ok_dom and ok_dow
 
-    # Search up to 7 days ahead, minute by minute. Plenty fast.
+    # Recherche jusqu'à un an : ``0 0 29 2 *`` tombe rarement, mais tombe.
+    # Sauter au jour ou à l'heure suivants quand ils ne conviennent pas garde
+    # la boucle courte — quelques centaines d'itérations au pire.
     candidate = now.replace(second=0, microsecond=0) + timedelta(minutes=1)
-    end = now + timedelta(days=7)
+    end = now + timedelta(days=366)
     while candidate <= end:
-        if (
-            _matches_int(candidate.minute, minute_f)
-            and _matches_int(candidate.hour, hour_f)
-            and _matches_int(candidate.day, dom_f)
-            and _matches_int(candidate.month, month_f)
-            and _matches_dow(candidate.weekday(), dow_f)
-        ):
+        if candidate.month not in mois or not _jour_ok(candidate):
+            candidate = (candidate + timedelta(days=1)).replace(hour=0, minute=0)
+            continue
+        if candidate.hour not in heures:
+            candidate = (candidate + timedelta(hours=1)).replace(minute=0)
+            continue
+        if candidate.minute in minutes:
             return candidate
         candidate += timedelta(minutes=1)
     return None
-
-
-def _parse_int(s: str) -> Optional[int]:
-    try:
-        return int(s)
-    except (ValueError, TypeError):
-        return None
 
 
 def is_due(project, now: Optional[datetime] = None) -> bool:

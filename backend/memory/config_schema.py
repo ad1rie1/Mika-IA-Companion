@@ -385,6 +385,13 @@ CONFIG_SCHEMA = [
         default=15, min=1, max=100, hot_reload=True,
     ),
     ConfigItem(
+        key="memory.profile_max_anchor_souvenirs", type="int", section="memory",
+        group="Profils", label="Souvenirs d'ancrage par profil (toutes époques)",
+        default=5, min=0, max=100, hot_reload=True,
+        hint="Ajoutés au vécu neuf depuis la dernière fiche : ce qui a compté "
+             "avec cette personne, quel que soit son âge.",
+    ),
+    ConfigItem(
         key="memory.profile_max_connaissances", type="int", section="memory",
         group="Profils", label="Connaissances envoyées au modèle par profil",
         default=10, min=1, max=100, hot_reload=True,

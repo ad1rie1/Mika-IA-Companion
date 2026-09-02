@@ -300,3 +300,206 @@ class TestConnaissanceORM:
         m = _make_manager(initialized=True)
         result = await m.get_valid_connaissance(c.pk)
         assert result is None
+
+
+# ===================================================================
+# Arrêt : la boucle AVANT la passe finale
+# ===================================================================
+
+class TestArretDuConsolidateur:
+
+    @pytest.mark.asyncio
+    async def test_la_boucle_est_arretee_avant_la_passe_finale(self):
+        """`stop()` attend un tick en cours ; la passe forcée ne trouve alors
+        que ce qui est arrivé depuis. Dans l'autre ordre, elle relisait la
+        fenêtre que le tick était en train d'extraire."""
+        m = _make_manager(initialized=True)
+        m.compactor = None
+        m.episodic = None
+        ordre = []
+        m.consolidator = MagicMock()
+        m.consolidator.stop = AsyncMock(side_effect=lambda: ordre.append("stop"))
+        m.consolidator.force_consolidate = AsyncMock(
+            side_effect=lambda: ordre.append("force"))
+
+        await m.shutdown()
+
+        assert ordre == ["stop", "force"]
+
+
+# ===================================================================
+# Ré-index après écriture d'importance — la métadonnée ChromaDB est le
+# filtre du rappel, et seule la passe de décroissance la maintenait.
+# ===================================================================
+
+class _MagasinSimule:
+    """Un ChromaDB de poche : mémorise les métadonnées et applique le même
+    pré-filtre ``importance >= min_importance`` que ``search_souvenirs``."""
+
+    def __init__(self):
+        self.meta: dict[int, dict] = {}
+        self.contenus: dict[int, str] = {}
+
+    def add_souvenir(self, souvenir_id, content, metadata=None):
+        self.meta[int(souvenir_id)] = dict(metadata or {})
+        self.contenus[int(souvenir_id)] = content
+
+    def add_souvenirs(self, entries):
+        for e in entries:
+            self.add_souvenir(e["souvenir_id"], e["content"], e.get("metadata"))
+
+    def remove_souvenir(self, souvenir_id):
+        self.meta.pop(int(souvenir_id), None)
+        self.contenus.pop(int(souvenir_id), None)
+
+    def search_souvenirs(self, query, n=5, min_importance=0.3):
+        return [
+            {"id": str(pk), "content": self.contenus[pk], "distance": 0.1,
+             "metadata": dict(meta)}
+            for pk, meta in self.meta.items()
+            if meta.get("importance", 0.0) >= min_importance
+        ][:n]
+
+    def search_connaissances(self, query, n=10):
+        return []
+
+
+@pytest.mark.django_db(transaction=True)
+class TestReindexApresEcritureDImportance:
+
+    @pytest.fixture(autouse=True)
+    def _clean(self):
+        from memory.models import Souvenir, Theme
+        Souvenir.objects.all().delete()
+        Theme.objects.all().delete()
+        yield
+
+    _CFG = {
+        "memory.retrieval_souvenirs": 5,
+        "memory.retrieval_connaissances": 5,
+        "memory.min_importance": 0.3,
+        "memory.retrieval_fetch_multiplier": 3,
+        "memory.retrieval_exchanges": 0,
+        "memory.assoc_expansion_enabled": False,
+        "memory.intrusion_enabled": False,
+    }
+
+    async def _endormi(self, magasin, content="Thomas m'a annoncé qu'il se marie"):
+        from django.utils import timezone
+
+        from memory.models import Souvenir
+        s = await Souvenir.objects.acreate(
+            content=content, emotion="happy", importance=0.02,
+            occurred_at=timezone.now(),
+        )
+        magasin.add_souvenir(s.pk, s.content, {"importance": 0.02, "emotion": "happy"})
+        return s
+
+    @staticmethod
+    def _manager(magasin):
+        from memory.retrieval.retriever import MemoryRetriever
+        m = _make_manager(initialized=True)
+        m.vector_store = magasin
+        m.retriever = MemoryRetriever(magasin)
+        return m
+
+    async def _rappel(self, m, question="mariage"):
+        with patch("configs.service.config_service.get",
+                   lambda k, *a, **kw: self._CFG.get(k, kw.get("default", 0))):
+            return await m.get_memory_context(question)
+
+    @pytest.mark.asyncio
+    async def test_un_souvenir_endormi_ranime_par_la_conscience_revient_au_rappel(self):
+        """Le boost n'écrivait que la ligne ORM : le vecteur gardait 0.02 et
+        le souvenir restait invisible au rappel spontané — précisément ce que
+        le boost promettait de défaire."""
+        magasin = _MagasinSimule()
+        s = await self._endormi(magasin)
+        m = self._manager(magasin)
+        assert "marie" not in await self._rappel(m)   # endormi : hors rappel
+
+        await m.boost_souvenir(s.pk, 0.6)
+
+        assert magasin.meta[s.pk]["importance"] == pytest.approx(0.62)
+        assert "marie" in await self._rappel(m)
+
+    @pytest.mark.asyncio
+    async def test_le_reindex_garde_emotion_et_themes(self):
+        """Un upsert remplace les métadonnées EN ENTIER : ré-indexer sans
+        `emotion` ni `themes` les effacerait."""
+        from memory.models import Theme
+        magasin = _MagasinSimule()
+        s = await self._endormi(magasin)
+        theme = await Theme.objects.acreate(name="mariage")
+        await sync_to_async(s.themes.add)(theme)
+        m = self._manager(magasin)
+
+        await m.boost_souvenir(s.pk, 0.5)
+
+        assert magasin.meta[s.pk]["emotion"] == "happy"
+        assert magasin.meta[s.pk]["themes"] == "mariage"
+
+    @pytest.mark.asyncio
+    async def test_la_reduction_et_le_boost_par_theme_reindexent_aussi(self):
+        from memory.models import Theme
+        magasin = _MagasinSimule()
+        s = await self._endormi(magasin)
+        theme = await Theme.objects.acreate(name="mariage")
+        await sync_to_async(s.themes.add)(theme)
+        m = self._manager(magasin)
+
+        assert await m.boost_souvenirs_by_themes(["mariage"], boost=0.5) == 1
+        assert magasin.meta[s.pk]["importance"] == pytest.approx(0.52)
+
+        await m.reduce_souvenir(s.pk, 0.3)
+        assert magasin.meta[s.pk]["importance"] == pytest.approx(0.22)
+
+    @pytest.mark.asyncio
+    async def test_un_magasin_en_panne_ne_coute_que_le_reindex(self):
+        """Best-effort : la ligne ORM reste la vérité, la panne est comptée."""
+        from memory.models import Souvenir
+        from utils.degradation import degradations
+
+        degradations.reset()
+        magasin = _MagasinSimule()
+        s = await self._endormi(magasin)
+        magasin.add_souvenirs = MagicMock(side_effect=RuntimeError("chroma"))
+        m = self._manager(magasin)
+
+        await m.boost_souvenir(s.pk, 0.5)
+
+        assert (await Souvenir.objects.aget(pk=s.pk)).importance == pytest.approx(0.52)
+        assert degradations.count_for("memoire: reindex apres ecriture d'importance") == 1
+        degradations.reset()
+
+    @pytest.mark.asyncio
+    async def test_la_fusion_nocturne_reindexe_le_gagnant(self, monkeypatch):
+        """Le gagnant prend max + 0.05 ; son vecteur doit le savoir."""
+        from datetime import date
+
+        from django.utils import timezone
+
+        import memory.manager as manager_mod
+        from memory.models import Souvenir
+        from memory.reorg import NightlyReorg
+
+        a = await Souvenir.objects.acreate(
+            content="Thomas adore son chat", importance=0.8, occurred_at=timezone.now())
+        b = await Souvenir.objects.acreate(
+            content="Thomas aime beaucoup son chat", importance=0.2,
+            occurred_at=timezone.now())
+
+        class Magasin(_MagasinSimule):
+            def search_souvenirs(self, content, n=3, min_importance=0.0):
+                return [{"id": str(a.pk), "distance": 0.0},
+                        {"id": str(b.pk), "distance": 0.05}]
+
+        magasin = Magasin()
+        magasin.add_souvenir(a.pk, a.content, {"importance": 0.8})
+        magasin.add_souvenir(b.pk, b.content, {"importance": 0.2})
+        monkeypatch.setattr(manager_mod.memory_manager, "vector_store", magasin)
+
+        assert await NightlyReorg()._dedup_souvenirs(date.today()) == 1
+
+        assert b.pk not in magasin.meta
+        assert magasin.meta[a.pk]["importance"] == pytest.approx(0.85)

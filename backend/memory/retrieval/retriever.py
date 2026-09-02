@@ -244,19 +244,23 @@ class MemoryRetriever:
         # proche : sans vivier élargi, re-classer ne ferait que réordonner du
         # déjà-similaire. `vector_call` sort l'encode CPU du thread ORM partagé.
         fetch_multiplier = self._fetch_multiplier()
+        # ``return_exceptions`` : une requête qui échoue (Chroma qui tousse
+        # sur UNE des formulations du plan de préparation) ne doit pas
+        # emporter tout le rappel du tour — ``_merge_pages`` saute la page
+        # et la compte, les autres formulations servent quand même.
         souvenir_pages, connaissance_pages = await asyncio.gather(
             asyncio.gather(*[
                 vector_call(self.vector_store.search_souvenirs)(
                     q, n=n_souvenirs * fetch_multiplier, min_importance=min_importance,
                 )
                 for q in queries
-            ]),
+            ], return_exceptions=True),
             asyncio.gather(*[
                 vector_call(self.vector_store.search_connaissances)(
                     q, n=n_connaissances,
                 )
                 for q in queries
-            ]),
+            ], return_exceptions=True),
         )
         souvenirs_raw = self._merge_pages(souvenir_pages)
         connaissances_raw = self._merge_pages(connaissance_pages)
@@ -265,8 +269,13 @@ class MemoryRetriever:
         # ``extra_exchanges`` vient du plan de préparation (intents
         # `echanges_passes`, rappel inter-personnes permis) ; la voie chaude
         # reste restreinte à l'identité de l'interlocuteur.
-        exchanges = await self._episodic_lane(queries[0], person_id)
-        if extra_exchanges:
+        exchanges = await self._episodic_lane(
+            queries[0], person_id, disclose_others=disclose_others,
+        )
+        # Les échanges du plan sont du verbatim aussi, et le rappel
+        # inter-personnes y est permis : sous le seuil de divulgation ils ne
+        # passent pas plus que la voie chaude.
+        if extra_exchanges and disclose_others:
             seen = {h.chunk_id for h in exchanges}
             exchanges = exchanges + [
                 h for h in extra_exchanges if h.chunk_id not in seen
@@ -286,7 +295,9 @@ class MemoryRetriever:
         souvenirs = await self._enrich_souvenirs(
             souvenirs_raw, boost_name=boost_name, disclose_others=disclose_others,
         )
-        connaissances = await self._enrich_connaissances(connaissances_raw)
+        connaissances = await self._enrich_connaissances(
+            connaissances_raw, boost_name=boost_name, disclose_others=disclose_others,
+        )
 
         # L'humeur courante est lue sans effet de bord (pas de création
         # d'oscillateur).
@@ -434,6 +445,17 @@ class MemoryRetriever:
         """Fusionne des pages ChromaDB par id, en gardant la distance min."""
         merged: dict[str, dict] = {}
         for page in pages:
+            if isinstance(page, BaseException):
+                # Relevée pour être rattrapée sur place : le registre des
+                # dégradations ne se nourrit que d'un `except` (un test AST
+                # l'impose), et une page en échec EST une panne à compter,
+                # pas une ligne de progression. Même famille d'exception que
+                # ce que `gather(return_exceptions=True)` peut rendre.
+                try:
+                    raise page
+                except BaseException as exc:
+                    degradations.record("retriever: page vectorielle", exc)
+                continue
             for r in page or []:
                 rid = str(r.get("id"))
                 prev = merged.get(rid)
@@ -448,11 +470,21 @@ class MemoryRetriever:
             key=lambda r: r["distance"] if r.get("distance") is not None else 1.0,
         )
 
-    async def _episodic_lane(self, query: str, person_id: str):
-        """Échanges bruts de la même identité que l'interlocuteur."""
+    async def _episodic_lane(
+        self, query: str, person_id: str, *, disclose_others: bool = True,
+    ):
+        """Échanges bruts de la même identité que l'interlocuteur.
+
+        ``disclose_others=False`` (sous le seuil de divulgation : salon
+        public, compte non corroboré) ferme la voie entièrement. Elle
+        cherchait « l'identité de l'interlocuteur », c'est-à-dire TOUS ses
+        handles : dans un groupe Telegram, les DM du compte revenaient mot
+        pour mot devant l'audience. Le verbatim est ce qui s'est dit en tête
+        à tête, et l'audience est précisément ce que la porte mesure.
+        """
         from identity.trust import is_internal_person
 
-        if not person_id or is_internal_person(person_id):
+        if not person_id or is_internal_person(person_id) or not disclose_others:
             return []
         try:
             from configs.service import config_service
@@ -600,13 +632,24 @@ class MemoryRetriever:
         qu'elle a vécus seule, et tout ce qui ne concerne personne
         d'identifié, continuent de remonter. On ne l'ampute pas de sa mémoire,
         on l'empêche de raconter celle des autres.
-        """
-        from django.db.models import Q
 
-        autrui = Q(entities__entity_type="person")
+        L'ensemble des AUTRES personnes est construit d'abord, puis exclu en
+        une seule jointure. La forme précédente —
+        ``exclude(Q(entities__entity_type="person") & ~Q(entities__name__iexact=X))``
+        — se compilait en « garder si aucune personne, OU si X figure parmi
+        les entités » : un souvenir étiqueté {Thomas, Alice} était servi à
+        Thomas dans un salon public, c'est-à-dire exactement la confidence
+        d'Alice que le filtre existe pour retenir. Même piège que celui déjà
+        documenté sur ``read.rows_mentioning_others``. Vaut pour tout modèle
+        portant un M2M ``entities`` (souvenirs et connaissances).
+        """
+        from memory.models import Entity
+
+        autres = Entity.objects.filter(entity_type="person")
         if boost_name:
-            autrui &= ~Q(entities__name__iexact=boost_name)
-        return queryset.exclude(autrui)
+            autres = autres.exclude(name__iexact=boost_name)
+        impliques = queryset.model.objects.filter(entities__in=autres).values("pk")
+        return queryset.exclude(pk__in=impliques)
 
     @staticmethod
     async def _load_by_pk(queryset, pks: list[int]) -> dict | None:
@@ -638,7 +681,8 @@ class MemoryRetriever:
 
         try:
             return await sync_to_async(_charger)()
-        except Exception:
+        except Exception as exc:
+            degradations.record("rappel: chargement ORM des lignes", exc)
             return None
 
     async def _enrich_souvenirs(
@@ -667,6 +711,12 @@ class MemoryRetriever:
         if not disclose_others:
             base = self.sans_confidences_d_autrui(base, boost_name)
         loaded = await self._load_by_pk(base, pks)
+        if loaded is None and not disclose_others:
+            # Le repli ChromaDB sert la page BRUTE, et le filtre intime ne vit
+            # que dans la requête ORM qui vient d'échouer : une base verrouillée
+            # ouvrait la porte que la divulgation ferme. Le rappel se tait
+            # plutôt que de raconter la mémoire des autres.
+            return []
 
         # L'ordre ChromaDB est l'ordre de pertinence : on le reconstitue en
         # Python plutot que de le demander a la base.
@@ -708,6 +758,10 @@ class MemoryRetriever:
                 continue
 
             # Chargement en echec, ou identifiant inexploitable : repli ChromaDB.
+            # Sous le seuil, une ligne dont on ne peut pas vérifier de qui
+            # elle parle ne sort pas — même règle que l'outil ``memory_search``.
+            if not disclose_others:
+                continue
             meta = r.get("metadata", {})
             enriched.append({
                 "id": pk,
@@ -864,10 +918,16 @@ class MemoryRetriever:
             degradations.record("prompt: intrusion importance", exc)
             return []
 
-    async def _enrich_connaissances(self, raw_results: list[dict]) -> list[dict]:
+    async def _enrich_connaissances(
+        self, raw_results: list[dict], *, boost_name: str = "",
+        disclose_others: bool = True,
+    ) -> list[dict]:
         """Load full Connaissance data from ORM.
 
-        Meme regroupement que pour les souvenirs (cf. `_enrich_souvenirs`).
+        Meme regroupement que pour les souvenirs (cf. `_enrich_souvenirs`),
+        et même frontière intime : « Alice attend un enfant » est une
+        connaissance, et ``(concerne: Alice)`` la rendait devant n'importe quel
+        handle non lié pendant que les souvenirs, eux, étaient déjà filtrés.
         """
         from memory.models import Connaissance
 
@@ -875,12 +935,20 @@ class MemoryRetriever:
         # `is_valid=True` en ceinture-bretelles : ChromaDB filtre sur sa propre
         # metadonnee, donc une ligne invalidee entre l'indexation et cette
         # lecture doit disparaitre du bloc, pas etre servie.
-        loaded = await self._load_by_pk(Connaissance.objects.filter(is_valid=True), pks)
+        base = Connaissance.objects.filter(is_valid=True)
+        if not disclose_others:
+            base = self.sans_confidences_d_autrui(base, boost_name)
+        loaded = await self._load_by_pk(base, pks)
+        if loaded is None:
+            # Chargement en échec : le repli ChromaDB servirait la page brute,
+            # sans `is_valid` ni le filtre intime — les deux ne vivent que dans
+            # la requête qui vient d'échouer. Rien de vérifié, rien de servi.
+            return []
 
         enriched = []
         for r in raw_results:
             pk = self._pk_of(r)
-            if loaded is not None and pk is not None:
+            if pk is not None:
                 row = loaded.get(pk)
                 if row is None:
                     # Invalidee ou effacee : le repli ChromaDB la reservirait
@@ -895,9 +963,11 @@ class MemoryRetriever:
                 })
                 continue
 
-            # Chargement en echec, ou identifiant inexploitable : repli
-            # ChromaDB, comme le faisait chaque ligne quand la requete etait
-            # posee ligne par ligne.
+            # Identifiant inexploitable : repli ChromaDB, comme le faisait
+            # chaque ligne quand la requete etait posee ligne par ligne —
+            # sauf sous le seuil, où l'on ne peut pas vérifier de qui elle parle.
+            if not disclose_others:
+                continue
             enriched.append({
                 "content": r["content"],
                 "confidence": r.get("metadata", {}).get("confidence", 0.5),

@@ -175,6 +175,16 @@ class MemoryConsolidator:
         self._last_processed_id: int = 0
         self._tick_count = 0
         self._loop = PeriodicLoop("Consolidator", self._tick, self.interval)
+        # Une seule passe à la fois — voir `_consolidate`.
+        self._verrou_consolidation = asyncio.Lock()
+
+    def _verrou(self) -> asyncio.Lock:
+        """Le verrou d'une passe. Créé à la demande : les tests construisent
+        le consolidateur par ``__new__``, sans passer par ``__init__``."""
+        verrou = getattr(self, "_verrou_consolidation", None)
+        if verrou is None:
+            verrou = self._verrou_consolidation = asyncio.Lock()
+        return verrou
 
     async def start(self):
         """Start the consolidation background loop."""
@@ -183,8 +193,16 @@ class MemoryConsolidator:
         logger.info("Consolidator resumed at last_id=%d", self._last_processed_id)
 
     async def stop(self):
-        """Stop the loop gracefully."""
-        await self._loop.stop()
+        """Stop the loop gracefully.
+
+        Sous le verrou : un tick en plein milieu d'une extraction n'est pas
+        annulé, il finit. Annuler entre ``store_extractions`` et le checkpoint
+        laisse des souvenirs écrits sous une fenêtre restée due — la passe
+        forcée de l'arrêt les réécrivait. Un tick qui n'a pas encore le verrou
+        est, lui, annulé proprement : il n'a rien fait.
+        """
+        async with self._verrou():
+            await self._loop.stop()
 
     async def force_consolidate(self):
         """Run consolidation immediately (e.g. on disconnect/shutdown)."""
@@ -223,7 +241,20 @@ class MemoryConsolidator:
             degradations.record("consolidator: checkpoint read", exc)
 
     async def _consolidate(self):
-        """Process new messages since last checkpoint.
+        """Process new messages since last checkpoint — une passe à la fois.
+
+        La boucle périodique et ``force_consolidate`` (appelé à l'arrêt)
+        lisaient la même fenêtre quand l'arrêt tombait au milieu d'un tick :
+        deux extractions du même verbatim, deux jeux de souvenirs et
+        d'engagements jumeaux que le dédoublonnage ne rattrapait qu'à moitié.
+        La seconde passe attend la première ; le checkpoint ayant avancé, sa
+        fenêtre est vide et elle ne coûte qu'une lecture.
+        """
+        async with self._verrou():
+            await self._passe()
+
+    async def _passe(self):
+        """Une passe, hors verrou.
 
         Four steps, each its own method: select the window, turn it into
         memories, checkpoint, then run the periodic maintenance that has to

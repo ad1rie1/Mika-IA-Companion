@@ -81,39 +81,84 @@ current_project_id: ContextVar[Optional[int]] = ContextVar(
 )
 
 # Optional per-call usage set by providers that know their token counts.
-# Layout: {"in": int, "out": int}. Cleared before each call.
+# Layout: {"in": int, "out": int} plus, only when non-zero, "cache_read" and
+# "cache_write" (only Claude ever posts them). Opened fresh by the router
+# before each call (``_reset_usage``), closed after (``_restore_usage``).
 _usage_ctx: ContextVar[Optional[dict]] = ContextVar(
     "ai_quota_usage_ctx", default=None,
 )
 
 
-def set_usage(input_tokens: int, output_tokens: int) -> None:
+def set_usage(
+    input_tokens: int,
+    output_tokens: int,
+    *,
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0,
+) -> None:
     """Providers call this right after the API round-trip to hand real
     token counts to the router. No-op when not running under the router.
 
     Les compteurs se **cumulent** : une boucle d'outils appelle le provider
     une fois par tour, et écraser à chaque tour ne facturerait que le dernier
-    — soit une fraction du poste le plus lourd du système. Le routeur remet
-    le contexte à zéro avant chaque appel (``_reset_usage``), donc un appel
+    — soit une fraction du poste le plus lourd du système. Le routeur ouvre
+    une fenêtre vierge avant chaque appel (``_reset_usage``), donc un appel
     simple retrouve exactement ses propres chiffres.
+
+    Les jetons de cache voyagent à part : ce sont des jetons consommés — ils
+    comptent dans le quota — mais ils ne se paient pas au tarif d'entrée
+    plein (0,1× en lecture, 1,25× en écriture), et les fondre dans ``in``
+    facturait dix fois son prix la lecture du préfixe en cache, c'est-à-dire
+    l'essentiel de chaque tour outillé.
     """
     try:
         current = _usage_ctx.get() or {}
-        _usage_ctx.set({
+        merged = {
             "in": int(current.get("in", 0)) + int(input_tokens),
             "out": int(current.get("out", 0)) + int(output_tokens),
-        })
+        }
+        # Les clés de cache n'apparaissent que portées : le relevé d'un
+        # provider sans cache garde la forme à deux clés qu'il a toujours eue.
+        cache_read = int(current.get("cache_read", 0)) + int(cache_read_tokens)
+        cache_write = int(current.get("cache_write", 0)) + int(cache_write_tokens)
+        if cache_read:
+            merged["cache_read"] = cache_read
+        if cache_write:
+            merged["cache_write"] = cache_write
+        _usage_ctx.set(merged)
     except Exception as exc:
         degradations.record("ai.quota.set_usage", exc)
 
 
-def _reset_usage() -> None:
-    _usage_ctx.set(None)
+def _reset_usage():
+    """Ouvre la fenêtre de relevé d'un appel routé ; renvoie le jeton qui
+    la referme (``_restore_usage``).
+
+    Une *fenêtre*, pas une remise à zéro : un outil MCP peut relancer le
+    routeur depuis l'intérieur d'une boucle d'outils (``files_analyze_image``
+    décrit une image pendant que la conversation attend), et une remise à
+    zéro plate effaçait l'usage que la boucle englobante avait déjà cumulé
+    itération par itération — le tour ne facturait plus que ce qui suivait
+    l'outil.
+    """
+    return _usage_ctx.set(None)
+
+
+def _restore_usage(token) -> None:
+    """Referme la fenêtre ouverte par ``_reset_usage`` : le relevé de
+    l'appel englobant, s'il y en a un, redevient visible tel qu'il était.
+    Tolère ``None`` (fenêtre jamais ouverte) et ne lève jamais."""
+    if token is None:
+        return
+    try:
+        _usage_ctx.reset(token)
+    except (ValueError, RuntimeError) as exc:
+        degradations.record("ai.quota._restore_usage", exc)
 
 
 def _take_usage() -> Optional[dict]:
     value = _usage_ctx.get()
-    _reset_usage()
+    _usage_ctx.set(None)
     return value
 
 
@@ -135,25 +180,42 @@ class QuotaExceeded(Exception):
 
 # ── Pricing table (USD per token, best-effort — override via settings) ──
 
-# Sources: Anthropic + OpenAI public pricing pages as of early 2026.
-# Values are per 1M tokens, converted to per-token in _MODEL_PRICING_USD.
-# Any model not listed falls back to the family-level entry below; any
-# family not listed is billed as $0 (local / unknown → no cost surprise).
+# Sources : tarifs Anthropic relevés via le skill ``claude-api`` (cache du
+# 2026-06-24), lignes OpenAI inchangées. Par million de jetons, (entrée,
+# sortie), converti au jeton dans ``_lookup_pricing``. Un id absent retombe
+# sur la famille par préfixe le plus long ; une famille absente vaut $0 —
+# et, chez un provider *payant*, se dit une fois à voix haute
+# (``_warn_unpriced``) : un $0 muet est indiscernable d'un modèle local, et
+# c'est ainsi que Fable, Mythos et toute la série 5 ont tourné « gratuits »
+# sur le tableau de bord.
 _PRICING_PER_MILLION: dict[str, tuple[float, float]] = {
-    # Claude Opus family (priciest)
-    "claude-opus":        (15.0, 75.0),
-    "claude-opus-4":      (15.0, 75.0),
-    "claude-opus-4-6":    (15.0, 75.0),
-    "claude-opus-4-7":    (15.0, 75.0),
-    # Claude Sonnet
-    "claude-sonnet":      (3.0, 15.0),
+    # Fable / Mythos — même palier, même tarif au jeton
+    "claude-fable":       (10.0, 50.0),
+    "claude-fable-5":     (10.0, 50.0),
+    "claude-fable-5-1":   (10.0, 50.0),
+    "claude-mythos":      (10.0, 50.0),
+    "claude-mythos-5":    (10.0, 50.0),
+    "claude-mythos-5-1":  (10.0, 50.0),
+    # Opus — $5/$25 depuis 4.6 (et Opus 5) ; 4.0/4.1, dépréciés, gardent
+    # l'ancien tarif tant qu'ils répondent.
+    "claude-opus":        (5.0, 25.0),
+    "claude-opus-5":      (5.0, 25.0),
+    "claude-opus-4":      (5.0, 25.0),
+    "claude-opus-4-0":    (15.0, 75.0),
+    "claude-opus-4-1":    (15.0, 75.0),
+    "claude-opus-4-6":    (5.0, 25.0),
+    "claude-opus-4-7":    (5.0, 25.0),
+    "claude-opus-4-8":    (5.0, 25.0),
+    # Sonnet — 5 à $2/$10, la génération 4.x à $3/$15
+    "claude-sonnet":      (2.0, 10.0),
+    "claude-sonnet-5":    (2.0, 10.0),
     "claude-sonnet-4":    (3.0, 15.0),
     "claude-sonnet-4-5":  (3.0, 15.0),
     "claude-sonnet-4-6":  (3.0, 15.0),
-    # Claude Haiku
-    "claude-haiku":       (0.8, 4.0),
-    "claude-haiku-4":     (0.8, 4.0),
-    "claude-haiku-4-5":   (0.8, 4.0),
+    # Haiku
+    "claude-haiku":       (1.0, 5.0),
+    "claude-haiku-4":     (1.0, 5.0),
+    "claude-haiku-4-5":   (1.0, 5.0),
     # OpenAI
     "gpt-4o":             (2.5, 10.0),
     "gpt-4o-mini":        (0.15, 0.6),
@@ -164,13 +226,53 @@ _PRICING_PER_MILLION: dict[str, tuple[float, float]] = {
     "o1-mini":            (3.0, 12.0),
 }
 
+# Jetons de cache (Claude) : la lecture se paie 0,1× le tarif d'entrée,
+# l'écriture 1,25× (TTL de 5 min — le TTL d'une heure écrit à 2×, mais le
+# provider ne le demande jamais). Exception publiée : Claude Fable 5.1 lit
+# son cache à $0,25/M, soit 0,025× ; Mythos 5.1 n'était pas confirmé au
+# lancement et reste au taux général.
+_CACHE_READ_MULTIPLIER = 0.1
+_CACHE_WRITE_MULTIPLIER = 1.25
+_CACHE_READ_PER_MILLION_OVERRIDES: dict[str, float] = {
+    "claude-fable-5-1": 0.25,
+}
+
+# (provider, modèle) déjà signalés sans tarif — un avertissement par paire et
+# par processus, pas un par appel.
+_unpriced_warned: set[tuple[str, str]] = set()
+
+
+def _match_family(table: dict, norm: str) -> Optional[str]:
+    """Clé exacte, sinon le préfixe le plus long (claude-opus-4-7 →
+    claude-opus-4 → claude-opus) ; None quand rien ne correspond."""
+    if norm in table:
+        return norm
+    matches = [k for k in table if norm.startswith(k)]
+    if not matches:
+        return None
+    return max(matches, key=len)
+
+
+def _warn_unpriced(provider: str, norm: str) -> None:
+    key = (provider, norm)
+    if key in _unpriced_warned:
+        return
+    _unpriced_warned.add(key)
+    logger.warning(
+        "Aucun tarif connu pour %s/%s — facturé $0 sur le tableau de bord ; "
+        "les compteurs de jetons, eux, restent exacts. Ajouter une ligne dans "
+        "ai/quota.py::_PRICING_PER_MILLION.",
+        provider, norm,
+    )
+
 
 def _lookup_pricing(provider: str, model: str) -> tuple[float, float]:
     """Return (in_per_token_usd, out_per_token_usd).
 
     Exact model match first, then progressively shorter prefix match
     (claude-opus-4-7 → claude-opus-4 → claude-opus). Ollama / unknown
-    providers are free.
+    providers are free — but an unknown model at a *paid* provider is said
+    out loud, once.
 
     Both Ollama variants are $0-per-token: local costs electricity, and the
     hosted one is billed by subscription, not by usage. The token *counters*
@@ -182,17 +284,30 @@ def _lookup_pricing(provider: str, model: str) -> tuple[float, float]:
         return (0.0, 0.0)
 
     norm = model.lower().strip()
-    # Exact
-    if norm in _PRICING_PER_MILLION:
-        in_per_m, out_per_m = _PRICING_PER_MILLION[norm]
-        return (in_per_m / 1_000_000, out_per_m / 1_000_000)
-    # Prefix search, longest first
-    matches = [k for k in _PRICING_PER_MILLION if norm.startswith(k)]
-    if matches:
-        matches.sort(key=len, reverse=True)
-        in_per_m, out_per_m = _PRICING_PER_MILLION[matches[0]]
-        return (in_per_m / 1_000_000, out_per_m / 1_000_000)
-    return (0.0, 0.0)
+    key = _match_family(_PRICING_PER_MILLION, norm)
+    if key is None:
+        _warn_unpriced(provider, norm)
+        return (0.0, 0.0)
+    in_per_m, out_per_m = _PRICING_PER_MILLION[key]
+    return (in_per_m / 1_000_000, out_per_m / 1_000_000)
+
+
+def _lookup_cache_pricing(provider: str, model: str) -> tuple[float, float]:
+    """Return (cache_read_per_token_usd, cache_write_per_token_usd).
+
+    Dérivé du tarif d'entrée du modèle — un modèle gratuit ou inconnu a un
+    cache gratuit — sauf pour les lectures dont le tarif est publié à part.
+    """
+    in_rate, _ = _lookup_pricing(provider, model)
+    if in_rate == 0.0:
+        return (0.0, 0.0)
+    norm = model.lower().strip()
+    key = _match_family(_CACHE_READ_PER_MILLION_OVERRIDES, norm)
+    if key is not None:
+        read_rate = _CACHE_READ_PER_MILLION_OVERRIDES[key] / 1_000_000
+    else:
+        read_rate = in_rate * _CACHE_READ_MULTIPLIER
+    return (read_rate, in_rate * _CACHE_WRITE_MULTIPLIER)
 
 
 def estimate_tokens_from_chars(chars: int) -> int:
@@ -397,11 +512,30 @@ class QuotaTracker:
         tokens_in: int,
         tokens_out: int,
         project_id: Optional[int] = None,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
     ) -> float:
-        """Bump counters + persist to DB. Returns the computed USD cost."""
-        total = max(0, int(tokens_in)) + max(0, int(tokens_out))
+        """Bump counters + persist to DB. Returns the computed USD cost.
+
+        Les jetons de cache comptent dans le quota comme n'importe quel jeton
+        consommé, chacun à son tarif. En base ils sont fondus dans
+        ``tokens_in`` — la table n'a pas de colonne pour eux, et le coût, lui,
+        est exact — de sorte qu'un total relu à l'hydratation vaut celui
+        compté ici.
+        """
+        tokens_in = max(0, int(tokens_in))
+        tokens_out = max(0, int(tokens_out))
+        cache_read = max(0, int(cache_read_tokens))
+        cache_write = max(0, int(cache_write_tokens))
+        total = tokens_in + tokens_out + cache_read + cache_write
         in_rate, out_rate = _lookup_pricing(provider, model)
-        cost = tokens_in * in_rate + tokens_out * out_rate
+        read_rate, write_rate = _lookup_cache_pricing(provider, model)
+        cost = (
+            tokens_in * in_rate
+            + tokens_out * out_rate
+            + cache_read * read_rate
+            + cache_write * write_rate
+        )
 
         with self._lock:
             today = self._today()
@@ -423,7 +557,7 @@ class QuotaTracker:
             provider=provider,
             model=model,
             project_id=project_id,
-            tokens_in=tokens_in,
+            tokens_in=tokens_in + cache_read + cache_write,
             tokens_out=tokens_out,
             cost_usd=cost,
             today=today,

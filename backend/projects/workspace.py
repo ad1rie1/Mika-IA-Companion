@@ -283,6 +283,52 @@ def _nom_du_dossier(project_id: int, titre: str) -> str:
     return f"{project_id}-{_fragment(titre)}"
 
 
+def _derniere_activite(dossier: Path) -> float:
+    """Le moment le plus récent où l'atelier a bougé, pour départager.
+
+    Le mtime du dossier ne bouge qu'à l'ajout d'une entrée directe ; l'index
+    git, lui, est réécrit à chaque ``git add`` du lanceur.
+    """
+    instants = [dossier.stat().st_mtime]
+    for organe in (dossier / ".git" / "index", dossier / ".git" / "HEAD"):
+        try:
+            instants.append(organe.stat().st_mtime)
+        except OSError:
+            pass
+    return max(instants)
+
+
+def _dossier_de(project_id: int, titre: str) -> Path:
+    """Le dossier d'un projet : celui qui existe déjà sous son identifiant,
+    sinon ``<id>-<slug du titre>``.
+
+    Le nom portait le titre, et le titre se modifie. Renommer un projet
+    détachait donc son travail : le lanceur ouvrait un dossier neuf et vide,
+    l'ancien restait orphelin, et la suppression ne mettait en corbeille que
+    le neuf. L'identifiant est la seule partie stable du nom ; le slug n'est
+    qu'un confort de lecture, figé à la création. Résoudre par préfixe évite
+    une migration — rien à recopier sur une installation existante.
+    """
+    racine = racine_des_ateliers()
+    existants = (
+        [p for p in racine.glob(f"{project_id}-*") if p.is_dir()]
+        if racine.is_dir() else []
+    )
+    if not existants:
+        return racine / _nom_du_dossier(project_id, titre)
+    if len(existants) > 1:
+        # Installation d'avant ce correctif, renommée entre deux ticks : deux
+        # dossiers, deux fragments de travail. On reprend là où le lanceur a
+        # travaillé en dernier, et on nomme les autres pour qu'on les fusionne.
+        existants.sort(key=_derniere_activite, reverse=True)
+        logger.warning(
+            "Projet %s : plusieurs ateliers sous %s (%s) — reprise dans %s",
+            project_id, racine, ", ".join(p.name for p in existants),
+            existants[0].name,
+        )
+    return existants[0]
+
+
 def atelier_de(project_id: int, titre: str) -> Atelier:
     """L'atelier d'un projet, créé à la volée.
 
@@ -294,14 +340,14 @@ def atelier_de(project_id: int, titre: str) -> Atelier:
     recharger le projet pour obtenir son dossier serait une requête de plus
     par tick pour deux champs qu'il a déjà.
     """
-    racine = racine_des_ateliers() / _nom_du_dossier(project_id, titre)
+    racine = _dossier_de(project_id, titre)
     racine.mkdir(parents=True, exist_ok=True)
     return Atelier(project_id=project_id, racine=racine)
 
 
 def atelier_existant(project_id: int, titre: str) -> Atelier | None:
     """L'atelier s'il existe déjà, sans le créer (lecture d'écran)."""
-    racine = racine_des_ateliers() / _nom_du_dossier(project_id, titre)
+    racine = _dossier_de(project_id, titre)
     return Atelier(project_id=project_id, racine=racine) if racine.is_dir() else None
 
 

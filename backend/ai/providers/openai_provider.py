@@ -68,7 +68,13 @@ class OpenAIProvider:
         else:
             user_content = user_prompt
 
-        response = await self._client.chat.completions.create(
+        from ai.providers._openai_tools import create_chat_completion, memo_for
+
+        # Les modèles de raisonnement (série o, gpt-5) refusent ``max_tokens``
+        # et ``temperature`` en 400 : l'aide reprend une fois par paramètre
+        # et mémorise le refus par modèle.
+        response = await create_chat_completion(
+            self._client, memo_for(self),
             model=model,
             max_tokens=max_tokens,
             temperature=temperature,
@@ -106,10 +112,13 @@ class OpenAIProvider:
         key their automatic prefix caching on; the per-turn state rides in
         the final user turn, after the reusable prefix.
         """
+        from ai.providers._openai_tools import create_chat_completion, memo_for
+
         messages = [{"role": "system", "content": prompt.system_stable}]
         messages.extend(prompt.chat_messages())
 
-        response = await self._client.chat.completions.create(
+        response = await create_chat_completion(
+            self._client, memo_for(self),
             model=model,
             max_tokens=max_tokens,
             temperature=temperature,
@@ -172,7 +181,7 @@ class OpenAIProvider:
         max_turns: int = 10,
     ) -> tuple[str, list[str]]:
         """OpenAI function-calling via ``tools=[...]`` + ping/pong loop."""
-        from ai.providers._openai_tools import run_openai_tool_loop_from_pair
+        from ai.providers._openai_tools import memo_for, run_openai_tool_loop_from_pair
         return await run_openai_tool_loop_from_pair(
             client=self._client,
             provider_label="OpenAI",
@@ -183,6 +192,7 @@ class OpenAIProvider:
             max_tokens=max_tokens,
             temperature=temperature,
             max_turns=max_turns,
+            memo=memo_for(self),
         )
 
     async def complete_chat_with_tools(
@@ -204,6 +214,7 @@ class OpenAIProvider:
         pas de la boucle, ni d'un tour à l'autre.
         """
         from ai.providers._openai_tools import (
+            memo_for,
             messages_from_chat_prompt,
             run_openai_tool_loop,
         )
@@ -216,6 +227,7 @@ class OpenAIProvider:
             max_tokens=max_tokens,
             temperature=temperature,
             max_turns=max_turns,
+            memo=memo_for(self),
         )
 
     # ── Audio transcription (OpenAI-specific capability) ─────────

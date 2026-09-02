@@ -21,6 +21,13 @@ from django.test import Client
 from django.utils import timezone
 
 
+@pytest.fixture(autouse=True)
+def _api_sans_portail(settings):
+    """Ces tests exercent la logique des vues, pas le portail : celui-ci a
+    son propre fichier (test_api_auth_gate.py) et suit le réglage du socket."""
+    settings.CONSUMER_REQUIRE_AUTH = False
+
+
 @pytest.fixture
 def client():
     return Client()

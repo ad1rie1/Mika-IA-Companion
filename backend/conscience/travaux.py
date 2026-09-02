@@ -59,6 +59,16 @@ _TRAVAIL_PAS_MAX = 5
 #: Sujets retenus parmi ceux que les modules proposent. Petit : c'est une
 #: curiosité, pas un inventaire — et chacun concourt aux trois places.
 _GRAINES_MODULES_MAX = 3
+#: Mémoire des amorces semées : une graine dont un chantier est né dans cette
+#: fenêtre ne rouvre rien, **quel que soit le sort du chantier**. La
+#: déduplication ne se lisait que sur les chantiers vivants, or une graine
+#: survit à son chantier — une Observation reste « en attente » trente
+#: minutes, une Rumination à 0.5 vit des heures — si bien qu'un chantier fini
+#: ou bloqué au cycle N+1 rouvrait la même amorce au cycle N+2 : un appel
+#: LLM à boucle d'outils par itération, et à chaque FINI un souvenir, une
+#: fierté et +0.05 d'estime (le plafond en neuf tours) ; à chaque BLOQUÉ une
+#: frustration, une rumination « je bloque sur… » de plus et −0.04 d'estime.
+_SEMIS_MEMOIRE_S = 24 * 3600
 #: Intensité de la fierté ressentie quand un chantier aboutit — la même que
 #: celle que sa diffusion déclare (`peut_etre_dire_le_travail`, proud 0.4) :
 #: une seule vérité émotionnelle pour un même événement.
@@ -133,13 +143,39 @@ def verdict_tuning() -> VerdictTuning:
 # ── Lecture et récolte ────────────────────────────────────────────────────
 
 
+def _apaiser_les_pensees(references, *, resoudre: bool = False) -> int:
+    """Une pensée dont le chantier se ferme cesse d'insister.
+
+    Résolue s'il a abouti — elle a fait la chose ; divisée par deux sinon
+    (bloqué, abandonné, clos au redémarrage) — elle a essayé, et l'échec a
+    déjà sa propre pensée (« je bloque sur… »). Ne rien faire laissait la
+    rumination entière, au-dessus de la porte des graines, prête à rouvrir le
+    même chantier dès que la déduplication cessait de la voir.
+
+    Synchrone, à appeler DANS le callable de l'écrivain qui change le statut :
+    les deux sont un seul fait. Tolère des références qui ne sont pas des pk.
+    """
+    from conscience.models import Rumination
+
+    pks = [int(r) for r in references if str(r).isdigit()]
+    if not pks:
+        return 0
+    actives = Rumination.objects.filter(pk__in=pks, status="active")
+    if resoudre:
+        return actives.update(status="resolved")
+    return actives.update(intensity=F("intensity") * 0.5)
+
+
 async def travaux_en_cours(maintenant) -> tuple[list, set]:
     """Les chantiers vivants, et les amorces déjà semées.
 
     Le second élément est la clé de déduplication `(origine, reference)` :
     sans elle, une `Observation` reste « en attente » trente minutes et
     rouvrirait le même chantier à chaque cycle — trois places saturées en
-    quatre-vingt-dix secondes.
+    quatre-vingt-dix secondes. Elle couvre **tout chantier né dans les
+    dernières `_SEMIS_MEMOIRE_S`**, pas seulement les vivants : une graine
+    survit à son chantier, et un chantier fini ou bloqué rouvrait la même
+    amorce au cycle suivant (voir la constante).
 
     L'abandon des essoufflés et le relâchement des attentes échues se font
     **dans le même callable synchrone** que la lecture.
@@ -149,6 +185,7 @@ async def travaux_en_cours(maintenant) -> tuple[list, set]:
     `_decay_ruminations`.
     """
     from conscience.models import Travail
+    from datetime import timedelta
 
     t = conduite_tuning()
 
@@ -157,6 +194,16 @@ async def travaux_en_cours(maintenant) -> tuple[list, set]:
         semees: set[tuple[str, str]] = set()
         a_abandonner: list = []
         a_reveiller: list = []
+        # Les amorces de TOUS les chantiers récents, vivants ou non : c'est
+        # le sort d'une graine, pas celui d'un chantier, qui décide si elle
+        # peut resservir. Lue avant la boucle, qui n'y ajoute plus que les
+        # vivants (une ligne vivante plus vieille que la fenêtre reste semée).
+        semees.update(
+            (origine, str(reference))
+            for origine, reference in Travail.objects.filter(
+                created_at__gte=maintenant - timedelta(seconds=_SEMIS_MEMOIRE_S),
+            ).values_list("origine", "reference")
+        )
         for row in Travail.objects.filter(statut=Travail.Statut.EN_COURS):
             # Une attente échue cesse d'en être une — ICI, parce que c'est
             # la seule relecture périodique des chantiers. Une échéance
@@ -189,6 +236,13 @@ async def travaux_en_cours(maintenant) -> tuple[list, set]:
             semees.add((row.origine, str(row.reference)))
         if a_abandonner:
             Travail.objects.bulk_update(a_abandonner, ["statut"])
+            # L'abandon est un statut terminal comme les autres : la pensée
+            # qui l'avait ouvert cesse d'insister, sinon elle rouvre le même
+            # chantier dès que la mémoire des semis l'oublie.
+            _apaiser_les_pensees(
+                row.reference for row in a_abandonner
+                if row.origine == Travail.Origine.PENSEE
+            )
         if a_reveiller:
             Travail.objects.bulk_update(
                 a_reveiller,
@@ -415,15 +469,28 @@ def graines_des_modules(pulsion, pulsions: list) -> list:
 
 
 async def ouvrir_travail(graine) -> bool:
-    """Poser un chantier en base. Aucun pas n'est fait ici."""
-    from conscience.models import Travail
+    """Poser un chantier en base, et consommer la graine. Aucun pas ici.
+
+    Une observation devenue chantier est **traitée** (`acted`) dans le même
+    callable synchrone que la création : elle a reçu une réponse — le
+    chantier — et ne doit plus ni peser dans l'urgence du cycle suivant, ni
+    se faire promouvoir en rumination à sa péremption, ni resservir de graine
+    quand la mémoire des semis l'aura oubliée. Une pensée, elle, n'est pas
+    consommée à l'ouverture (elle n'a pas encore été faite) : c'est le
+    verdict terminal qui l'apaise (`_apaiser_les_pensees`). Une référence qui
+    n'est pas un pk (les doubles des tests, une pulsion) ne touche rien.
+    """
+    from conscience.models import Observation, Travail
     from django.utils import timezone as tz
 
-    try:
-        await sync_to_async(Travail.objects.create)(
-            titre=graine.intitule[:200],
+    reference = str(graine.reference)[:100]
+    titre = graine.intitule[:200]
+
+    def _creer() -> None:
+        Travail.objects.create(
+            titre=titre,
             origine=graine.origine,
-            reference=str(graine.reference)[:100],
+            reference=reference,
             themes=list(graine.themes),
             # La trousse du chantier, figée à l'ouverture : c'est elle que
             # chaque pas rechargera, indépendamment de la tension de
@@ -434,6 +501,16 @@ async def ouvrir_travail(graine) -> bool:
             pas_max=cfg_int("conscience.travail.pas_max", _TRAVAIL_PAS_MAX,
                             mini=1),
         )
+        if graine.origine == Travail.Origine.OBSERVATION and reference.isdigit():
+            Observation.objects.filter(
+                pk=int(reference), status=Observation.Status.PENDING,
+            ).update(
+                status=Observation.Status.ACTED,
+                action_response=f"chantier ouvert : {titre}"[:200],
+            )
+
+    try:
+        await sync_to_async(_creer, thread_sensitive=True)()
         logger.info("Travail ouvert [%s]: %s", graine.origine, graine.intitule[:80])
         return True
     except Exception as exc:
@@ -692,15 +769,18 @@ async def appliquer_verdict(moteur, identifiant, verdict, dit, bilan) -> None:
         # Un chantier né d'une pensée et mené au bout résout la pensée.
         # C'est la boucle du regret refermée par l'autre côté : elle
         # n'oublie pas parce que le temps passe, elle oublie parce qu'elle
-        # a fait la chose.
+        # a fait la chose. Bloqué, il l'apaise seulement (divisée par deux) :
+        # ne rien faire la laissait entière, au-dessus de la porte des
+        # graines — et le même chantier se rouvrait dès que la
+        # déduplication cessait de le voir.
         if (
-            row.statut == Travail.Statut.ABOUTIE
-            and row.origine == Travail.Origine.PENSEE
-            and str(row.reference).isdigit()
+            row.origine == Travail.Origine.PENSEE
+            and row.statut in (Travail.Statut.ABOUTIE, Travail.Statut.BLOQUEE)
         ):
-            Rumination.objects.filter(
-                pk=int(row.reference), status="active",
-            ).update(status="resolved")
+            _apaiser_les_pensees(
+                [row.reference],
+                resoudre=row.statut == Travail.Statut.ABOUTIE,
+            )
 
         if row.statut == Travail.Statut.ABOUTIE:
             return {"issue": "aboutie", "titre": row.titre}
@@ -982,13 +1062,21 @@ async def reprendre_travaux() -> None:
     from conscience.models import Travail
 
     def _passe() -> int:
-        return Travail.objects.filter(
+        coupes = Travail.objects.filter(
             statut=Travail.Statut.EN_COURS,
             pas_effectues__gte=F("pas_max"),
-        ).update(
+        )
+        pensees = list(
+            coupes.filter(origine=Travail.Origine.PENSEE)
+            .values_list("reference", flat=True)
+        )
+        n = coupes.update(
             statut=Travail.Statut.BLOQUEE,
             raison_blocage="pas épuisés — interrompu au redémarrage",
         )
+        if n and pensees:
+            _apaiser_les_pensees(pensees)
+        return n
 
     with degraded("conscience: reprise des travaux"):
         n = await sync_to_async(_passe, thread_sensitive=True)()

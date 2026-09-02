@@ -6,6 +6,8 @@ import {
   coerceStatus,
   cursorOf,
   mergeHistory,
+  RESTORED_PENDING_REASON,
+  restoredStatus,
   sortMessages,
   stripProsody,
 } from "../chatSync";
@@ -392,6 +394,30 @@ describe("coerceStatus", () => {
     expect(coerceStatus("delivered")).toBeUndefined();
     expect(coerceStatus(undefined)).toBeUndefined();
     expect(coerceStatus(7)).toBeUndefined();
+  });
+});
+
+describe("restoredStatus", () => {
+  // Une bulle "pending" restaurée depuis le localStorage ne peut plus
+  // jamais avancer : l'outbox qui aurait porté ce frame était en mémoire
+  // dans l'onglet précédent (network/WebSocketClient), et a disparu avec
+  // lui. Sans cette règle elle affichait "en attente d'envoi" pour
+  // toujours — un état qu'aucun événement à venir ne pouvait plus changer.
+  it("turns a restored pending into a failed refusal", () => {
+    expect(restoredStatus("pending")).toEqual({
+      status: "failed",
+      reason: RESTORED_PENDING_REASON,
+    });
+  });
+
+  it("leaves a restored sent or failed status untouched", () => {
+    expect(restoredStatus("sent")).toEqual({ status: "sent" });
+    expect(restoredStatus("failed")).toEqual({ status: "failed" });
+  });
+
+  it("drops an unknown cached status like coerceStatus does", () => {
+    expect(restoredStatus("delivered")).toEqual({ status: undefined });
+    expect(restoredStatus(undefined)).toEqual({ status: undefined });
   });
 });
 

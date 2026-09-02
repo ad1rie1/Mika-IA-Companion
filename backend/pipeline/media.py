@@ -85,7 +85,14 @@ class MediaAttachment:
 
     @classmethod
     def from_ws_dict(cls, raw: dict) -> "MediaAttachment":
-        name = str(raw.get("name", "fichier"))
+        # Assaini à l'entrée : le nom brut partait tel quel dans
+        # ``Part.metadata``, d'où les préprocesseurs l'interpolaient dans le
+        # tour utilisateur et d'où ``attachments_meta`` le persistait — sans
+        # plafond, hors de MAX_MESSAGE_LENGTH. Un seul nom de 10 Mo faisait
+        # un tour de 10 Mo, une ligne de 10 Mo et une trame d'historique de
+        # 10 Mo. ``save_attachments`` assainissait déjà, mais seulement le
+        # nom gardé pour le fichier sur disque.
+        name = sanitize_filename(raw.get("name", "fichier"))
         media_type = str(raw.get("type", "application/octet-stream")).lower().split(";")[0].strip()
         data = str(raw.get("data", ""))
         if "," in data:

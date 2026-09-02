@@ -509,3 +509,116 @@ class TestNoCrossPersonLeak:
 
         sent = await self._send_to("conscience_mika")
         assert [group for group, _ in sent] == [BROADCAST_GROUP]
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.asyncio
+class TestLaRepriseGardeLaConfianceDuTransport:
+    """Un tour rejoué repart avec ce que son transport prouvait.
+
+    La perception rebâtie ne portait que ``resumed`` et l'id de la ligne ;
+    le processeur lisait alors ``is_public=False`` — un message de groupe
+    Telegram interrompu par un redémarrage repartait en confiance ACCOUNT :
+    divulgation accordée à un compte corroboré, fiche injectée, réponse
+    postée dans le groupe.
+    """
+
+    @staticmethod
+    async def _question(content, *, person_id, source, transport_meta=None):
+        from memory.models import Conversation, Message
+
+        conv = await Conversation.objects.acreate()
+        return await Message.objects.acreate(
+            conversation=conv, role="user", content=content, source=source,
+            person_id=person_id, awaiting_reply=True,
+            transport_meta=transport_meta,
+        )
+
+    @staticmethod
+    async def _rejouer():
+        from pipeline.turns import resume_interrupted_turns, turn_queue
+
+        seen: list = []
+
+        async def record(perception):
+            seen.append(perception)
+
+        await turn_queue.start(workers=1)
+        with patch("pipeline.router.perceive", new=record):
+            await resume_interrupted_turns()
+            await _drain()
+        return seen
+
+    async def test_un_tour_de_groupe_rejoue_reste_public(self):
+        row = await self._question(
+            "c'est quoi mon secret ?", person_id="tg_grp", source="telegram",
+            transport_meta={
+                "authenticated": False, "is_public": True,
+                "reply_ref": "-100777",
+            },
+        )
+
+        [perception] = await self._rejouer()
+
+        assert perception.metadata["is_public"] is True
+        assert perception.metadata["authenticated"] is False
+        # Et la réponse repart dans le groupe qui a posé la question.
+        assert perception.metadata["reply_ref"] == "-100777"
+        assert perception.metadata["original_message_id"] == row.pk
+
+    async def test_une_session_verifiee_rejouee_reste_verifiee(self):
+        await self._question(
+            "on en était où ?", person_id="user_5", source="frontend",
+            transport_meta={"authenticated": True, "is_public": False},
+        )
+
+        [perception] = await self._rejouer()
+
+        assert perception.metadata["authenticated"] is True
+        assert perception.metadata["is_public"] is False
+
+    async def test_un_tour_telegram_sans_preuve_est_rejoue_comme_public(self):
+        """Ligne antérieure à la colonne, ou écriture échouée : on ferme."""
+        await self._question(
+            "et donc ?", person_id="tg_old", source="telegram",
+        )
+
+        [perception] = await self._rejouer()
+
+        assert perception.metadata["is_public"] is True
+        assert perception.metadata["authenticated"] is False
+
+    async def test_un_tour_web_sans_preuve_ne_gagne_rien(self):
+        await self._question(
+            "et donc ?", person_id="web_old", source="frontend",
+        )
+
+        [perception] = await self._rejouer()
+
+        assert perception.metadata.get("authenticated", False) is False
+        assert perception.metadata.get("is_public", False) is False
+
+    async def test_la_question_garde_ce_que_le_transport_prouvait(self):
+        """L'écriture elle-même : ``persist_user_message`` pose la colonne."""
+        from asgiref.sync import sync_to_async
+        from memory.manager import memory_manager
+        from memory.models import Conversation, Message
+        from pipeline.broadcast import persist_user_message
+
+        memory_manager.conversation = await Conversation.objects.acreate()
+        memory_manager._initialized = True
+
+        preuve = {"authenticated": False, "is_public": True, "reply_ref": "-1"}
+        user_id = await persist_user_message(
+            message="q", source="telegram", person_id="tg_persist",
+            transport_meta=preuve,
+        )
+        row = await sync_to_async(Message.objects.get)(pk=user_id)
+        assert row.transport_meta == preuve
+
+        # Sans transport déclaré, rien n'est écrit — la reprise fermera.
+        user_id = await persist_user_message(
+            message="q2", source="telegram", person_id="tg_persist",
+        )
+        row = await sync_to_async(Message.objects.get)(pk=user_id)
+        assert row.transport_meta is None

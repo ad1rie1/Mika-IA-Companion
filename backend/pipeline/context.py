@@ -463,6 +463,16 @@ async def _label_history_speakers(history: list[dict], person_id: str) -> list[d
     if not others:
         return history
 
+    # « Un autre » se mesure à l'identité, pas au handle : la même personne
+    # liée sur le web (``user_5``) et sur Telegram (``tg_9``) voyait ses
+    # propres tours Telegram étiquetés comme ceux d'un tiers dans son prompt
+    # web. Même périmètre que ``_last_contact_gap`` ; ``own_handles`` se
+    # replie sur le handle brut et compte l'échec. Payé seulement quand un
+    # handle étranger apparaît — le cas mono-interlocuteur reste gratuit.
+    others -= set(await own_handles(person_id))
+    if not others:
+        return history
+
     try:
         names = await identity_resolver.display_names_for(sorted(others))
     except Exception as exc:

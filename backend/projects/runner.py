@@ -139,6 +139,11 @@ class ProjectRunner:
             except Exception:
                 logger.exception("Project advance failed for id=%s", project_id)
                 await self._log_error(project_id, "Exception during advance")
+                # Un tick qui a levé reste un tick qui a eu lieu. Sans cette
+                # avancée de l'échéance, le projet redevenait dû au passage
+                # suivant et le modèle était rappelé toutes les 30 s, sans
+                # plafond, sur la même sortie qui venait de faire lever.
+                await self._bump_next_run(project_id)
         return advanced
 
     # ── Due detection ────────────────────────────────────────────
@@ -355,21 +360,39 @@ class ProjectRunner:
             await self._bump_next_run(project_id)
             return True
 
-        await self._save_prompt_history(
-            project_id=project_id,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            raw_response=raw,
-            parsed_output=structured,
-            outcome="ok",
-            duration_ms=duration_ms,
-        )
-        await self._apply_structured(ctx, structured, raw=raw)
-        await self._enregistrer_le_travail(
-            atelier, structured.get("summary") or "travail", outils_appeles,
-        )
-        await self._bump_next_run(project_id)
-        return True
+        # L'application de la sortie et l'avancée de l'échéance sont
+        # découplées. Une forme inattendue dans le JSON (``"task_updates":
+        # "aucune"``) levait ici, hors de tout chemin gardé : l'échéance
+        # n'était jamais avancée, le projet restait dû, et le modèle était
+        # rappelé à chaque tick sur la même réponse, sans plafond. La ligne
+        # d'historique porte alors ``apply_error`` — ce qui a été dit est
+        # gardé, ce qui n'a pas pu en être fait est nommé.
+        outcome = "ok"
+        try:
+            await self._apply_structured(ctx, structured, raw=raw)
+            await self._enregistrer_le_travail(
+                atelier, str(structured.get("summary") or "travail"), outils_appeles,
+            )
+        except Exception as exc:  # noqa: BLE001 — l'échéance avance quand même
+            outcome = "apply_error"
+            logger.exception(
+                "Project %s: application de la sortie du modèle en échec", project_id,
+            )
+            await self._log_error(
+                project_id, f"Sortie du modèle inapplicable : {exc}"[:500],
+            )
+        finally:
+            await self._save_prompt_history(
+                project_id=project_id,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                raw_response=raw,
+                parsed_output=structured,
+                outcome=outcome,
+                duration_ms=duration_ms,
+            )
+            await self._bump_next_run(project_id)
+        return outcome == "ok"
 
     @staticmethod
     def _role_de_travail() -> AIRole:
@@ -479,7 +502,7 @@ class ProjectRunner:
         summary = str(data.get("summary") or "").strip()[:500] or "advanced"
 
         # 1. Task updates
-        for upd in (data.get("task_updates") or []):
+        for upd in _entrees(data, "task_updates", ctx.project_id):
             task_id = upd.get("id")
             new_status = str(upd.get("status") or "").strip().lower()
             result = str(upd.get("result") or "").strip()[:2000]
@@ -509,7 +532,7 @@ class ProjectRunner:
                 degradations.record("projects: update task", exc)
 
         # 2. New tasks
-        for nt in (data.get("new_tasks") or []):
+        for nt in _entrees(data, "new_tasks", ctx.project_id):
             desc = str(nt.get("description") or "").strip()
             if not desc:
                 continue
@@ -698,15 +721,24 @@ class ProjectRunner:
         on matching projects. Called by a module bus subscriber."""
         from projects.models import Project
         try:
-            needle = f"event:{event_name}"
-            candidates = await sync_to_async(
-                lambda: list(
-                    Project.objects.filter(
-                        status=Project.Status.ACTIVE,
-                        schedule_rule__iexact=needle,
-                    )
-                )
-            )()
+            # La règle est comparée PARSÉE, jamais brute : ``parse_rule`` la
+            # nettoie (espaces, casse) et c'est cette forme que ``is_due``
+            # lit. Un ``iexact`` sur la colonne laissait une règle stockée
+            # avec une espace de fin valide à la lecture et introuvable ici —
+            # le projet se disait « sur événement » et n'était jamais réveillé.
+            voulu = str(event_name or "").strip().lower()
+
+            def _concernes() -> list:
+                sortie = []
+                for p in Project.objects.filter(
+                    status=Project.Status.ACTIVE, schedule_rule__icontains="event:",
+                ):
+                    regle = schedule.parse_rule(p.schedule_rule)
+                    if regle.kind == "event" and str(regle.value).lower() == voulu:
+                        sortie.append(p)
+                return sortie
+
+            candidates = await sync_to_async(_concernes)()
             now = timezone.now()
             for p in candidates:
                 p.next_run_at = now
@@ -774,6 +806,35 @@ def _prune_history(project_id: int, keep: int) -> int:
         .delete()
     )
     return deleted
+
+
+def _entrees(data: dict, cle: str, project_id: int) -> list[dict]:
+    """Les entrées de ``data[cle]`` qui sont des objets — et rien d'autre.
+
+    ``_extract_json_tail`` ne vérifie que le sommet : un modèle qui répond
+    ``"task_updates": "aucune"`` passait, puis ``"aucune".get`` levait dans
+    ``_apply_structured``. Une forme inattendue est ignorée en le disant,
+    jamais interprétée — itérer une chaîne en donnerait les lettres.
+    """
+    brut = data.get(cle)
+    if brut in (None, "", [], {}):
+        return []
+    if isinstance(brut, dict):
+        # Un seul objet là où une liste était attendue : le sens est clair.
+        brut = [brut]
+    if not isinstance(brut, list):
+        logger.warning(
+            "Project %s: %s ignoré — %s reçu au lieu d'une liste",
+            project_id, cle, type(brut).__name__,
+        )
+        return []
+    gardees = [e for e in brut if isinstance(e, dict)]
+    if len(gardees) != len(brut):
+        logger.warning(
+            "Project %s: %d entrée(s) de %s ignorée(s) (pas des objets)",
+            project_id, len(brut) - len(gardees), cle,
+        )
+    return gardees
 
 
 def _extract_json_tail(raw: str) -> Optional[dict]:

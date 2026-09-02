@@ -22,6 +22,14 @@ from django.utils import timezone
 from pipeline.context import ConversationContext
 
 
+@pytest.fixture(autouse=True)
+def _api_sans_portail(settings):
+    """Ces tests exercent la logique des vues, pas le portail : celui-ci a
+    son propre fichier (test_api_auth_gate.py) et suit le réglage du socket."""
+    settings.CONSUMER_REQUIRE_AUTH = False
+
+
+
 def _patched_history_size(size: int):
     """Force the runner's rolling-buffer size via ``config_service``.
 

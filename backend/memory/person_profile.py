@@ -45,6 +45,9 @@ PROFILE_MIN_NEW_SOUVENIRS = 3
 PROFILE_ACTIVITY_WINDOW_DAYS = 14
 # Hard cap on LLM prompt size per person.
 MAX_SOUVENIRS_PER_PROFILE = 15
+# Souvenirs d'ancrage (les plus importants, toutes époques) ajoutés au vécu
+# neuf — même échantillon que l'auto-narratif.
+MAX_ANCHOR_SOUVENIRS_PER_PROFILE = 5
 MAX_CONNAISSANCES_PER_PROFILE = 10
 # Timeout per-person — we process people sequentially in the loop.
 PROFILE_TIMEOUT_SECONDS = 45
@@ -239,14 +242,41 @@ class PersonProfileGenerator:
             "memory.profile_max_connaissances", MAX_CONNAISSANCES_PER_PROFILE,
             mini=1, maxi=100,
         )
+        max_ancres = cfg_int(
+            "memory.profile_max_anchor_souvenirs", MAX_ANCHOR_SOUVENIRS_PER_PROFILE,
+            mini=0, maxi=100,
+        )
 
-        souvenir_rows = await sync_to_async(
-            lambda: list(
-                Souvenir.objects.filter(entities=entity)
-                .order_by("-importance", "-occurred_at")[:max_souvenirs]
+        # Le vécu NEUF d'abord, quelques ancres ensuite — l'échantillon de
+        # l'auto-narratif, pour la même raison. Le pool était le top-N par
+        # importance et le repère « j'ai vu jusque-là » était pris SUR ce
+        # pool : dès qu'une personne comptait N vieux souvenirs importants, le
+        # repère n'avançait plus, la porte (≥ 3 nouveaux depuis le repère) se
+        # rouvrait toutes les 24 h sur un prompt identique, et ce que la
+        # personne venait de confier n'entrait jamais dans sa fiche.
+        def _sample():
+            from memory.models import PersonProfile
+
+            last_id = (
+                PersonProfile.objects.filter(entity=entity)
+                .values_list("last_souvenir_id", flat=True)
+                .first()
+                or 0
+            )
+            recent = list(
+                Souvenir.objects.filter(entities=entity, id__gt=last_id)
+                .order_by("-occurred_at")[:max_souvenirs]
                 .prefetch_related("themes")
             )
-        )()
+            anchors = list(
+                Souvenir.objects.filter(entities=entity)
+                .exclude(pk__in=[s.pk for s in recent])
+                .order_by("-importance", "-occurred_at")[:max_ancres]
+                .prefetch_related("themes")
+            )
+            return recent + anchors
+
+        souvenir_rows = await sync_to_async(_sample)()
 
         souvenirs = await sync_to_async(lambda: [
             {
@@ -275,7 +305,13 @@ class PersonProfileGenerator:
             for c in connaissance_rows
         ])()
 
-        max_id = max((s.id for s in souvenir_rows), default=0)
+        # Le max GLOBAL des souvenirs de la personne, pas celui du pool :
+        # c'est un repère, et le prendre sur un échantillon majoritairement
+        # ancien laissait la porte re-compter le même neuf à chaque passe.
+        max_id = await sync_to_async(
+            lambda: Souvenir.objects.filter(entities=entity)
+            .order_by("-id").values_list("id", flat=True).first() or 0
+        )()
 
         return ProfileInput(
             entity_name=entity.name,

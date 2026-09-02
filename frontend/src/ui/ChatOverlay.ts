@@ -3,10 +3,10 @@ import type { HistoryEntry, RejectedAttachment } from "../types";
 import {
   applyAck,
   bindServerId,
-  coerceStatus,
   cursorOf,
   mergeHistory,
   nextClientMsgId,
+  restoredStatus,
   stripProsody,
 } from "./chatSync";
 import type { MessageStatus, StoredMessage } from "./chatSync";
@@ -182,7 +182,14 @@ export class ChatOverlay {
             typeof m.text === "string" &&
             (m.sender === "user" || m.sender === "vtuber")
         )
-        .map((m): StoredMessage => ({ ...m, status: coerceStatus(m.status) }))
+        .map((m): StoredMessage => {
+          // Un "pending" restauré ment : l'outbox qui aurait pu le faire
+          // avancer était en mémoire dans l'onglet précédent (voir
+          // restoredStatus). On ne touche `reason` que dans ce cas — un
+          // "failed" restauré garde le sien.
+          const { status, reason } = restoredStatus(m.status);
+          return reason ? { ...m, status, reason } : { ...m, status };
+        })
         .slice(-MAX_MESSAGES);
       this.repaint({ animate: false });
     } catch {

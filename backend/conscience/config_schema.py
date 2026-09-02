@@ -411,6 +411,16 @@ CONFIG_SCHEMA = [
         default=3, min=1, max=50, hot_reload=True,
     ),
     ConfigItem(
+        key="conscience.scheduled.reessai_s", type="int",
+        section="conscience", group=_GROUPE_TRAVAIL_CAL,
+        label="Délai avant de retenter une action programmée échouée (s)",
+        default=300, min=0, max=86400, hot_reload=True,
+        hint="Multiplié par le nombre de tentatives déjà faites. Pendant ce "
+             "délai l'action n'est plus « due » : elle ne lève ni le cooldown "
+             "ni le veto de sommeil. Sans lui, un rendez-vous prioritaire dont "
+             "l'appel IA échoue était retenté à chaque cycle de 30 s.",
+    ),
+    ConfigItem(
         key="conscience.cycles_sautes_max", type="int",
         section="conscience", group=_GROUPE_TRAVAIL_CAL,
         label="Cycles sautés d'affilée avant de signaler un blocage",
@@ -1095,5 +1105,22 @@ CONFIG_SCHEMA = [
         default=0.45, min=0.0, max=1.0, hot_reload=True,
         hint="Une personne normale ne ressasse pas, elle rejoue une ou deux "
              "fois.",
+    ),
+    ConfigItem(
+        key="conscience.audit.espacement_s", type="int",
+        section="conscience", group=_GROUPE_AUDIT,
+        label="Espacement entre deux audits pour une même personne (s)",
+        default=1800, min=0, max=86400, hot_reload=True,
+        hint="Un audit par personne par fenêtre. Sans lui, chaque réponse "
+             "chargée d'une conversation animée écrivait sa pensée, et le "
+             "facteur « ruminations » restait à son plafond pendant des heures.",
+    ),
+    ConfigItem(
+        key="conscience.audit.actives_max", type="int",
+        section="conscience", group=_GROUPE_AUDIT,
+        label="Micro-ruminations d'audit actives au maximum",
+        default=3, min=1, max=20, hot_reload=True,
+        hint="Au-delà, la plus faible se fane avant que la nouvelle ne "
+             "s'écrive : la dernière réponse est celle qu'on se rejoue.",
     ),
 ]

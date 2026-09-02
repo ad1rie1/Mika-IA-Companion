@@ -63,8 +63,15 @@ _CLAIM_PATTERNS: tuple[tuple[re.Pattern, float], ...] = (
     (re.compile(rf"\bmon\s+(?:pr[ée]nom|nom)\s+(?:c['’]est|est)\s+({_NAME})", re.I), 1.0),
     # "moi c'est Thomas"
     (re.compile(rf"\bmoi\s*,?\s*c['’]est\s+({_NAME})", re.I), 0.95),
-    # "c'est Thomas à l'appareil" / "Thomas au clavier"
-    (re.compile(rf"\b({_NAME})\s+(?:[àa]\s+l['’]appareil|au\s+clavier)", re.I), 0.95),
+    # "c'est Thomas à l'appareil" / "Thomas au clavier". Le « c'est » qui
+    # précède est consommé *avant* la capture : le nom admet deux mots, et
+    # « C'est Marie-Ève à l'appareil » rendait « C'est Marie-Ève » — « c'est »
+    # passe le filtre des mots (radical « c », reste « est »), donc le nom
+    # enregistré était faux, apostrophe comprise.
+    (re.compile(
+        rf"(?:\bc['’]est\s+)?\b({_NAME})\s+(?:[àa]\s+l['’]appareil|au\s+clavier)",
+        re.I,
+    ), 0.95),
     # "ici Thomas"
     (re.compile(rf"\bici\s+({_NAME})\b", re.I), 0.8),
     # "je suis Thomas" — weaker: also matches "je suis fatigué", filtered below
@@ -162,6 +169,29 @@ def _is_name_word(word: str) -> bool:
         return False
     stem, _, rest = folded.replace("’", "'").partition("'")
     return not (rest and (stem in _NOT_NAMES or rest in _NOT_NAMES))
+
+
+def _name_tokens(name: str | None) -> frozenset[str]:
+    """Les mots d'un nom, repliés (casse, accents) et séparés sur blancs et
+    tirets — « Marie-Ève » donne {marie, eve}."""
+    folded = _fold(name or "").replace("’", "'")
+    return frozenset(t for t in re.split(r"[\s\-]+", folded) if t)
+
+
+def same_name(a: str | None, b: str | None) -> bool:
+    """Deux noms désignent-ils la même personne, à la casse et aux accents près ?
+
+    « thomas », « Thomas » et « Thômas » sont un seul nom. Un prénom vaut
+    aussi pour le nom complet qui le contient (« Jean » pour « Jean Dupont »,
+    « Marie » pour « Marie-Ève ») : c'est par le prénom qu'on nie être
+    quelqu'un, pas par l'état civil. Rien de plus large — le résolveur s'en
+    sert précisément pour établir qu'un nom nié *n'a aucun rapport* avec la
+    liaison, et qu'il n'y a donc rien à retirer.
+    """
+    ta, tb = _name_tokens(a), _name_tokens(b)
+    if not ta or not tb:
+        return False
+    return ta <= tb or tb <= ta
 
 
 def detect_name_claim(message: str) -> NameClaim | None:

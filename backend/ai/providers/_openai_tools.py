@@ -31,6 +31,101 @@ from utils.degradation import degradations
 logger = logging.getLogger(__name__)
 
 
+class ParamMemo:
+    """Ce que chaque modèle a refusé, mémorisé par instance de provider.
+
+    Miroir de ``ClaudeProvider._create_message`` : un modèle de raisonnement
+    (série o, gpt-5) refuse ``max_tokens`` en 400 — « use
+    'max_completion_tokens' instead » — et refuse ``temperature`` hors de sa
+    valeur par défaut. Sans reprise, chaque rôle mappé sur un tel modèle
+    échouait à chaque appel ; sans mémo, chaque appel paierait la requête
+    condamnée avant la bonne, et chaque itération de la boucle d'outils
+    avec lui.
+    """
+
+    def __init__(self) -> None:
+        #: modèle → nom du paramètre de plafond accepté (absent = ``max_tokens``)
+        self.token_param: dict[str, str] = {}
+        #: modèles dont le serveur a refusé ``temperature``
+        self.no_temperature: set[str] = set()
+
+
+def memo_for(owner) -> ParamMemo:
+    """Le mémo de ce provider, créé à la demande.
+
+    ``getattr`` défensif : des tests (et d'éventuels usages ad hoc)
+    construisent le provider via ``__new__`` sans passer par ``__init__``.
+    """
+    memo = getattr(owner, "_param_memo", None)
+    if memo is None:
+        memo = ParamMemo()
+        try:
+            owner._param_memo = memo
+        except Exception:  # noqa: BLE001 — un objet figé garde un mémo jetable
+            pass
+    return memo
+
+
+async def create_chat_completion(
+    client,
+    memo: ParamMemo | None,
+    *,
+    model: str,
+    messages: list[dict],
+    max_tokens: int,
+    temperature: float,
+    **extra,
+):
+    """Un ``chat.completions.create``, paramètres de génération repris au 400.
+
+    ``max_tokens`` reste le **premier** essai : les serveurs compatibles
+    OpenAI tiers (Groq, vLLM, LM Studio, Zhipu) ne connaissent souvent que
+    ce nom, et c'est le cas commun. Deux reprises au plus, une par
+    paramètre, chacune mémorisée pour le modèle : ``max_tokens`` →
+    ``max_completion_tokens`` quand le refus nomme le premier, ``temperature``
+    retirée quand il la nomme. Toute autre erreur remonte intacte.
+    """
+    try:
+        from openai import BadRequestError
+    except ImportError:  # pragma: no cover — le provider n'existerait pas
+        BadRequestError = ()  # type: ignore[assignment]
+
+    memo = memo if memo is not None else ParamMemo()
+    token_param = memo.token_param.get(model, "max_tokens")
+    send_temperature = model not in memo.no_temperature
+    renamed = False
+    dropped = False
+
+    while True:
+        kwargs = {"model": model, "messages": messages, token_param: max_tokens}
+        if send_temperature:
+            kwargs["temperature"] = temperature
+        kwargs.update(extra)
+        try:
+            return await client.chat.completions.create(**kwargs)
+        except BadRequestError as exc:
+            text = str(exc)
+            if token_param == "max_tokens" and not renamed and "max_tokens" in text:
+                renamed = True
+                token_param = "max_completion_tokens"
+                memo.token_param[model] = token_param
+                logger.info(
+                    "Le modèle %s refuse `max_tokens` — `max_completion_tokens` "
+                    "mémorisé pour cette instance.", model,
+                )
+                continue
+            if send_temperature and not dropped and "temperature" in text:
+                dropped = True
+                send_temperature = False
+                memo.no_temperature.add(model)
+                logger.info(
+                    "Le modèle %s refuse `temperature` — mémorisé, plus "
+                    "jamais envoyée pour cette instance.", model,
+                )
+                continue
+            raise
+
+
 def messages_from_pair(system_prompt: str, user_prompt: str) -> list[dict]:
     """Fil de départ pour un appel à deux chaînes."""
     return [
@@ -102,6 +197,7 @@ async def run_openai_tool_loop_from_pair(
     max_tokens: int,
     temperature: float,
     max_turns: int,
+    memo: ParamMemo | None = None,
 ) -> tuple[str, list[str]]:
     """Amorce à deux chaînes du même corps de boucle."""
     return await run_openai_tool_loop(
@@ -113,6 +209,7 @@ async def run_openai_tool_loop_from_pair(
         max_tokens=max_tokens,
         temperature=temperature,
         max_turns=max_turns,
+        memo=memo,
     )
 
 
@@ -126,6 +223,7 @@ async def run_openai_tool_loop(
     max_tokens: int,
     temperature: float,
     max_turns: int,
+    memo: ParamMemo | None = None,
 ) -> tuple[str, list[str]]:
     """Run a ping/pong tool loop against an OpenAI-compatible endpoint.
 
@@ -133,6 +231,9 @@ async def run_openai_tool_loop(
 
     Also surfaces per-turn token usage to ``ai.quota.set_usage`` so the
     quota tracker sees real numbers instead of char-estimates.
+
+    ``memo`` est celui du provider appelant : un paramètre refusé au premier
+    tour ne doit pas être re-tenté à chaque itération de la boucle.
     """
     from ai.quota import set_usage
 
@@ -146,16 +247,15 @@ async def run_openai_tool_loop(
     final_text = ""
 
     for turn in range(max_turns):
-        kwargs = {
-            "model": model,
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-        }
-        if serialized:
-            kwargs["tools"] = serialized
-
-        response = await client.chat.completions.create(**kwargs)
+        extra = {"tools": serialized} if serialized else {}
+        response = await create_chat_completion(
+            client, memo,
+            model=model,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            **extra,
+        )
 
         usage = getattr(response, "usage", None)
         if usage is not None:

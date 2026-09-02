@@ -299,3 +299,59 @@ class TestDeadline:
         env = sandbox.build_globals(None, print)
         assert "BaseException" not in env["__builtins__"]
         assert "Exception" in env["__builtins__"]
+
+
+class TestModulesTransitifs:
+    """Un module sûr ne doit pas servir de pont vers les modules qu'il importe.
+
+    ``uuid`` importe ``os``, ``json`` importe ``codecs``, ``re`` importe
+    ``enum`` : chacun est un attribut sans tiret bas, donc invisible pour le
+    validateur, et le proxy rendait l'objet brut — ``uuid.os.system('…')``
+    passait la validation et s'exécutait (vérifié avant le correctif).
+    """
+
+    @staticmethod
+    def _env():
+        return sandbox.build_globals(api=None, print_fn=lambda *a, **k: None)
+
+    @pytest.mark.parametrize("chaine", [
+        "uuid.os", "json.codecs", "re.enum", "statistics.sys",
+        "collections.abc",
+    ])
+    def test_un_attribut_module_ne_sort_pas_du_proxy(self, chaine):
+        code = f"def on_tick(api):\n    return {chaine}\n"
+        assert sandbox.validate_source(code) == []  # le validateur ne voit rien
+        env = self._env()
+        exec(compile(code, "<forge:test>", "exec"), env)
+        with pytest.raises(AttributeError, match="module inaccessible"):
+            env["on_tick"](None)
+
+    def test_la_chaine_complete_est_coupee(self):
+        code = "def on_tick(api):\n    return uuid.os.getpid()\n"
+        env = self._env()
+        exec(compile(code, "<forge:test>", "exec"), env)
+        with pytest.raises(AttributeError):
+            env["on_tick"](None)
+
+    def test_un_module_sur_atteint_par_transitivite_reste_un_proxy(self):
+        """``datetime.datetime`` est une classe (autorisée) ; si un module sûr
+        expose un autre module sûr, on rend son proxy, pas l'objet brut."""
+        env = self._env()
+        exec(compile("def on_tick(api):\n    return json.dumps({'a': 1})\n",
+                     "<forge:test>", "exec"), env)
+        assert env["on_tick"](None) == '{"a": 1}'
+        # Le proxy d'un module sûr atteint par un autre garde ses règles.
+        frozen = sandbox.FrozenModule(sandbox.SAFE_MODULES["uuid"], "uuid")
+        with pytest.raises(AttributeError):
+            frozen.os
+
+    def test_l_usage_ordinaire_des_modules_surs_fonctionne_toujours(self):
+        code = (
+            "def on_tick(api):\n"
+            "    return [str(uuid.uuid4())[:0], datetime.datetime(2020, 1, 1).year,"
+            " re.sub('a', 'b', 'aa'), hashlib.sha256(b'x').hexdigest()[:4],"
+            " statistics.mean([1, 2, 3]), collections.Counter('ab')['a']]\n"
+        )
+        env = self._env()
+        exec(compile(code, "<forge:test>", "exec"), env)
+        assert env["on_tick"](None) == ["", 2020, "bb", "2d71", 2, 1]

@@ -113,6 +113,13 @@ _BRIEF_ACTIONS_MAX = 3
 _CYCLES_SAUTES_MAX = 6
 #: Tentatives d'une action programmée avant abandon.
 _SCHEDULED_TENTATIVES_MAX = 3
+#: Délai avant de retenter une action programmée qui vient d'échouer, par
+#: tentative déjà faite (5 min × n). Sans lui, un rendez-vous prioritaire dont
+#: l'appel IA échoue (rôle non mappé, quota, timeout) levait le cooldown ET le
+#: veto de sommeil à CHAQUE cycle de 30 s — un acte, un échec, un acte —
+#: pendant que `tentatives` restait à zéro parce que l'échec « propre »
+#: (`output.ai_failed`) rentrait avant le compteur, réservé à l'exception.
+_SCHEDULED_REESSAI_S = 300
 
 
 @dataclass(frozen=True)
@@ -153,12 +160,33 @@ class ActeResultat:
     outils_reussis: int = 0
     trousse: tuple = ()
     ai_failed: bool = False
+#: Espacement minimal entre deux audits d'après-coup pour une même personne,
+#: et plafond des micro-ruminations d'audit actives. Sans l'un ni l'autre,
+#: chaque réponse chargée (intensité ≥ 0.55, n'importe quelle émotion non
+#: neutre) écrivait sa rumination : douze tours de conversation animée, et le
+#: Facteur 10 restait cloué à +0.30 pendant les ~9 h que met la demi-vie à
+#: les dissoudre. Se rejouer une réponse est un battement, pas un régime.
+_AUDIT_ESPACEMENT_S = 1800
+_AUDIT_ACTIVES_MAX = 3
 #: Somme d'intensités valant une pression de rumination pleine (1.0).
 #:
 #: La somme était comparée à 1.0 : deux pensées à 0.5 saturaient déjà le
 #: Facteur 10. Avec une promotion plus ouverte, la saturation deviendrait
 #: l'état normal et le facteur cesserait d'informer.
 RUMINATION_PRESSION_PLEINE = 2.5
+
+
+def _intensite_de_debordement(glob) -> float:
+    """Intensité que les portes (débordement d'humeur, détresse) comparent.
+
+    Préfère ``overflow_intensity`` quand l'objet la porte et qu'elle est un
+    nombre — les doubles de test construisent parfois une humeur minimale —
+    et retombe sur ``intensity`` sinon, l'ancienne lecture.
+    """
+    valeur = getattr(glob, "overflow_intensity", None)
+    if isinstance(valeur, (int, float)) and not isinstance(valeur, bool):
+        return float(valeur)
+    return float(getattr(glob, "intensity", 0.0) or 0.0)
 
 
 class ConscienceEngine:
@@ -1543,7 +1571,13 @@ class ConscienceEngine:
         return DecisionContext(
             pending_observations=pending,
             global_mood=glob.emotion.value,
-            global_intensity=glob.intensity,
+            # Intensité *de débordement*, normalisée sur l'ancre la plus
+            # proche (``GlobalMood.overflow_intensity``) : l'intensité brute
+            # rapporte la norme à celle d'``excited`` (1,245), si bien que
+            # ``sad`` à fond lisait 0,73, ``frustrated`` 0,65 — sous la porte
+            # 0,7 du facteur 3 et sous le plancher 0,55 de la détresse. Les
+            # deux portes n'étaient franchissables que par l'excitation.
+            global_intensity=_intensite_de_debordement(glob),
             idle_seconds=idle,
             in_cooldown=in_cooldown,
             max_pertinence=max_p,
@@ -1625,27 +1659,30 @@ class ConscienceEngine:
         except ImportError:
             return
 
-        try:
-            active = await sync_to_async(
-                lambda: list(Rumination.objects.filter(status="active")[:20])
-            )()
-        except Exception as exc:
-            degradations.record("conscience: ruminations to relieve", exc)
-            return
+        def _passe() -> int:
+            """Halve puis résout — **un seul callable synchrone**, sans lecture.
 
-        for r in active:
-            r.intensity *= 0.5
-            if r.intensity < 0.1:
-                r.status = "resolved"
+            L'ancienne forme lisait le lot, le divisait en RAM, puis le
+            réécrivait par `bulk_update` : deux `await` entre lesquels la
+            digestion nocturne (ou `_decay_ruminations`) pouvait faner une
+            ligne que la réécriture ressuscitait en `active` — la course
+            exacte que `_decay_ruminations` et `sleep._digerer_ligne`
+            documentent. Deux UPDATE filtrés sur `status="active"` ne
+            touchent jamais une ligne qu'un autre écrivain vient de fermer.
+            """
+            from django.db import transaction
 
-        # Une seule ecriture pour le lot : ce sont deux champs scalaires
-        # calcules en memoire, sans logique par ligne. Vingt save() separes,
-        # c'etaient vingt sync_to_async serialises sur l'unique thread
-        # d'executeur partage avec les autres boucles de fond.
+            with transaction.atomic():
+                n = Rumination.objects.filter(status="active").update(
+                    intensity=F("intensity") * 0.5,
+                )
+                Rumination.objects.filter(
+                    status="active", intensity__lt=0.1,
+                ).update(status="resolved")
+            return n
+
         try:
-            await sync_to_async(Rumination.objects.bulk_update)(
-                active, ["intensity", "status"], batch_size=50,
-            )
+            await sync_to_async(_passe, thread_sensitive=True)()
         except Exception as exc:
             degradations.record("conscience: rumination relief write", exc)
 
@@ -1961,16 +1998,27 @@ class ConscienceEngine:
                 degradations.record("conscience: rumination creation", exc)
 
     async def _poll_scheduled_actions(self) -> list:
-        """Query scheduled actions that are due (scheduled_at <= now)."""
+        """Query scheduled actions that are due (scheduled_at <= now).
+
+        Une action dont la dernière tentative a échoué n'est due qu'après
+        `reessayer_le` : c'est ce qui rend le backoff effectif, puisque tout
+        ce qui lève le cooldown ou le veto de sommeil se lit sur ce que ce
+        poll remonte.
+        """
         from conscience.models import ScheduledAction
+        from django.db.models import Q
         from django.utils import timezone as tz
 
         try:
+            maintenant = tz.now()
             return await sync_to_async(
                 lambda: list(
                     ScheduledAction.objects.filter(
                         status="pending",
-                        scheduled_at__lte=tz.now(),
+                        scheduled_at__lte=maintenant,
+                    ).filter(
+                        Q(reessayer_le__isnull=True)
+                        | Q(reessayer_le__lte=maintenant)
                     ).order_by("scheduled_at")[:10]
                 )
             )()
@@ -2560,10 +2608,20 @@ class ConscienceEngine:
                 # nothing was actually said. Leave observations pending and
                 # scheduled actions unexecuted so they retry after cooldown,
                 # and don't satisfy drives with a phantom act.
+                #
+                # Mais la tentative se COMPTE, comme sur le chemin de
+                # l'exception plus bas : c'est l'échec ordinaire (rôle non
+                # mappé, quota, timeout), et il rentrait avant le compteur —
+                # `tentatives` restait à zéro, le plafond ne tombait jamais,
+                # et un rendez-vous prioritaire relevait le cooldown et le
+                # veto de sommeil à chaque cycle de 30 s, indéfiniment.
                 logger.warning(
                     "Conscience act aborted [%s]: AI call failed — will retry "
                     "after cooldown", reason,
                 )
+                if brief.actions:
+                    with degraded("conscience: tentative d'action programmee"):
+                        await self._compter_tentative(list(brief.actions))
                 return ActeResultat(
                     person_id=person_id, trousse=tuple(relevant_modules),
                     ai_failed=True,
@@ -2669,13 +2727,30 @@ class ConscienceEngine:
             return ActeResultat(person_id=person_id, ai_failed=True)
 
     async def _compter_tentative(self, actions: list) -> None:
-        """Une tentative de plus, et l'abandon au-delà du plafond."""
+        """Une tentative de plus, l'abandon au-delà du plafond — et, entre
+        les deux, un délai avant de réessayer.
+
+        Le délai croît avec les tentatives (`conscience.scheduled.reessai_s`
+        × n) et s'écrit sur `reessayer_le`, que `_poll_scheduled_actions`
+        respecte : une action qui vient d'échouer n'est plus « due » pendant
+        ce temps, donc ne lève ni le cooldown ni le veto de sommeil — la
+        sortie prioritaire du scoring ne s'applique qu'à ce que le poll
+        remonte. Sans ce délai, compter la tentative ne changeait rien au
+        rythme : trois échecs à 30 s d'intervalle, et l'action était perdue
+        en une minute et demie pour une panne passagère du provider.
+        """
         from conscience.models import ScheduledAction
+        from django.utils import timezone as tz
+        from datetime import timedelta
 
         plafond = cfg_int(
             "conscience.scheduled.tentatives_max", _SCHEDULED_TENTATIVES_MAX,
             mini=1,
         )
+        pas = cfg_int(
+            "conscience.scheduled.reessai_s", _SCHEDULED_REESSAI_S, mini=0,
+        )
+        maintenant = tz.now()
 
         def _ecrire() -> None:
             for action in actions:
@@ -2685,8 +2760,15 @@ class ConscienceEngine:
                     action.raison_echec = (
                         f"abandonnée après {action.tentatives} tentatives"
                     )
+                    action.reessayer_le = None
+                else:
+                    action.reessayer_le = maintenant + timedelta(
+                        seconds=pas * action.tentatives,
+                    )
             ScheduledAction.objects.bulk_update(
-                actions, ["tentatives", "status", "raison_echec"], batch_size=50,
+                actions,
+                ["tentatives", "status", "raison_echec", "reessayer_le"],
+                batch_size=50,
             )
 
         await sync_to_async(_ecrire, thread_sensitive=True)()
@@ -3200,6 +3282,40 @@ class ConscienceEngine:
     _AUDIT_BASE_INTENSITY: float = 0.2
     _AUDIT_SLOPE: float = 0.5
     _AUDIT_MAX_INTENSITY: float = 0.45
+    #: Borne RAM du mémo « dernier audit par personne » — même idiome que
+    #: `_habituer` : perdre le mémo au redémarrage coûte au pire un audit de
+    #: trop, jamais un de moins.
+    _AUDIT_MEMO_MAX_CLES = 200
+
+    def _audit_trop_recent(self, person_id: str) -> bool:
+        """Vrai si cette personne a déjà eu son audit dans la fenêtre.
+
+        Un audit par personne et par demi-heure : se rejouer une phrase est
+        un battement, pas un régime. Douze tours chargés d'affilée
+        écrivaient douze pensées, et le Facteur 10 restait cloué à +0.30
+        pendant les ~9 h que met la demi-vie à les dissoudre. Mémo posé par
+        ``getattr`` — les tests construisent le moteur par ``__new__``.
+        """
+        memo = getattr(self, "_audits_recents", None)
+        if not memo:
+            return False
+        fenetre = cfg_int(
+            "conscience.audit.espacement_s", _AUDIT_ESPACEMENT_S, mini=0,
+        )
+        dernier = memo.get(str(person_id))
+        return dernier is not None and (time.monotonic() - dernier) < fenetre
+
+    def _noter_audit(self, person_id: str) -> None:
+        """Marque l'audit de cette personne — à la TENTATIVE d'écriture, pas
+        au succès (la leçon du murmure) : une base illisible ne doit pas
+        relancer l'audit à chaque tour."""
+        memo = getattr(self, "_audits_recents", None)
+        if memo is None:
+            memo = {}
+            self._audits_recents = memo
+        memo[str(person_id)] = time.monotonic()
+        while len(memo) > self._AUDIT_MEMO_MAX_CLES:
+            memo.pop(next(iter(memo)))
 
     async def _audit_completed_turn(self, event) -> None:
         """Bus adapter for ``post_action_audit``.
@@ -3236,7 +3352,17 @@ class ConscienceEngine:
 
         Skipped for internal-trigger speech (conscience already acted,
         would cause a feedback loop of self-ruminations).
+
+        Deux bornes, parce qu'une conversation animée en produisait une par
+        tour : **un audit par personne par fenêtre** (`_audit_trop_recent`,
+        mémo RAM) et **un plafond de micro-ruminations d'audit actives**
+        (`conscience.audit.actives_max`) — au-delà, la plus faible se fane
+        avant que la nouvelle ne s'écrive, dans le même callable synchrone.
         """
+        if person_id == "conscience_mika":
+            return
+        if self._audit_trop_recent(person_id):
+            return
         seuil = cfg_float(
             "conscience.audit.min_intensity", self._AUDIT_MIN_INTENSITY,
             mini=0.0, maxi=1.0,
@@ -3249,8 +3375,6 @@ class ConscienceEngine:
                 await estime.lire() - estime.BASELINE
             ) * self._AUDIT_ESTIME_PENTE
         if intensity < seuil:
-            return
-        if person_id == "conscience_mika":
             return
         # Les 29 émotions, pas neuf. La table de gabarits en couvrait neuf, si
         # bien qu'un tour `melancholic` à 0.9 ne se rejouait JAMAIS pendant
@@ -3297,8 +3421,33 @@ class ConscienceEngine:
         except ImportError:
             return
 
-        try:
-            await sync_to_async(Rumination.objects.create)(
+        plafond = cfg_int(
+            "conscience.audit.actives_max", _AUDIT_ACTIVES_MAX, mini=1,
+        )
+
+        def _ecrire() -> int:
+            """Plafonne PUIS écrit — un seul callable synchrone.
+
+            Les pensées d'audit se reconnaissent à leur forme : sans
+            observation source et sans thème. Quand le plafond est atteint,
+            la plus faible se fane (jamais supprimée : la nuit la relit) pour
+            que la nouvelle prenne sa place — la dernière réponse est celle
+            qu'on se rejoue, pas la douzième d'avant.
+            """
+            audits = Rumination.objects.filter(
+                status="active", observation__isnull=True, themes=[],
+            )
+            fanees = 0
+            surplus = audits.count() - (plafond - 1)
+            if surplus > 0:
+                faibles = list(
+                    audits.order_by("intensity", "pk")
+                    .values_list("pk", flat=True)[:surplus]
+                )
+                fanees = Rumination.objects.filter(
+                    pk__in=faibles, status="active",
+                ).update(status="faded")
+            Rumination.objects.create(
                 summary=summary,
                 themes=[],
                 intensity=rumination_intensity,
@@ -3306,9 +3455,14 @@ class ConscienceEngine:
                 observation=None,
                 status="active",
             )
+            return fanees
+
+        self._noter_audit(person_id)
+        try:
+            fanees = await sync_to_async(_ecrire, thread_sensitive=True)()
             logger.debug(
-                "Post-action audit created rumination (%s, %.2f): %s",
-                rumination_emotion, rumination_intensity, excerpt[:40],
+                "Post-action audit created rumination (%s, %.2f, %d fanée(s)): %s",
+                rumination_emotion, rumination_intensity, fanees, excerpt[:40],
             )
         except Exception as exc:
             degradations.record("conscience: post-action audit", exc)

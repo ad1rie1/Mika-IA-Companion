@@ -63,7 +63,13 @@ class GLMProvider:
         else:
             user_content = user_prompt
 
-        response = await self._client.chat.completions.create(
+        from ai.providers._openai_tools import create_chat_completion, memo_for
+
+        # Même reprise que le provider OpenAI : un modèle qui refuse
+        # ``max_tokens`` ou ``temperature`` en 400 est repris une fois par
+        # paramètre, et le refus mémorisé par modèle.
+        response = await create_chat_completion(
+            self._client, memo_for(self),
             model=model,
             max_tokens=max_tokens,
             temperature=temperature,
@@ -100,10 +106,13 @@ class GLMProvider:
         octet pour octet d'un tour à l'autre, et l'état du tour voyage dans
         le dernier tour user, après ce préfixe réutilisable.
         """
+        from ai.providers._openai_tools import create_chat_completion, memo_for
+
         messages = [{"role": "system", "content": prompt.system_stable}]
         messages.extend(prompt.chat_messages())
 
-        response = await self._client.chat.completions.create(
+        response = await create_chat_completion(
+            self._client, memo_for(self),
             model=model,
             max_tokens=max_tokens,
             temperature=temperature,
@@ -149,7 +158,7 @@ class GLMProvider:
         max_turns: int = 10,
     ) -> tuple[str, list[str]]:
         """Zhipu exposes OpenAI-compatible function-calling — reuse the loop."""
-        from ai.providers._openai_tools import run_openai_tool_loop_from_pair
+        from ai.providers._openai_tools import memo_for, run_openai_tool_loop_from_pair
         return await run_openai_tool_loop_from_pair(
             client=self._client,
             provider_label="GLM",
@@ -160,6 +169,7 @@ class GLMProvider:
             max_tokens=max_tokens,
             temperature=temperature,
             max_turns=max_turns,
+            memo=memo_for(self),
         )
 
     async def complete_chat_with_tools(
@@ -179,6 +189,7 @@ class GLMProvider:
         aller-retour d'outil à l'autre.
         """
         from ai.providers._openai_tools import (
+            memo_for,
             messages_from_chat_prompt,
             run_openai_tool_loop,
         )
@@ -191,4 +202,5 @@ class GLMProvider:
             max_tokens=max_tokens,
             temperature=temperature,
             max_turns=max_turns,
+            memo=memo_for(self),
         )

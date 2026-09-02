@@ -131,3 +131,79 @@ class TestCheckpointNeverSkips:
         await c._consolidate()
         sent = c.extractor.analyze_messages.await_args[0][0]
         assert any("pendant la passe" in m["content"] for m in sent)
+
+
+# ---------------------------------------------------------------------------
+# Une passe à la fois — la boucle et la passe forcée de l'arrêt lisaient la
+# même fenêtre quand l'arrêt tombait au milieu d'un tick.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db(transaction=True)
+class TestUnePasseALaFois:
+
+    @pytest.fixture(autouse=True)
+    def _clean(self):
+        from memory.models import ConsolidationLog, Conversation, Message
+        Message.objects.all().delete()
+        ConsolidationLog.objects.all().delete()
+        Conversation.objects.all().delete()
+        yield
+
+    @pytest.mark.asyncio
+    async def test_deux_passes_concurrentes_n_extraient_la_fenetre_qu_une_fois(self):
+        """Le même verbatim extrait deux fois donne deux jeux de souvenirs et
+        d'engagements jumeaux. La seconde passe attend, puis trouve une
+        fenêtre vide."""
+        import asyncio
+
+        from memory.models import Message
+
+        conv = await _make_conversation()
+        await sync_to_async(Message.objects.create)(
+            conversation=conv, role="user", source="frontend",
+            content="J'ai adopté un chat aujourd'hui",
+        )
+        c = _make_consolidator()
+
+        async def _lente(msgs, **kw):
+            await asyncio.sleep(0.05)
+            return []
+
+        c.extractor.analyze_messages = AsyncMock(side_effect=_lente)
+        await asyncio.gather(c._consolidate(), c.force_consolidate())
+
+        assert c.extractor.analyze_messages.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_l_arret_attend_la_passe_en_cours_au_lieu_de_l_annuler(self):
+        """Annuler entre `store_extractions` et le checkpoint laisse des
+        souvenirs écrits sous une fenêtre restée due — que la passe forcée
+        de l'arrêt réécrivait."""
+        import asyncio
+
+        from memory.models import Message
+
+        conv = await _make_conversation()
+        await sync_to_async(Message.objects.create)(
+            conversation=conv, role="user", source="frontend", content="premier",
+        )
+        c = _make_consolidator()
+        c._loop = MagicMock()
+        c._loop.stop = AsyncMock()
+        ordre = []
+
+        async def _lente(msgs, **kw):
+            ordre.append("extraction")
+            await asyncio.sleep(0.05)
+            ordre.append("fin extraction")
+            return []
+
+        c.extractor.analyze_messages = AsyncMock(side_effect=_lente)
+        passe = asyncio.create_task(c._consolidate())
+        await asyncio.sleep(0.01)
+        await c.stop()
+        ordre.append("stop")
+        await passe
+
+        assert ordre == ["extraction", "fin extraction", "stop"]
+        c._loop.stop.assert_awaited_once()

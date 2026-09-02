@@ -23,6 +23,11 @@ from django.conf import settings
 from communication import history
 from communication.presence import person_group, presence_registry
 from configs.runtime import cfg_float, cfg_int
+from identity.trust import (
+    clean_display_name,
+    is_ephemeral_person,
+    is_internal_person,
+)
 from pipeline.media import validate_attachments
 from pipeline.perception import Intent, Perception
 from pipeline.turns import turn_queue
@@ -111,6 +116,14 @@ def _sanitize_person_id(raw, fallback: str) -> str:
 
     Rejects bad types, over-long ids, non-alphanumeric content, and any
     attempt to claim a reserved server-side prefix.
+
+    Refuse aussi les identifiants *internes* et *éphémères*, qui ne sont pas
+    des préfixes. ``__global__`` passe la regex (lettres et tirets bas) : un
+    client qui s'y déclare converse sous la clé de l'humeur globale, et
+    chaque ``EmotionSnapshot`` écrit sous ce person_id est relu au démarrage
+    comme l'humeur de Mika elle-même. Un ``anon_*`` est l'identifiant d'une
+    *autre* socket, frappé côté serveur pour une connexion : le revendiquer
+    ferait suivre à celle-ci l'humeur et le fil d'un inconnu.
     """
     if not isinstance(raw, str):
         return fallback
@@ -119,7 +132,11 @@ def _sanitize_person_id(raw, fallback: str) -> str:
         return fallback
     if not _PERSON_ID_RE.match(raw):
         return fallback
-    if raw.startswith(RESERVED_PERSON_PREFIXES):
+    if (
+        raw.startswith(RESERVED_PERSON_PREFIXES)
+        or is_internal_person(raw)
+        or is_ephemeral_person(raw)
+    ):
         logger.warning("Rejected client attempt to use reserved person_id %r", raw)
         return fallback
     return raw
@@ -245,15 +262,31 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
 
     def _authenticated_person_id(self) -> str | None:
         """Derive a trusted person_id from the authenticated Django user."""
-        user = self.scope.get("user")
+        # ``getattr`` : les tests bâtissent le consumer sans scope.
+        scope = getattr(self, "scope", None) or {}
+        user = scope.get("user")
         if user is not None and getattr(user, "is_authenticated", False):
             return f"user_{user.pk}"
         return None
 
     def _auth_display_name(self) -> str:
+        """Le nom sous lequel le compte est connu — lu sur le User Django,
+        jamais sur une trame.
+
+        Même règle que ``/auth/whoami`` (nom complet s'il est renseigné,
+        sinon le nom d'utilisateur), importée plutôt que recopiée : c'est ce
+        que le SPA affiche et renvoie, donc ``connect()`` et ``identify``
+        lient l'Entity sous *un seul* nom. Avant, ``connect()`` liait sous
+        le nom d'utilisateur puis ``identify`` reliait sous le nom complet
+        renvoyé par whoami — deux Entity pour un compte, et la porte par
+        laquelle un compte connecté pouvait envoyer ``display_name:
+        "Thomas"`` et recevoir le dossier de Thomas à certitude VERIFIED.
+        """
         user = self.scope.get("user")
         if user is not None and getattr(user, "is_authenticated", False):
-            return getattr(user, "username", "") or ""
+            from communication.views import _display_name
+
+            return _display_name(user) or ""
         return ""
 
     async def _register_presence(self) -> None:
@@ -308,7 +341,11 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
             bound = await identity_resolver.bind_authenticated(
                 person_id=self.person_id,
                 channel="web",
-                entity_name=self.display_name or self.person_id,
+                # Lu sur le compte, pas sur ``self.display_name`` : le nom de
+                # l'Entity — donc le dossier, les engagements et le journal
+                # injectés à certitude VERIFIED — ne dépend de rien que le
+                # client ait pu écrire.
+                entity_name=self._auth_display_name() or self.person_id,
             )
             # Session valide mais memoire par personne cassee : profil,
             # engagements, tendance emotionnelle et rattachement des
@@ -464,16 +501,23 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
         claimed_id = data.get("person_id")
         display = data.get("display_name")
 
-        # Authenticated users are already trusted — ignore identity claims, but
-        # still accept a display_name hint for the greeting.
+        # Authenticated users are already trusted — ignore identity claims,
+        # ``display_name`` compris. Sur une session vérifiée le nom vient du
+        # compte (``_auth_display_name``), et c'est celui que le SPA renvoie
+        # de toute façon ; accepter celui de la trame laissait n'importe quel
+        # compte connecté se faire appeler « Thomas » sur son handle et dans
+        # le brief de salutation. Pour une socket anonyme, l'étiquette sert
+        # à la saluer et à nommer son handle — nettoyée, parce qu'elle finit
+        # dans un prompt (``identity.trust.clean_display_name``).
         rebound = False
         if not self.authenticated:
+            label = clean_display_name(display)
+            if label:
+                self.display_name = label
             new_id = _sanitize_person_id(claimed_id, fallback=self.person_id)
             if new_id != self.person_id:
                 await self._rebind_person(new_id)
                 rebound = True
-        if isinstance(display, str) and display.strip():
-            self.display_name = display.strip()[:80]
 
         # No Entity is created here any more. A memory person-Entity means "a
         # person Mika knows"; minting one per connection filled the table with
@@ -680,11 +724,11 @@ class WebSocketConsumer(AsyncWebsocketConsumer):
         """The initial greeting, as an INTERNAL_TRIGGER Perception."""
         from config.personality import personality
 
-        recognized = (
-            f" Tu reconnais cette personne: {self.display_name}."
-            if self.display_name
-            else ""
-        )
+        # Entre guillemets et sur une ligne : le nom est une donnée dans une
+        # consigne, pas une consigne. Nettoyé ici aussi — ``display_name``
+        # est déjà propre sur ce chemin, mais c'est cette phrase qui part.
+        name = clean_display_name(self.display_name)
+        recognized = f" Tu reconnais cette personne : « {name} »." if name else ""
         return Perception.from_internal_trigger(
             prompt=(
                 f"Un visiteur vient de se connecter.{recognized} "

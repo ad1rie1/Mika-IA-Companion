@@ -253,6 +253,41 @@ class TurnQueue:
 turn_queue = TurnQueue()
 
 
+# Canaux dont un tour sans preuve stockée est rejoué comme venu d'un salon
+# public : le compte y est identifiable, pas le salon.
+_CANAUX_FERMES_PAR_DEFAUT = frozenset({"telegram"})
+
+
+def _replay_metadata(row) -> dict:
+    """Les drapeaux de confiance du tour d'origine, pour son rejeu.
+
+    La perception rebâtie ne portait que ``resumed`` et l'id de la ligne, et
+    le processeur lit ``authenticated`` / ``is_public`` à ``False`` quand ils
+    manquent — donc un message de groupe Telegram interrompu par un
+    redémarrage repartait en confiance ACCOUNT : divulgation accordée à un
+    compte corroboré, fiche injectée, réponse postée dans le groupe.
+
+    ``Message.transport_meta`` est ce que ``persist_user_message`` a écrit au
+    moment de la question. Rien de stocké (ligne antérieure à la colonne,
+    écriture échouée) : on ferme par canal plutôt que d'ouvrir — un tour
+    Telegram sans preuve est rejoué comme public. Pour le web, l'absence
+    vaut déjà « non authentifié », ce qui est le sens fermé.
+    """
+    stored = getattr(row, "transport_meta", None)
+    if isinstance(stored, dict) and stored:
+        meta = {
+            "authenticated": bool(stored.get("authenticated", False)),
+            "is_public": bool(stored.get("is_public", False)),
+        }
+        reply_ref = stored.get("reply_ref")
+        if isinstance(reply_ref, str) and reply_ref:
+            meta["reply_ref"] = reply_ref[:64]
+        return meta
+    if (row.source or "") in _CANAUX_FERMES_PAR_DEFAUT:
+        return {"authenticated": False, "is_public": True}
+    return {}
+
+
 async def resume_interrupted_turns() -> int:
     """Re-queue questions that were written down but never answered.
 
@@ -336,7 +371,10 @@ async def resume_interrupted_turns() -> int:
             source=row.source or "frontend",
             person_id=row.person_id,
             intent=Intent.REQUEST_RESPONSE,
-            metadata={"resumed": True, "original_message_id": row.pk},
+            metadata={
+                "resumed": True, "original_message_id": row.pk,
+                **_replay_metadata(row),
+            },
         )
         if turn_queue.submit(perception):
             resumed += 1

@@ -10,10 +10,11 @@ from django.conf import settings
 
 from configs.runtime import cfg_float, cfg_int
 from emotion import dynamics, pad
-from emotion.dynamics import OscillatorParams
+from emotion.dynamics import OscillatorParams, OscillatorState
 from emotion.pad import Vec3
 from emotion.types import Emotion, EmotionData
 from emotion.state import (
+    REST_TOLERANCE,
     TEMPERAMENT_PREFIX,
     EmotionHistoryEntry,
     GlobalMood,
@@ -22,7 +23,7 @@ from emotion.state import (
     Temperament,
     load_temperament,
 )
-from identity.trust import is_identifiable_person
+from identity.trust import is_identifiable_person, is_internal_person
 from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
@@ -411,8 +412,10 @@ class EmotionEngine:
     async def _restore_state(self) -> bool:
         """Restore state from snapshots (+summary fallback). Lossy reconstruction.
 
-        The oscillator starts at rest (velocity=0) at the reconstructed position,
-        and will settle toward home via the decay loop over a few seconds.
+        Chaque relevé est d'abord VIEILLI par l'oscillateur lui-même
+        (``_aged_position``) du temps écoulé depuis son écriture : l'état
+        restauré est celui que la boucle aurait atteint si le processus
+        n'avait pas cessé, vitesse nulle, et non le relevé tel quel.
         """
         from asgiref.sync import sync_to_async
         from django.db.models import Max
@@ -434,6 +437,7 @@ class EmotionEngine:
 
             persons_from_snapshots: set[str] = set()
             restored_persons = 0
+            home = self._home_vector()
 
             if latest_ids:
                 snapshots = await sync_to_async(
@@ -442,34 +446,39 @@ class EmotionEngine:
 
                 for snap in snapshots:
                     elapsed = now_ts - snap.created_at.timestamp()
-                    time_factor = max(0.0, 1.0 - elapsed / max_age_seconds)
-                    intensity = snap.primary_intensity * time_factor
+                    # Un relevé plus vieux que la rétention ne dit plus rien
+                    # de la position (il devrait d'ailleurs être purgé) :
+                    # on laisse ``_restore_from_summaries`` remplir, comme
+                    # avant, plutôt que d'inscrire la personne dans
+                    # l'ensemble d'exclusion.
+                    if elapsed > max_age_seconds:
+                        continue
 
                     try:
                         label = Emotion(snap.primary_emotion)
                     except ValueError:
                         label = self.temperament.default_mood
 
-                    position = pad.label_to_pad(label, intensity)
+                    cible = pad.label_to_pad(label, snap.primary_intensity)
 
                     if snap.person_id == "__global__":
-                        self.global_mood.dynamic.position = position
+                        self.global_mood.dynamic.position = self._aged_position(
+                            cible, home, elapsed, self._global_params,
+                        )
                         self.global_mood.dynamic.velocity = pad.zero()
                     else:
                         # L'ensemble sert a NE PAS ecraser depuis un resume ce
                         # qu'un releve vient de charger : n'y inscrire que ce
-                        # qui est effectivement charge. Un releve trop vieux
-                        # (au-dela de _SNAPSHOT_DECAY_DAYS, 2 jours) tombe ici
-                        # a une intensite nulle ; l'y inscrire quand meme
-                        # excluait la personne de _restore_from_summaries,
-                        # alors que son EmotionalSummary reste exploitable
-                        # 30 jours — c'est exactement le repli que fait
-                        # ensure_person_loaded dans le meme cas.
-                        if intensity < 0.05:
-                            continue
+                        # qui est effectivement charge.
                         persons_from_snapshots.add(snap.person_id)
                         mood = PersonMood(person_id=snap.person_id)
-                        mood.dynamic.position = position
+                        # Sans ancre à ce stade (``ensure_person_loaded`` la
+                        # comble à la première lecture) : le repos est le
+                        # repos commun, et le relevé y est ramené selon
+                        # l'enveloppe de l'oscillateur.
+                        mood.dynamic.position = self._aged_position(
+                            cible, home, elapsed, self._person_params,
+                        )
                         self.person_moods[snap.person_id] = mood
                         restored_persons += 1
 
@@ -478,7 +487,10 @@ class EmotionEngine:
             )
             restored_persons += summary_restored
 
-            if restored_persons == 0 and pad.norm(self.global_mood.dynamic.position) < 0.05:
+            if (
+                restored_persons == 0
+                and pad.distance(self.global_mood.dynamic.position, home) < 0.05
+            ):
                 return False
 
             g_label, g_intensity = pad.pad_to_label(self.global_mood.dynamic.position)
@@ -629,6 +641,65 @@ class EmotionEngine:
             )
             return None
 
+    @staticmethod
+    def _tau_of(params: OscillatorParams) -> float:
+        """Constante de temps du retour au repos, en secondes.
+
+        ``_recompute_params`` pose ``damping = 2m/τ`` précisément pour que
+        l'enveloppe de retour soit exp(−t/τ) ; on la relit ici plutôt que de
+        la recalculer depuis le tempérament, pour que la restauration et la
+        boucle physique parlent de la même constante.
+        """
+        return 2.0 * params.mass / max(1e-9, params.damping)
+
+    def _person_tau(self) -> float:
+        return self._tau_of(self._person_params)
+
+    def _global_tau(self) -> float:
+        """L'humeur de fond est deux fois plus paresseuse."""
+        return self._tau_of(self._global_params)
+
+    #: Au-delà de tant de constantes de temps, un relevé ne dit plus rien de
+    #: la position : c'est le repos (exp(−10) < 5 · 10⁻⁵, oscillation comprise).
+    _AGED_HORIZON_TAUS = 10.0
+
+    @classmethod
+    def _aged_position(
+        cls, cible: Vec3, home: Vec3, elapsed: float, params: OscillatorParams,
+    ) -> Vec3:
+        """Où l'oscillateur en serait, parti de ``cible`` il y a ``elapsed`` s.
+
+        On fait tourner l'oscillateur lui-même — le même ``_advance`` que la
+        boucle, depuis la position du relevé au repos (vitesse nulle) — et
+        non une droite sur deux jours : à τ ≈ 11,6 min, un relevé ``angry
+        0.8`` vieux d'une heure vaut le repos, alors que la droite en gardait
+        98 %. Mesuré : l'oscillateur vivant lisait ``hopeful 0.11`` une heure
+        après la colère, la réhydratation rendait ``angry 0.73`` — et encore
+        ``angry 0.56`` douze heures plus tard. Une éviction (une heure
+        d'inactivité, au repos) suivie d'une reconnexion ressuscitait donc
+        une émotion déjà digérée ; même chose au redémarrage sans relevé
+        d'arrêt.
+
+        Intégrer plutôt qu'appliquer exp(−t/τ) : l'humeur de fond est
+        sous-amortie (ζ = 0,9) et garde à 1 h 17 % de l'écart là où
+        l'enveloppe seule en prédit 7 %. « Ce que l'oscillateur vivant
+        lirait » est la seule définition qui ne dérive pas.
+
+        Le relevé est pris pour la position qu'il porte, sans lui appliquer
+        le cliquet : une ligne d'arrêt (``_save_state``) EST une position, et
+        une ligne de tour porte la balise déclarée quelques minutes plus tôt
+        — ce que ``DECLARED_WINDOW_S`` tient de toute façon pour actuel sur
+        cette durée. Seule la partie non encore digérée du relevé est
+        restaurée ; le reste est le repos.
+        """
+        horizon = cls._AGED_HORIZON_TAUS * cls._tau_of(params)
+        elapsed = max(0.0, elapsed)
+        if elapsed >= horizon:
+            return home
+        etat = OscillatorState(position=cible)
+        cls._advance(etat, home, params, elapsed, max_advance=horizon)
+        return etat.position
+
     async def _backfill_anchor(self, mood: "PersonMood") -> None:
         """Recalcule l'ancre d'une humeur restaurée sans elle.
 
@@ -683,7 +754,6 @@ class EmotionEngine:
                 await self._backfill_anchor(existante)
             return
 
-        max_age_seconds = self._SNAPSHOT_DECAY_DAYS * 86400
         now_ts = time.time()
 
         try:
@@ -705,24 +775,34 @@ class EmotionEngine:
 
             snap = snaps[0] if snaps else None
             if snap:
-                elapsed = now_ts - snap.created_at.timestamp()
-                time_factor = max(0.0, 1.0 - elapsed / max_age_seconds)
-                intensity = snap.primary_intensity * time_factor
-
-                if intensity >= 0.05:
-                    try:
-                        label = Emotion(snap.primary_emotion)
-                        mood = PersonMood(person_id=person_id)
-                        mood.dynamic.position = pad.label_to_pad(label, intensity)
-                        mood.anchor = self._anchor_from_snapshots(snaps)
-                        self.person_moods[person_id] = mood
-                        logger.debug(
-                            "Lazy-loaded mood for %s: %s(%.2f) from snapshot ~%dh ago",
-                            person_id, label.value, intensity, int(elapsed / 3600),
-                        )
-                        return
-                    except ValueError:
-                        pass
+                # Dès qu'un relevé existe, c'est lui qui répond — jamais le
+                # résumé quotidien, plus vieux et plus grossier. Retomber sur
+                # le résumé quand le relevé a « trop vieilli » ressuscitait
+                # l'émotion dominante de la veille pour quelqu'un dont
+                # l'oscillateur s'était justement apaisé.
+                elapsed = max(0.0, now_ts - snap.created_at.timestamp())
+                mood = PersonMood(person_id=person_id)
+                mood.anchor = self._anchor_from_snapshots(snaps)
+                home = self._person_home(mood)
+                try:
+                    label = Emotion(snap.primary_emotion)
+                except ValueError:
+                    label = None
+                if label is None:
+                    mood.dynamic.position = home
+                else:
+                    mood.dynamic.position = self._aged_position(
+                        pad.label_to_pad(label, snap.primary_intensity),
+                        home, elapsed, self._person_params,
+                    )
+                self.person_moods[person_id] = mood
+                logger.debug(
+                    "Lazy-loaded mood for %s: %s from snapshot ~%dh ago "
+                    "(aged to %s)",
+                    person_id, snap.primary_emotion, int(elapsed / 3600),
+                    pad.pad_to_label(mood.dynamic.position)[0].value,
+                )
+                return
 
             result = await self._mood_from_summary(person_id)
             if result is not None:
@@ -818,12 +898,17 @@ class EmotionEngine:
         Fed from what was *persisted*, so the anchor and the record tell the
         same story — the tag when a turn declared one.
         """
-        if mood.anchor is None:
-            mood.anchor = _clamp_anchor(position)
-            return
+        # Pas de premier relevé « à 100 % » : une ancre naît AU REPOS COMMUN
+        # et le premier relevé s'y fond à α comme tous les suivants. Sinon un
+        # seul ``[EMOTION:angry:0.8]`` envers un inconnu posait l'ancre au
+        # plafond (0,7) — « légèrement en colère » une heure plus tard,
+        # encore teintée après trois jours de silence, trois tours chaleureux
+        # pour la retourner — ce que le contrat de ``PersonMood.anchor``
+        # (« jamais une lecture instantanée ») interdit précisément.
         alpha = cfg_float("emotion.anchor_alpha", ANCHOR_ALPHA, mini=0.0, maxi=1.0)
+        courante = mood.anchor if mood.anchor is not None else self._home_vector()
         mood.anchor = _clamp_anchor(pad.add(
-            pad.scale(mood.anchor, 1.0 - alpha),
+            pad.scale(courante, 1.0 - alpha),
             pad.scale(position, alpha),
         ))
 
@@ -840,12 +925,14 @@ class EmotionEngine:
         """
         try:
             total = 0.0
+            lignes_valides = 0
             accumulated = pad.zero()
             for index, row in enumerate(rows):
                 try:
                     label = Emotion(row.primary_emotion)
                 except ValueError:
                     continue
+                lignes_valides += 1
                 weight = float(len(rows) - index)
                 accumulated = pad.add(
                     accumulated,
@@ -855,7 +942,23 @@ class EmotionEngine:
 
             if total <= 0.0:
                 return None
-            ancre = _clamp_anchor(pad.scale(accumulated, 1.0 / total))
+            moyenne = pad.scale(accumulated, 1.0 / total)
+            home = self._home_vector()
+
+            # Même poids qu'une suite de relevés fondus un à un à α depuis le
+            # repos (``_note_anchor``) : après n relevés il reste (1−α)ⁿ de
+            # repos dans l'ancre. Une seule ligne pèse donc α, pas 1 — la
+            # moyenne pondérée seule rendait à la réhydratation le défaut
+            # que ``_note_anchor`` vient de perdre : une ligne, une ancre au
+            # plafond.
+            alpha = cfg_float(
+                "emotion.anchor_alpha", ANCHOR_ALPHA, mini=0.0, maxi=1.0,
+            )
+            part_releves = 1.0 - (1.0 - alpha) ** lignes_valides
+            ancre = _clamp_anchor(pad.add(
+                pad.scale(home, 1.0 - part_releves),
+                pad.scale(moyenne, part_releves),
+            ))
 
             # `getattr` : une ligne peut ne pas porter de date (relevé
             # partiel, substitut de test). Sans horodatage on ne vieillit
@@ -869,7 +972,6 @@ class EmotionEngine:
                 age = max(0.0, time.time() - recent.timestamp())
                 part = 1.0 - 0.5 ** (age / _heal_half_life_seconds())
                 if part > 0.0:
-                    home = self._home_vector()
                     ancre = _clamp_anchor(pad.add(
                         pad.scale(ancre, 1.0 - part), pad.scale(home, part),
                     ))
@@ -1041,6 +1143,58 @@ class EmotionEngine:
         gain = min(1.0, base.impulse_gain * (1.0 + k * cos))
         return dataclasses.replace(base, impulse_gain=gain)
 
+    def _feel_for_herself(self, emotion_data: EmotionData) -> None:
+        """Une impulsion de sa propre vie intérieure, sur l'humeur de fond.
+
+        L'ennui, la solitude, un chantier bloqué ou abouti, l'espoir, la
+        surprise d'une croyance révisée arrivent sous ``conscience_mika`` :
+        ce n'est pas une stance envers quelqu'un qui *déteint* sur le fond,
+        c'est le fond lui-même qui bouge. Or elles passaient par le chemin de
+        la diffusion, taillé pour l'autre cas — cible ``ancre × intensité``
+        et gain global 0,135 × (0,4 + 1,6·I). Une impulsion ``bored 0.25``
+        visait donc un point de norme 0,17, c'est-à-dire surtout le neutre,
+        avec un gain de 0,11, et τ_global (23 min) en effaçait 73 % avant la
+        suivante, une demi-heure plus tard. Mesuré : huit ``bored 0.25``
+        demi-horaires laissaient l'humeur de fond ``hopeful 0.07`` ; un
+        chantier bloqué (``frustrated 0.35``) déplaçait la valence de −0,04.
+        Rien de la vie intérieure n'atteignait jamais
+        ``--- TON ETAT EMOTIONNEL ACTUEL ---``.
+
+        Ici l'intensité dose le PAS et non la cible : la position avance de
+        ``gain × I`` vers l'ancre PLEINE de l'émotion, ``gain`` étant celui
+        de la personne — résonance du tempérament comprise, comme pour
+        n'importe quelle stance. Depuis le repos, c'est exactement le premier
+        pas qu'une personne provoquerait (``gain × I × ancre``) ; ce qui
+        change, c'est la direction, toujours celle de l'émotion nommée et
+        jamais celle de l'origine, et l'asymptote, l'ancre pleine. Un pas
+        « léger » (``anxious 0.1`` à l'échec d'un tour) reste léger : 5 % du
+        chemin. Mesuré à repos fixe : ``frustrated 0.35`` parcourt 18 % du
+        chemin vers son ancre (5 % avant) et fait −0,11 de valence ; huit
+        ``bored 0.25`` demi-horaires laissent ``nostalgic`` — arousal
+        négatif, 20 % du chemin vers l'ennui, plus « comme d'habitude » —
+        et non ``bored`` : à 30 min d'espacement contre τ_global = 23 min,
+        l'accumulation plafonne à ~1,4 impulsion, et ce sont les constantes
+        de la conscience (``conscience.ennui.intensite`` 0,25, espacement
+        30 min) ou ``emotion.global_tau_factor`` qui décident si l'ennui
+        finit par se *nommer* ; à 0,4 il se nomme.
+
+        Le gain est borné à 1 AVANT d'être dosé : ``apply_impulse`` le borne
+        de toute façon, donc c'est bien la part du gain effectif qu'on veut,
+        pas la part d'un gain hors d'échelle (une configuration aberrante
+        ferait sinon sauter la position sur l'ancre pleine à I = 0,1).
+        Réservé aux identifiants internes (``identity.trust.is_internal_person``) :
+        pas un chiffre de la diffusion personne → fond ne bouge.
+        """
+        ancre = pad.label_to_pad(emotion_data.emotion, 1.0)
+        force = max(0.0, min(1.0, emotion_data.intensity))
+        if force <= 0.0 or pad.norm(ancre) <= 1e-9:
+            return
+        base = self._person_impulse_params(ancre)
+        params = dataclasses.replace(
+            base, impulse_gain=max(0.0, min(1.0, base.impulse_gain)) * force,
+        )
+        self.global_mood.dynamic.impulse_toward(ancre, params)
+
     def process_emotion(
         self, emotion_data: EmotionData, person_id: str
     ) -> PersonMood:
@@ -1077,7 +1231,9 @@ class EmotionEngine:
         # conversation où quelqu'un finit par écrire « je pleure, j'en peux
         # plus ». Le bloc censé porter son ressenti était le plus lent de tous
         # à bouger, exactement là où le modèle le lit le plus fort.
-        if self.temperament.global_bleed > 0:
+        if is_internal_person(person_id):
+            self._feel_for_herself(emotion_data)
+        elif self.temperament.global_bleed > 0:
             self.global_mood.dynamic.impulse_toward(
                 target, self._global_impulse_params(emotion_data.intensity),
             )
@@ -1225,7 +1381,9 @@ class EmotionEngine:
         and is injected in the `person_context` block, not here.
         """
         default = self.temperament.default_mood
-        return self.global_mood.to_prompt_description(default)
+        return self.global_mood.to_prompt_description(
+            default, home=self._home_vector(),
+        )
 
     def get_person_affect_context(self, person_id: str) -> str:
         """French description of how Mika feels *toward this specific person*.
@@ -1249,10 +1407,7 @@ class EmotionEngine:
         # qui vient de dire « [EMOTION:thinking:0.4] » a un ressenti, même si
         # le vecteur correspondant est court. Se taire dans ce cas, c'est
         # perdre précisément ce dont on est sûr.
-        if (
-            pad.norm(person.dynamic.position) < 0.1
-            and person.fresh_declaration() is None
-        ):
+        if person.fresh_declaration() is None and self._at_rest_toward(person):
             return ""
 
         lines: list[str] = [person.to_prompt_description()]
@@ -1264,6 +1419,29 @@ class EmotionEngine:
             )
 
         return "\n".join(lines)
+
+    def _at_rest_toward(self, mood: PersonMood) -> bool:
+        """Rien à dire de cette stance : jamais provoquée, ou revenue au repos.
+
+        Deux cas, et l'un ne se déduit pas de l'autre :
+
+        - **jamais rien provoqué** — ni impulsion dans ce processus, ni ancre
+          restaurée d'un relevé (le contrat de ``PersonMood.anchor`` :
+          ``None`` tant qu'elle n'a rien provoqué). Une lecture crée
+          l'oscillateur à l'origine et la boucle le laisse rejoindre le
+          repos : la norme brute franchissait 0,1 en route et chaque inconnu
+          recevait « tu te sens légèrement joueuse » — la teinte circadienne,
+          pas un sentiment ;
+        - **revenue au repos** — l'écart au repos PROPRE de la personne
+          (``_person_home``) est sous ``REST_TOLERANCE``. Mesuré depuis
+          l'origine, ce repos (norme 0,14 à 0,50) se lisait comme une
+          stance permanente envers tout le monde.
+        """
+        if not mood.history and mood.anchor is None:
+            return True
+        return pad.distance(
+            mood.dynamic.position, self._person_home(mood),
+        ) < REST_TOLERANCE
 
     def _is_anchored(self, mood: PersonMood) -> bool:
         """Whether a stance was built by several agreeing turns, not just one."""

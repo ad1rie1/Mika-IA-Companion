@@ -40,6 +40,14 @@ class Message(models.Model):
     # queue, instead of leaving someone with a message marked delivered
     # and no reply, forever.
     awaiting_reply = models.BooleanField(default=False, db_index=True)
+    # Ce que le transport prouvait quand la question a été écrite —
+    # ``is_public``, ``authenticated``, et le salon d'où elle est venue
+    # (``reply_ref``). Relu par ``resume_interrupted_turns`` : un tour rejoué
+    # sans ces drapeaux repartait en confiance ACCOUNT, donc un message de
+    # groupe interrompu par un redémarrage obtenait la divulgation en public.
+    # ``None`` = rien d'écrit (ligne antérieure à la colonne) ; la reprise
+    # ferme alors par canal.
+    transport_meta = models.JSONField(null=True, blank=True, default=None)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

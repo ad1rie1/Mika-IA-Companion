@@ -258,7 +258,9 @@ class ProjectToolsModule(BaseModule):
                 allowed_modules=list(args.get("allowed_modules") or []),
                 resource_paths=list(args.get("resource_paths") or []),
                 contacts=list(args.get("contacts") or []),
-                schedule_rule=str(args.get("schedule_rule") or "")[:120],
+                # Nettoyée à l'écriture : le réveil sur événement compare la
+                # règle stockée, et « event:x » avec une espace n'est pas « event:x ».
+                schedule_rule=str(args.get("schedule_rule") or "").strip()[:120],
                 priority=priority,
                 origin=origin,
                 keywords=list(args.get("keywords") or []),
@@ -497,7 +499,7 @@ class ProjectToolsModule(BaseModule):
             if args.get("priority") in VALID_PRIORITIES:
                 p.priority = args["priority"]
             if "schedule_rule" in args:
-                p.schedule_rule = str(args["schedule_rule"] or "")[:120]
+                p.schedule_rule = str(args["schedule_rule"] or "").strip()[:120]
                 try:
                     p.next_run_at = sched.compute_next_run(
                         p.schedule_rule, timezone.now(),

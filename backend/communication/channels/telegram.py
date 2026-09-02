@@ -285,13 +285,23 @@ class TelegramChannel:
         display_name = message.from_user.full_name or ""
         is_public = self._is_public_chat(message)
 
+        # L'adresse mémorisée ici sert aux envois PROACTIFS (la conscience
+        # qui écrit la première) : seul un salon privé peut la devenir. Un
+        # groupe laissé là en ferait la destination par défaut d'une parole
+        # composée pour la personne — son fichier lu à voix haute devant
+        # tout le monde. La chaîne vide ne remplace pas une adresse déjà
+        # connue (registre et handle gardent l'existante). La réponse
+        # RÉACTIVE, elle, ne passe pas par cette adresse : elle repart vers
+        # le salon d'où la question est venue (``reply_ref`` du tour).
+        stored_ref = "" if is_public else str(chat_id)
+
         from communication.presence import presence_registry
 
         presence_registry.register(
             person_id=person_id,
             channel="telegram",
             kind="module",
-            delivery_ref=str(chat_id),
+            delivery_ref=stored_ref,
             display_name=display_name,
         )
         from identity.resolver import identity_resolver
@@ -301,7 +311,7 @@ class TelegramChannel:
             person_id=person_id,
             channel="telegram",
             kind="module",
-            delivery_ref=str(chat_id),
+            delivery_ref=stored_ref,
             display_name=display_name,
             trust=ChannelTrust.PUBLIC if is_public else ChannelTrust.ACCOUNT,
         )
@@ -315,6 +325,24 @@ class TelegramChannel:
                 person_id,
             )
         return person_id, is_public
+
+    @staticmethod
+    def _turn_metadata(message, is_public: bool) -> dict:
+        """Ce que le transport prouve pour ce tour, et d'où il vient.
+
+        ``reply_ref`` est le salon qui a posé la question. La réponse était
+        routée par l'adresse mémorisée dans le registre de présence — « le
+        dernier salon où ce compte a été vu » : une question posée en privé,
+        mise en attente derrière l'unique worker, puis un message du même
+        compte dans un groupe, et la réponse privée, composée avec tout son
+        contexte, partait dans le groupe. Le tour emporte donc son propre
+        salon, et la diffusion le préfère à l'adresse mémorisée.
+        """
+        return {
+            "authenticated": False,
+            "is_public": is_public,
+            "reply_ref": str(getattr(message, "chat_id", "") or ""),
+        }
 
     async def _handle_message(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -333,7 +361,7 @@ class TelegramChannel:
             update.message.text,
             source="telegram",
             person_id=person_id,
-            metadata={"authenticated": False, "is_public": is_public},
+            metadata=self._turn_metadata(update.message, is_public),
         )
         await self._submit(perception, update.message)
 
@@ -367,7 +395,7 @@ class TelegramChannel:
             attachments=[attachment],
             source="telegram",
             person_id=person_id,
-            metadata={"authenticated": False, "is_public": is_public},
+            metadata=self._turn_metadata(message, is_public),
         )
         await self._submit(perception, message)
 
@@ -408,7 +436,9 @@ class TelegramChannel:
         Returns a validated ``MediaAttachment`` or None (unsupported type,
         oversized payload, or download failure — all logged, none fatal).
         """
-        from pipeline.media import MAX_FILE_SIZE_BYTES, MediaAttachment, _categorize
+        from pipeline.media import (
+            MAX_FILE_SIZE_BYTES, MediaAttachment, _categorize, sanitize_filename,
+        )
 
         # Le plafond est un réglage côté ``pipeline.media`` : le lire par son
         # accesseur, la constante étant figée à l'import. L'import est gardé
@@ -427,7 +457,9 @@ class TelegramChannel:
             mime = media.mime_type or "audio/ogg"
         elif message.audio:
             media = message.audio
-            name = media.file_name or "audio.mp3"
+            # ``file_name`` est choisi par l'expéditeur : borné ici comme un
+            # nom venu du WebSocket, avant le journal et la Perception.
+            name = sanitize_filename(media.file_name or "audio.mp3")
             mime = media.mime_type or "audio/mpeg"
         elif message.photo:
             media = message.photo[-1]  # largest resolution
@@ -435,7 +467,7 @@ class TelegramChannel:
             mime = "image/jpeg"
         elif message.document:
             media = message.document
-            name = media.file_name or "document"
+            name = sanitize_filename(media.file_name or "document")
             mime = media.mime_type or "application/octet-stream"
         else:
             return None

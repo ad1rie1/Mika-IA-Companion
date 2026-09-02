@@ -123,6 +123,12 @@ class SpeechOutput:
     # so a locally-painted message can be reconciled with its server row
     # instead of appearing twice after a history merge.
     client_msg_id: str | None = None
+    # Le salon d'où la question est venue, sur le canal ``source`` — ce que
+    # la diffusion préfère, pour une réponse réactive, à l'adresse mémorisée
+    # dans le registre de présence (« le dernier salon où ce compte a été
+    # vu »). ``None`` pour un tour qui n'en déclare pas (web, initiative
+    # interne) : la diffusion garde alors ses règles.
+    reply_ref: str | None = None
 
 
 # -- Main entry point ---------------------------------------------------------
@@ -234,6 +240,7 @@ async def process_message(
             if isinstance(replayed_id, int):
                 user_message_id = replayed_id
             else:
+                internal = perception.intent is Intent.INTERNAL_TRIGGER
                 user_message_id = await persist_user_message(
                     message=message,
                     source=source,
@@ -241,7 +248,10 @@ async def process_message(
                     attachments_meta=_serialize_attachments_meta(perception),
                     # The "user" side of an internal trigger is scaffolding
                     # Mika wrote to herself, not something anyone said.
-                    is_internal=perception.intent is Intent.INTERNAL_TRIGGER,
+                    is_internal=internal,
+                    # Un brief interne n'est jamais rejoué : rien à retenir
+                    # de son transport.
+                    transport_meta=None if internal else _transport_meta(perception),
                 )
 
         # 2. Prompt -> AI call -> emotion extraction (bounded by timeout)
@@ -470,6 +480,7 @@ async def process_message(
         message_id=assistant_message_id,
         user_message_id=user_message_id,
         client_msg_id=_client_msg_id(perception),
+        reply_ref=_reply_ref(perception),
     )
 
     # 7. Broadcast to WebSocket (inner state attached so UI panels refresh).
@@ -518,6 +529,60 @@ def _client_msg_id(perception: Perception) -> str | None:
     return raw[:64]
 
 
+def _reply_ref(perception: Perception) -> str | None:
+    """Le salon d'où ce tour est venu, tel que le canal l'a déclaré.
+
+    Même traitement que ``client_msg_id`` : une valeur opaque au pipeline,
+    rendue au canal qui l'a émise, donc bornée et coercée plutôt que
+    validée.
+    """
+    raw = perception.metadata.get("reply_ref")
+    if raw is None or raw == "":
+        return None
+    return str(raw)[:64]
+
+
+def _transport_meta(perception: Perception) -> dict:
+    """Ce que le transport a prouvé pour ce tour, tel que la reprise le rejouera.
+
+    Persisté sur la ligne de la question (``Message.transport_meta``) : un
+    tour interrompu par un redémarrage était rebâti avec des drapeaux vides,
+    donc ``is_public=False`` — un message de groupe Telegram repartait en
+    confiance ACCOUNT, le fichier de la personne injecté, la réponse postée
+    dans le groupe. Les clés sont exactement celles que ce module lit.
+    """
+    meta = {
+        "authenticated": bool(perception.metadata.get("authenticated", False)),
+        "is_public": bool(perception.metadata.get("is_public", False)),
+    }
+    reply_ref = _reply_ref(perception)
+    if reply_ref:
+        meta["reply_ref"] = reply_ref
+    return meta
+
+
+# Ce qui, des métadonnées d'une pièce jointe, est persisté puis expédié dans
+# chaque trame ``history``. Une liste fermée, et pas « tout sauf deux clés » :
+# ``Part.metadata`` recopie le dict brut de l'émetteur, et rien en aval ne
+# mesurait — une seule clé de 10 Mo faisait une ligne de 10 Mo et une trame
+# de 10 Mo, à chaque ouverture du fil. Les clés sont celles que les
+# préprocesseurs posent (``vision`` / ``audio`` / ``files``).
+_ATTACHMENT_META_KEYS = (
+    "name", "preprocessor", "extracted", "extract_method", "truncated",
+    "duration_seconds", "error",
+)
+_ATTACHMENT_META_STR_MAX = 255
+
+
+def _bounded_meta_value(value):
+    """Un scalaire JSON borné, ou ``None`` pour ce qui n'en est pas un."""
+    if isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return value[:_ATTACHMENT_META_STR_MAX]
+    return None
+
+
 def _serialize_attachments_meta(perception: Perception) -> list[dict]:
     """Extract a JSON-friendly descriptor for each attached, non-text part.
 
@@ -546,10 +611,16 @@ def _serialize_attachments_meta(perception: Perception) -> list[dict]:
         original_kind = p.metadata.get("original_kind")
         if p.kind == "text" and not original_kind:
             continue
-        meta.append({
+        entry = {
             "kind": original_kind or p.kind,
-            "mime_type": p.metadata.get("original_mime_type") or p.mime_type,
-            **{k: v for k, v in p.metadata.items()
-               if k not in ("original_kind", "original_mime_type")},
-        })
+            "mime_type": _bounded_meta_value(
+                p.metadata.get("original_mime_type") or p.mime_type
+            ),
+        }
+        for key in _ATTACHMENT_META_KEYS:
+            if key in p.metadata:
+                value = _bounded_meta_value(p.metadata[key])
+                if value is not None:
+                    entry[key] = value
+        meta.append(entry)
     return meta

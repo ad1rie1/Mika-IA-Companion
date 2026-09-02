@@ -160,6 +160,17 @@ def _error(msg: str, status: int = 400) -> JsonResponse:
     return JsonResponse({"error": msg}, status=status)
 
 
+def _regle_nettoyee(brut) -> str:
+    """La règle de cadence telle qu'on la stocke : sans espaces autour.
+
+    ``parse_rule`` nettoie à la lecture, donc une règle stockée avec une
+    espace de fin se lisait bien « event:x » — mais le réveil sur événement
+    la cherchait telle quelle en base et ne la trouvait jamais. Nettoyer à
+    chaque écriture ferme l'écart entre ce que le projet dit et ce qu'il fait.
+    """
+    return str(brut or "").strip()[:120]
+
+
 # ── Project CRUD ────────────────────────────────────────────────
 
 
@@ -199,6 +210,8 @@ def create_project(request):
     }
     kwargs = {k: body[k] for k in body.keys() & allowed_fields if body[k] is not None}
     kwargs["title"] = title[:150]
+    if "schedule_rule" in kwargs:
+        kwargs["schedule_rule"] = _regle_nettoyee(kwargs["schedule_rule"])
 
     # Compute initial next_run_at if a clock-based rule is provided
     rule = kwargs.get("schedule_rule") or ""
@@ -267,6 +280,8 @@ def project_detail(request, project_id: int):
     for k, v in body.items():
         if k in updatable and v is not None:
             setattr(p, k, v)
+    if body.get("schedule_rule") is not None:
+        p.schedule_rule = _regle_nettoyee(body["schedule_rule"])
     # Owner is settable AND clearable (explicit null detaches the owner).
     if "owner_id" in body:
         p.owner_id = body["owner_id"] or None
@@ -571,6 +586,7 @@ def _execute_pending_payload(a: ProjectPendingAction) -> tuple[bool, str]:
     if kind == "send_email":
         # Delegate to the email module's real send path. Schema:
         #   {"kind": "send_email", "to": "...", "subject": "...", "body": "..."}
+        _verifier_le_destinataire(a.project, a.payload.get("to", ""))
         try:
             from modules.manager import module_manager
             em = module_manager.get_module("email")
@@ -590,3 +606,28 @@ def _execute_pending_payload(a: ProjectPendingAction) -> tuple[bool, str]:
 
     # Unknown kinds: audit-only
     return False, f"aucun exécuteur pour le type '{kind}' : rien n'a eu lieu"
+
+
+def _verifier_le_destinataire(project, to) -> None:
+    """Refuse un destinataire hors des contacts du projet — s'il en déclare.
+
+    ``Project.contacts`` est le périmètre annoncé au modèle, et personne ne
+    le lisait à l'exécution : une charge ``send_email`` approuvée partait
+    vers n'importe quelle adresse que le modèle avait écrite. Vérifié ici,
+    au seul endroit où l'envoi a lieu, pour que l'API et l'écran du tableau
+    de bord refusent pareil. Lever marque l'action « failed » avec ce motif ;
+    rien n'est envoyé. Un projet sans contact déclaré garde le comportement
+    d'avant : le périmètre est une déclaration, pas une obligation.
+    """
+    contacts = {
+        str(c).strip().lower() for c in (project.contacts or []) if str(c).strip()
+    }
+    if not contacts:
+        return
+    voulus = [str(v).strip() for v in (to if isinstance(to, (list, tuple)) else [to])]
+    hors = [v for v in voulus if v.lower() not in contacts]
+    if hors or not voulus:
+        raise RuntimeError(
+            f"destinataire hors des contacts du projet ({', '.join(hors) or 'vide'}) ; "
+            f"autorisés : {', '.join(sorted(contacts))} — rien n'a été envoyé"
+        )

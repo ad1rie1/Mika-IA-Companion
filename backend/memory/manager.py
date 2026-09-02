@@ -468,6 +468,8 @@ class MemoryManager:
             await sync_to_async(souvenir.save)(update_fields=["importance"])
         except Exception:
             logger.warning("boost_souvenir failed for #%d", souvenir_id, exc_info=True)
+            return
+        await self.reindex_souvenirs([souvenir_id])
 
     async def reduce_souvenir(self, souvenir_id: int, reduction: float) -> None:
         """Decrease a souvenir's importance. Floored at 0.0."""
@@ -479,6 +481,61 @@ class MemoryManager:
             await sync_to_async(souvenir.save)(update_fields=["importance"])
         except Exception:
             logger.warning("reduce_souvenir failed for #%d", souvenir_id, exc_info=True)
+            return
+        await self.reindex_souvenirs([souvenir_id])
+
+    async def reindex_souvenirs(self, pks) -> None:
+        """Réaligne les métadonnées ChromaDB de ces souvenirs sur la ligne ORM.
+
+        L'``importance`` est une métadonnée ChromaDB ET le filtre du rappel
+        (``search_souvenirs(min_importance=…)``). Un écrivain qui ne touche
+        que la ligne ORM laisse le vecteur à l'ancienne valeur : un souvenir
+        endormi (0.02) que la Conscience vient de ranimer restait invisible au
+        rappel spontané — précisément ce que le boost promettait. Seule la
+        passe de décroissance ré-indexait ; tout écrivain d'importance passe
+        désormais ici (boost, réduction, boost par thème, fusion nocturne).
+
+        Pourquoi ré-indexer plutôt que retirer le pré-filtre ChromaDB et
+        filtrer côté ORM : l'oubli n'efface plus, donc les lignes endormies
+        deviennent la majorité d'un magasin ancien, et sans pré-filtre elles
+        rempliraient la page de candidats (n × multiplicateur) que le rappel
+        n'aurait plus qu'à jeter — un rappel qui s'amincit avec l'âge de
+        l'installation. C'est la métadonnée qui doit suivre, pas le filtre
+        qui doit tomber.
+
+        Best-effort : la ligne ORM reste la vérité ; un ré-index perdu coûte
+        du rappel jusqu'à la prochaine passe de décroissance, jamais le
+        souvenir.
+        """
+        from memory.models import Souvenir
+        from memory.storage.vector_store import souvenir_metadata, vector_call
+
+        pks = [pk for pk in (pks or ()) if pk is not None]
+        if not pks or not self.vector_store:
+            return
+
+        def _lire() -> list[dict]:
+            rows = Souvenir.objects.filter(pk__in=pks).prefetch_related("themes")
+            return [
+                {
+                    "souvenir_id": s.pk,
+                    "content": s.content,
+                    "metadata": souvenir_metadata(
+                        importance=s.importance,
+                        emotion=s.emotion,
+                        occurred_at=(s.occurred_at or s.created_at).isoformat(),
+                        themes=[t.name for t in s.themes.all()],
+                    ),
+                }
+                for s in rows
+            ]
+
+        try:
+            entries = await sync_to_async(_lire)()
+            if entries:
+                await vector_call(self.vector_store.add_souvenirs)(entries)
+        except Exception as exc:
+            degradations.record("memoire: reindex apres ecriture d'importance", exc)
 
     async def boost_souvenirs_by_themes(
         self, themes: list[str], boost: float = 0.1
@@ -498,7 +555,7 @@ class MemoryManager:
         if not themes:
             return 0
 
-        def _booster() -> int:
+        def _booster() -> list[int]:
             souvenirs = list(
                 Souvenir.objects.filter(
                     themes__name__in=themes,
@@ -508,10 +565,12 @@ class MemoryManager:
             for s in souvenirs:
                 s.importance = min(1.0, s.importance + boost)
                 s.save(update_fields=["importance"])
-            return len(souvenirs)
+            return [s.pk for s in souvenirs]
 
         try:
-            count = await sync_to_async(_booster)()
+            pks = await sync_to_async(_booster)()
+            count = len(pks)
+            await self.reindex_souvenirs(pks)
 
             if count:
                 logger.info(
@@ -751,8 +810,12 @@ class MemoryManager:
                 logger.exception("Error stopping episodic indexer")
         if self.consolidator:
             try:
-                await self.consolidator.force_consolidate()
+                # La boucle AVANT la passe finale : `stop()` attend un tick en
+                # cours au lieu de l'annuler, et la passe forcée ne trouve
+                # alors que ce qui est arrivé depuis — jamais la fenêtre que le
+                # tick était en train d'extraire.
                 await self.consolidator.stop()
+                await self.consolidator.force_consolidate()
                 logger.info("Memory consolidator shut down cleanly")
             except Exception:
                 logger.exception("Error during memory shutdown")

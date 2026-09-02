@@ -30,6 +30,18 @@ export interface TTSEvents {
    * before its synthetic audio plays — so a body gesture can start in
    * sync with the sound. */
   onProsodicCue?: (cue: ProsodicCue) => void;
+  /**
+   * Fired for the queued item that is actually about to play — after any
+   * pending wake-up delay, right before synthesis starts for real.
+   *
+   * The caller used to build the lip-sync plan itself at `speak()` time,
+   * which is when the text is *enqueued*, not when it starts sounding: two
+   * replies close together had the mouth animate the second one's phonemes
+   * while the first was still audible, because `speak()` only queues.
+   * Passing the text back here lets the caller derive the plan
+   * (`lipSyncPlan(text)`) at the moment it actually applies.
+   */
+  onUtteranceStart?: (text: string) => void;
 }
 
 // Emotion-to-voice modulation: pitch and rate adjustments
@@ -357,9 +369,13 @@ export class TTSService {
 
   /**
    * Mute switch. Muting drops queued utterances and cuts the current one
-   * short (speechSynthesis.cancel() fires the utterance's end event, so
-   * onSpeakEnd/lip-sync teardown still run). Unmuting only affects future
-   * replies.
+   * short. `speechSynthesis.cancel()` is *supposed* to fire the utterance's
+   * end event, but nothing guarantees the browser actually does (a known
+   * Web Speech API flake) — without the synchronous reset below, a mute
+   * hitting that case left `isSpeaking` stuck true and the talking
+   * animation running forever. Mirrors `stop()`'s reset; `forceSpeechEnded`
+   * is what keeps the two from double-firing `onSpeakEnd` when the browser
+   * event does eventually arrive. Unmuting only affects future replies.
    */
   setMuted(muted: boolean) {
     this.muted = muted;
@@ -370,6 +386,7 @@ export class TTSService {
       if ("speechSynthesis" in window) {
         speechSynthesis.cancel();
       }
+      this.forceSpeechEnded();
     }
   }
 
@@ -421,6 +438,13 @@ export class TTSService {
       const delay = this.nextPreDelayMs;
       this.nextPreDelayMs = 0;
       await new Promise((r) => setTimeout(r, delay));
+    }
+
+    // Ce tour précis commence maintenant — pas au moment où speak() l'a mis
+    // en file, ni pendant le silence du réveil ci-dessus. C'est le signal
+    // sur lequel le lip-sync doit se caler (voir onUtteranceStart).
+    if (!this.muted) {
+      this.events.onUtteranceStart?.(text);
     }
 
     // Parse non-verbal tokens and handle the segmented path if any are
@@ -531,8 +555,12 @@ export class TTSService {
       };
 
       utterance.onend = () => {
+        // Si `stop()`/`setMuted(true)` a déjà remis `isSpeaking` à `false`
+        // (leur propre reset synchrone), cet événement arrive en retard sur
+        // un énoncé déjà considéré terminé : ne pas re-notifier `onSpeakEnd`.
+        const wasSpeaking = this.isSpeaking;
         this.isSpeaking = false;
-        if (!suppressEvents) {
+        if (!suppressEvents && wasSpeaking) {
           this.events.onSpeakEnd();
         }
         resolve();
@@ -543,8 +571,9 @@ export class TTSService {
         if (e.error !== "canceled") {
           console.warn("TTS error:", e.error);
         }
+        const wasSpeaking = this.isSpeaking;
         this.isSpeaking = false;
-        if (!suppressEvents) {
+        if (!suppressEvents && wasSpeaking) {
           this.events.onSpeakEnd();
         }
         resolve();
@@ -558,6 +587,20 @@ export class TTSService {
     this.speechQueue = [];
     this.interruptEpoch++;
     speechSynthesis.cancel();
+    this.forceSpeechEnded();
+  }
+
+  /**
+   * Réinitialisation synchrone de l'état "parle", partagée par `stop()` et
+   * `setMuted(true)` : après un `cancel()`, rien ne garantit que le
+   * navigateur déclenche `onend`/`onerror` sur l'énoncé annulé. La garde
+   * `if (this.isSpeaking)` fait aussi le travail inverse — si le navigateur
+   * déclenche quand même l'événement (avant ou après cet appel), l'un des
+   * deux trouve `isSpeaking` déjà à `false` et ne re-déclenche pas
+   * `onSpeakEnd` une seconde fois (voir `speakTextChunk`, qui ne notifie
+   * que si l'énoncé parlait encore juste avant).
+   */
+  private forceSpeechEnded() {
     if (this.isSpeaking) {
       this.isSpeaking = false;
       this.events.onSpeakEnd();

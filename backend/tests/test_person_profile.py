@@ -1054,3 +1054,79 @@ class TestFetchPersonContext:
         from pipeline.context import _fetch_person_context
         assert "deteste" in await _fetch_person_context(private)
         assert "deteste" not in await _fetch_person_context(public)
+
+
+# ---------------------------------------------------------------------------
+# Le repère « j'ai vu jusque-là » — le max GLOBAL de la personne, pas celui
+# du pool. L'auto-narratif avait déjà été corrigé exactement ainsi.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db(transaction=True)
+class TestRepereDeLaFiche:
+
+    @pytest.fixture(autouse=True)
+    def _clean(self):
+        from memory.models import Entity, PersonProfile, Souvenir
+        PersonProfile.objects.all().delete()
+        Souvenir.objects.all().delete()
+        Entity.objects.all().delete()
+        yield
+
+    async def _thomas_avec_du_vieux(self, combien):
+        from memory.models import Entity, PersonProfile, Souvenir
+
+        ent = await sync_to_async(Entity.objects.create)(
+            name="Thomas", entity_type="person")
+        now = timezone.now()
+        anciens = []
+        for i in range(combien):
+            s = await sync_to_async(Souvenir.objects.create)(
+                content=f"vieux souvenir important {i}", importance=1.0,
+                occurred_at=now - timedelta(days=30 + i),
+            )
+            await sync_to_async(s.entities.add)(ent)
+            anciens.append(s)
+        await sync_to_async(PersonProfile.objects.create)(
+            entity=ent, last_souvenir_id=max(s.pk for s in anciens),
+            generated_at=now - timedelta(days=2),
+        )
+        neuf = await sync_to_async(Souvenir.objects.create)(
+            content="Thomas vient de me confier qu'il déménage",
+            importance=0.3, occurred_at=now,
+        )
+        await sync_to_async(neuf.entities.add)(ent)
+        return ent, neuf
+
+    @pytest.mark.asyncio
+    async def test_le_neuf_entre_dans_le_pool_et_le_repere_avance(self):
+        """Quinze vieux souvenirs importants suffisaient à figer la fiche :
+        le pool (top-15 par importance) ne contenait que du vieux, le repère
+        était pris dessus, et la porte (≥ 3 nouveaux depuis le repère) se
+        rouvrait toutes les 24 h sur un prompt identique."""
+        from memory.person_profile import (
+            MAX_SOUVENIRS_PER_PROFILE, PersonProfileGenerator,
+        )
+
+        ent, neuf = await self._thomas_avec_du_vieux(MAX_SOUVENIRS_PER_PROFILE + 1)
+
+        pool, max_id = await PersonProfileGenerator.gather_for_entity(ent)
+
+        assert max_id == neuf.pk
+        assert pool.souvenirs[0]["content"].endswith("déménage")
+
+    @pytest.mark.asyncio
+    async def test_le_neuf_d_abord_puis_des_ancres_bornees(self):
+        """Ce qui a bougé pèse ; ce qui a compté reste, en nombre borné."""
+        from memory.person_profile import (
+            MAX_ANCHOR_SOUVENIRS_PER_PROFILE, MAX_SOUVENIRS_PER_PROFILE,
+            PersonProfileGenerator,
+        )
+
+        ent, neuf = await self._thomas_avec_du_vieux(MAX_SOUVENIRS_PER_PROFILE + 1)
+
+        pool, _ = await PersonProfileGenerator.gather_for_entity(ent)
+
+        assert len(pool.souvenirs) == 1 + MAX_ANCHOR_SOUVENIRS_PER_PROFILE
+        assert all(
+            s["content"].startswith("vieux") for s in pool.souvenirs[1:]
+        )

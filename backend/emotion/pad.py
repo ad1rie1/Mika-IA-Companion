@@ -144,6 +144,45 @@ def pad_to_label(position: Vec3) -> tuple[Emotion, float]:
     return best_emotion, intensity
 
 
+#: Plancher de normalisation du débordement : la plus courte des ancres de
+#: la famille négative (``bored``, 0,70) — celle que lisent la porte de
+#: débordement d'humeur (facteur 3 de ``conscience/scoring.py``) et le
+#: détecteur de détresse. Calculé, pas écrit : il suit la table.
+_OVERFLOW_ANCHOR_FLOOR = norm(EMOTION_ANCHORS[Emotion.BORED])
+
+
+def overflow_intensity(position: Vec3) -> float:
+    """Intensité rapportée à l'ancre la plus proche, pour les portes de la conscience.
+
+    ``pad_to_label`` rapporte la norme à la PLUS LONGUE des ancres (celle
+    d'``excited``, 1,245) : sur cette échelle, ``sad`` à son ancre pleine lit
+    0,73, ``frustrated`` 0,65, ``melancholic`` 0,62, ``bored`` 0,56 — sous la
+    porte de débordement (0,7) pour la plupart, et sous le plancher de
+    détresse (0,55) pour certaines. Toute la famille triste était donc
+    structurellement incapable de « déborder » ou de compter comme détresse,
+    quelle que soit sa force réelle.
+
+    Ici la norme est rapportée à l'ancre la plus proche : c'est l'inverse
+    exact de ``label_to_pad`` (une position posée sur ``sad × 0.8`` lit 0,8),
+    la même échelle que la balise déclare. Avec un garde-fou : le
+    dénominateur ne descend jamais sous la plus courte ancre négative.
+    ``thinking`` (0,245) ou ``nostalgic`` (0,30) sont des émotions courtes
+    par construction — sans le plancher, une humeur de norme 0,3 dans leur
+    cône aurait lu 1,0 et une heure de conversation banale « débordait ».
+
+    Fonction séparée plutôt qu'un changement de ``pad_to_label`` : l'échelle
+    de lecture est épinglée par toute la suite (fiche affect, trames, blend,
+    gestes), et la renormaliser déplaçait aussi des tests hors du périmètre
+    de l'émotion (mesuré : cinq, dont deux dans des fichiers d'invariants).
+    """
+    mag = norm(position)
+    if mag < 1e-6:
+        return 0.0
+    emotion, _ = pad_to_label(position)
+    reference = max(norm(EMOTION_ANCHORS[emotion]), _OVERFLOW_ANCHOR_FLOOR)
+    return min(1.0, mag / reference)
+
+
 def pad_to_blend(
     position: Vec3,
     top_k: int = 2,

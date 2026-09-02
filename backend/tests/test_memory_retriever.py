@@ -874,3 +874,201 @@ class TestEntetesVides:
         r = _make_retriever()
         out = self._appel(r, 460)
         assert len(out) <= 460 + len("\n--- FIN SOUVENIRS ---")
+
+
+# ===================================================================
+# Frontière intime — ce qui ne sort PAS sous le seuil de divulgation.
+#
+# Trois fuites, toutes vérifiées empiriquement : (1) le filtre gardait un
+# souvenir partagé avec un tiers dès que l'interlocuteur y figurait aussi ;
+# (2) ni les connaissances ni la voie épisodique n'avaient de porte ;
+# (3) une base en panne repliait sur ChromaDB brut, en contournant le filtre.
+# ===================================================================
+
+@pytest.mark.django_db(transaction=True)
+class TestFrontiereIntime:
+
+    @pytest.fixture(autouse=True)
+    def _clean(self):
+        from memory.models import Connaissance, Entity, Souvenir
+        Souvenir.objects.all().delete()
+        Connaissance.objects.all().delete()
+        Entity.objects.all().delete()
+        yield
+
+    async def _personne(self, nom):
+        from memory.models import Entity
+        return await Entity.objects.acreate(name=nom, entity_type="person")
+
+    async def _souvenir(self, content, *entites):
+        from django.utils import timezone
+
+        from memory.models import Souvenir
+        s = await Souvenir.objects.acreate(
+            content=content, importance=0.8, occurred_at=timezone.now())
+        for e in entites:
+            await _sync(s.entities.add, e)
+        return s
+
+    async def _triple(self):
+        thomas = await self._personne("Thomas")
+        alice = await self._personne("Alice")
+        personne = await self._souvenir("J'ai regardé la pluie tomber")
+        solo = await self._souvenir("Thomas m'a parlé de son chat", thomas)
+        partage = await self._souvenir(
+            "Alice m'a confié devant Thomas qu'elle a rechuté", thomas, alice)
+        return personne, solo, partage
+
+    async def _pks_retenus(self, boost_name):
+        from memory.models import Souvenir
+        r = _make_retriever()
+        qs = r.sans_confidences_d_autrui(Souvenir.objects.all(), boost_name)
+        return await _sync(lambda: set(qs.values_list("pk", flat=True)))
+
+    # ── (1) le filtre lui-même ───────────────────────────────────────
+
+    async def test_un_souvenir_partage_avec_un_tiers_est_retenu(self):
+        """{Thomas, Alice} n'est pas « à Thomas » : c'est aussi la confidence
+        d'Alice. L'ancienne forme le gardait dès que Thomas y figurait."""
+        personne, solo, partage = await self._triple()
+        assert await self._pks_retenus("Thomas") == {personne.pk, solo.pk}
+
+    async def test_un_handle_non_lie_ne_recoit_que_ce_qui_ne_concerne_personne(self):
+        personne, solo, partage = await self._triple()
+        assert await self._pks_retenus("") == {personne.pk}
+
+    async def test_le_nom_est_compare_sans_la_casse(self):
+        personne, solo, partage = await self._triple()
+        assert await self._pks_retenus("thomas") == {personne.pk, solo.pk}
+
+    async def test_une_entite_qui_n_est_pas_une_personne_ne_retient_rien(self):
+        from memory.models import Entity
+        lieu = await Entity.objects.acreate(name="Lyon", entity_type="place")
+        s = await self._souvenir("Une balade à Lyon", lieu)
+        assert await self._pks_retenus("") == {s.pk}
+
+    # ── (2) connaissances et voie épisodique derrière la porte ───────
+
+    @staticmethod
+    def _hit(pk, content):
+        return {"id": str(pk), "content": content, "distance": 0.1,
+                "metadata": {"confidence": 0.9}}
+
+    async def test_une_connaissance_sur_un_tiers_ne_sort_pas_sous_le_seuil(self):
+        """« (concerne: Alice) » sortait devant n'importe quel handle non lié
+        pendant que les souvenirs, eux, étaient déjà filtrés."""
+        from memory.models import Connaissance
+        alice = await self._personne("Alice")
+        intime = await Connaissance.objects.acreate(
+            content="Alice attend un enfant", confidence=0.9)
+        await _sync(intime.entities.add, alice)
+        neutre = await Connaissance.objects.acreate(
+            content="Le ciel est bleu", confidence=0.9)
+        hits = [self._hit(intime.pk, intime.content), self._hit(neutre.pk, neutre.content)]
+
+        r = _make_retriever()
+        ferme = await r._enrich_connaissances(
+            hits, boost_name="Thomas", disclose_others=False)
+        ouvert = await r._enrich_connaissances(hits)
+
+        assert [c["content"] for c in ferme] == ["Le ciel est bleu"]
+        assert {c["content"] for c in ouvert} == {"Alice attend un enfant", "Le ciel est bleu"}
+
+    async def test_la_voie_episodique_se_ferme_sous_le_seuil(self):
+        """Dans un groupe, « l'identité de l'interlocuteur » inclut ses DM :
+        le verbatim revenait mot pour mot devant l'audience."""
+        r = _make_retriever()
+        search = AsyncMock(return_value=[])
+        with patch("identity.resolver.identity_resolver.handles_for_person",
+                   AsyncMock(return_value=[
+                       {"person_id": "tg_42"}, {"person_id": "web_thomas"},
+                   ])), \
+             patch("memory.episodic.api.search_exchanges", search):
+            out = await r._episodic_lane("hier soir", "tg_42", disclose_others=False)
+        assert out == []
+        search.assert_not_called()
+
+    async def test_retrieve_multi_transmet_la_porte_aux_deux_voies(self):
+        """Le câblage : la voie épisodique, les échanges du plan et les
+        connaissances reçoivent tous la porte du tour."""
+        from memory.episodic.api import ExchangeHit
+        from memory.retrieval.retriever import MemoryRetriever
+
+        store = MagicMock()
+        store.search_souvenirs = MagicMock(return_value=[])
+        store.search_connaissances = MagicMock(return_value=[
+            {"id": "3", "content": "x", "distance": 0.1, "metadata": {}},
+        ])
+        r = MemoryRetriever(store)
+        lane = AsyncMock(return_value=[])
+        conn = AsyncMock(return_value=[])
+        du_plan = ExchangeHit("5", "Thomas: secret", "tg_42", 1, 5, 6, 0.0, 0.2)
+        vals = {
+            "memory.retrieval_souvenirs": 5,
+            "memory.retrieval_connaissances": 5,
+            "memory.min_importance": 0.3,
+            "memory.retrieval_fetch_multiplier": 3,
+            "memory.retrieval_exchanges": 3,
+        }
+        with patch("configs.service.config_service.get",
+                   lambda k, *a, **kw: vals.get(k, kw.get("default", 0))), \
+             patch.object(r, "_episodic_lane", lane), \
+             patch.object(r, "_enrich_connaissances", conn), \
+             patch.object(r, "_enrich_souvenirs", AsyncMock(return_value=[])), \
+             patch.object(r, "_person_boost_name", AsyncMock(return_value="")), \
+             patch.object(r, "_associative_expansion", AsyncMock(return_value=[])), \
+             patch.object(r, "_importance_intrusion", AsyncMock(return_value=[])):
+            bloc = await r.retrieve_multi(
+                ["q"], person_id="tg_42", extra_exchanges=[du_plan],
+                disclose_others=False,
+            )
+
+        assert lane.await_args.kwargs.get("disclose_others") is False
+        assert conn.await_args.kwargs.get("disclose_others") is False
+        assert "secret" not in bloc
+
+    # ── (3) une base en panne ferme, elle n'ouvre pas ────────────────
+
+    async def test_sous_le_seuil_une_base_en_panne_ne_sert_rien(self):
+        """Le repli ChromaDB est la page BRUTE, sans le filtre — qui ne vit
+        que dans la requête ORM qui vient d'échouer."""
+        r = _make_retriever()
+        r.vector_store.remove_souvenir = MagicMock()
+        hit = {"id": "4242", "content": "Alice a rechuté", "distance": 0.2,
+               "metadata": {"importance": 0.9}}
+        with patch.object(type(r), "_load_by_pk", AsyncMock(return_value=None)):
+            ferme = await r._enrich_souvenirs([hit], boost_name="", disclose_others=False)
+            ouvert = await r._enrich_souvenirs([hit])
+
+        assert ferme == []
+        # En divulgation ouverte, le repli garde sa raison d'être.
+        assert [s["id"] for s in ouvert] == [4242]
+
+    async def test_une_connaissance_non_verifiee_n_est_jamais_servie(self):
+        """`is_valid` et le filtre intime vivent dans la requête qui a
+        échoué : rien de vérifié, rien de servi."""
+        r = _make_retriever()
+        hit = {"id": "7", "content": "x", "distance": 0.2, "metadata": {"confidence": 0.9}}
+        with patch.object(type(r), "_load_by_pk", AsyncMock(return_value=None)):
+            assert await r._enrich_connaissances([hit]) == []
+
+    async def test_un_identifiant_illisible_ne_sort_pas_sous_le_seuil(self):
+        """On ne peut pas vérifier de qui parle une ligne sans pk — même règle
+        que l'outil ``memory_search``."""
+        r = _make_retriever()
+        r.vector_store.remove_souvenir = MagicMock()
+        hit = {"id": "pas-un-pk", "content": "x", "metadata": {}}
+        with patch.object(type(r), "_load_by_pk", AsyncMock(return_value={})):
+            assert await r._enrich_souvenirs([hit], disclose_others=False) == []
+            assert await r._enrich_connaissances([hit], disclose_others=False) == []
+
+    async def test_l_echec_de_chargement_est_compte(self):
+        from memory.retrieval.retriever import MemoryRetriever
+        from utils.degradation import degradations
+
+        degradations.reset()
+        qs = MagicMock()
+        qs.filter.side_effect = RuntimeError("database is locked")
+        assert await MemoryRetriever._load_by_pk(qs, [1]) is None
+        assert degradations.count_for("rappel: chargement ORM des lignes") == 1
+        degradations.reset()

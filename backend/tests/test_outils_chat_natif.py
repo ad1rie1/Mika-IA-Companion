@@ -334,7 +334,9 @@ class TestLaBoucleTourneEncore:
         assert appeles == [outil.name]
         assert outil.recu == [{"limite": 3}]
         assert _messages_envoyes(provider, 1)[-1] == {
-            "role": "tool", "name": outil.name, "content": '{"mails": 2}',
+            # ``tool_name`` : le champ du SDK ollama — ``name`` était
+            # silencieusement jeté par pydantic, résultat anonyme pour le modèle.
+            "role": "tool", "tool_name": outil.name, "content": '{"mails": 2}',
         }
 
     @pytest.mark.parametrize(
@@ -426,7 +428,20 @@ class TestPlusDAplatissement:
                 for noeud in ast.walk(fonction)
             )
         }
-        assert corps == {"run_openai_tool_loop"}
+        # Le seul corps qui appelle l'API est ``create_chat_completion``, le
+        # point de passage qui rejoue une requête refusée pour ``max_tokens``
+        # ou ``temperature`` ; la boucle passe par lui, elle ne recopie pas
+        # l'appel.
+        assert corps == {"create_chat_completion"}
+        boucle = next(
+            f for f in ast.walk(source)
+            if isinstance(f, ast.AsyncFunctionDef) and f.name == "run_openai_tool_loop"
+        )
+        appelle = {
+            ast.unparse(n.func).rsplit(".", 1)[-1]
+            for n in ast.walk(boucle) if isinstance(n, ast.Call)
+        }
+        assert "create_chat_completion" in appelle
         assert hasattr(_openai_tools, "run_openai_tool_loop_from_pair")
 
 

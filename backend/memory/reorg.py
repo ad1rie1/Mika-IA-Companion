@@ -318,6 +318,10 @@ class NightlyReorg:
                         await vector_call(store.remove_souvenir)(loser_pk)
                     except Exception as exc:
                         degradations.record("reorg: retrait chroma", exc)
+                    # Le gagnant a changé d'importance (max + 0.05) : la
+                    # métadonnée ChromaDB — le filtre du rappel — doit suivre.
+                    keeper_pk = other_pk if loser_pk == row["id"] else row["id"]
+                    await memory_manager.reindex_souvenirs([keeper_pk])
                 break
         return merges
 

@@ -243,7 +243,22 @@ class FrozenModule:
             raise AttributeError(
                 f"attribut privé inaccessible: {self._forge_name}.{name}"
             )
-        return getattr(object.__getattribute__(self, "_forge_mod"), name)
+        value = getattr(object.__getattribute__(self, "_forge_mod"), name)
+        # Un module sûr expose souvent, sous un nom banal, les modules qu'il
+        # importe : ``uuid.os``, ``json.codecs``, ``re.enum``, ``statistics.sys``.
+        # Le validateur ne voit qu'une chaîne d'attributs sans tiret bas, et
+        # ce proxy rendait l'objet brut — d'où ``uuid.os.system(...)``, une
+        # exécution de commande depuis un module forgé (vérifié). Un attribut
+        # dont la valeur est un module ne sort donc jamais d'ici, sauf s'il
+        # est lui-même un module sûr, auquel cas c'est son proxy qui sort.
+        if isinstance(value, types.ModuleType):
+            for public_name, safe in SAFE_MODULES.items():
+                if value is safe:
+                    return FrozenModule(safe, public_name)
+            raise AttributeError(
+                f"module inaccessible depuis la forge: {self._forge_name}.{name}"
+            )
+        return value
 
     def __setattr__(self, name, value):
         raise AttributeError(

@@ -131,6 +131,14 @@ async function init() {
     onProsodicCue: (cue) => {
       animationSystem.playCue(cue);
     },
+    // Le plan de lip-sync doit suivre l'énoncé qui commence réellement à
+    // jouer, pas celui qu'on vient de mettre en file (voir handleSpeech
+    // ci-dessous) : deux répliques rapprochées faisaient sinon articuler la
+    // bouche sur le texte suivant pendant que l'audio du précédent tournait
+    // encore.
+    onUtteranceStart: (text) => {
+      lipSyncController.startFromPlan(tts.lipSyncPlan(text));
+    },
   });
 
   // Auth: the WebSocket authenticates via the Django session cookie.
@@ -287,11 +295,10 @@ async function init() {
     if (data.speak === false || typeof data.text !== "string" || !data.text) {
       return;
     }
-    // La bouche suit ce que le TTS va réellement jouer, pas la chaîne brute :
-    // les tokens de prosodie ne sont pas prononcés, ils réservent du silence.
-    // Aucun plafond de durée non plus — la borne réelle est la fin de
-    // l'utterance, signalée par onSpeakEnd qui appelle stop().
-    lipSyncController.startFromPlan(tts.lipSyncPlan(data.text));
+    // Le plan de lip-sync part de `onUtteranceStart` (ci-dessus), déclenché
+    // par TTSService quand CE texte précis commence effectivement à jouer —
+    // pas ici, à la simple mise en file, où une réplique encore audible se
+    // serait fait voler la bouche par celle-ci.
     tts.speak(data.text, emotion, data.voice_profile);
   };
 

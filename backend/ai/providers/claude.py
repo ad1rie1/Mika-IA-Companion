@@ -37,6 +37,21 @@ _NO_SAMPLING_PREFIXES = (
 
 _CACHE_MARK = {"type": "ephemeral"}
 
+# Plafond du second essai quand une réponse est tronquée en plein appel
+# d'outil (``stop_reason == "max_tokens"`` avec un bloc ``tool_use``).
+# Doubler sans borne finirait au-delà de ce que le SDK accepte hors
+# streaming — son garde-fou de délai se déclenche vers 21 000 jetons de
+# sortie.
+_TOOL_CALL_CAP_CEILING = 16384
+# Ce que le texte rendu porte quand même le second essai n'a pas suffi :
+# l'appel n'a pas eu lieu, et le dire vaut mieux qu'une réponse qui s'arrête
+# net comme si le modèle avait fini.
+_TRUNCATED_TOOL_CALL_MARKER = "[réponse tronquée avant l'appel d'outil]"
+
+
+def _new_totals() -> dict:
+    return {"in": 0, "out": 0, "cache_read": 0, "cache_write": 0}
+
 
 def _model_accepts_temperature(model: str) -> bool:
     return not model.startswith(_NO_SAMPLING_PREFIXES)
@@ -112,16 +127,9 @@ class ClaudeProvider:
 
         # Surface native token usage to the quota tracker. No-op when this
         # call wasn't routed through AIRouter (e.g. ad-hoc provider use).
-        try:
-            from ai.quota import set_usage
-            usage = getattr(response, "usage", None)
-            if usage is not None:
-                set_usage(
-                    input_tokens=int(getattr(usage, "input_tokens", 0) or 0),
-                    output_tokens=int(getattr(usage, "output_tokens", 0) or 0),
-                )
-        except Exception:
-            pass
+        totals = _new_totals()
+        self._accumulate_usage(getattr(response, "usage", None), totals)
+        self._flush_usage(totals)
 
         parts = []
         for block in response.content:
@@ -148,7 +156,7 @@ class ClaudeProvider:
             messages=messages,
             temperature=temperature,
         )
-        totals = {"in": 0, "out": 0}
+        totals = _new_totals()
         self._accumulate_usage(getattr(response, "usage", None), totals)
         self._flush_usage(totals)
         return "".join(b.text for b in response.content if b.type == "text")
@@ -212,25 +220,58 @@ class ClaudeProvider:
         ]
         handlers = {t.name: t.handler for t in tools}
 
-        totals = {"in": 0, "out": 0}
+        totals = _new_totals()
         texts: list[str] = []
         calls: list[str] = []
         # Only the *newest* tool_result carries a cache breakpoint: markers
         # accumulate across iterations otherwise, and the API caps them at 4
         # per request.
         marked_result: dict | None = None
+        cap = max_tokens
+        cap_raised = False
 
         try:
             for _ in range(max_turns):
                 response = await self._create_message(
                     model=model,
-                    max_tokens=max_tokens,
+                    max_tokens=cap,
                     system=system,
                     messages=messages,
                     tools=tool_defs,
                     temperature=temperature,
                 )
                 self._accumulate_usage(getattr(response, "usage", None), totals)
+                tool_uses = [b for b in response.content if b.type == "tool_use"]
+
+                if (
+                    response.stop_reason == "max_tokens"
+                    and tool_uses
+                    and not cap_raised
+                    and cap < _TOOL_CALL_CAP_CEILING
+                ):
+                    # Tronquée en plein appel d'outil : le bloc ``tool_use``
+                    # est là, mais la sortie s'est arrêtée avant sa fin. La
+                    # boucle sortait comme si le modèle avait fini — l'appel
+                    # disparaissait sans un mot. Cette itération est rejouée
+                    # une fois avec un plafond doublé (borné) ; le texte de
+                    # l'essai tronqué n'est pas gardé, celui-ci le remplace.
+                    cap_raised = True
+                    cap = min(cap * 2, _TOOL_CALL_CAP_CEILING)
+                    logger.warning(
+                        "Claude: réponse tronquée (max_tokens) en plein appel "
+                        "d'outil sur %s — nouvel essai avec max_tokens=%d",
+                        model, cap,
+                    )
+                    response = await self._create_message(
+                        model=model,
+                        max_tokens=cap,
+                        system=system,
+                        messages=messages,
+                        tools=tool_defs,
+                        temperature=temperature,
+                    )
+                    self._accumulate_usage(getattr(response, "usage", None), totals)
+                    tool_uses = [b for b in response.content if b.type == "tool_use"]
 
                 turn_text = "".join(
                     b.text for b in response.content if b.type == "text"
@@ -238,7 +279,23 @@ class ClaudeProvider:
                 if turn_text:
                     texts.append(turn_text)
 
-                tool_uses = [b for b in response.content if b.type == "tool_use"]
+                if response.stop_reason == "refusal":
+                    # Un refus n'est pas une fin de tour ordinaire : il
+                    # porte une catégorie, et c'est elle qu'on veut lire
+                    # dans le journal quand une réponse manque.
+                    logger.warning(
+                        "Claude a refusé de poursuivre (stop_reason=refusal, "
+                        "stop_details=%s)",
+                        getattr(response, "stop_details", None),
+                    )
+                    break
+                if response.stop_reason == "max_tokens" and tool_uses:
+                    logger.warning(
+                        "Claude: appel d'outil encore tronqué à max_tokens=%d "
+                        "sur %s — l'appel n'a pas eu lieu", cap, model,
+                    )
+                    texts.append(_TRUNCATED_TOOL_CALL_MARKER)
+                    break
                 if response.stop_reason != "tool_use" or not tool_uses:
                     break
 
@@ -386,26 +443,35 @@ class ClaudeProvider:
     def _accumulate_usage(usage, totals: dict) -> None:
         """Add one response's usage to the running totals.
 
-        Cache tokens count as input: they are consumed tokens, and on the
-        tooled path they carry the bulk of the prompt (system + tools,
-        reused iteration after iteration).
+        Les jetons de cache sont comptés **à part** : ce sont des jetons
+        consommés — ils comptent dans le quota, et sur le chemin outillé ils
+        portent l'essentiel du prompt (système + outils, relus itération
+        après itération) — mais fondus dans ``in`` ils se facturaient au
+        tarif d'entrée plein, dix fois le prix réel d'une lecture de cache.
         """
         if usage is None:
             return
-        totals["in"] += (
-            int(getattr(usage, "input_tokens", 0) or 0)
-            + int(getattr(usage, "cache_creation_input_tokens", 0) or 0)
-            + int(getattr(usage, "cache_read_input_tokens", 0) or 0)
-        )
+        totals["in"] += int(getattr(usage, "input_tokens", 0) or 0)
         totals["out"] += int(getattr(usage, "output_tokens", 0) or 0)
+        totals["cache_read"] += int(
+            getattr(usage, "cache_read_input_tokens", 0) or 0
+        )
+        totals["cache_write"] += int(
+            getattr(usage, "cache_creation_input_tokens", 0) or 0
+        )
 
     @staticmethod
     def _flush_usage(totals: dict) -> None:
         """Surface the accumulated usage to the quota tracker (best-effort)."""
         try:
             from ai.quota import set_usage
-            if totals["in"] or totals["out"]:
-                set_usage(input_tokens=totals["in"], output_tokens=totals["out"])
+            if any(totals.values()):
+                set_usage(
+                    input_tokens=totals["in"],
+                    output_tokens=totals["out"],
+                    cache_read_tokens=totals["cache_read"],
+                    cache_write_tokens=totals["cache_write"],
+                )
         except Exception:
             pass
 

@@ -245,7 +245,7 @@ def _part_from_attachment(att) -> Part:
             kind=kind,
             content=getattr(att, "data", ""),
             mime_type=getattr(att, "media_type", None),
-            metadata={"name": getattr(att, "name", "")},
+            metadata={"name": _safe_name(getattr(att, "name", ""))},
         )
 
     # Dict path — supports both the raw WebSocket shape and the
@@ -265,7 +265,25 @@ def _part_from_attachment(att) -> Part:
         k: v for k, v in att.items()
         if k not in ("content", "content_b64", "data", "mime_type", "type", "kind")
     }
+    if "name" in metadata:
+        metadata["name"] = _safe_name(metadata["name"])
     return Part(kind=kind, content=content, mime_type=mime_type, metadata=metadata)
+
+
+def _safe_name(raw) -> str:
+    """Le nom d'une pièce jointe, ramené à une ligne bornée avant tout usage.
+
+    Le nom vient de l'émetteur (payload WebSocket, ``file_name`` Telegram), et
+    c'est depuis ``Part.metadata`` que les préprocesseurs l'interpolent dans
+    le tour utilisateur et que ``attachments_meta`` le persiste : ni l'un ni
+    l'autre ne le mesurait. Un nom vide reste vide — c'est aux lecteurs de
+    choisir leur libellé (« fichier », « image »).
+    """
+    if raw is None or raw == "":
+        return ""
+    from pipeline.media import sanitize_filename
+
+    return sanitize_filename(raw)
 
 
 def _dominant_modality(parts: list[Part]) -> Modality:
