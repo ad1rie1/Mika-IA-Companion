@@ -8,6 +8,7 @@ import type {
   SleepPhase,
 } from "../../types";
 import { retargetMixamoClip, type RetargetReport } from "./mixamoRetarget";
+import { forwardSign } from "../vrmVersion";
 
 export const REST_CLIP_NAME = "__rest__";
 
@@ -239,13 +240,17 @@ export class ClipLibrary {
   }
 }
 
-// ~66° down from horizontal: relaxed A-pose, arms along the body — the
-// same values the old VTuberModel.applyRestPose wrote.
+// ~66° down from horizontal: relaxed A-pose, arms along the body.
+// Authored in the VRM 1.0 convention (the left arm runs along +X, so a
+// NEGATIVE Z rotation drops it) and conjugated by `forwardSign` for a
+// 0.x rig — where the historical hand-tuned values (+1.15 / −1.15, the
+// ones the old VTuberModel.applyRestPose wrote) come out unchanged. On a
+// VRM 1.0 the unconjugated values raised both arms into a V.
 const REST_ARM_POSE = [
-  ["leftUpperArm", 1.15],
-  ["rightUpperArm", -1.15],
-  ["leftLowerArm", 0.1],
-  ["rightLowerArm", -0.1],
+  ["leftUpperArm", -1.15],
+  ["rightUpperArm", 1.15],
+  ["leftLowerArm", -0.1],
+  ["rightLowerArm", 0.1],
 ] as const;
 
 const _restEuler = new THREE.Euler();
@@ -262,10 +267,11 @@ const _restQuat = new THREE.Quaternion();
  * arms-down stance instead of the T-pose.
  */
 export function applyRestPose(vrm: VRM): void {
+  const sign = forwardSign(vrm);
   for (const [bone, z] of REST_ARM_POSE) {
     const node = vrm.humanoid?.getNormalizedBoneNode(bone);
     if (!node) continue;
-    node.quaternion.setFromEuler(_restEuler.set(0, 0, z));
+    node.quaternion.setFromEuler(_restEuler.set(0, 0, sign * z));
   }
 }
 
@@ -274,11 +280,12 @@ export function applyRestPose(vrm: VRM): void {
  * crossfade with, not a special code path. */
 export function buildRestClip(vrm: VRM): THREE.AnimationClip {
   const tracks: THREE.KeyframeTrack[] = [];
+  const sign = forwardSign(vrm);
 
   for (const [bone, z] of REST_ARM_POSE) {
     const node = vrm.humanoid?.getNormalizedBoneNode(bone);
     if (!node) continue;
-    _restQuat.setFromEuler(_restEuler.set(0, 0, z));
+    _restQuat.setFromEuler(_restEuler.set(0, 0, sign * z));
     tracks.push(
       new THREE.QuaternionKeyframeTrack(
         `${node.name}.quaternion`,

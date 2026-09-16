@@ -615,8 +615,17 @@ class TestFrontiereIntime:
                 narrative="Thomas m'a raconte que sa mere etait hospitalisee.",
                 persons_interacted=["Thomas"], dominant_emotion="sad"))
 
-        ouvert = await _fetch_journal_context(may_disclose=True)
-        ferme = await _fetch_journal_context(may_disclose=False)
+        # ``transaction=True`` ne rembobine rien : sans ce nettoyage le
+        # journal d'hier survit au test et ``/api/dev/sleep/status`` (qui
+        # sert le plus récent de {aujourd'hui, hier}) le trouve dans une
+        # base censée être vide — un échec qui ne se voit qu'après ce fichier.
+        try:
+            ouvert = await _fetch_journal_context(may_disclose=True)
+            ferme = await _fetch_journal_context(may_disclose=False)
+        finally:
+            await sync_to_async(
+                lambda: DailyJournal.objects.filter(date=hier).delete()
+            )()
 
         assert "Thomas" in ouvert
         assert "Thomas" not in ferme

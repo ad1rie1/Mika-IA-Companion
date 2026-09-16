@@ -1,51 +1,22 @@
-"""Réorganisation nocturne — clustering, extraction par thème, dédoublonnage."""
+"""Réorganisation nocturne — dédoublonnage des souvenirs, et rien d'autre.
+
+Le clustering et l'extraction par thème ont quitté ce module pour le
+consolidateur (voir test_extraction_par_theme.py) : la nuit extrayait
+au-dessus du checkpoint sans le faire avancer, et le tick suivant
+réextrayait la même fenêtre. Les tests ci-dessous pinent ce qui reste — la
+fusion — et le fait que la nuit ne convoque plus l'extracteur.
+"""
 
 from __future__ import annotations
 
+import ast
 from datetime import date
-from unittest.mock import AsyncMock, patch
+from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
-from memory.reorg import NightlyReorg, _cluster_greedy
-
-
-def _chunk(cid, embedding, ts=0.0, content="Lui: x\nMika: y", handle="web_a",
-           first=1, last=2):
-    return {
-        "id": cid,
-        "content": content,
-        "embedding": embedding,
-        "metadata": {
-            "ts": ts, "handle": handle, "conversation_id": 1,
-            "first_message_id": first, "last_message_id": last,
-        },
-    }
-
-
-class TestClustering:
-
-    def test_similar_chunks_join_the_same_cluster(self):
-        clusters = _cluster_greedy([
-            _chunk("1", [1.0, 0.0, 0.0], ts=1),
-            _chunk("2", [0.99, 0.05, 0.0], ts=2),
-            _chunk("3", [0.0, 1.0, 0.0], ts=3),
-        ], threshold=0.8)
-        sizes = sorted(len(c) for c in clusters)
-        assert sizes == [1, 2]
-
-    def test_deterministic_by_ts_order(self):
-        chunks = [
-            _chunk("b", [0.0, 1.0], ts=2),
-            _chunk("a", [1.0, 0.0], ts=1),
-        ]
-        clusters = _cluster_greedy(chunks, threshold=0.8)
-        # Premier cluster = premier chunk chronologique.
-        assert clusters[0][0]["id"] == "a"
-
-    def test_chunks_without_embedding_are_skipped(self):
-        clusters = _cluster_greedy([_chunk("1", None)], threshold=0.5)
-        assert clusters == []
+from memory.reorg import NightlyReorg
 
 
 @pytest.mark.django_db(transaction=True)
@@ -157,172 +128,75 @@ class TestDedup:
 
 
 @pytest.mark.django_db(transaction=True)
-class TestExtractByTheme:
+class TestLaNuitNExtraitPlus:
+    """La nuit ne relit plus le verbatim : ni extracteur, ni consolidateur."""
 
     @pytest.fixture(autouse=True)
     def _clean(self):
-        from memory.models import (
-            ConsolidationLog, Conversation, Message, Souvenir,
-        )
-        Message.objects.all().delete()
-        ConsolidationLog.objects.all().delete()
+        from memory.models import Souvenir
         Souvenir.objects.all().delete()
-        Conversation.objects.all().delete()
         yield
 
-    async def test_each_cluster_gets_its_own_extraction_call(self, monkeypatch):
-        # Aucun ConsolidationLog ici : c'est le cas BACKLOG, celui que la nuit
-        # doit encore rattraper (le fil de l'eau n'a rien extrait).
-        import memory.manager as manager_mod
-        from memory.models import Conversation, Message
+    async def test_run_ne_convoque_ni_l_extracteur_ni_le_consolidateur(self, monkeypatch):
+        from django.utils import timezone
 
-        conv = await Conversation.objects.acreate()
-        m1 = await Message.objects.acreate(
-            conversation=conv, role="user", content="parlons du projet fusée",
-            person_id="web_a")
-        m2 = await Message.objects.acreate(
-            conversation=conv, role="assistant", content="oui ! où en es-tu ?",
-            person_id="web_a")
-
-        class FakeStore:
-            def get_exchanges_between(self, since, until, include_embeddings=False):
-                return [
-                    _chunk("10", [1.0, 0.0], ts=since + 60, content="x" * 300,
-                           first=m1.pk, last=m2.pk),
-                    _chunk("20", [0.0, 1.0], ts=since + 120, content="y" * 300,
-                           first=m1.pk, last=m2.pk),
-                ]
-
-        fake_extractor = type("X", (), {})()
-        fake_extractor.analyze_messages = AsyncMock(return_value=[])
-        fake_consolidator = type("C", (), {})()
-        fake_consolidator.store_extractions = AsyncMock(
-            return_value={"souvenirs": 1, "connaissances": 0, "commitments": 0})
-
-        monkeypatch.setattr(manager_mod.memory_manager, "vector_store", FakeStore())
-        monkeypatch.setattr(manager_mod.memory_manager, "extractor", fake_extractor)
-        monkeypatch.setattr(manager_mod.memory_manager, "consolidator", fake_consolidator)
-
-        reorg = NightlyReorg()
-        stats = await reorg._extract_by_theme(date.today())
-        # Deux clusters orthogonaux → deux appels d'extraction distincts.
-        assert stats["clusters"] == 2
-        assert fake_extractor.analyze_messages.call_count == 2
-        assert stats["extracted"] == 2
-
-    async def _monter_la_nuit(self, monkeypatch, *, checkpoint, created_at=None):
-        """Deux messages, un cluster qui les couvre, un checkpoint donné."""
-        import memory.manager as manager_mod
-        from memory.models import ConsolidationLog, Conversation, Message
-
-        conv = await Conversation.objects.acreate()
-        m1 = await Message.objects.acreate(
-            conversation=conv, role="user", content="parlons du projet fusée",
-            person_id="web_a")
-        m2 = await Message.objects.acreate(
-            conversation=conv, role="assistant", content="oui ! où en es-tu ?",
-            person_id="web_a")
-        if created_at is not None:
-            await Message.objects.filter(pk__in=[m1.pk, m2.pk]).aupdate(
-                created_at=created_at)
-        await ConsolidationLog.objects.acreate(
-            messages_processed=2,
-            last_message_id=checkpoint if checkpoint is not None else m2.pk,
-        )
-
-        class FakeStore:
-            def get_exchanges_between(self, since, until, include_embeddings=False):
-                return [
-                    _chunk("10", [1.0, 0.0], ts=since + 60, content="x" * 300,
-                           first=m1.pk, last=m2.pk),
-                ]
-
-        monkeypatch.setattr(manager_mod.memory_manager, "vector_store", FakeStore())
-        return m1, m2
-
-    async def test_la_nuit_ne_reextrait_pas_ce_que_le_jour_a_deja_extrait(self, monkeypatch):
-        """Sinon chaque journée est extraite deux fois, et la copie nocturne
-        — mieux datée que l'originale — la surclasse au rappel."""
         import memory.manager as manager_mod
         from memory.models import Souvenir
 
-        _, m2 = await self._monter_la_nuit(monkeypatch, checkpoint=None)
+        # Un souvenir du jour, pour que la passe ait bien quelque chose à
+        # parcourir — un run à vide prouverait moins.
+        await Souvenir.objects.acreate(
+            content="on a parlé du projet fusée", importance=0.5,
+            occurred_at=timezone.now(),
+        )
+
+        class FakeStore:
+            def search_souvenirs(self, content, n=3, min_importance=0.0):
+                return []
 
         fake_extractor = type("X", (), {})()
         fake_extractor.analyze_messages = AsyncMock(return_value=[])
         fake_consolidator = type("C", (), {})()
         fake_consolidator.store_extractions = AsyncMock(return_value={})
+        monkeypatch.setattr(manager_mod.memory_manager, "vector_store", FakeStore())
         monkeypatch.setattr(manager_mod.memory_manager, "extractor", fake_extractor)
         monkeypatch.setattr(manager_mod.memory_manager, "consolidator", fake_consolidator)
 
-        stats = await NightlyReorg()._extract_by_theme(date.today())
+        stats = await NightlyReorg().run(date.today())
 
-        assert fake_extractor.analyze_messages.call_count == 0
-        assert stats["extracted"] == 0
-        assert not await Souvenir.objects.aexists()
+        fake_extractor.analyze_messages.assert_not_awaited()
+        fake_consolidator.store_extractions.assert_not_awaited()
+        assert stats == {"merges": 0}
 
-    async def test_la_nuit_rattrape_ce_que_le_jour_n_a_pas_pu_extraire(self, monkeypatch):
-        """Le chemin par thème reste vivant : c'est exactement ce que laisse
-        derrière lui un provider mort tout l'après-midi."""
-        import memory.manager as manager_mod
+    async def test_run_rend_le_nombre_de_fusions_meme_quand_la_dedup_casse(self):
+        """Le cycle de sommeil journalise ce que ``run`` rend : la clé doit
+        être là même quand la passe a dégradé."""
+        reorg = NightlyReorg()
+        reorg._dedup_souvenirs = AsyncMock(side_effect=RuntimeError("chroma down"))
 
-        m1, _ = await self._monter_la_nuit(monkeypatch, checkpoint=0)
+        stats = await reorg.run(date.today())
 
-        fake_extractor = type("X", (), {})()
-        fake_extractor.analyze_messages = AsyncMock(return_value=[])
-        fake_consolidator = type("C", (), {})()
-        fake_consolidator.store_extractions = AsyncMock(
-            return_value={"souvenirs": 1})
-        monkeypatch.setattr(manager_mod.memory_manager, "extractor", fake_extractor)
-        monkeypatch.setattr(manager_mod.memory_manager, "consolidator", fake_consolidator)
+        assert stats == {"merges": 0}
 
-        stats = await NightlyReorg()._extract_by_theme(date.today())
-
-        assert fake_extractor.analyze_messages.call_count == 1
-        assert stats["extracted"] == 1
-
-    async def test_un_souvenir_de_la_reorg_est_date_de_la_nuit_couverte(self, monkeypatch):
-        from datetime import timedelta
-        from unittest.mock import MagicMock
-
-        from django.utils import timezone
-
-        import memory.manager as manager_mod
-        from memory.models import Souvenir
-        from memory.storage.consolidator import MemoryConsolidator
-
-        hier_20h = timezone.now() - timedelta(days=1)
-        await self._monter_la_nuit(monkeypatch, checkpoint=0, created_at=hier_20h)
-
-        fake_extractor = type("X", (), {})()
-        fake_extractor.analyze_messages = AsyncMock(return_value=[
-            {"type": "souvenir", "store": True,
-             "content": "On a parlé du projet fusée", "emotion": "excited"},
-        ])
-        vrai_consolidateur = MemoryConsolidator.__new__(MemoryConsolidator)
-        vrai_consolidateur.vector_store = MagicMock()
-        monkeypatch.setattr(manager_mod.memory_manager, "extractor", fake_extractor)
-        monkeypatch.setattr(manager_mod.memory_manager, "consolidator", vrai_consolidateur)
-
-        await NightlyReorg()._extract_by_theme(date.today())
-
-        s = await Souvenir.objects.aget()
-        assert abs((s.occurred_at - hier_20h).total_seconds()) < 1
-
-
-class TestBatchSplit:
-
-    def test_backlog_is_split_on_message_boundaries(self):
-        from memory.storage.consolidator import _split_batches
-
-        messages = [{"content": "x" * 3000} for _ in range(5)]
-        batches = _split_batches(messages, 8000)
-        assert [len(b) for b in batches] == [2, 2, 1]
-
-    def test_one_giant_message_travels_alone(self):
-        from memory.storage.consolidator import _split_batches
-
-        batches = _split_batches(
-            [{"content": "a"}, {"content": "x" * 20000}, {"content": "b"}], 8000,
-        )
-        assert [len(b) for b in batches] == [1, 1, 1]
+    def test_le_module_ne_reference_plus_l_extraction(self):
+        """Garde AST, jamais une recherche de texte : les commentaires de ce
+        dépôt nomment précisément ce qu'il ne faut plus faire."""
+        source = (Path(__file__).resolve().parent.parent / "memory" / "reorg.py") \
+            .read_text(encoding="utf-8")
+        arbre = ast.parse(source)
+        interdits = {
+            "analyze_messages", "store_extractions", "cluster_greedy",
+            "_cluster_greedy", "get_exchanges_between", "get_exchanges_for_messages",
+        }
+        noms = set()
+        for noeud in ast.walk(arbre):
+            if isinstance(noeud, ast.Attribute):
+                noms.add(noeud.attr)
+            elif isinstance(noeud, ast.Name):
+                noms.add(noeud.id)
+            elif isinstance(noeud, ast.ImportFrom):
+                assert (noeud.module or "") != "memory.themes", (
+                    "la réorg ne regroupe plus : memory.themes appartient "
+                    "au consolidateur"
+                )
+        assert not (noms & interdits), f"la nuit extrait encore : {noms & interdits}"

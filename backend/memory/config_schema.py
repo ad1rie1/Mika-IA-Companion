@@ -37,6 +37,16 @@ CONFIG_SCHEMA = [
                     "souvenirs, connaissances et engagements.",
     ),
     ConfigGroup(
+        section="memory", key="Extraction par thème", order=35, advanced=True,
+        description="Quand une passe de consolidation dépasse une tranche "
+                    "(reprise après panne, grosse journée), la fenêtre est "
+                    "découpée par thème — sur les embeddings déjà stockés de "
+                    "l'index épisodique — plutôt qu'en tranches linéaires : "
+                    "« trois conversations aujourd'hui : le projet, la "
+                    "dispute, les vacances ». Un tick ordinaire de 60 s "
+                    "n'est pas concerné et ne lit pas l'index.",
+    ),
+    ConfigGroup(
         section="memory", key="Récupération", order=40,
         description="Combien de souvenirs et de connaissances remontent dans "
                     "le prompt à chaque tour. Ce sont des planchers : si le "
@@ -95,8 +105,10 @@ CONFIG_SCHEMA = [
     ),
     ConfigGroup(
         section="memory", key="Réorganisation nocturne", order=140, advanced=True,
-        description="Regroupement thématique des échanges de la journée et "
-                    "fusion des souvenirs en double.",
+        description="Fusion, en fin de nuit, des souvenirs que la journée a "
+                    "écrits en double. Le regroupement par thème, lui, vit "
+                    "dans « Extraction par thème » : la nuit ne relit plus "
+                    "le verbatim.",
     ),
     ConfigGroup(
         section="memory", key="Profils", order=150, advanced=True,
@@ -284,9 +296,11 @@ CONFIG_SCHEMA = [
     ),
     ConfigItem(
         key="memory.reorg_cluster_similarity", type="float", section="memory",
-        group="Réorganisation nocturne", label="Seuil de similarité des clusters",
+        group="Extraction par thème", label="Seuil de similarité des thèmes",
         default=0.55, min=0.3, max=0.9, hot_reload=True,
-        hint="Cosinus minimal pour qu'un chunk rejoigne un thème existant.",
+        hint="Cosinus minimal pour qu'un échange rejoigne un thème existant. "
+             "Plus bas = moins de thèmes, plus gros ; plus haut = un appel "
+             "d'extraction par nuance.",
     ),
     ConfigItem(
         key="memory.reorg_dedup_distance", type="float", section="memory",
@@ -455,26 +469,29 @@ CONFIG_SCHEMA = [
              "doit pas la retenir.",
     ),
 
-    # ── Réorganisation nocturne (suite) ──────────────────────────
+    # ── Extraction par thème (suite) ─────────────────────────────
+    # Les clés gardent leur préfixe « reorg_ » : elles sont nées dans la
+    # réorganisation nocturne, et les renommer perdrait la valeur réglée de
+    # chaque installation. Le volume max d'un thème n'a plus de clé propre :
+    # c'est la tranche d'extraction (memory.extraction_max_chars) qui borne.
     ConfigItem(
         key="memory.reorg_max_clusters", type="int", section="memory",
-        group="Réorganisation nocturne", label="Thèmes max pour une nuit",
+        group="Extraction par thème", label="Thèmes max par fenêtre",
         default=20, min=1, max=200, hot_reload=True,
-        hint="Au-delà, un chunk rejoint le cluster le plus proche même sous le "
+        hint="Au-delà, un échange rejoint le thème le plus proche même sous le "
              "seuil de similarité — un thème de plus est un appel LLM de plus.",
     ),
     ConfigItem(
-        key="memory.reorg_max_cluster_chars", type="int", section="memory",
-        group="Réorganisation nocturne", label="Verbatim max par thème (car.)",
-        default=6000, min=500, max=50000, hot_reload=True,
-    ),
-    ConfigItem(
         key="memory.reorg_min_cluster_chars", type="int", section="memory",
-        group="Réorganisation nocturne",
-        label="Verbatim min pour qu'un thème compte (car.)",
+        group="Extraction par thème",
+        label="Verbatim min pour qu'un thème parte seul (car.)",
         default=200, min=0, max=5000, hot_reload=True,
-        hint="Un cluster d'un seul chunk minuscule est du bruit, pas un thème.",
+        hint="Un thème plus petit n'est pas perdu : il rejoint la tranche "
+             "résiduelle, extraite en ordre linéaire avec ce que l'index "
+             "épisodique n'a pas encore découpé.",
     ),
+
+    # ── Réorganisation nocturne (suite) ──────────────────────────
     ConfigItem(
         key="memory.reorg_max_merges_per_night", type="int", section="memory",
         group="Réorganisation nocturne", label="Fusions de souvenirs max par nuit",
@@ -611,8 +628,9 @@ CONFIG_SCHEMA = [
         key="memory.extraction_max_chars", type="int", section="memory",
         group="Consolidation", label="Volume max d'une tranche d'extraction (car.)",
         default=8000, min=500, max=100000, hot_reload=True,
-        hint="Au-delà, le backlog est découpé sur les frontières de messages "
-             "— jamais au milieu d'un tour.",
+        hint="Au-delà, la fenêtre est découpée par thème (bloc « Extraction "
+             "par thème »), chaque tranche restant sous ce volume et sur les "
+             "frontières de messages — jamais au milieu d'un tour.",
     ),
     ConfigItem(
         key="memory.consolidation_max_window_messages", type="int", section="memory",

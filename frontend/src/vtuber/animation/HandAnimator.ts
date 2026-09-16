@@ -1,6 +1,7 @@
 import { VRM } from "@pixiv/three-vrm";
 import type { VRMHumanBoneName } from "@pixiv/three-vrm";
 import type { EmotionName, HandShapeName, SleepPhase } from "../../types";
+import { forwardSign } from "../vrmVersion";
 
 /**
  * Full finger articulation for both hands (30 VRM humanoid bones).
@@ -19,16 +20,21 @@ import type { EmotionName, HandShapeName, SleepPhase } from "../../types";
  *   5. spring smoothing  — per-finger, staggered (index leads, little
  *                          trails) so shape changes cascade naturally
  *
- * Sign conventions follow the empirically-verified rig convention
- * (left arm along -X, so left-hand curl is +Z, right-hand curl is -Z;
- * thumbs curl around ±Y). If a different model bends fingers backward,
- * flip CURL_SIGN / THUMB_SIGN.
+ * Sign conventions were verified empirically on a VRM 0.x rig (left arm
+ * along −X, so left-hand curl is +Z, right-hand curl is −Z; thumbs curl
+ * around ±Y). They are AUTHORED here in the VRM 1.0 convention (left arm
+ * along +X: a NEGATIVE Z folds the left fingers) and conjugated by
+ * `forwardSign`, which reproduces the verified values on a 0.x model and
+ * the mirrored ones on a 1.0 — a curl is a rotation about Z, and Z flips
+ * with the rig's facing. Spread and the thumb rotate about Y, which does
+ * not flip; their left/right mirror is inherent to the hand.
  */
 
 type Side = "left" | "right";
 const SIDES: Side[] = ["left", "right"];
 
-const CURL_SIGN: Record<Side, number> = { left: 1, right: -1 };
+const CURL_SIGN_VRM1: Record<Side, number> = { left: -1, right: 1 };
+const SPREAD_SIGN: Record<Side, number> = { left: 1, right: -1 };
 const THUMB_SIGN: Record<Side, number> = { left: 1, right: -1 };
 
 // Fingers animated through the 3-joint curl chain.
@@ -146,6 +152,7 @@ interface FingerSpring {
 
 export class HandAnimator {
   private vrm: VRM | null = null;
+  private sign: 1 | -1 = 1;
   private sleepPhase: SleepPhase = "awake";
   private isSpeaking = false;
 
@@ -176,6 +183,7 @@ export class HandAnimator {
 
   setVRM(vrm: VRM): void {
     this.vrm = vrm;
+    this.sign = forwardSign(vrm);
   }
 
   setSleepPhase(phase: SleepPhase): void {
@@ -334,7 +342,7 @@ export class HandAnimator {
   }
 
   private applyFinger(side: Side, finger: Finger, curl: number): void {
-    const sign = CURL_SIGN[side];
+    const sign = this.sign * CURL_SIGN_VRM1[side];
     const cap = FINGER_CAP[finger];
 
     const proximal = this.bone(`${side}${cap}Proximal`);
@@ -343,10 +351,10 @@ export class HandAnimator {
 
     if (proximal) {
       proximal.rotation.z = sign * curl * PROXIMAL_MAX;
-      // Spread lives on the proximal joint only. Sign mirrors the curl
-      // convention (rig is X-mirrored vs the VRM1 standard).
+      // Spread lives on the proximal joint only, about Y — the one axis
+      // the rig convention does not flip, hence its own side sign.
       proximal.rotation.y =
-        -sign * SPREAD_DIR[finger] * this.spreadCurrent[side] * SPREAD_MAX;
+        -SPREAD_SIGN[side] * SPREAD_DIR[finger] * this.spreadCurrent[side] * SPREAD_MAX;
     }
     if (intermediate) intermediate.rotation.z = sign * curl * INTERMEDIATE_MAX;
     if (distal) distal.rotation.z = sign * curl * DISTAL_MAX;

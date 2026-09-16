@@ -13,6 +13,8 @@
       "category": "idle",
       "weight": 2,
       "hold": [7, 14],
+      "valence": 0.7,
+      "arousal": 0.2,
       "hands": ["relaxed", "relaxed"]
     },
     "idle_bored": {
@@ -48,6 +50,8 @@
       "category": "talk",
       "weight": 1,
       "hold": [4, 8],
+      "arousal": 0.8,
+      "valence": -0.3,
       "hands": ["open", "open"]
     },
     "talk_variant_b": {

@@ -812,7 +812,7 @@ class ConscienceEngine:
 
     #: Replis de l'ennui — clés `conscience.ennui.*`.
     _ENNUI_IDLE_MINUTES = 120
-    _ENNUI_INTENSITE = 0.25
+    _ENNUI_INTENSITE = 0.4
     #: Espacement des glissements (RAM). L'ennui teinte, il ne matraque pas :
     #: sans cet espacement, la boucle enverrait une impulsion toutes les 30 s
     #: pendant toute l'après-midi vide — même leçon que la saignée des

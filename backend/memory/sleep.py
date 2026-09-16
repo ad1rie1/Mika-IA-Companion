@@ -447,17 +447,22 @@ class SleepCycle:
         except Exception:
             logger.exception("Sleep: digestion phase failed (non-fatal)")
 
-        # Phase 4: réorganisation — clusteriser les échanges du jour,
-        # ré-extraire par thème, dédoublonner les souvenirs (fin de nuit, une
-        # fois par nuit, après la digestion). Même profil d'isolement que les
-        # autres phases : un échec ne coûte que sa nuit.
+        # Phase 4: réorganisation — dédoublonner les souvenirs de la journée
+        # (fin de nuit, une fois par nuit, après la digestion). L'extraction
+        # par thème qui vivait ici a rejoint le consolidateur
+        # (memory/themes.py) : la nuit ne relit plus le verbatim. Même profil
+        # d'isolement que les autres phases : un échec ne coûte que sa nuit.
         try:
             if profond:
                 if self._last_reorg_night != current_night:
                     await self._set_phase(SleepPhase.DEEP_SLEEP)
                     from memory.reorg import nightly_reorg
-                    await nightly_reorg.run(current_night)
+                    stats = await nightly_reorg.run(current_night)
                     self._last_reorg_night = current_night
+                    logger.info(
+                        "Sleep: reorg (%s) — %d fusion(s) de souvenirs",
+                        current_night, int((stats or {}).get("merges", 0) or 0),
+                    )
         except Exception:
             logger.exception("Sleep: reorg phase failed (non-fatal)")
 

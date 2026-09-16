@@ -6,7 +6,7 @@ import { VTuberModel } from "./vtuber/VTuberModel";
 import { EmotionController } from "./vtuber/EmotionController";
 import { AnimationSystem } from "./vtuber/animation/AnimationSystem";
 import { AnimationDebugger } from "./vtuber/animation/AnimationDebugger";
-import { LipSyncController } from "./audio/LipSyncController";
+import { LipSyncController, msPerCharForRate } from "./audio/LipSyncController";
 import { TTSService } from "./audio/TTSService";
 import { WebSocketClient } from "./network/WebSocketClient";
 import { IdentityService } from "./network/IdentityService";
@@ -105,8 +105,10 @@ async function init() {
       // Starts animating synchronously on the rest pose, then streams the
       // Mixamo clips in — not awaited so the app boots without waiting for
       // FBX downloads.
+      // The camera is the viewer: her eyes and head keep contact with it,
+      // with the gaze aversions of a real conversation (see attention.ts).
       void animationSystem
-        .init(vrm, { root })
+        .init(vrm, { root, camera: sceneManager.camera })
         .catch((e) => console.warn("AnimationSystem init failed:", e));
       console.log("VTuber model ready");
     })
@@ -118,6 +120,58 @@ async function init() {
       createPlaceholder(sceneManager);
     });
 
+  // What the avatar shows: face, body, gaze, hands.
+  const applyAvatarEmotion = (
+    emotion: EmotionName,
+    intensity: number,
+    blend: SpeechMessage["emotion_blend"] = [],
+    persona?: SpeechMessage["voice_persona"],
+    opts: { ambient?: boolean } = {}
+  ) => {
+    emotionController.setEmotion(emotion, intensity);
+    animationSystem.setEmotion(emotion, intensity, blend ?? [], persona, opts);
+  };
+
+  // Avatar + the readout, at once — the debug hooks and silent replies.
+  const applyEmotion = (
+    emotion: EmotionName,
+    intensity: number,
+    blend: SpeechMessage["emotion_blend"] = [],
+    persona?: SpeechMessage["voice_persona"],
+    opts: { ambient?: boolean } = {}
+  ) => {
+    applyAvatarEmotion(emotion, intensity, blend, persona, opts);
+    emotionDisplay.setEmotion(emotion, intensity);
+  };
+
+  // Une réplique vocale possède le visage tant qu'elle sonne. Ce que le
+  // backend pousse entre-temps (`emotion_update`, la dérive de
+  // l'oscillateur — souvent une TROISIÈME émotion, voir CLAUDE.md) est
+  // gardé de côté et appliqué quand la voix s'est tue : la balise
+  // [EMOTION:] est la vérité du tour, et la voix qui la dit ne doit pas
+  // voir le visage glisser vers autre chose au milieu de la phrase.
+  let voicedInFlight = 0;
+  // Quand la première réplique en vol est partie : soupape de sécurité —
+  // un énoncé dont le navigateur n'émet jamais onend/onerror (flake connue
+  // de la Web Speech API) ne doit pas figer le visage jusqu'au rechargement.
+  let voicedSince = 0;
+  const VOICED_HOLD_MAX_MS = 60_000;
+  let pendingDrift: {
+    emotion: EmotionName;
+    intensity: number;
+    blend: SpeechMessage["emotion_blend"];
+  } | null = null;
+  const voiceOwnsFace = () =>
+    voicedInFlight > 0 && performance.now() - voicedSince < VOICED_HOLD_MAX_MS;
+  const flushDrift = () => {
+    if (voiceOwnsFace() || !pendingDrift) return;
+    const drift = pendingDrift;
+    pendingDrift = null;
+    applyAvatarEmotion(drift.emotion, drift.intensity, drift.blend, undefined, {
+      ambient: true,
+    });
+  };
+
   // TTS with lip-sync + body-animation integration
   const tts = new TTSService({
     onSpeakStart: () => {
@@ -126,6 +180,13 @@ async function init() {
     onSpeakEnd: () => {
       animationSystem.setSpeaking(false);
       lipSyncController.stop();
+      // La voix s'est tue et rien n'attend derrière : le visage est rendu à
+      // la dérive. Ce chemin est aussi celui du reset synchrone de stop() /
+      // setMuted(), là où la promesse de speak() peut ne jamais se résoudre.
+      if (tts.queuedCount === 0) {
+        voicedInFlight = 0;
+        flushDrift();
+      }
     },
     // [SIGH]/[LAUGH] tokens fire a body beat in sync with their audio.
     onProsodicCue: (cue) => {
@@ -136,8 +197,14 @@ async function init() {
     // ci-dessous) : deux répliques rapprochées faisaient sinon articuler la
     // bouche sur le texte suivant pendant que l'audio du précédent tournait
     // encore.
-    onUtteranceStart: (text) => {
-      lipSyncController.startFromPlan(tts.lipSyncPlan(text));
+    onUtteranceStart: (text, rate) => {
+      lipSyncController.startFromPlan(tts.lipSyncPlan(text), msPerCharForRate(rate));
+    },
+    // La synthèse dit où en est la voix (début réel, puis chaque mot là où
+    // le navigateur le donne) : la bouche s'y recale au lieu de courir sur
+    // une estimation qui finissait avant ou après l'audio.
+    onSpeechProgress: (charIndex) => {
+      lipSyncController.seekToChar(charIndex);
     },
   });
 
@@ -248,18 +315,6 @@ async function init() {
   };
   innerLifePanel.onSleepPhaseChange(applySleepPhase);
 
-  const applyEmotion = (
-    emotion: EmotionName,
-    intensity: number,
-    blend: SpeechMessage["emotion_blend"] = [],
-    persona?: SpeechMessage["voice_persona"],
-    opts: { ambient?: boolean } = {}
-  ) => {
-    emotionController.setEmotion(emotion, intensity);
-    animationSystem.setEmotion(emotion, intensity, blend ?? [], persona, opts);
-    emotionDisplay.setEmotion(emotion, intensity);
-  };
-
   const handleSpeech = (data: SpeechMessage) => {
     // Validate emotion from backend
     const emotion: EmotionName = isEmotionName(data.emotion)
@@ -269,13 +324,20 @@ async function init() {
       typeof data.emotion_intensity === "number"
         ? data.emotion_intensity
         : 0.7;
+    const blend = data.emotion_blend ?? [];
+    const persona = data.voice_persona;
 
-    // Face + body + UI
-    applyEmotion(emotion, intensity, data.emotion_blend, data.voice_persona);
-
-    // Ambivalence panel + rest of inner state
-    innerLifePanel.setEmotionBlend(data.emotion_blend || [], intensity);
+    // The readouts follow the frame; the avatar follows the VOICE (below).
+    emotionDisplay.setEmotion(emotion, intensity);
+    innerLifePanel.setEmotionBlend(blend, intensity);
     innerLifePanel.applyInnerState(data.inner_state);
+    // Whatever she was composing, this is it: the thinking gaze ends as
+    // the text lands, the voice follows.
+    animationSystem.setReplyPending(false);
+    // A reply supersedes any drift that was waiting for the voice to end.
+    pendingDrift = null;
+
+    const showReply = () => applyAvatarEmotion(emotion, intensity, blend, persona);
 
     // Wake-up pause: if Mika was asleep within the last 10s (either
     // she's still marked asleep OR she just transitioned awake in the
@@ -292,14 +354,39 @@ async function init() {
     // Speak — the backend decides whether this turn is voiced at all, and
     // in which voice (see backend/pipeline/voice.py). `speak: false` still
     // shows the text and animates the avatar; it just stays silent.
-    if (data.speak === false || typeof data.text !== "string" || !data.text) {
+    const willSpeak =
+      data.speak !== false &&
+      typeof data.text === "string" &&
+      data.text.length > 0 &&
+      !tts.isMuted;
+    if (!willSpeak) {
+      showReply();
       return;
     }
-    // Le plan de lip-sync part de `onUtteranceStart` (ci-dessus), déclenché
-    // par TTSService quand CE texte précis commence effectivement à jouer —
-    // pas ici, à la simple mise en file, où une réplique encore audible se
-    // serait fait voler la bouche par celle-ci.
-    tts.speak(data.text, emotion, data.voice_profile);
+    // Le plan de lip-sync ET l'émotion du visage/corps partent de l'instant
+    // où CE texte précis commence effectivement à jouer (`onStart` /
+    // `onUtteranceStart`, déclenchés par TTSService au dépilement) — pas
+    // ici, à la simple mise en file, où une réplique encore audible se
+    // ferait voler la bouche et le visage par celle-ci.
+    if (voicedInFlight === 0) voicedSince = performance.now();
+    voicedInFlight++;
+    let shown = false;
+    void tts
+      .speak(data.text as string, emotion, data.voice_profile, {
+        onStart: () => {
+          shown = true;
+          showReply();
+        },
+      })
+      .then(() => {
+        // Never voiced (muted or stopped before its turn): the text is on
+        // screen all the same, so the face should say it.
+        if (!shown) showReply();
+      })
+      .finally(() => {
+        voicedInFlight = Math.max(0, voicedInFlight - 1);
+        flushDrift();
+      });
   };
 
   ws.on("speech", handleSpeech);
@@ -322,10 +409,26 @@ async function init() {
     if (!isEmotionName(data.emotion)) return;
     const intensity =
       typeof data.emotion_intensity === "number" ? data.emotion_intensity : 0;
-    applyEmotion(data.emotion, intensity, data.emotion_blend, undefined, {
+    emotionDisplay.setEmotion(data.emotion, intensity);
+    innerLifePanel.setEmotionBlend(data.emotion_blend ?? [], intensity);
+    if (voiceOwnsFace()) {
+      // Held until the voice ends — the newest drift wins.
+      pendingDrift = {
+        emotion: data.emotion,
+        intensity,
+        blend: data.emotion_blend ?? [],
+      };
+      return;
+    }
+    applyAvatarEmotion(data.emotion, intensity, data.emotion_blend, undefined, {
       ambient: true,
     });
-    innerLifePanel.setEmotionBlend(data.emotion_blend ?? [], intensity);
+  });
+
+  // A message the server accepted is a reply she is now composing: the
+  // gaze goes up and to the side until the `speech` frame lands.
+  ws.on("ack", (data) => {
+    if (data.status === "accepted") animationSystem.setReplyPending(true);
   });
 
   // Project reports — silent by default (no TTS). Show as a message
@@ -363,6 +466,8 @@ async function init() {
   // Typing anywhere (outside another field) focuses the chat input, so you
   // can just start writing without clicking the box first.
   const chatInput = document.getElementById("chat-input") as HTMLTextAreaElement | null;
+  // Someone typing to her is someone to listen to: eyes on them.
+  chatInput?.addEventListener("input", () => animationSystem.noteUserTyping());
   document.addEventListener("keydown", (e) => {
     if (!chatInput) return;
     const target = e.target as HTMLElement;

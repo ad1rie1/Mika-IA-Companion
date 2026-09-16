@@ -143,3 +143,58 @@ class TestParseResults:
         raw = {"ids": [["1"]], "documents": [["doc1"]], "metadatas": [[{}]]}
         result = self._p(raw)
         assert result[0]["distance"] is None
+
+
+# ===================================================================
+# Échanges par plage de messages — l'entrée du découpage par thème
+# ===================================================================
+
+class TestExchangesForMessages:
+
+    def test_filtre_sur_le_chevauchement_de_la_plage(self):
+        store, coll = _make_store()
+        store._echanges = coll
+        coll.get = MagicMock(return_value={"ids": []})
+
+        store.get_exchanges_for_messages(10, 20)
+
+        where = coll.get.call_args.kwargs["where"]
+        assert where == {"$and": [
+            {"last_message_id": {"$gte": 10}},
+            {"first_message_id": {"$lte": 20}},
+        ]}
+        assert "embeddings" not in coll.get.call_args.kwargs["include"]
+
+    def test_rend_les_embeddings_stockes_quand_on_les_demande(self):
+        store, coll = _make_store()
+        store._echanges = coll
+        coll.get = MagicMock(return_value={
+            "ids": ["7", "9"],
+            "documents": ["Lui: a\nMika: b", "Lui: c\nMika: d"],
+            "metadatas": [
+                {"first_message_id": 7, "last_message_id": 8, "ts": 1.0},
+                {"first_message_id": 9, "last_message_id": 9, "ts": 2.0},
+            ],
+            "embeddings": [[1.0, 0.0], [0.0, 1.0]],
+        })
+
+        rows = store.get_exchanges_for_messages(7, 9, include_embeddings=True)
+
+        assert "embeddings" in coll.get.call_args.kwargs["include"]
+        assert [r["id"] for r in rows] == ["7", "9"]
+        assert rows[0]["embedding"] == [1.0, 0.0]
+        assert rows[1]["metadata"]["first_message_id"] == 9
+
+    def test_meme_forme_que_la_plage_temporelle(self):
+        store, coll = _make_store()
+        store._echanges = coll
+        brut = {
+            "ids": ["7"], "documents": ["x"],
+            "metadatas": [{"first_message_id": 7, "last_message_id": 7, "ts": 1.0}],
+        }
+        coll.get = MagicMock(return_value=brut)
+
+        par_ids = store.get_exchanges_for_messages(7, 7)
+        par_ts = store.get_exchanges_between(0.0, 2.0)
+
+        assert par_ids == par_ts

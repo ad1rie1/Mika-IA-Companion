@@ -46,8 +46,8 @@ que du nom de fichier.
 | 15 | Shaking Head No | `gesture/gesture_headshake.fbx` | frustrated/disgusted |
 | 16 | Excited | `gesture/gesture_excited.fbx` | excited/happy fort |
 | 17 | Relieved Sigh | `gesture/gesture_sigh.fbx` | relieved + token [SIGH] |
-| 18 | Yawn | `gesture/gesture_yawn.fbx` | transition sommeil (futur) |
-| 19 | Stretching | `gesture/gesture_stretch.fbx` | réveil / pause (manuel) |
+| 18 | Yawn | `gesture/gesture_yawn.fbx` | bâillement avant de s'endormir (bord éveil → sommeil) |
+| 19 | Stretching | `gesture/gesture_stretch.fbx` | étirement au réveil (bord sommeil → éveil, sauf si elle répond déjà) |
 
 ### Réservé v2 (locomotion — ne pas télécharger maintenant)
 
@@ -74,6 +74,13 @@ personnage sur Mixamo, puis télécharge les clips depuis ce personnage.
 - `hands`: formes de doigts `[gauche, droite]` (relaxed/open/tucked/loose/clasp)
 - `fadeIn`/`fadeOut`: durées de crossfade du geste
 - `stripRootXZ`: `true` pour forcer un clip de locomotion « in place »
+- `arousal` / `valence` (−1…1, optionnels) : l'affect que le clip exprime,
+  confronté à l'émotion courante au moment du tirage (`animation/affect.ts`).
+  `talk_heated` déclare `arousal: 0.8` — favorisé pour une réponse en colère,
+  rare pour une réponse rêveuse ; `idle_happy` déclare `valence: 0.7` et
+  n'est presque plus tiré quand elle est triste. Un clip qui ne déclare
+  rien garde son `weight` tel quel. Le tempo du clip de base suit aussi
+  l'arousal de l'émotion (±15 % max), et la durée de `hold` avec lui.
 
 ## Validation (après dépôt des fichiers)
 

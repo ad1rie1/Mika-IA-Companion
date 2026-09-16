@@ -17,6 +17,7 @@ from memory.storage.vector_store import (
     souvenir_metadata,
     vector_call,
 )
+from memory.themes import PlanExtraction, plan_by_theme, theme_tuning
 from utils.periodic import PeriodicLoop
 from utils.degradation import degradations
 
@@ -31,8 +32,9 @@ RETENTION_SWEEP_INTERVAL_S = 3600
 # épisodique) ; le nom est ré-exporté ici pour les lecteurs existants.
 from memory.storage.window import INTERNAL_MESSAGE_SOURCES, user_facing_messages  # noqa: E402
 
-# Une tranche d'extraction ne dépasse jamais ce volume : au-delà, le backlog
-# est découpé sur les frontières de messages (voir _extract_and_store).
+# Une tranche d'extraction ne dépasse jamais ce volume : au-delà, la fenêtre
+# est découpée par thème, chaque thème restant borné aux frontières de
+# messages (voir _extract_and_store et memory/themes.py).
 # `_EXTRACTION_MAX_CHARS_DEFAUT` est la valeur DÉCLARÉE ; `EXTRACTION_MAX_CHARS`
 # est la variable de module, que des appelants réassignent pour forcer un
 # découpage (les tests de découpe du backlog). Les deux sont distinctes pour
@@ -291,6 +293,20 @@ class MemoryConsolidator:
 
         complete = extracted_through >= messages[-1]["id"]
         max_id = (ceiling_id or messages[-1]["id"]) if complete else extracted_through
+        if max_id <= self._last_processed_id:
+            # Des tranches ont abouti, mais la tranche en échec portait le
+            # plus petit id de la fenêtre (un message sans chunk, parti dans
+            # le résiduel) : rien n'est réputé extrait sous le checkpoint
+            # courant. Écrire une ligne égale à la précédente ne dirait rien
+            # de vrai ; la fenêtre sera relue, et ce qui a été écrit est
+            # absorbé par le dédoublonnage-renforcement.
+            logger.warning(
+                "Consolidation: tranches partiellement extraites, checkpoint "
+                "inchangé (last_id=%d)",
+                self._last_processed_id,
+            )
+            await self._run_maintenance(regenerate=True)
+            return
         await self._save_checkpoint(max_id, len(messages), counts)
         self._last_processed_id = max_id
 
@@ -357,15 +373,18 @@ class MemoryConsolidator:
     ) -> tuple[dict[str, int], int | None]:
         """Run the extraction LLM over the window and persist what comes back.
 
-        Returns per-type creation counts, and the id of the last message
-        réellement extrait — ``None`` quand même la première tranche n'a pas
-        pu l'être. C'est ce second terme qui décide du checkpoint : une
-        tranche en échec au milieu d'un backlog était jusqu'ici
+        Returns per-type creation counts, and the id under which everything
+        has réellement été extrait — ``None`` quand aucune tranche n'a abouti.
+        C'est ce second terme qui décide du checkpoint (``_borne_extraite``) :
+        une tranche en échec au milieu d'un backlog était jusqu'ici
         indistinguable des autres.
 
-        Un backlog démesuré (reprise après indisponibilité) est découpé en
-        tranches d'au plus ``EXTRACTION_MAX_CHARS`` sur les frontières de
-        messages : la fenêtre sans borne partait entière dans UN appel LLM.
+        Une fenêtre qui tient dans ``EXTRACTION_MAX_CHARS`` part telle quelle,
+        en un appel, sans lecture vectorielle — le tick ordinaire de 60 s.
+        Au-delà (reprise après indisponibilité, grosse journée), elle est
+        découpée **par thème** et non plus en tranches linéaires (voir
+        ``_planifier``), chaque thème restant borné à la tranche, sur les
+        frontières de messages.
         """
         from memory.models import Commitment
 
@@ -381,15 +400,7 @@ class MemoryConsolidator:
             )
         )()
 
-        # Who Mika was talking to, as memory entities. The extractor names
-        # entities from the *content* ("Thomas said…"), which misses the most
-        # basic fact about an exchange: whom it was with. A conversation where
-        # nobody says their own name produced souvenirs attached to nobody, so
-        # PersonProfile never had material and theory-of-mind stayed empty.
-        interlocutors = await self._resolve_interlocutors(messages)
-
         counts = {"souvenirs": 0, "connaissances": 0, "commitments": 0}
-        extracted_through: int | None = None
         taille_tranche = (
             EXTRACTION_MAX_CHARS
             if EXTRACTION_MAX_CHARS != _EXTRACTION_MAX_CHARS_DEFAUT
@@ -398,7 +409,19 @@ class MemoryConsolidator:
                 mini=500, maxi=100000,
             )
         )
-        for batch in _split_batches(messages, taille_tranche):
+        plan = await self._planifier(messages, taille_tranche)
+
+        reussies: list[list[dict]] = []
+        en_echec: list[list[dict]] = []
+        for rang, batch in enumerate(plan.tranches):
+            # Who Mika was talking to, as memory entities. The extractor names
+            # entities from the *content* ("Thomas said…"), which misses the
+            # most basic fact about an exchange: whom it was with. A
+            # conversation where nobody says their own name produced souvenirs
+            # attached to nobody, so PersonProfile never had material and
+            # theory-of-mind stayed empty. Résolu PAR TRANCHE : un thème ne
+            # réunit pas forcément les mêmes personnes que la fenêtre entière.
+            interlocutors = await self._resolve_interlocutors(batch)
             msg_dicts = [{"role": m["role"], "content": m["content"]} for m in batch]
             extractions = await self.extractor.analyze_messages(
                 msg_dicts, pending_commitments=pending_commitments,
@@ -406,6 +429,7 @@ class MemoryConsolidator:
             if extractions is None:
                 # Le provider est mort : les tranches suivantes échoueraient
                 # de même, et chacune coûterait son timeout.
+                en_echec = plan.tranches[rang:]
                 break
             batch_counts = await self.store_extractions(
                 extractions, interlocutors=interlocutors,
@@ -433,23 +457,105 @@ class MemoryConsolidator:
             echouees = batch_counts.get("echouees", 0)
             if tentees and echouees == tentees:
                 logger.warning(
-                    "Consolidation : les %d extractions de la fenêtre ont "
+                    "Consolidation : les %d extractions de la tranche ont "
                     "toutes échoué — checkpoint gelé, la fenêtre sera relue.",
                     tentees,
                 )
+                en_echec = plan.tranches[rang:]
                 break
-            extracted_through = batch[-1]["id"]
+            reussies.append(batch)
 
-        return counts, extracted_through
+        return counts, self._borne_extraite(reussies, en_echec)
+
+    def _borne_extraite(
+        self, reussies: list[list[dict]], en_echec: list[list[dict]],
+    ) -> int | None:
+        """Jusqu'où le checkpoint peut avancer après une passe.
+
+        Les tranches d'un plan par thème ne sont pas contiguës : réussir le
+        thème A (messages 1, 3, 5) ne dit rien du message 2. La règle du
+        curseur linéaire est donc reformulée en ensembliste :
+
+        - aucune tranche n'a abouti → ``None``, la fenêtre reste due (cause
+          systémique, l'ancienne règle) ;
+        - toutes ont abouti → le plus grand id de la fenêtre ;
+        - sinon → (plus petit id parmi les tranches en échec) − 1 : tout ce
+          qui est dessous a été extrait ; ce qui est au-dessus dans une
+          tranche réussie sera relu à la passe suivante — rare, sur échec
+          partiel seulement, et le dédoublonnage-renforcement de
+          ``store_extractions`` en absorbe une partie. Jamais sous le
+          checkpoint courant.
+
+        Sur un plan linéaire (tranches contiguës, arrêt à la première en
+        échec) la formule rend la borne d'avant — la dernière tranche réussie
+        — à un trou d'ids près : les messages internes exclus de la fenêtre
+        entre deux tranches n'avaient rien à extraire.
+        """
+        if not reussies:
+            return None
+        if not en_echec:
+            return max(int(m["id"]) for t in reussies for m in t)
+        plancher = int(getattr(self, "_last_processed_id", 0) or 0)
+        premier_rate = min(int(m["id"]) for t in en_echec for m in t)
+        return max(plancher, premier_rate - 1)
+
+    async def _planifier(
+        self, messages: list[dict], taille_tranche: int,
+    ) -> PlanExtraction:
+        """Les tranches d'extraction d'une fenêtre.
+
+        Sous une tranche : une seule, linéaire, zéro lecture vectorielle — le
+        tick ordinaire. Au-delà : par thème, sur les chunks épisodiques de la
+        fenêtre (embeddings stockés, jamais ré-encodés). Sans chunk — étage
+        épisodique désactivé, store indisponible, indexeur en retard — tout
+        part dans la tranche résiduelle, c'est-à-dire l'ancien découpage
+        linéaire : la couverture est complète dans tous les cas.
+        """
+        if not messages:
+            return PlanExtraction(tranches=[])
+        total = sum(len(m.get("content") or "") for m in messages)
+        if total <= taille_tranche:
+            return PlanExtraction(tranches=[messages], residuel=len(messages))
+        chunks = await self._chunks_de_la_fenetre(messages)
+        plan = plan_by_theme(
+            messages, chunks, max_chars=taille_tranche, tuning=theme_tuning(),
+        )
+        logger.info(
+            "Consolidation: fenêtre de %d messages (%d car.) découpée en %d "
+            "tranche(s) — %d thème(s), %d message(s) en résiduel",
+            len(messages), total, len(plan.tranches), plan.themes, plan.residuel,
+        )
+        return plan
+
+    async def _chunks_de_la_fenetre(self, messages: list[dict]) -> list[dict]:
+        """Les chunks épisodiques couvrant la fenêtre, avec leurs embeddings.
+
+        Toute panne rend ``[]`` — et compte : sans chunk le plan retombe en
+        linéaire, ce qui est un fonctionnement dégradé, pas une erreur.
+        """
+        store = getattr(self, "vector_store", None)
+        if store is None:
+            return []
+        ids = [int(m["id"]) for m in messages]
+        try:
+            rows = await vector_call(store.get_exchanges_for_messages)(
+                min(ids), max(ids), include_embeddings=True,
+            )
+        except Exception as exc:
+            degradations.record("consolidator: chunks de la fenetre", exc)
+            return []
+        # Un store simulé ou un retour d'une autre forme = pas de chunk.
+        return rows if isinstance(rows, list) else []
 
     async def store_extractions(
         self, extractions: list[dict], *, interlocutors: list,
         occurred_at=None,
     ) -> dict[str, int]:
         """Persiste une liste d'extractions (souvenirs, connaissances,
-        engagements) — le second temps de ``_extract_and_store``, public
-        pour que la réorganisation nocturne (memory/reorg.py) réutilise le
-        dédoublonnage-renforcement et les contrôles de contradiction.
+        engagements) — le second temps de ``_extract_and_store``. Public :
+        c'est la moitié réutilisable (dédoublonnage-renforcement, contrôles
+        de contradiction), que la réorganisation nocturne appelait avant que
+        l'extraction par thème ne revienne ici.
 
         ``occurred_at`` = quand l'épisode a eu lieu. L'instant de l'extraction
         est un artefact du planificateur : la réorg de 3 h datait d'aujourd'hui
@@ -1425,26 +1531,6 @@ class MemoryConsolidator:
             except (Connaissance.DoesNotExist, ValueError):
                 pass
         return None
-
-
-def _split_batches(messages: list[dict], max_chars: int) -> list[list[dict]]:
-    """Découpe une fenêtre en tranches ≤ max_chars, aux frontières de messages.
-
-    Un message seul plus gros que la tranche part seul (jamais coupé).
-    """
-    batches: list[list[dict]] = []
-    current: list[dict] = []
-    size = 0
-    for m in messages:
-        weight = len(m.get("content") or "")
-        if current and size + weight > max_chars:
-            batches.append(current)
-            current, size = [], 0
-        current.append(m)
-        size += weight
-    if current:
-        batches.append(current)
-    return batches
 
 
 def _valid_emotion(raw) -> str:

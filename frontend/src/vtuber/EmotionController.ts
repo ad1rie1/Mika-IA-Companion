@@ -111,13 +111,55 @@ function pulse(t: number, seed: number): number {
 
 const PULSE_AMPLITUDE = 0.05;
 
+/**
+ * Onset speed per emotion (1/s of the exponential ease). Real expressions
+ * do not all arrive at one speed: a startle lands in ~100–200 ms, a smile
+ * in ~300–500 ms, sadness and reverie settle in over most of a second. And
+ * every expression LEAVES more slowly than it arrives (`OFFSET_RATIO`) —
+ * a face that snaps back to neutral at the same rate it lit up is one of
+ * the surest "it's a rig" tells.
+ */
+export const ONSET_SPEED: Partial<Record<EmotionName, number>> = {
+  surprised: 9,
+  scared: 8,
+  excited: 6,
+  angry: 5,
+  amused: 5,
+  playful: 5,
+  disgusted: 4.5,
+  frustrated: 4,
+  curious: 4,
+  happy: 3.5,
+  sad: 1.8,
+  lonely: 1.8,
+  melancholic: 1.6,
+  nostalgic: 1.6,
+  dreamy: 1.6,
+  relieved: 2.2,
+  bored: 2.0,
+  love: 2.2,
+  grateful: 2.5,
+  hopeful: 2.5,
+};
+export const DEFAULT_ONSET_SPEED = 3.0;
+export const OFFSET_RATIO = 0.6;
+/** An expression never lingers longer than ~0.8 s of time constant. */
+export const MIN_OFFSET_SPEED = 1.2;
+
+export function onsetSpeedFor(emotion: EmotionName): number {
+  return ONSET_SPEED[emotion] ?? DEFAULT_ONSET_SPEED;
+}
+
+export function offsetSpeedFor(emotion: EmotionName): number {
+  return Math.max(MIN_OFFSET_SPEED, onsetSpeedFor(emotion) * OFFSET_RATIO);
+}
+
 export class EmotionController {
   private vrm: VRM | null = null;
   private currentEmotion: EmotionName = "neutral";
   private intensity: number = 0.5;
   private targetWeights: BlendShapeTarget = {};
   private currentWeights: Map<string, number> = new Map();
-  private transitionSpeed = 3.0;
   private time = 0;
   private activeMap: Record<EmotionName, BlendShapeTarget> =
     STANDARD_EMOTION_MAP;
@@ -184,7 +226,10 @@ export class EmotionController {
     if (!this.vrm?.expressionManager) return;
 
     this.time += delta;
-    const lerpFactor = Math.min(1, delta * this.transitionSpeed);
+    // Onset at the emotion's own speed, offset slower — per shape, since a
+    // shape leaving (the previous emotion's) and one arriving coexist.
+    const onset = Math.min(1, delta * onsetSpeedFor(this.currentEmotion));
+    const offset = Math.min(1, delta * offsetSpeedFor(this.currentEmotion));
 
     // Ease every expression touched by the current OR a previous emotion,
     // so switching emotions fades the old shapes out instead of snapping.
@@ -198,6 +243,7 @@ export class EmotionController {
       seed++;
       const target = this.targetWeights[name] ?? 0;
       const current = this.currentWeights.get(name) ?? 0;
+      const lerpFactor = target > current ? onset : offset;
       const newValue = current + (target - current) * lerpFactor;
 
       if (target === 0 && newValue < 0.001) {

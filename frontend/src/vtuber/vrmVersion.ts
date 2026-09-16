@@ -16,3 +16,21 @@ import type { VRM } from "@pixiv/three-vrm";
 export function isVRM0(vrm: VRM): boolean {
   return vrm.meta?.metaVersion === "0";
 }
+
+/**
+ * Sign of the model's forward axis in its normalized-rig frame: +1 for a
+ * VRM 1.0 (faces +Z), −1 for a VRM 0.x (faces −Z — three-vrm's own words:
+ * "VRM 0.0 models are facing Z- instead of Z+").
+ *
+ * Every hand-written rotation of the animation layer — a head tilt, an eye
+ * pitch, the A-pose arm drop, a finger curl — is authored ONCE in the
+ * VRM 1.0 convention and conjugated by Ry(π) for a 0.x model. That
+ * conjugation flips the X and Z components and leaves Y alone, exactly what
+ * `mixamoRetarget` does to every clip quaternion, so "look down", "tilt
+ * right" and "curl the fingers" keep their meaning on both rigs. Before this
+ * existed the overlays wrote +Z-convention pitches onto a −Z-facing model:
+ * `sad` raised the chin and the sleep doze tilted the head *back*.
+ */
+export function forwardSign(vrm: VRM): 1 | -1 {
+  return isVRM0(vrm) ? -1 : 1;
+}

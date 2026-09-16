@@ -23,7 +23,13 @@ export type ProsodicCue = "sigh" | "laugh" | "breath";
 // tokens de prosodie réservent sans qu'un mot soit dit. Le lip-sync en a
 // besoin pour articuler la bonne chaîne et se taire pendant les silences.
 export type SpeechPlanSegment =
-  | { type: "speech"; text: string }
+  | {
+      type: "speech";
+      text: string;
+      /** Index of `text` in the full reply, so a word-boundary event from
+       * the synthesis (a char index in the reply) can find its frame. */
+      start?: number;
+    }
   | { type: "silence"; ms: number };
 
 // ── Emotion → body gesture mapping ──────────────────────────────────
@@ -64,6 +70,15 @@ export interface ClipManifestEntry {
   hands?: [HandShapeName, HandShapeName];
   /** Zero the hips X/Z position track (in-place enforcement, locomotion). */
   stripRootXZ?: boolean;
+  /**
+   * Affect the clip expresses, −1…1, matched against the current emotion
+   * (see animation/affect.ts). A heated talking clip declares `arousal:
+   * 0.8` and is favoured for an angry reply, rare for a dreamy one; a
+   * cheerful idle declares `valence: 0.7`. Undeclared = the historical
+   * uniform rotation.
+   */
+  arousal?: number;
+  valence?: number;
 }
 
 export interface AnimationManifest {

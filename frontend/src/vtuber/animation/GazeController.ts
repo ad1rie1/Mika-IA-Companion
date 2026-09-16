@@ -1,92 +1,94 @@
+import * as THREE from "three";
 import { VRM } from "@pixiv/three-vrm";
 import type { EmotionName, SleepPhase } from "../../types";
+import { forwardSign } from "../vrmVersion";
+import type { GazeIntent } from "./attention";
+import {
+  directionToGaze,
+  eyesLocalOrigin,
+  gazeToQuaternion,
+  localDirectionTo,
+  type GazeAngles,
+} from "./gazeMath";
 
 /**
- * Drives eye pose: where Mika is looking, and whether she's making
- * eye contact, averting, or just flickering around the scene.
+ * Drives the eye bones: where Mika is looking, on top of what the head
+ * already does.
  *
- * Mixamo rigs have no eye bones, so this controller's absolute writes
- * never conflict with the clip mixer — it kept its pre-rewrite logic.
+ * Mixamo rigs have no eye bones, so these absolute writes never conflict
+ * with the clip mixer. Composition, in semantic angles (pitch > 0 down,
+ * yaw > 0 her left — see gazeMath):
  *
- * Three interacting sources of eye direction (blended in priority
- * order — the highest-priority non-zero contribution wins):
+ *   contact · (viewer direction, measured in the FINAL head frame)
+ *   + emotion bias · intensity
+ *   + attention offset (aversion / thinking / inner murmur)
+ *   + saccade jitter
  *
- *   1. SLEEP — eyes forced forward+down; no gaze movement while asleep
- *   2. EMOTION — some emotions override gaze behavior
- *      - embarrassed / scared / jealous → avert down-side
- *      - thinking / curious → look up-side (gaze up-right/left)
- *      - love / grateful → direct eye contact, held
- *      - sad / lonely / melancholic → look down, reduced contact
- *   3. SACCADES — micro eye movements every 2-5s when idle, small
- *      deviations around eye-contact baseline. Human-like restlessness.
+ * The viewer term is measured after every head overlay ran, so it is the
+ * residual the head did not cover — that is the vestibulo-ocular reflex:
+ * the clip turns the head, the eyes counter-rotate, contact holds. It is
+ * applied unfiltered (the reflex is ~10 ms in humans); everything else is
+ * a step decided by the AttentionDirector, followed with a ~30 ms ease
+ * that reads as a saccade, never as a slide.
  *
- * Target rotations are applied to both eye bones via the VRM humanoid.
- * Values are tiny angles (± 0.15 rad max on each axis) — eye bones
- * rotate around their own origin, not the head's.
+ * Eye range is deliberately conservative — a VRM eye bone rotated past
+ * ~17° shows white on most models. Past it the eyes stop at the corner
+ * and the head overlay carries the rest.
  */
 
-interface GazeDirection {
-  pitch: number; // up (-) / down (+)
-  yaw: number;   // left (-) / right (+)
-}
+export const EYE_MAX_YAW = 0.3;
+export const EYE_MAX_PITCH = 0.22;
+/** ~2 frames: the eye lands, it does not glide. */
+export const EYE_TAU = 0.03;
+/** Asleep: lids closed, eyes rest slightly downward like a real sleeper's. */
+export const EYE_SLEEP_PITCH = 0.06;
 
-const ZERO: GazeDirection = { pitch: 0, yaw: 0 };
-
-// Emotion → steady gaze bias (baseline around which saccades wiggle).
-// pitch: positive looks down, negative looks up.
-// yaw:   positive looks right, negative looks left.
-const EMOTION_GAZE_BIAS: Partial<Record<EmotionName, GazeDirection>> = {
-  embarrassed: { pitch: 0.08, yaw: -0.08 },  // down-left: averts
-  scared:      { pitch: 0.10, yaw:  0.06 },  // down-right, tense
-  jealous:     { pitch: 0.05, yaw: -0.10 },  // side-glance
-  anxious:     { pitch: 0.06, yaw:  0.04 },  // down, unsteady
-  lonely:      { pitch: 0.06, yaw:  0.0  },  // down, center
-  sad:         { pitch: 0.08, yaw:  0.0  },
+/** Emotion → steady gaze bias (baseline the saccades wiggle around). */
+export const EMOTION_GAZE_BIAS: Partial<Record<EmotionName, GazeAngles>> = {
+  embarrassed: { pitch: 0.08, yaw: -0.08 }, // down, away: averts
+  scared: { pitch: 0.1, yaw: 0.06 }, // down-side, tense
+  jealous: { pitch: 0.05, yaw: -0.1 }, // side-glance
+  anxious: { pitch: 0.06, yaw: 0.04 }, // down, unsteady
+  lonely: { pitch: 0.06, yaw: 0.0 }, // down, centre
+  sad: { pitch: 0.08, yaw: 0.0 },
   melancholic: { pitch: 0.07, yaw: -0.02 },
-  bored:       { pitch: 0.0,  yaw:  0.10 },  // looks elsewhere
-  thinking:    { pitch: -0.06, yaw: 0.08 },  // up-right (classic "thinking")
-  curious:     { pitch: -0.04, yaw: 0.06 },  // slightly up
-  confused:    { pitch: -0.02, yaw: -0.05 },
-  dreamy:      { pitch: -0.05, yaw:  0.0  },  // gaze up, vacant
-  love:        { pitch: 0.0,  yaw:  0.0  },  // direct eye contact
-  grateful:    { pitch: 0.0,  yaw:  0.0  },
-  proud:       { pitch: -0.02, yaw: 0.0  },  // chin up slightly
-  determined:  { pitch: 0.0,  yaw:  0.0  },
-  // Emotions without an entry fall through to pure saccade behavior.
+  bored: { pitch: 0.0, yaw: 0.1 }, // looks elsewhere
+  thinking: { pitch: -0.06, yaw: 0.08 }, // up and to the side
+  curious: { pitch: -0.04, yaw: 0.06 }, // slightly up
+  confused: { pitch: -0.02, yaw: -0.05 },
+  dreamy: { pitch: -0.05, yaw: 0.0 }, // gaze up, vacant
+  love: { pitch: 0.0, yaw: 0.0 }, // direct eye contact
+  grateful: { pitch: 0.0, yaw: 0.0 },
+  proud: { pitch: -0.02, yaw: 0.0 }, // chin up slightly
+  determined: { pitch: 0.0, yaw: 0.0 },
+  // Emotions without an entry keep a plain contact / saccade behaviour.
 };
 
-// Emotions where saccade amplitude should be reduced (focused gaze).
-const FOCUSED_EMOTIONS = new Set<EmotionName>([
-  "love", "grateful", "proud", "determined",
-]);
-
-// Emotions where saccades should be faster / more restless.
-const RESTLESS_EMOTIONS = new Set<EmotionName>([
-  "scared", "anxious", "surprised", "excited",
-]);
-
+const ZERO: GazeAngles = { pitch: 0, yaw: 0 };
 
 export class GazeController {
   private vrm: VRM | null = null;
+  private sign: 1 | -1 = 1;
+  private camera: THREE.Object3D | null = null;
   private emotion: EmotionName = "neutral";
-  private intensity: number = 0.5;
+  private intensity = 0.5;
   private sleepPhase: SleepPhase = "awake";
 
-  // Current applied rotation (eased toward target).
-  private current: GazeDirection = { pitch: 0, yaw: 0 };
-  // Target rotation, recomputed each frame from bias + saccade offset.
-  private target: GazeDirection = { pitch: 0, yaw: 0 };
-
-  // Saccade state machine
-  private saccadeTimer = 0;
-  private saccadeInterval = 2 + Math.random() * 3; // 2-5s
-  private saccadeOffset: GazeDirection = { pitch: 0, yaw: 0 };
-
-  // How fast `current` eases toward `target`. 1 / easeTime per second.
-  private easeSpeed = 5.0;
+  /** Applied angles, eased toward the target. */
+  private readonly current: GazeAngles = { pitch: 0, yaw: 0 };
+  private readonly target: GazeAngles = { pitch: 0, yaw: 0 };
+  private readonly _v = new THREE.Vector3();
+  private readonly _eye = new THREE.Vector3();
+  private readonly _viewer: GazeAngles = { pitch: 0, yaw: 0 };
+  private readonly _q = new THREE.Quaternion();
 
   setVRM(vrm: VRM): void {
     this.vrm = vrm;
+    this.sign = forwardSign(vrm);
+  }
+
+  setCamera(camera: THREE.Object3D | null): void {
+    this.camera = camera;
   }
 
   setEmotion(emotion: EmotionName, intensity: number): void {
@@ -98,69 +100,61 @@ export class GazeController {
     this.sleepPhase = phase;
   }
 
-  update(delta: number): void {
-    if (!this.vrm?.humanoid) return;
-
-    // Compute target gaze
-    if (this.sleepPhase !== "awake") {
-      // Asleep: eyes look forward+down, no saccades. The blink/closure
-      // is already handled by BlinkController — the bone rotation just
-      // keeps them pointed naturally (not rolled up).
-      this.target = { pitch: 0.05, yaw: 0 };
-    } else {
-      this.updateSaccade(delta);
-      const bias = EMOTION_GAZE_BIAS[this.emotion] || ZERO;
-      // Emotion bias scales with intensity — a mild "thinking" barely
-      // moves the gaze, a strong one clearly looks away.
-      const biasScale = 0.3 + this.intensity * 0.7;
-      this.target = {
-        pitch: bias.pitch * biasScale + this.saccadeOffset.pitch,
-        yaw: bias.yaw * biasScale + this.saccadeOffset.yaw,
-      };
-    }
-
-    // Ease current toward target
-    const ease = Math.min(1, delta * this.easeSpeed);
-    this.current.pitch += (this.target.pitch - this.current.pitch) * ease;
-    this.current.yaw += (this.target.yaw - this.current.yaw) * ease;
-
-    // Apply to VRM eye bones. Not all VRM models have eye bones — fail soft.
-    const leftEye = this.vrm.humanoid.getNormalizedBoneNode("leftEye");
-    const rightEye = this.vrm.humanoid.getNormalizedBoneNode("rightEye");
-    if (leftEye) {
-      leftEye.rotation.x = this.current.pitch;
-      leftEye.rotation.y = this.current.yaw;
-    }
-    if (rightEye) {
-      rightEye.rotation.x = this.current.pitch;
-      rightEye.rotation.y = this.current.yaw;
-    }
+  /** Semantic angles currently applied — for tests and the debug panel. */
+  get applied(): Readonly<GazeAngles> {
+    return this.current;
   }
 
-  private updateSaccade(delta: number): void {
-    this.saccadeTimer += delta;
-    if (this.saccadeTimer < this.saccadeInterval) return;
+  update(delta: number, intent: GazeIntent | null = null): void {
+    const humanoid = this.vrm?.humanoid;
+    if (!humanoid) return;
+    const leftEye = humanoid.getNormalizedBoneNode("leftEye");
+    const rightEye = humanoid.getNormalizedBoneNode("rightEye");
+    if (!leftEye && !rightEye) return;
 
-    // Fire a new saccade
-    this.saccadeTimer = 0;
+    const t = this.target;
+    if (this.sleepPhase !== "awake") {
+      t.pitch = EYE_SLEEP_PITCH;
+      t.yaw = 0;
+    } else {
+      const bias = EMOTION_GAZE_BIAS[this.emotion] ?? ZERO;
+      // A mild "thinking" barely moves the gaze, a strong one clearly looks away.
+      const biasScale = 0.3 + this.intensity * 0.7;
+      t.pitch = bias.pitch * biasScale;
+      t.yaw = bias.yaw * biasScale;
 
-    // Amplitude: ~0.04-0.10 rad, smaller for focused emotions, larger for
-    // restless ones.
-    let amplitude = 0.04 + Math.random() * 0.06;
-    if (FOCUSED_EMOTIONS.has(this.emotion)) amplitude *= 0.4;
-    if (RESTLESS_EMOTIONS.has(this.emotion)) amplitude *= 1.4;
+      if (intent) {
+        if (intent.contact > 0 && this.camera) {
+          const head = humanoid.getNormalizedBoneNode("head");
+          if (head) {
+            head.updateWorldMatrix(true, false);
+            this.camera.getWorldPosition(this._v);
+            eyesLocalOrigin(humanoid, this._eye);
+            localDirectionTo(head, this._eye, this._v, this._v);
+            directionToGaze(this._v, this.sign, this._viewer);
+            // Only what the eyes can physically reach: a viewer past the
+            // corner of the eye is looked at as far as the eye goes.
+            t.pitch +=
+              intent.contact *
+              Math.max(-EYE_MAX_PITCH, Math.min(EYE_MAX_PITCH, this._viewer.pitch));
+            t.yaw +=
+              intent.contact *
+              Math.max(-EYE_MAX_YAW, Math.min(EYE_MAX_YAW, this._viewer.yaw));
+          }
+        }
+        t.pitch += intent.offset.pitch + intent.saccade.pitch;
+        t.yaw += intent.offset.yaw + intent.saccade.yaw;
+      }
+      t.pitch = Math.max(-EYE_MAX_PITCH, Math.min(EYE_MAX_PITCH, t.pitch));
+      t.yaw = Math.max(-EYE_MAX_YAW, Math.min(EYE_MAX_YAW, t.yaw));
+    }
 
-    // Random direction in 2D (a saccade in any direction)
-    const angle = Math.random() * Math.PI * 2;
-    this.saccadeOffset = {
-      pitch: Math.sin(angle) * amplitude,
-      yaw: Math.cos(angle) * amplitude,
-    };
+    const k = 1 - Math.exp(-Math.max(0, delta) / EYE_TAU);
+    this.current.pitch += (t.pitch - this.current.pitch) * k;
+    this.current.yaw += (t.yaw - this.current.yaw) * k;
 
-    // Next interval: faster for restless emotions
-    let baseInterval = 2 + Math.random() * 3;
-    if (FOCUSED_EMOTIONS.has(this.emotion)) baseInterval *= 1.3;
-    if (RESTLESS_EMOTIONS.has(this.emotion)) baseInterval *= 0.55;
-    this.saccadeInterval = baseInterval;
+    gazeToQuaternion(this.current, this.sign, this._q);
+    if (leftEye) leftEye.quaternion.copy(this._q);
+    if (rightEye) rightEye.quaternion.copy(this._q);
   }
 }

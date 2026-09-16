@@ -24,6 +24,16 @@ interface BlinkShape {
 const QUICK: BlinkShape = { close: 0.055, hold: 0.02, open: 0.09 };
 const SOFT: BlinkShape = { close: 0.13, hold: 0.07, open: 0.2 };
 
+/**
+ * Gaze-evoked blinks. A large saccade is accompanied by a blink about a
+ * third of the time (the lids ride the gaze shift); a small fixational
+ * jump is not. `ctx.gazeShift` is what the eyes jumped this frame.
+ */
+export const GAZE_BLINK_MIN_SHIFT = 0.12;
+export const GAZE_BLINK_P = 0.35;
+/** No gaze-evoked blink right on the heels of another blink. */
+export const GAZE_BLINK_REFRACTORY_S = 0.6;
+
 // Alert emotions blink more often; low-energy ones blink slower and
 // favour the long, heavy-lidded blink.
 const RESTLESS = new Set<EmotionName>([
@@ -98,7 +108,12 @@ export class BlinkController implements ProceduralOverlay {
   ): void {
     if (!this.blinking) {
       this.blinkTimer += dt;
+      const gazeEvoked =
+        ctx.gazeShift >= GAZE_BLINK_MIN_SHIFT &&
+        this.blinkTimer >= GAZE_BLINK_REFRACTORY_S &&
+        Math.random() < GAZE_BLINK_P;
       if (this.blinkTimer >= this.nextBlinkAt) this.startBlink(ctx);
+      else if (gazeEvoked) this.startBlink(ctx, /*forcedQuick*/ true);
       else return;
     }
 
@@ -132,10 +147,16 @@ export class BlinkController implements ProceduralOverlay {
     manager.setValue("blink", Math.max(0, Math.min(1, value)));
   }
 
-  private startBlink(ctx: OverlayContext): void {
+  private startBlink(ctx: OverlayContext, forcedQuick = false): void {
     this.blinking = true;
     this.elapsed = 0;
     this.blinkTimer = 0;
+    if (forcedQuick) {
+      // A blink riding a gaze shift is a quick one and never doubles.
+      this.shape = QUICK;
+      this.doublePending = false;
+      return;
+    }
     if (this.secondBeatArmed) {
       // Forced quick, and deliberately no re-roll: a draw here would let
       // the beat come out SOFT (a slow blink 70ms after a quick one reads

@@ -1,258 +1,59 @@
-"""Réorganisation nocturne — la nuit trie le durable, par thème.
+"""Réorganisation nocturne — la nuit fusionne ce que le jour a écrit en double.
 
-Quatrième phase du sommeil (après journal, rêves, digestion) :
+Quatrième phase du sommeil (après journal, rêves, digestion) : un
+**dédoublonnage des souvenirs du jour** sans LLM — auto-requête vectorielle,
+paires quasi identiques fusionnées (importance max, M2M unis, FK repointées,
+perdant retiré de Chroma puis supprimé — le pattern de ``_decay_souvenirs``).
+Idempotent, borné par nuit.
 
-1. **Clustering** des chunks épisodiques du jour par similarité cosinus
-   (greedy, seuils configurables) — les embeddings sont **réutilisés tels
-   quels** depuis ChromaDB, zéro ré-encodage, zéro dépendance nouvelle
-   (numpy arrive avec chromadb).
-2. **Extraction par cluster** : le verbatim SQL de chaque thème part dans
-   son propre appel d'extraction, au lieu du flux linéaire — « il y a eu
-   trois conversations aujourd'hui : le projet, la dispute, les vacances ».
-   Réutilise ``consolidator.store_extractions`` (dédoublonnage-renforcement
-   et contrôles de contradiction gratuits). Ne porte que sur ce qui reste
-   **au-dessus du checkpoint du consolidateur** : à 3 h, le fil de l'eau a
-   normalement déjà couvert la journée, et re-passer les mêmes chunks créait
-   des paraphrases jumelles que le dédoublonnage ne rattrapait qu'à moitié.
-   Le chemin reste vivant pour ce que la journée n'a pas pu extraire — un
-   provider mort tout l'après-midi laisse justement ce backlog derrière lui.
-3. **Dédoublonnage des souvenirs du jour** sans LLM : auto-requête
-   vectorielle, paires quasi identiques fusionnées (importance max, M2M
-   unis, FK repointées, perdant retiré de Chroma puis supprimé — le pattern
-   de ``_decay_souvenirs``). Idempotent, borné par nuit.
+Elle portait deux étapes de plus, un clustering des chunks épisodiques du
+jour et une extraction par thème de ce qui restait au-dessus du checkpoint
+du consolidateur — sans jamais faire avancer ce checkpoint. Or le
+consolidateur possède déjà ce backlog correctement (son curseur n'avance que
+sur un succès réel, il relit la fenêtre gelée jusqu'au retour du provider,
+ses tranches sont bornées) : ce que la nuit rattrapait, son tick suivant le
+réextrayait, et l'étape ne produisait que des paraphrases jumelles.
+Restreindre la nuit à ce qui est SOUS le checkpoint aurait réextrait ce que
+le jour venait de faire — la régression que ce module documentait. Sa seule
+valeur propre était le découpage *par thème* plutôt qu'en ordre linéaire, et
+rien ne justifiait de la réserver au rattrapage nocturne : elle vit
+désormais dans ``MemoryConsolidator._extract_and_store`` (via
+``memory/themes.py``), sur toute fenêtre assez grosse pour être découpée,
+avec un checkpoint qui suit. La nuit ne garde que ce qu'elle seule sait
+faire — relire la journée entière et fusionner.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, time as dt_time, timedelta
+from datetime import date
 
 from asgiref.sync import sync_to_async
-from django.utils import timezone
 
 from configs.runtime import cfg_int
-from memory.storage.vector_store import souvenir_metadata, vector_call
-from memory.storage.window import user_facing_messages
+from memory.storage.vector_store import vector_call
 from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
-# Les quatre valeurs ci-dessous sont réglables (``memory.reorg_*``) ; elles
-# restent déclarées ici comme repli quand le registre est hors d'atteinte.
-MAX_CLUSTERS = 20
-# Volume max de verbatim envoyé à l'extraction pour UN cluster.
-MAX_CLUSTER_CHARS = 6000
-# Un cluster d'un seul chunk minuscule est du bruit, pas un thème.
-MIN_CLUSTER_CHARS = 200
+# Réglable (``memory.reorg_max_merges_per_night``) ; déclaré ici comme repli
+# quand le registre est hors d'atteinte.
 MAX_MERGES_PER_NIGHT = 50
-
-
-def _cluster_greedy(
-    chunks: list[dict], threshold: float, max_clusters: int | None = None,
-) -> list[list[dict]]:
-    """Clustering greedy cosinus sur embeddings stockés. Pur, déterministe
-    (ordre chronologique par ts).
-
-    ``max_clusters`` non fourni = le réglage ``memory.reorg_max_clusters``. Il
-    est lu dans le corps et non en défaut d'argument, un défaut étant évalué à
-    l'import — donc avant que la base soit joignable.
-    """
-    import numpy as np
-
-    if max_clusters is None:
-        max_clusters = cfg_int(
-            "memory.reorg_max_clusters", MAX_CLUSTERS, mini=1, maxi=200,
-        )
-
-    ordered = sorted(
-        (c for c in chunks if c.get("embedding") is not None),
-        key=lambda c: (c.get("metadata") or {}).get("ts", 0.0),
-    )
-    clusters: list[dict] = []
-    for c in ordered:
-        v = np.asarray(c["embedding"], dtype=float)
-        norm = float(np.linalg.norm(v)) or 1.0
-        v = v / norm
-        best, best_sim = None, -1.0
-        for cl in clusters:
-            sim = float(v @ cl["centroid"])
-            if sim > best_sim:
-                best, best_sim = cl, sim
-        if best is not None and (best_sim >= threshold or len(clusters) >= max_clusters):
-            best["items"].append(c)
-            best["sum"] = best["sum"] + v
-            s_norm = float(np.linalg.norm(best["sum"])) or 1.0
-            best["centroid"] = best["sum"] / s_norm
-        else:
-            clusters.append({"centroid": v, "sum": v.copy(), "items": [c]})
-    return [cl["items"] for cl in clusters]
 
 
 class NightlyReorg:
 
     async def run(self, night: date) -> dict:
         """Une passe complète pour la journée ``night``. Ne lève jamais."""
-        stats = {"chunks": 0, "clusters": 0, "extracted": 0, "merges": 0}
-        try:
-            stats.update(await self._extract_by_theme(night))
-        except Exception as exc:
-            degradations.record("reorg: extraction par theme", exc)
+        stats = {"merges": 0}
         try:
             stats["merges"] = await self._dedup_souvenirs(night)
         except Exception as exc:
             degradations.record("reorg: dedoublonnage", exc)
-        logger.info(
-            "Reorg nocturne (%s): %d chunks, %d clusters, %d extractions, %d fusions",
-            night, stats["chunks"], stats["clusters"],
-            stats["extracted"], stats["merges"],
-        )
+        logger.info("Reorg nocturne (%s): %d fusion(s)", night, stats["merges"])
         return stats
 
-    # ── Étape 1+2 : clustering + extraction par thème ────────────
-
-    async def _extract_by_theme(self, night: date) -> dict:
-        from configs.service import config_service
-        from memory.manager import memory_manager
-
-        store = memory_manager.vector_store
-        consolidator = memory_manager.consolidator
-        extractor = memory_manager.extractor
-        if store is None or consolidator is None or extractor is None:
-            return {"chunks": 0, "clusters": 0, "extracted": 0}
-
-        start = timezone.make_aware(datetime.combine(night, dt_time.min))
-        end = start + timedelta(days=1)
-        chunks = await vector_call(store.get_exchanges_between)(
-            start.timestamp(), end.timestamp(), include_embeddings=True,
-        )
-        if not chunks:
-            return {"chunks": 0, "clusters": 0, "extracted": 0}
-
-        try:
-            threshold = float(config_service.get("memory.reorg_cluster_similarity"))
-        except Exception:
-            threshold = 0.55
-
-        clusters = await sync_to_async(_cluster_greedy, thread_sensitive=False)(
-            chunks, threshold,
-        )
-
-        checkpoint = await self._extraction_checkpoint()
-
-        plancher_cluster = cfg_int(
-            "memory.reorg_min_cluster_chars", MIN_CLUSTER_CHARS, mini=0, maxi=5000,
-        )
-        extracted = 0
-        used_clusters = 0
-        for items in clusters:
-            total_chars = sum(len(c.get("content") or "") for c in items)
-            if total_chars < plancher_cluster:
-                continue
-            messages = await self._fetch_cluster_messages(
-                items, min_message_id=checkpoint,
-            )
-            if not messages:
-                continue
-            used_clusters += 1
-            interlocutors = await self._cluster_interlocutors(items)
-            msg_dicts = [
-                {"role": m["role"], "content": m["content"]} for m in messages
-            ]
-            try:
-                extractions = await extractor.analyze_messages(msg_dicts)
-                if extractions is None:
-                    continue
-                counts = await consolidator.store_extractions(
-                    extractions, interlocutors=interlocutors,
-                    occurred_at=messages[-1].get("created_at"),
-                )
-                extracted += sum(counts.values())
-            except Exception as exc:
-                degradations.record("reorg: extraction cluster", exc)
-
-        return {"chunks": len(chunks), "clusters": used_clusters, "extracted": extracted}
-
-    @staticmethod
-    async def _extraction_checkpoint() -> int:
-        from memory.models import ConsolidationLog
-
-        return await sync_to_async(
-            lambda: ConsolidationLog.objects.order_by("-pk")
-            .values_list("last_message_id", flat=True)
-            .first()
-            or 0
-        )()
-
-    @staticmethod
-    async def _fetch_cluster_messages(
-        items: list[dict], *, min_message_id: int = 0,
-    ) -> list[dict]:
-        """Verbatim SQL des plages du cluster, borné à MAX_CLUSTER_CHARS.
-
-        ``min_message_id`` = le checkpoint du consolidateur : en dessous, le
-        fil de l'eau a déjà extrait, et un cluster entièrement couvert repart
-        vide (donc sans appel LLM ni doublon).
-        """
-        from django.db.models import Q
-
-        from memory.models import Message
-
-        ranges = []
-        for c in items:
-            meta = c.get("metadata") or {}
-            first, last = meta.get("first_message_id"), meta.get("last_message_id")
-            if first and last:
-                ranges.append((int(first), int(last)))
-        if not ranges:
-            return []
-
-        plafond = cfg_int(
-            "memory.reorg_max_cluster_chars", MAX_CLUSTER_CHARS, mini=500, maxi=50000,
-        )
-
-        def _fetch():
-            q = Q()
-            for first, last in ranges:
-                q |= Q(pk__gte=first, pk__lte=last)
-            rows = list(
-                user_facing_messages(
-                    Message.objects.filter(q).filter(pk__gt=min_message_id)
-                )
-                .order_by("pk")
-                .values("id", "role", "content", "person_id", "created_at")
-            )
-            out, size = [], 0
-            for r in rows:
-                size += len(r.get("content") or "")
-                if size > plafond:
-                    break
-                out.append(r)
-            return out
-
-        return await sync_to_async(_fetch)()
-
-    @staticmethod
-    async def _cluster_interlocutors(items: list[dict]) -> list:
-        from identity.resolver import identity_resolver
-        from identity.trust import is_internal_person
-
-        handles = {
-            (c.get("metadata") or {}).get("handle") or "" for c in items
-        }
-        out, seen = [], set()
-        for handle in sorted(handles):
-            if not handle or is_internal_person(handle):
-                continue
-            try:
-                entity = await identity_resolver.entity_for_person(handle)
-            except Exception:
-                entity = None
-            if entity is not None and entity.pk not in seen:
-                seen.add(entity.pk)
-                out.append(entity)
-        return out
-
-    # ── Étape 3 : dédoublonnage des souvenirs du jour ────────────
+    # ── Dédoublonnage des souvenirs du jour ──────────────────────
 
     async def _dedup_souvenirs(self, night: date) -> int:
         from configs.service import config_service

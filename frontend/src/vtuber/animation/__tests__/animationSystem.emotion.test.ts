@@ -17,6 +17,7 @@ interface MachineStub {
   idleVariantName: string | null;
   setIdleVariant(name: string | null): void;
   requestGesture(loaded: LoadedClip): boolean;
+  setAffect(emotion: EmotionName, intensity: number): void;
 }
 
 function harness() {
@@ -32,6 +33,7 @@ function harness() {
       gestures.push(loaded.name);
       return true;
     },
+    setAffect() {},
   };
 
   const system = new AnimationSystem();

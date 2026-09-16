@@ -660,10 +660,13 @@ CONFIG_SCHEMA = [
         key="conscience.ennui.intensite", type="float",
         section="conscience", group=_GROUPE_PENSEES,
         label="Intensité du glissement vers l'ennui",
-        default=0.25, min=0.0, max=1.0, hot_reload=True,
+        default=0.4, min=0.0, max=1.0, hot_reload=True,
         hint="Une teinte, pas une crise : sous la porte de débordement "
              "d'humeur (0.7), l'ennui colore sans jamais forcer une prise "
-             "de parole à lui seul. À 0, l'ennui n'existe pas.",
+             "de parole à lui seul. À 0, l'ennui n'existe pas. Mesuré : à "
+             "0.25, une impulsion par demi-heure sous une constante de temps "
+             "globale de 23 min ne s'accumule pas et l'humeur lit "
+             "« nostalgique » ; à 0.4 elle lit « ennuyée ».",
     ),
     ConfigGroup(
         section="conscience", key="Manque", order=21,

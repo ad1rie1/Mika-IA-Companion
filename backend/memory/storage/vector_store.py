@@ -235,21 +235,51 @@ class VectorStore:
     def get_exchanges_between(
         self, since_ts: float, until_ts: float, include_embeddings: bool = False,
     ) -> list[dict]:
-        """Chunks d'une plage temporelle — l'entrée du clustering nocturne.
+        """Chunks d'une plage temporelle.
 
         Renvoie ``[{id, content, metadata, embedding?}]``. Les embeddings
-        stockés sont réutilisés tels quels : la nuit ne ré-encode jamais.
+        stockés sont réutilisés tels quels : personne ne ré-encode.
         """
-        include = ["documents", "metadatas"]
-        if include_embeddings:
-            include.append("embeddings")
         got = self._echanges.get(
             where={"$and": [
                 {"ts": {"$gte": float(since_ts)}},
                 {"ts": {"$lt": float(until_ts)}},
             ]},
-            include=include,
+            include=self._include_exchanges(include_embeddings),
         )
+        return self._rows_from_get(got, include_embeddings)
+
+    def get_exchanges_for_messages(
+        self, min_message_id: int, max_message_id: int,
+        include_embeddings: bool = False,
+    ) -> list[dict]:
+        """Chunks dont la plage de messages chevauche ``[min, max]`` —
+        l'entrée du découpage par thème du consolidateur.
+
+        Un chunk couvre ``[first_message_id, last_message_id]`` et un message
+        appartient à au plus un chunk ; chevaucher la fenêtre suffit, le
+        consolidateur ne garde de chaque chunk que les messages de SA
+        fenêtre. Même forme de retour que ``get_exchanges_between``.
+        """
+        got = self._echanges.get(
+            where={"$and": [
+                {"last_message_id": {"$gte": int(min_message_id)}},
+                {"first_message_id": {"$lte": int(max_message_id)}},
+            ]},
+            include=self._include_exchanges(include_embeddings),
+        )
+        return self._rows_from_get(got, include_embeddings)
+
+    @staticmethod
+    def _include_exchanges(include_embeddings: bool) -> list[str]:
+        include = ["documents", "metadatas"]
+        if include_embeddings:
+            include.append("embeddings")
+        return include
+
+    @staticmethod
+    def _rows_from_get(got: dict, include_embeddings: bool) -> list[dict]:
+        """``collection.get`` → ``[{id, content, metadata, embedding?}]``."""
         out = []
         ids = got.get("ids") or []
         embeddings = got.get("embeddings")

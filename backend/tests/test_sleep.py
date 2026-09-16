@@ -944,3 +944,60 @@ class TestSommeilProfondSuitLeProfil:
         s._digest_ruminations.assert_awaited_once()
         run_reorg.assert_awaited_once_with(night)
         assert s.phase == SleepPhase.DEEP_SLEEP
+
+
+@pytest.mark.django_db(transaction=True)
+class TestPhaseReorgJournalisee:
+    """La phase 4 ne fait plus que dédoublonner ; ce qu'elle rend est
+    journalisé par le cycle, pour qu'une nuit sans fusion se distingue d'une
+    nuit où la phase n'a pas tourné."""
+
+    @pytest.fixture(autouse=True)
+    def _clean(self):
+        from conscience.models import Rumination
+        from memory.models import DailyJournal, Dream, Souvenir
+        Rumination.objects.all().delete()
+        Souvenir.objects.all().delete()
+        DailyJournal.objects.all().delete()
+        Dream.objects.all().delete()
+        yield
+
+    @pytest.mark.asyncio
+    async def test_la_phase_4_tourne_et_journalise_les_fusions(self, caplog):
+        import logging
+
+        from drives.state import DriveKind
+        from memory import reorg as reorg_mod
+        from memory.sleep import SleepCycle, SleepPhase
+
+        s = SleepCycle()
+        night = date(2026, 4, 17)
+        s._last_journal_date = night
+        s._last_dream_night = night
+        s._dreams_this_night = 99
+        s._last_digestion_night = night
+
+        caplog.set_level(logging.INFO, logger="memory.sleep")
+        with (
+            patch("memory.sleep.datetime", wraps=datetime) as mock_dt,
+            patch("pipeline.broadcast.broadcast_inner_state_update",
+                  new_callable=AsyncMock),
+            patch("conscience.engine.conscience_engine") as mock_cons,
+            patch("drives.engine.drive_engine") as mock_drives,
+            patch.object(reorg_mod.nightly_reorg, "run",
+                         AsyncMock(return_value={"merges": 3})) as run_reorg,
+        ):
+            mock_dt.now.return_value = datetime(2026, 4, 18, 4, 30)
+            mock_cons.get_idle_seconds.return_value = 3600.0
+            rest = MagicMock()
+            rest.tension = 0.0
+            mock_drives.states = {DriveKind.REST: rest}
+            await s.run_if_due()
+
+        run_reorg.assert_awaited_once_with(night)
+        assert s._last_reorg_night == night
+        assert s.phase == SleepPhase.DEEP_SLEEP
+        assert any(
+            "3 fusion" in r.getMessage() for r in caplog.records
+            if r.name == "memory.sleep"
+        ), [r.getMessage() for r in caplog.records]

@@ -9,6 +9,23 @@ export type { VoiceProfile } from "../types";
 
 const NEUTRAL_PROFILE: VoiceProfile = { pitch: 1.0, rate: 1.0, gain: 1.0 };
 
+/** Ce qu'il est advenu d'un `speak()` : joué (même coupé en route) ou
+ * jamais commencé (muet, vidé par un mute ou un stop). */
+export type SpeakOutcome = "played" | "skipped";
+
+export interface SpeakHooks {
+  /**
+   * Appelé à l'instant où CET énoncé commence réellement — après le
+   * silence de réveil, après ceux qui le précédaient dans la file. C'est là
+   * que ce qui doit coïncider avec la voix (l'émotion du visage, le geste
+   * du corps) doit s'appliquer, et non à la réception de la frame : deux
+   * répliques rapprochées faisaient sinon changer le visage sur la seconde
+   * pendant que la voix disait encore la première — le défaut déjà corrigé
+   * pour la bouche via onUtteranceStart, étendu au reste du corps.
+   */
+  onStart?: () => void;
+}
+
 // Temps que chaque effet non verbal occupe dans la restitution. Sert de
 // budget d'attente à playSfx et de durée de silence au plan de lip-sync :
 // deux valeurs distinctes se seraient désynchronisées de la bouche.
@@ -41,7 +58,15 @@ export interface TTSEvents {
    * Passing the text back here lets the caller derive the plan
    * (`lipSyncPlan(text)`) at the moment it actually applies.
    */
-  onUtteranceStart?: (text: string) => void;
+  onUtteranceStart?: (text: string, rate: number) => void;
+  /**
+   * « La voix en est à ce caractère du texte de la réponse. » Émis à
+   * `utterance.onstart` (index du début du morceau qui sonne) et, là où le
+   * navigateur les fournit, à chaque frontière de mot (`onboundary`). Le
+   * lip-sync s'y recale : l'estimation texte ne peut plus dériver de toute
+   * la latence de synthèse ni se terminer avant la voix.
+   */
+  onSpeechProgress?: (charIndex: number) => void;
 }
 
 // Emotion-to-voice modulation: pitch and rate adjustments
@@ -89,6 +114,8 @@ export class TTSService {
     text: string;
     emotion: EmotionName;
     profile: VoiceProfile;
+    hooks: SpeakHooks | undefined;
+    settle: (outcome: SpeakOutcome) => void;
   }> = [];
   private processing = false;
   // Next speak() call will be prefixed with this many ms of silence.
@@ -127,25 +154,32 @@ export class TTSService {
   private parseSegments(
     text: string
   ): Array<
-    | { type: "speech"; text: string }
+    | { type: "speech"; text: string; start: number }
     | { type: "pause"; ms: number }
     | { type: "sfx"; kind: "sigh" | "laugh" | "breath" }
   > {
     const TOKEN_RE = /\[(PAUSE(?::(\d+))?|SIGH|LAUGH|BREATH)\]/gi;
     const segments: Array<
-      | { type: "speech"; text: string }
+      | { type: "speech"; text: string; start: number }
       | { type: "pause"; ms: number }
       | { type: "sfx"; kind: "sigh" | "laugh" | "breath" }
     > = [];
+
+    // `start` est l'index du premier caractère RETENU dans le texte
+    // complet : la synthèse rapporte ses frontières de mot relativement au
+    // morceau qu'elle joue, et c'est cet offset qui les ramène au texte.
+    const pushSpeech = (from: number, to: number) => {
+      const raw = text.slice(from, to);
+      const lead = raw.length - raw.trimStart().length;
+      const chunk = raw.trim();
+      if (chunk) segments.push({ type: "speech", text: chunk, start: from + lead });
+    };
 
     let cursor = 0;
     let match: RegExpExecArray | null;
     while ((match = TOKEN_RE.exec(text)) !== null) {
       // Text before the token
-      if (match.index > cursor) {
-        const chunk = text.slice(cursor, match.index).trim();
-        if (chunk) segments.push({ type: "speech", text: chunk });
-      }
+      if (match.index > cursor) pushSpeech(cursor, match.index);
       const kind = match[1].toUpperCase();
       if (kind.startsWith("PAUSE")) {
         const ms = match[2] ? parseInt(match[2], 10) : 500;
@@ -160,10 +194,7 @@ export class TTSService {
       cursor = match.index + match[0].length;
     }
     // Trailing text
-    if (cursor < text.length) {
-      const chunk = text.slice(cursor).trim();
-      if (chunk) segments.push({ type: "speech", text: chunk });
-    }
+    if (cursor < text.length) pushSpeech(cursor, text.length);
     return segments;
   }
 
@@ -176,7 +207,9 @@ export class TTSService {
    */
   lipSyncPlan(text: string): SpeechPlanSegment[] {
     return this.parseSegments(text).map((seg) => {
-      if (seg.type === "speech") return { type: "speech", text: seg.text };
+      if (seg.type === "speech") {
+        return { type: "speech", text: seg.text, start: seg.start };
+      }
       const ms = seg.type === "pause" ? seg.ms : SFX_DURATION_MS[seg.kind];
       return { type: "silence", ms };
     });
@@ -380,7 +413,7 @@ export class TTSService {
   setMuted(muted: boolean) {
     this.muted = muted;
     if (muted) {
-      this.speechQueue.length = 0;
+      this.dropQueue();
       this.nextPreDelayMs = 0;
       this.interruptEpoch++;
       if ("speechSynthesis" in window) {
@@ -394,6 +427,11 @@ export class TTSService {
     return this.muted;
   }
 
+  /** Replies still waiting behind the one in flight. */
+  get queuedCount(): number {
+    return this.speechQueue.length;
+  }
+
   private muted = false;
 
   // Jeton d'interruption, incrémenté par `setMuted(true)` et par `stop()`.
@@ -402,16 +440,25 @@ export class TTSService {
   // et abandonne les segments restants dès qu'elle change.
   private interruptEpoch = 0;
 
-  async speak(
+  /**
+   * Met le texte en file. La promesse se résout quand l'énoncé a fini de
+   * jouer (ou dès qu'il est certain qu'il ne jouera pas) : c'est ce qui
+   * permet à l'appelant de savoir qu'une réplique vocale est encore en vol
+   * — et donc que le visage lui appartient.
+   */
+  speak(
     text: string,
     emotion: EmotionName = "neutral",
-    profile: VoiceProfile = NEUTRAL_PROFILE
-  ) {
-    if (this.muted) return;
-    this.speechQueue.push({ text, emotion, profile });
-    if (!this.processing) {
-      this.processQueue();
-    }
+    profile: VoiceProfile = NEUTRAL_PROFILE,
+    hooks?: SpeakHooks
+  ): Promise<SpeakOutcome> {
+    if (this.muted) return Promise.resolve("skipped");
+    return new Promise<SpeakOutcome>((settle) => {
+      this.speechQueue.push({ text, emotion, profile, hooks, settle });
+      if (!this.processing) {
+        this.processQueue();
+      }
+    });
   }
 
   private async processQueue() {
@@ -419,17 +466,36 @@ export class TTSService {
 
     while (this.speechQueue.length > 0) {
       const item = this.speechQueue.shift()!;
-      await this.speakImmediate(item.text, item.emotion, item.profile);
+      let outcome: SpeakOutcome = "skipped";
+      try {
+        outcome = await this.speakImmediate(item.text, item.emotion, item.profile, item.hooks);
+      } finally {
+        item.settle(outcome);
+      }
     }
 
     this.processing = false;
   }
 
+  /** Vide la file en prévenant chaque item qu'il ne jouera jamais. */
+  private dropQueue() {
+    const dropped = this.speechQueue.splice(0, this.speechQueue.length);
+    for (const item of dropped) item.settle("skipped");
+  }
+
+  /** Débit effectif d'un énoncé : modulation d'émotion × identité vocale,
+   * borné comme `utterance.rate` l'est. */
+  effectiveRate(emotion: EmotionName, profile: VoiceProfile = NEUTRAL_PROFILE): number {
+    const voiceMod = EMOTION_VOICE[emotion] || EMOTION_VOICE.neutral;
+    return clampRate(voiceMod.rate * profile.rate);
+  }
+
   private async speakImmediate(
     text: string,
     emotion: EmotionName,
-    profile: VoiceProfile = NEUTRAL_PROFILE
-  ): Promise<void> {
+    profile: VoiceProfile = NEUTRAL_PROFILE,
+    hooks?: SpeakHooks
+  ): Promise<SpeakOutcome> {
     this.activeProfile = profile;
     // Consume any pending wake-up delay before the actual utterance.
     // Drained here (not in processQueue) so back-to-back speeches within
@@ -440,12 +506,14 @@ export class TTSService {
       await new Promise((r) => setTimeout(r, delay));
     }
 
+    // Un mute arrivé pendant le silence de réveil : l'énoncé ne joue pas.
+    if (this.muted) return "skipped";
+
     // Ce tour précis commence maintenant — pas au moment où speak() l'a mis
     // en file, ni pendant le silence du réveil ci-dessus. C'est le signal
-    // sur lequel le lip-sync doit se caler (voir onUtteranceStart).
-    if (!this.muted) {
-      this.events.onUtteranceStart?.(text);
-    }
+    // sur lequel le lip-sync et le visage doivent se caler.
+    hooks?.onStart?.();
+    this.events.onUtteranceStart?.(text, this.effectiveRate(emotion, profile));
 
     // Parse non-verbal tokens and handle the segmented path if any are
     // present. Fall through to the single-utterance path when the text
@@ -453,9 +521,10 @@ export class TTSService {
     const hasTokens = /\[(PAUSE(?::\d+)?|SIGH|LAUGH|BREATH)\]/i.test(text);
     if (hasTokens) {
       await this.speakSegmented(text, emotion);
-      return;
+    } else {
+      await this.speakTextChunk(text, emotion);
     }
-    await this.speakTextChunk(text, emotion);
+    return "played";
   }
 
   /**
@@ -488,7 +557,7 @@ export class TTSService {
 
       if (seg.type === "speech") {
         emitStart();
-        await this.speakTextChunk(seg.text, emotion, /*suppressEvents*/ true);
+        await this.speakTextChunk(seg.text, emotion, /*suppressEvents*/ true, seg.start);
       } else if (seg.type === "pause") {
         await new Promise((r) => setTimeout(r, seg.ms));
       } else if (seg.type === "sfx") {
@@ -512,7 +581,8 @@ export class TTSService {
   private speakTextChunk(
     text: string,
     emotion: EmotionName,
-    suppressEvents = false
+    suppressEvents = false,
+    charBase = 0
   ): Promise<void> {
     return new Promise((resolve) => {
       // Muet : ne jamais relancer la synthèse. Couvre la course entre le
@@ -549,8 +619,18 @@ export class TTSService {
 
       utterance.onstart = () => {
         this.isSpeaking = true;
+        // Le son commence ici, pas à la mise en file : premier recalage.
+        this.events.onSpeechProgress?.(charBase);
         if (!suppressEvents) {
           this.events.onSpeakStart();
+        }
+      };
+
+      // Frontières de mot (Chrome/Edge avec les voix locales, Firefox) :
+      // `charIndex` est relatif au texte de CET énoncé, d'où l'offset.
+      utterance.onboundary = (e) => {
+        if (e.name === "word") {
+          this.events.onSpeechProgress?.(charBase + e.charIndex);
         }
       };
 
@@ -584,7 +664,7 @@ export class TTSService {
   }
 
   stop() {
-    this.speechQueue = [];
+    this.dropQueue();
     this.interruptEpoch++;
     speechSynthesis.cancel();
     this.forceSpeechEnded();

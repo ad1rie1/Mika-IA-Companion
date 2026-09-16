@@ -18,9 +18,15 @@ import { OverlayContext, type ProceduralOverlay } from "./overlays/Overlay";
 import { BreathingOverlay } from "./overlays/BreathingOverlay";
 import { SleepOverlay } from "./overlays/SleepOverlay";
 import { HeadEmotionOverlay } from "./overlays/HeadEmotionOverlay";
+import { HeadAttentionOverlay, viewerReachable } from "./overlays/HeadAttentionOverlay";
+import { AttentionDirector, type AttentionInput, type AttentionState } from "./attention";
 import { CUE_GESTURE, decideGesture } from "./gestures";
 
 const DEFAULT_MANIFEST_URL = "/animations/manifest.json";
+
+/** How long after the last keystroke she still counts as being listened
+ * to — the gaze rests on the viewer while they type. */
+export const LISTENING_HOLD_S = 2.5;
 
 /**
  * Facade over the whole body-animation stack — the ONLY object main.ts
@@ -29,11 +35,17 @@ const DEFAULT_MANIFEST_URL = "/animations/manifest.json";
  *   1. humanoid.resetNormalizedPose()   clean identity base
  *   2. state machine                    clip scheduling / transitions
  *   3. THREE.AnimationMixer             base layer (bones + hips pos)
- *   4. overlays (additive quaternions)  breathing → sleep tilt → head
- *   5. HandAnimator                     fingers (absolute; clips are
+ *   4. AttentionDirector                where her attention is (pure)
+ *   5. overlays (additive quaternions)  breathing → sleep tilt → emotion
+ *                                       head pose → attention head turn
+ *   6. HandAnimator                     fingers (absolute; clips are
  *                                       stripped of finger tracks)
- *   6. GazeController                   eyes (absolute; clips have none)
- *   7. BlinkController                  blink expression + REM flicker
+ *   7. GazeController                   eyes (absolute; clips have none) —
+ *                                       runs AFTER the head overlays so it
+ *                                       points at the residual (VOR)
+ *   8. BlinkController                  blink expression + REM flicker,
+ *                                       gaze-evoked blinks
+ *   9. FaceIdleController               ARKit micro-expressions
  *
  * main.ts then runs lipSync / environment and calls vtuberModel.update
  * (vrm.update) LAST — that invariant is unchanged from the old system.
@@ -50,10 +62,16 @@ export class AnimationSystem {
   private faceIdle = new FaceIdleController();
   private hands = new HandAnimator();
   private gaze = new GazeController();
+  private director = new AttentionDirector();
   private root: THREE.Object3D | null = null;
+  private camera: THREE.Object3D | null = null;
 
   private sleepPhase: SleepPhase = "awake";
   private speaking = false;
+  private replyPending = false;
+  /** Internal clock (sum of clamped dt) — the typing memo is stamped on it. */
+  private clock = 0;
+  private lastTypingAt = -Infinity;
   private lastOneshotAt: number | null = null;
   private lastPersona: VoicePersona | undefined;
   private _ready = false;
@@ -73,12 +91,16 @@ export class AnimationSystem {
     opts: {
       manifestUrl?: string;
       root?: THREE.Object3D | null;
+      /** Whose position she looks at. Null = no viewer: forward gaze. */
+      camera?: THREE.Object3D | null;
       onProgress?: (done: number, total: number, name: string) => void;
     } = {}
   ): Promise<void> {
     this.root = opts.root ?? null;
+    this.camera = opts.camera ?? null;
     this.hands.setVRM(vrm);
     this.gaze.setVRM(vrm);
+    this.gaze.setCamera(this.camera);
 
     if (!vrm.humanoid) {
       console.warn("AnimationSystem: VRM has no humanoid — body animation disabled");
@@ -93,15 +115,21 @@ export class AnimationSystem {
     this.ctx = new OverlayContext(vrm);
     this.ctx.sleepPhase = this.sleepPhase;
     this.ctx.speaking = this.speaking;
+    this.ctx.persona = this.lastPersona;
+    this.ctx.camera = this.camera;
     this.overlays = [
       new BreathingOverlay(),
       new SleepOverlay(),
       new HeadEmotionOverlay(),
+      // Last of the head writers: it measures the viewer in the head frame
+      // as everything above posed it, so its turn is the residual.
+      new HeadAttentionOverlay(),
     ];
 
     // Re-apply signals that may have arrived before init.
     this.machine.setSpeaking(this.speaking);
     this.machine.setSleepPhase(this.sleepPhase);
+    this.machine.setAffect(this.ctx.emotion, this.ctx.intensity);
     this.machine.start();
     this.vrm = vrm; // update() starts animating from this point on
 
@@ -122,6 +150,7 @@ export class AnimationSystem {
     if (!vrm || !ctx) return;
 
     const dt = Math.min(delta, 0.1);
+    this.clock += dt;
 
     if (this.machine && this.mixer && vrm.humanoid) {
       // Identity base every frame: a clip missing some tracks degrades
@@ -135,11 +164,32 @@ export class AnimationSystem {
       this.mixer.update(dt);
     }
 
+    // Where her attention is, decided before any head writer runs. The
+    // reachability it reads was measured last frame — one frame of lag on
+    // "is the viewer behind me" is nothing.
+    const input: AttentionInput = {
+      speaking: this.speaking,
+      replyPending: this.replyPending,
+      listening: this.clock - this.lastTypingAt < LISTENING_HOLD_S,
+      persona: ctx.persona,
+      emotion: ctx.emotion,
+      intensity: ctx.intensity,
+      sleepPhase: this.sleepPhase,
+      reachable:
+        ctx.camera !== null &&
+        ctx.viewerMeasured &&
+        viewerReachable(ctx.viewerYaw, ctx.viewerPitch),
+      viewerAngle: ctx.viewerMeasured ? Math.hypot(ctx.viewerYaw, ctx.viewerPitch) : 0,
+    };
+    const intent = this.director.update(dt, input);
+    ctx.attention = intent;
+
     for (const overlay of this.overlays) {
       overlay.update(dt, ctx);
     }
     this.hands.update(dt);
-    this.gaze.update(dt);
+    this.gaze.update(dt, intent);
+    ctx.gazeShift = intent.shift;
     this.blink.update(dt, ctx);
     // Micro-expressions last: ARKit shapes, disjoint from the emotion
     // shapes, the lip-sync visemes and `blink`, so all four compose.
@@ -155,6 +205,19 @@ export class AnimationSystem {
     this.machine?.setSpeaking(speaking);
   }
 
+  /** A message was accepted and no reply came yet: she is composing —
+   * the gaze goes up and to the side with brief check-ins. Cleared by the
+   * reply; the director also gives up on its own after THINKING_MAX_S. */
+  setReplyPending(pending: boolean): void {
+    this.replyPending = pending;
+  }
+
+  /** The person in front of her typed something just now: listening
+   * gaze — eyes on them, fewer aversions — for LISTENING_HOLD_S. */
+  noteUserTyping(): void {
+    this.lastTypingAt = this.clock;
+  }
+
   setEmotion(
     emotion: EmotionName,
     intensity: number,
@@ -165,7 +228,10 @@ export class AnimationSystem {
     const clamped = Math.max(0, Math.min(1, intensity));
     // Ambient drift says nothing about how she is speaking, so it must not
     // clear the persona a reply set — playCue reads it after the fact.
-    if (!opts.ambient) this.lastPersona = persona;
+    if (!opts.ambient) {
+      this.lastPersona = persona;
+      if (this.ctx) this.ctx.persona = persona;
+    }
     if (this.ctx) {
       this.ctx.emotion = emotion;
       this.ctx.intensity = clamped;
@@ -174,6 +240,7 @@ export class AnimationSystem {
     this.hands.setEmotion(emotion, clamped);
 
     if (!this.machine) return;
+    this.machine.setAffect(emotion, clamped);
     const decision = decideGesture({
       emotion,
       intensity: clamped,
@@ -282,7 +349,12 @@ export class AnimationSystem {
     intensity: number;
     speaking: boolean;
     clipCount: number;
+    attention: AttentionState;
+    /** Semantic eye angles applied (pitch/yaw, rad). */
+    gaze: { pitch: number; yaw: number };
+    tempo: number;
   } {
+    const applied = this.gaze.applied;
     return {
       state: this.machine?.state ?? "(none)",
       clip: this.machine?.currentClipName ?? null,
@@ -293,6 +365,9 @@ export class AnimationSystem {
       intensity: this.ctx?.intensity ?? 0,
       speaking: this.speaking,
       clipCount: this.library.listNames().length,
+      attention: this.director.currentState,
+      gaze: { pitch: applied.pitch, yaw: applied.yaw },
+      tempo: this.machine?.affectTempo ?? 1,
     };
   }
 

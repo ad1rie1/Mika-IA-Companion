@@ -173,6 +173,8 @@ export class AnimationDebugger {
         `clip: ${s.clip ?? "—"} (${s.clipTime.toFixed(1)}/${s.clipDuration.toFixed(1)}s)<br>` +
         `sommeil: ${s.sleepPhase} · émotion: ${s.emotion}@${s.intensity.toFixed(2)}<br>` +
         `talking: ${s.speaking} · clips: ${s.clipCount}<br>` +
+        `attention: <b>${s.attention}</b> · regard: ${s.gaze.pitch.toFixed(2)}/${s.gaze.yaw.toFixed(2)}` +
+        ` · tempo: ${s.tempo.toFixed(2)}<br>` +
         `<hr style="border-color:#334">` +
         clips
           .map(
