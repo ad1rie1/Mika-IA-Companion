@@ -449,6 +449,12 @@ class TestResumeAfterRestart:
 
 
 @pytest.mark.asyncio
+def _groupes_speech(sent):
+    """Les groupes qui ont reçu une trame ``speech`` — l'état intérieur
+    suit dans une seconde trame, qui n'est pas ce que ces tests mesurent."""
+    return [g for g, p in sent if p["data"]["type"] == "speech"]
+
+
 class TestNoCrossPersonLeak:
     """A message composed for someone is not a message for everyone."""
 
@@ -502,13 +508,13 @@ class TestNoCrossPersonLeak:
         from pipeline.broadcast import BROADCAST_GROUP
 
         sent = await self._send_to("anon_deadbeef")
-        assert [group for group, _ in sent] == [BROADCAST_GROUP]
+        assert _groupes_speech(sent) == [BROADCAST_GROUP]
 
     async def test_mikas_own_thinking_aloud_still_reaches_the_room(self):
         from pipeline.broadcast import BROADCAST_GROUP
 
         sent = await self._send_to("conscience_mika")
-        assert [group for group, _ in sent] == [BROADCAST_GROUP]
+        assert _groupes_speech(sent) == [BROADCAST_GROUP]
 
 
 @pytest.mark.django_db(transaction=True)

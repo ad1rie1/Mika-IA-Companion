@@ -29,8 +29,9 @@ class TestBroadcastToWebSocket:
             from pipeline.broadcast import broadcast_to_websocket
             await broadcast_to_websocket(_output(text="Coucou !", emotion="excited"), source="frontend")
 
-        mock_layer.group_send.assert_called_once()
-        group, payload = mock_layer.group_send.call_args[0]
+        # Deux trames : la réponse d'abord, l'état intérieur ensuite.
+        assert mock_layer.group_send.call_count == 2
+        group, payload = mock_layer.group_send.call_args_list[0][0]
         assert group == "vtuber_broadcast"
         assert payload["type"] == "communication.broadcast"
         data = payload["data"]
@@ -49,7 +50,7 @@ class TestBroadcastToWebSocket:
             from pipeline.broadcast import broadcast_to_websocket
             await broadcast_to_websocket(_output(), source="conscience")
 
-        data = mock_layer.group_send.call_args[0][1]["data"]
+        data = mock_layer.group_send.call_args_list[0][0][1]["data"]
         assert data["source"] == "conscience"
 
 
@@ -143,7 +144,8 @@ class TestTargetedDeliveryNeverLeaks:
             await broadcast_to_websocket(
                 _output(), source="conscience", person_id="conscience_mika",
             )
-        mock_layer.group_send.assert_called_once()
+        trames = [c[0][1]["data"]["type"] for c in mock_layer.group_send.call_args_list]
+        assert trames == ["speech", "inner_state_update"]
 
 
 class TestEmitCommunicationEvent:

@@ -164,6 +164,19 @@ CONFIG_SCHEMA = [
     ),
     _concurrency_item("claude", "Claude", default=0, maximum=64,
                       hint=_HOSTED_CONCURRENCY_HINT),
+    ConfigItem(
+        key="ai.claude.cache_ttl", type="select", section="ai_providers",
+        group="Claude", label="Durée du cache de prompt",
+        default="5m", choices=[("5m", "5 minutes"), ("1h", "1 heure")],
+        hot_reload=True,
+        hint="Le préfixe stable (personnalité, self-concept, déclarations "
+             "d'outils) est relu depuis le cache à 0,1× tant qu'il est "
+             "chaud. 5 min convient à un chat serré ; un compagnon a des "
+             "silences de 5 à 60 min après lesquels tout est réécrit à "
+             "1,25×. 1 h écrit à 2× et relit à 0,1× pendant une heure — "
+             "rentable dès la troisième lecture. Le taux de relecture par "
+             "rôle se lit dans Système › Quotas.",
+    ),
     # OpenAI
     ConfigItem(
         key="ai.openai.api_key", type="secret", section="ai_providers", group="OpenAI",
@@ -529,9 +542,12 @@ CONFIG_SCHEMA = [
     ConfigItem(
         key="ai.preparation.deadline_ms", type="int", section="ai_context",
         group="Préparation", label="Deadline du plan (ms)",
-        default=1500, min=300, max=5000, hot_reload=True,
+        default=2500, min=300, max=5000, hot_reload=True,
         hint="La réponse n'attend JAMAIS la réflexion au-delà : passé ce "
-             "délai, le tour part avec le rappel spéculatif seul.",
+             "délai, le tour part avec le rappel spéculatif seul. Le plan "
+             "tourne pendant les lectures de contexte, donc la plus grande "
+             "partie de ce délai est masquée ; à 1 500 ms un petit modèle "
+             "dépassait souvent — appel payé puis jeté.",
     ),
     ConfigItem(
         key="ai.preparation.min_chars", type="int", section="ai_context",
@@ -583,9 +599,21 @@ CONFIG_SCHEMA = [
     ConfigItem(
         key="ai.context.l5_recall_share", type="float", section="ai_context",
         group="Répartition du contexte", label="Part du rappel mémoire",
-        default=0.06, min=0.0, max=1.0, hot_reload=True,
+        default=0.04, min=0.0, max=1.0, hot_reload=True,
         hint=_PART_HINT + "Couche L5 : souvenirs, connaissances et échanges "
-             "passés retrouvés par recherche sémantique.",
+             "passés retrouvés par recherche sémantique. Rendue dans le tour "
+             "courant, donc jamais relue depuis le cache : derrière un 200 k, "
+             "0,06 en faisait le poste non caché dominant du tour.",
+    ),
+    ConfigItem(
+        key="ai.context.l3_trim_low_ratio", type="float", section="ai_context",
+        group="Rendu du fil", label="Hystérésis d'élagage du fil",
+        default=0.5, min=0.1, max=1.0, hot_reload=True,
+        hint="Quand le fil déborde de sa part L3, il est ramené à cette "
+             "fraction de la part (pas juste sous la borne). Élaguer au fil "
+             "de l'eau changeait le début de l'historique à chaque tour et "
+             "invalidait le préfixe caché chez Claude. 1,0 = l'ancien "
+             "comportement.",
     ),
     ConfigItem(
         key="ai.context.safety_margin", type="float", section="ai_context",

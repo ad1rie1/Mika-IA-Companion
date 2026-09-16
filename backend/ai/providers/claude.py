@@ -36,6 +36,31 @@ _NO_SAMPLING_PREFIXES = (
 )
 
 _CACHE_MARK = {"type": "ephemeral"}
+# TTL accepté par l'API à côté de « ephemeral » (5 min implicite). Toute autre
+# valeur lue en configuration retombe sur le marqueur nu : un TTL inconnu
+# ferait rejeter chaque requête, ce qui coûte plus qu'un cache non prolongé.
+_CACHE_TTL_ALLOWED = ("1h",)
+
+
+def _cache_mark() -> dict:
+    """Le marqueur ``cache_control`` du tour, TTL compris.
+
+    Le cache de 5 min est dimensionné pour un chat serré ; un compagnon a des
+    silences de 5 à 60 min, après lesquels personnalité + self-concept + les
+    ~6 500 tokens d'outils sont réécrits à 1,25×. ``ai.claude.cache_ttl`` à
+    « 1h » écrit à 2× mais relit à 0,1× pendant une heure — rentable dès la
+    troisième lecture. Lu à chaque appel (``hot_reload``), jamais mis en
+    cache ici : le marqueur est copié dans chaque bloc.
+    """
+    try:
+        from configs.service import config_service
+
+        ttl = str(config_service.get("ai.claude.cache_ttl") or "").strip()
+    except Exception:
+        ttl = ""
+    if ttl in _CACHE_TTL_ALLOWED:
+        return {"type": "ephemeral", "ttl": ttl}
+    return dict(_CACHE_MARK)
 
 # Plafond du second essai quand une réponse est tronquée en plein appel
 # d'outil (``stop_reason == "max_tokens"`` avec un bloc ``tool_use``).
@@ -312,7 +337,7 @@ class ClaudeProvider:
                         block.name, str(block.input)[:200],
                     )
                     results.append(await self._execute_tool(handlers, block))
-                results[-1]["cache_control"] = dict(_CACHE_MARK)
+                results[-1]["cache_control"] = _cache_mark()
                 marked_result = results[-1]
                 messages.append({"role": "user", "content": results})
             else:
@@ -366,7 +391,7 @@ class ClaudeProvider:
         system = [{
             "type": "text",
             "text": prompt.system_stable,
-            "cache_control": dict(_CACHE_MARK),
+            "cache_control": _cache_mark(),
         }]
         chat = prompt.chat_messages()
         last_history_idx = len(chat) - 2
@@ -379,7 +404,7 @@ class ClaudeProvider:
                 # block keeps the same shape with or without its marker.
                 block: dict = {"type": "text", "text": m["content"]}
                 if i == last_history_idx:
-                    block["cache_control"] = dict(_CACHE_MARK)
+                    block["cache_control"] = _cache_mark()
                 messages.append({"role": m["role"], "content": [block]})
             else:
                 # Final user turn — per-turn state + message, after every

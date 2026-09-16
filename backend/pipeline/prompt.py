@@ -57,29 +57,57 @@ _TRUNCATION_NOTICE = (
 )
 
 
-def _trim_history_to_l3(history: list[dict], max_chars: int) -> tuple[list[dict], int]:
-    """Garde le bloc le plus récent de l'historique tenant dans ``max_chars``.
+# Quand le fil déborde du budget L3, on ne le ramène pas juste sous la borne :
+# on le ramène à cette FRACTION de la borne. Élaguer message par message, au
+# fil de l'eau, changeait ``messages[0]`` à chaque tour dès que la borne était
+# atteinte — et le préfixe caché chez Claude (système + historique jusqu'au
+# tour précédent) ne matchait plus jamais : ~48 k tokens réécrits à 1,25× à
+# chaque tour au lieu de relus à 0,1×. Avec l'hystérésis, une coupe ouvre de
+# la place pour des dizaines de tours pendant lesquels le préfixe est stable.
+# Même parti que le compacteur (``memory/compaction.py``).
+_L3_TRIM_LOW_RATIO = 0.5
+
+
+def _l3_trim_low_ratio() -> float:
+    from configs.runtime import cfg_float
+
+    return cfg_float(
+        "ai.context.l3_trim_low_ratio", _L3_TRIM_LOW_RATIO, mini=0.1, maxi=1.0,
+    )
+
+
+def _trim_history_to_l3(
+    history: list[dict], max_chars: int, low_ratio: float | None = None,
+) -> tuple[list[dict], int]:
+    """Garde le bloc le plus récent de l'historique, avec hystérésis.
 
     Pur et testable. Le poids d'un message est sa taille de *rendu* (clippée
     à ``HISTORY_MSG_MAX_CHARS``), pour que la borne corresponde à ce qui part
-    réellement sur le réseau. Le fil est contigu : dès qu'un message (en
-    remontant) ne tient plus, tout ce qui est plus ancien est élagué d'un
-    bloc — jamais de trou au milieu. Le tour le plus récent est toujours
-    gardé, même s'il dépasse à lui seul.
+    réellement sur le réseau. Tant que le fil entier tient dans ``max_chars``,
+    il est rendu intact. Quand il déborde, il est ramené au bloc le plus
+    récent tenant dans ``max_chars × low_ratio`` — jamais juste sous la
+    borne, sinon la coupe se répète à chaque tour et le préfixe caché ne
+    matche plus (voir ``_L3_TRIM_LOW_RATIO``). Le fil est contigu : jamais
+    de trou au milieu. Le tour le plus récent est toujours gardé, même s'il
+    dépasse à lui seul.
 
     Retourne ``(kept, dropped_count)``.
     """
     if max_chars <= 0:
         return list(history), 0
-    kept_rev: list[dict] = []
-    used = 0
     # Lu une fois par appel, pas une fois par message : les deux plafonds
     # doivent parler du même chiffre, et le budget d'un tour ne peut pas
     # changer au milieu du fil qu'il découpe.
     plafond_message = history_msg_max_chars()
-    for m in reversed(history):
-        weight = min(len(m.get("content") or ""), plafond_message)
-        if kept_rev and used + weight > max_chars:
+    weights = [min(len(m.get("content") or ""), plafond_message) for m in history]
+    if sum(weights) <= max_chars:
+        return list(history), 0
+    ratio = _l3_trim_low_ratio() if low_ratio is None else low_ratio
+    cible = max(1, int(max_chars * ratio))
+    kept_rev: list[dict] = []
+    used = 0
+    for m, weight in zip(reversed(history), reversed(weights)):
+        if kept_rev and used + weight > cible:
             break
         kept_rev.append(m)
         used += weight
@@ -302,11 +330,20 @@ def build_chat_prompt(context: ConversationContext, message: str) -> ChatPrompt:
     history = list(context.history or [])
     summary = context.conversation_summary
     tools_chars = 0
+    # Le rôle qui SERVIRA ce tour : outillé dès qu'il y a des outils (le cas
+    # nominal — les modules SYSTEM en garantissent). Le budget se calculait
+    # sur ``CONVERSATION`` quel que soit le tour : deux modèles à fenêtres
+    # différentes sur les deux rôles bornaient le tour contre la mauvaise
+    # fenêtre (troncature par la tête dans un sens, place gaspillée dans
+    # l'autre). ``_resolve`` replie ``conversation_tools`` sur
+    # ``conversation`` quand seul le second est mappé, donc le budget suit.
+    role_effectif = None
 
     try:
         from ai.budget import conversation_l3_chars, tool_weight, tools_prompt_chars
         from ai.router import AIRole
 
+        role_effectif = AIRole.CONVERSATION_TOOLS if context.tools else AIRole.CONVERSATION
         tools_chars = tools_prompt_chars(context.tools)
         if tools_chars:
             # Le relevé porte la valeur jusqu'aux appelants sans outils sous la
@@ -315,10 +352,12 @@ def build_chat_prompt(context: ConversationContext, message: str) -> ChatPrompt:
             # viseraient deux tailles : le compactor laisserait grossir jusqu'à
             # 7 864 caractères pendant que le rendu en enverrait 4 000. Un tour
             # sans outils (conscience, `include_tools=False`) ne dit rien du
-            # poids d'un tour outillé et n'écrase donc pas le relevé.
+            # poids d'un tour outillé et n'écrase donc pas le relevé. Noté sous
+            # les deux rôles : le compactor lit la clé ``conversation``.
             tool_weight.note(AIRole.CONVERSATION.value, tools_chars)
+            tool_weight.note(role_effectif.value, tools_chars)
         history, dropped = _trim_history_to_l3(
-            history, conversation_l3_chars(tools_chars),
+            history, conversation_l3_chars(tools_chars, role=role_effectif),
         )
     except Exception as exc:
         degradations.record("prompt: borne historique L3", exc)
@@ -359,7 +398,9 @@ def build_chat_prompt(context: ConversationContext, message: str) -> ChatPrompt:
         )
         from ai.router import AIRole
 
-        budget = budget_for(AIRole.CONVERSATION, tools_chars=tools_chars)
+        budget = budget_for(
+            role_effectif or AIRole.CONVERSATION, tools_chars=tools_chars,
+        )
         if budget is None:
             # Même repli que le budget L3 : « fenêtre non déclarée » ne peut
             # pas vouloir dire « pas de borne », sinon le seul cas où la

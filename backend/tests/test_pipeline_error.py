@@ -69,10 +69,15 @@ class TestErrorDoesNotColorPersonMood:
         pid = "person_under_test_timeout"
         emotion_engine.person_moods.pop(pid, None)
 
+        # La borne appartient au routeur (une seule, ``ai.call_timeout_seconds``
+        # dans ``_metered_call``) : le processeur ne pose plus son propre
+        # ``wait_for`` — deux bornes égales emboîtées faisaient tomber
+        # l'externe en premier et le routeur ne comptait jamais l'usage
+        # d'un tour en timeout. Ce que le processeur voit est donc le
+        # ``TimeoutError`` remonté par le routeur.
         async def hang(*a, **kw):
-            await asyncio.sleep(10)
+            raise asyncio.TimeoutError()
 
-        # Timeout now comes from config_service, not settings.AI_CALL_TIMEOUT.
         real_get = config_service.get
 
         def _fake_get(key, default=None):

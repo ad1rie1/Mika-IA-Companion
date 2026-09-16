@@ -202,6 +202,17 @@ def _quota(request) -> dict:
         logger.exception("instantané de quota indisponible")
         return {"available": False}
 
+    # Le cache de prompt, par rôle : la seule mesure qui dise si le préfixe
+    # stable est réellement relu d'un tour à l'autre (et donc si le TTL de
+    # ``ai.claude.cache_ttl`` convient). Isolé : un agrégat indisponible ne
+    # retire pas l'écran des quotas.
+    try:
+        from ai.router import cache_stats
+        cache = cache_stats.snapshot()
+    except Exception:
+        logger.exception("agrégat du cache de prompt indisponible")
+        cache = []
+
     return {
         "available": True,
         "today": snap.today,
@@ -209,6 +220,7 @@ def _quota(request) -> dict:
         "roles": snap.roles,
         "projects": snap.projects,
         "limits": snap.limits,
+        "cache": cache,
     }
 
 

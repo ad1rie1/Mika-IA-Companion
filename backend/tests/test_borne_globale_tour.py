@@ -637,7 +637,9 @@ class TestCablagePipeline:
         avant = _tour_sans_borne(_contexte_charge(tools))
         budget = self._budget(tools)
         demande = measure_turn(avant) + budget.tools_tokens + budget.max_tokens
-        assert demande > 19_000
+        # ~18 900 depuis que la part L5 vaut 0,04 (DEF-14) ; l'ordre de
+        # grandeur — plus que la fenêtre entière — est ce qui compte.
+        assert demande > 18_000
         assert demande / 16_384 > 1.15
         assert budget.window_overflow(measure_turn(avant)) > 0
 
@@ -728,8 +730,14 @@ class TestCablagePipeline:
         context = _contexte_charge(tools)
         avec = build_chat_prompt(context, "m" * 500)
         sans = _tour_sans_borne(context)
-        assert sum(len(m["content"]) for m in avec.history) <= 4_000
-        assert sum(len(m["content"]) for m in sans.history) > 7_000
+        # L'hystérésis d'élagage (PIPE-04) ramène chaque fil à la moitié de
+        # sa borne : 4 000 → ≤ 2 000 avec les outils, 7 864 → ~3 900 sans.
+        # L'écart entre les deux est ce que ce test mesure.
+        poids_avec = sum(len(m["content"]) for m in avec.history)
+        poids_sans = sum(len(m["content"]) for m in sans.history)
+        assert poids_avec <= 4_000
+        assert poids_sans > 3_000
+        assert poids_sans > poids_avec
 
     def test_le_releve_est_depose_pour_la_compaction(self, fenetre_16k):
         """La compaction décide *quand* replier le fil et appelle

@@ -153,6 +153,7 @@ async def gather_context(
     # réflexion, et tout échec redonne exactement le comportement d'avant.
     memory_context = ""
     note_de_focus = ""
+    prep_task, prep_deadline, spec_task = None, 0.0, None
     if include_memory:
         prep_task, prep_deadline = _launch_preparation(message, person_id)
 
@@ -162,65 +163,15 @@ async def gather_context(
             )
         )
 
-        plan = None
-        if prep_task is not None:
-            try:
-                remaining = max(0.05, prep_deadline - _time.monotonic())
-                plan = await asyncio.wait_for(prep_task, timeout=remaining)
-            except Exception as exc:
-                prep_task.cancel()
-                degradations.record("preparation: attente du plan", exc)
-
-        plan_used = False
-        if plan is not None:
-            if plan.note_de_focus:
-                note_de_focus = (
-                    "(pensée pré-verbale, pas une consigne) " + plan.note_de_focus
-                )
-            if plan.rappels:
-                try:
-                    from pipeline.preparation import execute_plan
-
-                    results = await execute_plan(plan, person_id)
-                    directed = await memory_manager.get_memory_context_multi(
-                        [message] + results.memory_queries,
-                        person_id=person_id,
-                        extra_exchanges=results.exchange_hits,
-                        disclose_others=peut_divulguer,
-                        # Tour émotionnellement chargé → le rappel attend
-                        # davantage aux souvenirs marquants (réflexe humain).
-                        salience_boost=plan.charge_emotionnelle,
-                    )
-                    if directed:
-                        memory_context = directed
-                        plan_used = True
-                except Exception as exc:
-                    degradations.record("preparation: rappel dirige", exc)
-
-        if plan_used:
-            spec_task.cancel()
-        else:
-            try:
-                memory_context = await spec_task
-            except Exception as exc:
-                degradations.record("rappel memoire", exc)
-                logger.warning("Memory retrieval failed, continuing without context")
-                memory_context = ""
-
-        # Un rappel vide est le cas nominal d'une base jeune ; une mémoire
-        # longue en panne ne l'est pas. Le drapeau vient du manager, jamais
-        # déduit d'un bloc vide — sinon le prompt annoncerait une panne dès
-        # le premier jour. Le dire lui permet de répondre « je ne retrouve
-        # pas » au lieu de confabuler.
-        # `is True` et non une vérité pythonique : les tests substituent le
-        # manager par un mock, dont n'importe quel attribut est truthy.
-        if getattr(memory_manager, "recall_unavailable", False) is True:
-            notice = (
-                "[Ta memoire longue est indisponible en ce moment : tu ne "
-                "peux rien y retrouver. Dis-le simplement si ca compte pour "
-                "la conversation, plutot que d'inventer un souvenir.]"
-            )
-            memory_context = f"{notice}\n{memory_context}" if memory_context else notice
+    # ── Tout ce qui ne dépend pas du rappel tourne PENDANT le plan ──────
+    #
+    # Le plan (petit LLM, ~1–2 s) était attendu ICI, avant la dizaine de
+    # lectures qui suivent (self-concept, fiche personne, rythme, humeur,
+    # modules, historique, estime, ruminations, chantiers, rêve, journal,
+    # projet) — toutes en série sur l'exécuteur partagé. En les faisant
+    # d'abord, la deadline du plan est masquée par du travail qu'il fallait
+    # faire de toute façon, et un plan qui arrive en 1,8 s ne coûte plus
+    # 1,8 s de latence au tour.
 
     # Self-concept: latest autobiographical narrative from the consolidator.
     # Best-effort — if the table hasn't been populated yet (no narrative
@@ -343,6 +294,68 @@ async def gather_context(
         except Exception as exc:
             degradations.record("prompt: project detection", exc)
 
+    # ── Le rappel mémoire, maintenant que tout le reste est lu ──────────
+    if include_memory:
+        plan = None
+        if prep_task is not None:
+            try:
+                remaining = max(0.05, prep_deadline - _time.monotonic())
+                plan = await asyncio.wait_for(prep_task, timeout=remaining)
+            except Exception as exc:
+                prep_task.cancel()
+                degradations.record("preparation: attente du plan", exc)
+
+        plan_used = False
+        if plan is not None:
+            if plan.note_de_focus:
+                note_de_focus = (
+                    "(pensée pré-verbale, pas une consigne) " + plan.note_de_focus
+                )
+            if plan.rappels:
+                try:
+                    from pipeline.preparation import execute_plan
+
+                    results = await execute_plan(plan, person_id)
+                    directed = await memory_manager.get_memory_context_multi(
+                        [message] + results.memory_queries,
+                        person_id=person_id,
+                        extra_exchanges=results.exchange_hits,
+                        disclose_others=peut_divulguer,
+                        # Tour émotionnellement chargé → le rappel attend
+                        # davantage aux souvenirs marquants (réflexe humain).
+                        salience_boost=plan.charge_emotionnelle,
+                    )
+                    if directed:
+                        memory_context = directed
+                        plan_used = True
+                except Exception as exc:
+                    degradations.record("preparation: rappel dirige", exc)
+
+        if plan_used:
+            spec_task.cancel()
+        else:
+            try:
+                memory_context = await spec_task
+            except Exception as exc:
+                degradations.record("rappel memoire", exc)
+                logger.warning("Memory retrieval failed, continuing without context")
+                memory_context = ""
+
+        # Un rappel vide est le cas nominal d'une base jeune ; une mémoire
+        # longue en panne ne l'est pas. Le drapeau vient du manager, jamais
+        # déduit d'un bloc vide — sinon le prompt annoncerait une panne dès
+        # le premier jour. Le dire lui permet de répondre « je ne retrouve
+        # pas » au lieu de confabuler.
+        # `is True` et non une vérité pythonique : les tests substituent le
+        # manager par un mock, dont n'importe quel attribut est truthy.
+        if getattr(memory_manager, "recall_unavailable", False) is True:
+            notice = (
+                "[Ta memoire longue est indisponible en ce moment : tu ne "
+                "peux rien y retrouver. Dis-le simplement si ca compte pour "
+                "la conversation, plutot que d'inventer un souvenir.]"
+            )
+            memory_context = f"{notice}\n{memory_context}" if memory_context else notice
+
     # Tools (generic ModuleTool list — the provider does the translation)
     #
     # ``ai.conversation_tool_modules`` narrows the set to an allow-list of
@@ -403,7 +416,7 @@ def _launch_preparation(message: str, person_id: str):
         try:
             deadline_s = float(config_service.get("ai.preparation.deadline_ms")) / 1000.0
         except Exception:
-            deadline_s = 1.5
+            deadline_s = 2.5
 
         history_tail = list(memory_manager.get_conversation_context())[-6:]
         task = asyncio.create_task(
@@ -595,6 +608,20 @@ async def _last_contact_gap(person_id: str) -> str:
         return ""
 
 
+# Mémo id → ``created_at`` des messages du fil (voir ``_stamp_history_gaps``).
+# Borné : au-delà, les plus anciens ids sortent — ce sont aussi ceux qui ont
+# quitté le tampon court terme.
+_MESSAGE_DATES: dict[int, object] = {}
+_MESSAGE_DATES_MAX = 2000
+
+
+def _prune_message_dates() -> None:
+    if len(_MESSAGE_DATES) <= _MESSAGE_DATES_MAX:
+        return
+    for pk in sorted(_MESSAGE_DATES)[: len(_MESSAGE_DATES) - _MESSAGE_DATES_MAX]:
+        _MESSAGE_DATES.pop(pk, None)
+
+
 async def _stamp_history_gaps(history: list[dict]) -> list[dict]:
     """Date les segments d'historique séparés par un trou.
 
@@ -618,12 +645,18 @@ async def _stamp_history_gaps(history: list[dict]) -> list[dict]:
         ids = [m["id"] for m in history if isinstance(m.get("id"), int)]
         if not ids:
             return history
-        dates = {
-            pk: created
+        # ``created_at`` ne change jamais : une date lue une fois vaut pour
+        # la vie du process. Sans ce mémo, c'était un ``SELECT … pk IN (500)``
+        # à chaque tour, sur l'exécuteur partagé, pour relire 498 dates déjà
+        # connues.
+        missing = [pk for pk in ids if pk not in _MESSAGE_DATES]
+        if missing:
             async for pk, created in Message.objects.filter(
-                pk__in=ids
-            ).values_list("id", "created_at")
-        }
+                pk__in=missing
+            ).values_list("id", "created_at"):
+                _MESSAGE_DATES[pk] = created
+            _prune_message_dates()
+        dates = {pk: _MESSAGE_DATES[pk] for pk in ids if pk in _MESSAGE_DATES}
 
         now = timezone.now()
         ecart_min = _history_gap_seconds()

@@ -126,8 +126,11 @@ class TestDispatchRouting:
 
     async def test_unresolved_falls_back_to_broadcast(self, clean_global_registry):
         await broadcast_to_websocket(make_output(), "conscience", "conscience_mika")
+        # La trame speech, puis l'état intérieur sur le même groupe.
         sent_groups = [c.args[0] for c in self.layer.group_send.await_args_list]
-        assert sent_groups == [BROADCAST_GROUP]
+        assert sent_groups == [BROADCAST_GROUP, BROADCAST_GROUP]
+        types = [c.args[1]["data"]["type"] for c in self.layer.group_send.await_args_list]
+        assert types == ["speech", "inner_state_update"]
 
     async def test_module_proactive_calls_deliver(self, clean_global_registry):
         clean_global_registry.register(

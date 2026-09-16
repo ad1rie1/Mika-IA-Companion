@@ -174,7 +174,7 @@ class TestInnerVoiceIdentity:
                 source="conscience",
             )
 
-        data = layer.group_send.call_args[0][1]["data"]
+        data = layer.group_send.call_args_list[0][0][1]["data"]  # la trame speech, l'état suit
         assert data["voice_persona"] == "inner"
         assert data["voice_profile"]["gain"] < 1.0
         assert data["speak"] is True
@@ -403,6 +403,6 @@ class TestScreenDecisionInPayload:
             from pipeline.broadcast import broadcast_to_websocket
             await broadcast_to_websocket(_output(), source="frontend")
 
-        data = layer.group_send.call_args[0][1]["data"]
+        data = layer.group_send.call_args_list[0][0][1]["data"]  # la trame speech, l'état suit
         assert data["speak"] is True
         assert data["voice_reason"] == "screen_ok"

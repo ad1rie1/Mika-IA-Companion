@@ -157,6 +157,9 @@ class TestCeQueLaFrameAnnonce:
             await processor.process_message(
                 Perception.from_text("hey", source="frontend", person_id=pid),
             )
+            # La diffusion vit dans une chaîne détachée (délai « réflexion »
+            # hors du worker) : on la vide avant de lire ce qui est parti.
+            await processor.flush_delayed_broadcasts()
         return sent["output"]
 
     async def test_la_frame_speech_porte_le_tag_du_tour(self, _stub_turn):
@@ -233,6 +236,7 @@ class TestCeQueLaFrameAnnonce:
             await processor.process_message(
                 Perception.from_text("hey", source="frontend", person_id=pid),
             )
+            await processor.flush_delayed_broadcasts()
 
         assert sent["output"].emotion_name == attendu.emotion.value
 

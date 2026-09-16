@@ -49,8 +49,13 @@ async def broadcast_to_websocket(
     """
     channel_layer = get_channel_layer()
 
-    inner_state = await _collect_inner_state(person_id)
-
+    # L'état intérieur (dix chargeurs + quatre requêtes personne, en série
+    # sur l'exécuteur partagé avec les six boucles) était assemblé AVANT
+    # d'envoyer la réponse : la personne attendait la fiche de Mika pour lire
+    # sa phrase. La trame ``speech`` part d'abord ; l'état suit dans une
+    # trame ``inner_state_update`` sur les mêmes groupes (le panneau la
+    # fusionne sans voix ni animation, c'est déjà ce qu'il fait pour les
+    # transitions de sommeil).
     payload = {
         "type": "communication.broadcast",
         "data": {
@@ -62,7 +67,6 @@ async def broadcast_to_websocket(
             "emotion_blend": output.emotion_blend or [],
             "source": source,
             "person_id": person_id,
-            "inner_state": inner_state,
             # Synchronisation cursors. `message_id` is this reply's row;
             # a client stores the highest one it has seen and asks for
             # everything after it when the socket comes back, which is the
@@ -128,14 +132,17 @@ async def broadcast_to_websocket(
             )
             return
         await channel_layer.group_send(BROADCAST_GROUP, payload)
+        await _follow_with_inner_state(channel_layer, [BROADCAST_GROUP], person_id)
         return
 
     delivered = False
     reply_ref = getattr(output, "reply_ref", None)
+    consumer_groups: list[str] = []
     for target in targets:
         if target.is_consumer:
             group = target.delivery_ref or _person_group(person_id)
             await channel_layer.group_send(group, payload)
+            consumer_groups.append(group)
             delivered = True
         elif target.is_module:
             delivered = (
@@ -153,6 +160,28 @@ async def broadcast_to_websocket(
             "broadcast to everyone",
             person_id, ", ".join(t.channel for t in targets),
         )
+    if consumer_groups:
+        # Les modules (Telegram) n'ont pas de panneau : l'état ne va qu'aux
+        # navigateurs qui viennent de recevoir la réponse.
+        await _follow_with_inner_state(channel_layer, consumer_groups, person_id)
+
+
+async def _follow_with_inner_state(channel_layer, groups: list[str], person_id) -> None:
+    """La trame d'état qui suit une ``speech`` — après elle, jamais avant.
+
+    Isolée : un chargeur d'état en panne ne doit pas retirer la réponse
+    déjà envoyée, ni faire remonter une exception dans le tour.
+    """
+    try:
+        inner_state = await _collect_inner_state(person_id)
+        frame = {
+            "type": "communication.broadcast",
+            "data": {"type": "inner_state_update", "inner_state": inner_state},
+        }
+        for group in dict.fromkeys(groups):
+            await channel_layer.group_send(group, frame)
+    except Exception as exc:
+        degradations.record("broadcast: etat interieur apres speech", exc)
 
 
 def _first_consumer(targets):

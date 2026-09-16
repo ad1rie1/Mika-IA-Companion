@@ -65,6 +65,43 @@
     </div>
   </section>
 
+  <section class="card mb-6">
+    <div class="card-head">
+      <h3>Cache de prompt</h3>
+      <span class="card-sub">depuis le démarrage du processus — un taux de relecture bas sur « conversation_tools » signifie que le préfixe stable est réécrit à chaque tour (TTL trop court, ou historique élagué message par message)</span>
+    </div>
+    <div class="card-body flush">
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Rôle</th>
+              <th class="num">Appels</th>
+              <th class="num">Jetons entrée (plein tarif)</th>
+              <th class="num">Relus du cache</th>
+              <th class="num">Écrits en cache</th>
+              <th class="num">Taux de relecture</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in cache %}
+              <tr>
+                <td class="mono">{{ c.role }}</td>
+                <td class="num">{{ c.calls }}</td>
+                <td class="num">{{ c.tokens_in }}</td>
+                <td class="num">{{ c.cache_read }}</td>
+                <td class="num">{{ c.cache_write }}</td>
+                <td class="num">{% widthratio c.hit_ratio 1 100 %} %</td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="6"><span class="muted">Aucun appel enregistré depuis le démarrage.</span></td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
   {% if projects %}
     <section class="card">
       <div class="card-head">

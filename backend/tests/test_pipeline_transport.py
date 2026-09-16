@@ -54,6 +54,8 @@ class TestLeProcesseurRetientLeTransport:
              patch.object(processor, "broadcast_to_websocket",
                           new=AsyncMock()) as diffusion:
             output = await processor.process_message(perception)
+            # La diffusion est différée hors du worker : la vider avant de lire.
+            await processor.flush_delayed_broadcasts()
         return output, persist_q, diffusion
 
     async def test_les_drapeaux_du_tour_sont_ecrits_avec_la_question(self):

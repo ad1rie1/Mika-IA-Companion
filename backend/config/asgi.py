@@ -162,6 +162,14 @@ class LifespanWrapper:
             await turn_queue.stop()
         except Exception:
             logger.exception("Turn queue failed to stop cleanly")
+        # Les diffusions différées (délai « réflexion ») vivent hors du
+        # worker : la file vidée, il peut en rester deux secondes en vol.
+        try:
+            from pipeline.processor import flush_delayed_broadcasts
+
+            await flush_delayed_broadcasts(timeout=5.0)
+        except Exception:
+            logger.exception("Delayed broadcasts failed to flush cleanly")
 
         # Stop dedicated loops first — they only call into sleep_cycle /
         # project_runner state and don't own DB connections, so they shut

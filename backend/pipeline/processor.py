@@ -188,8 +188,13 @@ async def process_message(
     ai_failed = False
     user_message_id: int | None = None
     assistant_message_id: int | None = None
-    from configs.service import config_service
-    timeout_seconds = config_service.get("ai.call_timeout_seconds")
+    # Lu pour le message de log seulement : la borne elle-même est posée par
+    # le routeur (voir l'étape 2).
+    try:
+        from configs.service import config_service
+        timeout_seconds = float(config_service.get("ai.call_timeout_seconds"))
+    except Exception:
+        timeout_seconds = 0.0
 
     try:
         # 1. Assemble context (memory, emotion, modules, self-concept, ...)
@@ -241,23 +246,44 @@ async def process_message(
                 user_message_id = replayed_id
             else:
                 internal = perception.intent is Intent.INTERNAL_TRIGGER
-                user_message_id = await persist_user_message(
-                    message=message,
-                    source=source,
-                    person_id=person_id,
-                    attachments_meta=_serialize_attachments_meta(perception),
-                    # The "user" side of an internal trigger is scaffolding
-                    # Mika wrote to herself, not something anyone said.
-                    is_internal=internal,
-                    # Un brief interne n'est jamais rejoué : rien à retenir
-                    # de son transport.
-                    transport_meta=None if internal else _transport_meta(perception),
-                )
+                # Une écriture qui échoue (base verrouillée) n'est pas une
+                # panne d'IA : servir « j'ai eu un petit bug » sans avoir
+                # appelé le modèle privait la personne d'une réponse que
+                # rien n'empêchait. On répond, on compte l'échec, et la
+                # ligne manquante est la seule chose perdue.
+                try:
+                    user_message_id = await persist_user_message(
+                        message=message,
+                        source=source,
+                        person_id=person_id,
+                        attachments_meta=_serialize_attachments_meta(perception),
+                        # The "user" side of an internal trigger is scaffolding
+                        # Mika wrote to herself, not something anyone said.
+                        is_internal=internal,
+                        # Un brief interne n'est jamais rejoué : rien à retenir
+                        # de son transport.
+                        transport_meta=None if internal else _transport_meta(perception),
+                    )
+                except Exception as exc:
+                    degradations.record("turn: persistance de la question", exc)
+                    logger.warning(
+                        "Question non persistée (person=%s, source=%s): %s — "
+                        "le tour continue sans ligne", person_id, source, exc,
+                    )
+                    user_message_id = None
 
-        # 2. Prompt -> AI call -> emotion extraction (bounded by timeout)
-        response_text, emotion_data, tool_calls = await asyncio.wait_for(
-            call_ai_and_parse(context, message),
-            timeout=timeout_seconds,
+        # 2. Prompt -> AI call -> emotion extraction.
+        #
+        #    UNE seule borne temporelle, celle du routeur (``_metered_call``,
+        #    ``ai.call_timeout_seconds``). Il y en avait deux, égales, l'une
+        #    autour de l'autre : l'externe démarrait avant la construction du
+        #    prompt et l'attente du créneau, donc tombait toujours la
+        #    première — la coroutine interne recevait un ``CancelledError``,
+        #    jamais un ``TimeoutError``, et le routeur ne comptait pas les
+        #    jetons déjà payés d'une boucle d'outils morte à l'itération six.
+        #    Le ``TimeoutError`` du routeur remonte ici tel quel.
+        response_text, emotion_data, tool_calls = await call_ai_and_parse(
+            context, message,
         )
 
         if not (response_text or "").strip():
@@ -281,9 +307,18 @@ async def process_message(
             person_id, source, ure,
         )
         ai_failed = True
+        # Nommer le rôle : « pas de modèle associé » sans dire lequel a
+        # laissé plus d'une install fraîche chercher du côté de
+        # ``conversation`` alors que c'est ``conversation_tools`` qui manquait.
+        role_manquant = getattr(ure, "role", None)
+        precision = (
+            f" au role '{role_manquant.value}'"
+            if getattr(role_manquant, "value", None) else ""
+        )
         response_text = (
             "Je ne suis pas encore configurée pour repondre... "
-            "Mon IA n'a pas de modele associe (Configuration > IA · Roles)."
+            f"Mon IA n'a pas de modele associe{precision} "
+            "(Configuration > IA · Roles)."
         )
         emotion_data = None
     except QuotaExceeded as qe:
@@ -375,14 +410,26 @@ async def process_message(
     #    withholds still is: no emotional impulse, no chat.message event, no
     #    turn signal. She keeps the trace without pretending she answered.
     if persist:
-        assistant_message_id = await persist_assistant_message(
-            response=response_text,
-            person_id=person_id,
-            is_internal=ai_failed,
-            # Closes the question: answered, well or badly. A fallback still
-            # counts, or every boot would replay the same failing turn.
-            replying_to=user_message_id,
-        )
+        try:
+            assistant_message_id = await persist_assistant_message(
+                response=response_text,
+                person_id=person_id,
+                is_internal=ai_failed,
+                # Closes the question: answered, well or badly. A fallback still
+                # counts, or every boot would replay the same failing turn.
+                replying_to=user_message_id,
+            )
+        except Exception as exc:
+            # Même règle qu'à l'écriture de la question : une réponse déjà
+            # reçue du modèle ne devient pas une panne parce que la base
+            # n'a pas pu la garder. Elle part à l'écran ; la mémoire longue
+            # en perd la trace et le registre le dit.
+            degradations.record("turn: persistance de la reponse", exc)
+            logger.warning(
+                "Réponse non persistée (person=%s, source=%s): %s",
+                person_id, source, exc,
+            )
+            assistant_message_id = None
 
     # 5. Emit module event — also skipped on failure.
     if emit_event and not ai_failed:
@@ -495,6 +542,7 @@ async def process_message(
     if ai_failed and perception.intent is Intent.INTERNAL_TRIGGER:
         broadcast = False
     if broadcast:
+        thinking_delay = 0.0
         if not ai_failed:
             try:
                 from drives.engine import drive_engine
@@ -504,15 +552,107 @@ async def process_message(
             thinking_delay = _compute_thinking_delay(
                 response_text=response_text, energy=energy, source=source,
             )
+        # Le délai cosmétique dormait ICI, dans l'unique worker de la file :
+        # deux secondes pendant lesquelles le tour suivant — de n'importe
+        # qui — attendait. Il vit maintenant dans une chaîne de diffusion
+        # détachée qui garde l'ordre des réponses ; le worker rend la main
+        # dès que le tour est calculé et persisté.
+        if thinking_delay > 0 or _broadcast_chain.pending():
             if thinking_delay > 0:
                 logger.debug(
-                    "Thinking delay: %.2fs (words=%d, energy=%.2f)",
-                    thinking_delay, len(response_text.split()), energy,
+                    "Thinking delay: %.2fs (words=%d)",
+                    thinking_delay, len(response_text.split()),
                 )
-                await asyncio.sleep(thinking_delay)
-        await broadcast_to_websocket(output, source, person_id=person_id)
+            _broadcast_chain.schedule(thinking_delay, output, source, person_id)
+        else:
+            await broadcast_to_websocket(output, source, person_id=person_id)
 
     return output
+
+
+class _BroadcastChain:
+    """Diffusions différées, dans l'ordre, hors du worker de la file.
+
+    Chaque diffusion attend la précédente avant son propre délai : deux
+    réponses ne peuvent pas se doubler (la deuxième calculée vite pendant
+    que la première « réfléchit » partirait avant elle, et la voix lirait
+    les répliques à l'envers). Une diffusion qui lève ne casse ni la chaîne
+    ni le tour : le tour est déjà persisté, le client le récupère par
+    curseur. ``flush`` est appelé à l'arrêt pour ne pas perdre les deux
+    dernières secondes d'une conversation.
+    """
+
+    def __init__(self) -> None:
+        self._tail: asyncio.Task | None = None
+        self._tasks: set[asyncio.Task] = set()
+
+    @staticmethod
+    def _sur_cette_boucle(task: asyncio.Task) -> bool:
+        """Une tâche d'une autre boucle (tests : une boucle par test) n'est
+        ni un prédécesseur à attendre ni quelque chose à vider — l'attendre
+        lèverait « attached to a different loop » et perdrait la diffusion."""
+        try:
+            return task.get_loop() is asyncio.get_running_loop()
+        except RuntimeError:
+            return False
+
+    def pending(self) -> bool:
+        return (
+            self._tail is not None
+            and not self._tail.done()
+            and self._sur_cette_boucle(self._tail)
+        )
+
+    def schedule(self, delay: float, output, source: str, person_id: str | None) -> None:
+        previous = self._tail if self.pending() else None
+        task = asyncio.create_task(
+            self._run(previous, delay, output, source, person_id)
+        )
+        self._tail = task
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    @staticmethod
+    async def _run(previous, delay: float, output, source: str, person_id) -> None:
+        if previous is not None:
+            # ``wait`` ne relève jamais l'issue du prédécesseur (échec ou
+            # annulation) : seule NOTRE annulation peut sortir d'ici, et elle
+            # doit sortir — un ``except BaseException`` autour d'un ``shield``
+            # aurait avalé l'annulation de l'arrêt et diffusé quand même.
+            await asyncio.wait([previous])
+        if delay > 0:
+            await asyncio.sleep(delay)
+        try:
+            await broadcast_to_websocket(output, source, person_id=person_id)
+        except Exception as exc:
+            degradations.record("turn: diffusion differee", exc)
+            logger.exception("Diffusion différée en échec (person=%s)", person_id)
+
+    async def flush(self, timeout: float = 5.0) -> None:
+        """Attend les diffusions en attente — borné, jamais bloquant à l'arrêt."""
+        pending = [
+            t for t in self._tasks if not t.done() and self._sur_cette_boucle(t)
+        ]
+        if not pending:
+            return
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*pending, return_exceptions=True), timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "%d diffusion(s) différée(s) abandonnée(s) à l'arrêt", len(pending),
+            )
+            for t in pending:
+                t.cancel()
+
+
+_broadcast_chain = _BroadcastChain()
+
+
+async def flush_delayed_broadcasts(timeout: float = 5.0) -> None:
+    """Point d'appel de l'arrêt (config/asgi.py), après le drain de la file."""
+    await _broadcast_chain.flush(timeout)
 
 
 def _client_msg_id(perception: Perception) -> str | None:

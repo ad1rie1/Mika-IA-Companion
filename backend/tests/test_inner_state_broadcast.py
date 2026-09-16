@@ -268,12 +268,20 @@ class TestBroadcastCarriesInnerState:
                    new_callable=AsyncMock, return_value={"drives": {}, "ruminations": []}):
             await broadcast_to_websocket(_output("coucou"), source="frontend", person_id="web_u1")
 
-        payload = mock_layer.group_send.call_args[0][1]
+        # La réponse part d'abord, SANS l'état intérieur ; l'état suit dans
+        # une trame ``inner_state_update`` sur le même groupe (l'assemblage
+        # de l'état — dix chargeurs en série — retardait la phrase).
+        calls = mock_layer.group_send.call_args_list
+        assert len(calls) == 2
+        group_speech, payload = calls[0][0]
         data = payload["data"]
         assert data["type"] == "speech"
         assert data["text"] == "coucou"
         assert data["source"] == "frontend"
         assert data["person_id"] == "web_u1"
-        assert "inner_state" in data
-        assert "drives" in data["inner_state"]
+        assert "inner_state" not in data
+        group_state, suite = calls[1][0]
+        assert group_state == group_speech
+        assert suite["data"]["type"] == "inner_state_update"
+        assert "drives" in suite["data"]["inner_state"]
         presence_registry.unregister("web_u1", "web")

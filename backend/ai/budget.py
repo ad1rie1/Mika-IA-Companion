@@ -51,7 +51,12 @@ logger = logging.getLogger(__name__)
 # provider par la tête — le hint de chacune le dit.
 L3_HISTORY_SHARE = 0.60      # fil de conversation (verbatim + résumé roulant)
 L2_RELATIONAL_SHARE = 0.04   # profil, engagements, historique émotionnel
-L5_RECALL_SHARE = 0.06       # rappel sémantique (souvenirs, connaissances, échanges)
+# Rappel sémantique (souvenirs, connaissances, échanges). 0,06 → 0,04 : derrière
+# un 200 k, la part donnait ~27 000 caractères (~7 k tokens) rendus dans le
+# tour user, donc JAMAIS cachés — le poste non caché dominant d'un tour, plus
+# que le préfixe entier relu depuis le cache. 0,04 laisse ~12 000 caractères,
+# six fois ce qu'un petit modèle recevait, et un rappel reste un rappel.
+L5_RECALL_SHARE = 0.04
 
 _SAFETY_MARGIN = 0.05
 # Sert à DEUX titres : défaut du champ de dataclass (évalué à l'import, donc
@@ -263,8 +268,12 @@ class ToolWeight:
 tool_weight = ToolWeight()
 
 
-def conversation_l3_chars(tools_chars: int | None = None) -> int:
-    """Budget L3 (fil de conversation) en caractères, pour le rôle CONVERSATION.
+def conversation_l3_chars(tools_chars: int | None = None, role=None) -> int:
+    """Budget L3 (fil de conversation) en caractères, pour le rôle du tour.
+
+    ``role`` à ``None`` = ``CONVERSATION`` (le compactor, qui ne sait pas si
+    le prochain tour sera outillé) ; le constructeur du prompt passe le rôle
+    qui servira réellement (``CONVERSATION_TOOLS`` dès qu'il y a des outils).
 
     **Une seule source pour deux consommateurs qui doivent s'accorder** : le
     watermark de la compaction (``memory/compaction.py``, qui décide *quand*
@@ -283,9 +292,10 @@ def conversation_l3_chars(tools_chars: int | None = None) -> int:
     try:
         from ai.router import AIRole
 
+        role = role or AIRole.CONVERSATION
         if tools_chars is None:
-            tools_chars = tool_weight.chars_for(AIRole.CONVERSATION.value)
-        budget = budget_for(AIRole.CONVERSATION, tools_chars=tools_chars)
+            tools_chars = tool_weight.chars_for(getattr(role, "value", str(role)))
+        budget = budget_for(role, tools_chars=tools_chars)
         if budget is None:
             budget = build_budget(default_window_tokens(), tools_chars=tools_chars)
         plancher = cfg_int("ai.context.l3_floor_chars", _L3_FLOOR_CHARS, mini=1)

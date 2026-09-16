@@ -13,7 +13,7 @@ class TestBuildBudget:
         # 500k (ratio 0.5) − 16k sortie − 7k outils − 50k marge = 427k
         assert b.usable_tokens == 427_000
         assert b.l3_history_tokens == int(427_000 * 0.60)
-        assert b.l5_recall_tokens == int(427_000 * 0.06)
+        assert b.l5_recall_tokens == int(427_000 * 0.04)  # DEF-14
 
     def test_a_small_window_never_goes_negative(self):
         b = build_budget(2_000, max_tokens=4_096)

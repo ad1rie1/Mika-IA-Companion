@@ -490,7 +490,7 @@ class TestSpeechCarriesTheCursors:
         finally:
             presence_registry.unregister("web_x", "web")
 
-        [(_group, payload)] = sent
+        [(_group, payload)] = [s for s in sent if s[1]["data"]["type"] == "speech"]
         data = payload["data"]
         assert data["message_id"] == 77
         assert data["user_message_id"] == 76

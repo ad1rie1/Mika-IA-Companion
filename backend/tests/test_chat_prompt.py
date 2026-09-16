@@ -878,10 +878,38 @@ class TestHistoryL3Trim:
 
     def test_oldest_are_dropped_as_a_contiguous_block(self):
         hist = [{"role": "user", "content": "x" * 100} for _ in range(10)]
-        kept, dropped = _trim_history_to_l3(hist, 250)
+        # ``low_ratio=1.0`` = l'ancien comportement (coupe juste sous la borne).
+        kept, dropped = _trim_history_to_l3(hist, 250, low_ratio=1.0)
         # 250 car. ⇒ 2 messages de 100 tiennent, le 3e déborde → 8 élagués.
         assert dropped == 8
         assert kept == hist[-2:]  # les plus RÉCENTS, contigus
+
+    def test_une_coupe_ramene_sous_la_borne_basse_pas_juste_sous_la_borne(self):
+        """Hystérésis : le fil déborde de 500 → on garde ce qui tient dans
+        500 × 0,5, pas dans 500. Couper « juste sous la borne » recommençait
+        au tour suivant et changeait messages[0] à chaque tour."""
+        hist = [{"role": "user", "content": "x" * 100} for _ in range(10)]
+        kept, dropped = _trim_history_to_l3(hist, 500, low_ratio=0.5)
+        assert len(kept) == 2 and dropped == 8
+        assert kept == hist[-2:]
+
+    def test_un_fil_qui_tient_n_est_jamais_coupe_meme_avec_hysteresis(self):
+        hist = [{"role": "user", "content": "x" * 100} for _ in range(4)]
+        kept, dropped = _trim_history_to_l3(hist, 500, low_ratio=0.5)
+        assert kept == hist and dropped == 0
+
+    def test_la_tete_du_fil_est_stable_entre_deux_coupes(self):
+        """La propriété que le cache de prompt attend : après une coupe, les
+        tours suivants s'ajoutent SANS changer le début de l'historique,
+        jusqu'à ce que le fil déborde à nouveau."""
+        hist = [{"role": "user", "content": "x" * 100} for _ in range(10)]
+        kept, _ = _trim_history_to_l3(hist, 500, low_ratio=0.5)
+        tete = kept[0]
+        fil = list(kept)
+        for _ in range(2):  # 2 × 100 = 200 : 200 + 200 < 500, pas de coupe
+            fil.append({"role": "assistant", "content": "y" * 100})
+            kept_n, dropped_n = _trim_history_to_l3(fil, 500, low_ratio=0.5)
+            assert dropped_n == 0 and kept_n[0] is tete
 
     def test_the_newest_turn_is_kept_even_if_it_alone_overflows(self):
         hist = [{"role": "user", "content": "y" * 50_000}]
@@ -908,9 +936,11 @@ class TestBuildChatPromptL3Cap:
         monkeypatch.setattr("ai.budget.conversation_l3_chars", lambda *a, **kw: 250)
         hist = [{"role": "user", "content": "x" * 100} for _ in range(10)]
         prompt = build_chat_prompt(self._ctx(hist), "et maintenant ?")
-        assert len(prompt.history) == 2
+        # Hystérésis (ai.context.l3_trim_low_ratio 0,5) : 250 × 0,5 = 125 →
+        # un seul message de 100 tient, 9 élagués.
+        assert len(prompt.history) == 1
         assert prompt.conversation_summary.startswith("[Début de conversation non affiché")
-        assert "8" in prompt.conversation_summary  # le compte élagué
+        assert "9" in prompt.conversation_summary  # le compte élagué
 
     def test_truncation_with_a_real_summary_keeps_the_summary(self, monkeypatch):
         monkeypatch.setattr("ai.budget.conversation_l3_chars", lambda *a, **kw: 250)

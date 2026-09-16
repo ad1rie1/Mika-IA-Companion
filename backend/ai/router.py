@@ -191,7 +191,79 @@ def _load_declared_models() -> dict[str, dict]:
 
 
 class UnconfiguredRoleError(RuntimeError):
-    """Raised when a role is requested but has no valid declared model."""
+    """Raised when a role is requested but has no valid declared model.
+
+    ``role`` porte le rôle manquant : le texte de repli servi à l'utilisateur
+    doit pouvoir le nommer, sinon « Mon IA n'a pas de modèle associé » ne dit
+    pas *lequel* — et la doc invitait à ne mapper que ``conversation`` alors
+    que le tour part sur ``conversation_tools`` dès qu'un module est actif.
+    """
+
+    def __init__(self, message: str, role: "AIRole | None" = None):
+        super().__init__(message)
+        self.role = role
+
+
+# Rôles qui, non mappés, retombent sur un autre rôle plutôt que de lever.
+# ``conversation_tools`` est le tour NOMINAL (les modules SYSTEM garantissent
+# une liste d'outils non vide), donc l'exiger en plus de ``conversation``
+# laissait une install fraîche muette avec un message qui ne nommait pas le
+# rôle manquant. Le repli est logué une fois par process.
+_ROLE_FALLBACKS: dict[AIRole, AIRole] = {
+    AIRole.CONVERSATION_TOOLS: AIRole.CONVERSATION,
+}
+# Portée process (pas instance) : les tests construisent le routeur par
+# ``__new__`` sans passer par ``__init__``.
+_fallbacks_logged: set[AIRole] = set()
+
+
+class CacheStats:
+    """Agrégat RAM du cache de prompt, par rôle.
+
+    Les quatre chiffres (entrée, sortie, lu depuis le cache, écrit dans le
+    cache) figuraient dans chaque ligne « AI call OK » et nulle part ailleurs :
+    impossible de savoir, sans grep des logs, si le préfixe stable est
+    réellement relu d'un tour à l'autre — la seule mesure qui dise si le
+    TTL de 5 min (``ai.claude.cache_ttl``) suffit à la cadence d'un compagnon.
+    Portée process, jamais persisté : c'est un instrument, pas une archive.
+    """
+
+    def __init__(self):
+        self._by_role: dict[str, dict[str, int]] = {}
+
+    def record(
+        self, role_value: str, *, tokens_in: int, cache_read: int, cache_write: int,
+    ) -> None:
+        row = self._by_role.setdefault(
+            str(role_value),
+            {"calls": 0, "tokens_in": 0, "cache_read": 0, "cache_write": 0},
+        )
+        row["calls"] += 1
+        row["tokens_in"] += max(0, int(tokens_in or 0))
+        row["cache_read"] += max(0, int(cache_read or 0))
+        row["cache_write"] += max(0, int(cache_write or 0))
+
+    def snapshot(self) -> list[dict]:
+        """Une ligne par rôle, avec le taux de relecture du prompt.
+
+        ``hit_ratio`` = lu depuis le cache ÷ (entrée + lu + écrit) — la part
+        du prompt qui a coûté 0,1× plutôt que 1× ou 1,25×.
+        """
+        out = []
+        for role_value, row in sorted(self._by_role.items()):
+            prompt_total = row["tokens_in"] + row["cache_read"] + row["cache_write"]
+            out.append({
+                "role": role_value,
+                **row,
+                "hit_ratio": (row["cache_read"] / prompt_total) if prompt_total else 0.0,
+            })
+        return out
+
+    def reset(self) -> None:
+        self._by_role.clear()
+
+
+cache_stats = CacheStats()
 
 
 class AIRouter:
@@ -305,17 +377,28 @@ class AIRouter:
         """
         internal_name = self._role_to_internal.get(role, "").strip()
         if not internal_name:
+            fallback = _ROLE_FALLBACKS.get(role)
+            if fallback is not None and self._role_to_internal.get(fallback, "").strip():
+                if role not in _fallbacks_logged:
+                    _fallbacks_logged.add(role)
+                    logger.info(
+                        "Rôle '%s' non mappé : repli sur le modèle du rôle '%s'",
+                        role.value, fallback.value,
+                    )
+                return self._resolve(fallback)
             raise UnconfiguredRoleError(
                 f"Aucun modèle déclaré n'est associé au rôle '{role.value}'. "
                 "Déclare un modèle dans Configuration > Déclaration des modèles "
-                "puis mappe-le dans IA · Rôles."
+                "puis mappe-le dans IA · Rôles.",
+                role=role,
             )
         declared = self._get_declared_models()
         entry = declared.get(internal_name)
         if entry is None:
             raise UnconfiguredRoleError(
                 f"Le rôle '{role.value}' pointe sur '{internal_name}' "
-                "qui n'est pas (ou plus) déclaré."
+                "qui n'est pas (ou plus) déclaré.",
+                role=role,
             )
         return entry["provider"], entry["model_id"], entry["temperature"], internal_name
 
@@ -576,6 +659,13 @@ class AIRouter:
                 cache_read_tokens=cache_read,
                 cache_write_tokens=cache_write,
             )
+            try:
+                cache_stats.record(
+                    role.value, tokens_in=tokens_in,
+                    cache_read=cache_read, cache_write=cache_write,
+                )
+            except Exception as exc:
+                degradations.record("ai.router.cache_stats", exc)
 
             logger.info(
                 "AI call OK     role=%-22s internal=%-18s provider=%-7s model=%-30s "
@@ -602,6 +692,26 @@ class AIRouter:
             )
             self._record_partial_usage(
                 role, provider_name, model, project_id, note="TIMEOUT",
+            )
+            raise
+
+        except asyncio.CancelledError:
+            # L'annulation vient de l'extérieur — un ``wait_for`` plus court
+            # chez l'appelant, un SIGTERM pendant le tour, une tâche
+            # moissonnée à l'arrêt. Elle n'est pas une ``Exception`` : sans
+            # cette branche, une boucle d'outils annulée à l'itération six
+            # comptait pour zéro, exactement le cas où les plafonds servent.
+            # Le tour de conversation vivait dans ce cas en permanence tant
+            # que le processeur posait sa propre borne autour du routeur.
+            elapsed_ms = (time.monotonic() - t_call) * 1000
+            logger.warning(
+                "AI call ANNULÉ role=%-22s internal=%-18s provider=%-7s model=%-30s "
+                "prompt=%5d chars  %7.0f ms (attente %.0f ms)",
+                role.value, internal_name, provider_name, model,
+                prompt_chars, elapsed_ms, wait_ms,
+            )
+            self._record_partial_usage(
+                role, provider_name, model, project_id, note="ANNULÉ",
             )
             raise
 
@@ -684,6 +794,11 @@ class AIRouter:
         (``timeout=`` explicite, sinon ``ai.call_timeout_seconds``).
         """
         timeout = kwargs.pop("timeout", None)
+        # Une image compte en jetons sans compter en caractères : calibrer
+        # chars→tokens sur un appel de vision polluait le ratio de tout le
+        # provider (un prompt long + une petite image passait le filtre
+        # [1, 12]) et rétrécissait le budget L3 de la conversation.
+        calibrate = not bool(kwargs.get("attachments"))
 
         async def _invoke(provider, model, temperature, max_tokens):
             # Role-configured temperature wins unless the caller overrides it.
@@ -700,6 +815,7 @@ class AIRouter:
 
         return await self._metered_call(
             role, system_prompt, user_prompt, _invoke, timeout=timeout,
+            calibrate=calibrate,
         )
 
     async def complete_with_tools(
