@@ -178,6 +178,11 @@ class Rumination(models.Model):
     origine = models.CharField(
         max_length=20, choices=Origine.choices, blank=True, default="",
     )
+    # Quand la digestion nocturne en a tiré un souvenir réflexif. Une pensée
+    # assez lourde (≥ 0,4 après digestion) restait active et REDONNAIT un
+    # « Après y avoir repensé cette nuit… » chaque nuit, tant qu'elle ne
+    # s'était pas fanée — trois nuits, trois souvenirs jumeaux (MEM-11).
+    reflechie_le = models.DateTimeField(null=True, blank=True)
     # Emotional label (uses the 29-emotion vocabulary) that tints mood
     # while the rumination is active. Empty means no bleed.
     emotion = models.CharField(max_length=30, blank=True, default="")

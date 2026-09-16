@@ -77,8 +77,26 @@ class MemoryBridge:
 
     # ── Read ─────────────────────────────────────────────────────
 
-    async def recall_for_context(self, queries: list[str], person_id: str = "") -> str:
+    async def recall_for_context(
+        self, queries: list[str], person_id: str = "", *, channel: str = "",
+        interne: bool = False,
+    ) -> str:
         """Retrieve relevant memories for a list of query strings.
+
+        **La porte de divulgation s'applique ici aussi** (MEM-09). Ce rappel
+        alimentait ``--- TES SOUVENIRS ---`` d'un acte spontané SANS
+        ``person_id``, donc avec les confidences de tout le monde, puis
+        ``_appeler_le_modele`` écrasait le contexte que ``gather_context``
+        avait correctement filtré. Un inconnu présent quand SOCIAL débordait
+        recevait les souvenirs d'Alice.
+
+        - ``interne=True`` : un pas de chantier, une réflexion que personne
+          n'entend — sa mémoire entière.
+        - ``person_id`` identifiable : la certitude d'identité et le canal
+          décident, exactement comme pour un tour de conversation.
+        - ni l'un ni l'autre (un acte pour « qui regarde ») : fermé — on ne
+          récite pas les confidences des autres devant une pièce dont on ne
+          sait pas qui l'occupe.
 
         Multi-requêtes : chaque résumé d'observation interroge la mémoire
         séparément et les pages fusionnent par pertinence — la concaténation
@@ -95,13 +113,36 @@ class MemoryBridge:
         if not queries:
             return ""
 
+        disclose_others = await self._peut_divulguer(
+            person_id, channel=channel, interne=interne,
+        )
         try:
             return await memory_manager.get_memory_context_multi(
-                queries[:3], person_id=person_id,
+                queries[:3], person_id=person_id, disclose_others=disclose_others,
             )
         except Exception:
             logger.exception("MemoryBridge: recall_for_context failed")
             return ""
+
+    @staticmethod
+    async def _peut_divulguer(person_id: str, *, channel: str, interne: bool) -> bool:
+        """Fermé par défaut : ne pas savoir à qui on parle n'ouvre rien."""
+        if interne:
+            return True
+        from identity.trust import is_identifiable_person
+
+        if not person_id or not is_identifiable_person(person_id):
+            return False
+        try:
+            from identity.resolver import identity_resolver
+
+            ctx = await identity_resolver.resolve_context(
+                person_id, channel=channel or "", authenticated=False, is_public=False,
+            )
+            return bool(ctx.may_disclose)
+        except Exception as exc:
+            degradations.record("conscience: divulgation du rappel", exc)
+            return False
 
     # Poids de l'évidence épisodique dans who_is_concerned : un échange
     # récent pèse un peu plus qu'une mention en mémoire curée.
@@ -668,7 +709,9 @@ class MemoryBridge:
     #: marque plus qu'un fait moyen, moins qu'un moment fort de conversation.
     _COMPLETED_WORK_IMPORTANCE = 0.55
 
-    async def remember_completed_work(self, titre: str, essence: str = ""):
+    async def remember_completed_work(
+        self, titre: str, essence: str = "", notable: float | None = None,
+    ):
         """Un chantier abouti devient un souvenir à la première personne.
 
         C'est la moitié mémoire de « aller au bout » : sans elle, un travail
@@ -687,10 +730,17 @@ class MemoryBridge:
         essence = str(essence or "").strip()
         if essence:
             contenu += f" {essence}"
+        # L'importance suit ce que le verdict a jugé notable : à 0,55 fixe,
+        # « [France Info] titre » commenté passait devant les vraies
+        # conversations (0,44) dans le rappel (MEM-11 / DEF-13).
+        if notable is None:
+            importance = self._COMPLETED_WORK_IMPORTANCE
+        else:
+            importance = 0.25 + 0.4 * max(0.0, min(1.0, float(notable)))
         return await memory_manager.create_souvenir(
             content=contenu[:600],
             emotion="proud",
-            importance=self._COMPLETED_WORK_IMPORTANCE,
+            importance=importance,
         )
 
     # ── Write: Modify Importance ─────────────────────────────────

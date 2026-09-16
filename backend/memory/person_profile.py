@@ -413,8 +413,27 @@ class PersonProfileGenerator:
 
     # ── Full cycle ────────────────────────────────────────────────
 
+    #: Sélection des fiches dues : horaire. La requête agrège TOUTES les
+    #: entités-personne × leurs souvenirs, à chaque tick régénérant — toutes
+    #: les 60 s en conversation — pour une porte à 24 h (MEM-12).
+    _CHECK_INTERVAL_S = 3600
+    _derniere_selection: float = 0.0
+
     async def run_cycle(self) -> int:
         """Generate profiles for all due entities. Returns number processed."""
+        import time as _time
+
+        intervalle = cfg_int(
+            "memory.profile_check_interval_s", self._CHECK_INTERVAL_S,
+            mini=60, maxi=86400,
+        )
+        maintenant = _time.monotonic()
+        if (
+            self._derniere_selection
+            and maintenant - self._derniere_selection < intervalle
+        ):
+            return 0
+        self._derniere_selection = maintenant
         due = await self.select_due_entities()
         if not due:
             logger.debug("PersonProfile: no entities due")

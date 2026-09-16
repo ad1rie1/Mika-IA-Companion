@@ -625,8 +625,8 @@ class MemoryManager:
             if self.vector_store:
                 # `search_connaissances` filtre sur `is_valid` cote ChromaDB :
                 # sans cette metadonnee la ligne ne serait jamais servie.
-                from memory.storage.vector_store import connaissance_metadata
-                await sync_to_async(self.vector_store.add_connaissance)(
+                from memory.storage.vector_store import connaissance_metadata, vector_call
+                await vector_call(self.vector_store.add_connaissance)(
                     connaissance_id=connaissance.pk,
                     content=connaissance.content,
                     metadata=connaissance_metadata(
@@ -781,13 +781,24 @@ class MemoryManager:
         valid = {str(pk) for pk in valid_pks}
         return [r for r in rows if str(r.get("id")) in valid]
 
-    async def search_related_souvenirs(self, text: str, n: int = 5) -> list[dict]:
-        """Semantic search for souvenirs related to text via ChromaDB."""
+    async def search_related_souvenirs(
+        self, text: str, n: int = 5, min_importance: float | None = None,
+    ) -> list[dict]:
+        """Semantic search for souvenirs related to text via ChromaDB.
+
+        ``min_importance`` à ``None`` = le défaut du store (0,3, le plancher
+        du rappel spontané). L'outil ``memory_search`` passe 0 : une
+        recherche DÉLIBÉRÉE retrouve aussi ce qui s'est endormi — c'est la
+        promesse « l'oubli ne détruit pas », qui n'était pas tenue (MEM-01).
+        """
         if not self.vector_store:
             return []
         from memory.storage.vector_store import vector_call
         try:
-            return await vector_call(self.vector_store.search_souvenirs)(text, n=n)
+            kwargs = {"n": n}
+            if min_importance is not None:
+                kwargs["min_importance"] = float(min_importance)
+            return await vector_call(self.vector_store.search_souvenirs)(text, **kwargs)
         except Exception as exc:
             degradations.record("memory.manager.search_related_souvenirs", exc)
             logger.debug("search_related_souvenirs failed", exc_info=True)

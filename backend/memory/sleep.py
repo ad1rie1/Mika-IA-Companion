@@ -1152,7 +1152,7 @@ class SleepCycle:
 
         from memory.manager import memory_manager
 
-        def _digerer_ligne(pk: int) -> tuple[float, str] | None:
+        def _digerer_ligne(pk: int) -> tuple[float, str, bool] | None:
             """Relit la ligne et applique la digestion sur ses valeurs fraîches.
 
             La boucle de décision de la conscience écrit `status`/`intensity`
@@ -1175,8 +1175,16 @@ class SleepCycle:
                 row.emotion = derive
             if row.intensity < 0.15:
                 row.status = "faded"
-            row.save(update_fields=["intensity", "emotion", "status"])
-            return avant, row.emotion
+            # Le souvenir réflexif, UNE fois par pensée — marqué à la
+            # tentative, dans la même écriture, pour qu'une pensée encore
+            # active la nuit suivante ne le redonne pas.
+            a_reflechir = avant >= seuil_souvenir and row.reflechie_le is None
+            champs = ["intensity", "emotion", "status"]
+            if a_reflechir:
+                row.reflechie_le = tz.now()
+                champs.append("reflechie_le")
+            row.save(update_fields=champs)
+            return avant, row.emotion, a_reflechir
 
         processed = 0
         for r in aging:
@@ -1191,8 +1199,8 @@ class SleepCycle:
 
             # Les lourdes deviennent un souvenir réflexif — après l'écriture,
             # pour que l'aller-retour ChromaDB soit hors de la fenêtre de course.
-            old_intensity, emotion = frais
-            if old_intensity >= seuil_souvenir:
+            old_intensity, emotion, a_reflechir = frais
+            if a_reflechir:
                 try:
                     # Passe par le manager, qui cree *et* indexe dans ChromaDB.
                     # C'est l'insight avec lequel on se reveille : ecrit

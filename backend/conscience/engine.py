@@ -2766,6 +2766,22 @@ class ConscienceEngine:
             return False
 
     @staticmethod
+    def _canal_de(person_id: str | None) -> str:
+        """Le canal par lequel ce destinataire est joignable (« web »,
+        « telegram »), pour que la porte de divulgation lise le bon plancher.
+        Vide quand on ne sait pas — la porte est alors fermée."""
+        if not person_id:
+            return ""
+        try:
+            from communication.presence import presence_registry
+
+            cibles = presence_registry.resolve(person_id)
+            return str(cibles[0].channel) if cibles else ""
+        except Exception as exc:
+            degradations.record("conscience: canal du destinataire", exc)
+            return ""
+
+    @staticmethod
     def _audience_presente() -> bool:
         """Quelqu'un est-il là pour entendre un acte sans destinataire ?
 
@@ -2798,9 +2814,6 @@ class ConscienceEngine:
         # trembler.
         self._tirer_gigue_cooldown()
 
-        # Recall relevant memories
-        queries = [o.summary for o in ctx.pending_observations if o.pertinence > 0.3]
-        memory_context = await self.memory.recall_for_context(queries)
 
         # Determine which modules are relevant based on observation sources
         trousse = self._preparer_trousse(ctx)
@@ -2828,6 +2841,14 @@ class ConscienceEngine:
         # them; otherwise it stays Mika's internal/broadcast voice.
         target = await self._select_recipient(ctx)
         person_id = target or "conscience_mika"
+
+        # Le rappel vient APRÈS le choix du destinataire, et avec sa porte :
+        # avant, il partait sans `person_id` (donc avec les confidences de
+        # tous) et écrasait le contexte filtré de `gather_context` (MEM-09).
+        queries = [o.summary for o in ctx.pending_observations if o.pertinence > 0.3]
+        memory_context = await self.memory.recall_for_context(
+            queries, person_id=target or "", channel=self._canal_de(target),
+        )
 
         # Personne à qui s'adresser ET personne dans la pièce : un acte
         # partait quand même sur le groupe global — vide — et était PERSISTÉ

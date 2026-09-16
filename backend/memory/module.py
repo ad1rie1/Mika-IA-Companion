@@ -314,8 +314,11 @@ class MemoryToolsModule(BaseModule):
         souvenirs: list[dict] = []
         connaissances: list[dict] = []
         if kind in ("all", "souvenirs"):
+            # 0 : une recherche délibérée retrouve aussi les souvenirs
+            # endormis (importance 0,02) — la doctrine « l'oubli déplace,
+            # il ne détruit pas » était fausse pour cet outil.
             souvenirs = await memory_manager.search_related_souvenirs(
-                query, n=plafond
+                query, n=plafond, min_importance=0.0,
             )
         if kind in ("all", "connaissances"):
             connaissances = await memory_manager.search_related_connaissances(

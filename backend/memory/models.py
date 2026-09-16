@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models.functions import Lower
 
 
 class Conversation(models.Model):
@@ -96,6 +97,12 @@ class Entity(models.Model):
         ordering = ["name"]
         verbose_name_plural = "entities"
         unique_together = [("name", "entity_type")]
+        indexes = [
+            # Les lectures par nom sont insensibles à la casse (identité,
+            # filtre intime, résolution des étiquettes) : sans cet index
+            # fonctionnel, chacune balayait la table.
+            models.Index(Lower("name"), name="memory_entity_name_lower"),
+        ]
 
     def __str__(self):
         return f"{self.name} ({self.entity_type})"
@@ -441,7 +448,7 @@ class EpisodicIndexLog(models.Model):
     introuvable jusqu'à sa purge.
     """
 
-    last_message_id = models.IntegerField(default=0)
+    last_message_id = models.BigIntegerField(default=0)
     chunks_created = models.IntegerField(default=0)
     ran_at = models.DateTimeField(auto_now_add=True)
 

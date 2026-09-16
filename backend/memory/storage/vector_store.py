@@ -134,6 +134,18 @@ class VectorStore:
             metadatas=[meta],
         )
 
+    def souvenir_ids_present(self, souvenir_ids) -> list[int]:
+        """Parmi ces ids, ceux que la collection tient réellement.
+
+        Sert au rattrapage du consolidateur : un ``upsert`` raté laisse une
+        ligne ORM sans vecteur, donc irrécupérable pour le rappel.
+        """
+        ids = [str(i) for i in souvenir_ids if i is not None]
+        if not ids:
+            return []
+        got = self._souvenirs.get(ids=ids, include=[])
+        return [int(i) for i in (got.get("ids") or [])]
+
     def add_souvenirs(self, entries: list[dict]):
         """Upsert plusieurs souvenirs en un seul appel.
 

@@ -852,6 +852,7 @@ async def appliquer_verdict(moteur, identifiant, verdict, dit, bilan) -> None:
             with degraded("conscience: souvenir d'un travail abouti"):
                 await bridge.remember_completed_work(
                     aboutie["titre"], essence,
+                    notable=getattr(verdict, "notable", None),
                 )
         # Ressentie, pas seulement mémorisée. Sans cette impulsion, le
         # souvenir disait « proud » pendant que le visage, la voix et

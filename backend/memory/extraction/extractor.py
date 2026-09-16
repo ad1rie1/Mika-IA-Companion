@@ -88,6 +88,8 @@ REGLES:
 - "Salut ca va?" → NE PAS STOCKER (banalite)
 - "Je m'appelle Thomas" → connaissance | "On a joue a Zelda!" → souvenir
 - Chaque extraction doit etre AUTONOME (comprehensible seule)
+- Les lignes sont prefixees par le PRENOM de qui parle quand il est connu. Un fait sur cette personne la NOMME dans "content" ET dans "entities" (type "person"). N'ecris JAMAIS "l'utilisateur" ni "l'autre" : "Thomas ne travaille pas dans une banque", pas "L'utilisateur ne travaille pas..."
+- Une ligne "User:" sans prenom = quelqu'un que {name} n'a pas encore identifie
 
 IMPORTANT: Retourne UNIQUEMENT du JSON valide. Pas de texte avant ni apres. Pas de markdown. Juste le JSON.
 
@@ -152,27 +154,33 @@ Retourne UNIQUEMENT du JSON valide:
 """
 
 
+def _etiquette(message: dict, nom_mika: str) -> str:
+    """Le préfixe d'une ligne soumise à l'extraction."""
+    if message.get("role") != "user":
+        return nom_mika
+    return str(message.get("speaker") or "").strip() or "User"
+
+
 class MemoryExtractor:
     """Uses Claude to analyze messages and extract structured memories.
     Souvenirs are written from the VTuber's subjective POV (personality + emotion).
     Connaissances are objective facts."""
 
-    def __init__(self):
-        self._system_prompt: str | None = None
-
     def _get_system_prompt(self) -> str:
-        """Build the extraction prompt with personality context."""
-        if self._system_prompt is None:
-            from config.personality import personality
+        """Build the extraction prompt with personality context.
 
-            self._system_prompt = EXTRACTION_PROMPT_TEMPLATE.format(
-                name=personality.name,
-                description=personality.description,
-                tone=personality.tone,
-                traits=", ".join(personality.traits),
-                emotions=EXTRACTION_EMOTIONS,
-            )
-        return self._system_prompt
+        Reconstruit à chaque appel : la personnalité est un réglage à chaud,
+        et ce gabarit était mis en cache pour la vie du process.
+        """
+        from config.personality import personality
+
+        return EXTRACTION_PROMPT_TEMPLATE.format(
+            name=personality.name,
+            description=personality.description,
+            tone=personality.tone,
+            traits=", ".join(personality.traits),
+            emotions=EXTRACTION_EMOTIONS,
+        )
 
     async def analyze_messages(
         self,
@@ -200,10 +208,25 @@ class MemoryExtractor:
         if not messages:
             return []
 
+        # Qui parle, nommé quand la couche identité le sait (clé ``speaker``
+        # posée par le consolidateur). L'extracteur ne voyait que « User: »
+        # et ne pouvait donc pas nommer l'interlocuteur : les faits sur lui
+        # sortaient sans entité, « L'utilisateur… », absents de sa fiche.
+        from config.personality import personality
+
+        nom_mika = personality.name or "Assistant"
         conversation_text = "\n".join(
-            f"{'User' if m['role'] == 'user' else 'Assistant'}: {m['content']}"
-            for m in messages
+            f"{_etiquette(m, nom_mika)}: {m['content']}" for m in messages
         )
+        presents = sorted({
+            str(m.get("speaker")) for m in messages
+            if m.get("role") == "user" and m.get("speaker")
+        })
+        if presents:
+            conversation_text = (
+                "PERSONNES DANS LA CONVERSATION: " + ", ".join(presents)
+                + "\n\n" + conversation_text
+            )
 
         if pending_commitments:
             lines = "\n".join(

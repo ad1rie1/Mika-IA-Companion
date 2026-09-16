@@ -60,7 +60,7 @@ class _Sortie:
 
 
 class _MemoireMuette:
-    async def recall_for_context(self, queries):
+    async def recall_for_context(self, queries, **kw):
         return ""
 
 

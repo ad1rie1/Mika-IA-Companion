@@ -92,6 +92,15 @@ POLICIES: tuple[Policy, ...] = (
     # has a ring buffer; this one was simply missed.
     Policy("projects", "ProjectLog", keep_days=90, keep_rows=20_000,
            note="project audit trail"),
+    # Trois tables de la mémoire interprétée qui grossissaient sans borne
+    # (MEM-15). Généreux : ce sont des traces d'une vie, pas un cache.
+    Policy("memory", "Dream", date_field="night_of", keep_days=365,
+           keep_rows=2_000, note="rêves ; un an, deux mille nuits"),
+    Policy("memory", "EmotionalSummary", date_field="period_start",
+           keep_days=365, keep_rows=20_000,
+           note="agrégats émotionnels quotidiens et hebdomadaires"),
+    Policy("memory", "SelfNarrative", keep_rows=200,
+           note="l'historique du récit de soi ; le plus récent est lu"),
     # One handle (and one Identity) per anonymous socket. The frontend
     # reconnects on backoff, so these accumulate on their own: an install
     # with zero messages had already collected 68 of them. Only the

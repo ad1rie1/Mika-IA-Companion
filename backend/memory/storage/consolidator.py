@@ -19,7 +19,7 @@ from memory.storage.vector_store import (
 )
 from memory.themes import PlanExtraction, plan_by_theme, theme_tuning
 from utils.periodic import PeriodicLoop
-from utils.degradation import degradations
+from utils.degradation import degradations, degraded
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,22 @@ EXTRACTION_MAX_CHARS = _EXTRACTION_MAX_CHARS_DEFAUT
 # serait relu intégralement à chaque tick de 60 s. Le plafond est choisi AVANT
 # la lecture des messages, donc l'invariant « la borne d'abord » tient.
 MAX_WINDOW_MESSAGES = 400
+
+# Cadence d'extraction (MEM-04 / MEM-10). Une fenêtre partait dès UN message,
+# à chaque tick de 60 s : une question persistée avant sa réponse était
+# extraite seule, la réponse au tick d'après — la paire coupée en deux appels
+# (« chaque extraction doit être autonome » devenait impossible) — et une
+# session d'une heure coûtait 60 à 90 appels d'extraction là où cinq
+# suffisent. Une fenêtre part quand elle est MÛRE (assez de messages) ou
+# CALME (plus rien depuis un moment), et jamais sur une question dont la
+# réponse est encore attendue. La passe forcée de l'arrêt ne se soumet qu'à
+# la seconde règle.
+EXTRACTION_MIN_MESSAGES = 6
+EXTRACTION_QUIET_S = 300
+# Rattrapage des souvenirs jamais indexés (MEM-07) : la remémoration part
+# exclusivement du vectoriel, une ligne sans vecteur est irrécupérable.
+REINDEX_INTERVAL_S = 3600
+REINDEX_LOOKBACK_H = 48
 
 # Pending commitments older than this are dropped (see _expire_commitments).
 COMMITMENT_MAX_AGE_DAYS = 30
@@ -85,7 +101,7 @@ DECAY_MIN_AGE = timedelta(hours=1)
 # vérification est un appel LLM séquentiel de plus dans un tick de 60 s — sur
 # un backend à un créneau, ils entrent en concurrence avec le tour de
 # conversation en cours.
-MAX_CONTRADICTION_CHECKS = 2
+MAX_CONTRADICTION_CHECKS = 1
 
 # Ceiling on rows rewritten per pass. Each write also re-indexes into
 # ChromaDB (an embedding call), so a first run over a large backlog stays
@@ -207,9 +223,15 @@ class MemoryConsolidator:
             await self._loop.stop()
 
     async def force_consolidate(self):
-        """Run consolidation immediately (e.g. on disconnect/shutdown)."""
+        """Run consolidation immediately (e.g. on disconnect/shutdown).
+
+        Forcée : la fenêtre part même petite et même fraîche — à l'arrêt, on
+        ne reviendra pas. Une question encore sans réponse reste retenue :
+        sa réponse arrivera après le redémarrage (`resume_interrupted_turns`)
+        et la paire sera extraite entière.
+        """
         logger.info("Force consolidation triggered")
-        await self._consolidate()
+        await self._consolidate(force=True)
 
     # ------------------------------------------------------------------
     # Internal
@@ -242,7 +264,7 @@ class MemoryConsolidator:
             # beginning of history.
             degradations.record("consolidator: checkpoint read", exc)
 
-    async def _consolidate(self):
+    async def _consolidate(self, force: bool = False):
         """Process new messages since last checkpoint — une passe à la fois.
 
         La boucle périodique et ``force_consolidate`` (appelé à l'arrêt)
@@ -253,22 +275,28 @@ class MemoryConsolidator:
         fenêtre est vide et elle ne coûte qu'une lecture.
         """
         async with self._verrou():
-            await self._passe()
+            await self._passe(force=force)
 
-    async def _passe(self):
+    async def _passe(self, force: bool = False):
         """Une passe, hors verrou.
 
         Four steps, each its own method: select the window, turn it into
         memories, checkpoint, then run the periodic maintenance that has to
         happen whether or not anything was said.
         """
-        messages, ceiling_id = await self._select_window()
+        messages, ceiling_id = await self._select_window(force=force)
 
         if not messages:
             # Advance past internal-only messages so the window doesn't
-            # re-scan them forever.
-            if ceiling_id:
+            # re-scan them forever — et l'ÉCRIRE : avancé en RAM seule, ce
+            # plafond était relu à chaque redémarrage (MEM-08).
+            if ceiling_id and ceiling_id > self._last_processed_id:
                 self._last_processed_id = ceiling_id
+                with degraded("consolidator: checkpoint interne"):
+                    await self._save_checkpoint(
+                        ceiling_id, 0,
+                        {"souvenirs": 0, "connaissances": 0, "commitments": 0},
+                    )
             logger.info(
                 "Consolidation: no new user messages (last_id=%d)",
                 self._last_processed_id,
@@ -321,7 +349,65 @@ class MemoryConsolidator:
 
     # ── Step 1: pick the window ───────────────────────────────────
 
-    async def _select_window(self) -> tuple[list[dict], int | None]:
+    #: La cadence d'extraction s'applique ; les tests qui mesurent la
+    #: sélection la coupent (attribut d'instance, moteurs construits par
+    #: ``__new__``).
+    _cadence_extraction: bool = True
+
+    def _borner_la_cadence(
+        self, messages: list[dict], ceiling_id: int | None, *, force: bool = False,
+        now=None,
+    ) -> tuple[list[dict], int | None]:
+        """Ce qui part à l'extraction maintenant, et le plafond qui va avec.
+
+        Deux règles, pures et testables :
+
+        1. **Une question sans réponse encore fraîche est retenue**, avec
+           tout ce qui la suit : sa réponse est en train d'être écrite, et
+           l'extraire seule coupe la paire. Passé le calme, une question
+           restée sans réponse est un fait, elle part.
+        2. **La fenêtre part mûre ou calme** : au moins
+           ``memory.extraction_min_messages`` messages, ou plus rien depuis
+           ``memory.extraction_quiet_seconds``. ``force`` (arrêt) ignore
+           cette règle-ci, jamais la première.
+
+        Quand des messages sont retenus, le plafond devient le dernier
+        message gardé — sinon le checkpoint sauterait par-dessus ce qu'on
+        vient de décider de ne pas extraire.
+        """
+        if not messages:
+            return [], ceiling_id
+        now = now or timezone.now()
+        quiet_s = cfg_int(
+            "memory.extraction_quiet_seconds", EXTRACTION_QUIET_S, mini=0, maxi=86400,
+        )
+        minimum = cfg_int(
+            "memory.extraction_min_messages", EXTRACTION_MIN_MESSAGES, mini=1, maxi=200,
+        )
+
+        def _age(m) -> float:
+            stamp = m.get("created_at")
+            if stamp is None:
+                return float("inf")
+            return (now - stamp).total_seconds()
+
+        kept = list(messages)
+        while kept and kept[-1].get("role") == "user" and _age(kept[-1]) < quiet_s:
+            kept.pop()
+        if not kept:
+            logger.debug("Consolidation: une question attend sa réponse — fenêtre retenue")
+            return [], None
+        if not force and len(kept) < minimum and _age(kept[-1]) < quiet_s:
+            logger.debug(
+                "Consolidation: fenêtre de %d message(s) ni mûre ni calme — retenue",
+                len(kept),
+            )
+            return [], None
+        if len(kept) < len(messages):
+            ceiling_id = int(kept[-1]["id"])
+        return kept, ceiling_id
+
+    async def _select_window(self, force: bool = False) -> tuple[list[dict], int | None]:
         """Messages to consolidate, and the id ceiling they were read under.
 
         The ceiling is picked FIRST, then messages are read below it. Reading
@@ -364,6 +450,10 @@ class MemoryConsolidator:
             .order_by("created_at")
             .values("id", "role", "content", "created_at", "source", "person_id")
         )
+        if messages and getattr(self, "_cadence_extraction", True):
+            messages, ceiling_id = self._borner_la_cadence(
+                messages, ceiling_id, force=force,
+            )
         return messages, ceiling_id
 
     # ── Step 2: turn the window into memories ─────────────────────
@@ -422,7 +512,18 @@ class MemoryConsolidator:
             # theory-of-mind stayed empty. Résolu PAR TRANCHE : un thème ne
             # réunit pas forcément les mêmes personnes que la fenêtre entière.
             interlocutors = await self._resolve_interlocutors(batch)
-            msg_dicts = [{"role": m["role"], "content": m["content"]} for m in batch]
+            # Et NOMMÉS dans le texte soumis : l'extracteur ne voyait que
+            # « User: » / « Assistant: », donc ne pouvait pas nommer
+            # l'interlocuteur — 4 connaissances sur 8 « L'utilisateur… » sans
+            # entité, invisibles de la fiche et du filtre intime (MEM-02).
+            noms = await self._noms_des_interlocuteurs(batch)
+            msg_dicts = [
+                {
+                    "role": m["role"], "content": m["content"],
+                    "speaker": noms.get((m.get("person_id") or "").strip(), ""),
+                }
+                for m in batch
+            ]
             extractions = await self.extractor.analyze_messages(
                 msg_dicts, pending_commitments=pending_commitments,
             )
@@ -631,9 +732,19 @@ class MemoryConsolidator:
                 continue
             if not nom:
                 continue
-            entity, _ = await sync_to_async(Entity.objects.get_or_create)(
-                name=nom, entity_type=genre,
-            )
+            # Insensible à la casse : `get_or_create(name=nom)` exact créait
+            # « adrien » à côté de « Adrien » (que la couche identité, elle,
+            # cherche en `iexact`) — une fiche scindée, et le filtre intime
+            # traitant le doublon comme un tiers (MEM-03).
+            entity = await sync_to_async(
+                lambda: Entity.objects.filter(
+                    name__iexact=nom, entity_type=genre,
+                ).order_by("pk").first()
+            )()
+            if entity is None:
+                entity, _ = await sync_to_async(Entity.objects.get_or_create)(
+                    name=nom, entity_type=genre,
+                )
             entities.append(entity)
         return themes, entities
 
@@ -646,6 +757,37 @@ class MemoryConsolidator:
         occurred = occurred_at or timezone.now()
         emotion = _valid_emotion(extraction.get("emotion"))
         importance = _extracted_importance(extraction)
+
+        # Le doublon d'abord, comme pour les connaissances. Une tranche relue
+        # après un échec partiel, ou le même épisode raconté deux fois,
+        # créait deux lignes — « requin projecteur » ×2 en base — que seule
+        # la fusion nocturne rapprochait, et à moitié (MEM-05). Un souvenir
+        # redit se RENFORCE : il compte davantage, il n'existe pas deux fois.
+        existing = await self._find_similar_souvenir(extraction["content"])
+        if existing is not None:
+            existing.importance = min(1.0, max(existing.importance, importance) + 0.05)
+            existing.decayed_at = timezone.now()
+            await sync_to_async(existing.save)(update_fields=["importance", "decayed_at"])
+            linked = _merge_entities(entities, interlocutors)
+            if linked:
+                await sync_to_async(existing.entities.add)(*linked)
+            await self._index(
+                self.vector_store.add_souvenir, "souvenir", existing.pk,
+                souvenir_id=existing.pk,
+                content=existing.content,
+                metadata=souvenir_metadata(
+                    importance=existing.importance,
+                    emotion=existing.emotion,
+                    occurred_at=existing.occurred_at.isoformat(),
+                    themes=[t.name for t in themes],
+                ),
+            )
+            logger.info(
+                "Souvenir reinforced (importance=%.2f): %s",
+                existing.importance, existing.content[:120],
+            )
+            return None
+
         souvenir = await sync_to_async(Souvenir.objects.create)(
             content=extraction["content"], emotion=emotion,
             importance=importance, occurred_at=occurred,
@@ -691,7 +833,11 @@ class MemoryConsolidator:
         existing = await self._find_similar_connaissance(content)
         if existing:
             # Saying the same thing twice is evidence, not a duplicate row.
+            # L'ancre de décroissance repart d'ici : `save()` ne déplaçait que
+            # `updated_at`, et la passe suivante facturait tout le temps
+            # écoulé AVANT le renforcement (MEM-06).
             existing.confidence = min(1.0, existing.confidence + 0.1)
+            existing.decayed_at = timezone.now()
             await sync_to_async(existing.save)()
             await self._index(
                 self.vector_store.add_connaissance, "connaissance", existing.pk,
@@ -715,8 +861,19 @@ class MemoryConsolidator:
         )
         if themes:
             await sync_to_async(connaissance.themes.set)(themes)
-        if entities:
-            await sync_to_async(connaissance.entities.set)(entities)
+        # Un fait qui ne nomme personne concerne, presque toujours, celui qui
+        # l'a dit : sans ce lien, « ne travaille pas pour une banque » vivait
+        # sans entité — absent de la fiche de la personne, invisible au filtre
+        # intime, rendu « (concerne: …) » par un nom que l'extracteur n'avait
+        # pas. Seulement quand UN interlocuteur est identifié (MEM-02).
+        linked = list(entities)
+        if (
+            not any(getattr(e, "entity_type", "") == "person" for e in linked)
+            and len(interlocutors) == 1
+        ):
+            linked = _merge_entities(linked, interlocutors)
+        if linked:
+            await sync_to_async(connaissance.entities.set)(linked)
 
         await self._index(
             self.vector_store.add_connaissance, "connaissance", connaissance.pk,
@@ -742,6 +899,12 @@ class MemoryConsolidator:
         # case it was almost certainly made to whoever Mika was talking to,
         # so fall back to the interlocutor rather than filing it against
         # nobody (which is how a commitment becomes unresolvable).
+        # Un engagement déjà en attente, redit, n'est pas un second engagement
+        # (« Lui envoyer le lien du concert » ×2 en base, MEM-05).
+        if await MemoryConsolidator._engagement_deja_pris(extraction["content"]):
+            logger.info("Commitment already pending: %s", extraction["content"][:120])
+            return None
+
         target_person = None
         person_name = (extraction.get("person") or "").strip()
         if person_name:
@@ -761,6 +924,36 @@ class MemoryConsolidator:
             extraction["content"][:120],
         )
         return "commitments"
+
+    @staticmethod
+    async def _engagement_deja_pris(description: str, seuil: float = 0.85) -> bool:
+        """Un engagement en attente dit la même chose, à peu près ?
+
+        Lexical (``difflib``), pas vectoriel : les engagements ne sont pas
+        indexés, et une promesse redite l'est presque mot pour mot.
+        """
+        import difflib
+
+        from memory.models import Commitment
+
+        cible = " ".join(str(description or "").lower().split())
+        if not cible:
+            return False
+        try:
+            en_attente = await sync_to_async(
+                lambda: list(
+                    Commitment.objects.filter(status="pending")
+                    .values_list("description", flat=True)[:50]
+                )
+            )()
+        except Exception as exc:
+            degradations.record("consolidator: relecture des engagements", exc)
+            return False
+        for existant in en_attente:
+            autre = " ".join(str(existant or "").lower().split())
+            if autre == cible or difflib.SequenceMatcher(None, cible, autre).ratio() >= seuil:
+                return True
+        return False
 
     @staticmethod
     async def _resolve_commitment(
@@ -793,7 +986,11 @@ class MemoryConsolidator:
         """
         try:
             await vector_call(fn)(**kwargs)
-        except Exception:
+        except Exception as exc:
+            # Compté : la remémoration part exclusivement du vectoriel, donc
+            # une ligne non indexée est irrécupérable pour le rappel — et le
+            # ledger ne le savait pas (MEM-07). `_reindex_missing` repasse.
+            degradations.record("consolidator: indexation chromadb", exc)
             logger.warning("ChromaDB indexing failed for %s #%d", kind, pk)
 
     # ── Step 3: checkpoint ────────────────────────────────────────
@@ -835,6 +1032,7 @@ class MemoryConsolidator:
         """
         await self._apply_decay()
         await self._aggregate_emotion_snapshots()
+        await self._reindex_missing()
 
         if not regenerate:
             return
@@ -852,6 +1050,86 @@ class MemoryConsolidator:
             await person_profile_generator.run_cycle()
         except Exception:
             logger.exception("Person profile generation failed (non-fatal)")
+
+    @staticmethod
+    async def _noms_des_interlocuteurs(messages: list[dict]) -> dict[str, str]:
+        """``person_id → prénom`` pour les locuteurs identifiés de la tranche.
+
+        Même chemin que ``_resolve_interlocutors`` (la couche identité), même
+        règle : un visiteur non lié n'a pas de nom, il reste « User » dans le
+        texte soumis. Ne lève jamais.
+        """
+        from identity.resolver import identity_resolver
+
+        noms: dict[str, str] = {}
+        person_ids = {
+            (m.get("person_id") or "").strip()
+            for m in messages if m.get("role") == "user"
+        }
+        for person_id in sorted(p for p in person_ids if p):
+            try:
+                entity = await identity_resolver.entity_for_person(person_id)
+            except Exception as exc:
+                degradations.record("consolidator: nom d'interlocuteur", exc)
+                continue
+            if entity is not None and getattr(entity, "name", ""):
+                noms[person_id] = str(entity.name)
+        return noms
+
+    async def _reindex_missing(self) -> None:
+        """Réindexe les souvenirs récents que ChromaDB n'a pas. Horaire.
+
+        Un `upsert` qui a échoué (store indisponible, encodeur en panne) ne
+        laissait rien derrière lui qu'une ligne de log : la ligne ORM existait,
+        le rappel ne la trouverait jamais. On relit les souvenirs des
+        dernières 48 h, on demande au store lesquels il tient, on repousse
+        les autres. Ne lève jamais.
+        """
+        store = getattr(self, "vector_store", None)
+        if store is None or not hasattr(store, "souvenir_ids_present"):
+            return
+        now = _time.monotonic()
+        last = getattr(self, "_last_reindex", 0.0)
+        if last and (now - last) < REINDEX_INTERVAL_S:
+            return
+        self._last_reindex = now
+        try:
+            from memory.models import Souvenir
+
+            depuis = timezone.now() - timedelta(hours=REINDEX_LOOKBACK_H)
+            recents = await sync_to_async(
+                lambda: list(
+                    Souvenir.objects.filter(created_at__gte=depuis)
+                    .prefetch_related("themes")
+                    .order_by("pk")[:2000]
+                )
+            )()
+            if not recents:
+                return
+            presents = set(await vector_call(store.souvenir_ids_present)(
+                [s.pk for s in recents],
+            ))
+            manquants = [s for s in recents if s.pk not in presents]
+            if not manquants:
+                return
+            await vector_call(store.add_souvenirs)([
+                {
+                    "souvenir_id": s.pk,
+                    "content": s.content,
+                    "metadata": souvenir_metadata(
+                        importance=s.importance, emotion=s.emotion,
+                        occurred_at=s.occurred_at.isoformat() if s.occurred_at else "",
+                        themes=[t.name for t in s.themes.all()],
+                    ),
+                }
+                for s in manquants
+            ])
+            logger.warning(
+                "Consolidation: %d souvenir(s) réindexé(s) — ils manquaient au store",
+                len(manquants),
+            )
+        except Exception as exc:
+            degradations.record("consolidator: reindexation des manquants", exc)
 
     @staticmethod
     async def _resolve_interlocutors(messages: list[dict]) -> list:
@@ -1513,10 +1791,49 @@ class MemoryConsolidator:
                 # applique par ailleurs.
                 elif new_confidence is not None and conn.confidence - new_confidence > 0.05:
                     conn.confidence = new_confidence
-                    await sync_to_async(conn.save)(update_fields=["confidence"])
+                    conn.decayed_at = timezone.now()
+                    await sync_to_async(conn.save)(
+                        update_fields=["confidence", "decayed_at"],
+                    )
+                    await self._index(
+                        self.vector_store.add_connaissance, "connaissance", conn.pk,
+                        connaissance_id=conn.pk, content=conn.content,
+                        metadata=connaissance_metadata(
+                            confidence=conn.confidence, is_valid=conn.is_valid,
+                        ),
+                    )
 
         except Exception as exc:
             degradations.record("consolidator: contradiction check", exc)
+
+    async def _find_similar_souvenir(self, content: str):
+        """Un souvenir quasi identique existe-t-il déjà ? Même distance que
+        la fusion nocturne (``memory.reorg_dedup_distance``), pour qu'une
+        seule idée de « pareil » vive dans le système. ``None`` sur toute
+        panne : douter ne doit pas empêcher d'écrire."""
+        from memory.models import Souvenir
+
+        try:
+            distance_max = cfg_float(
+                "memory.reorg_dedup_distance", 0.12, mini=0.0, maxi=0.3,
+            )
+            results = await vector_call(self.vector_store.search_souvenirs)(
+                content, n=1, min_importance=0.0,
+            )
+        except Exception as exc:
+            degradations.record("consolidator: recherche de doublon", exc)
+            return None
+        # Un store simulé ou un retour d'une autre forme = pas de doublon.
+        if not isinstance(results, list) or not results or not isinstance(results[0], dict):
+            return None
+        premier = results[0]
+        distance = premier.get("distance")
+        if not isinstance(distance, (int, float)) or distance >= distance_max:
+            return None
+        try:
+            return await sync_to_async(Souvenir.objects.get)(pk=int(premier["id"]))
+        except Exception:
+            return None
 
     async def _find_similar_connaissance(self, content: str):
         """Check if a similar connaissance already exists via vector search."""

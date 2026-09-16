@@ -418,6 +418,14 @@ CONFIG_SCHEMA = [
              "est par personne, pas par cycle.",
     ),
     ConfigItem(
+        key="memory.profile_check_interval_s", type="int", section="memory",
+        group="Profils", label="Période de la sélection des fiches (s)",
+        default=3600, min=60, max=86400, hot_reload=True,
+        hint="La sélection agrège toutes les personnes et leurs souvenirs ; "
+             "la faire à chaque passe de 60 s pour une porte à 24 h grossit "
+             "avec l'installation. Horaire suffit.",
+    ),
+    ConfigItem(
         key="memory.profile_max_persons_per_cycle", type="int", section="memory",
         group="Profils", label="Personnes traitées par cycle",
         default=3, min=1, max=50, hot_reload=True,
@@ -664,9 +672,27 @@ CONFIG_SCHEMA = [
              "déplacement moyen.",
     ),
     ConfigItem(
+        key="memory.extraction_min_messages", type="int", section="memory",
+        group="Consolidation", label="Messages minimum pour extraire",
+        default=6, min=1, max=200, hot_reload=True,
+        hint="Une fenêtre part quand elle atteint ce nombre de messages, OU "
+             "quand plus rien n'arrive depuis le délai de calme. À 1, chaque "
+             "tick de 60 s extrayait un message seul : une question à un "
+             "appel, sa réponse au suivant, et 60 à 90 appels par heure de "
+             "conversation là où cinq suffisent.",
+    ),
+    ConfigItem(
+        key="memory.extraction_quiet_seconds", type="int", section="memory",
+        group="Consolidation", label="Calme avant d'extraire une petite fenêtre (s)",
+        default=300, min=0, max=86400, hot_reload=True,
+        hint="Une fenêtre trop petite part quand même après ce silence. Et "
+             "une question sans réponse plus fraîche que ce délai est "
+             "retenue : sa réponse arrive, la paire doit partir ensemble.",
+    ),
+    ConfigItem(
         key="memory.max_contradiction_checks", type="int", section="memory",
         group="Consolidation", label="Vérifications de contradiction par connaissance",
-        default=2, min=0, max=10, hot_reload=True,
+        default=1, min=0, max=10, hot_reload=True,
         hint="Chaque vérification est un appel LLM séquentiel de plus dans un "
              "tick — sur un backend à un créneau, en concurrence avec le tour "
              "de conversation en cours. 0 = plus de contrôle.",

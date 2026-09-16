@@ -21,9 +21,16 @@ def user_facing_messages(qs):
     - ``source in INTERNAL_MESSAGE_SOURCES`` : plomberie de modules.
     - ``(source="conscience", role="user")`` : le prompt d'action que la
       conscience se donne ; sa *réponse* (ce que Mika a dit) reste incluse.
+    - ``(source="conscience", person_id="conscience_mika")`` : un acte sans
+      destinataire — pensé à voix haute pour « qui regarde ». Ses
+      commentaires de flux RSS devenaient souvenirs ET connaissances-monde
+      (« Il existe un requin doté d'un système de projection », confiance
+      0,93) puis déclenchaient des contrôles de contradiction (MEM-11). Un
+      acte ADRESSÉ à quelqu'un garde son ``person_id`` et reste inclus.
     """
     return (
         qs.exclude(source__in=INTERNAL_MESSAGE_SOURCES)
         .exclude(is_internal=True)
         .exclude(source="conscience", role="user")
+        .exclude(source="conscience", person_id="conscience_mika")
     )

@@ -254,3 +254,19 @@ def _un_public_est_present():
         "conscience.engine.ConscienceEngine._audience_presente", return_value=True,
     ):
         yield
+
+
+@pytest.fixture(autouse=True)
+def _extraction_sans_cadence():
+    """Le consolidateur n'extrait plus une fenêtre dès le premier message :
+    elle part mûre (≥ N messages) ou calme (rien depuis 5 min), jamais sur
+    une question dont la réponse est attendue (MEM-04 / MEM-10). Les tests
+    existants créent un ou deux messages « maintenant » et consolident tout
+    de suite : ils mesurent la sélection, pas la cadence. Celle-ci est donc
+    coupée par défaut ; les tests de la cadence la rallument sur l'instance."""
+    from unittest.mock import patch
+
+    with patch(
+        "memory.storage.consolidator.MemoryConsolidator._cadence_extraction", False,
+    ):
+        yield

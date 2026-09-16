@@ -23,7 +23,7 @@ from conscience.types import DecisionContext
 class _MemoireMuette:
     """Le rappel mémoire ne rend rien : ce n'est pas ce qu'on mesure ici."""
 
-    async def recall_for_context(self, queries):
+    async def recall_for_context(self, queries, **kw):
         return ""
 
 
