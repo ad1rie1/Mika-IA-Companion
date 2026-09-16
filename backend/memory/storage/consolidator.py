@@ -771,6 +771,11 @@ class MemoryConsolidator:
             linked = _merge_entities(entities, interlocutors)
             if linked:
                 await sync_to_async(existing.entities.add)(*linked)
+            if themes:
+                await sync_to_async(existing.themes.add)(*themes)
+            tous_themes = await sync_to_async(
+                lambda: [t.name for t in existing.themes.all()]
+            )()
             await self._index(
                 self.vector_store.add_souvenir, "souvenir", existing.pk,
                 souvenir_id=existing.pk,
@@ -779,7 +784,7 @@ class MemoryConsolidator:
                     importance=existing.importance,
                     emotion=existing.emotion,
                     occurred_at=existing.occurred_at.isoformat(),
-                    themes=[t.name for t in themes],
+                    themes=tous_themes,
                 ),
             )
             logger.info(
@@ -1097,33 +1102,38 @@ class MemoryConsolidator:
             from memory.models import Souvenir
 
             depuis = timezone.now() - timedelta(hours=REINDEX_LOOKBACK_H)
-            recents = await sync_to_async(
-                lambda: list(
-                    Souvenir.objects.filter(created_at__gte=depuis)
-                    .prefetch_related("themes")
-                    .order_by("pk")[:2000]
-                )
-            )()
+
+            def _entrees() -> list[dict]:
+                # Tout ce qui touche l'ORM (M2M comprises) reste dans le
+                # thread d'exécuteur : lire `themes.all()` depuis la boucle
+                # lèverait `SynchronousOnlyOperation` au premier cache manqué.
+                return [
+                    {
+                        "souvenir_id": s.pk,
+                        "content": s.content,
+                        "metadata": souvenir_metadata(
+                            importance=s.importance, emotion=s.emotion,
+                            occurred_at=s.occurred_at.isoformat() if s.occurred_at else "",
+                            themes=[t.name for t in s.themes.all()],
+                        ),
+                    }
+                    for s in Souvenir.objects.filter(created_at__gte=depuis)
+                    .prefetch_related("themes").order_by("pk")[:2000]
+                ]
+
+            recents = await sync_to_async(_entrees)()
             if not recents:
                 return
-            presents = set(await vector_call(store.souvenir_ids_present)(
-                [s.pk for s in recents],
-            ))
-            manquants = [s for s in recents if s.pk not in presents]
+            presents = await vector_call(store.souvenir_ids_present)(
+                [e["souvenir_id"] for e in recents],
+            )
+            if not isinstance(presents, (list, tuple, set)):
+                return  # store simulé ou réponse d'une autre forme
+            presents = set(presents)
+            manquants = [e for e in recents if e["souvenir_id"] not in presents]
             if not manquants:
                 return
-            await vector_call(store.add_souvenirs)([
-                {
-                    "souvenir_id": s.pk,
-                    "content": s.content,
-                    "metadata": souvenir_metadata(
-                        importance=s.importance, emotion=s.emotion,
-                        occurred_at=s.occurred_at.isoformat() if s.occurred_at else "",
-                        themes=[t.name for t in s.themes.all()],
-                    ),
-                }
-                for s in manquants
-            ])
+            await vector_call(store.add_souvenirs)(manquants)
             logger.warning(
                 "Consolidation: %d souvenir(s) réindexé(s) — ils manquaient au store",
                 len(manquants),

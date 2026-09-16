@@ -136,6 +136,11 @@ class MemoryBridge:
         try:
             from identity.resolver import identity_resolver
 
+            # `authenticated=False` n'abaisse rien : le résolveur prend le
+            # plus fort entre la confiance STOCKÉE sur le handle (posée à la
+            # connexion — AUTHENTICATED pour une session web vérifiée) et
+            # celle déduite du canal. Un compte Telegram reste ACCOUNT, donc
+            # exige une identité corroborée — la même règle qu'en conversation.
             ctx = await identity_resolver.resolve_context(
                 person_id, channel=channel or "", authenticated=False, is_public=False,
             )
