@@ -477,6 +477,7 @@ class MemoryBridge:
                 intensity=self._REVISION_PENSEE_INTENSITE,
                 emotion="confused",
                 status="active",
+                origine=Rumination.Origine.REVISION,
             )
 
         with degraded("conscience: pensee d'une revision"):
@@ -508,6 +509,7 @@ class MemoryBridge:
                 intensity=self._PENSEE_ABSENT_INTENSITE,
                 emotion="nostalgic",
                 status="active",
+                origine=Rumination.Origine.MANQUE,
             )
             return True
 

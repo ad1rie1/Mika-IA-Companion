@@ -286,11 +286,14 @@ class TestRestDrive:
         engine.update()
         assert engine.states[DriveKind.REST].tension > 0.1
 
-    def test_observation_raises_rest_pressure(self, engine):
-        for _ in range(3):
+    def test_observation_does_not_raise_rest_pressure(self, engine):
+        """Percevoir n'est pas de l'activité (CONS-01) : quinze titres RSS
+        par relève saturaient REST en 1 h 30 sans que personne ne parle, et
+        la couchaient à 21 h. Seuls `on_act` / `on_reply` fatiguent."""
+        for _ in range(30):
             engine.on_observation(pertinence=0.8)
         engine.update()
-        assert engine.states[DriveKind.REST].tension > 0.05
+        assert engine.states[DriveKind.REST].tension == 0.0
 
     def test_long_messages_tire_more(self, engine):
         # Short message
@@ -347,7 +350,7 @@ class TestSignalRouting:
     def test_low_pertinence_observation_does_not_feed_curiosity(self, engine):
         engine.states[DriveKind.CURIOSITY].tension = 0.5
         engine.on_observation(pertinence=0.3)
-        # Below threshold — no satisfaction, only REST pressure
+        # Below threshold — no satisfaction
         assert engine.states[DriveKind.CURIOSITY].tension >= 0.5
 
 

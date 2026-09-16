@@ -141,6 +141,7 @@ async def process_message(
     broadcast: bool = True,
     persist: bool = True,
     emit_event: bool = True,
+    emotion_impulse: bool = True,
 ) -> SpeechOutput:
     """Full conversation pipeline: context -> AI -> emotion -> persist -> broadcast.
 
@@ -150,6 +151,11 @@ async def process_message(
         broadcast: Whether to broadcast the response via WebSocket.
         persist: Whether to save the exchange in memory.
         emit_event: Whether to emit a ``chat.message`` module event after.
+        emotion_impulse: Whether the reply's ``[EMOTION]`` tag moves the mood.
+            False for a silent work step: the tag still travels in the frame,
+            but a chantier step is not a lived exchange — its affect comes
+            from the verdict (fierté, blocage), not from every intermediate
+            sentence the model writes to itself.
     """
     request_id = set_new_request_id()
     tool_calls = []
@@ -377,7 +383,7 @@ async def process_message(
         getattr(context, "project_suppresses_emotion", False)
     )
     declared = emotion_data if not ai_failed and not suppresses_emotion else None
-    if not ai_failed and not suppresses_emotion:
+    if not ai_failed and not suppresses_emotion and emotion_impulse:
         try:
             # No tag means *no impulse*. NEUTRAL is not "nothing", it is the
             # origin of PAD space, so the default one pulled whatever the

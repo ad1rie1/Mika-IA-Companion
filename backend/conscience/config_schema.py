@@ -278,7 +278,7 @@ CONFIG_SCHEMA = [
         key="conscience.travail.travaux_actifs_max", type="int",
         section="conscience", group=_GROUPE_TRAVAIL,
         label="Chantiers menés de front",
-        default=3, min=0, max=20, hot_reload=True,
+        default=2, min=0, max=20, hot_reload=True,
         hint="À 0, elle n'entreprend plus rien — les chantiers déjà ouverts "
              "continuent de vieillir et de s'abandonner.",
     ),
@@ -312,9 +312,21 @@ CONFIG_SCHEMA = [
         key="conscience.travail.pas_intervalle_min_s", type="float",
         section="conscience", group=_GROUPE_TRAVAIL,
         label="Silence minimal entre deux pas (s)",
-        default=900.0, min=0.0, max=86400.0, hot_reload=True,
+        default=1800.0, min=0.0, max=86400.0, hot_reload=True,
         hint="La boucle tourne toutes les 30 s : sans espacement, un chantier "
-             "brûlerait tous ses pas en quelques minutes.",
+             "brûlerait tous ses pas en quelques minutes. Chaque pas est une "
+             "boucle d'outils complète, muette : à 900 s et trois chantiers, "
+             "jusqu'à douze appels par heure sans qu'on la voie travailler.",
+    ),
+    ConfigItem(
+        key="conscience.travail.pas_par_heure_max", type="int",
+        section="conscience", group=_GROUPE_TRAVAIL,
+        label="Pas de chantier par heure, tous chantiers confondus",
+        default=4, min=0, max=60, hot_reload=True,
+        hint="Le vrai poste de coût de la vie intérieure : un pas est une "
+             "boucle d'outils. Ce plafond borne l'heure quel que soit le "
+             "nombre de chantiers ouverts ; un pas refusé attend le cycle "
+             "suivant, rien n'est perdu. 1 ou 2 derrière un modèle local.",
     ),
     ConfigItem(
         key="conscience.travail.graine_obs_pertinence", type="float",
@@ -739,8 +751,12 @@ CONFIG_SCHEMA = [
         key="conscience.factor.pertinence_gate", type="float",
         section="conscience", group=_GROUPE_FACTEURS,
         label="F1 · Pertinence : seuil d'entrée",
-        default=0.7, min=0.0, max=1.0, hot_reload=True,
-        hint="En dessous, l'observation la plus pertinente ne contribue pas.",
+        default=0.6, min=0.0, max=1.0, hot_reload=True,
+        hint="En dessous, l'observation la plus pertinente ne contribue pas. "
+             "Le chemin sans LLM plafonne à 0,55, relevé jusqu'à 0,63 quand "
+             "le signal va dans le sens de son humeur : à 0,7 ce facteur ne "
+             "vivait que par un compte mail ; à 0,6, un titre qui résonne "
+             "avec ce qu'elle ressent compte, un titre banal non.",
     ),
     ConfigItem(
         key="conscience.factor.pertinence_weight", type="float",
@@ -1046,9 +1062,30 @@ CONFIG_SCHEMA = [
         key="conscience.ignored_reply_window_minutes", type="int",
         section="conscience", group=_GROUPE_ENTRETIEN,
         label="Délai pour qu'une relance compte comme répondue (min)",
-        default=10, min=1, max=1440, hot_reload=True,
+        default=20, min=1, max=1440, hot_reload=True,
         hint="Au-delà, l'initiative est comptée comme ignorée — ce qui "
-             "allonge le cooldown et pèse au facteur 8.",
+             "allonge le cooldown et pèse au facteur 8. Un humain ne se vexe "
+             "pas d'une réponse à douze minutes : 10 comptait « ignorée » la "
+             "plupart des réponses réelles.",
+    ),
+    ConfigItem(
+        key="conscience.ignored_reply_window_telegram_factor", type="float",
+        section="conscience", group=_GROUPE_ENTRETIEN,
+        label="Multiplicateur du délai sur Telegram",
+        default=3.0, min=1.0, max=20.0, hot_reload=True,
+        hint="Un message Telegram se lit quand on y pense, pas quand il "
+             "arrive : le délai avant de compter une initiative ignorée y est "
+             "multiplié par ce facteur.",
+    ),
+    ConfigItem(
+        key="conscience.inactivite_restauree_max_seconds", type="int",
+        section="conscience", group=_GROUPE_ENTRETIEN,
+        label="Inactivité maximale restaurée au démarrage (s)",
+        default=72 * 3600, min=0, max=30 * 86400, restart_required=True,
+        hint="Au démarrage, le silence est relu sur le dernier message d'une "
+             "vraie personne, plafonné à ceci : après une semaine d'arrêt, "
+             "elle ne doit pas se réveiller avec sept jours de manque d'un "
+             "coup. Lue par le moteur mais non déclarée jusqu'ici.",
     ),
     ConfigItem(
         key="conscience.observation_retention_hours", type="int",

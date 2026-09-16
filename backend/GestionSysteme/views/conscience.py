@@ -70,16 +70,19 @@ def _observations(request) -> dict:
     }
 
 
-#: Les six issues d'un cycle, en français. Le filtre n'en couvrait que trois,
+#: Les sept issues d'un cycle, en français. Le filtre n'en couvrait que trois,
 #: et deux d'entre elles — poursuivre un chantier, en ouvrir un — n'existaient
 #: pas encore : un cycle qui fait avancer un travail en silence était
-#: indiscernable d'un cycle qui n'a rien fait.
+#: indiscernable d'un cycle qui n'a rien fait. « retenue » : elle avait
+#: décidé de parler, mais personne à qui, ni personne pour entendre — rien
+#: n'a été tenté, ce n'est pas un échec.
 _DECISION_FR = {
     "act": "parler",
     "poursuivre": "avancer un chantier",
     "ouvrir": "ouvrir un chantier",
     "wait": "attendre",
     "skip": "rien à faire",
+    "sans_audience": "retenue — personne pour entendre",
     "failed": "échouée",
 }
 _DECISION_TONS = {
@@ -88,6 +91,7 @@ _DECISION_TONS = {
     "ouvrir": "ok",
     "failed": "danger",
     "wait": "warn",
+    "sans_audience": "warn",
 }
 
 

@@ -260,8 +260,14 @@ class DriveEngine:
             # Learning about the world satisfies curiosity a bit.
             self.satisfy(DriveKind.CURIOSITY, pertinence * 0.4)
 
-        # Activity contributes to REST pressure.
-        self._register_activity(pertinence)
+        # Percevoir n'est PAS de l'activité. Chaque observation enregistrait
+        # de la pression REST, et le module RSS émet un événement PAR ARTICLE
+        # (jusqu'à quinze par flux toutes les dix minutes) : ~+0,16 REST par
+        # relève contre −0,06 de décroissance, REST saturait en 1 h 30 sans
+        # que personne ne parle — pénalité de fatigue dans le score,
+        # « énergie basse » dans le prompt, et coucher avancé à 21 h chaque
+        # soir. Lire des titres ne fatigue pas ; parler et agir, oui
+        # (`on_act`, `on_reply`).
 
     def _register_activity(self, intensity: float) -> None:
         self._activity.append((time.time(), max(0.1, min(2.0, intensity))))

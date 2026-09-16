@@ -258,9 +258,6 @@ class SignalInterpreter:
     Claude Haiku for rich or unknown events.
     """
 
-    def __init__(self):
-        self._system_prompt: str | None = None
-
     async def interpret(self, event: ModuleEvent) -> InterpretedSignal:
         """Interpret a module event into a structured signal."""
 
@@ -319,17 +316,22 @@ class SignalInterpreter:
         return self._parse_response(raw, event)
 
     def _get_system_prompt(self) -> str:
-        """Build interpretation system prompt with personality context."""
-        if self._system_prompt is None:
-            from config.personality import personality
+        """Build interpretation system prompt with personality context.
 
-            interests = ", ".join(personality.interests) if personality.interests else ""
-            self._system_prompt = INTERPRETATION_SYSTEM_PROMPT.format(
-                name=personality.name,
-                description=personality.description,
-                interests=interests,
-            )
-        return self._system_prompt
+        Reconstruit à chaque appel, plus mis en cache pour la vie du process :
+        la personnalité est un réglage à chaud (Configuration › Personnalité),
+        et l'interpréteur était le seul lecteur à garder l'ancienne. Le coût
+        est un `format` sur des accesseurs déjà mémoïsés ; l'appel LLM qui
+        suit pèse mille fois plus.
+        """
+        from config.personality import personality
+
+        interests = ", ".join(personality.interests) if personality.interests else ""
+        return INTERPRETATION_SYSTEM_PROMPT.format(
+            name=personality.name,
+            description=personality.description,
+            interests=interests,
+        )
 
     def _build_prompt(self, event: ModuleEvent) -> str:
         """Build the user prompt for Haiku interpretation with actual event data."""

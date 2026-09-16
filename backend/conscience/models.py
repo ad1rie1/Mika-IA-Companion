@@ -154,8 +154,30 @@ class Rumination(models.Model):
         RESOLVED = "resolved"    # Mika spoke about it / got it off her chest
         FADED = "faded"          # Decayed naturally below threshold
 
+    class Origine(models.TextChoices):
+        """D'où vient la pensée. Un champ, pas une convention de forme.
+
+        Les pensées d'audit se reconnaissaient à « sans observation et sans
+        thème », les pensées de manque à « nostalgic avec un prénom en
+        premier thème ». Deux lecteurs déduisaient l'origine de la forme :
+        une pensée promue dont l'observation avait été purgée (FK SET_NULL
+        à 48 h) passait pour un audit et se faisait faner par son plafond ;
+        une pensée d'audit dérivée vers `nostalgic` dont le premier thème
+        était un prénom déclenchait « le retour d'un absent ». Les lignes
+        d'avant la migration gardent `""` et les anciennes déductions
+        restent en repli pour elles seules.
+        """
+        OBSERVATION = "observation"  # promue d'un signal resté sans suite
+        AUDIT = "audit"              # « ai-je bien dit ça ? » après une réplique
+        MANQUE = "manque"            # quelqu'un dont elle n'a plus de nouvelles
+        REVISION = "revision"        # une croyance qu'elle a dû abandonner
+        BLOCAGE = "blocage"          # un chantier bloqué
+
     summary = models.TextField()
     themes = models.JSONField(default=list)
+    origine = models.CharField(
+        max_length=20, choices=Origine.choices, blank=True, default="",
+    )
     # Emotional label (uses the 29-emotion vocabulary) that tints mood
     # while the rumination is active. Empty means no bleed.
     emotion = models.CharField(max_length=30, blank=True, default="")

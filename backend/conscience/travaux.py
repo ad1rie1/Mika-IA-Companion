@@ -401,7 +401,7 @@ def recolter(ctx, semees: set) -> list:
             pulsions=pulsions,
             tuning=conduite_tuning(),
         )
-        graines = list(graines) + graines_des_modules(pulsion, pulsions)
+        graines = list(graines) + graines_des_modules(pulsion, pulsions, semees)
         return [
             g for g in graines
             if (g.origine, str(g.reference)) not in semees
@@ -411,7 +411,7 @@ def recolter(ctx, semees: set) -> list:
         return []
 
 
-def graines_des_modules(pulsion, pulsions: list) -> list:
+def graines_des_modules(pulsion, pulsions: list, semees=frozenset()) -> list:
     """Ce que le monde propose, quand une pulsion féconde a de quoi s'en saisir.
 
     C'est la moitié manquante de H1. `recolter_graines` savait déjà tirer
@@ -450,6 +450,15 @@ def graines_des_modules(pulsion, pulsions: list) -> list:
     plafond = cfg_int(
         "conscience.travail.graines_modules_max", _GRAINES_MODULES_MAX, mini=0,
     )
+    # Les sujets DÉJÀ semés sont écartés AVANT la troncature. Le plafond
+    # s'appliquait d'abord et `recolter` dédupliquait ensuite : RSS renvoie
+    # toujours les mêmes titres non lus en tête, donc après trois chantiers
+    # les trois mêmes sujets étaient proposés puis écartés, et les douze
+    # autres n'arrivaient jamais — les modules ne proposaient plus rien.
+    candidats = [
+        (nom, sujet) for nom, sujet in sujets
+        if ("pulsion", f"{nom}:{sujet[:60]}") not in semees
+    ]
     return [
         Graine(
             origine="pulsion",
@@ -461,7 +470,7 @@ def graines_des_modules(pulsion, pulsions: list) -> list:
             # retombée de la pulsion après le premier pas.
             modules=(nom,),
         )
-        for nom, sujet in sujets[:plafond]
+        for nom, sujet in candidats[:plafond]
     ]
 
 
@@ -634,6 +643,8 @@ async def faire_un_pas(moteur, identifiant) -> bool:
             metadata={"travail": identifiant, "titre": row.titre},
             broadcast=False,
             persist=False,
+            # Muet ET sans impulsion : l'affect vient du verdict.
+            ressentir=False,
         )
     except Exception as exc:
         degradations.record("conscience: pas de travail", exc)
@@ -801,6 +812,7 @@ async def appliquer_verdict(moteur, identifiant, verdict, dit, bilan) -> None:
                 intensity=_FRUSTRATION_TRAVAIL_BLOQUE,
                 emotion="frustrated",
                 status="active",
+                origine=Rumination.Origine.BLOCAGE,
             )
             return {"issue": "bloquee", "titre": row.titre}
         return None

@@ -222,3 +222,35 @@ def simulate_time_decay(engine: EmotionEngine, seconds: float):
 
     # Run decay once (it uses time.time() internally)
     engine._apply_decay()
+
+
+@pytest.fixture(autouse=True)
+def _dates_d_historique_vierges():
+    """Le mémo id → ``created_at`` de ``pipeline.context`` est de portée
+    process. En production ``created_at`` ne change jamais et un id n'est
+    jamais réutilisé ; sous pytest, un test transactionnel annulé rend son
+    compteur d'ids, et le test suivant peut recréer le pk 3 avec une autre
+    date — le mémo servirait alors un horodatage d'un autre test. Vidé avant
+    chaque test ; autouse parce que le piège est invisible depuis le test
+    qui le subit."""
+    from pipeline import context as ctx_module
+
+    ctx_module._MESSAGE_DATES.clear()
+    yield
+    ctx_module._MESSAGE_DATES.clear()
+
+
+@pytest.fixture(autouse=True)
+def _un_public_est_present():
+    """Un acte sans destinataire ET sans navigateur connecté n'a plus lieu
+    (CONS-11) : la garde `ConscienceEngine._audience_presente` retient
+    l'acte. Aucun test du moteur n'enregistre de présence, et tous ceux qui
+    font agir la conscience supposaient implicitement qu'on l'entendait —
+    c'est cette supposition qu'on rend explicite ici. Un test qui veut le
+    silence pose son propre `patch` par-dessus, et gagne."""
+    from unittest.mock import patch
+
+    with patch(
+        "conscience.engine.ConscienceEngine._audience_presente", return_value=True,
+    ):
+        yield

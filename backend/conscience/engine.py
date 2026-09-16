@@ -46,6 +46,7 @@ from conscience.conduite import (
     choisir_conduite,
 )
 from conscience.verdict import VerdictTuning
+from conscience import murmure as _murmure
 from conscience.murmure import murmurer
 from conscience.murmure_reglage import tuning as murmure_tuning
 from conscience.types import DecisionContext, InterpretedSignal
@@ -158,6 +159,9 @@ class ActeResultat:
     person_id: str = ""
     outils: str = ""
     outils_reussis: int = 0
+    #: Personne à qui parler ET personne pour entendre : l'acte n'a pas eu
+    #: lieu, sans échec. Distinct de `ai_failed` — rien n'a été tenté.
+    sans_audience: bool = False
     trousse: tuple = ()
     ai_failed: bool = False
 #: Espacement minimal entre deux audits d'après-coup pour une même personne,
@@ -258,7 +262,15 @@ class ConscienceEngine:
         # Restore cooldown from last "act" decision log (survives restarts)
         await self._restore_cooldown()
         await self._restaurer_inactivite()
+        await self._restaurer_salutations()
         await self._reprendre_travaux()
+
+        # Le compteur d'initiatives ignorées « déjà vues » repart de l'état
+        # réel : à zéro, `_suivre_l_estime_sociale` lisait au premier cycle
+        # « 2 ignorées, j'en connaissais 0 » et prenait un coup d'estime pour
+        # des silences déjà encaissés avant le redémarrage.
+        with degraded("conscience: restauration des ignorees vues"):
+            _, self._ignores_vus = await self._introspect()
 
         # Les pulsions se rechargent ici parce que la conscience est déjà leur
         # horloge — c'est elle qui appelle `update()`, et rien d'autre ne tick
@@ -368,8 +380,18 @@ class ConscienceEngine:
         # anti-spirale). Placées ici, elles gatent tout l'aval — souvenir
         # immédiat, urgence accumulée, fast-path, graines de chantier —
         # exactement comme un filtre d'attention humain.
+        pertinence_brute = signal.pertinence
         signal.pertinence = self._habituer(
             event.source_module, event.event_type, signal.pertinence,
+        )
+        # Le facteur d'habituation vaut pour l'AFFECT aussi : il n'amortissait
+        # que la pertinence, et `_feed_emotion` injectait l'intensité brute —
+        # quinze titres RSS appariés à `curious 0.25` faisaient déborder
+        # l'humeur (mesuré : dix impulsions → 0,82, au-dessus de la porte
+        # 0,7), donc une prise de parole « parce que je suis curieuse », et
+        # la congruence d'entrée renchérissait sur les titres suivants.
+        facteur_habituation = (
+            signal.pertinence / pertinence_brute if pertinence_brute > 1e-9 else 1.0
         )
         signal.pertinence = self._colorer_par_l_humeur(
             signal.pertinence, signal.emotional_reaction,
@@ -377,9 +399,16 @@ class ConscienceEngine:
 
         observation = await self._store_observation(event, signal)
 
-        # Feed emotional reaction into the EmotionEngine
+        # Feed emotional reaction into the EmotionEngine — habituée, puis
+        # dosée par source : une source ne peut pas mouvoir l'humeur de plus
+        # d'un budget par fenêtre, quel que soit le nombre d'événements.
         if signal.emotional_reaction and signal.emotional_intensity > 0.1:
-            self._feed_emotion(signal)
+            signal.emotional_intensity = self._doser_l_affect(
+                event.source_module,
+                signal.emotional_intensity * facteur_habituation,
+            )
+            if signal.emotional_intensity > 0.05:
+                self._feed_emotion(signal)
 
         # Immediate memory action for high-pertinence signals
         if signal.should_remember and signal.pertinence > 0.5:
@@ -490,6 +519,50 @@ class ConscienceEngine:
             degradations.record("conscience: habituation", exc)
             return pertinence
 
+    #: Budget d'affect par SOURCE et par fenêtre : la somme des intensités
+    #: qu'une source peut injecter dans l'humeur en dix minutes. L'habituation
+    #: amortit chaque impulsion (plancher 0,4), mais quinze impulsions amorties
+    #: font encore ~1,9 d'intensité cumulée — de quoi franchir la porte de
+    #: débordement. Un budget dit : un flux, une boîte mail, c'est UNE source
+    #: d'émotion, pas quinze.
+    _AFFECT_BUDGET_PAR_SOURCE = 0.6
+    _AFFECT_FENETRE_S = 600.0
+    _AFFECT_MAX_CLES = 200
+
+    def _doser_l_affect(self, source: str, intensite: float) -> float:
+        """Rogne l'intensité au budget restant de la source. Ne lève jamais.
+
+        Mémo RAM posé par ``getattr`` (moteurs construits par ``__new__``).
+        Le dosage est enregistré sur ce qui est *réellement* injecté, jamais
+        sur la demande : une demande refusée ne consomme rien.
+        """
+        try:
+            intensite = max(0.0, float(intensite))
+            if intensite <= 0.0:
+                return 0.0
+            memo = getattr(self, "_affect_par_source", None)
+            if memo is None:
+                memo = {}
+                self._affect_par_source = memo
+            cle = str(source)
+            maintenant = time.monotonic()
+            recents = [
+                (t, i) for t, i in memo.get(cle, ())
+                if maintenant - t < self._AFFECT_FENETRE_S
+            ]
+            consomme = sum(i for _, i in recents)
+            reste = max(0.0, self._AFFECT_BUDGET_PAR_SOURCE - consomme)
+            dose = min(intensite, reste)
+            if dose > 0.0:
+                recents.append((maintenant, dose))
+            memo[cle] = recents
+            if len(memo) > self._AFFECT_MAX_CLES:
+                memo.pop(next(iter(memo)))
+            return dose
+        except Exception as exc:
+            degradations.record("conscience: dosage de l'affect", exc)
+            return intensite
+
     def _colorer_par_l_humeur(self, pertinence: float, reaction: str) -> float:
         """Module légèrement la pertinence par la congruence avec l'humeur.
 
@@ -580,15 +653,24 @@ class ConscienceEngine:
 
     # ── 2. DECISION LOOP ──────────────────────────────────────────
 
-    async def _decide(self) -> None:
+    async def _decide(self, *, compter_les_sauts: bool = True) -> None:
         """Core decision: evaluate accumulated signals, maintain memory, maybe act.
 
         Protected by _decision_lock to prevent concurrent decisions from
         the periodic loop and high-pertinence fast-path racing.
         Note: locked() check is safe in asyncio (single-threaded event loop,
         no preemption between check and acquire within the same coroutine step).
+
+        ``compter_les_sauts`` : seul le tick PÉRIODIQUE compte un cycle sauté.
+        Le fast-path entrait ici aussi, et cinq mails à p ≥ 0,85 reçus
+        pendant un acte (verrou tenu ~135 s) plus le tick suivant faisaient
+        six sauts « d'affilée » — un `RuntimeError` compté comme panne de
+        boucle alors que rien n'était bloqué.
         """
         if self._decision_lock.locked():
+            if not compter_les_sauts:
+                logger.debug("Decision already in progress, fast-path dropped")
+                return
             # Un `return` nu laissait `PeriodicLoop` marquer le tick en succès :
             # « conscience figée sur un appel qui ne rend pas la main » et
             # « conscience en bonne santé » étaient rigoureusement
@@ -624,7 +706,7 @@ class ConscienceEngine:
         garbage-collected mid-flight, and exceptions in a dropped task vanish
         silently.
         """
-        task = asyncio.create_task(self._decide())
+        task = asyncio.create_task(self._decide(compter_les_sauts=False))
         self._fastpath_tasks.add(task)
         task.add_done_callback(self._fastpath_tasks.discard)
         task.add_done_callback(self._log_fastpath_result)
@@ -704,7 +786,21 @@ class ConscienceEngine:
         elif decision == "skip":
             self._consecutive_waits = 0
 
-        if decision == "act":
+        if decision == "act" and not self._quelquun_est_joignable():
+            # Personne, nulle part : ni navigateur, ni handle module joignable.
+            # Vérifié ICI, avant `note_interaction()` et le murmure — sinon un
+            # rendez-vous prioritaire à 3 h la réveillait pour de bon, la
+            # faisait murmurer, et `_act` découvrait ensuite qu'il n'y avait
+            # personne. `_act` garde sa propre garde pour le cas où quelqu'un
+            # est joignable mais que la sélection ne retient personne.
+            self._last_action_time = time.time()
+            self._tirer_gigue_cooldown()
+            resultat = ActeResultat(sans_audience=True)
+            decision = "sans_audience"
+            logger.info(
+                "Conscience act withheld [%s]: personne de joignable", reason,
+            )
+        elif decision == "act":
             # Se réveiller pour de bon avant de parler. `_act` appelle
             # `process_message` en direct et non `perceive()`, seul appelant de
             # `note_interaction()` : elle restait donc officiellement en
@@ -762,6 +858,11 @@ class ConscienceEngine:
                 # The greeting is spent only now that Mika really speaks.
                 self._commit_greeting()
                 self._consecutive_waits = 0
+            elif resultat.sans_audience:
+                # Rien tenté : ni un acte (elle n'a pas parlé) ni une panne.
+                # La salutation n'est pas dépensée — elle la dira quand
+                # quelqu'un sera là.
+                decision = "sans_audience"
             else:
                 # L'appel IA a echoue : rien n'a ete dit, donc rien n'est
                 # committe. Journalise "failed" plutot que "act", sans quoi
@@ -777,7 +878,15 @@ class ConscienceEngine:
                 decision = "wait"
             elif decision == "poursuivre":
                 cible = getattr(conduite.cible, "identifiant", conduite.cible)
-                if not await self._faire_un_pas(cible):
+                if not self._budget_de_pas_disponible():
+                    # Un pas est une boucle d'outils complète et muette :
+                    # trois chantiers à un pas par quart d'heure faisaient
+                    # jusqu'à douze appels par heure, le vrai poste de coût
+                    # de la vie intérieure, invisible jusqu'au verdict. Le
+                    # chantier attend, rien n'est perdu.
+                    logger.debug("Pas de chantier différé : budget horaire épuisé")
+                    decision = "wait"
+                elif not await self._faire_un_pas(cible):
                     decision = "wait"
             # Sur les TROIS conduites non parlantes, et non plus seulement sur
             # « skip » et « wait » : la péremption des observations entraîne
@@ -982,7 +1091,11 @@ class ConscienceEngine:
     _ESPOIR_INTENSITE = 0.25
     #: Un rendez-vous « proche » : dans l'heure, et qui compte vraiment.
     _ESPOIR_FENETRE_MIN = 60
-    _ESPOIR_PRIORITE_MIN = 0.6
+    #: 0,5 et non 0,6 : `schedule_action` pose 0,5 par défaut, si bien qu'à
+    #: 0,6 un rendez-vous ordinaire — « rappelle-moi de… » — ne faisait
+    #: jamais espérer. Un rendez-vous qu'elle s'est donné compte ; seul un
+    #: « tiède » (< 0,5, fixé explicitement) ne compte pas.
+    _ESPOIR_PRIORITE_MIN = 0.5
     #: Horodatage monotone du dernier glissement d'espoir (attribut de
     #: classe — moteurs construits par `__new__`).
     _dernier_espoir: float = 0.0
@@ -1071,6 +1184,19 @@ class ConscienceEngine:
         # peut être « répondu » pour la sélection des réponses et « ignoré »
         # pour le comptage.
         fenetre = timedelta(minutes=self._ignored_reply_window_minutes())
+        # La fenêtre dépend du CANAL de l'acte : un message Telegram se lit
+        # quand on y pense, pas quand il arrive. Compter « ignorée » une
+        # relance Telegram après vingt minutes, c'est se vexer d'un téléphone
+        # posé sur une table.
+        facteur_tg = cfg_float(
+            "conscience.ignored_reply_window_telegram_factor",
+            self._IGNORED_TELEGRAM_FACTOR, mini=1.0,
+        )
+
+        def _fenetre_de(person_id: str) -> timedelta:
+            if str(person_id or "").startswith("tg_"):
+                return fenetre * facteur_tg
+            return fenetre
 
         def _query() -> tuple[int, int]:
             # One round-trip for the whole introspection. This runs on every
@@ -1082,19 +1208,19 @@ class ConscienceEngine:
                 decision="act", created_at__gte=today_start,
             ).count()
 
-            recent_act_times = list(
+            recent_acts = list(
                 ConscienceLog.objects.filter(decision="act")
                 .order_by("-created_at")
-                .values_list("created_at", flat=True)[:5]
+                .values_list("created_at", "person_id")[:5]
             )
-            if not recent_act_times:
+            if not recent_acts:
                 return acts_today, 0
 
             # Fetch every user reply since the oldest act in the window once,
-            # then answer "was this act followed by a reply within 10 min?"
-            # in Python. The window is bounded by definition — 5 acts.
-            oldest = recent_act_times[-1]
-            newest_window_end = recent_act_times[0] + fenetre
+            # then answer "was this act followed by a reply within the
+            # window?" in Python. The window is bounded by definition — 5 acts.
+            oldest = recent_acts[-1][0]
+            newest_window_end = max(t + _fenetre_de(pid) for t, pid in recent_acts)
             replies = list(
                 Observation.objects.filter(
                     event_type__in=("chat.message", "telegram.message"),
@@ -1104,8 +1230,8 @@ class ConscienceEngine:
             )
 
             consecutive_ignored = 0
-            for act_time in recent_act_times:
-                deadline = act_time + fenetre
+            for act_time, pid in recent_acts:
+                deadline = act_time + _fenetre_de(pid)
                 if any(act_time < reply <= deadline for reply in replies):
                     break
                 consecutive_ignored += 1
@@ -1145,8 +1271,10 @@ class ConscienceEngine:
     #: ce que le scoring voit, ce que le balayage périme, et la borne haute de
     #: la promotion en rumination. Une seule clé, donc.
     _PENDING_WINDOW_MIN: int = 30
-    #: Délai au-delà duquel une initiative sans réponse compte comme ignorée.
-    _IGNORED_REPLY_WINDOW_MIN: int = 10
+    #: Délai au-delà duquel une initiative sans réponse compte comme ignorée,
+    #: et son multiplicateur quand l'acte est parti sur Telegram.
+    _IGNORED_REPLY_WINDOW_MIN: int = 20
+    _IGNORED_TELEGRAM_FACTOR: float = 3.0
     #: Âge des observations closes avant purge.
     _OBSERVATION_RETENTION_H: int = 48
 
@@ -1446,9 +1574,9 @@ class ConscienceEngine:
         """Délégué — voir `travaux.recolter`."""
         return travaux.recolter(ctx, semees)
 
-    def _graines_des_modules(self, pulsion, pulsions: list) -> list:
+    def _graines_des_modules(self, pulsion, pulsions: list, semees=frozenset()) -> list:
         """Délégué — voir `travaux.graines_des_modules`."""
-        return travaux.graines_des_modules(pulsion, pulsions)
+        return travaux.graines_des_modules(pulsion, pulsions, semees)
 
     async def _ouvrir_travail(self, graine) -> bool:
         """Délégué — voir `travaux.ouvrir_travail`."""
@@ -1989,6 +2117,7 @@ class ConscienceEngine:
                     emotion=obs.emotional_reaction or "",
                     observation=obs,
                     status="active",
+                    origine=Rumination.Origine.OBSERVATION,
                 )
                 logger.debug(
                     "Promoted observation %d to rumination (p=%.2f)",
@@ -2254,9 +2383,17 @@ class ConscienceEngine:
             from conscience.models import Rumination
 
             def _pensees() -> list[dict]:
+                from django.db.models import Q
+
+                # Les pensées de MANQUE, par origine — une pensée d'audit
+                # dérivée vers `nostalgic` dont le premier thème est un
+                # prénom n'est pas quelqu'un qui manque. Le repli sur
+                # l'émotion ne vaut que pour les lignes sans origine.
                 return list(
-                    Rumination.objects.filter(
-                        status="active", emotion="nostalgic",
+                    Rumination.objects.filter(status="active")
+                    .filter(
+                        Q(origine=Rumination.Origine.MANQUE)
+                        | Q(origine="", emotion="nostalgic")
                     )
                     .exclude(themes=[])
                     .values("id", "themes", "created_at")[:5]
@@ -2391,10 +2528,41 @@ class ConscienceEngine:
         """Délégué — voir `travaux.build_work_prompt`."""
         return await travaux.build_work_prompt(row)
 
+    #: Budget horaire des pas de chantier, tous chantiers confondus
+    #: (`conscience.travail.pas_par_heure_max`). Mémo RAM des pas faits,
+    #: posé par `getattr` — moteurs construits par `__new__`.
+    _PAS_PAR_HEURE_MAX = 4
+    _PAS_FENETRE_S = 3600.0
+
+    def _pas_recents(self) -> list[float]:
+        memo = getattr(self, "_pas_faits", None)
+        if memo is None:
+            memo = []
+            self._pas_faits = memo
+        maintenant = time.monotonic()
+        memo[:] = [t for t in memo if maintenant - t < self._PAS_FENETRE_S]
+        return memo
+
+    def _budget_de_pas_disponible(self) -> bool:
+        """Reste-t-il un pas dans l'heure ? Ne lève jamais (défaut : oui)."""
+        try:
+            plafond = cfg_int(
+                "conscience.travail.pas_par_heure_max", self._PAS_PAR_HEURE_MAX,
+                mini=0,
+            )
+            return len(self._pas_recents()) < plafond
+        except Exception as exc:
+            degradations.record("conscience: budget de pas", exc)
+            return True
+
     async def _faire_un_pas(self, identifiant) -> bool:
         """Délégué — voir `travaux.faire_un_pas`, qui orchestre à travers la
         surface du moteur pour que les patchs de test continuent de porter."""
-        return await travaux.faire_un_pas(self, identifiant)
+        fait = await travaux.faire_un_pas(self, identifiant)
+        if fait:
+            with degraded("conscience: compte des pas"):
+                self._pas_recents().append(time.monotonic())
+        return fait
 
     def _preparer_trousse_travail(self, row):
         """Délégué — voir `travaux.preparer_trousse_travail`."""
@@ -2464,6 +2632,38 @@ class ConscienceEngine:
                 int(self.get_idle_seconds()),
             )
 
+    async def _restaurer_salutations(self) -> None:
+        """Retrouver quelles périodes ont déjà été saluées aujourd'hui.
+
+        `_greeted_periods` vivait en RAM seulement : un redémarrage entre 7 h
+        et 10 h refaisait dire bonjour (+0,35 au score, la moitié du seuil).
+        La trace existe déjà — `ConscienceLog.reason` porte `time(morning)`
+        sur l'acte qui a salué — donc on la relit plutôt que d'ajouter une
+        table. Ne lève jamais.
+        """
+        import re
+        from datetime import date
+
+        from conscience.models import ConscienceLog
+        from conscience.read import debut_du_jour_local
+
+        motif = re.compile(r"time\((morning|evening|night)\)")
+
+        def _lire() -> set[str]:
+            raisons = ConscienceLog.objects.filter(
+                decision="act",
+                created_at__gte=debut_du_jour_local(),
+                reason__contains="time(",
+            ).values_list("reason", flat=True)
+            return {m.group(1) for r in raisons for m in motif.finditer(r or "")}
+
+        with degraded("conscience: restauration des salutations"):
+            periodes = await sync_to_async(_lire, thread_sensitive=True)()
+            if periodes:
+                self._greeted_periods = periodes
+                self._greeted_date = date.today()
+                logger.info("Salutations déjà faites aujourd'hui : %s", sorted(periodes))
+
     async def _reprendre_travaux(self) -> None:
         """Délégué — voir `travaux.reprendre_travaux`."""
         return await travaux.reprendre_travaux()
@@ -2478,8 +2678,14 @@ class ConscienceEngine:
         metadata: dict | None = None,
         broadcast: bool = True,
         persist: bool = True,
+        ressentir: bool = True,
     ):
         """Un tour de modèle, avec sa trousse et son carnet d'outils.
+
+        ``ressentir=False`` pour un pas de chantier : chaque `[EMOTION]` d'un
+        pas muet teintait l'humeur globale — quatre pas d'un chantier, quatre
+        impulsions que personne n'a vécues. L'affect d'un travail vient de
+        son verdict (fierté à l'aboutissement, frustration au blocage).
 
         Extrait de `_act` sans changer un octet de son comportement : deux
         chemins en ont désormais besoin — la parole et le pas de travail — et
@@ -2538,8 +2744,37 @@ class ConscienceEngine:
                 emit_event=False,
                 broadcast=broadcast,
                 persist=persist,
+                emotion_impulse=ressentir,
             )
             return output, carnet.resume(), carnet.reussites
+
+    def _quelquun_est_joignable(self) -> bool:
+        """Un navigateur connecté, ou un handle module joignable (Telegram).
+
+        La condition minimale pour qu'un acte puisse avoir un destinataire :
+        `_select_recipient` ne retient que des cibles joignables. Ne lève
+        jamais — fermé par défaut, comme la garde d'audience.
+        """
+        if self._audience_presente():
+            return True
+        try:
+            from communication.presence import presence_registry
+
+            return any(t.is_module for t in presence_registry.reachable())
+        except Exception as exc:
+            degradations.record("conscience: lecture de presence", exc)
+            return False
+
+    @staticmethod
+    def _audience_presente() -> bool:
+        """Quelqu'un est-il là pour entendre un acte sans destinataire ?
+
+        Même lecture que le murmure (un navigateur connecté ; Telegram ne
+        compte pas, un acte sans destinataire ne part pas en push). Crochet
+        du moteur pour que les tests qui le font agir sans présence
+        enregistrée puissent dire « on l'entend » sans toucher au murmure.
+        """
+        return _murmure._audience_presente()
 
     async def _act(self, ctx: DecisionContext, reason: str) -> ActeResultat:
         """Generate a spontaneous response using accumulated context.
@@ -2593,6 +2828,25 @@ class ConscienceEngine:
         # them; otherwise it stays Mika's internal/broadcast voice.
         target = await self._select_recipient(ctx)
         person_id = target or "conscience_mika"
+
+        # Personne à qui s'adresser ET personne dans la pièce : un acte
+        # partait quand même sur le groupe global — vide — et était PERSISTÉ
+        # dans le fil partagé. Jusqu'à cinq monologues par jour que personne
+        # n'entendait, payés en boucle d'outils, et que le prochain
+        # interlocuteur retrouvait dans son historique. Même garde que le
+        # murmure : sans public, elle ne parle pas — ce qu'elle avait à dire
+        # reste en attente, vieillit, et devient une pensée (promotion en
+        # rumination) plutôt qu'une phrase dans le vide. `_last_action_time`
+        # est déjà posé : le cooldown espace les tentatives, gratuites.
+        if target is None and not self._audience_presente():
+            logger.info(
+                "Conscience act withheld [%s]: personne à qui parler ni pour "
+                "entendre — les observations restent en attente", reason,
+            )
+            return ActeResultat(
+                person_id=person_id, trousse=tuple(relevant_modules),
+                sans_audience=True,
+            )
 
         try:
             output, bilan_outils, outils_reussis = await self._appeler_le_modele(
@@ -3434,8 +3688,15 @@ class ConscienceEngine:
             que la nouvelle prenne sa place — la dernière réponse est celle
             qu'on se rejoue, pas la douzième d'avant.
             """
-            audits = Rumination.objects.filter(
-                status="active", observation__isnull=True, themes=[],
+            from django.db.models import Q
+
+            # L'origine d'abord ; la forme (sans observation, sans thème) ne
+            # vaut que pour les lignes d'avant la migration, qui n'ont pas
+            # d'origine. Une pensée promue dont l'observation a été purgée
+            # n'est plus prise pour un audit.
+            audits = Rumination.objects.filter(status="active").filter(
+                Q(origine=Rumination.Origine.AUDIT)
+                | Q(origine="", observation__isnull=True, themes=[])
             )
             fanees = 0
             surplus = audits.count() - (plafond - 1)
@@ -3454,6 +3715,7 @@ class ConscienceEngine:
                 emotion=rumination_emotion,
                 observation=None,
                 status="active",
+                origine=Rumination.Origine.AUDIT,
             )
             return fanees
 

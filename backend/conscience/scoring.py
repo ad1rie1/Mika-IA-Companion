@@ -57,7 +57,7 @@ class ScoringTuning:
     sleep_wake_scheduled_priority: float = SLEEP_WAKE_SCHEDULED_PRIORITY
     sleep_penalty: float = SLEEP_PENALTY
     # F1 pertinence
-    pertinence_gate: float = 0.7
+    pertinence_gate: float = 0.6
     pertinence_weight: float = 0.4
     # F2 urgence accumulée
     urgency_gate: float = 0.5

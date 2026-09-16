@@ -155,11 +155,27 @@ class TestPertinence:
         assert "pertinence" not in reason
 
     def test_pertinence_exactly_at_threshold(self):
-        """max_pertinence == 0.7 should not trigger (>0.7 required)."""
-        ctx = make_context(max_pertinence=0.7)
+        """max_pertinence == gate should not trigger (strictly above required).
+
+        Lue sur le réglage et non en dur : la porte est passée de 0,7 à 0,6
+        (CONS-08) pour qu'un signal sans LLM qui résonne avec son humeur
+        (0,55 × 1,15 = 0,63) compte, un signal banal (0,55) non."""
+        from conscience.scoring import DEFAULT_TUNING
+
+        ctx = make_context(max_pertinence=DEFAULT_TUNING.pertinence_gate)
         score, reason, _, _ = _score(ctx)
 
         assert "pertinence" not in reason
+
+    def test_un_signal_qui_resonne_avec_l_humeur_compte_sans_llm(self):
+        """0,55 (RSS apparié) × 1,15 (congruence d'entrée) franchit la porte."""
+        from conscience.scoring import DEFAULT_TUNING
+
+        assert DEFAULT_TUNING.pertinence_gate == 0.6
+        _, reason_banal, _, _ = _score(make_context(max_pertinence=0.55))
+        _, reason_resonne, _, _ = _score(make_context(max_pertinence=0.55 * 1.15))
+        assert "pertinence" not in reason_banal
+        assert "pertinence" in reason_resonne
 
 
 # ===================================================================

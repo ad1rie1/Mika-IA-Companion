@@ -113,13 +113,13 @@ OUVERTURE_ENVIE_MIN = 0.50
 #: Nombre de travaux ouverts simultanément. Trois, parce qu'un quatrième ne
 #: serait plus jamais visité : à un pas par 15 min et un frein de diffusion,
 #: la file se viderait plus lentement qu'elle ne se remplit.
-TRAVAUX_ACTIFS_MAX = 3
+TRAVAUX_ACTIFS_MAX = 2
 
 #: Espacement minimal entre deux pas du **même** travail (15 min). La boucle
 #: tourne toutes les 30 s : sans cet espacement, un travail consommerait tous
 #: ses pas en une poignée de minutes, ce qui est l'inverse exact de « aller au
 #: bout de quelque chose ».
-PAS_INTERVALLE_MIN_S = 900.0
+PAS_INTERVALLE_MIN_S = 1800.0
 
 #: Au-dessus, le résultat d'un pas est jugé assez notable pour être dit à voix
 #: haute sans qu'on le lui ait demandé. Volontairement très haut : le défaut
