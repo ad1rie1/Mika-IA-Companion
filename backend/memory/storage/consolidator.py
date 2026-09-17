@@ -1506,6 +1506,12 @@ class MemoryConsolidator:
                 ).order_by().values_list("person_id", flat=True).distinct()
             )
         )()
+        # La même règle que l'écrivain (``save_snapshot``) : un résumé pour
+        # ``anon_*`` ou ``conscience_mika`` n'est le profil affectif de
+        # personne, et le moteur les rechargeait en RAM trente jours au boot.
+        from identity.trust import is_identifiable_person
+
+        person_ids = [pid for pid in person_ids if is_identifiable_person(pid)]
 
         if not person_ids:
             return

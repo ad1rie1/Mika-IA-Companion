@@ -87,6 +87,11 @@ class TestPercevoirNeFatiguePas:
 
         e = DriveEngine()
         e.on_reply(word_count=60)
+        # Cinq minutes de la fenêtre d'activité s'écoulent.
+        import time as _t
+        debut, poids = e._derniere_activite
+        e._derniere_activite = (debut - 300.0, poids)
+        e.states[DriveKind.REST].last_update = _t.time() - 300.0
         e.update()
         assert e.states[DriveKind.REST].tension > 0.0
 

@@ -29,6 +29,15 @@
       {% endif %}
 
       <dl class="kv">
+        <dt title="Ce que le prompt et la conscience lisent : l'écart de la position à son point de repos, nommé par l'émotion vers laquelle elle a dérivé">Ressenti (écart au repos)</dt>
+        <dd>
+          {% if global_mood.felt == "neutral" %}
+            <span class="muted">au repos — comme d'habitude</span>
+          {% else %}
+            <span class="emo" style="{{ global_mood.felt|emo_style }}">{{ global_mood.felt|emo_fr }}</span>
+            <span class="tabular muted">{{ global_mood.felt_intensity|pct }}</span>
+          {% endif %}
+        </dd>
         <dt title="Plaisir / Éveil / Dominance">Position PAD</dt>
         <dd class="mono">{{ global_mood.pad|join:" · " }}</dd>
         <dt title="Norme du vecteur vitesse — élevée = humeur en mouvement">Dynamique</dt>

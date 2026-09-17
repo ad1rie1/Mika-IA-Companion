@@ -198,9 +198,14 @@ class TestLongConversation:
             f"5-minute pause should leave the impulse readable: "
             f"{after_5min:.3f} of {travelled:.3f}"
         )
-        assert mood.emotion is Emotion.EXCITED, (
+        # Read RELATIVE to rest: a fresh oscillator starts at rest (positive,
+        # the hour's tint), so the absolute label of « rest + excitement »
+        # is the tint's neighbour (playful); the deviation from rest is what
+        # the prompt names, and it still reads excited.
+        felt, _ = pad.label_from_home(mood.dynamic.position, home)
+        assert felt is Emotion.EXCITED, (
             f"5 min later the state should still read as the emotion that "
-            f"created it, got {mood.emotion.value}"
+            f"created it, got {felt.value}"
         )
 
         simulate_time_decay(engine, 1500.0)  # 30 minutes in total

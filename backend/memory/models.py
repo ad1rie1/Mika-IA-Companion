@@ -202,6 +202,13 @@ class EmotionSnapshot(models.Model):
     primary_intensity = models.FloatField()
     global_emotion = models.CharField(max_length=30, default="neutral")
     global_intensity = models.FloatField(default=0.0)
+    # Une ligne de tour porte la BALISE déclarée par le modèle ; une ligne
+    # d'arrêt (``_save_state``) porte une POSITION. La restauration doit
+    # rejouer le cliquet sur la première et prendre la seconde telle quelle —
+    # sans le savoir, elle restaurait ``angry 0.8`` là où l'oscillateur
+    # vivant n'avait jamais dépassé 0,46. Défaut ``True`` : les lignes
+    # antérieures sont presque toutes des tours.
+    declared = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

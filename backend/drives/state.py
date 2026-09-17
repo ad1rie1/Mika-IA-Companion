@@ -106,7 +106,7 @@ DEFAULT_PARAMS: dict[DriveKind, DriveParams] = {
     ),
     DriveKind.REST: DriveParams(
         # Rest drive grows only when Mika has been very active recently.
-        # It's handled specially — see DriveEngine.on_activity.
+        # It is handled specially — see DriveEngine._rest_step (time spent active).
         growth_rate=0.0,
         decay_on_satisfy=0.3,
         weight=0.20,

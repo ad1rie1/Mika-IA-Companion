@@ -242,46 +242,36 @@ CONFIG_SCHEMA = [
         growth_rate=0.0, decay_on_satisfy=0.3,
         weight=0.20, satisfy_threshold=0.50,
         growth_hint=(
-            "Laissé à 0.0 : REST ne monte pas avec le temps mais avec "
-            "l'ACTIVITÉ — chaque réplique, chaque acte, chaque observation "
-            "ajoute « Pression par événement » ci-dessous."
+            "Laissé à 0.0 : REST ne monte pas avec le temps qui passe mais "
+            "avec le temps d'ACTIVITÉ — voir « Fatigue gagnée par heure "
+            "d'activité soutenue » ci-dessous."
         ),
     ),
     ConfigItem(
-        key="drives.rest.pressure_per_event", type="float", section="drives",
-        group=REST_GROUP, label="Pression ajoutée par événement d'activité",
-        default=0.04, min=0.0, max=1.0, hot_reload=True,
-        hint="Un message long compte davantage qu'un mot (le facteur monte "
-             "jusqu'à ×2 avec la longueur).",
-    ),
-    ConfigItem(
-        key="drives.rest.max_gain_per_update", type="float", section="drives",
-        group=REST_GROUP, label="Fatigue maximale gagnée en une passe",
-        default=0.15, min=0.0, max=1.0, hot_reload=True,
-        hint="Borne ce qu'une rafale de signaux peut ajouter d'un seul coup. "
-             "Un relevé RSS de 9 flux produit une centaine d'observations en "
-             "même temps : sans ce plafond la fatigue saute à fond dès le "
-             "premier relevé, l'énergie reste basse toute la journée et elle "
-             "se couche à 21 h tous les soirs. Une conversation normale reste "
-             "loin sous ce plafond — il ne mord que sur les rafales.",
+        key="drives.rest.growth_per_active_hour", type="float", section="drives",
+        group=REST_GROUP, label="Fatigue gagnée par heure d'activité soutenue",
+        default=0.2, min=0.0, max=2.0, hot_reload=True,
+        hint="REST monte avec le TEMPS passé à répondre et à agir, pas avec "
+             "le nombre de messages : chaque réponse ouvre une fenêtre "
+             "d'activité (« Fenêtre glissante d'activité » plus bas) pendant "
+             "laquelle la fatigue croît à ce taux. À 0.2, deux heures de "
+             "conversation dense valent 0.4 et cinq heures la saturent ; une "
+             "réponse isolée ajoute ~0.03. Elle était comptée par réponse "
+             "(0.04 × la longueur) : quatorze réponses — quinze minutes de "
+             "chat — l'épuisaient.",
     ),
     ConfigItem(
         key="drives.rest.natural_decay_per_second", type="float",
         section="drives", group=REST_GROUP,
         label="Décroissance naturelle du repos (par seconde)",
-        default=0.0001, min=0.0, max=0.0004, hot_reload=True,
-        hint="⚠ À MANIPULER AVEC PRÉCAUTION — monter ce nombre a déjà rendu "
-             "TOUT le cycle de sommeil inatteignable : aucun journal, aucun "
-             "rêve, aucune digestion de ruminations, et l'avatar les yeux "
-             "ouverts toute la nuit. La cause : le sommeil n'ouvre qu'après "
-             "900 s SANS interaction, pendant lesquelles la tension ne fait "
-             "que baisser — ce coefficient borne donc mécaniquement ce qu'il "
-             "en reste quand la nuit s'ouvre. À 0.0008 (l'ancienne valeur) "
-             "une tension pleine perdait 0.72 sur cette fenêtre et le seuil "
-             "n'était jamais franchi ; à 0.0001 elle perd 0.09, et il faut "
-             "~2 h 45 pour vider une tension pleine. Le sommeil doit rester "
-             "la voie principale de récupération : c'est là que REST est "
-             "réellement soulagé.",
+        default=0.0002, min=0.0, max=0.0008, hot_reload=True,
+        hint="Hors activité seulement (pendant une fenêtre d'activité, REST "
+             "ne fait que monter). À 0.0002 (0.72/h), la fatigue d'un chat de "
+             "deux heures (0.4) s'absorbe en ~35 min de calme ; à 0.0001 elle "
+             "durait trois heures. REST n'interdit plus de dormir (il avance "
+             "l'heure du coucher), donc ce coefficient ne ferme plus la nuit "
+             "comme il l'a fait jadis à 0.0008 ; le sommeil reste ce qui vide "
+             "une fatigue installée.",
     ),
 
     ConfigItem(
@@ -297,8 +287,9 @@ CONFIG_SCHEMA = [
         group=COMMUN_GROUP,
         label="Fenêtre glissante d'activité (s)",
         default=600.0, min=1.0, max=86400.0, hot_reload=True,
-        hint="Au-delà, un événement d'activité sort de l'historique. Il n'est "
-             "de toute façon compté qu'une fois dans la pression REST.",
+        hint="Combien de temps une réponse ou un acte « tient » comme "
+             "activité : tant que la fenêtre court, la fatigue monte ; passé "
+             "ce délai sans nouvel échange, elle redescend.",
     ),
 
     ConfigItem(

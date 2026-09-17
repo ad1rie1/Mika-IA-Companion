@@ -193,6 +193,23 @@ def _intensite_de_debordement(glob) -> float:
     return float(getattr(glob, "intensity", 0.0) or 0.0)
 
 
+def _humeur_ressentie(glob) -> str:
+    """Le nom que les portes et le prompt de décision donnent à l'humeur.
+
+    ``felt_emotion`` — l'écart au repos — quand l'objet la porte : la
+    position absolue nommait la teinte de l'heure (« amusée » à 14 h) quoi
+    que la vie intérieure y ajoute, si bien que la détresse
+    (``_suivre_la_detresse`` lit la valence de ce nom) ne se déclenchait que
+    par cinq tours ``angry 0.9`` d'un utilisateur, jamais par elle-même.
+    Retombe sur ``emotion`` (doubles de test).
+    """
+    ressentie = getattr(glob, "felt_emotion", None)
+    valeur = getattr(ressentie, "value", None)
+    if isinstance(valeur, str):
+        return valeur
+    return getattr(getattr(glob, "emotion", None), "value", "") or ""
+
+
 class ConscienceEngine:
     """Singleton. Mika's waking consciousness.
 
@@ -579,6 +596,12 @@ class ConscienceEngine:
 
             ancre = pad.EMOTION_ANCHORS.get(Emotion(reaction))
             humeur = emotion_engine.global_mood.dynamic.position
+            # L'écart au repos, quand le repos est connu : au repos, la
+            # position absolue est positive (la teinte de l'heure) et tout
+            # signal positif pesait +15 % sans qu'elle ressente rien.
+            repos = getattr(emotion_engine.global_mood, "home", None)
+            if repos is not None:
+                humeur = pad.sub(humeur, repos)
             if not ancre:
                 return pertinence
             na, nh = pad.norm(ancre), pad.norm(humeur)
@@ -898,7 +921,7 @@ class ConscienceEngine:
             # Le vide prolongé a une couleur. `bored` fait partie des 29
             # émotions et rien ne le produisait : une après-midi sans rien
             # laissait l'humeur là où le matin l'avait posée.
-            self._peut_etre_s_ennuyer(ctx, travaux)
+            await self._peut_etre_s_ennuyer(ctx, travaux)
             # Et ce qui vient en a une aussi : un rendez-vous proche ou un
             # chantier presque au bout glissent vers l'espoir — le futur
             # cesse d'être un calendrier sans affect.
@@ -921,12 +944,24 @@ class ConscienceEngine:
 
     #: Replis de l'ennui — clés `conscience.ennui.*`.
     _ENNUI_IDLE_MINUTES = 120
-    _ENNUI_INTENSITE = 0.4
+    #: L'ennui est un ÉTAT TENU, dosé comme un plateau : 0,2 toutes les dix
+    #: minutes, et non 0,4 par demi-heure. Sous τ_global = 23 min, une dose
+    #: demi-horaire retombait de 0,36 à 0,10 d'écart entre deux impulsions —
+    #: une dent de scie où le prompt alternait « comme d'habitude » et
+    #: « lasse ». À 0,2 / 10 min le régime permanent est un écart de ~0,25
+    #: (« légèrement lasse ») qui ne bouge plus.
+    _ENNUI_INTENSITE = 0.2
     #: Espacement des glissements (RAM). L'ennui teinte, il ne matraque pas :
     #: sans cet espacement, la boucle enverrait une impulsion toutes les 30 s
     #: pendant toute l'après-midi vide — même leçon que la saignée des
     #: ruminations.
-    _ENNUI_INTERVAL_S = 1800.0
+    _ENNUI_INTERVAL_S = 600.0
+    #: Le manque de QUELQU'UN (``who_misses_contact``) n'est vérifié qu'à cet
+    #: espacement pendant le vide — trois requêtes bornées, une fois par
+    #: demi-heure, jamais à chaque cycle.
+    _MANQUE_INTERVAL_S = 1800.0
+    _manque_verifie_le: float = 0.0
+    _manque_present: bool = False
     #: Tension SOCIAL à partir de laquelle le vide se ressent comme de la
     #: SOLITUDE plutôt que de l'ennui. `lonely` n'était produit nulle part
     #: par la vie interne : SOCIAL débordait en *score* (elle agissait),
@@ -940,47 +975,94 @@ class ConscienceEngine:
     #: tests construisent le moteur par `__new__` (voir `_cycles_sautes`).
     _dernier_ennui: float = 0.0
 
-    def _peut_etre_s_ennuyer(self, ctx: DecisionContext, travaux: list) -> None:
-        """Le vide prolongé glisse l'humeur vers l'ennui. Ne lève jamais.
+    def _le_vide_est_la(self, ctx: DecisionContext, travaux: list) -> float:
+        """L'intensité du glissement d'ennui dû maintenant, ou 0.
 
         Quatre conditions, toutes nécessaires : éveillée (dormir n'est pas
         s'ennuyer), rien à observer, aucun chantier en cours (travailler
-        n'est pas s'ennuyer), et un long silence. L'intensité reste sous la
-        porte de débordement d'humeur : l'ennui colore le visage, le murmure
-        et le vécu — il ne force jamais une prise de parole à lui seul, mais
-        il donne à « ouvrir un chantier » la raison lisible qui manquait.
+        n'est pas s'ennuyer), et un long silence — puis l'espacement. Pure
+        RAM, ne lève jamais ; marque l'espacement quand elle répond oui.
         """
         try:
             if ctx.sleep_phase != "awake":
-                return
+                return 0.0
             if ctx.pending_observations or travaux:
-                return
+                return 0.0
             porte_s = cfg_int(
                 "conscience.ennui.idle_minutes", self._ENNUI_IDLE_MINUTES,
                 mini=1,
             ) * 60
             if ctx.idle_seconds < porte_s:
-                return
+                return 0.0
             intensite = cfg_float(
                 "conscience.ennui.intensite", self._ENNUI_INTENSITE,
                 mini=0.0, maxi=1.0,
             )
             if intensite <= 0.0:
-                return
+                return 0.0
             maintenant = time.monotonic()
             if (
                 self._dernier_ennui
                 and maintenant - self._dernier_ennui < self._ENNUI_INTERVAL_S
             ):
-                return
+                return 0.0
             self._dernier_ennui = maintenant
+            return intensite
+        except Exception as exc:
+            degradations.record("conscience: portes de l'ennui", exc)
+            return 0.0
 
+    async def _quelquun_lui_manque(self) -> bool:
+        """Y a-t-il UNE personne dont le silence dépasse le rythme du lien ?
+
+        La solitude tenait à une tension globale (SOCIAL ≥ 0,6 ≈ 18 h de
+        silence) : long pour quelqu'un qui a un ami quotidien, et aveugle à
+        qui manque. ``who_misses_contact`` mesure déjà le manque au rythme de
+        chaque relation pour choisir un destinataire ; ici il colore
+        l'affect. Vérifié au plus toutes les ``_MANQUE_INTERVAL_S`` (le verdict
+        est mis en cache), jamais à chaque cycle. Ne lève jamais.
+        """
+        maintenant = time.monotonic()
+        if (
+            self._manque_verifie_le
+            and maintenant - self._manque_verifie_le < self._MANQUE_INTERVAL_S
+        ):
+            return self._manque_present
+        self._manque_verifie_le = maintenant
+        try:
+            memoire = getattr(self, "memory", None)
+            if memoire is None:
+                self._manque_present = False
+            else:
+                candidats = await memoire.who_misses_contact(n=1)
+                self._manque_present = bool(candidats)
+        except Exception as exc:
+            degradations.record("conscience: manque pour la solitude", exc)
+            self._manque_present = False
+        return self._manque_present
+
+    async def _peut_etre_s_ennuyer(
+        self, ctx: DecisionContext, travaux: list,
+    ) -> None:
+        """Le vide prolongé glisse l'humeur vers l'ennui — ou la solitude.
+
+        L'intensité reste sous la porte de débordement d'humeur : l'ennui
+        colore le visage, le murmure et le vécu — il ne force jamais une
+        prise de parole à lui seul, mais il donne à « ouvrir un chantier » la
+        raison lisible qui manquait. Ne lève jamais.
+        """
+        intensite = self._le_vide_est_la(ctx, travaux)
+        if intensite <= 0.0:
+            return
+        try:
             from emotion.types import Emotion, EmotionData
 
             # Le même vide n'a pas la même couleur selon ce qui manque :
-            # rien à faire → ennui ; quelqu'un → solitude. SOCIAL haut
-            # pendant une longue absence, c'est « je veux de la compagnie »,
-            # pas « je veux de l'occupation ».
+            # rien à faire → ennui ; quelqu'un → solitude. Quelqu'un manque
+            # quand une relation a dépassé son propre rythme de silence
+            # (``_quelquun_lui_manque``), ou, à défaut de relation lisible,
+            # quand SOCIAL est haut pendant une longue absence — « je veux
+            # de la compagnie », pas « je veux de l'occupation ».
             emotion = Emotion.BORED
             try:
                 from drives.state import DriveKind
@@ -989,7 +1071,7 @@ class ConscienceEngine:
             except Exception as exc:
                 degradations.record("conscience: tension sociale illisible", exc)
                 social = 0.0
-            if social >= self._SOLITUDE_PORTE_SOCIAL:
+            if social >= self._SOLITUDE_PORTE_SOCIAL or await self._quelquun_lui_manque():
                 emotion = Emotion.LONELY
 
             emotion_engine.process_emotion(
@@ -1698,7 +1780,7 @@ class ConscienceEngine:
 
         return DecisionContext(
             pending_observations=pending,
-            global_mood=glob.emotion.value,
+            global_mood=_humeur_ressentie(glob),
             # Intensité *de débordement*, normalisée sur l'ancre la plus
             # proche (``GlobalMood.overflow_intensity``) : l'intensité brute
             # rapporte la norme à celle d'``excited`` (1,245), si bien que
@@ -1848,7 +1930,13 @@ class ConscienceEngine:
     _RUMINATION_BLEED_INTERVAL_S: float = 600.0
     #: Part de l'intensité d'une pensée effectivement versée dans l'humeur.
     #: Elle teinte, elle n'impose pas.
-    _RUMINATION_BLEED_INTENSITY: float = 0.15
+    #: 0,35 et non 0,15 : à 0,15, « Je bloque sur… » (0,35) versait
+    #: ``frustrated 0.05`` toutes les dix minutes — régime permanent à 7 % de
+    #: l'écart au repos, sous la tolérance de 0,1 : le mécanisme existait et
+    #: ne se voyait jamais, ni dans le prompt ni dans les portes. À 0,35 le
+    #: régime permanent est ~0,16 d'écart, « à peine frustrée » — visible,
+    #: pas envahissant.
+    _RUMINATION_BLEED_INTENSITY: float = 0.35
 
     #: Plafond de l'espacement, quoi qu'il arrive : au-delà d'une demi-journée
     #: sans un mot, se taire davantage n'est plus de la retenue, c'est une

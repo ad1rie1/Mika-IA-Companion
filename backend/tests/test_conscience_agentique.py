@@ -929,7 +929,7 @@ class TestEnnuiEtSolitude:
         e._dernier_ennui = 0.0
         return e
 
-    def _vide(self, e, ctx, travaux=(), social=0.1):
+    async def _vide(self, e, ctx, travaux=(), social=0.1):
         """Un tour de vide avec la tension SOCIAL contrôlée."""
         from drives.state import DriveKind
 
@@ -937,41 +937,41 @@ class TestEnnuiEtSolitude:
             "conscience.engine.drive_engine",
         ) as de:
             de.states = {DriveKind.SOCIAL: SimpleNamespace(tension=social)}
-            e._peut_etre_s_ennuyer(ctx, travaux=list(travaux))
+            await e._peut_etre_s_ennuyer(ctx, travaux=list(travaux))
         return moteur
 
-    def test_le_vide_sans_manque_social_glisse_vers_l_ennui(self):
+    async def test_le_vide_sans_manque_social_glisse_vers_l_ennui(self):
         from emotion.types import Emotion
 
         e = self._moteur()
-        moteur = self._vide(e, _ctx(idle_seconds=3 * 3600), social=0.1)
+        moteur = await self._vide(e, _ctx(idle_seconds=3 * 3600), social=0.1)
         data, personne = moteur.process_emotion.call_args.args
         assert data.emotion is Emotion.BORED
         assert personne == "conscience_mika"
 
-    def test_le_vide_avec_envie_de_compagnie_est_de_la_solitude(self):
+    async def test_le_vide_avec_envie_de_compagnie_est_de_la_solitude(self):
         from emotion.types import Emotion
 
         e = self._moteur()
-        moteur = self._vide(e, _ctx(idle_seconds=3 * 3600), social=0.8)
+        moteur = await self._vide(e, _ctx(idle_seconds=3 * 3600), social=0.8)
         data, personne = moteur.process_emotion.call_args.args
         assert data.emotion is Emotion.LONELY
         assert personne == "conscience_mika"
 
-    def test_travailler_n_est_pas_s_ennuyer(self):
+    async def test_travailler_n_est_pas_s_ennuyer(self):
         e = self._moteur()
-        moteur = self._vide(e, _ctx(idle_seconds=3 * 3600), travaux=[object()])
+        moteur = await self._vide(e, _ctx(idle_seconds=3 * 3600), travaux=[object()])
         moteur.process_emotion.assert_not_called()
 
-    def test_dormir_n_est_pas_s_ennuyer(self):
+    async def test_dormir_n_est_pas_s_ennuyer(self):
         e = self._moteur()
-        moteur = self._vide(
+        moteur = await self._vide(
             e, _ctx(idle_seconds=3 * 3600, sleep_phase="deep_sleep"),
         )
         moteur.process_emotion.assert_not_called()
 
-    def test_le_vide_teinte_il_ne_matraque_pas(self):
-        """Une impulsion par demi-heure au plus — pas une par tour de 30 s."""
+    async def test_le_vide_teinte_il_ne_matraque_pas(self):
+        """Une impulsion par dix minutes au plus — pas une par tour de 30 s."""
         from drives.state import DriveKind
 
         e = self._moteur()
@@ -980,13 +980,13 @@ class TestEnnuiEtSolitude:
             "conscience.engine.drive_engine",
         ) as de:
             de.states = {DriveKind.SOCIAL: SimpleNamespace(tension=0.1)}
-            e._peut_etre_s_ennuyer(ctx, travaux=[])
-            e._peut_etre_s_ennuyer(ctx, travaux=[])
+            await e._peut_etre_s_ennuyer(ctx, travaux=[])
+            await e._peut_etre_s_ennuyer(ctx, travaux=[])
         assert moteur.process_emotion.call_count == 1
 
-    def test_une_conversation_recente_n_ennuie_pas(self):
+    async def test_une_conversation_recente_n_ennuie_pas(self):
         e = self._moteur()
-        moteur = self._vide(e, _ctx(idle_seconds=600))
+        moteur = await self._vide(e, _ctx(idle_seconds=600))
         moteur.process_emotion.assert_not_called()
 
 
@@ -1439,11 +1439,11 @@ class TestIntegrationAffective:
         with patch("conscience.travaux.emotion_engine", emo):
             await e._appliquer_verdict(row.pk, verdict, "je bloque", "")
 
-        # Sa position PAD envers elle-même a une valence négative : la
-        # frustration s'est réellement inscrite, elle ne s'est pas perdue
-        # dans un appel bouchonné.
+        # Sa position PAD envers elle-même a dérivé vers le négatif depuis
+        # le repos : la frustration s'est réellement inscrite, elle ne s'est
+        # pas perdue dans un appel bouchonné.
         position = emo.person_moods["conscience_mika"].dynamic.position
-        assert position[0] < -0.05
+        assert position[0] < emo._home_vector()[0] - 0.05
 
     async def test_l_aboutissement_deplace_vers_le_positif(self):
         from conscience.verdict import lire_verdict

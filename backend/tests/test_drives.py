@@ -43,6 +43,11 @@ def _backdate(engine: DriveEngine, seconds: float) -> None:
     for state in engine.states.values():
         state.last_update = past
         state.last_satisfied = past
+    # La fenêtre d'activité recule avec le reste : « il y a `seconds` », un
+    # échange enregistré à l'instant est un échange d'alors.
+    if engine._derniere_activite is not None:
+        debut, poids = engine._derniere_activite
+        engine._derniere_activite = (debut - seconds, poids)
 
 
 @pytest.fixture
@@ -280,11 +285,52 @@ class TestScoringContribution:
 class TestRestDrive:
 
     def test_act_raises_rest_pressure(self, engine):
+        """Parler fatigue — avec le TEMPS passé à parler, pas par message :
+        cinq actes espacés de deux minutes, c'est dix minutes d'activité
+        (0,2/h → ~0,03), pas cinq coups de 0,04."""
         assert engine.states[DriveKind.REST].tension == 0.0
         for _ in range(5):
-            engine.on_act(had_tools=False, word_count=20)
+            engine.on_act(had_tools=False, word_count=50)
+            _backdate(engine, 120.0)
+            engine.update()
+        tension = engine.states[DriveKind.REST].tension
+        assert 0.02 < tension < 0.06, tension
+
+    def test_quatorze_reponses_n_epuisent_plus(self, engine):
+        """Avant : +0,08 par réponse de 50 mots, 1,0 après quatorze réponses —
+        un quart d'heure de conversation valait une nuit blanche."""
+        for _ in range(14):
+            engine.on_reply(word_count=60)
+            _backdate(engine, 60.0)
+            engine.update()
+        assert engine.states[DriveKind.REST].tension < 0.1
+
+    def test_deux_heures_denses_fatiguent_vraiment(self, engine):
+        """Deux heures de conversation soutenue ≈ 0,4 (REF-04) : lisible,
+        sous le seuil de pénalité (0,5) ; cinq heures saturent."""
+        for _ in range(60):
+            engine.on_reply(word_count=50)
+            _backdate(engine, 120.0)
+            engine.update()
+        deux_heures = engine.states[DriveKind.REST].tension
+        assert 0.3 < deux_heures < 0.5, deux_heures
+        for _ in range(90):
+            engine.on_reply(word_count=50)
+            _backdate(engine, 120.0)
+            engine.update()
+        assert engine.states[DriveKind.REST].tension > 0.9
+
+    def test_une_reponse_isolee_tient_dix_minutes(self, engine):
+        """Une réponse ouvre une fenêtre d'activité ; passé la fenêtre, plus
+        rien ne monte et la décroissance reprend."""
+        engine.on_reply(word_count=50)
+        _backdate(engine, 600.0)
         engine.update()
-        assert engine.states[DriveKind.REST].tension > 0.1
+        apres_fenetre = engine.states[DriveKind.REST].tension
+        assert 0.02 < apres_fenetre < 0.05, apres_fenetre
+        _backdate(engine, 600.0)
+        engine.update()
+        assert engine.states[DriveKind.REST].tension < apres_fenetre
 
     def test_observation_does_not_raise_rest_pressure(self, engine):
         """Percevoir n'est pas de l'activité (CONS-01) : quinze titres RSS
@@ -299,16 +345,18 @@ class TestRestDrive:
         # Short message
         e1 = DriveEngine()
         e1.on_act(word_count=5)
+        _backdate(e1, 300.0)
         e1.update()
         t_short = e1.states[DriveKind.REST].tension
 
         # Long message
         e2 = DriveEngine()
         e2.on_act(word_count=200)
+        _backdate(e2, 300.0)
         e2.update()
         t_long = e2.states[DriveKind.REST].tension
 
-        assert t_long > t_short
+        assert 0.0 < t_short < t_long
 
     def test_rest_decays_during_idle(self, engine):
         engine.states[DriveKind.REST].tension = 0.6
@@ -371,7 +419,7 @@ class TestReset:
         engine.on_act(word_count=100)
         engine.on_act(word_count=100)
         engine.reset()
-        assert engine._activity == []
+        assert engine._derniere_activite is None
 
 
 # ---------------------------------------------------------------------------
@@ -396,6 +444,7 @@ class TestOnReply:
 
     def test_reply_registers_activity_for_rest(self, engine):
         engine.on_reply(word_count=80)
+        _backdate(engine, 60.0)
         engine.update()
         assert engine.states[DriveKind.REST].tension > 0.0
 
@@ -551,8 +600,8 @@ class TestPersistance:
 
         neuf = DriveEngine()
         await neuf.restore_state()
-        # Une heure de décroissance naturelle (0.0001/s) sur la valeur relue.
-        assert neuf.states[DriveKind.REST].tension == pytest.approx(0.54, abs=0.02)
+        # Une heure de décroissance naturelle (0.0002/s) sur la valeur relue.
+        assert neuf.states[DriveKind.REST].tension == pytest.approx(0.18, abs=0.02)
 
     async def test_une_base_vide_laisse_l_etat_a_zero(self):
         neuf = DriveEngine()
@@ -590,9 +639,10 @@ class TestRafaleDeSignauxPassifs:
         e = DriveEngine()
         for _ in range(8):
             e.on_reply(word_count=40)
+            _backdate(e, 120.0)
             e.update()
 
-        assert e.states[DriveKind.REST].tension > 0.3
+        assert e.states[DriveKind.REST].tension > 0.03
 
     def test_l_excedent_n_est_pas_reporte(self):
         """Une rafale est UN moment de charge. Reporter l'excédent l'étalerait

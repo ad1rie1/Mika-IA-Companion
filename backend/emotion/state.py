@@ -70,12 +70,22 @@ MARKED_INTENSITY = 0.6
 #: déclarée ici parce que ``engine`` importe ``state``, jamais l'inverse.
 REST_TOLERANCE = 0.1
 
+#: Écart minimal du repos PROPRE d'une personne au repos commun pour que la
+#: prose nomme un « fond » installé envers elle (voir
+#: ``PersonMood._fond_description``).
+FOND_MIN = 0.2
+
 
 #: Pendant combien de temps « ce qu'elle vient de déclarer » reste ce qu'elle
-#: éprouve. Calé sur la constante de temps de l'oscillateur au tempérament par
-#: défaut (~11 min 30) : au-delà, l'état a réellement bougé et c'est la
-#: position qui dit vrai.
-DECLARED_WINDOW_S: float = 700.0
+#: éprouve. Au-delà, l'état a réellement bougé et c'est la position qui dit
+#: vrai. Vingt minutes, et non les 700 s de la constante de temps nominale :
+#: la formule τ = 693 s est l'enveloppe, mais ζ = 0,755 et la position repart
+#: à pente nulle, si bien que le vrai 1/e est ~950 s et le retour sous
+#: ``REST_TOLERANCE`` à ~20 min. Mesuré après ``angry 0.8`` : « determined »
+#: à 700 s, « playful » à 30 min — la fenêtre découvrait pendant huit minutes
+#: la troisième émotion qu'elle devait masquer. À 1 200 s la position a
+#: rejoint le repos propre de la personne quand la déclaration lâche prise.
+DECLARED_WINDOW_S: float = 1200.0
 
 
 def _declared_window_s() -> float:
@@ -155,7 +165,12 @@ def load_temperament() -> Temperament:
     def value(name, fallback):
         try:
             got = config_service.get(f"{TEMPERAMENT_PREFIX}{name}")
-        except Exception:
+        except Exception as exc:
+            # Compté : une base verrouillée au boot posait le tempérament
+            # par défaut pour la vie du processus, en silence.
+            from utils.degradation import degradations
+
+            degradations.record("emotion.state.load_temperament", exc)
             return fallback
         return fallback if got is None else got
 
@@ -260,7 +275,8 @@ class PersonMood:
         return self.last_declared
 
     def to_prompt_description(
-        self, declared_window_s: float | None = None,
+        self, declared_window_s: float | None = None, *,
+        home: pad.Vec3 | None = None, common_home: pad.Vec3 | None = None,
     ) -> str:
         """Ce que le prompt lui dit éprouver envers cette personne.
 
@@ -270,14 +286,35 @@ class PersonMood:
         sentiment principal. Passé la fenêtre, la déclaration n'est plus
         d'actualité et la position redevient la source — c'est bien elle qui
         porte « où en est la relation ».
+
+        ``home`` est le repos PROPRE de la personne (``engine._person_home``) :
+        fourni, la position se nomme par son écart à ce repos
+        (``pad.label_from_home``) et non dans l'absolu. Passé la fenêtre
+        déclarée, l'absolu disait la teinte de l'heure — « légèrement joueuse »
+        vingt minutes après une colère, alors que l'écart au repos lit encore
+        « à peine en colère », ce qui est ce qui reste vrai. ``common_home``
+        est le repos de tout le monde : quand la stance est au repos mais que
+        ce repos-là est lui-même marqué (une ancre construite sur des tours
+        qui se ressemblent), le fond se dit — une rancune ou une chaleur
+        installée n'est pas « pas de sentiment particulier ».
         """
         declaree = self.fresh_declaration(declared_window_s)
         if declaree is not None:
             label, intensity = declaree
         else:
-            label, intensity = pad.pad_to_label(self.dynamic.position)
+            if home is not None:
+                label, intensity = pad.label_from_home(self.dynamic.position, home)
+                # Au repos propre : rien à dire de l'instant. Le fond, lui,
+                # peut avoir quelque chose à dire.
+                if pad.distance(self.dynamic.position, home) < REST_TOLERANCE:
+                    intensity = 0.0
+            else:
+                label, intensity = pad.pad_to_label(self.dynamic.position)
             if intensity < 0.1:
-                return "Tu n'as pas de sentiment particulier envers cette personne."
+                fond = self._fond_description(home, common_home)
+                return fond or (
+                    "Tu n'as pas de sentiment particulier envers cette personne."
+                )
 
         intensity_word = _intensity_label(intensity)
         base = (
@@ -289,7 +326,9 @@ class PersonMood:
         # contredit la balise est exactement le renommage qu'on vient de retirer.
         blend = [
             (emo, poids)
-            for emo, poids in pad.pad_to_blend(self.dynamic.position, top_k=3)
+            for emo, poids in pad.pad_to_blend(
+                self.dynamic.position, top_k=3, home=home,
+            )
             if emo is not label
         ]
         if declaree is not None:
@@ -303,15 +342,52 @@ class PersonMood:
                 )
             return base
         return base + _format_blend_phrase(
-            pad.pad_to_blend(self.dynamic.position, top_k=2)
+            pad.pad_to_blend(self.dynamic.position, top_k=2, home=home)
+        )
+
+    def _fond_description(
+        self, home: pad.Vec3 | None, common_home: pad.Vec3 | None,
+    ) -> str:
+        """Le fond installé envers cette personne, s'il se distingue du repos
+        de tout le monde. Vide sinon.
+
+        L'ancre est une trace lissée (α = 0,15 par tour, guérison sur trois
+        jours) : elle ne parle que d'une stance CONSTRUITE. Elle n'entrait
+        jamais dans la prose — la physique et le choix du destinataire la
+        lisaient, le prompt non — si bien qu'une brouille installée et un
+        inconnu se décrivaient de la même phrase dès que l'instant était
+        calme.
+        """
+        if self.anchor is None or home is None or common_home is None:
+            return ""
+        label, intensity = pad.label_from_home(home, common_home)
+        # 0,2 et non la tolérance de repos : l'ancre se fond à α = 0,15 par
+        # tour, et le repos propre n'en porte que 60 % — deux tours de
+        # frustration donnent ~0,17, quatre ~0,3. Un « fond » se dit à
+        # partir de trois ou quatre tours qui se ressemblent, pas de deux.
+        if intensity < FOND_MIN or label is Emotion.NEUTRAL:
+            return ""
+        return (
+            f"Envers cette personne, rien de particulier sur le moment, mais "
+            f"ton fond est plutôt {_fr(label)} : c'est ce que vos échanges "
+            "ont installé."
         )
 
 
 @dataclass
 class GlobalMood:
-    """Global emotional state, independent of who is talking."""
+    """Global emotional state, independent of who is talking.
+
+    ``home`` est le point de repos courant, posé par le moteur à chaque pas
+    de physique et à chaque impulsion (``engine._home_vector()``). Il rend
+    lisible l'ÉCART au repos — ``felt_emotion``, ``overflow_intensity`` —
+    sans que l'humeur ait à calculer elle-même la teinte circadienne. ``None``
+    (objet construit à la main, tests) : les lectures retombent sur la
+    géométrie absolue, l'ancien comportement.
+    """
     dynamic: OscillatorState = field(default_factory=OscillatorState)
     last_update: float = field(default_factory=time.time)
+    home: pad.Vec3 | None = None
 
     @property
     def emotion(self) -> Emotion:
@@ -323,16 +399,43 @@ class GlobalMood:
         _, value = pad.pad_to_label(self.dynamic.position)
         return value
 
+    def felt(self) -> tuple[Emotion, float]:
+        """Ce qu'elle ressent PAR RAPPORT À SON REPOS : (émotion, force).
+
+        ``emotion`` / ``intensity`` nomment la position absolue, c'est-à-dire
+        au repos la teinte de l'heure (« amusée » à 14 h). Ce couple-ci nomme
+        l'écart au repos (``pad.label_from_home``) : au repos il vaut
+        ``(NEUTRAL, 0)``, et une impulsion négative de sa propre vie se lit
+        enfin par son nom. Sans ``home`` connu, l'origine fait office de
+        repos — l'ancienne lecture, en échelle de rayon.
+        """
+        repos = self.home if self.home is not None else pad.zero()
+        return pad.label_from_home(self.dynamic.position, repos)
+
+    @property
+    def felt_emotion(self) -> Emotion:
+        return self.felt()[0]
+
     @property
     def overflow_intensity(self) -> float:
         """Intensité pour les portes de la conscience (débordement, détresse).
 
-        Voir ``pad.overflow_intensity`` : rapportée à l'ancre la plus proche,
-        l'échelle que la balise déclare — ``sad`` à son ancre pleine vaut 1,0
-        ici et 0,73 sur ``intensity``. C'est cette valeur que
-        ``global_intensity`` du ``DecisionContext`` devrait porter.
+        Mesurée DEPUIS LE REPOS quand il est connu (``pad.overflow_from_home``) :
+        rapportée à l'ancre la plus proche dans l'absolu, le repos lui-même
+        lisait 0,38–0,53 — le biais circadien —, si bien qu'un ``hopeful
+        0.25`` anodin franchissait la porte 0,7 (0,61 → 0,72 avec une
+        surprise), tandis que ``sad 0.8`` répété par quelqu'un plafonnait à
+        0,64 : la cible de la diffusion est ``ancre × I``, jamais au-delà, et
+        la famille triste a des ancres courtes. Depuis le repos, ``sad 0.8``
+        franchit 0,6 au troisième tour et le repos lit 0.
+
+        Sans repos connu : ``pad.overflow_intensity``, l'échelle de l'ancre la
+        plus proche — ``sad`` à son ancre pleine vaut 1,0 ici et 0,73 sur
+        ``intensity``.
         """
-        return pad.overflow_intensity(self.dynamic.position)
+        if self.home is None:
+            return pad.overflow_intensity(self.dynamic.position)
+        return pad.overflow_from_home(self.dynamic.position, self.home)
 
     def to_dict(self) -> dict:
         label, intensity = pad.pad_to_label(self.dynamic.position)
@@ -351,8 +454,17 @@ class GlobalMood:
         l'origine. Sans lui (appel isolé, tests), l'origine fait office de
         repos — l'ancien comportement.
         """
-        label, intensity = pad.pad_to_label(self.dynamic.position)
+        if home is None:
+            home = self.home
         repos = home if home is not None else pad.zero()
+        # Le libellé ET la force se lisent sur l'écart au repos
+        # (``pad.label_from_home``), pas sur la position absolue : la
+        # position est ``repos (positif, norme ~0,5) + petit pas``, et son
+        # plus proche voisin restait la teinte de l'heure quel que soit le
+        # pas — « légèrement excitée » pour un chantier bloqué, « à peine
+        # amusée » après une demi-journée d'ennui. L'écart, lui, lit
+        # « frustrée » et « lasse ».
+        label, intensity = pad.label_from_home(self.dynamic.position, repos)
         ecart = pad.distance(self.dynamic.position, repos)
         # Brancher sur le seul libellé disait « comme d'habitude » aussi bien
         # d'un tempérament à peine teinté que d'une euphorie pleine : avec le
@@ -380,7 +492,7 @@ class GlobalMood:
                 f"Ton humeur générale est {_intensity_label(intensity)} "
                 f"{_fr(label)}, dans ta pente naturelle."
             )
-        blend = pad.pad_to_blend(self.dynamic.position, top_k=2)
+        blend = pad.pad_to_blend(self.dynamic.position, top_k=2, home=repos)
         return base + _format_blend_phrase(blend)
 
 

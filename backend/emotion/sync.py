@@ -138,7 +138,7 @@ class EmotionSync:
         from pipeline.broadcast import broadcast_emotion_update
 
         if person_id not in self._hydrated:
-            # Reading a mood CREATES it at the origin, and
+            # Reading a mood CREATES it (at rest), and
             # ``ensure_person_loaded`` is a no-op for anyone already in RAM —
             # so reading first would permanently lose the mood stored for
             # someone who reconnects before saying anything.

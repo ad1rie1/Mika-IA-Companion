@@ -68,8 +68,9 @@ from utils.phrasing import Palier, Phrase, ReglagePhrasing, TirageAmorti
 #: annonce un silence que le score n'a pas compté, ou l'inverse.
 INACTIVITE_GATE_MINUTES = 10.0
 
-#: Débordement d'humeur — même barre que ``ScoringTuning.mood_gate``.
-HUMEUR_GATE = 0.7
+#: Débordement d'humeur — même barre que ``ScoringTuning.mood_gate`` (0,6 :
+#: l'intensité comparée est l'écart au repos, nul au repos).
+HUMEUR_GATE = 0.6
 
 #: Pression de rumination — même barre que ``ScoringTuning.rumination_gate``.
 RUMINATION_GATE = 0.2

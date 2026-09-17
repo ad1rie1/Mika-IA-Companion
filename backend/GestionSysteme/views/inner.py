@@ -67,11 +67,15 @@ def _emotions(request) -> dict:
 
     position = emotion_engine.global_mood.dynamic.position
     label, intensity = pad.pad_to_label(position)
+    # L'écart au repos : le nom que le prompt et les portes lisent.
+    felt_label, felt_intensity = emotion_engine.global_mood.felt()
 
     # Les humeurs par personne vivent en RAM, pas en base : elles se
     # paginent comme une liste ordinaire.
     people = []
-    for person_id, mood in emotion_engine.person_moods.items():
+    # Copie instantanée : ce thread lit pendant que la boucle asyncio insère
+    # et évince (« dictionary changed size during iteration »).
+    for person_id, mood in emotion_engine.snapshot_moods():
         p_label, p_intensity = pad.pad_to_label(mood.dynamic.position)
         people.append({
             "person_id": person_id,
@@ -95,6 +99,8 @@ def _emotions(request) -> dict:
         "global_mood": {
             "label": label.value,
             "intensity": intensity,
+            "felt": felt_label.value,
+            "felt_intensity": felt_intensity,
             "blend": [
                 {"emotion": e.value, "weight": w}
                 for e, w in pad.pad_to_blend(position, top_k=3)

@@ -257,8 +257,13 @@ class TestComputeMessageEmotionBlend:
             assert msg_b.blend[0][1] >= msg_a.blend[0][1]
 
     def test_neutral_state_produces_default_mood_blend(self, engine):
-        """Zero-ish state → blend falls back to default mood (HAPPY)."""
-        msg = engine.compute_message_emotion("never_talked_to")
+        """A never-seen person starts AT REST, and the rest (circadian tint
+        neutralised) is the default mood (HAPPY)."""
+        from unittest.mock import patch
+        from emotion import circadian
+
+        with patch.object(circadian, "phase_bias", return_value=(0.0, 0.0, 0.0)):
+            msg = engine.compute_message_emotion("never_talked_to")
         assert len(msg.blend) >= 1
         # Default mood from conftest.py is HAPPY
         assert msg.blend[0][0] is Emotion.HAPPY

@@ -390,7 +390,11 @@ async def process_message(
             # person had just provoked back toward zero: a turn she had no
             # tag for was lived as a soothing.
             if declared is not None:
-                emotion_engine.process_emotion(declared, person_id)
+                # ``declared`` : c'est la balise du modèle, pas une impulsion
+                # programmée — pour un acte sans destinataire (``conscience_mika``)
+                # elle passe par la diffusion ordinaire, pas par le pas dosé
+                # de la vie intérieure (voir ``_feel_for_herself``).
+                emotion_engine.process_emotion(declared, person_id, declared=True)
             # Snapshot runs either way, so the drift between turns keeps being
             # archived even when a turn declares nothing.
             await emotion_engine.save_snapshot(person_id, declared=declared)

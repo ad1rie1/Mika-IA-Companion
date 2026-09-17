@@ -127,7 +127,8 @@ class TestEntreeEnSommeil:
         from drives.engine import drive_engine
         from drives.state import DriveKind
 
-        moment = datetime(2026, 7, 27, 21, 30)
+        # Une heure d'avance au plus (deux couchaient un adulte à 21 h).
+        moment = datetime(2026, 7, 27, 22, 30)
 
         drive_engine.reset()
         drive_engine.states[DriveKind.REST].tension = 0.9
@@ -162,7 +163,7 @@ class TestEntreeEnSommeil:
 
         drive_engine.reset()
         cycle = SleepCycle()
-        assert cycle._night_start_hour(already_asleep=True) == 21
+        assert cycle._night_start_hour(already_asleep=True) == 22
         assert cycle._night_start_hour(already_asleep=False) == 23
 
 

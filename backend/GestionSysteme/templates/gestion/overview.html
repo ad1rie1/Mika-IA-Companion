@@ -33,9 +33,9 @@
           <span class="emo text-lg" style="{{ mood.label|emo_style }}">{{ mood.label|emo_fr }}</span>
           <span class="tabular muted">{{ mood.intensity|pct }}</span>
           {% if mood.is_default %}
-            <span class="badge" title="Son humeur de repos, définie par le tempérament">au repos</span>
+            <span class="badge" title="Aucun écart à son point de repos (tempérament + teinte de l'heure)">au repos</span>
           {% else %}
-            <span class="badge badge-info" title="Tempérament : {{ mood.default_mood }}">écart au tempérament</span>
+            <span class="badge badge-info" title="Ce que le prompt lit : l'écart au repos, nommé par l'émotion vers laquelle elle a dérivé">ressent : {{ mood.felt|emo_fr }} {{ mood.felt_intensity|pct }}</span>
           {% endif %}
         </div>
 

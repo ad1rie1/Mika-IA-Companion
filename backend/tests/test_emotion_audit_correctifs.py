@@ -253,15 +253,24 @@ class TestRehydratation:
         assert pad.distance(mood.dynamic.position, engine._person_home(mood)) < 0.02
         assert mood.anchor is not None, "l'ancre, elle, survit — c'est son rôle"
 
-    async def test_un_releve_de_l_instant_est_restaure_tel_quel(self):
-        """L'autre bord : redémarrage juste après le tour, rien n'est perdu."""
+    async def test_un_releve_de_l_instant_restaure_la_position_pas_la_balise(self):
+        """L'autre bord : redémarrage juste après le tour, rien n'est perdu —
+        mais ce qui est restauré est ce que l'oscillateur VIVANT tenait après
+        le tour (le cliquet ne parcourt que ~51 % du chemin), pas la balise
+        ``angry 0.8`` elle-même, que la position n'avait jamais atteinte."""
+        vivant = _moteur()
+        vivant.process_emotion(EmotionData(Emotion.ANGRY, 0.8), "web_r")
+        attendu = vivant._get_person_mood("web_r").dynamic.position
+
         engine = _moteur()
         await self._releve_vieux_de(engine, "web_r", Emotion.ANGRY, 0.8, 0)
         engine.person_moods.pop("web_r", None)
         await engine.ensure_person_loaded("web_r")
 
         restaure = engine.person_moods["web_r"].dynamic.position
-        assert pad.distance(restaure, pad.label_to_pad(Emotion.ANGRY, 0.8)) < 0.02
+        assert pad.distance(restaure, attendu) < 0.08, (restaure, attendu)
+        assert pad.pad_to_label(restaure)[0] is Emotion.ANGRY
+        assert pad.distance(restaure, pad.label_to_pad(Emotion.ANGRY, 0.8)) > 0.2
 
     async def test_un_releve_existant_prime_sur_le_resume_quotidien(self):
         """Un relevé apaisé n'est pas « trop vieux » : retomber sur le résumé
@@ -324,7 +333,13 @@ class TestRehydratation:
         ) < 0.03
         assert pad.valence(engine.global_mood.emotion) >= 0.0
         assert "web_r" in engine.person_moods
-        assert pad.distance(engine.person_moods["web_r"].dynamic.position, home) < 0.02
+        # Au repos PROPRE de la personne : l'ancre est recalculée au
+        # redémarrage (une ligne, fondue à α depuis le repos commun), et la
+        # position y est ramenée — plus vers le repos de tout le monde.
+        mood = engine.person_moods["web_r"]
+        assert mood.anchor is not None
+        assert pad.distance(mood.dynamic.position, engine._person_home(mood)) < 0.02
+        assert pad.distance(mood.dynamic.position, home) < 0.15
 
 
 # ===================================================================
@@ -518,9 +533,13 @@ class TestVieInterieure:
         assert pad.distance(engine.global_mood.dynamic.position, home) > 0.1
 
     def test_sa_stance_envers_elle_meme_reste_enregistree(self):
+        """L'oscillateur « envers elle-même » part du repos comme tous les
+        autres : c'est l'ÉCART au repos qui vire au négatif."""
         engine, _ = self._au_repos()
+        repos = engine._home_vector()
         engine.process_emotion(EmotionData(Emotion.FRUSTRATED, 0.35), "conscience_mika")
-        assert engine.person_moods["conscience_mika"].dynamic.position[0] < -0.05
+        position = engine.person_moods["conscience_mika"].dynamic.position
+        assert position[0] < repos[0] - 0.05
 
 
 # ===================================================================

@@ -564,9 +564,11 @@ CONFIG_SCHEMA = [
     ConfigItem(
         key="memory.sleep_early_night_max_advance_hours", type="int", section="memory",
         group="Sommeil", label="Avance max du coucher par la fatigue (h)",
-        default=2, min=0, max=6, hot_reload=True,
+        default=1, min=0, max=6, hot_reload=True,
         hint="La tension REST n'interdit plus de dormir, elle avance l'heure "
-             "du coucher. Pas davantage, sinon on empiète sur la phase du soir.",
+             "du coucher — d'au plus ce nombre d'heures à fatigue pleine "
+             "(cinq heures d'activité soutenue). À 2, une soirée de "
+             "conversation la couchait à 21 h.",
     ),
 
     # ── Journal intime (sommeil léger) ───────────────────────────

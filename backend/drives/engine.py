@@ -45,43 +45,32 @@ logger = logging.getLogger(__name__)
 # « Pulsions » du dashboard) : même valeur, servie quand le registre est hors
 # d'atteinte. Voir ``configs/runtime.py``.
 #
-# Activity tracking for REST drive.
-# REST grows proportionally to "activity density" in the last window.
-_ACTIVITY_WINDOW_SECONDS = 600.0   # 10 min rolling window
-_REST_PRESSURE_PER_EVENT = 0.04    # each act/observation adds this to rest
-# Décroissance naturelle de REST, par seconde. Calibrée CONTRE le gate
-# d'entrée du cycle de sommeil (`memory/sleep.py`), qui exige 900 s sans
-# interaction PUIS `rest_tension >= 0.5` : pendant ces 900 s la tension ne
-# fait que baisser, donc ce coefficient borne mécaniquement ce qu'elle peut
-# encore valoir quand le gate s'ouvre. À 0.0008 elle perdait 0.72 sur la
-# fenêtre — une tension pleine retombait à 0.28, le seuil de 0.5 était
-# inatteignable et le cycle de sommeil entier ne s'exécutait jamais (aucun
-# journal, aucun rêve, aucune digestion de ruminations). À 0.0001 la perte
-# tombe à 0.09 sur la fenêtre (~2 h 45 pour vider une tension pleine) et le
-# sommeil redevient la voie principale de récupération, ce que le
-# commentaire de `SLEEP_REST_RECOVERY` affirmait déjà.
-_REST_NATURAL_DECAY = 0.0001
-
-# Plafond du gain de REST consommé en UNE passe. `conscience.observe()`
-# appelle `drive_engine.on_observation()` pour CHAQUE signal externe, donc la
-# fatigue suit le NOMBRE d'événements, pas la charge qu'ils représentent.
+# REST — la fatigue — est une fonction du TEMPS D'ACTIVITÉ SOUTENUE, pas du
+# nombre d'événements. Elle était pondérée par réponse (+0,04 × un facteur de
+# longueur jusqu'à ×2) : quatorze réponses de plus de cinquante mots la
+# saturaient à 1,0 — quinze à vingt minutes de conversation —, puis 0,36/h de
+# redescente : un chat de vingt minutes valait une heure et demie de
+# « brouillard de fatigue » (énergie < 0,5 avant 10 h et après 18 h) et un
+# coucher avancé à 21 h. Un humain n'est pas épuisé par vingt minutes de
+# conversation ; il l'est par deux heures denses, et davantage par cinq.
 #
-# En régime établi ce n'est pas un problème : mesuré sur une installation
-# réelle, l'actualité tombe au fil de l'eau — médiane 1 entrée/heure sur les
-# neuf flux, moyenne 3.4, pic horaire à 23 — soit ~0.2 entrée par relevé de
-# 10 min, loin sous la décroissance de la fenêtre (0.06). Rien ne sature.
-#
-# Le plafond borne l'autre régime : le DÉMARRAGE À FROID et la REPRISE APRÈS
-# COUPURE, où tout le retard arrive en un seul relevé. Mesuré sur un premier
-# boot, base vide : 119 entrées × 0.04 × 0.42 = +2.00 d'un seul tenant, REST
-# écrêté à 1.00 quarante secondes après le lancement sans qu'elle ait rien
-# fait — puis ~2 h 45 pour redescendre, pendant lesquelles l'énergie est
-# plafonnée à 0.7 × circadien, le prompt affiche le brouillard de fatigue à
-# toute heure (elle se dit « crevée » à chaque phrase) et le coucher tombe sur
-# son plancher de 21 h. Une machine éteinte une nuit reproduit la même chose
-# en plus petit. Le plafond garde la lecture voulue : lire l'actualité fatigue
-# un peu, et un rattrapage reste UN moment de charge, pas cent dix-neuf.
-_REST_MAX_GAIN_PER_UPDATE = 0.15
+# Le modèle : une réponse ou un acte ouvre une fenêtre d'activité
+# (`_ACTIVITY_WINDOW_SECONDS`) ; tant que la fenêtre court, REST monte à
+# `_REST_GROWTH_PER_ACTIVE_HOUR` par heure d'activité (le poids du dernier
+# échange, lié à sa longueur, module ce taux dans [0,5 ; 1,5]) ; hors fenêtre
+# elle redescend à `_REST_NATURAL_DECAY` par seconde. Deux heures de chat
+# dense ≈ 0,4 ; cinq heures ≈ 1,0 ; une réponse isolée ≈ +0,03. Percevoir
+# (une observation) n'est jamais de l'activité (voir `on_observation`).
+_ACTIVITY_WINDOW_SECONDS = 600.0   # une réponse « tient » 10 min d'activité
+_REST_GROWTH_PER_ACTIVE_HOUR = 0.2
+# Décroissance naturelle de REST, par seconde, hors activité. 0,72/h : la
+# fatigue d'un chat de deux heures (0,4) est absorbée en ~35 min de calme.
+# Elle valait 0,0001 (0,36/h), calibrée contre un gate de sommeil qui
+# exigeait `rest_tension >= 0.5` après 900 s d'inactivité — ce gate n'existe
+# plus (REST n'interdit plus de dormir, il avance l'heure du coucher), et à
+# 0,36/h la fatigue d'une conversation durait trois heures. Le sommeil reste
+# ce qui vide une fatigue installée (`SLEEP_REST_RECOVERY`).
+_REST_NATURAL_DECAY = 0.0002
 
 # Pertinence à partir de laquelle observer le monde assouvit un peu la
 # curiosité. À 0.6 — et en comparaison stricte — la porte était au-dessus du
@@ -106,8 +95,9 @@ class DriveEngine:
         self.states: dict[DriveKind, DriveState] = {
             kind: DriveState(kind=kind) for kind in DriveKind
         }
-        # Activity events, (timestamp, intensity) pairs, used by REST drive.
-        self._activity: list[tuple[float, float]] = []
+        # Dernier échange qui compte comme activité : (horodatage, poids).
+        # ``None`` = aucune activité en cours de fenêtre. Voir `_rest_step`.
+        self._derniere_activite: tuple[float, float] | None = None
 
     # ── Tension updates ───────────────────────────────────────────
 
@@ -127,13 +117,7 @@ class DriveEngine:
             params = params_for(kind)
 
             if kind is DriveKind.REST:
-                # Always consume pending activity events, even if dt=0.
-                pressure = self._rest_pressure(now)
-                decay = cfg_float(
-                    "drives.rest.natural_decay_per_second",
-                    _REST_NATURAL_DECAY, mini=0.0,
-                ) * dt
-                state.tension += pressure - decay
+                state.tension += self._rest_step(state.last_update, now)
             elif params.growth_horizon:
                 # `max` et non `=` : après un assouvissement partiel
                 # `last_satisfied` repart de zéro, donc la cible aussi — le
@@ -152,40 +136,48 @@ class DriveEngine:
             state.clamp()
             state.last_update = now
 
-        # Prune old activity events outside the window
-        cutoff = now - cfg_float(
-            "drives.activity_window_seconds", _ACTIVITY_WINDOW_SECONDS, mini=0.0,
-        )
-        self._activity = [(t, w) for t, w in self._activity if t >= cutoff]
+        # Une fenêtre d'activité expirée est oubliée : `_rest_step` n'en
+        # comptera plus rien.
+        if self._derniere_activite is not None:
+            fenetre = cfg_float(
+                "drives.activity_window_seconds", _ACTIVITY_WINDOW_SECONDS,
+                mini=0.0,
+            )
+            if now - self._derniere_activite[0] >= fenetre:
+                self._derniere_activite = None
 
-    def _rest_pressure(self, now: float) -> float:
-        """REST tension increment from recent activity density.
+    def _rest_step(self, since: float, now: float) -> float:
+        """Variation de REST entre deux mises à jour : montée pendant le temps
+        d'activité, descente pendant le temps calme. Idempotent (intégrale
+        exacte sur ``[since, now]``, jamais un incrément par appel).
 
-        High activity in the last 10 min → REST climbs fast. Idle period
-        → REST naturally drifts down (via `_REST_NATURAL_DECAY`).
-        Returns a per-call *increment* (not per-second), because activity
-        events are discrete.
+        « Actif » = à l'intérieur de la fenêtre ouverte par le dernier
+        échange. Une seule fenêtre suffit : chaque échange repousse la sienne
+        plus loin que la précédente, et ``update()`` est appelée avant qu'un
+        échange soit enregistré (``satisfy`` → ``update``), si bien que ce qui
+        précède la nouvelle fenêtre a déjà été intégré sous l'ancienne.
         """
-        # We don't re-apply events already counted. Instead, activity
-        # events are "one-shot" — added here when first seen, then drained.
-        total = 0.0
-        remaining: list[tuple[float, float]] = []
-        pression = cfg_float(
-            "drives.rest.pressure_per_event", _REST_PRESSURE_PER_EVENT, mini=0.0,
-        )
-        for t, w in self._activity:
-            # Consume: this event contributes once.
-            total += pression * w
-            # Keep it in the history for context reporting (not re-counted)
-            remaining.append((t, 0.0))
-        self._activity = remaining
-        # L'excédent est jeté, pas reporté : une rafale de signaux passifs est
-        # un moment de charge, et le reporter reviendrait à l'étaler sur les
-        # passes suivantes — soit exactement la saturation qu'on borne ici.
-        return min(total, cfg_float(
-            "drives.rest.max_gain_per_update",
-            _REST_MAX_GAIN_PER_UPDATE, mini=0.0,
-        ))
+        dt = max(0.0, now - since)
+        if dt <= 0.0:
+            return 0.0
+        actif = 0.0
+        poids = 1.0
+        if self._derniere_activite is not None:
+            debut, poids = self._derniere_activite
+            fenetre = cfg_float(
+                "drives.activity_window_seconds", _ACTIVITY_WINDOW_SECONDS,
+                mini=0.0,
+            )
+            actif = max(0.0, min(now, debut + fenetre) - max(since, debut))
+        calme = max(0.0, dt - actif)
+        montee = cfg_float(
+            "drives.rest.growth_per_active_hour", _REST_GROWTH_PER_ACTIVE_HOUR,
+            mini=0.0,
+        ) / 3600.0 * poids * actif
+        descente = cfg_float(
+            "drives.rest.natural_decay_per_second", _REST_NATURAL_DECAY, mini=0.0,
+        ) * calme
+        return montee - descente
 
     # ── Satisfaction signals ──────────────────────────────────────
 
@@ -229,9 +221,10 @@ class DriveEngine:
         if had_tools:
             self.satisfy(DriveKind.CURIOSITY, 0.5)
 
-        # Longer messages = more active = more rest pressure
-        intensity = min(2.0, 1.0 + word_count / 50)
-        self._register_activity(intensity)
+        # Un message long est un échange plus dense : il module le taux de
+        # fatigue de sa fenêtre (×0,5 pour un mot, ×1,0 à cinquante mots,
+        # ×1,5 au-delà de cent).
+        self._register_activity(self._poids_de(word_count))
 
     def on_reply(self, word_count: int = 0) -> None:
         """Called when Mika answers someone (reactive speech).
@@ -243,8 +236,7 @@ class DriveEngine:
         It is also activity, so REST pressure climbs like for any act.
         """
         self.satisfy(DriveKind.EXPRESSION, 0.4)
-        intensity = min(2.0, 1.0 + word_count / 50)
-        self._register_activity(intensity)
+        self._register_activity(self._poids_de(word_count))
 
     def on_observation(self, pertinence: float) -> None:
         """Called when a pertinent signal is observed (email, RSS, etc.)."""
@@ -269,8 +261,14 @@ class DriveEngine:
         # soir. Lire des titres ne fatigue pas ; parler et agir, oui
         # (`on_act`, `on_reply`).
 
+    @staticmethod
+    def _poids_de(word_count: int) -> float:
+        return max(0.5, min(1.5, 0.5 + max(0, int(word_count)) / 100.0))
+
     def _register_activity(self, intensity: float) -> None:
-        self._activity.append((time.time(), max(0.1, min(2.0, intensity))))
+        """Ouvre (ou repousse) la fenêtre d'activité. Le temps déjà écoulé a
+        été intégré par le ``update()`` que ``satisfy`` vient d'exécuter."""
+        self._derniere_activite = (time.time(), max(0.1, min(2.0, intensity)))
 
     # ── Scoring contribution ──────────────────────────────────────
 
@@ -393,9 +391,9 @@ class DriveEngine:
           - **Circadian phase** (emotion/circadian.py): a cosine curve
             over 24h that peaks early afternoon. Gives Mika "mornings,
             afternoons, evenings, nights" without manual tuning.
-          - **REST drive tension**: accumulates with activity (each act,
-            each observation) and drains slowly during idle. Models short-
-            term fatigue on top of the daily baseline.
+          - **REST drive tension**: accumulates with sustained activity
+            (time spent replying and acting) and drains during idle. Models
+            short-term fatigue on top of the daily baseline.
 
         The result is used by:
           - the conscience scoring (tired Mika has a higher effective
@@ -462,8 +460,8 @@ class DriveEngine:
         Sans ce rejeu, une coupure de trois heures rendrait la fatigue de la
         veille intacte ; avec lui, REST retombe et les pulsions positives
         montent exactement comme si le processus n'avait pas coupé.
-        `_activity` n'est pas persisté : c'est une fenêtre glissante de 10 min
-        d'événements déjà consommés.
+        La fenêtre d'activité n'est pas persistée : après un redémarrage,
+        le temps d'arrêt est du calme.
         """
         from asgiref.sync import sync_to_async
 
@@ -498,7 +496,7 @@ class DriveEngine:
             state.tension = 0.0
             state.last_update = now
             state.last_satisfied = now
-        self._activity.clear()
+        self._derniere_activite = None
 
 
 # Module-level singleton

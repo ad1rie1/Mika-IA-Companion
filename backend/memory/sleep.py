@@ -80,10 +80,13 @@ ENDOGENOUS_WAKE_GRACE_SECONDS = 180
 # et décroît pendant les 900 s d'idle que le gate impose d'abord, si bien
 # qu'une soirée calme (conversation jusqu'à 20h30, coucher à 23h) laissait la
 # tension à ~0.01 — nuit blanche, aucun journal, aucun rêve, aucune digestion,
-# et l'avatar les yeux ouverts. Une fatigue pleine ouvre donc la nuit deux
-# heures plus tôt ; pas davantage, sinon on empiéterait sur `_night_of` (qui
-# range 21h dans la nuit du jour même) et sur la phase EVENING.
-EARLY_NIGHT_MAX_ADVANCE_HOURS = 2
+# et l'avatar les yeux ouverts. Une fatigue pleine ouvre donc la nuit UNE
+# heure plus tôt. Deux heures couchaient un adulte à 21 h après une soirée
+# de conversation — et REST était alors compté par réponse, saturé en un
+# quart d'heure ; maintenant qu'il mesure le temps d'activité (cinq heures
+# denses pour saturer), une heure d'avance à fatigue pleine est ce qu'une
+# grosse journée fait à un humain.
+EARLY_NIGHT_MAX_ADVANCE_HOURS = 1
 
 # Each sleeping tick relieves the REST drive by this `satisfy()` amount —
 # sleep is what rest tension is FOR. With REST's decay_on_satisfy (0.3),

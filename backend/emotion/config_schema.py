@@ -274,10 +274,13 @@ CONFIG_SCHEMA = [
     ConfigItem(
         key="emotion.max_advance_seconds", type="float", section="emotion",
         group=OSC_GROUP, label="Rattrapage maximal en une passe (s)",
-        default=3600.0, min=60.0, max=86400.0, hot_reload=True,
+        default=10800.0, min=60.0, max=86400.0, hot_reload=True,
         hint="Temps simulé maximal qu'une passe d'intégration rattrape. "
              "L'ancienne borne de 30 s était invisible tant que τ valait ~7 s "
-             "mais figeait l'état d'une machine sortie de veille.",
+             "mais figeait l'état d'une machine sortie de veille ; à 1 h, une "
+             "hibernation de cinq heures laissait encore 17 % de l'écart au "
+             "fond. Au-delà de dix constantes de temps, la passe pose "
+             "directement le repos.",
     ),
     ConfigItem(
         key="emotion.home_default_mood_weight", type="float", section="emotion",
@@ -437,11 +440,12 @@ CONFIG_SCHEMA = [
     ConfigItem(
         key="emotion.declared_window_seconds", type="float", section="emotion",
         group=GLOBALE_GROUP, label="Fraîcheur d'une émotion déclarée (s)",
-        default=700.0, min=0.0, max=86400.0, hot_reload=True,
+        default=1200.0, min=0.0, max=86400.0, hot_reload=True,
         hint="Pendant ce délai, ce qu'elle vient de déclarer dans sa balise "
              "[EMOTION:] prime sur la position de l'oscillateur pour dire ce "
-             "qu'elle éprouve. Calé sur la constante de temps au tempérament "
-             "par défaut (~11 min 30) : au-delà, l'état a réellement bougé et "
-             "c'est la position qui dit vrai.",
+             "qu'elle éprouve. Vingt minutes : le temps réel du retour au "
+             "repos (le vrai 1/e est ~950 s, le repos à ~20 min). À 700 s, "
+             "la fenêtre lâchait pendant que la position lisait encore une "
+             "troisième émotion (« determined » après une colère).",
     ),
 ]

@@ -18,6 +18,16 @@ import pytest
 
 
 @pytest.mark.asyncio
+def _au_repos(engine, mood) -> bool:
+    """Aucune impulsion : l'oscillateur (créé AU REPOS, plus à l'origine)
+    n'a pas quitté le repos de la personne."""
+    from emotion import pad
+
+    if mood is None:
+        return True
+    return pad.distance(mood.dynamic.position, engine._person_home(mood)) < 0.05
+
+
 class TestErrorDoesNotColorPersonMood:
 
     async def test_exception_does_not_touch_person_mood(self):
@@ -34,7 +44,17 @@ class TestErrorDoesNotColorPersonMood:
         # The timeout read hits the ORM whenever an earlier test invalidated
         # the config cache — which is why this one was red in a full run and
         # green on its own. Its sibling below already stubs the same read.
-        with patch.object(config_service, "get", return_value=60), \
+        # Stubbed for THAT key only: a blanket 60 reached ``_home_vector``
+        # (``emotion.home_default_mood_weight`` × 60) and posed a fresh
+        # oscillator at an absurd rest.
+        real_get = config_service.get
+
+        def _fake_get(key, default=None):
+            if key == "ai.call_timeout_seconds":
+                return 60
+            return real_get(key, default)
+
+        with patch.object(config_service, "get", side_effect=_fake_get), \
              patch.object(processor, "call_ai_and_parse", new=AsyncMock(
                  side_effect=RuntimeError("llm broke"),
              )), \
@@ -51,7 +71,7 @@ class TestErrorDoesNotColorPersonMood:
 
         assert "bug" in output.text.lower() or "reessayer" in output.text.lower()
         mood = emotion_engine.person_moods.get(pid)
-        assert mood is None or mood.intensity < 0.05
+        assert _au_repos(emotion_engine, mood)
         emit.assert_not_called()
         # The exchange is kept; only the reply is demoted to machinery.
         persist_q.assert_called_once()
@@ -98,7 +118,7 @@ class TestErrorDoesNotColorPersonMood:
             output = await processor.process_message(perception)
 
         mood = emotion_engine.person_moods.get(pid)
-        assert mood is None or mood.intensity < 0.05
+        assert _au_repos(emotion_engine, mood)
         emit.assert_not_called()
         persist_q.assert_called_once()
         persist_a.assert_called_once()

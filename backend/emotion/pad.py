@@ -183,11 +183,78 @@ def overflow_intensity(position: Vec3) -> float:
     return min(1.0, mag / reference)
 
 
+def label_from_home(
+    position: Vec3, home: Vec3, *, floor: float | None = None,
+) -> tuple[Emotion, float]:
+    """L'émotion que la position dit PAR RAPPORT AU REPOS, et sa force.
+
+    ``pad_to_label`` nomme la position absolue : au repos, c'est la teinte de
+    l'heure (« amusée » à 14 h, norme 0,49), et une impulsion de la vie
+    intérieure — ``bored 0.4``, ``frustrated 0.35`` — n'y change rien, parce
+    que le petit pas négatif s'ajoute à un repos positif deux fois plus long.
+    Mesuré : douze ``bored 0.4`` demi-horaires lisaient « à peine amusée »,
+    un chantier bloqué « légèrement excitée ». Aucune émotion négative de sa
+    propre vie n'atteignait le prompt ni les portes de la conscience.
+
+    Ici on nomme l'ÉCART ``position − home``. Deux choix qui comptent :
+
+    * la direction se compare aux **rayons** ``ancre − home``, pas aux ancres
+      brutes. Une impulsion déplace la position depuis le repos VERS une
+      ancre, donc l'écart est colinéaire au rayon de cette ancre — et pas à
+      l'ancre elle-même : comparé aux ancres, un pas vers ``bored`` lisait
+      ``melancholic``, un pas vers ``frustrated`` lisait ``disgusted``, un
+      pas vers ``sad`` lisait ``lonely``. Contre les rayons, le pas vers X
+      lit X ;
+    * l'intensité est la part du rayon parcourue, ``|écart| / |rayon|``,
+      avec le même plancher que ``overflow_intensity`` : depuis un repos
+      positif, le rayon de ``hopeful`` fait 0,24 et celui de ``thinking``
+      0,31 — sans plancher, une humeur ordinaire dans leur cône lirait 1,0.
+      Rapportée à son rayon, une position posée sur ``sad × 0.8`` depuis le
+      repos lit ~0,9 ; l'ancre pleine lit 1,0.
+
+    ``home`` à l'origine retombe sur la géométrie absolue (rayons = ancres),
+    ce qui garde leur sens aux appels isolés. Le neutre n'est jamais candidat
+    (son rayon est ``−home`` : « légèrement neutre » ne dit rien).
+    """
+    ecart = sub(position, home)
+    mag = norm(ecart)
+    if mag < 1e-6:
+        return Emotion.NEUTRAL, 0.0
+    best_emotion = Emotion.NEUTRAL
+    best_score = -2.0
+    best_len = 1.0
+    for emotion, anchor in EMOTION_ANCHORS.items():
+        if emotion is Emotion.NEUTRAL:
+            continue
+        rayon = sub(anchor, home)
+        longueur = norm(rayon)
+        if longueur < 1e-6:
+            continue
+        score = dot(ecart, rayon) / (mag * longueur)
+        if score > best_score:
+            best_score, best_emotion, best_len = score, emotion, longueur
+    plancher = _OVERFLOW_ANCHOR_FLOOR if floor is None else floor
+    return best_emotion, min(1.0, mag / max(best_len, plancher))
+
+
+def overflow_from_home(position: Vec3, home: Vec3) -> float:
+    """Débordement mesuré depuis le repos — ce que les portes lisent.
+
+    Même échelle que ``label_from_home`` : au repos exact, 0 (l'ancienne
+    lecture absolue donnait 0,38–0,53 au repos, la teinte circadienne, si
+    bien qu'un ``hopeful 0.25`` anodin franchissait la porte 0,7 et qu'aucune
+    tristesse ne pouvait le faire).
+    """
+    return label_from_home(position, home)[1]
+
+
 def pad_to_blend(
     position: Vec3,
     top_k: int = 2,
     similarity_floor: float = 0.35,
     residual_floor: float = 0.15,
+    *,
+    home: Vec3 | None = None,
 ) -> list[tuple[Emotion, float]]:
     """Décompose un point PAD sur les top-K ancres, par poursuite du résidu.
 
@@ -226,36 +293,56 @@ def pad_to_blend(
       - vecteur nul                    → liste vide
       - direction d'ancre pure         → une seule entrée
       - direction mixte (0.6*HAPPY + 0.4*NOSTALGIC) → deux entrées
+
+    ``home`` fourni : la décomposition porte sur l'ÉCART au repos et sur les
+    rayons ``ancre − home`` (voir ``label_from_home``), la dominante et son
+    poids étant ceux que ``label_from_home`` renvoie — le libellé du prompt
+    et sa nuance parlent alors de la même géométrie.
     """
     if top_k <= 0:
         return []
 
+    if home is not None:
+        position = sub(position, home)
     mag = norm(position)
     if mag < 1e-6:
         return []
 
-    intensity = min(1.0, mag / _MAX_ANCHOR_NORM)
+    if home is None:
+        intensity = min(1.0, mag / _MAX_ANCHOR_NORM)
+    else:
+        intensity = label_from_home(add(position, home), home)[1]
 
     # Ancres compatibles avec la position, gardées sous forme unitaire :
     # la décomposition qui suit projette sur des directions, pas sur des
-    # ancres de normes disparates.
-    candidates: list[tuple[Emotion, Vec3, float]] = []
+    # ancres de normes disparates. Depuis un repos, un rayon court (celui de
+    # ``thinking``, 0,31 depuis un repos positif, pointe presque vers
+    # l'origine) attire tout résidu négatif ; sa part est amortie par sa
+    # longueur rapportée au plancher, sans l'exclure — une nuance de
+    # nostalgie reste possible, une nuance de « pensive » sur toute humeur
+    # sombre ne l'est plus.
+    candidates: list[tuple[Emotion, Vec3, float, float]] = []
     for emotion, anchor in EMOTION_ANCHORS.items():
+        if emotion is Emotion.NEUTRAL:
+            continue  # pas de direction (et depuis un repos, un rayon −home)
+        if home is not None:
+            anchor = sub(anchor, home)
         anchor_mag = norm(anchor)
         if anchor_mag < 1e-6:
-            continue  # NEUTRAL — pas de direction
+            continue
         unit = scale(anchor, 1.0 / anchor_mag)
         cos = dot(position, unit) / mag
         if cos < similarity_floor:
             continue
-        candidates.append((emotion, unit, cos))
+        amorti = 1.0 if home is None else min(1.0, anchor_mag / _OVERFLOW_ANCHOR_FLOOR)
+        candidates.append((emotion, unit, cos, amorti))
 
     if not candidates:
         return []
 
     # Dominante : l'ancre la plus proche en direction, comme pad_to_label.
     candidates.sort(key=lambda c: -c[2])
-    primary, primary_unit, _ = candidates.pop(0)
+    primary, primary_unit, _, _ = candidates.pop(0)
     primary_coeff = dot(position, primary_unit)
 
     blend: list[tuple[Emotion, float]] = [(primary, round(intensity, 3))]
@@ -268,17 +355,20 @@ def pad_to_blend(
     while candidates and len(blend) < top_k:
         best_index = -1
         best_coeff = 0.0
-        for index, (_, unit, _) in enumerate(candidates):
+        best_score = 0.0
+        for index, (_, unit, _, amorti) in enumerate(candidates):
             coeff = dot(residual, unit)
-            if coeff > best_coeff:
+            score = coeff * amorti
+            if score > best_score:
+                best_score = score
                 best_coeff = coeff
                 best_index = index
         if best_index < 0:
             break
-        ratio = best_coeff / primary_coeff
+        ratio = best_score / primary_coeff
         if ratio < residual_floor:
             break
-        emotion, unit, _ = candidates.pop(best_index)
+        emotion, unit, _, _ = candidates.pop(best_index)
         weight = min(previous_weight, ratio * intensity)
         blend.append((emotion, round(weight, 3)))
         residual = sub(residual, scale(unit, best_coeff))

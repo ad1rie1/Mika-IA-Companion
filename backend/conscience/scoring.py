@@ -64,7 +64,10 @@ class ScoringTuning:
     urgency_weight: float = 0.3
     urgency_cap: float = 0.3
     # F3 débordement d'humeur
-    mood_gate: float = 0.7
+    # 0,6 : l'intensité comparée est l'écart au repos (``overflow_intensity``
+    # depuis ``home``), qui vaut 0 au repos — l'ancien 0,7 compensait une
+    # lecture absolue qui lisait déjà 0,4–0,5 au repos.
+    mood_gate: float = 0.6
     mood_bonus: float = 0.25
     # F4 inactivité
     idle_gate_minutes: float = 10

@@ -106,10 +106,18 @@ def _mood() -> dict | None:
         from config.personality import personality
         from emotion import pad
         from emotion.engine import emotion_engine
+        from emotion.types import Emotion
 
-        position = emotion_engine.global_mood.dynamic.position
+        glob = emotion_engine.global_mood
+        position = glob.dynamic.position
         label, intensity = pad.pad_to_label(position)
         blend = pad.pad_to_blend(position, top_k=3)
+        # Ce qu'elle ressent PAR RAPPORT À SON REPOS — ce que le prompt et
+        # les portes de la conscience lisent. La position absolue est la
+        # teinte de l'heure au repos (« amusée » à 14 h), donc « au repos »
+        # se juge sur l'écart, jamais sur le libellé absolu, qui ne valait
+        # jamais le tempérament.
+        felt_label, felt_intensity = glob.felt()
         return {
             "label": label.value,
             "intensity": intensity,
@@ -117,8 +125,10 @@ def _mood() -> dict | None:
                 {"emotion": e.value, "weight": w}
                 for e, w in blend
             ],
+            "felt": felt_label.value,
+            "felt_intensity": felt_intensity,
             "default_mood": personality.temperament.default_mood.value,
-            "is_default": label.value == personality.temperament.default_mood.value,
+            "is_default": felt_label is Emotion.NEUTRAL,
             "velocity": pad.norm(emotion_engine.global_mood.dynamic.velocity),
             "tracked_persons": len(emotion_engine.person_moods),
         }

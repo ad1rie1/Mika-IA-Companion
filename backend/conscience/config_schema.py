@@ -601,10 +601,12 @@ CONFIG_SCHEMA = [
         key="conscience.rumination_bleed_intensity", type="float",
         section="conscience", group="Pensées qui trottent",
         label="Part de la pensée versée dans l'humeur (×)",
-        default=0.15, min=0.0, max=1.0, hot_reload=True,
+        default=0.35, min=0.0, max=1.0, hot_reload=True,
         hint="Fraction de l'intensité de la rumination envoyée comme "
              "impulsion émotionnelle. À 1.0 une pensée tenace impose son "
-             "émotion à l'humeur globale.",
+             "émotion à l'humeur globale. À 0.15, un « je bloque » de 0.35 "
+             "laissait un écart au repos de 7 % — invisible ; à 0.35, "
+             "« à peine frustrée », lisible sans envahir.",
     ),
     ConfigItem(
         key="conscience.ignored_backoff_factor", type="float",
@@ -672,13 +674,14 @@ CONFIG_SCHEMA = [
         key="conscience.ennui.intensite", type="float",
         section="conscience", group=_GROUPE_PENSEES,
         label="Intensité du glissement vers l'ennui",
-        default=0.4, min=0.0, max=1.0, hot_reload=True,
+        default=0.2, min=0.0, max=1.0, hot_reload=True,
         hint="Une teinte, pas une crise : sous la porte de débordement "
-             "d'humeur (0.7), l'ennui colore sans jamais forcer une prise "
-             "de parole à lui seul. À 0, l'ennui n'existe pas. Mesuré : à "
-             "0.25, une impulsion par demi-heure sous une constante de temps "
-             "globale de 23 min ne s'accumule pas et l'humeur lit "
-             "« nostalgique » ; à 0.4 elle lit « ennuyée ».",
+             "d'humeur, l'ennui colore sans jamais forcer une prise de "
+             "parole à lui seul. À 0, l'ennui n'existe pas. Dosé comme un "
+             "état tenu — toutes les dix minutes — plutôt qu'en dents de "
+             "scie : à 0.4 par demi-heure, l'écart retombait de 0.36 à 0.10 "
+             "entre deux impulsions ; à 0.2 par dix minutes il se tient à "
+             "~0.25, « légèrement lasse », et ne bouge plus.",
     ),
     ConfigGroup(
         section="conscience", key="Manque", order=21,
@@ -805,9 +808,13 @@ CONFIG_SCHEMA = [
         key="conscience.factor.mood_gate", type="float",
         section="conscience", group=_GROUPE_FACTEURS,
         label="F3 · Débordement d'humeur : seuil d'entrée",
-        default=0.7, min=0.0, max=1.0, hot_reload=True,
-        hint="Intensité de l'humeur globale au-delà de laquelle elle a "
-             "quelque chose de non exprimé.",
+        default=0.6, min=0.0, max=1.0, hot_reload=True,
+        hint="Écart de l'humeur globale à son repos, rapporté à l'émotion "
+             "vers laquelle elle a dérivé, au-delà duquel elle a quelque chose "
+             "de non exprimé. Au repos l'écart vaut 0 (il lisait 0.4–0.5 "
+             "quand la porte comparait la position absolue, d'où l'ancien "
+             "0.7) ; à 0.6, trois tours « sad 0.8 » de quelqu'un la "
+             "franchissent, une joie ordinaire non.",
     ),
     ConfigItem(
         key="conscience.factor.mood_bonus", type="float",

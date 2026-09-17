@@ -153,8 +153,15 @@ class TestMessageEmotion:
             f"Message emotion should be in LOVE direction, got {msg.emotion.value}"
 
     def test_message_default_when_state_empty(self, engine):
-        """When nothing was processed, message should fall back to default mood."""
-        msg = engine.compute_message_emotion("never_seen")
+        """When nothing was processed, the message reads the REST — which is
+        the default mood once the circadian tint is neutralised. A fresh
+        oscillator starts at rest, no longer at the origin (it used to drift
+        from a neutral face to the hour's tint over twenty minutes)."""
+        from unittest.mock import patch
+        from emotion import circadian
+
+        with patch.object(circadian, "phase_bias", return_value=(0.0, 0.0, 0.0)):
+            msg = engine.compute_message_emotion("never_seen")
         assert msg.emotion == engine.temperament.default_mood
 
     def test_intensity_in_range(self, engine):

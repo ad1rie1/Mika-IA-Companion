@@ -201,8 +201,14 @@ class TestMultiPersonMessageEmotion:
         assert alice_msg.global_intensity == bob_msg.global_intensity
 
     def test_new_person_gets_default_mood(self, engine):
-        """A person with no history should get default mood in message emotion."""
-        msg = engine.compute_message_emotion("stranger")
+        """A person with no history starts at rest — the default mood once the
+        circadian tint is neutralised (a fresh oscillator no longer starts at
+        the origin and drifts for twenty minutes)."""
+        from unittest.mock import patch
+        from emotion import circadian
+
+        with patch.object(circadian, "phase_bias", return_value=(0.0, 0.0, 0.0)):
+            msg = engine.compute_message_emotion("stranger")
 
         # Should use default mood (happy for default temperament)
         assert msg.emotion == engine.temperament.default_mood
