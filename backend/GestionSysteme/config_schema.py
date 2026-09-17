@@ -37,8 +37,9 @@ CONFIG_SCHEMA = [
         key="accounts.users", type="record_list", section="accounts",
         label="Comptes", min_items=0,
         description=(
-            "Un compte = un login pour le frontend, et — si « Accès "
-            "administration » est coché — pour /gestion/. Le mot de passe passe "
+            "Un compte = un login pour le frontend (parler à Mika), et — si "
+            "« Opérateur » est coché — l'administration : /gestion/ et l'API "
+            "d'administration. Le mot de passe passe "
             "par les mêmes validateurs que la création du premier compte. "
             "Un compte désactivé ne peut plus se connecter mais garde son "
             "historique et son identité."
@@ -58,8 +59,11 @@ CONFIG_SCHEMA = [
                             hint="Facultatif — jamais utilisé pour se connecter."),
                 record_item(key="password",     type="secret", label="Mot de passe", sensitive=True,
                             hint="Laisser vide pour conserver l'actuel. Obligatoire à la création."),
-                record_item(key="is_staff",     type="bool",   label="Accès administration", default=False,
-                            hint="Requis pour /gestion/ quand DASHBOARD_REQUIRE_AUTH est actif."),
+                record_item(key="is_staff",     type="bool",   label="Opérateur", default=False,
+                            hint="Administre Mika : /gestion/ (quand DASHBOARD_REQUIRE_AUTH est actif), "
+                                 "l'API d'administration (projets, Forge, approbations), tous les "
+                                 "fichiers déposés et le contexte privé des modules. Décoché = compte "
+                                 "de conversation : parle à Mika, ne touche qu'à ses propres fichiers."),
                 record_item(key="is_superuser", type="bool",   label="Administrateur", default=False,
                             hint="Accès complet à /admin/."),
                 record_item(key="person_id",    type="str",    label="person_id", readonly=True,

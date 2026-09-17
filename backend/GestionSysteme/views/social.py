@@ -762,10 +762,63 @@ def _person_synthese(request, entity, identities, person_ids) -> dict:
         # sur cette page ne le dirait.
         "may_disclose": any(v["decision"].may_disclose for v in verdicts),
         "threshold": _politique().private_context_threshold,
+        "divulgation": _divulgation_graduee(entity, verdicts, person_ids),
         "affects": _live_affects(person_ids),
         "projects": list(
             Project.objects.filter(owner=entity).order_by("-updated_at")[:10],
         ),
+    }
+
+
+def _divulgation_graduee(entity, verdicts, person_ids) -> dict | None:
+    """Le niveau (``identity.divulgation``) que cette personne obtiendrait
+    aujourd'hui sur ce que Mika sait des AUTRES — et les cinq entrées qui
+    le produisent, servies par la même fonction pure que le tour.
+
+    Le verdict retenu est le plus sûr (celui que le prompt suit aussi). La
+    chaleur se lit en RAM comme ``_live_affects`` : une ancre absente vaut
+    froide, et la page le dit. ``None`` sans identité liée : sans certitude,
+    il n'y a pas de niveau à annoncer.
+    """
+    if not verdicts:
+        return None
+    from identity import divulgation as div
+    from identity.resolver import politique_divulgation
+
+    meilleur = max(verdicts, key=lambda v: v["decision"].certainty)
+    decision = meilleur["decision"]
+    profile = getattr(entity, "profile", None)
+    closeness = str(getattr(profile, "closeness", "") or "")
+    chaleur, ancre_lue = 0.0, False
+    try:
+        from emotion.engine import emotion_engine
+
+        for person_id in person_ids:
+            mood = emotion_engine.person_moods.get(person_id)
+            ancre = getattr(mood, "anchor", None)
+            if ancre:
+                ancre_lue = True
+                chaleur = max(chaleur, min(1.0, float(ancre[0])))
+    except Exception:
+        logger.debug("chaleur d'ancre indisponible", exc_info=True)
+    tuning = politique_divulgation()
+    resultat = div.decider(
+        decision.certainty, decision.trust, closeness=closeness,
+        chaleur=chaleur, fiche_ouverte=decision.may_disclose, tuning=tuning,
+    )
+    return {
+        "niveau": resultat.niveau.value,
+        "avec_temoin": resultat.avec_temoin.value,
+        "explication": div.expliquer_fr(resultat),
+        "certitude": decision.certainty,
+        "canal": decision.trust.value,
+        "publique": decision.trust is ChannelTrust.PUBLIC,
+        "closeness": closeness or "stranger",
+        "chaleur": chaleur,
+        "ancre_lue": ancre_lue,
+        "chaleur_min": tuning.chaleur_min,
+        "barre_personnel": tuning.barre_personnel,
+        "barre_confidence": tuning.barre_confidence,
     }
 
 

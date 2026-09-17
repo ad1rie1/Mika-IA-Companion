@@ -23,7 +23,7 @@ def debut_du_jour_local() -> datetime:
     """Minuit, à l'horloge à laquelle le reste du moteur date ses journées.
 
     `timezone.now().replace(hour=0, …)` rend **minuit UTC** sous `USE_TZ=True`
-    — deux heures d'écart l'été à Paris. `_introspect` comptait donc les actes
+    — deux heures d'écart l'été à Paris. `introspection.introspect` comptait donc les actes
     d'une journée commençant à 02 h locales : une initiative prise entre minuit
     et 02 h était imputée à la veille, puis jamais décomptée du jour qui
     s'ouvrait, si bien que le frein quotidien (`acts_today >= 5`) et le
@@ -35,7 +35,7 @@ def debut_du_jour_local() -> datetime:
     Ce n'est pas une requête, et cette couche n'en héberge d'ordinaire pas
     d'autres — mais c'est bien une question de lecture (« quand commence
     aujourd'hui ? ») dont trois appelants ont besoin de la *même* réponse ;
-    la garder dans `engine.py` en referait une arithmétique locale, ce qui est
+    la garder dans `introspection.py` en referait une arithmétique locale, ce qui est
     exactement la forme du bug.
 
     Le retour est *aware* parce qu'il borne `created_at` (`auto_now_add`,

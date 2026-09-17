@@ -1,4 +1,3 @@
-import os
 import warnings
 from pathlib import Path
 
@@ -269,9 +268,11 @@ DASHBOARD_REQUIRE_AUTH = env.bool("DASHBOARD_REQUIRE_AUTH", default=False)
 # itself permanently (see communication/views.py).
 CONSUMER_REQUIRE_AUTH = env.bool("CONSUMER_REQUIRE_AUTH", default=True)
 
-# Person ids treated as the operator/owner — they see private module context
-# (unread emails, pending wakes). Authenticated users (user_*) and Mika's own
-# internal channels are always trusted; this adds extras (e.g. your tg_<id>).
+# Person ids treated as the owner — they see private module context (unread
+# emails, pending wakes). Operators (``is_staff`` accounts) and Mika's own
+# internal channels are owners by construction (identity/roles.py); this adds
+# handles with no Django account behind them (e.g. your tg_<id>). A plain
+# ``user_*`` account is a chat account, not an owner.
 OWNER_PERSON_IDS = env.list("OWNER_PERSON_IDS", default=[])
 
 # --- AI Quota / Limiter ---
@@ -281,8 +282,9 @@ OWNER_PERSON_IDS = env.list("OWNER_PERSON_IDS", default=[])
 # Global caps apply to every call; per-role caps apply on top for a
 # specific AIRole. Per-project caps live on ``Project.monthly_token_budget``.
 
-# Per-role overrides. Add as many as you need. Role names match
-# ``AIRole`` values uppercased (conversation → AI_QUOTA_ROLE_CONVERSATION_*).
+# Per-role overrides — one pair per ``AIRole`` member, no exception (a test
+# pins the enum against these names). Role names match ``AIRole`` values
+# uppercased (conversation → AI_QUOTA_ROLE_CONVERSATION_*).
 AI_QUOTA_ROLE_CONVERSATION_DAILY = env.int("AI_QUOTA_ROLE_CONVERSATION_DAILY", default=0)
 AI_QUOTA_ROLE_CONVERSATION_MONTHLY = env.int("AI_QUOTA_ROLE_CONVERSATION_MONTHLY", default=0)
 AI_QUOTA_ROLE_CONVERSATION_TOOLS_DAILY = env.int("AI_QUOTA_ROLE_CONVERSATION_TOOLS_DAILY", default=0)
@@ -297,6 +299,16 @@ AI_QUOTA_ROLE_VALIDITY_CHECK_DAILY = env.int("AI_QUOTA_ROLE_VALIDITY_CHECK_DAILY
 AI_QUOTA_ROLE_VALIDITY_CHECK_MONTHLY = env.int("AI_QUOTA_ROLE_VALIDITY_CHECK_MONTHLY", default=0)
 AI_QUOTA_ROLE_VISION_CAPTION_DAILY = env.int("AI_QUOTA_ROLE_VISION_CAPTION_DAILY", default=0)
 AI_QUOTA_ROLE_VISION_CAPTION_MONTHLY = env.int("AI_QUOTA_ROLE_VISION_CAPTION_MONTHLY", default=0)
+AI_QUOTA_ROLE_INNER_VOICE_DAILY = env.int("AI_QUOTA_ROLE_INNER_VOICE_DAILY", default=0)
+AI_QUOTA_ROLE_INNER_VOICE_MONTHLY = env.int("AI_QUOTA_ROLE_INNER_VOICE_MONTHLY", default=0)
+AI_QUOTA_ROLE_PREPARATION_DAILY = env.int("AI_QUOTA_ROLE_PREPARATION_DAILY", default=0)
+AI_QUOTA_ROLE_PREPARATION_MONTHLY = env.int("AI_QUOTA_ROLE_PREPARATION_MONTHLY", default=0)
+AI_QUOTA_ROLE_COMPACTION_DAILY = env.int("AI_QUOTA_ROLE_COMPACTION_DAILY", default=0)
+AI_QUOTA_ROLE_COMPACTION_MONTHLY = env.int("AI_QUOTA_ROLE_COMPACTION_MONTHLY", default=0)
+# La boucle d'outils la plus chère du système : sans plafond, un projet en
+# `interval:` pouvait dépenser sans limite.
+AI_QUOTA_ROLE_PROJECT_WORK_DAILY = env.int("AI_QUOTA_ROLE_PROJECT_WORK_DAILY", default=0)
+AI_QUOTA_ROLE_PROJECT_WORK_MONTHLY = env.int("AI_QUOTA_ROLE_PROJECT_WORK_MONTHLY", default=0)
 
 # --- Forge (modules auto-gérés par l'IA, espace confiné) ---
 FORGE_DIR = env("FORGE_DIR", default=str(PROJECT_ROOT / "data" / "forge_modules"))

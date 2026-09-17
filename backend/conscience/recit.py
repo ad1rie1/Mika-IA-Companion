@@ -12,9 +12,10 @@ réglage — même famille que les planchers de canal de ``identity/trust.py``
 (« qu'un inconnu ne reçoive pas le récit intégral » n'est pas une préférence).
 Les entrées sont trois faits résolus par l'appelant :
 
-* ``est_owner`` — la définition EXISTANTE de la confiance d'opérateur
-  (``modules.collectors.is_owner`` : owners configurés + comptes
-  authentifiés). On ne fabrique pas une seconde échelle de confiance.
+* ``est_owner`` — la définition EXISTANTE du propriétaire
+  (``identity.roles.is_owner`` : opérateurs ``is_staff``, ``OWNER_PERSON_IDS``
+  et canaux internes — un simple compte de conversation n'en est pas un).
+  On ne fabrique pas une seconde échelle de confiance.
 * ``closeness`` — ce que la théorie de l'esprit sait du lien
   (``PersonProfile.closeness``).
 * ``concerne`` — la personne est-elle liée au *sujet* du chantier

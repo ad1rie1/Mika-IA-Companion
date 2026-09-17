@@ -2,9 +2,8 @@
 
 Le chemin sans outil était déjà structuré partout ; le chemin outillé, lui,
 retombait sur ``ChatPrompt.legacy_pair()`` chez tous les providers sauf
-Claude — ``AIRouter.chat_with_tools`` bascule sur
-``hasattr(provider, "complete_chat_with_tools")``, et personne d'autre ne
-l'exposait.
+Claude — seul à exposer ``complete_chat_with_tools`` à l'époque où le routeur
+détectait cette capacité par ``hasattr``.
 
 C'est pourtant le tour le plus cher du système : les déclarations d'outils
 pèsent ~6 500 jetons et repartent à CHAQUE aller-retour de la boucle. Amorcée
@@ -379,8 +378,8 @@ class TestLaBoucleTourneEncore:
 class TestPlusDAplatissement:
 
     def test_les_trois_exposent_complete_chat_with_tools(self):
-        """C'est sur ce ``hasattr`` que le routeur bascule — sans lui, aucun
-        des tests ci-dessus ne dit quoi que ce soit du chemin réel."""
+        """C'est ce que le routeur appelle — sans lui, aucun des tests
+        ci-dessus ne dit quoi que ce soit du chemin réel."""
         from ai.providers.glm_provider import GLMProvider
         from ai.providers.ollama_cloud_provider import OllamaCloudProvider
         from ai.providers.ollama_provider import OllamaProvider
@@ -412,10 +411,10 @@ class TestPlusDAplatissement:
         assert offenders == []
 
     def test_un_seul_corps_de_boucle_compatible_openai(self):
-        """Deux amorces, un corps : l'amorce à deux chaînes délègue, elle ne
-        recopie pas la boucle (c'est ainsi que les deux dérivent)."""
-        from ai.providers import _openai_tools
-
+        """Une amorce, un corps : la boucle vit dans ``_tool_loop`` et ce
+        module n'y branche qu'un adaptateur — il ne recopie ni l'appel
+        (c'est ``create_chat_completion`` qui rejoue une requête refusée pour
+        ``max_tokens`` ou ``temperature``), ni l'itération."""
         source = ast.parse(
             (_BACKEND / "ai" / "providers" / "_openai_tools.py").read_text("utf-8")
         )
@@ -428,21 +427,16 @@ class TestPlusDAplatissement:
                 for noeud in ast.walk(fonction)
             )
         }
-        # Le seul corps qui appelle l'API est ``create_chat_completion``, le
-        # point de passage qui rejoue une requête refusée pour ``max_tokens``
-        # ou ``temperature`` ; la boucle passe par lui, elle ne recopie pas
-        # l'appel.
         assert corps == {"create_chat_completion"}
-        boucle = next(
+        appeler = next(
             f for f in ast.walk(source)
-            if isinstance(f, ast.AsyncFunctionDef) and f.name == "run_openai_tool_loop"
+            if isinstance(f, ast.AsyncFunctionDef) and f.name == "appeler"
         )
         appelle = {
             ast.unparse(n.func).rsplit(".", 1)[-1]
-            for n in ast.walk(boucle) if isinstance(n, ast.Call)
+            for n in ast.walk(appeler) if isinstance(n, ast.Call)
         }
         assert "create_chat_completion" in appelle
-        assert hasattr(_openai_tools, "run_openai_tool_loop_from_pair")
 
 
 # =================================================================
@@ -535,8 +529,7 @@ def routeur(monkeypatch):
 
 
 class TestRouteurDonneLaFormeStructuree:
-    """Le correctif doit suffire *sans* toucher au routeur : c'est
-    ``hasattr(provider, "complete_chat_with_tools")`` qui décide."""
+    """Bout en bout : ``AIRouter.chat_with_tools`` tend la forme structurée."""
 
     @pytest.mark.parametrize(
         "fabrique", [_openai, _glm, _ollama], ids=["openai", "glm", "ollama"],

@@ -272,8 +272,8 @@ class TestGeminiChatNatif:
 class TestPlusDAplatissement:
 
     def test_les_deux_exposent_complete_chat(self):
-        """C'est sur ce ``hasattr`` que le routeur bascule — sans lui, aucun
-        des tests ci-dessus ne dit quoi que ce soit du chemin réel."""
+        """C'est ce que le routeur appelle — sans lui, aucun des tests
+        ci-dessus ne dit quoi que ce soit du chemin réel."""
         from ai.providers.gemini_provider import GeminiProvider
         from ai.providers.glm_provider import GLMProvider
 
@@ -339,9 +339,7 @@ def routeur(monkeypatch):
 
 
 class TestRouteurDonneLaFormeStructuree:
-    """Le correctif doit suffire *sans* toucher au routeur : c'est
-    ``hasattr(provider, "complete_chat")`` qui décide, et ces deux tours
-    passent par ``AIRouter.chat`` pour le vérifier de bout en bout."""
+    """Bout en bout : ces deux tours passent par ``AIRouter.chat``."""
 
     def test_glm_recoit_de_vrais_tours(self, routeur, monkeypatch):
         r, router_mod = routeur

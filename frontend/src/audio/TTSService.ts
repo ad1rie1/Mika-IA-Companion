@@ -5,6 +5,8 @@ import type {
   VoiceProfile,
 } from "../types";
 
+import { msPerCharForRate } from "./cadence";
+
 export type { VoiceProfile } from "../types";
 
 const NEUTRAL_PROFILE: VoiceProfile = { pitch: 1.0, rate: 1.0, gain: 1.0 };
@@ -34,6 +36,27 @@ const SFX_DURATION_MS: Record<ProsodicCue, number> = {
   laugh: 900,
   breath: 350,
 };
+
+/**
+ * Échéance d'un énoncé : le temps que la voix devrait mettre à le dire,
+ * doublé, plus un forfait. La Web Speech API ne garantit ni `onend` ni
+ * `onerror` — ni après un `cancel()`, ni sur un énoncé que le moteur
+ * abandonne en silence — et la file attend cette promesse : sans borne, un
+ * seul énoncé muet bloquait `processQueue` pour toute la session, chaque
+ * `speak()` suivant s'empilant sans jamais être dépilé. Même arithmétique que
+ * l'estimation du lip-sync (`msPerCharForRate`), pour que les deux lisent le
+ * même débit ; la marge ×2 absorbe une voix plus lente que l'estimation,
+ * le forfait couvre la latence de synthèse d'un texte court.
+ */
+export const UTTERANCE_DEADLINE_FACTOR = 2;
+export const UTTERANCE_DEADLINE_GRACE_MS = 5000;
+
+export function utteranceDeadlineMs(text: string, rate: number): number {
+  return (
+    text.length * msPerCharForRate(rate) * UTTERANCE_DEADLINE_FACTOR +
+    UTTERANCE_DEADLINE_GRACE_MS
+  );
+}
 
 // Web Speech API accepts pitch in [0,2] and rate in [0.1,10]; the product of
 // an emotion multiplier and a persona multiplier can leave that window.
@@ -127,6 +150,13 @@ export class TTSService {
   // speakImmediate so the deeper utterance construction can read it
   // without threading the profile through every segment helper.
   private activeProfile: VoiceProfile = NEUTRAL_PROFILE;
+  /**
+   * Le morceau que la synthèse joue en ce moment, réduit à ce qui permet de
+   * le clore de l'extérieur. `stop()` et `setMuted(true)` s'en servent :
+   * annuler l'énoncé côté navigateur ne résout pas la promesse que la file
+   * attend, et sans elle la file ne repart jamais.
+   */
+  private inflight: { finish: () => void } | null = null;
 
   constructor(events: TTSEvents) {
     this.events = events;
@@ -220,10 +250,10 @@ export class TTSService {
    * need asset files. Quality is "good enough for a VTuber", not voice-
    * actor studio grade — the point is prosodic presence, not realism.
    */
-  private async playSfx(kind: "sigh" | "laugh" | "breath"): Promise<void> {
+  private async playSfx(kind: "sigh" | "laugh" | "breath"): Promise<boolean> {
     // Le mute passe par speechSynthesis.cancel(), qui n'a aucune prise sur
     // WebAudio : sans cette garde le soupir sortait après le clic sur 🔇.
-    if (this.muted) return;
+    if (this.muted) return false;
     const ctx = this.ensureAudioContext();
     if (ctx.state === "suspended") {
       // Awaited: a suspended context never fires `onended`, and the queue
@@ -235,7 +265,7 @@ export class TTSService {
       } catch {
         // Autoplay policy still blocking (no user gesture yet): skip the
         // effect rather than hanging the speech queue on it.
-        return;
+        return false;
       }
     }
     const now = ctx.currentTime;
@@ -259,6 +289,7 @@ export class TTSService {
       rendered,
       new Promise<void>((r) => setTimeout(r, budgetMs + 250)),
     ]);
+    return true;
   }
 
   /** Synthetic sigh: filtered noise, descending pitch, 600ms envelope. */
@@ -419,6 +450,7 @@ export class TTSService {
       if ("speechSynthesis" in window) {
         speechSynthesis.cancel();
       }
+      this.abandonInflight();
       this.forceSpeechEnded();
     }
   }
@@ -519,12 +551,12 @@ export class TTSService {
     // present. Fall through to the single-utterance path when the text
     // is clean speech (common case — avoids adding latency to every reply).
     const hasTokens = /\[(PAUSE(?::\d+)?|SIGH|LAUGH|BREATH)\]/i.test(text);
-    if (hasTokens) {
-      await this.speakSegmented(text, emotion);
-    } else {
-      await this.speakTextChunk(text, emotion);
-    }
-    return "played";
+    const sounded = hasTokens
+      ? await this.speakSegmented(text, emotion)
+      : await this.speakTextChunk(text, emotion);
+    // « Joué » dès que la voix a commencé, même coupée en route ; un énoncé
+    // clos avant son premier son (mute, stop, moteur muet) n'a pas joué.
+    return sounded ? "played" : "skipped";
   }
 
   /**
@@ -532,14 +564,16 @@ export class TTSService {
    * tokens. Fires a single onSpeakStart at the beginning of the first
    * audible segment and a single onSpeakEnd after the last one, so the
    * lip-sync controller sees the whole reply as one coherent event.
+   * Résout `true` si quelque chose a sonné (un mot ou un effet).
    */
   private async speakSegmented(
     text: string,
     emotion: EmotionName
-  ): Promise<void> {
+  ): Promise<boolean> {
     const segments = this.parseSegments(text);
-    if (segments.length === 0) return;
+    if (segments.length === 0) return false;
     const epoch = this.interruptEpoch;
+    let sounded = false;
 
     // Emit "start" on the first segment that actually makes sound.
     let started = false;
@@ -557,38 +591,49 @@ export class TTSService {
 
       if (seg.type === "speech") {
         emitStart();
-        await this.speakTextChunk(seg.text, emotion, /*suppressEvents*/ true, seg.start);
+        if (await this.speakTextChunk(seg.text, emotion, /*suppressEvents*/ true, seg.start)) {
+          sounded = true;
+        }
       } else if (seg.type === "pause") {
         await new Promise((r) => setTimeout(r, seg.ms));
       } else if (seg.type === "sfx") {
         emitStart();
         this.events.onProsodicCue?.(seg.kind);
-        await this.playSfx(seg.kind);
+        if (await this.playSfx(seg.kind)) sounded = true;
       }
     }
 
     if (started) {
       this.events.onSpeakEnd();
     }
+    return sounded;
   }
 
   /**
-   * Speak a single chunk of plain text (no tokens). Returns a promise
-   * resolved when the utterance ends or errors. When `suppressEvents` is
-   * true, the start/end callbacks are NOT fired — used by the segmented
-   * path which manages these lifecycle events at a higher level.
+   * Speak a single chunk of plain text (no tokens). Resolves `true` when the
+   * voice actually started (`onstart`, or the browser reporting its end),
+   * `false` when the chunk was closed before making a sound. When
+   * `suppressEvents` is true, the start/end callbacks are NOT fired — used by
+   * the segmented path which manages these lifecycle events at a higher
+   * level.
+   *
+   * Trois façons de se clore, une seule sortie (`finish`) : l'événement du
+   * navigateur (`onend`/`onerror`), l'échéance (`utteranceDeadlineMs`), ou
+   * l'abandon depuis `stop()`/`setMuted(true)`. La première arrivée gagne,
+   * les suivantes ne font rien — un `onend` tardif ne résout pas deux fois
+   * et ne re-notifie pas `onSpeakEnd`.
    */
   private speakTextChunk(
     text: string,
     emotion: EmotionName,
     suppressEvents = false,
     charBase = 0
-  ): Promise<void> {
+  ): Promise<boolean> {
     return new Promise((resolve) => {
       // Muet : ne jamais relancer la synthèse. Couvre la course entre le
       // `cancel()` du mute et le segment suivant, déjà en vol ici.
       if (this.muted || !text.trim()) {
-        resolve();
+        resolve(false);
         return;
       }
 
@@ -617,7 +662,45 @@ export class TTSService {
         ctx.resume();
       }
 
+      let settled = false;
+      let started = false;
+      let deadline: ReturnType<typeof setTimeout> | null = null;
+      const budgetMs = utteranceDeadlineMs(text, utterance.rate);
+
+      const finish = (sounded: boolean) => {
+        if (settled) return;
+        settled = true;
+        if (deadline !== null) clearTimeout(deadline);
+        if (this.inflight === record) this.inflight = null;
+        // Si `stop()`/`setMuted(true)` a déjà remis `isSpeaking` à `false`
+        // (leur propre reset synchrone), un événement tardif arrive sur un
+        // énoncé déjà considéré terminé : ne pas re-notifier `onSpeakEnd`.
+        const wasSpeaking = this.isSpeaking;
+        this.isSpeaking = false;
+        if (!suppressEvents && wasSpeaking) {
+          this.events.onSpeakEnd();
+        }
+        resolve(sounded);
+      };
+      const record = { finish: () => finish(started) };
+
+      // Armée dès la remise au moteur (la latence de synthèse compte, le
+      // forfait la couvre) et réarmée au premier son, pour que le budget
+      // mesure bien la parole et non l'attente qui la précède.
+      const arm = () => {
+        if (deadline !== null) clearTimeout(deadline);
+        deadline = setTimeout(() => {
+          console.warn(
+            `TTS: aucun onend après ${Math.round(budgetMs)} ms — énoncé clos par échéance`
+          );
+          finish(started);
+        }, budgetMs);
+      };
+
       utterance.onstart = () => {
+        if (settled) return;
+        started = true;
+        arm();
         this.isSpeaking = true;
         // Le son commence ici, pas à la mise en file : premier recalage.
         this.events.onSpeechProgress?.(charBase);
@@ -629,51 +712,55 @@ export class TTSService {
       // Frontières de mot (Chrome/Edge avec les voix locales, Firefox) :
       // `charIndex` est relatif au texte de CET énoncé, d'où l'offset.
       utterance.onboundary = (e) => {
+        if (settled) return;
         if (e.name === "word") {
           this.events.onSpeechProgress?.(charBase + e.charIndex);
         }
       };
 
-      utterance.onend = () => {
-        // Si `stop()`/`setMuted(true)` a déjà remis `isSpeaking` à `false`
-        // (leur propre reset synchrone), cet événement arrive en retard sur
-        // un énoncé déjà considéré terminé : ne pas re-notifier `onSpeakEnd`.
-        const wasSpeaking = this.isSpeaking;
-        this.isSpeaking = false;
-        if (!suppressEvents && wasSpeaking) {
-          this.events.onSpeakEnd();
-        }
-        resolve();
-      };
+      // Le navigateur dit « fini » : il a joué, même sans `onstart` reçu.
+      utterance.onend = () => finish(true);
 
       utterance.onerror = (e) => {
         // "canceled" is expected when we call speechSynthesis.cancel()
-        if (e.error !== "canceled") {
+        if (e.error !== "canceled" && !settled) {
           console.warn("TTS error:", e.error);
         }
-        const wasSpeaking = this.isSpeaking;
-        this.isSpeaking = false;
-        if (!suppressEvents && wasSpeaking) {
-          this.events.onSpeakEnd();
-        }
-        resolve();
+        finish(started);
       };
 
+      this.inflight = record;
+      arm();
       speechSynthesis.speak(utterance);
     });
+  }
+
+  /**
+   * Clore de l'extérieur le morceau en vol, s'il y en a un : sa promesse se
+   * résout, la file avance. Appelé après le `cancel()` du navigateur, dont
+   * l'événement de fin n'est pas garanti.
+   */
+  private abandonInflight() {
+    const record = this.inflight;
+    this.inflight = null;
+    record?.finish();
   }
 
   stop() {
     this.dropQueue();
     this.interruptEpoch++;
     speechSynthesis.cancel();
+    this.abandonInflight();
     this.forceSpeechEnded();
   }
 
   /**
    * Réinitialisation synchrone de l'état "parle", partagée par `stop()` et
    * `setMuted(true)` : après un `cancel()`, rien ne garantit que le
-   * navigateur déclenche `onend`/`onerror` sur l'énoncé annulé. La garde
+   * navigateur déclenche `onend`/`onerror` sur l'énoncé annulé.
+   * `abandonInflight` clôt le morceau en vol par le même chemin ; la garde
+   * ici reste la ceinture pour un `isSpeaking` que rien d'autre n'aurait
+   * remis à `false`. La garde
    * `if (this.isSpeaking)` fait aussi le travail inverse — si le navigateur
    * déclenche quand même l'événement (avant ou après cet appel), l'un des
    * deux trouve `isSpeaking` déjà à `false` et ne re-déclenche pas

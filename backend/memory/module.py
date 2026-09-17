@@ -47,11 +47,24 @@ REFUS_RECHERCHE = (
 
 @dataclass(frozen=True)
 class _Perimetre:
-    """Ce que le tour en cours a le droit de sortir de la memoire."""
+    """Ce que le tour en cours a le droit de sortir de la memoire.
+
+    ``divulgation`` est la porte binaire de la FICHE de l'interlocuteur
+    (journal, engagements — ``may_disclose``) ; ``niveau`` est le niveau
+    gradué sur AUTRUI (``identity.divulgation``), le meme que celui du
+    bloc ``--- TES SOUVENIRS ---`` du tour.
+    """
 
     interne: bool
     divulgation: bool
     entity_id: int | None
+    niveau: object = None  # identity.divulgation.Divulgation
+
+    def __post_init__(self):
+        if self.niveau is None:
+            from identity.divulgation import FERME, TOUT
+
+            object.__setattr__(self, "niveau", TOUT if self.interne else FERME)
 
 
 async def _perimetre() -> _Perimetre:
@@ -74,9 +87,13 @@ async def _perimetre() -> _Perimetre:
         return _Perimetre(True, True, None)
     try:
         from identity.resolver import identity_resolver
+        from pipeline.context_blocks import divulgation_du_tour
 
         ctx = await identity_resolver.resolve_context(person_id)
-        return _Perimetre(False, bool(ctx.may_disclose), ctx.entity_id)
+        return _Perimetre(
+            False, bool(ctx.may_disclose), ctx.entity_id,
+            niveau=await divulgation_du_tour(ctx),
+        )
     except Exception as exc:
         degradations.record("outils memoire: perimetre", exc)
         return _Perimetre(False, False, None)
@@ -91,25 +108,38 @@ def _pk_of(row) -> int | None:
         return None
 
 
-async def _sans_les_autres(rows: list, model, perimetre: _Perimetre) -> list:
-    """Ecarte les lignes rattachees a quelqu'un d'autre que l'interlocuteur.
+async def _selon_le_niveau(rows: list, model, perimetre: _Perimetre) -> list:
+    """Applique le niveau du tour ligne par ligne, comme le rappel du prompt.
 
-    Une ligne dont le pk est illisible est ecartee elle aussi : on ne peut
-    pas verifier de qui elle parle.
+    Rend ``[(ligne, tag)]`` : une ligne qui concerne un tiers et pese plus
+    que le niveau est ecartee ; en dessous mais pas anodine, elle sort avec
+    son tag d'arbitrage. Une ligne dont le pk est illisible est ecartee elle
+    aussi : on ne peut pas verifier de qui elle parle. Un appelant interne
+    garde tout, sans tag.
     """
     if not rows:
-        return rows
-    from memory import read
+        return []
+    if perimetre.interne:
+        return [(r, "") for r in rows]
+    from memory import read, sensibilite
 
     pks = [_pk_of(r) for r in rows]
     try:
-        autrui = await read.rows_mentioning_others(
+        qualifs = await read.qualifications(
             model, pks, entity_id=perimetre.entity_id,
         )
     except Exception as exc:
         degradations.record("outils memoire: filtrage tiers", exc)
         return []
-    return [r for r, pk in zip(rows, pks) if pk is not None and pk not in autrui]
+    out = []
+    for r, pk in zip(rows, pks):
+        if pk is None or pk not in qualifs:
+            continue
+        q = qualifs[pk]
+        if not sensibilite.admissible(q, perimetre.niveau):
+            continue
+        out.append((r, sensibilite.tag(q)))
+    return out
 
 
 class MemoryToolsModule(BaseModule):
@@ -325,33 +355,29 @@ class MemoryToolsModule(BaseModule):
                 query, n=plafond
             )
 
+        from memory.models import Connaissance, Souvenir
+
         perimetre = await _perimetre()
-        if not perimetre.interne and not perimetre.divulgation:
-            from memory.models import Connaissance, Souvenir
+        retenus_s = await _selon_le_niveau(souvenirs, Souvenir, perimetre)
+        retenues_c = await _selon_le_niveau(connaissances, Connaissance, perimetre)
+        ecarte = len(retenus_s) < len(souvenirs) or len(retenues_c) < len(connaissances)
+        if ecarte and not retenus_s and not retenues_c:
+            return {"message": REFUS_RECHERCHE}
 
-            retenus_s = await _sans_les_autres(souvenirs, Souvenir, perimetre)
-            retenues_c = await _sans_les_autres(
-                connaissances, Connaissance, perimetre
-            )
-            ecarte = len(retenus_s) < len(souvenirs) or len(retenues_c) < len(connaissances)
-            souvenirs, connaissances = retenus_s, retenues_c
-            if ecarte and not souvenirs and not connaissances:
-                return {"message": REFUS_RECHERCHE}
-
-        def _fmt(row: dict) -> dict:
+        def _fmt(row: dict, tag: str) -> dict:
             meta = row.get("metadata") or {}
-            out = {"content": row.get("content", "")}
+            out = {"content": row.get("content", "") + tag}
             if meta.get("emotion"):
                 out["emotion"] = meta["emotion"]
             if meta.get("occurred_at"):
                 out["date"] = str(meta["occurred_at"])[:10]
             return out
 
-        if not souvenirs and not connaissances:
+        if not retenus_s and not retenues_c:
             return {"message": "Rien trouve dans ta memoire pour cette recherche."}
         return {
-            "souvenirs": [_fmt(r) for r in souvenirs],
-            "connaissances": [_fmt(r) for r in connaissances],
+            "souvenirs": [_fmt(r, tag) for r, tag in retenus_s],
+            "connaissances": [_fmt(r, tag) for r, tag in retenues_c],
         }
 
     @staticmethod
@@ -362,25 +388,23 @@ class MemoryToolsModule(BaseModule):
         rows = await memory_manager.get_important_souvenirs(
             min_importance=0.3, limit=limit
         )
-        perimetre = await _perimetre()
-        if rows and not perimetre.interne and not perimetre.divulgation:
-            from memory.models import Souvenir
+        from memory.models import Souvenir
 
-            retenus = await _sans_les_autres(rows, Souvenir, perimetre)
-            if not retenus:
-                return {"message": REFUS_RECHERCHE}
-            rows = retenus
-        if not rows:
+        perimetre = await _perimetre()
+        retenus = await _selon_le_niveau(rows, Souvenir, perimetre)
+        if rows and not retenus:
+            return {"message": REFUS_RECHERCHE}
+        if not retenus:
             return {"message": "Aucun souvenir marquant recemment."}
         return {
             "souvenirs": [
                 {
-                    "content": s.content,
+                    "content": s.content + tag,
                     "emotion": s.emotion,
                     "date": s.occurred_at.date().isoformat() if s.occurred_at else "",
                     "importance": round(s.importance, 2),
                 }
-                for s in rows
+                for s, tag in retenus
             ]
         }
 

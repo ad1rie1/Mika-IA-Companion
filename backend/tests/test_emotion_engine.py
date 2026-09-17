@@ -334,11 +334,13 @@ class TestArret:
             conversation = object()
 
         import memory.manager as manager_module
-        from asgiref import sync as asgiref_sync
+        from emotion import persistence
 
         monkeypatch.setattr(manager_module, "memory_manager", _FauxManager())
+        # Patché là où il est lu : ``persistence`` lie ``sync_to_async`` à
+        # l'import, un patch sur ``asgiref.sync`` ne l'atteindrait plus.
         monkeypatch.setattr(
-            asgiref_sync, "sync_to_async", lambda fn, **kw: _create,
+            persistence, "sync_to_async", lambda fn, **kw: _create,
         )
 
         await engine._save_state()

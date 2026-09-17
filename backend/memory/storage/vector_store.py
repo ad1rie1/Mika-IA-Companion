@@ -176,6 +176,26 @@ class VectorStore:
             metadatas=[meta],
         )
 
+    def collection_ids(self, name: str) -> set[str]:
+        """Tous les ids d'une collection (``souvenirs`` / ``connaissances`` /
+        ``echanges``), sans documents ni embeddings. Sert à la
+        resynchronisation après restauration (``reindexer_vecteurs``) : ce que
+        Chroma tient et que SQL ne connaît plus est retiré."""
+        collection = {
+            "souvenirs": self._souvenirs,
+            "connaissances": self._connaissances,
+            "echanges": self._echanges,
+        }[name]
+        ids: set[str] = set()
+        page, offset = 1000, 0
+        while True:
+            got = collection.get(include=[], limit=page, offset=offset)
+            batch = got.get("ids") or []
+            ids.update(batch)
+            if len(batch) < page:
+                return ids
+            offset += page
+
     def remove_souvenir(self, souvenir_id: int):
         """Remove a souvenir (e.g. decayed below threshold)."""
         try:

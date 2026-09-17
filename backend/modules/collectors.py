@@ -19,6 +19,11 @@ import time
 
 from django.urls import path
 
+# ``is_owner`` vit dans ``identity/roles.py`` (trois niveaux : compte de
+# conversation, opérateur, propriétaire). Réexporté ici parce que c'est le nom
+# que les consommateurs du contexte privé importent (``files/service.py``,
+# ``conscience/travaux.py``) — et celui que les tests patchent.
+from identity.roles import is_owner  # noqa: F401 (réexport)
 from modules.registry import ModuleRegistry
 from modules.types import ModuleCapability, ModuleTool
 from utils.degradation import degraded
@@ -37,23 +42,6 @@ def _signale_une_erreur(resultat) -> bool:
     return bool(resultat.get("isError") or resultat.get("is_error"))
 
 logger = logging.getLogger(__name__)
-
-
-def is_owner(person_id: str) -> bool:
-    """May this person see owner-scoped (private) module context?
-
-    Trusted: configured owners, authenticated users (``user_*``), and Mika's
-    own internal channels (``conscience*``, ``module_*``). Anonymous web
-    guests (``anon_*``) and external contacts are not — unread email subjects
-    and pending wake-ups are not small talk.
-    """
-    if not person_id:
-        return False
-    from django.conf import settings
-
-    if person_id in getattr(settings, "OWNER_PERSON_IDS", []):
-        return True
-    return person_id.startswith(("user_", "conscience", "module_"))
 
 
 class ModuleCollectors:

@@ -8,7 +8,14 @@ from __future__ import annotations
 
 import logging
 
-from django.conf import settings
+from ai.providers._tool_loop import (
+    AdaptateurOutils,
+    AppelOutil,
+    Issue,
+    Reponse,
+    contenu_json,
+    executer_la_boucle,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -218,34 +225,6 @@ class OllamaProvider:
         from ai.providers import default_test
         return await default_test(self)
 
-    async def complete_with_tools(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        model: str,
-        tools: list,
-        max_tokens: int = 4096,
-        temperature: float = 0.7,
-        *,
-        max_turns: int = 10,
-    ) -> tuple[str, list[str]]:
-        """Ollama function-calling loop (SDK ≥ 0.3, model must support tools).
-
-        Amorce à deux chaînes : le chemin non structuré du routeur ne connaît
-        que celle-là.
-        """
-        return await self._tool_loop(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            model=model,
-            tools=tools,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            max_turns=max_turns,
-        )
-
     async def complete_chat_with_tools(
         self,
         prompt,
@@ -256,127 +235,94 @@ class OllamaProvider:
         *,
         max_turns: int = 10,
     ) -> tuple[str, list[str]]:
-        """Tour outillé structuré — la même boucle, amorcée sur de vrais tours.
+        """Tour outillé structuré — la boucle générique, amorcée sur de vrais tours.
 
         C'est ici que le cache KV compte le plus : la boucle rappelle le
         modèle à chaque aller-retour d'outil, et un préfixe reconstruit à
         chaque fois se re-préremplit intégralement, déclarations d'outils
         comprises, aux ~19 tok/s auxquels un contexte long descend.
+
+        If the selected model isn't tool-capable, Ollama returns a plain
+        response with no ``tool_calls`` — the loop returns the text as-is,
+        so the call degrades gracefully instead of looping.
         """
         messages = [{"role": "system", "content": prompt.system_stable}]
         messages.extend(prompt.chat_messages())
-        return await self._tool_loop(
-            messages=messages,
-            model=model,
+        return await executer_la_boucle(
+            _AdaptateurOllama(
+                self, messages=messages, model=model, tools=tools,
+                temperature=temperature,
+            ),
             tools=tools,
             max_tokens=max_tokens,
-            temperature=temperature,
             max_turns=max_turns,
         )
 
-    async def _tool_loop(
-        self,
-        *,
-        messages: list[dict],
-        model: str,
-        tools: list,
-        max_tokens: int,
-        temperature: float,
-        max_turns: int,
-    ) -> tuple[str, list[str]]:
-        """The one tool-loop body, whichever way the thread was started.
 
-        If the selected model isn't tool-capable, Ollama returns a plain
-        response with no ``tool_calls`` — we detect this and return the
-        text as-is, so the call degrades gracefully instead of looping.
-        """
-        import json
+class _AdaptateurOllama(AdaptateurOutils):
+    """La boucle d'outils vue par ``/api/chat``.
 
+    La politique de génération (``think``, ``num_predict``) s'applique à
+    chaque aller-retour, comme sur l'appel simple.
+    """
+
+    LABEL = "Ollama"
+
+    def __init__(
+        self, provider: OllamaProvider, *, messages: list[dict], model: str,
+        tools: list, temperature: float,
+    ) -> None:
+        self._provider = provider
+        self._model = model
+        self._temperature = temperature
         # Le fil appartient à l'appelant : la boucle y empile ses tours.
-        messages = list(messages)
-        serialized = _serialize_tools_for_ollama(tools) if tools else None
-        tools_by_name = {t.name: t for t in tools}
+        self.fil = list(messages)
+        self._serialises = _serialize_tools_for_ollama(tools) if tools else None
 
-        called: list[str] = []
-        final_text = ""
+    async def appeler(self, max_tokens: int):
+        kwargs = {
+            "model": self._model,
+            "messages": self.fil,
+            "think": self._provider._thinking(),
+            "options": self._provider._generation_options(max_tokens, self._temperature),
+        }
+        if self._serialises:
+            kwargs["tools"] = self._serialises
+        response = await self._provider._chat(**kwargs)
+        _record_ollama_usage(response)
+        return response
 
-        think = self._thinking()
-        options = self._generation_options(max_tokens, temperature)
+    def lire(self, response) -> Reponse:
+        msg = response.message
+        tool_calls = getattr(msg, "tool_calls", None) or []
+        if not tool_calls:
+            return Reponse(texte=msg.content or "")
+        # Ollama already parses arguments to a dict — the loop guards the
+        # string case anyway.
+        return Reponse(appels=[
+            AppelOutil(name=tc.function.name, arguments=tc.function.arguments)
+            for tc in tool_calls
+        ])
 
-        for _ in range(max_turns):
-            kwargs = {
-                "model": model,
-                "messages": messages,
-                "think": think,
-                "options": options,
-            }
-            if serialized:
-                kwargs["tools"] = serialized
+    def rejouer_le_tour(self, response, reponse: Reponse) -> None:
+        msg = response.message
+        self.fil.append({
+            "role": "assistant",
+            "content": msg.content or "",
+            "tool_calls": [
+                {
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments,
+                    },
+                }
+                for tc in (getattr(msg, "tool_calls", None) or [])
+            ],
+        })
 
-            response = await self._chat(**kwargs)
-            _record_ollama_usage(response)
-
-            msg = response.message
-            tool_calls = getattr(msg, "tool_calls", None) or []
-
-            if not tool_calls:
-                final_text = msg.content or ""
-                break
-
-            messages.append({
-                "role": "assistant",
-                "content": msg.content or "",
-                "tool_calls": [
-                    {
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
-                        },
-                    }
-                    for tc in tool_calls
-                ],
-            })
-
-            for tc in tool_calls:
-                name = tc.function.name
-                tool = tools_by_name.get(name)
-                # Ollama already parses arguments to a dict — guard anyway.
-                raw_args = tc.function.arguments
-                if isinstance(raw_args, str):
-                    try:
-                        args = json.loads(raw_args) if raw_args else {}
-                    except json.JSONDecodeError as exc:
-                        args = None
-                        err = str(exc)
-                    else:
-                        err = None
-                else:
-                    args = raw_args or {}
-                    err = None
-
-                if tool is None:
-                    content = json.dumps({"error": f"unknown tool '{name}'"})
-                elif err is not None:
-                    content = json.dumps({"error": f"invalid JSON arguments: {err}"})
-                else:
-                    logger.info(
-                        "Ollama called tool: %s (input=%s)", name, str(args)[:200],
-                    )
-                    try:
-                        result = await tool.handler(args)
-                        content = json.dumps(result, ensure_ascii=False, default=str)
-                    except Exception as exc:  # noqa: BLE001
-                        logger.warning("Tool '%s' handler raised: %s", name, exc)
-                        content = json.dumps({"error": str(exc)})
-                    called.append(name)
-
-                messages.append(_tool_message(name, content))
-        else:
-            final_text = final_text or "[max_turns atteint avant réponse finale]"
-
-        if called:
-            logger.info("Ollama tools used in this turn: %s", called)
-        return final_text, called
+    def rendre_les_resultats(self, issues: list[Issue]) -> None:
+        for issue in issues:
+            self.fil.append(_tool_message(issue.appel.name, contenu_json(issue)))
 
 
 def _is_think_rejection(exc: BaseException) -> bool:

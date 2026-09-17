@@ -153,6 +153,19 @@ async def latest_self_narrative():
 # the only place that knows the channel and the certainty.
 
 
+async def closeness_of(entity_id) -> str:
+    """La proximité (``PersonProfile.closeness``) de l'entité, ou ``""``.
+    Une lecture d'une colonne, pour le niveau de divulgation du tour."""
+    from memory.models import PersonProfile
+
+    if entity_id is None:
+        return ""
+    return await sync_to_async(
+        lambda: PersonProfile.objects.filter(entity_id=entity_id)
+        .values_list("closeness", flat=True).first() or ""
+    )()
+
+
 async def person_profile_for(entity):
     """The theory-of-mind profile for an entity, or None.
 
@@ -232,32 +245,70 @@ def _anciennete_engagement(maintenant, cree_le, echeance) -> str:
     return ""
 
 
-async def rows_mentioning_others(model, pks, *, entity_id) -> set[int]:
-    """Parmi ``pks``, ceux rattachés à une personne AUTRE que ``entity_id``.
+def charger_qualifiees(queryset, pks, *, soi_nom: str = "", soi_pk: int | None = None):
+    """Charge en UNE requête les lignes demandées, avec thèmes, entités et
+    leur **qualification** face à l'interlocuteur (``memory.sensibilite``).
+
+    Synchrone — s'appelle sous ``sync_to_async``. Retourne
+    ``{pk: (ligne, [thèmes], [noms d'entités], Qualification | None)}``.
+    ``None`` en dernière position = la ligne ne concerne aucun tiers.
 
     Le filtrage est fait côté Python et non en ORM parce que la forme ORM
     naturelle est fausse dans le sens dangereux :
     ``.filter(entities__entity_type="person").exclude(entities__id=<pk>)``
     écarte toute ligne ayant *au moins une* entité égale, donc un souvenir
     liant l'interlocuteur ET un tiers sort de l'exclusion et se retrouve
-    servi. ``entity_id=None`` (personne non liée) : toute entité-personne
-    compte comme autrui.
+    servi. L'interlocuteur est reconnu par ``soi_pk`` (outils : l'entité
+    liée) ou ``soi_nom`` (rappel : le nom résolu par la couche identité) ;
+    ni l'un ni l'autre → toute personne compte comme autrui.
+
+    Les M2M se lisent via ``.all()``, la seule forme qui consomme le cache
+    de ``prefetch_related``. ``entities__profile`` est préchargé pour la
+    surcharge par ``sensitive_topics`` : un fait sur un sujet que la fiche
+    de la personne dit sensible est lu ``confidence``, jamais réécrit.
     """
+    from memory.sensibilite import qualifier
+
     pks = [pk for pk in (pks or ()) if pk is not None]
     if not pks:
-        return set()
+        return {}
+    rows = queryset.filter(pk__in=pks).prefetch_related(
+        "themes", "entities", "entities__profile",
+    )
+    out = {}
+    for row in rows:
+        entites = list(row.entities.all())
+        infos = [(e.pk, e.name, e.entity_type, _sujets_sensibles(e)) for e in entites]
+        out[row.pk] = (
+            row,
+            [t.name for t in row.themes.all()],
+            [e.name for e in entites],
+            qualifier(row.content, getattr(row, "sensibilite", None), infos,
+                      soi_nom=soi_nom, soi_pk=soi_pk),
+        )
+    return out
 
-    def _query() -> set[int]:
-        rows = model.objects.filter(pk__in=pks).prefetch_related("entities")
-        return {
-            r.pk for r in rows
-            if any(
-                e.entity_type == "person" and e.pk != entity_id
-                for e in r.entities.all()
-            )
-        }
 
-    return await sync_to_async(_query)()
+def _sujets_sensibles(entity) -> list:
+    """Les ``sensitive_topics`` de la fiche d'une entité, ou ``[]``.
+
+    Le prefetch de la relation inverse un-à-un ne crée pas l'attribut quand
+    la fiche n'existe pas : l'accès lève ``RelatedObjectDoesNotExist``."""
+    try:
+        return list(entity.profile.sensitive_topics or [])
+    except Exception:
+        return []
+
+
+async def qualifications(model, pks, *, entity_id) -> dict:
+    """``{pk: Qualification | None}`` pour les outils mémoire, où
+    l'interlocuteur est connu par l'entité liée à son handle."""
+    return {
+        pk: charge[3]
+        for pk, charge in (await sync_to_async(charger_qualifiees)(
+            model.objects.all(), pks, soi_pk=entity_id,
+        )).items()
+    }
 
 
 async def recent_daily_summaries(person_id: str, *, days: int = 7) -> list:

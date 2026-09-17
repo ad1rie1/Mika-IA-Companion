@@ -1,7 +1,11 @@
 """Context assembly — gather all contextual information for a conversation turn.
 
-Collects memory, emotion, module context, and conversation history
-into a single structure ready for the AI call.
+``gather_context`` is the orchestration and reads like the « Data Flow » of
+CLAUDE.md : one named step per question, in the order that matters. The
+steps that read a live singleton (memory buffer, mood, drives, modules,
+tools) live here ; the prompt-block formatters live in
+``pipeline.context_blocks`` and the history labelling in
+``pipeline.context_history``.
 """
 
 import asyncio
@@ -9,14 +13,33 @@ import logging
 import time as _time
 from dataclasses import dataclass, field
 
-from configs.runtime import cfg_float, cfg_int
+from configs.runtime import cfg_int
 from drives.engine import drive_engine
 from emotion.engine import emotion_engine
+from identity import divulgation as div
 from identity.resolver import identity_resolver
-from identity.trust import ChannelTrust, is_internal_person
+from identity.trust import is_internal_person
 from memory.manager import memory_manager
 from modules.manager import module_manager
+from pipeline.context_blocks import (
+    _MODULE_CONTEXT_MAX_CHARS,
+    _clip,
+    _fatigue_fog_context,
+    _fetch_circadian_context,
+    _fetch_dream_context,
+    _fetch_journal_context,
+    _fetch_person_context,
+    _fetch_rumination_context,
+    _fetch_self_concept,
+    _fetch_travaux_context,
+    _format_identity_block,
+    _format_project_block,
+    detect_user_mood_hint,
+    divulgation_du_tour,
+)
+from pipeline.context_history import _label_history_speakers, _stamp_history_gaps
 from pipeline.perception import Intent
+from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +109,11 @@ class ConversationContext:
     # `--- QUI TU AS EN FACE ---`. Also gates `person_context`: below the
     # disclosure threshold, private per-person memory is withheld entirely.
     identity_context: str = ""
+    # Le niveau de divulgation du tour (``identity.divulgation``) : ce que la
+    # mémoire a pu servir sur AUTRUI, en deux facettes. Calculé une fois au
+    # bord, passé au rappel et au journal ; porté ici pour que le tour dise
+    # sous quel niveau il a été composé. ``FERME`` par défaut : fail-closed.
+    niveau_divulgation: div.Divulgation = div.FERME
 
     # Pensée pré-verbale produite par la passe de préparation — injectée en
     # dernier (`--- CE QUI TE VIENT A L'ESPRIT ---`), là où la récence pèse
@@ -130,250 +158,48 @@ async def gather_context(
             thrown away on every spontaneous act.
         intent: What kind of stimulus this is. Only a ``REQUEST_RESPONSE``
             carries text somebody actually wrote — see ``user_mood_hint``.
+
+    L'ordre des étapes est porteur : l'identité d'abord (le rappel en
+    dépend), le rappel mémoire *lancé* ensuite et *attendu* en dernier, pour
+    que la deadline du plan de préparation soit masquée par la dizaine de
+    lectures qu'il fallait faire de toute façon.
     """
-    # Qui est en face, et à quel point elle en est sûre. Résolu ICI, avant
-    # tout le reste : le rappel mémoire lui-même en dépend. Sous le seuil de
-    # divulgation, `--- TES SOUVENIRS ---` ne doit pas servir les confidences
-    # d'un tiers alors que le bloc `CE QUE TU SAIS DE CETTE PERSONNE` vient
-    # d'être fermé pour la même raison — et alors que l'outil `memory_search`,
-    # lui, refusait déjà.
+    # Qui est en face, et à quel point elle en est sûre — résolu avant tout
+    # le reste, puis le NIVEAU de divulgation du tour (ce que la mémoire peut
+    # servir sur autrui) : le rappel ne doit pas servir les confidences d'un
+    # tiers alors que le bloc « CE QUE TU SAIS DE CETTE PERSONNE » vient
+    # d'être fermé pour la même raison.
     identity_ctx = await identity_resolver.resolve_context(
         person_id, channel=channel,
         authenticated=authenticated, is_public=is_public,
     )
-    identity_context = _format_identity_block(identity_ctx)
-    peut_divulguer = bool(identity_ctx.may_disclose)
+    divulgation = await divulgation_du_tour(identity_ctx)
+    interne = is_internal_person(person_id)
 
-    # ── Rappel mémoire : spéculatif (plancher) + plan de préparation ──
-    #
-    # Le spéculatif est la recherche historique sur le message ; la passe de
-    # préparation (petit LLM, pipeline/preparation.py) tourne EN PARALLÈLE et
-    # peut la remplacer par un rappel dirigé (multi-requêtes + échanges
-    # bruts). Deadline dure, fail-open : la réponse n'attend jamais la
-    # réflexion, et tout échec redonne exactement le comportement d'avant.
-    memory_context = ""
-    note_de_focus = ""
-    prep_task, prep_deadline, spec_task = None, 0.0, None
-    if include_memory:
-        prep_task, prep_deadline = _launch_preparation(message, person_id)
+    rappel = _lancer_le_rappel(message, person_id, include_memory, divulgation)
 
-        spec_task = asyncio.create_task(
-            memory_manager.get_memory_context(
-                message, person_id=person_id, disclose_others=peut_divulguer,
-            )
-        )
-
-    # ── Tout ce qui ne dépend pas du rappel tourne PENDANT le plan ──────
-    #
-    # Le plan (petit LLM, ~1–2 s) était attendu ICI, avant la dizaine de
-    # lectures qui suivent (self-concept, fiche personne, rythme, humeur,
-    # modules, historique, estime, ruminations, chantiers, rêve, journal,
-    # projet) — toutes en série sur l'exécuteur partagé. En les faisant
-    # d'abord, la deadline du plan est masquée par du travail qu'il fallait
-    # faire de toute façon, et un plan qui arrive en 1,8 s ne coûte plus
-    # 1,8 s de latence au tour.
-
-    # Self-concept: latest autobiographical narrative from the consolidator.
-    # Best-effort — if the table hasn't been populated yet (no narrative
-    # generated), we just skip it and the prompt uses personality alone.
+    # Tout ce qui ne dépend pas du rappel tourne PENDANT le plan.
     self_concept = await _fetch_self_concept()
-
-    # Theory of mind: profile + pending commitments for the current person.
-    # Gated on identity certainty — recounting what someone confided to a
-    # visitor who merely *claims* to be them is the failure mode this whole
-    # layer exists to prevent.
     person_context = await _fetch_person_context(identity_ctx)
-
-    # Circadian: where Mika sits in her daily rhythm.
     circadian_context = _fetch_circadian_context()
-
-    # Emotion context = Mika's global mood only. The per-person affective
-    # stance is relational and belongs to person_context (see below), so
-    # the prompt cleanly separates "how Mika feels" from "how Mika feels
-    # about this person".
-    emotion_context = emotion_engine.get_global_mood_context()
-
-    # Intrinsic drives — still Mika-centric (curiosity / social need / rest),
-    # so they attach to the global mood layer. Lecture seule : assouvir une
-    # pulsion est la politique des pulsions, déclarée dans drives/apps.py sur
-    # `_turn.completed`. Appeler drive_engine.on_conversation() ici la
-    # compterait deux fois.
-    drive_context = drive_engine.get_context()
-    if drive_context:
-        emotion_context = (
-            f"{emotion_context}\n{drive_context}" if emotion_context else drive_context
-        )
-
-    # Module context for system prompt (scoped to this person). Capped here
-    # rather than in the collector: chaque module se borne déjà lui-même,
-    # mais leur somme (Forge inclus, qui concatène tous ses mini-modules)
-    # n'a aucune limite globale.
-    module_context = _clip(
-        module_manager.collect_context(person_id),
-        cfg_int("pipeline.context.module_context_max_chars",
-                _MODULE_CONTEXT_MAX_CHARS, mini=1),
+    emotion_context = _humeur_et_pulsions()
+    module_context = _contexte_modules(person_id)
+    history, conversation_summary = await _fil_de_conversation(person_id)
+    fatigue_fog = await _etat_cognitif()
+    rumination_context = await _fetch_rumination_context()
+    travaux_context = await _fetch_travaux_context()
+    user_mood_hint = _ton_de_la_personne(message, person_id, intent)
+    dream_context, pending_dream_recall, journal_context = await _reve_et_journal(
+        interne, divulgation.niveau,
+    )
+    project_context, project_suppresses_emotion, project_id = await _projet_du_tour(
+        message, person_id, interne,
     )
 
-    # Conversation history — annotee de qui parle quand ce n'est pas la
-    # personne en face. Le tampon est partage par tout le monde et c'est
-    # voulu, mais l'arbitrage confie a Mika suppose qu'elle puisse distinguer
-    # les tours : sans marquage, la question posee par Alice il y a trois
-    # minutes se lit exactement comme celle que Thomas vient d'ecrire.
-    history = await _stamp_history_gaps(memory_manager.get_conversation_context())
-    history = await _label_history_speakers(history, person_id)
-    # Résumé roulant du fil (compaction). Coercition défensive : les tests
-    # substituent le manager par un mock dont l'attribut rendrait un objet.
-    _summary = getattr(memory_manager, "get_conversation_summary", lambda: "")()
-    conversation_summary = _summary if isinstance(_summary, str) else ""
-
-    # Fatigue fog — when energy is low, shape the cognitive tone
-    fatigue_fog = _fatigue_fog_context()
-
-    # L'estime de soi rejoint l'état cognitif : le doute ou l'assurance sont
-    # une couleur de pensée, pas une émotion du moment. Lue par l'API du
-    # module (`conscience/estime.py` EST sa couche de lecture) — un
-    # sentiment dans le prompt, jamais un nombre. L'équilibre est silencieux.
-    try:
-        from conscience import estime as estime_module
-
-        ligne_estime = estime_module.ligne_de_prompt(await estime_module.lire())
-        if ligne_estime:
-            fatigue_fog = (fatigue_fog + "\n" + ligne_estime).strip()
-    except Exception as exc:
-        degradations.record("prompt: estime de soi", exc)
-
-    # Active ruminations — now visible every turn, not only during _act()
-    rumination_context = await _fetch_rumination_context()
-
-    # Ce qu'elle a en train — mêmes règles d'injection que les ruminations :
-    # tous les tours, y compris les siens (un acte spontané doit savoir ce
-    # qu'elle a déjà entrepris, ou il rouvre ce qui existe).
-    travaux_context = await _fetch_travaux_context()
-
-    # User mood heuristic — a best-effort read of the user's emotional tone
-    # from the raw message. Gated on the *intent*, not only on the person: an
-    # internal trigger aimed at a real person carries their handle, so the
-    # person gate let the action brief Mika wrote to herself be read as their
-    # tone. On ne lit pas le ton d'un texte que personne n'a envoyé.
-    if intent is not Intent.REQUEST_RESPONSE or is_internal_person(person_id):
-        user_mood_hint = ""
-    else:
-        user_mood_hint = detect_user_mood_hint(message)
-
-    # Dream residue from last night. Only surfaces in the morning and
-    # only to real interlocutors (not to Mika's own conscience trigger).
-    pending_dream_recall = None
-    if is_internal_person(person_id):
-        dream_context = ""
-        journal_context = ""
-    else:
-        dream_context, pending_dream_recall = await _fetch_dream_context()
-        journal_context = await _fetch_journal_context(
-            may_disclose=bool(identity_ctx.may_disclose),
-        )
-
-    # Project detection — is this turn about an active project?
-    # Skipped for internal triggers (conscience prompts don't reference
-    # user-confided projects by mistake).
-    project_context = ""
-    project_suppresses_emotion = False
-    project_id: int | None = None
-    if not is_internal_person(person_id):
-        try:
-            from projects.detection import (
-                detect_project_for_message,
-                load_project_for_prompt,
-            )
-            match = await detect_project_for_message(message, person_id=person_id)
-            if match:
-                data = await load_project_for_prompt(match.project_id)
-                if data:
-                    project_context = _format_project_block(data)
-                    project_suppresses_emotion = (data["emotion_policy"] == "off")
-                    project_id = data["id"]
-        except Exception as exc:
-            degradations.record("prompt: project detection", exc)
-
-    # ── Le rappel mémoire, maintenant que tout le reste est lu ──────────
-    if include_memory:
-        plan = None
-        if prep_task is not None:
-            try:
-                remaining = max(0.05, prep_deadline - _time.monotonic())
-                plan = await asyncio.wait_for(prep_task, timeout=remaining)
-            except Exception as exc:
-                prep_task.cancel()
-                degradations.record("preparation: attente du plan", exc)
-
-        plan_used = False
-        if plan is not None:
-            if plan.note_de_focus:
-                note_de_focus = (
-                    "(pensée pré-verbale, pas une consigne) " + plan.note_de_focus
-                )
-            if plan.rappels:
-                try:
-                    from pipeline.preparation import execute_plan
-
-                    results = await execute_plan(plan, person_id)
-                    directed = await memory_manager.get_memory_context_multi(
-                        [message] + results.memory_queries,
-                        person_id=person_id,
-                        extra_exchanges=results.exchange_hits,
-                        disclose_others=peut_divulguer,
-                        # Tour émotionnellement chargé → le rappel attend
-                        # davantage aux souvenirs marquants (réflexe humain).
-                        salience_boost=plan.charge_emotionnelle,
-                    )
-                    if directed:
-                        memory_context = directed
-                        plan_used = True
-                except Exception as exc:
-                    degradations.record("preparation: rappel dirige", exc)
-
-        if plan_used:
-            spec_task.cancel()
-        else:
-            try:
-                memory_context = await spec_task
-            except Exception as exc:
-                degradations.record("rappel memoire", exc)
-                logger.warning("Memory retrieval failed, continuing without context")
-                memory_context = ""
-
-        # Un rappel vide est le cas nominal d'une base jeune ; une mémoire
-        # longue en panne ne l'est pas. Le drapeau vient du manager, jamais
-        # déduit d'un bloc vide — sinon le prompt annoncerait une panne dès
-        # le premier jour. Le dire lui permet de répondre « je ne retrouve
-        # pas » au lieu de confabuler.
-        # `is True` et non une vérité pythonique : les tests substituent le
-        # manager par un mock, dont n'importe quel attribut est truthy.
-        if getattr(memory_manager, "recall_unavailable", False) is True:
-            notice = (
-                "[Ta memoire longue est indisponible en ce moment : tu ne "
-                "peux rien y retrouver. Dis-le simplement si ca compte pour "
-                "la conversation, plutot que d'inventer un souvenir.]"
-            )
-            memory_context = f"{notice}\n{memory_context}" if memory_context else notice
-
-    # Tools (generic ModuleTool list — the provider does the translation)
-    #
-    # ``ai.conversation_tool_modules`` narrows the set to an allow-list of
-    # modules. Empty = every running module, which is right for a hosted API
-    # and wrong for a local model: a tool declaration is prompt, re-sent and
-    # re-evaluated on every turn of the tool loop, and the nine modules
-    # together weigh ~6 500 tokens — more than four times the system prompt.
-    # The knob lives in config rather than in code because the sensible
-    # answer is a property of the model behind the role, not of the pipeline.
-    tools: list = []
-    tool_names: list[str] = []
-    if include_tools:
-        allowed = _conversation_tool_modules()
-        tools = (
-            module_manager.get_tools_for_modules(allowed) if allowed
-            else module_manager.collect_tools()
-        )
-        tool_names = [t.name for t in tools]
+    memory_context, note_de_focus = await _achever_le_rappel(
+        rappel, message, person_id, divulgation,
+    )
+    tools, tool_names = _outils_de_la_conversation(include_tools)
 
     return ConversationContext(
         memory_context=memory_context,
@@ -394,11 +220,45 @@ async def gather_context(
         project_context=project_context,
         project_suppresses_emotion=project_suppresses_emotion,
         project_id=project_id,
-        identity_context=identity_context,
+        identity_context=_format_identity_block(identity_ctx),
+        niveau_divulgation=divulgation,
         note_de_focus=note_de_focus,
         conversation_summary=conversation_summary,
         pending_dream_recall=pending_dream_recall,
     )
+
+
+# ── Rappel mémoire : spéculatif (plancher) + plan de préparation ────────────
+#
+# Le spéculatif est la recherche historique sur le message ; la passe de
+# préparation (petit LLM, pipeline/preparation.py) tourne EN PARALLÈLE et
+# peut la remplacer par un rappel dirigé (multi-requêtes + échanges bruts).
+# Deadline dure, fail-open : la réponse n'attend jamais la réflexion, et tout
+# échec redonne exactement le comportement d'avant.
+
+
+@dataclass
+class _RappelEnCours:
+    """Les deux tâches lancées en tête de tour, attendues en queue."""
+    spec_task: asyncio.Task
+    prep_task: asyncio.Task | None
+    prep_deadline: float
+
+
+def _lancer_le_rappel(
+    message: str, person_id: str, include_memory: bool,
+    divulgation: div.Divulgation,
+) -> _RappelEnCours | None:
+    """Lance le plan et la recherche spéculative ; ``None`` sans rappel."""
+    if not include_memory:
+        return None
+    prep_task, prep_deadline = _launch_preparation(message, person_id)
+    spec_task = asyncio.create_task(
+        memory_manager.get_memory_context(
+            message, person_id=person_id, divulgation=divulgation,
+        )
+    )
+    return _RappelEnCours(spec_task, prep_task, prep_deadline)
 
 
 def _launch_preparation(message: str, person_id: str):
@@ -428,6 +288,241 @@ def _launch_preparation(message: str, person_id: str):
         return None, 0.0
 
 
+async def _achever_le_rappel(
+    rappel: _RappelEnCours | None, message: str, person_id: str,
+    divulgation: div.Divulgation,
+) -> tuple[str, str]:
+    """``(memory_context, note_de_focus)`` — le plan s'il a abouti, sinon
+    le spéculatif, plus l'avis d'indisponibilité de la mémoire longue."""
+    if rappel is None:
+        return "", ""
+
+    note_de_focus = ""
+    memory_context = ""
+    plan_used = False
+    plan = await _attendre_le_plan(rappel)
+    if plan is not None:
+        if plan.note_de_focus:
+            note_de_focus = (
+                "(pensée pré-verbale, pas une consigne) " + plan.note_de_focus
+            )
+        if plan.rappels:
+            memory_context, plan_used = await _rappel_dirige(
+                plan, message, person_id, divulgation,
+            )
+
+    if plan_used:
+        rappel.spec_task.cancel()
+    else:
+        memory_context = await _rappel_speculatif(rappel.spec_task)
+
+    return _signaler_memoire_indisponible(memory_context), note_de_focus
+
+
+async def _attendre_le_plan(rappel: _RappelEnCours):
+    """Le plan de préparation, ou ``None`` : deadline dure, jamais une levée."""
+    if rappel.prep_task is None:
+        return None
+    try:
+        remaining = max(0.05, rappel.prep_deadline - _time.monotonic())
+        return await asyncio.wait_for(rappel.prep_task, timeout=remaining)
+    except Exception as exc:
+        rappel.prep_task.cancel()
+        degradations.record("preparation: attente du plan", exc)
+        return None
+
+
+async def _rappel_dirige(
+    plan, message: str, person_id: str, divulgation: div.Divulgation,
+) -> tuple[str, bool]:
+    """Exécute les intentions du plan ; ``(bloc, True)`` s'il a rendu quelque
+    chose, ``("", False)`` sinon — le spéculatif prend alors le relais."""
+    try:
+        from pipeline.preparation import execute_plan
+
+        results = await execute_plan(plan, person_id)
+        directed = await memory_manager.get_memory_context_multi(
+            [message] + results.memory_queries,
+            person_id=person_id,
+            extra_exchanges=results.exchange_hits,
+            divulgation=divulgation,
+            # Tour émotionnellement chargé → le rappel attend davantage aux
+            # souvenirs marquants (réflexe humain).
+            salience_boost=plan.charge_emotionnelle,
+        )
+    except Exception as exc:
+        degradations.record("preparation: rappel dirige", exc)
+        return "", False
+    if directed:
+        return directed, True
+    return "", False
+
+
+async def _rappel_speculatif(spec_task: asyncio.Task) -> str:
+    try:
+        return await spec_task
+    except Exception as exc:
+        degradations.record("rappel memoire", exc)
+        logger.warning("Memory retrieval failed, continuing without context")
+        return ""
+
+
+def _signaler_memoire_indisponible(memory_context: str) -> str:
+    """Préfixe l'avis de panne de la mémoire longue quand le manager le dit.
+
+    Un rappel vide est le cas nominal d'une base jeune ; une mémoire longue
+    en panne ne l'est pas. Le drapeau vient du manager, jamais déduit d'un
+    bloc vide — sinon le prompt annoncerait une panne dès le premier jour.
+    Le dire lui permet de répondre « je ne retrouve pas » au lieu de
+    confabuler. ``is True`` et non une vérité pythonique : les tests
+    substituent le manager par un mock, dont tout attribut est truthy.
+    """
+    if getattr(memory_manager, "recall_unavailable", False) is not True:
+        return memory_context
+    notice = (
+        "[Ta memoire longue est indisponible en ce moment : tu ne "
+        "peux rien y retrouver. Dis-le simplement si ca compte pour "
+        "la conversation, plutot que d'inventer un souvenir.]"
+    )
+    return f"{notice}\n{memory_context}" if memory_context else notice
+
+
+# ── Les lectures d'état qui ne dépendent pas du rappel ─────────────────────
+
+
+def _humeur_et_pulsions() -> str:
+    """Le bloc émotionnel = l'humeur globale de Mika + ses pulsions.
+
+    La stance affective envers la personne est relationnelle et appartient
+    à ``person_context`` : le prompt sépare « comment Mika se sent » de
+    « comment elle se sent envers cette personne ». Lecture seule des
+    pulsions : les assouvir est la politique de ``drives/apps.py`` sur
+    ``_turn.completed`` — appeler ``on_conversation`` ici compterait deux fois.
+    """
+    emotion_context = emotion_engine.get_global_mood_context()
+    drive_context = drive_engine.get_context()
+    if drive_context:
+        return f"{emotion_context}\n{drive_context}" if emotion_context else drive_context
+    return emotion_context
+
+
+def _contexte_modules(person_id: str) -> str:
+    """Le contexte des modules pour cette personne, plafonné ici et non dans
+    le collecteur : chaque module se borne, leur somme (Forge inclus) non."""
+    return _clip(
+        module_manager.collect_context(person_id),
+        cfg_int("pipeline.context.module_context_max_chars",
+                _MODULE_CONTEXT_MAX_CHARS, mini=1),
+    )
+
+
+async def _fil_de_conversation(person_id: str) -> tuple[list[dict], str]:
+    """``(historique, résumé de compaction)``.
+
+    L'historique est daté (trous) et annoté de qui parle quand ce n'est pas
+    la personne en face : le tampon est partagé par tout le monde, et
+    l'arbitrage confié à Mika suppose qu'elle distingue les tours. Le résumé
+    est coercé : les tests substituent le manager par un mock dont
+    l'attribut rendrait un objet.
+    """
+    history = await _stamp_history_gaps(memory_manager.get_conversation_context())
+    history = await _label_history_speakers(history, person_id)
+    summary = getattr(memory_manager, "get_conversation_summary", lambda: "")()
+    return history, (summary if isinstance(summary, str) else "")
+
+
+async def _etat_cognitif() -> str:
+    """Brouillard de fatigue + la ligne d'estime de soi.
+
+    L'estime rejoint l'état cognitif : le doute ou l'assurance sont une
+    couleur de pensée, pas une émotion du moment. Lue par l'API du module
+    (``conscience/estime.py`` EST sa couche de lecture) — un sentiment dans
+    le prompt, jamais un nombre. L'équilibre est silencieux.
+    """
+    fatigue_fog = _fatigue_fog_context()
+    try:
+        from conscience import estime as estime_module
+
+        ligne_estime = estime_module.ligne_de_prompt(await estime_module.lire())
+        if ligne_estime:
+            fatigue_fog = (fatigue_fog + "\n" + ligne_estime).strip()
+    except Exception as exc:
+        degradations.record("prompt: estime de soi", exc)
+    return fatigue_fog
+
+
+def _ton_de_la_personne(message: str, person_id: str, intent: Intent) -> str:
+    """Lecture heuristique du ton — gardée sur l'*intent*, pas seulement sur
+    la personne : un déclencheur interne visant une vraie personne porte son
+    handle, et la porte personne laissait lire le brief que Mika s'écrit
+    comme le ton de l'autre. On ne lit pas le ton d'un texte que personne
+    n'a envoyé."""
+    if intent is not Intent.REQUEST_RESPONSE or is_internal_person(person_id):
+        return ""
+    return detect_user_mood_hint(message)
+
+
+async def _reve_et_journal(
+    interne: bool, niveau: div.Niveau,
+) -> tuple[str, object | None, str]:
+    """``(rêve, Dream en attente, journal d'hier)`` — rien pour un
+    déclencheur interne : le résidu du rêve et le fil d'hier ne s'adressent
+    qu'à de vrais interlocuteurs."""
+    if interne:
+        return "", None, ""
+    dream_context, pending_dream = await _fetch_dream_context()
+    journal_context = await _fetch_journal_context(niveau=niveau)
+    return dream_context, pending_dream, journal_context
+
+
+async def _projet_du_tour(
+    message: str, person_id: str, interne: bool,
+) -> tuple[str, bool, int | None]:
+    """``(bloc projet, mode professionnel, id)`` du projet actif que ce tour
+    concerne — jamais pour un déclencheur interne (un prompt de la
+    conscience ne doit pas référencer par erreur un projet confié)."""
+    if interne:
+        return "", False, None
+    try:
+        from projects.detection import detect_project_for_message, load_project_for_prompt
+
+        match = await detect_project_for_message(message, person_id=person_id)
+        if match:
+            data = await load_project_for_prompt(match.project_id)
+            if data:
+                return (
+                    _format_project_block(data),
+                    data["emotion_policy"] == "off",
+                    data["id"],
+                )
+    except Exception as exc:
+        degradations.record("prompt: project detection", exc)
+    return "", False, None
+
+
+# ── Les outils de la conversation ───────────────────────────────────────────
+
+
+def _outils_de_la_conversation(include_tools: bool) -> tuple[list, list[str]]:
+    """Liste générique de ``ModuleTool`` (le provider traduit) + leurs noms.
+
+    ``ai.conversation_tool_modules`` restreint à une allow-list de modules.
+    Vide = tous les modules en marche : juste derrière une API hébergée, faux
+    derrière un modèle local — une déclaration d'outil est du prompt renvoyé
+    à chaque itération de la boucle, et les neuf modules pèsent ~6 500
+    jetons, quatre fois le prompt système. Le réglage vit en configuration
+    parce que la bonne réponse est une propriété du modèle derrière le rôle.
+    """
+    if not include_tools:
+        return [], []
+    allowed = _conversation_tool_modules()
+    tools = (
+        module_manager.get_tools_for_modules(allowed) if allowed
+        else module_manager.collect_tools()
+    )
+    return tools, [t.name for t in tools]
+
+
 def _conversation_tool_modules() -> list[str]:
     """Module allow-list for conversation tools — empty means "all of them".
 
@@ -446,952 +541,3 @@ def _conversation_tool_modules() -> list[str]:
     if isinstance(raw, str):
         raw = [part.strip() for part in raw.split(",")]
     return [name for name in (str(n).strip() for n in raw) if name]
-
-
-# Comment designer un tour venu de quelqu'un dont aucun nom n'est connu.
-# Vague exprès : « web_6f3e22ccb0ae » n'apprendrait rien au modele, alors
-# que « quelqu'un d'autre » dit tout ce qui compte — ce n'est pas la
-# personne en face.
-_UNKNOWN_SPEAKER = "quelqu'un d'autre"
-
-
-async def _label_history_speakers(history: list[dict], person_id: str) -> list[dict]:
-    """Marque les tours dits par quelqu'un d'autre que l'interlocuteur courant.
-
-    Seuls les tours ``user`` d'un autre ``person_id`` recoivent un
-    ``speaker`` : les reponses de Mika sont les siennes quel que soit le
-    destinataire, et un tour de la personne en face n'a rien a signaler. Le
-    prompt ne paie donc un nom que quand le locuteur change.
-
-    Une seule requete groupee, et uniquement s'il y a effectivement un autre
-    locuteur — le cas mono-interlocuteur, qui est le nominal, ne coute rien.
-    Les entrees non marquees sont renvoyees telles quelles (jamais mutees :
-    ``get_conversation_context`` ne copie que la liste, pas les dicts).
-    """
-    others = {
-        (msg.get("person_id") or "")
-        for msg in history
-        if msg.get("role") == "user"
-    } - {person_id, ""}
-    if not others:
-        return history
-
-    # « Un autre » se mesure à l'identité, pas au handle : la même personne
-    # liée sur le web (``user_5``) et sur Telegram (``tg_9``) voyait ses
-    # propres tours Telegram étiquetés comme ceux d'un tiers dans son prompt
-    # web. Même périmètre que ``_last_contact_gap`` ; ``own_handles`` se
-    # replie sur le handle brut et compte l'échec. Payé seulement quand un
-    # handle étranger apparaît — le cas mono-interlocuteur reste gratuit.
-    others -= set(await own_handles(person_id))
-    if not others:
-        return history
-
-    try:
-        names = await identity_resolver.display_names_for(sorted(others))
-    except Exception as exc:
-        degradations.record("prompt: history speakers", exc)
-        names = {}
-
-    labelled: list[dict] = []
-    for msg in history:
-        if msg.get("role") == "user" and (msg.get("person_id") or "") in others:
-            speaker = names.get(msg["person_id"]) or _UNKNOWN_SPEAKER
-            labelled.append({**msg, "speaker": speaker})
-        else:
-            labelled.append(msg)
-    return labelled
-
-
-async def own_handles(person_id: str) -> list[str]:
-    """Les handles de l'identité de ``person_id`` — repli fermé sur le sien.
-
-    Même formule que ``retriever._episodic_lane`` : la politique « own
-    identity only » ne doit pas avoir deux définitions selon la voie qui la
-    demande. Une résolution qui échoue ferme le périmètre, jamais l'inverse.
-    """
-    try:
-        rows = await identity_resolver.handles_for_person(person_id)
-        handles = sorted({h["person_id"] for h in rows if h.get("person_id")})
-        return handles or [person_id]
-    except Exception as exc:
-        degradations.record("identite: perimetre des handles", exc)
-        return [person_id]
-
-
-# En deçà, deux messages sont la même conversation : le cas nominal ne doit
-# pas payer une ligne de prompt à chaque tour, et un fil continu ne doit pas
-# se retrouver tapissé de marqueurs.
-#
-# Deux cadrans distincts malgré la valeur identique, et ils le restent en
-# configuration (``pipeline.context.gap_mention_floor_hours`` et
-# ``pipeline.context.history_gap_hours``) : le premier décide si Mika *dit* à
-# quelqu'un qu'on ne s'est pas parlé depuis un moment, le second date un
-# segment de l'historique rejoué au modèle. Les fusionner ferait dépendre une
-# phrase adressée à une personne d'un réglage de mise en forme du fil.
-_ECART_PLANCHER_S = 6 * 3600
-_HISTORY_GAP_SECONDS = 6 * 3600
-
-
-def _ecart_plancher_s() -> int:
-    return cfg_int("pipeline.context.gap_mention_floor_hours",
-                   _ECART_PLANCHER_S // 3600, mini=1) * 3600
-
-
-def _history_gap_seconds() -> int:
-    return cfg_int("pipeline.context.history_gap_hours",
-                   _HISTORY_GAP_SECONDS // 3600, mini=1) * 3600
-
-_EN_LETTRES = {
-    2: "deux", 3: "trois", 4: "quatre", 5: "cinq", 6: "six",
-    7: "sept", 8: "huit", 9: "neuf", 10: "dix", 11: "onze",
-}
-
-
-def _duree_approx(seconds: float) -> str:
-    """Durée en prose française, arrondie. Jamais un nombre de secondes.
-
-    Le prompt se lit, il ne se calcule pas : « depuis 1814400s » n'aide pas
-    un modèle qui doit ensuite écrire « ça fait un moment ».
-    """
-    jours = max(0.0, seconds) / 86400
-    if jours < 1:
-        return "quelques heures"
-    if jours < 2:
-        return "un jour"
-    if jours < 7:
-        return f"{_EN_LETTRES.get(int(jours), int(jours))} jours"
-    if jours < 14:
-        return "une semaine"
-    if jours < 30:
-        semaines = int(jours // 7)
-        return f"{_EN_LETTRES.get(semaines, semaines)} semaines"
-    if jours < 60:
-        return "un mois"
-    mois = int(jours // 30)
-    return f"{_EN_LETTRES.get(mois, mois)} mois"
-
-
-def _phrase_ecart(seconds: float) -> str:
-    """Le temps écoulé depuis le dernier échange, ou '' s'il est négligeable."""
-    if seconds < _ecart_plancher_s():
-        return ""
-    if seconds < 86400:
-        return "Vous vous etes deja parle plus tot dans la journee."
-    if seconds < 2 * 86400:
-        return "Vous ne vous etes pas parle depuis hier."
-    return f"Vous ne vous etes pas parle depuis {_duree_approx(seconds)}."
-
-
-async def _last_contact_gap(person_id: str) -> str:
-    """Depuis combien de temps cette personne ne s'est pas manifestée.
-
-    Rien du tout quand aucune ligne n'existe : dire « c'est la premiere fois »
-    contredirait une identité liée qui revient sur un nouveau handle, et une
-    absence de donnée n'est pas un fait sur la relation.
-    """
-    from django.db.models import Max
-    from django.utils import timezone
-
-    from memory.models import Message
-
-    try:
-        handles = await own_handles(person_id)
-        row = await Message.objects.filter(
-            person_id__in=handles, is_internal=False,
-        ).aaggregate(dernier=Max("created_at"))
-        last = row.get("dernier")
-        if last is None:
-            return ""
-        return _phrase_ecart((timezone.now() - last).total_seconds())
-    except Exception as exc:
-        degradations.record("prompt: derniere interaction", exc)
-        return ""
-
-
-# Mémo id → ``created_at`` des messages du fil (voir ``_stamp_history_gaps``).
-# Borné : au-delà, les plus anciens ids sortent — ce sont aussi ceux qui ont
-# quitté le tampon court terme.
-_MESSAGE_DATES: dict[int, object] = {}
-_MESSAGE_DATES_MAX = 2000
-
-
-def _prune_message_dates() -> None:
-    if len(_MESSAGE_DATES) <= _MESSAGE_DATES_MAX:
-        return
-    for pk in sorted(_MESSAGE_DATES)[: len(_MESSAGE_DATES) - _MESSAGE_DATES_MAX]:
-        _MESSAGE_DATES.pop(pk, None)
-
-
-async def _stamp_history_gaps(history: list[dict]) -> list[dict]:
-    """Date les segments d'historique séparés par un trou.
-
-    Un fil réhydraté après trois semaines se lit exactement comme la suite de
-    la conversation d'il y a cinq minutes : le tampon ne porte aucun
-    horodatage et ``ChatPrompt.chat_messages()`` ne rend que ``{role,
-    content}``. Le marqueur va donc DANS le contenu — une clé supplémentaire
-    n'atteindrait aucun modèle.
-
-    Les dicts du tampon sont partagés avec ``MemoryManager.short_term`` : on
-    recopie, jamais on ne mute.
-    """
-    if len(history) < 2:
-        return history
-
-    from django.utils import timezone
-
-    from memory.models import Message
-
-    try:
-        ids = [m["id"] for m in history if isinstance(m.get("id"), int)]
-        if not ids:
-            return history
-        # ``created_at`` ne change jamais : une date lue une fois vaut pour
-        # la vie du process. Sans ce mémo, c'était un ``SELECT … pk IN (500)``
-        # à chaque tour, sur l'exécuteur partagé, pour relire 498 dates déjà
-        # connues.
-        missing = [pk for pk in ids if pk not in _MESSAGE_DATES]
-        if missing:
-            async for pk, created in Message.objects.filter(
-                pk__in=missing
-            ).values_list("id", "created_at"):
-                _MESSAGE_DATES[pk] = created
-            _prune_message_dates()
-        dates = {pk: _MESSAGE_DATES[pk] for pk in ids if pk in _MESSAGE_DATES}
-
-        now = timezone.now()
-        ecart_min = _history_gap_seconds()
-        stamped: list[dict] = []
-        previous = None
-        for msg in history:
-            # Une entrée jamais persistée est de maintenant : c'est le tour
-            # en cours, pas un fragment d'archive.
-            current = dates.get(msg.get("id")) or now
-            if previous is not None:
-                gap = (current - previous).total_seconds()
-                if gap >= ecart_min:
-                    msg = {
-                        **msg,
-                        "content": f"[il y a {_duree_approx(gap)}] "
-                                   + (msg.get("content") or ""),
-                    }
-            stamped.append(msg)
-            previous = current
-        return stamped
-    except Exception as exc:
-        degradations.record("prompt: horodatage historique", exc)
-        return history
-
-
-# ── Plafonds des blocs sans borne naturelle ─────────────────────────────────
-# Chaque bloc du prompt doit porter sa propre limite : rien en aval ne mesure
-# ni ne tronque (pas de tokenizer dans le processus), donc un bloc qui grossit
-# sans borne — un self-narrative que le consolidateur allonge, un module
-# bavard, un projet aux consignes fleuves — gonfle chaque tour en silence.
-# Les valeurs sont larges : le but est d'empêcher la dérive, pas de rogner
-# le cas nominal.
-# Ces cinq valeurs sont le repli des réglages ``pipeline.context.*``
-# (section « Tour · Contexte ») et leur sont identiques au bit près.
-_SELF_CONCEPT_MAX_CHARS = 1600
-_MODULE_CONTEXT_MAX_CHARS = 1800
-_PROJECT_TEXT_MAX_CHARS = 300
-_PROJECT_LIST_ITEMS_MAX = 8
-_IDENTITY_CLAIMS_MAX = 5
-
-
-def _plafond_texte_projet() -> int:
-    return cfg_int("pipeline.context.project_text_max_chars",
-                   _PROJECT_TEXT_MAX_CHARS, mini=1)
-
-
-def _plafond_liste_projet() -> int:
-    return cfg_int("pipeline.context.project_list_items_max",
-                   _PROJECT_LIST_ITEMS_MAX, mini=1)
-
-
-def _plafond_revendications() -> int:
-    return cfg_int("pipeline.context.identity_claims_max",
-                   _IDENTITY_CLAIMS_MAX, mini=1)
-
-
-def _clip(text: str, limit: int) -> str:
-    """Hard cap with a visible marker — a silent slice hides the loss."""
-    if len(text) <= limit:
-        return text
-    return text[: limit - 1].rstrip() + "…"
-
-
-def _format_identity_block(ctx) -> str:
-    """Render the identity situation as the `--- QUI TU AS EN FACE ---` body.
-
-    Silent for internal person_ids (Mika's own conscience triggers don't need
-    to be told who they are) and silent when an authenticated session made
-    the question moot *and* nothing is pending — in that case the person
-    context block already names them, and a paragraph explaining that she is
-    certain would only invite the model to talk about certainty.
-    """
-    if ctx.is_internal:
-        return ""
-
-    # Session authentifiee et rien en attente : la question ne se pose pas.
-    # `describe_fr` rendrait « Aucun doute a avoir », ce qui n'apprend rien de
-    # plus que le bloc suivant et invite le modele a parler de sa certitude.
-    if ctx.trust is ChannelTrust.AUTHENTICATED and not ctx.pending_claims:
-        return ""
-
-    lines = [ctx.description] if ctx.description else []
-
-    if ctx.pending_claims:
-        lines.append("")
-        # Compte borné : chaque ligne coûte à chaque tour, et au-delà de
-        # quelques revendications simultanées le modèle n'arbitre plus rien.
-        plafond_revendications = _plafond_revendications()
-        for claim in ctx.pending_claims[:plafond_revendications]:
-            lines.append(
-                f"- Revendication #{claim['id']} : se presente comme "
-                f"« {claim['name']} » (« {claim['evidence'][:140]} »)"
-            )
-        hidden = len(ctx.pending_claims) - plafond_revendications
-        if hidden > 0:
-            lines.append(f"- (+{hidden} autre(s) revendication(s) en attente)")
-        lines.append(
-            "Tu peux la tester avec identity_check_story (est-ce que ce qui "
-            "est dit recoupe ce que tu sais ?), puis trancher avec "
-            "identity_accept_claim ou identity_reject_claim. Rien ne t'oblige "
-            "a decider maintenant — tu as le droit de rester prudente et de "
-            "poser une question dont seule la vraie personne aurait la reponse."
-        )
-    elif not ctx.may_disclose and not ctx.is_identified:
-        lines.append(
-            "Si tu veux savoir a qui tu parles, demande-le simplement — "
-            "c'est plus honnete que de deviner."
-        )
-
-    return "\n".join(line for line in lines if line is not None).strip()
-
-
-def _format_project_block(data: dict) -> str:
-    """Render a dict from ``detection.load_project_for_prompt`` as the
-    body of the ``--- PROJET EN COURS ---`` prompt section.
-
-    Conservative with wording — the LLM will read this as directive,
-    not descriptive. When emotion_policy is OFF the block explicitly
-    reminds the model to drop emoji / informal markers.
-    """
-    plafond_texte = _plafond_texte_projet()
-    plafond_liste = _plafond_liste_projet()
-    lines: list[str] = [f"Titre : {data['title']}"]
-    if data.get("description"):
-        lines.append(f"Cadre : {_clip(data['description'], 2 * plafond_texte)}")
-    if data.get("tone_directive"):
-        lines.append(f"Ton à utiliser : {_clip(data['tone_directive'], plafond_texte)}")
-    instr = data.get("instructions") or []
-    if instr:
-        lines.append("Consignes :")
-        for i in instr[:plafond_liste]:
-            lines.append(f"  - {_clip(i, plafond_texte)}")
-    oos = data.get("out_of_scope") or []
-    if oos:
-        lines.append("Hors de portée :")
-        for o in oos[:plafond_liste]:
-            lines.append(f"  - {_clip(o, plafond_texte)}")
-
-    policy = data.get("emotion_policy", "off")
-    if policy == "off":
-        lines.append(
-            "Politique émotionnelle : OFF. "
-            "N'inclus PAS de balise [EMOTION:...]. "
-            "Pas d'emojis, pas de langage familier, pas d'interjections "
-            "(pff, hehe, mdr). Ton factuel et posé uniquement."
-        )
-    elif policy == "muted":
-        lines.append(
-            "Politique émotionnelle : atténuée. "
-            "Tu peux inclure [EMOTION:...] mais avec une intensité modérée "
-            "(≤ 0.5). Pas d'exubérance."
-        )
-    # policy == "full" → default personality behavior, no extra line needed.
-
-    if data.get("requires_approval"):
-        lines.append(
-            "Actions à effet de bord : à soumettre à l'utilisateur avant "
-            "exécution (aucune envoi / écriture sans approbation)."
-        )
-
-    todo = data.get("todo_tasks") or []
-    if todo:
-        lines.append("Tâches en cours / à faire :")
-        for t in todo[:5]:
-            lines.append(f"  - {t}")
-
-    return "\n".join(lines)
-
-
-def _fatigue_fog_context() -> str:
-    """Return a short French sentence shaping Mika's TONE when her energy
-    is low — a "cognitive fog" layer distinct from the action threshold.
-
-    Empty string when energy is mid-to-high: sober humans don't need the
-    reminder. Only kicks in below ~0.5 and ramps up as energy drops.
-    """
-    try:
-        energy = float(drive_engine.energy_level())
-    except (TypeError, ValueError, Exception):
-        # Defensive: drive_engine may be mocked in tests returning a
-        # non-numeric value. Absence of fog is a safe default.
-        return ""
-
-    if energy >= 0.5:
-        return ""
-    if energy >= 0.3:
-        return (
-            "Tu sens une petite baisse de regime. Tes phrases peuvent etre un "
-            "peu plus courtes, tu accroches moins vite, ton humour est plus "
-            "calme. Ce n'est pas grave — tu restes toi, juste en version moins "
-            "explosive."
-        )
-    if energy >= 0.15:
-        return (
-            "Tu es clairement fatiguee. Tes pensees partent en vrille plus "
-            "facilement, tu laisses des phrases en suspens, tu as moins de "
-            "patience pour te relire. Laisse-toi etre moins parfaite — c'est "
-            "plus honnete que faire semblant d'etre fraiche."
-        )
-    return (
-        "Tu es epuisee. Tes associations d'idees flottent, tu confonds des "
-        "mots, tu peux demander de repeter. Tu n'as pas l'energie pour des "
-        "reponses travaillees — va au plus simple, quitte a etre un peu "
-        "a cote de la plaque. Un humain crame ne dissimule pas, il fatigue."
-    )
-
-
-# Dream-recall window: after waking, for how many hours is last night's
-# dream eligible to surface in the prompt. Keeps the residue morning-
-# bound — a dream from last night shouldn't pop up at 21h.
-# Repli de ``pipeline.context.dream_recall_window_hours``.
-_DREAM_RECALL_WINDOW_HOURS = 8
-# Only dreams above this vividness are mentionable at all — faint ones
-# stay purely internal (they still nudged the self-narrative elsewhere).
-# Repli de ``pipeline.context.dream_vividness_threshold``.
-_DREAM_VIVIDNESS_THRESHOLD = 0.6
-
-
-async def _fetch_dream_context() -> tuple[str, object | None]:
-    """Return ``(residue, dream)`` for last night's dream, or ``("", None)``.
-
-    Gating: current hour must be before the profile-derived night end + window, the
-    dream must not have been recalled yet, and vividness above threshold.
-
-    The dream is *not* marked here. Marking it during context assembly spent
-    it before the AI call, so a timeout consumed it forever while the fallback
-    never mentioned it — the caller marks it once the turn succeeded.
-    """
-    from datetime import datetime
-
-    from memory import read
-    from memory.sleep import SleepCycle
-
-    now = datetime.now()
-    # La fin de nuit appartient au cycle de sommeil : on lit SON accesseur —
-    # dérivé du profil circadien (phase MORNING) depuis que la clé
-    # `memory.sleep_night_end_hour` est supprimée. Relire une clé morte ici
-    # aurait fait diverger la fenêtre du rêve de la nuit réelle sur tout
-    # profil nocturne — la divergence exacte que la dérivation supprime.
-    fin_de_nuit = SleepCycle._night_end_hour()
-    fenetre = cfg_int("pipeline.context.dream_recall_window_hours",
-                      _DREAM_RECALL_WINDOW_HOURS, mini=1)
-    # Only eligible in the morning window [fin de nuit, +fenêtre]
-    if not (fin_de_nuit <= now.hour < fin_de_nuit + fenetre):
-        return "", None
-
-    try:
-        dream = await read.dream_of_last_night(
-            unrecalled_only=True,
-            min_vividness=cfg_float(
-                "pipeline.context.dream_vividness_threshold",
-                _DREAM_VIVIDNESS_THRESHOLD, mini=0.0, maxi=1.0),
-        )
-    except Exception as exc:
-        degradations.record("prompt: dream context", exc)
-        return "", None
-
-    if not dream:
-        return "", None
-
-    # Build a human-readable residue hint.
-    type_label = {
-        "associative": "un reve un peu bizarre, des associations libres",
-        "nightmare": "un reve inconfortable, pas tragique mais derangeant",
-        "pleasant": "un reve plutot doux",
-        "mundane": "un reve banal mais tu t'en souviens quand meme",
-    }.get(dream.dream_type, "un reve")
-    emotion_hint = f" (teinte : {dream.emotion})" if dream.emotion else ""
-    return (
-        f"Tu as fait cette nuit {type_label}{emotion_hint}.\n"
-        f"Le souvenir du reve : \"{dream.content[:400]}\"\n"
-        "Tu peux le mentionner si la conversation s'y prete (ou au contraire "
-        "le garder pour toi). N'en parle pas tout de suite si l'autre commence "
-        "par quelque chose d'important — laisse la conversation couler naturellement.",
-        dream,
-    )
-
-
-# Cap on the journal narrative injected into the prompt — the recap is
-# a thread, not a transcript.
-# Repli de ``pipeline.context.journal_max_chars``.
-_JOURNAL_MAX_CHARS = 450
-
-
-def _redige_sans_tiers(texte: str, noms: list[str]) -> str:
-    """Remplace les noms de tiers par « quelqu'un » dans un texte libre.
-
-    Le récit du journal est écrit à la première personne à partir des
-    souvenirs de la veille : il cite donc les gens et ce qu'ils ont confié.
-    On ne connaît pas d'autre inventaire de ces noms que
-    ``persons_interacted``, ce qui suffit — ce sont exactement les personnes
-    que la nuit a identifiées dans sa journée.
-    """
-    import re as _re
-
-    for nom in sorted((n for n in noms if n and len(n) > 2), key=len, reverse=True):
-        texte = _re.sub(
-            rf"\b{_re.escape(nom)}\b", "quelqu'un", texte, flags=_re.IGNORECASE,
-        )
-    return texte
-
-
-async def _fetch_journal_context(may_disclose: bool = True) -> str:
-    """Return a compact recap of yesterday's journal, or ''.
-
-    ``may_disclose`` reprend la porte de divulgation de l'interlocuteur. Le
-    bloc n'était gardé que par ``is_internal_person`` : un handle jamais
-    identifié recevait donc, dès son premier « salut », le récit à la première
-    personne de la veille — « Thomas m'a raconté que sa mère était
-    hospitalisée » — et la liste nominative des gens croisés, dans le prompt
-    même où le bloc identité lui dit de ne rien raconter de personnel sur qui
-    que ce soit. L'outil ``memory_read_journal``, lui, refusait déjà.
-
-    Sous le seuil, elle garde son fil — c'est le sien — mais elle ne nomme
-    plus personne.
-
-    The nightly journal gives Mika a causal thread through the previous
-    day; without this injection it was write-only (frontend panel + tool
-    only) and "hier" relied on semantic retrieval luck. Available all
-    day: unlike a dream, yesterday doesn't fade by mid-afternoon.
-    """
-    from memory import read
-
-    # Strictly yesterday, not "the latest": light sleep writes a journal late
-    # on the evening of the day it covers, so between 23h and midnight the
-    # newest row is *today's*. A block titled "ton fil d'hier" must not
-    # narrate the day currently in progress. The panels ask the other
-    # question — see memory.read.latest_journal.
-    try:
-        journal = await read.journal_for(read.yesterday())
-    except Exception as exc:
-        degradations.record("prompt: journal context", exc)
-        return ""
-
-    if not journal or not journal.narrative:
-        return ""
-
-    plafond = cfg_int("pipeline.context.journal_max_chars",
-                      _JOURNAL_MAX_CHARS, mini=1)
-    narrative = journal.narrative.strip()
-    if len(narrative) > plafond:
-        narrative = narrative[:plafond].rstrip() + "..."
-
-    persons = [p for p in (journal.persons_interacted or []) if p]
-
-    if not may_disclose:
-        narrative = _redige_sans_tiers(narrative, persons)
-
-    lines = [f"Ce que tu retiens d'hier : {narrative}"]
-    if persons and may_disclose:
-        lines.append("Tu avais interagi avec : " + ", ".join(persons[:4]) + ".")
-    if journal.dominant_emotion:
-        lines.append(f"La journee etait teintee de : {journal.dominant_emotion}.")
-    if may_disclose:
-        lines.append(
-            "C'est ton fil de continuite — tu peux y faire reference naturellement "
-            "(\"comme hier...\") sans le reciter."
-        )
-    else:
-        lines.append(
-            "C'est ton fil de continuite, pour toi. Tu ne sais pas assez qui "
-            "tu as en face pour raconter ta journee ni nommer les gens que tu "
-            "as croises — garde ca pour toi, ca colore juste ton humeur."
-        )
-    return "\n".join(lines)
-
-
-async def _fetch_rumination_context() -> str:
-    """Return a short French block describing the top active ruminations.
-
-    These are unresolved thoughts promoted from stale pertinent observations.
-    Were previously visible only during conscience._act(); surfacing them
-    every turn lets them color REACTIONS too, not just spontaneous speech.
-    Empty string when the table is missing, empty, or intensities are low.
-    """
-    from conscience import read as conscience_read
-
-    try:
-        # Top 3 above a floor: a thought too faint to notice should not be
-        # narrated as one. The panel shows more, and fainter — see
-        # conscience.read.active_ruminations.
-        items = await conscience_read.active_ruminations(
-            limit=3, min_intensity=0.2,
-        )
-    except Exception as exc:
-        degradations.record("prompt: rumination context", exc)
-        return ""
-
-    if not items:
-        return ""
-
-    lines = []
-    for r in items:
-        label = "fortement" if r.intensity > 0.7 else (
-            "encore" if r.intensity > 0.4 else "par intermittence"
-        )
-        line = f"- Tu repenses {label} a : {r.summary[:140]}"
-        if r.emotion:
-            line += f" (teinte : {r.emotion})"
-        lines.append(line)
-    return (
-        "Meme si tu reponds a ce qui arrive maintenant, ces pensees restent "
-        "en arriere-plan et colorent subtilement ton humeur :\n"
-        + "\n".join(lines)
-    )
-
-
-async def _fetch_travaux_context() -> str:
-    """Un court bloc français : ses chantiers en cours, et ceux finis du jour.
-
-    Même couche de lecture que le tableau de bord (`conscience.read`), jamais
-    une requête directe ici — la règle qui a déjà servi aux ruminations et au
-    journal. Aucun nombre destiné à être relu par une machine : le prompt dit
-    « presque au bout », pas « pas 4/5 à envie 0.31 ».
-    """
-    from conscience import read as conscience_read
-
-    try:
-        en_cours = await conscience_read.travaux_en_cours(limit=3)
-        aboutis = await conscience_read.travaux_aboutis_depuis(
-            conscience_read.debut_du_jour_local(), limit=2,
-        )
-    except Exception as exc:
-        degradations.record("prompt: travaux context", exc)
-        return ""
-
-    if not en_cours and not aboutis:
-        return ""
-
-    lines = []
-    for t in en_cours:
-        etape = ""
-        if t.pas_max:
-            if t.pas_effectues <= 0:
-                etape = " (tu n'as pas encore commence)"
-            elif t.pas_effectues >= t.pas_max - 1:
-                etape = " (presque au bout)"
-            else:
-                etape = " (en cours)"
-        if not t.en_attente_de_reponse:
-            attente = ""
-        elif getattr(t, "attend_qui", ""):
-            attente = (
-                f" Tu attends une reponse de {t.attend_qui} pour continuer."
-            )
-        else:
-            attente = " Tu attends une reponse pour continuer."
-        lines.append(f"- Tu as entrepris : {t.titre[:140]}{etape}.{attente}")
-    for t in aboutis:
-        lines.append(f"- Tu as mene au bout aujourd'hui : {t.titre[:140]}.")
-    return (
-        "Ce sont TES chantiers — des choses que tu as decide de faire de "
-        "toi-meme. Tu peux en parler si on te demande ce que tu fais :\n"
-        + "\n".join(lines)
-    )
-
-
-# Regex assets for user-mood heuristic
-import re as _re_mood  # noqa: E402
-from utils.degradation import degradations
-
-_CAPS_RUN = _re_mood.compile(r"[A-ZÉÈÀÔÂÊÎÛ]{4,}")
-_EXCLAM_RUN = _re_mood.compile(r"!{2,}")
-_QUESTION_RUN = _re_mood.compile(r"\?{2,}")
-_ELLIPSIS_RUN = _re_mood.compile(r"\.{3,}|…")
-_POSITIVE_WORDS = {
-    "super", "génial", "genial", "trop bien", "j'adore", "jadore",
-    "youpi", "merci", "haha", "mdr", "lol", "ptdr", "yes", "nickel",
-    "parfait", "cool", "top",
-}
-_NEGATIVE_WORDS = {
-    "triste", "déprimé", "deprime", "naze", "nul", "marre", "fatigué",
-    "fatigue", "épuisé", "epuise", "galère", "galere", "chiant", "putain",
-    "merde", "j'en peux plus", "ras le bol", "pleure",
-}
-_ANGRY_WORDS = {
-    "énervé", "enerve", "furieux", "rage", "dégueu", "degueu",
-    "honteux", "insupportable",
-}
-
-
-def detect_user_mood_hint(message: str) -> str:
-    """Heuristic read of the user's emotional tone from raw text.
-
-    This does NOT call the AI — it's fast, cheap, and deterministic.
-    Gives Mika "she sounds pissed", "they seem down", "excited" cues
-    she can react to rather than only declaring her own emotion.
-
-    Returns '' when no confident signal — silence beats noise in a prompt.
-    """
-    if not message or len(message.strip()) < 2:
-        return ""
-
-    text = message.strip()
-    low = text.lower()
-
-    signals = []
-
-    # Structural cues
-    caps_hits = len(_CAPS_RUN.findall(text))
-    if caps_hits >= 1 and len(text) >= 6:
-        signals.append("en majuscules (ton elevé ou emphase)")
-
-    if _EXCLAM_RUN.search(text):
-        signals.append("plusieurs points d'exclamation — emotion marquee")
-    if _QUESTION_RUN.search(text):
-        signals.append("questions en rafale — surprise ou doute")
-    if _ELLIPSIS_RUN.search(text):
-        signals.append("des points de suspension — hesitation, lassitude ou flou")
-
-    # Length cue
-    words = len(text.split())
-    if words <= 3:
-        signals.append("tres court — soit agace, soit pressé, soit peu inspire")
-    elif words >= 80:
-        signals.append("long message — sujet qui lui tient a coeur ou besoin de vider son sac")
-
-    # Lexical cues
-    pos_hits = sum(1 for w in _POSITIVE_WORDS if w in low)
-    neg_hits = sum(1 for w in _NEGATIVE_WORDS if w in low)
-    ang_hits = sum(1 for w in _ANGRY_WORDS if w in low)
-
-    if ang_hits:
-        signals.append("mots qui trahissent de la colere ou de l'exasperation")
-    if neg_hits >= 2 or (neg_hits and "pleure" in low):
-        signals.append("mots qui trahissent une humeur sombre, tristesse ou epuisement")
-    elif neg_hits:
-        signals.append("une teinte negative legere")
-    if pos_hits:
-        signals.append("des marqueurs positifs / enjoues")
-
-    # Emoji burst
-    if len(_re_mood.findall(r"[😀-🙏🤔-🫧]", text)) >= 2:
-        signals.append("beaucoup d'emojis — registre expressif, chaleureux")
-
-    if not signals:
-        return ""
-
-    hint = (
-        "Ce que tu captes dans la maniere dont il/elle ecrit (pur ressenti, "
-        "tu peux te tromper) : "
-        + " ; ".join(signals[:4])
-        + ". Accueille-le dans ta reponse au lieu de l'ignorer — une vraie "
-        "personne remarque ces signes."
-    )
-    return hint
-
-
-def _fetch_circadian_context() -> str:
-    """Return a short French description of Mika's current circadian state."""
-    try:
-        from emotion import circadian
-
-        try:
-            from config.personality import personality
-            profile = personality.circadian_profile
-        except Exception:
-            profile = None
-
-        state = circadian.current_state(profile=profile)
-        return circadian.phase_description_fr(state)
-    except Exception as exc:
-        degradations.record("prompt: circadian context", exc)
-        return ""
-
-
-async def _fetch_self_concept() -> str:
-    """Return the most recent self-narrative content, or '' if none."""
-    from memory import read
-
-    try:
-        latest = await read.latest_self_narrative()
-        if latest and latest.content:
-            return _clip(latest.content,
-                         cfg_int("pipeline.context.self_concept_max_chars",
-                                 _SELF_CONCEPT_MAX_CHARS, mini=1))
-        return ""
-    except Exception as exc:
-        degradations.record("prompt: self-concept", exc)
-        return ""
-
-
-# System/internal person_ids live in identity.trust — one definition, because
-# "is this id a person?" was previously answered in three places that had
-# already drifted apart.
-
-
-async def _fetch_person_context(identity_ctx) -> str:
-    """Return a prompt-ready block combining everything Mika knows/feels
-    about this specific person:
-      - semantic profile (summary, closeness, preferred tone, topics)
-      - current affective stance (live PAD oscillator via EmotionEngine)
-      - weekly emotional trend (EmotionalSummary)
-      - pending commitments toward them
-
-    This block replaces the per-person half of what used to live in
-    `emotion_context`. It gives the LLM a unified relational picture.
-
-    Resolution goes through the identity layer, not through
-    ``entity__name=person_id``. The old lookup could only ever match when a
-    person's memory Entity happened to be named after their transport handle
-    — which never happens in practice, because the consolidator names
-    entities after what people are *called* ("Thomas") while handles are
-    ``web_6f3e22ccb0ae``. Every profile lookup silently missed.
-
-    Empty string when internal/system person_id, when nothing is known, or
-    when certainty is too low to justify reading out someone's private
-    history to whoever is currently holding the handle.
-    """
-    person_id = identity_ctx.person_id
-    if identity_ctx.is_internal:
-        return ""
-
-    affect = emotion_engine.get_person_affect_context(person_id)
-    # Le temps écoulé est un fait sur l'échange avec CE handle, pas un extrait
-    # de la fiche d'un tiers : il reste sous le seuil de divulgation, au même
-    # titre que la stance affective. Sans lui, « tu m'as manqué » n'a aucune
-    # base mécanique — le prompt ne porte que l'heure courante et « hier ».
-    derniere_interaction = await _last_contact_gap(person_id)
-
-    # Not sure enough who this is: the affective stance toward the handle is
-    # still Mika's own feeling and safe to keep, but the semantic profile,
-    # the shared history and the commitments are someone else's business.
-    if not identity_ctx.may_disclose:
-        return "\n".join(x for x in (affect, derniere_interaction) if x)
-
-    entity = None
-    try:
-        from memory import read
-
-        entity = await identity_resolver.entity_for_person(person_id)
-        if entity is None:
-            return "\n".join(x for x in (affect, derniere_interaction) if x)
-
-        profile = await read.person_profile_for(entity)
-        commitments = await read.pending_commitments_for(entity)
-        weekly_trend = _summarize_emotional_trend(
-            await read.recent_daily_summaries(person_id)
-        )
-
-        if (
-            not affect
-            and not derniere_interaction
-            and profile is None
-            and not commitments
-            and not weekly_trend
-        ):
-            return ""
-
-        return _format_person_context(
-            profile=profile,
-            commitments=commitments,
-            affect=affect,
-            weekly_trend=weekly_trend,
-            derniere_interaction=derniere_interaction,
-        )
-
-    except Exception as exc:
-        degradations.record("prompt: person context", exc)
-        # If DB failed but we at least have an affect string, return that —
-        # it's better than a silent blank about the person.
-        return "\n".join(x for x in (affect, derniere_interaction) if x)
-
-
-def _format_person_context(
-    *, profile, commitments: list[str], affect: str, weekly_trend: str,
-    derniere_interaction: str = "",
-) -> str:
-    """Assemble a compact French block covering everything Mika knows+feels."""
-    lines: list[str] = []
-
-    if profile and profile.summary:
-        lines.append(profile.summary)
-
-    if profile:
-        extras = []
-        if profile.closeness and profile.closeness != "stranger":
-            extras.append(f"proximite: {profile.closeness}")
-        if profile.preferred_tone and profile.preferred_tone != "unknown":
-            extras.append(f"ton prefere avec elle/lui: {profile.preferred_tone}")
-        if profile.topics_of_interest:
-            extras.append(
-                "sujets qui l'interessent: "
-                + ", ".join(profile.topics_of_interest[:4])
-            )
-        if profile.sensitive_topics:
-            extras.append(
-                "sujets sensibles a manier avec prudence: "
-                + ", ".join(profile.sensitive_topics[:3])
-            )
-        if extras:
-            lines.append(" | ".join(extras))
-
-    if affect:
-        lines.append(affect)
-
-    if derniere_interaction:
-        lines.append(derniere_interaction)
-
-    if weekly_trend:
-        lines.append(weekly_trend)
-
-    if commitments:
-        lines.append(
-            "Tu lui avais dit: " + "; ".join(c[:120] for c in commitments)
-        )
-
-    return "\n".join(lines)
-
-
-def _summarize_emotional_trend(summaries: list) -> str:
-    """Build a short French line from recent EmotionalSummary rows.
-
-    Empty when fewer than 2 days of data — a single-day snapshot isn't
-    really a "trend". Returns e.g. "Sur les 5 derniers jours avec elle/lui
-    tu as ete majoritairement happy (tendance warming)."
-    """
-    if not summaries or len(summaries) < 2:
-        return ""
-
-    from collections import Counter
-    dominant_per_day = [s.dominant_emotion for s in summaries if s.dominant_emotion]
-    if not dominant_per_day:
-        return ""
-
-    counter = Counter(dominant_per_day)
-    top, top_count = counter.most_common(1)[0]
-    most_recent = summaries[0]
-
-    if top_count >= len(summaries) * 0.6:
-        return (
-            f"Sur les {len(summaries)} derniers jours avec elle/lui tu as ete "
-            f"majoritairement {top} (tendance recente: {most_recent.trend})."
-        )
-    return (
-        f"Emotions variees avec elle/lui sur {len(summaries)} jours "
-        f"(tendance recente: {most_recent.dominant_emotion}, {most_recent.trend})."
-    )

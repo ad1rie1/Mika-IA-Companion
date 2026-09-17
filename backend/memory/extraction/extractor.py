@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 
-from django.conf import settings
 
 from ai.router import AIRole, UnconfiguredRoleError, ai_router
 from emotion.types import Emotion
@@ -61,10 +60,19 @@ TROIS TYPES A EXTRAIRE:
        0.3-0.5 : un echange agreable ou utile, dont on garde une trace tiede
        0.1-0.2 : anecdotique, on l'oubliera vite
      Sois EXIGEANT sur le haut du bareme: si tout vaut 0.9, plus rien ne surnage.
+   - "sensibilite" = CE QUE CA PESERAIT si {name} le repetait a quelqu'un d'autre
+     que la personne concernee. Trois valeurs:
+       "anodin"     : « Alice aime le cafe », « Thomas joue a Zelda » — se dit devant n'importe qui
+       "personnel"  : « Alice cherche un nouveau boulot » — confie, pas secret ; a ne pas
+                      repeter a n'importe qui, mais un ami proche peut l'apprendre
+       "confidence" : « Alice m'a dit qu'elle a rechute », sante, argent, rupture, secret
+                      avoue — ne sort jamais, sauf a la personne elle-meme
+     Sans personne concernee (vecu seule, une nouvelle lue) : "anodin".
 
 2. CONNAISSANCE (fait objectif durable):
    - Ecrit de maniere OBJECTIVE (3eme personne), sans emotion
    - Fait factuel sur une personne, un objet, un lieu
+   - "sensibilite" : meme echelle que pour un souvenir (anodin / personnel / confidence)
 
 3. COMMITMENT (engagement pris par {name}):
    - Detecte SEULEMENT dans les messages ou {name} s'engage a faire quelque chose
@@ -102,6 +110,7 @@ Format:
       "content": "On a passe un super moment a jouer a Zelda avec Thomas!",
       "emotion": "happy",
       "importance": 0.45,
+      "sensibilite": "anodin",
       "themes": ["gaming", "zelda"],
       "entities": [{{"name": "Thomas", "type": "person"}}]
     }},
@@ -109,6 +118,7 @@ Format:
       "type": "connaissance",
       "store": true,
       "content": "Thomas aime les jeux retro",
+      "sensibilite": "anodin",
       "themes": ["gaming", "preference"],
       "entities": [{{"name": "Thomas", "type": "person"}}]
     }},

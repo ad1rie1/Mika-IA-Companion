@@ -28,6 +28,7 @@ import logging
 from asgiref.sync import sync_to_async
 from django.db.models import F
 
+from ai.router import AIRole, ai_router
 from configs.runtime import cfg_float, cfg_int
 from conscience.conduite import (
     PULSIONS_FECONDES,
@@ -602,6 +603,18 @@ async def faire_un_pas(moteur, identifiant) -> bool:
     """
     from conscience.models import Travail
     from django.utils import timezone as tz
+
+    # Avant de réserver le pas : un pas est un appel de fond chez le
+    # provider de `conversation_tools`, et le budget horaire de ce provider
+    # est la borne commune à toute la vie intérieure. Refusé, le chantier
+    # attend le cycle suivant sans avoir consommé de pas — le plafond
+    # propre aux pas (`pas_par_heure_max`) reste vérifié par le moteur.
+    if not ai_router.budget_de_fond_disponible(AIRole.CONVERSATION_TOOLS):
+        logger.info(
+            "Pas de chantier #%s différé : budget d'appels de fond épuisé",
+            identifiant,
+        )
+        return False
 
     maintenant = tz.now()
 

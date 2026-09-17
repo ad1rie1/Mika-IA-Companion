@@ -314,7 +314,7 @@ class TestConscienceRuminationHelpers:
         # saturaient déjà le Facteur 10. Avec une promotion plus ouverte
         # (pertinence 0.45 au lieu de 0.5), la saturation serait devenue l'état
         # permanent et le facteur aurait cessé d'informer.
-        from conscience.engine import RUMINATION_PRESSION_PLEINE
+        from conscience.ruminations import RUMINATION_PRESSION_PLEINE
         assert abs(pressure - 0.7 / RUMINATION_PRESSION_PLEINE) < 0.01
         assert count == 2
         # Le troisième élément existe dès maintenant, avant tout lecteur : le

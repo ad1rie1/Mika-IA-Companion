@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from asgiref.sync import sync_to_async
@@ -5,6 +6,13 @@ from django.conf import settings
 from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
+
+
+def _divulgation(valeur):
+    """Le niveau du tour, ou sa mémoire entière quand l'appelant n'en a pas."""
+    from identity.divulgation import TOUT
+
+    return TOUT if valeur is None else valeur
 
 
 class MemoryUnavailable(RuntimeError):
@@ -30,6 +38,14 @@ class MemoryManager:
         )
         self.conversation = None
         self._initialized = False
+        # Où en est la mémoire longue (ChromaDB + encodeur) : ``absent`` tant
+        # que rien n'a été tenté, ``starting`` pendant le chargement en
+        # thread, ``ready``, ``degraded`` (repli explicite par
+        # MEMORY_REQUIRE_VECTOR_STORE=0), ``failed`` (refusé). Lu par
+        # `/health` (config/readiness.py) — c'est ce qui rend « le port est
+        # ouvert mais elle ne se souvient pas encore » visible.
+        self.etat_memoire_longue = "absent"
+        self._chargement: "asyncio.Task | None" = None
         # Lu par la couche prompt : sans ça, une mémoire longue en panne est
         # indistinguable de « rien à dire », donc Mika simule l'amnésie au
         # lieu de pouvoir dire qu'elle ne peut pas y accéder. Dit « le dernier
@@ -91,15 +107,62 @@ class MemoryManager:
             "MEMORY_REQUIRE_VECTOR_STORE=0 dans .env."
         ) from cause
 
-    async def initialize(self):
-        """Initialize all memory subsystems."""
+    async def initialize(self, *, differe: bool = False, sur_echec_fatal=None):
+        """Initialize all memory subsystems.
+
+        ``differe=True`` (le lifespan ASGI) : la mémoire longue — ChromaDB et
+        le modèle d'embedding, plusieurs secondes de chargement synchrone —
+        part dans une tâche de fond et ``initialize`` rend la main tout de
+        suite, pour que le port s'ouvre avant. Le fil de conversation et la
+        compaction, qui ne dépendent que de l'ORM, sont prêts au retour ; le
+        rappel mémoire d'un tour reçu entre-temps est simplement vide
+        (``get_memory_context`` sans retriever, ``recall_unavailable``).
+        ``sur_echec_fatal(exc)`` est appelé si le chargement différé est
+        *refusé* (``MemoryUnavailable``) — le lifespan s'en sert pour
+        arrêter le processus, comme quand le refus remontait en synchrone.
+
+        Sans ``differe`` (tests, scripts) : tout est chargé ici, et un refus
+        lève ``MemoryUnavailable`` avant que ``_initialized`` soit posé.
+        """
         if self._initialized:
             return
 
         await self._resume_or_open_conversation()
         await self._rehydrate_short_term()
 
-        # Initialize contextual memory (requires chromadb, not yet compatible with Python 3.14+)
+        if differe:
+            # Posé avant même que la tâche démarre : `/health` doit dire
+            # `starting` dès le retour, pas au premier tour de boucle.
+            self.etat_memoire_longue = "starting"
+            self._chargement = asyncio.create_task(
+                self._charger_en_arriere_plan(sur_echec_fatal),
+                name="memoire:chargement",
+            )
+        else:
+            await self._charger_memoire_longue()
+
+        # Compaction du fil — hors du chargement chromadb : elle n'a besoin
+        # que de l'ORM et du rôle COMPACTION (non mappé = no-op à chaque tick).
+        try:
+            from memory.compaction import ConversationCompactor
+            self.compactor = ConversationCompactor()
+            await self.compactor.start()
+        except Exception:
+            logger.exception("Failed to start conversation compactor")
+
+        self._initialized = True
+
+    async def _charger_memoire_longue(self) -> None:
+        """Charge ChromaDB et démarre ce qui en dépend (consolidateur,
+        indexeur épisodique, retriever). Lève ``MemoryUnavailable`` quand le
+        chargement échoue et que le repli n'est pas autorisé.
+
+        ``VectorStore()`` charge le modèle d'embedding : plusieurs secondes de
+        CPU pur, en thread pour ne pas figer la boucle d'événements — ni les
+        sockets déjà ouverts en mode différé, ni les autres étapes du
+        démarrage.
+        """
+        self.etat_memoire_longue = "starting"
         try:
             import chromadb  # noqa: F401 — test import before loading subsystems
 
@@ -107,10 +170,11 @@ class MemoryManager:
             from memory.retrieval import MemoryRetriever
             from memory.storage import MemoryConsolidator, VectorStore
 
-            self.vector_store = VectorStore()
+            store = await asyncio.to_thread(VectorStore)
+            self.vector_store = store
             self.extractor = MemoryExtractor()
-            self.retriever = MemoryRetriever(self.vector_store)
-            self.consolidator = MemoryConsolidator(self.extractor, self.vector_store)
+            self.retriever = MemoryRetriever(store)
+            self.consolidator = MemoryConsolidator(self.extractor, store)
             await self.consolidator.start()
 
             # Étage épisodique : les échanges bruts, trouvables le jour même.
@@ -118,9 +182,10 @@ class MemoryManager:
             from configs.service import config_service
             from memory.episodic import EpisodicIndexer
             if config_service.get("memory.episodic_enabled"):
-                self.episodic = EpisodicIndexer(self.vector_store)
+                self.episodic = EpisodicIndexer(store)
                 await self.episodic.start()
 
+            self.etat_memoire_longue = "ready"
             logger.info("Contextual memory system initialized")
         except ImportError as exc:
             import sys
@@ -131,23 +196,47 @@ class MemoryManager:
             else:
                 raison = "chromadb n'est pas installé"
             degradations.record("memoire: vector store indisponible", exc)
-            self._refuser_ou_degrader(raison, exc)
+            self._echec_memoire_longue(raison, exc)
+        except asyncio.CancelledError:
+            self.etat_memoire_longue = "absent"
+            raise
         except Exception as exc:
             degradations.record("memoire: vector store indisponible", exc)
-            self._refuser_ou_degrader(
+            self._echec_memoire_longue(
                 f"le magasin vectoriel n'a pas démarré ({exc})", exc,
             )
 
-        # Compaction du fil — hors du try chromadb : elle n'a besoin que de
-        # l'ORM et du rôle COMPACTION (non mappé = no-op à chaque tick).
-        try:
-            from memory.compaction import ConversationCompactor
-            self.compactor = ConversationCompactor()
-            await self.compactor.start()
-        except Exception:
-            logger.exception("Failed to start conversation compactor")
+    def _echec_memoire_longue(self, raison: str, exc: Exception) -> None:
+        """Refuse ou dégrade selon le réglage, l'état posé dans les deux cas."""
+        self.etat_memoire_longue = "failed"
+        self._refuser_ou_degrader(raison, exc)
+        # Atteint seulement en repli explicite : refuser a levé.
+        self.etat_memoire_longue = "degraded"
 
-        self._initialized = True
+    async def _charger_en_arriere_plan(self, sur_echec_fatal) -> None:
+        """Le chargement différé. Un refus ne peut plus remonter au lifespan
+        (il a rendu la main) : il est journalisé en CRITICAL et remis au
+        crochet, qui décide d'arrêter le processus."""
+        try:
+            await self._charger_memoire_longue()
+        except MemoryUnavailable as exc:
+            logger.critical("%s", exc)
+            if sur_echec_fatal is not None:
+                try:
+                    sur_echec_fatal(exc)
+                except Exception:
+                    logger.exception("Le crochet d'échec fatal a lui-même échoué")
+
+    async def attendre_memoire_longue(self, timeout: float | None = None) -> str:
+        """Attend la fin du chargement différé et rend l'état atteint.
+
+        Pour les tests et les scripts ; le lifespan n'attend pas. Sans
+        chargement en cours, rend l'état courant tout de suite.
+        """
+        tache = self._chargement
+        if tache is not None and not tache.done():
+            await asyncio.wait_for(asyncio.shield(tache), timeout=timeout)
+        return self.etat_memoire_longue
 
     # ── Startup: continuity across restarts ──────────────────────
 
@@ -362,7 +451,7 @@ class MemoryManager:
         return True
 
     async def get_memory_context(
-        self, query: str, person_id: str = "", disclose_others: bool = True,
+        self, query: str, person_id: str = "", divulgation=None,
     ) -> str:
         """Retrieve relevant long-term memories formatted for the system prompt.
 
@@ -375,7 +464,7 @@ class MemoryManager:
             return ""
         try:
             bloc = await self.retriever.retrieve(
-                query, person_id=person_id, disclose_others=disclose_others,
+                query, person_id=person_id, divulgation=_divulgation(divulgation),
             )
         except Exception as exc:
             degradations.record("rappel memoire simple", exc)
@@ -391,10 +480,13 @@ class MemoryManager:
         person_id: str = "",
         extra_exchanges: list | None = None,
         salience_boost: float = 0.0,
-        disclose_others: bool = True,
+        divulgation=None,
     ) -> str:
         """Rappel multi-requêtes (plan de préparation, observations de la
         conscience) — un seul bloc formaté, fusion par pertinence.
+
+        ``divulgation`` : le niveau du tour (``identity.divulgation``) ;
+        ``None`` = sa mémoire entière (appelant interne).
 
         ``salience_boost`` (charge émotionnelle du tour, plan de préparation)
         monte les poids émotion/humeur du re-ranking pour ce tour."""
@@ -404,7 +496,7 @@ class MemoryManager:
         try:
             bloc = await self.retriever.retrieve_multi(
                 queries, person_id=person_id, extra_exchanges=extra_exchanges,
-                salience_boost=salience_boost, disclose_others=disclose_others,
+                salience_boost=salience_boost, divulgation=_divulgation(divulgation),
             )
         except Exception as exc:
             degradations.record("rappel memoire multi", exc)
@@ -808,7 +900,24 @@ class MemoryManager:
         self.short_term.clear()
 
     async def shutdown(self):
-        """Graceful shutdown: force final consolidation and stop background tasks."""
+        """Graceful shutdown: force final consolidation and stop background tasks.
+
+        Borné de l'extérieur (``config.asgi`` l'enveloppe dans un
+        ``wait_for``) : ``consolidator.stop()`` n'attend un tick en cours
+        que ``STOP_GRACE_S``, et la passe forcée est annulable — grâce au
+        checkpoint par tranche, une annulation ne laisse jamais plus d'une
+        tranche à ré-extraire au prochain démarrage.
+        """
+        # `getattr` : les tests construisent le manager sans `__init__`.
+        chargement, self._chargement = getattr(self, "_chargement", None), None
+        if chargement is not None and not chargement.done():
+            # Arrêt pendant le chargement différé : on n'attend pas un
+            # encodeur à moitié chargé, et rien n'en dépend encore.
+            chargement.cancel()
+            try:
+                await chargement
+            except (asyncio.CancelledError, Exception):
+                pass
         if self.compactor:
             try:
                 await self.compactor.stop()

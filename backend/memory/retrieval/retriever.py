@@ -9,6 +9,8 @@ from asgiref.sync import sync_to_async
 from django.utils import timezone
 
 from configs.runtime import cfg_float, cfg_int
+from identity.divulgation import TOUT, Divulgation, Niveau
+from memory import sensibilite
 from memory.storage.vector_store import VectorStore, vector_call
 from utils.degradation import degradations
 
@@ -187,11 +189,11 @@ class MemoryRetriever:
             self._servis.popitem(last=False)
 
     async def retrieve(
-        self, query: str, person_id: str = "", disclose_others: bool = True,
+        self, query: str, person_id: str = "", divulgation: Divulgation = TOUT,
     ) -> str:
         """Retrieve and format relevant memories for a user message."""
         return await self.retrieve_multi(
-            [query], person_id=person_id, disclose_others=disclose_others,
+            [query], person_id=person_id, divulgation=divulgation,
         )
 
     async def retrieve_multi(
@@ -200,9 +202,16 @@ class MemoryRetriever:
         person_id: str = "",
         extra_exchanges: list | None = None,
         salience_boost: float = 0.0,
-        disclose_others: bool = True,
+        divulgation: Divulgation = TOUT,
     ) -> str:
         """Rappel multi-requêtes — le chemin unique du bloc mémoire.
+
+        ``divulgation`` est le niveau du tour (``identity.divulgation``,
+        calculé une fois au bord) : ce qui concerne un tiers et pèse plus
+        que le niveau est retiré, ce qui pèse moins mais n'est pas anodin
+        est rendu **tagué** pour que Mika arbitre. Ce qui la concerne seule,
+        ou concerne l'interlocuteur, passe sans tag. Le défaut ``TOUT`` est
+        sa mémoire entière — un appelant interne.
 
         1. Chaque requête interroge ChromaDB (souvenirs + connaissances,
            en parallèle) ; les pages sont fusionnées par id, distance min.
@@ -270,12 +279,12 @@ class MemoryRetriever:
         # `echanges_passes`, rappel inter-personnes permis) ; la voie chaude
         # reste restreinte à l'identité de l'interlocuteur.
         exchanges = await self._episodic_lane(
-            queries[0], person_id, disclose_others=disclose_others,
+            queries[0], person_id, divulgation=divulgation,
         )
         # Les échanges du plan sont du verbatim aussi, et le rappel
-        # inter-personnes y est permis : sous le seuil de divulgation ils ne
-        # passent pas plus que la voie chaude.
-        if extra_exchanges and disclose_others:
+        # inter-personnes y est permis : le verbatim d'autrui est la forme la
+        # plus lourde, il ne sort qu'au niveau ``confidence``, tout ou rien.
+        if extra_exchanges and divulgation.niveau is Niveau.CONFIDENCE:
             seen = {h.chunk_id for h in exchanges}
             exchanges = exchanges + [
                 h for h in extra_exchanges if h.chunk_id not in seen
@@ -293,10 +302,10 @@ class MemoryRetriever:
 
         # Enrich with ORM data
         souvenirs = await self._enrich_souvenirs(
-            souvenirs_raw, boost_name=boost_name, disclose_others=disclose_others,
+            souvenirs_raw, boost_name=boost_name, divulgation=divulgation,
         )
         connaissances = await self._enrich_connaissances(
-            connaissances_raw, boost_name=boost_name, disclose_others=disclose_others,
+            connaissances_raw, boost_name=boost_name, divulgation=divulgation,
         )
 
         # L'humeur courante est lue sans effet de bord (pas de création
@@ -321,12 +330,12 @@ class MemoryRetriever:
         exclude_pks = {s["id"] for s in souvenirs if s.get("id")} | memo
         associations = await self._associative_expansion(
             souvenirs, exclude_pks,
-            boost_name=boost_name, disclose_others=disclose_others,
+            boost_name=boost_name, divulgation=divulgation,
         )
         exclude_pks |= {a["id"] for a in associations if a.get("id")}
         intrusions = await self._importance_intrusion(
             exclude_pks, salience_boost,
-            boost_name=boost_name, disclose_others=disclose_others,
+            boost_name=boost_name, divulgation=divulgation,
         )
         self._noter_servis(person_id, {
             s["id"] for s in (souvenirs + associations + intrusions) if s.get("id")
@@ -471,20 +480,23 @@ class MemoryRetriever:
         )
 
     async def _episodic_lane(
-        self, query: str, person_id: str, *, disclose_others: bool = True,
+        self, query: str, person_id: str, *, divulgation: Divulgation = TOUT,
     ):
         """Échanges bruts de la même identité que l'interlocuteur.
 
-        ``disclose_others=False`` (sous le seuil de divulgation : salon
-        public, compte non corroboré) ferme la voie entièrement. Elle
-        cherchait « l'identité de l'interlocuteur », c'est-à-dire TOUS ses
-        handles : dans un groupe Telegram, les DM du compte revenaient mot
-        pour mot devant l'audience. Le verbatim est ce qui s'est dit en tête
-        à tête, et l'audience est précisément ce que la porte mesure.
+        Tout ou rien, sur la **fiche** de l'interlocuteur
+        (``divulgation.fiche_ouverte`` = ``may_disclose``, inchangé) : c'est
+        SON verbatim, la forme la plus lourde de sa propre histoire. Sous le
+        seuil (salon public, compte non corroboré) la voie se ferme
+        entièrement. Elle cherchait « l'identité de l'interlocuteur »,
+        c'est-à-dire TOUS ses handles : dans un groupe Telegram, les DM du
+        compte revenaient mot pour mot devant l'audience. Le verbatim est ce
+        qui s'est dit en tête à tête, et l'audience est précisément ce que la
+        porte mesure.
         """
         from identity.trust import is_internal_person
 
-        if not person_id or is_internal_person(person_id) or not disclose_others:
+        if not person_id or is_internal_person(person_id) or not divulgation.fiche_ouverte:
             return []
         try:
             from configs.service import config_service
@@ -618,76 +630,34 @@ class MemoryRetriever:
             return None
 
     @staticmethod
-    def sans_confidences_d_autrui(queryset, boost_name: str):
-        """Retire d'un queryset les souvenirs qui impliquent une AUTRE personne.
+    async def _load_by_pk(queryset, pks: list[int], *, soi_nom: str = "") -> dict | None:
+        """Charge en UNE requete les lignes demandees, avec leurs M2M et leur
+        qualification face a l'interlocuteur (``read.charger_qualifiees``).
 
-        La porte de divulgation fermait `--- CE QUE TU SAIS DE CETTE PERSONNE ---`
-        mais pas `--- TES SOUVENIRS ---` : le boost de personne (×1.4) PROMEUT,
-        il n'exclut rien, et ni la voie vectorielle ni les deux voies
-        non-lexicales n'avaient le moindre filtre. Un handle jamais lié
-        recevait donc « Alice m'a confié qu'elle a rechuté » — pendant que
-        l'outil ``memory_search``, lui, refusait la même ligne à voix haute.
-
-        Le filtre porte sur les entités de type ``person`` : les souvenirs
-        qu'elle a vécus seule, et tout ce qui ne concerne personne
-        d'identifié, continuent de remonter. On ne l'ampute pas de sa mémoire,
-        on l'empêche de raconter celle des autres.
-
-        L'ensemble des AUTRES personnes est construit d'abord, puis exclu en
-        une seule jointure. La forme précédente —
-        ``exclude(Q(entities__entity_type="person") & ~Q(entities__name__iexact=X))``
-        — se compilait en « garder si aucune personne, OU si X figure parmi
-        les entités » : un souvenir étiqueté {Thomas, Alice} était servi à
-        Thomas dans un salon public, c'est-à-dire exactement la confidence
-        d'Alice que le filtre existe pour retenir. Même piège que celui déjà
-        documenté sur ``read.rows_mentioning_others``. Vaut pour tout modèle
-        portant un M2M ``entities`` (souvenirs et connaissances).
+        Retourne ``{pk: (ligne, themes, entities, qualification)}``, ou
+        ``None`` si le chargement lui-meme a echoue (base verrouillee, table
+        absente) — le cas ou l'appelant doit replier *toute* la page sur
+        ChromaDB, a distinguer d'une ligne simplement absente du resultat.
         """
-        from memory.models import Entity
+        from memory import read
 
-        autres = Entity.objects.filter(entity_type="person")
-        if boost_name:
-            autres = autres.exclude(name__iexact=boost_name)
-        impliques = queryset.model.objects.filter(entities__in=autres).values("pk")
-        return queryset.exclude(pk__in=impliques)
-
-    @staticmethod
-    async def _load_by_pk(queryset, pks: list[int]) -> dict | None:
-        """Charge en UNE requete les lignes demandees, avec leurs M2M.
-
-        Retourne ``{pk: (ligne, themes, entities)}``, ou ``None`` si le
-        chargement lui-meme a echoue (base verrouillee, table absente) — le
-        cas ou l'appelant doit replier *toute* la page sur ChromaDB, a
-        distinguer d'une ligne simplement absente du resultat.
-
-        Les M2M se lisent via ``.all()``, la seule forme qui consomme le cache
-        de ``prefetch_related`` : ``values_list()`` rechaine le queryset
-        (``_result_cache`` remis a None) et refait la requete, ce qui rendait
-        le prefetch purement decoratif.
-        """
         if not pks:
             return {}
-
-        def _charger() -> dict:
-            rows = queryset.filter(pk__in=pks).prefetch_related("themes", "entities")
-            return {
-                row.pk: (
-                    row,
-                    [t.name for t in row.themes.all()],
-                    [e.name for e in row.entities.all()],
-                )
-                for row in rows
-            }
-
         try:
-            return await sync_to_async(_charger)()
+            return await sync_to_async(read.charger_qualifiees)(
+                queryset, pks, soi_nom=soi_nom,
+            )
         except Exception as exc:
             degradations.record("rappel: chargement ORM des lignes", exc)
             return None
 
+    @staticmethod
+    def _admis(qualification, divulgation: Divulgation) -> bool:
+        return sensibilite.admissible(qualification, divulgation)
+
     async def _enrich_souvenirs(
         self, raw_results: list[dict], *, boost_name: str = "",
-        disclose_others: bool = True,
+        divulgation: Divulgation = TOUT,
     ) -> list[dict]:
         """Load full Souvenir data from ORM.
 
@@ -700,18 +670,14 @@ class MemoryRetriever:
         from memory.models import Souvenir
 
         pks = [pk for pk in (self._pk_of(r) for r in raw_results) if pk is not None]
-        # Le seul filtre est celui de la frontière intime : sous le seuil de
-        # divulgation, un souvenir qui implique une AUTRE personne identifiée
-        # n'a pas à remonter. Un pk absent du chargement signifie donc soit
-        # « la ligne n'existe plus », soit « ce n'est pas à elle de le
-        # raconter » — les deux se traitent pareil ici (on saute), mais seule
-        # la première doit évincer le vecteur, d'où le `orphelins` ci-dessous
-        # qui n'est alimenté qu'en divulgation ouverte.
-        base = Souvenir.objects.all()
-        if not disclose_others:
-            base = self.sans_confidences_d_autrui(base, boost_name)
-        loaded = await self._load_by_pk(base, pks)
-        if loaded is None and not disclose_others:
+        # Le seul filtre est celui de la frontière intime, ligne par ligne :
+        # un souvenir qui implique une AUTRE personne et pèse plus que le
+        # niveau du tour n'a pas à remonter ; en dessous, il sort tagué.
+        # Une ligne absente du chargement n'existe plus — elle évince son
+        # vecteur ; une ligne retirée par le niveau est bien vivante.
+        loaded = await self._load_by_pk(Souvenir.objects.all(), pks, soi_nom=boost_name)
+        brut_permis = divulgation.niveau is Niveau.CONFIDENCE
+        if loaded is None and not brut_permis:
             # Le repli ChromaDB sert la page BRUTE, et le filtre intime ne vit
             # que dans la requête ORM qui vient d'échouer : une base verrouillée
             # ouvrait la porte que la divulgation ferme. Le rappel se tait
@@ -730,16 +696,12 @@ class MemoryRetriever:
                     # Effacee (fusion nocturne) : le repli ChromaDB la
                     # resservirait indefiniment, importance figee, et l'oubli
                     # decide deviendrait inoubliable.
-                    #
-                    # En divulgation fermee on ne peut PAS conclure a
-                    # l'absence : la ligne est peut-etre simplement celle d'un
-                    # tiers, filtree a dessein. L'evincer de ChromaDB
-                    # supprimerait alors un souvenir parfaitement vivant.
-                    if disclose_others:
-                        orphelins.append(pk)
+                    orphelins.append(pk)
                     continue
 
-                souvenir, themes, entities = row
+                souvenir, themes, entities, qualif = row
+                if not self._admis(qualif, divulgation):
+                    continue
 
                 # Compute base relevance from vector distance (lower = more relevant)
                 distance = r.get("distance")
@@ -754,13 +716,14 @@ class MemoryRetriever:
                     "themes": themes,
                     "entities": entities,
                     "relevance": relevance,
+                    "tag": sensibilite.tag(qualif),
                 })
                 continue
 
             # Chargement en echec, ou identifiant inexploitable : repli ChromaDB.
-            # Sous le seuil, une ligne dont on ne peut pas vérifier de qui
-            # elle parle ne sort pas — même règle que l'outil ``memory_search``.
-            if not disclose_others:
+            # Une ligne dont on ne peut pas vérifier de qui elle parle ne sort
+            # que si le tour peut tout porter — même règle que ``memory_search``.
+            if not brut_permis:
                 continue
             meta = r.get("metadata", {})
             enriched.append({
@@ -798,19 +761,46 @@ class MemoryRetriever:
     # ── Rappels non-lexicaux — ce que le cosinus ne trouvera jamais ──────
 
     @staticmethod
-    def _linked_souvenir_dict(row: dict) -> dict:
-        """Ligne ``.values()`` → dict au format attendu par _format_context."""
+    def _linked_souvenir_dict(charge: tuple) -> dict:
+        """Ligne chargée ``(souvenir, thèmes, entités, qualification)`` → dict
+        au format attendu par _format_context."""
+        souvenir, _themes, _entities, qualif = charge
         return {
-            "id": row["id"],
-            "content": row["content"],
-            "emotion": row.get("emotion", "neutral"),
-            "occurred_at": row.get("occurred_at"),
-            "importance": row.get("importance", 0.0),
+            "id": souvenir.pk,
+            "content": souvenir.content,
+            "emotion": souvenir.emotion or "neutral",
+            "occurred_at": souvenir.occurred_at,
+            "importance": souvenir.importance,
+            "tag": sensibilite.tag(qualif),
         }
+
+    #: Les voies non-lexicales filtrent en Python après chargement (la
+    #: sensibilité effective et le témoignage se lisent ligne par ligne) :
+    #: elles chargent ce multiple de ce qu'elles rendent.
+    _SURPLUS_FILTRE = 4
+
+    async def _lignes_admises(
+        self, queryset, pks: list[int], *, boost_name: str,
+        divulgation: Divulgation, n: int,
+    ) -> list[dict]:
+        """Les ``n`` premières lignes de ``pks`` (dans cet ordre) que le
+        niveau du tour admet, au format de ``_format_context``."""
+        loaded = await self._load_by_pk(queryset, pks, soi_nom=boost_name)
+        if not loaded:
+            return []
+        out: list[dict] = []
+        for pk in pks:
+            charge = loaded.get(pk)
+            if charge is None or not self._admis(charge[3], divulgation):
+                continue
+            out.append(self._linked_souvenir_dict(charge))
+            if len(out) >= n:
+                break
+        return out
 
     async def _associative_expansion(
         self, souvenirs: list[dict], exclude_pks: set, *,
-        boost_name: str = "", disclose_others: bool = True,
+        boost_name: str = "", divulgation: Divulgation = TOUT,
     ) -> list[dict]:
         """« Ça me rappelle… » — souvenirs liés par thème/entité aux meilleurs
         hits déjà retenus. **Ancré** sur ce qui est déjà pertinent (donc pas
@@ -837,7 +827,7 @@ class MemoryRetriever:
         if not themes and not entities:
             return []
 
-        def _query() -> list[dict]:
+        def _candidats() -> list[int]:
             from django.db.models import Q
 
             from memory.models import Souvenir
@@ -847,28 +837,30 @@ class MemoryRetriever:
                 q |= Q(themes__name__in=themes)
             if entities:
                 q |= Q(entities__name__in=entities)
-            base = Souvenir.objects.filter(q)
-            if not disclose_others:
-                base = self.sans_confidences_d_autrui(base, boost_name)
-            rows = list(
-                base
+            return list(
+                Souvenir.objects.filter(q)
                 .filter(importance__gte=min_imp)
                 .exclude(pk__in=exclude_pks)
                 .distinct()
                 .order_by("-importance")
-                .values("id", "content", "emotion", "occurred_at", "importance")[:max_n]
+                .values_list("pk", flat=True)[: max_n * self._SURPLUS_FILTRE]
             )
-            return [self._linked_souvenir_dict(r) for r in rows]
 
         try:
-            return await sync_to_async(_query)()
+            from memory.models import Souvenir
+
+            pks = await sync_to_async(_candidats)()
+            return await self._lignes_admises(
+                Souvenir.objects.all(), pks, boost_name=boost_name,
+                divulgation=divulgation, n=max_n,
+            )
         except Exception as exc:
             degradations.record("prompt: expansion associative", exc)
             return []
 
     async def _importance_intrusion(
         self, exclude_pks: set, salience_boost: float, *,
-        boost_name: str = "", disclose_others: bool = True,
+        boost_name: str = "", divulgation: Divulgation = TOUT,
     ) -> list[dict]:
         """Le souvenir intense qui S'IMPOSE, même hors-sujet — l'intrusion.
 
@@ -889,17 +881,23 @@ class MemoryRetriever:
         if salience_boost < threshold:
             return []
 
-        def _query() -> list[dict]:
+        def _candidats() -> list[int]:
             from memory.models import Souvenir
 
-            base = Souvenir.objects.filter(importance__gte=min_imp)
-            if not disclose_others:
-                base = self.sans_confidences_d_autrui(base, boost_name)
-            rows = list(
-                base
+            return list(
+                Souvenir.objects.filter(importance__gte=min_imp)
                 .exclude(pk__in=exclude_pks)
                 .order_by("-importance")
-                .values("id", "content", "emotion", "occurred_at", "importance")[:5]
+                .values_list("pk", flat=True)[:5]
+            )
+
+        try:
+            from memory.models import Souvenir
+
+            pks = await sync_to_async(_candidats)()
+            rows = await self._lignes_admises(
+                Souvenir.objects.all(), pks, boost_name=boost_name,
+                divulgation=divulgation, n=len(pks),
             )
             if not rows:
                 return []
@@ -910,17 +908,14 @@ class MemoryRetriever:
                 key=lambda r: r["importance"]
                 * (1 + _emotional_charge(r.get("emotion") or "neutral")),
             )
-            return [self._linked_souvenir_dict(best)]
-
-        try:
-            return await sync_to_async(_query)()
+            return [best]
         except Exception as exc:
             degradations.record("prompt: intrusion importance", exc)
             return []
 
     async def _enrich_connaissances(
         self, raw_results: list[dict], *, boost_name: str = "",
-        disclose_others: bool = True,
+        divulgation: Divulgation = TOUT,
     ) -> list[dict]:
         """Load full Connaissance data from ORM.
 
@@ -936,9 +931,7 @@ class MemoryRetriever:
         # metadonnee, donc une ligne invalidee entre l'indexation et cette
         # lecture doit disparaitre du bloc, pas etre servie.
         base = Connaissance.objects.filter(is_valid=True)
-        if not disclose_others:
-            base = self.sans_confidences_d_autrui(base, boost_name)
-        loaded = await self._load_by_pk(base, pks)
+        loaded = await self._load_by_pk(base, pks, soi_nom=boost_name)
         if loaded is None:
             # Chargement en échec : le repli ChromaDB servirait la page brute,
             # sans `is_valid` ni le filtre intime — les deux ne vivent que dans
@@ -954,19 +947,22 @@ class MemoryRetriever:
                     # Invalidee ou effacee : le repli ChromaDB la reservirait
                     # telle quelle, ce qui annulerait le filtre ci-dessus.
                     continue
-                conn, themes, entities = row
+                conn, themes, entities, qualif = row
+                if not self._admis(qualif, divulgation):
+                    continue
                 enriched.append({
                     "content": conn.content,
                     "confidence": conn.confidence,
                     "themes": themes,
                     "entities": entities,
+                    "tag": sensibilite.tag(qualif),
                 })
                 continue
 
             # Identifiant inexploitable : repli ChromaDB, comme le faisait
             # chaque ligne quand la requete etait posee ligne par ligne —
-            # sauf sous le seuil, où l'on ne peut pas vérifier de qui elle parle.
-            if not disclose_others:
+            # sauf quand on ne peut pas tout porter : de qui parle-t-elle ?
+            if divulgation.niveau is not Niveau.CONFIDENCE:
                 continue
             enriched.append({
                 "content": r["content"],
@@ -986,7 +982,7 @@ class MemoryRetriever:
         time_str = self._time_ago(s["occurred_at"]) if s.get("occurred_at") else "?"
         emotion = s.get("emotion", "neutral")
         emotion_str = f" [{emotion}]" if emotion != "neutral" else ""
-        return f"  - ({time_str}){emotion_str} {s['content'][:300]}"
+        return f"  - ({time_str}){emotion_str} {s['content'][:300]}{s.get('tag', '')}"
 
     def _format_context(
         self,
@@ -1035,7 +1031,7 @@ class MemoryRetriever:
                 entities_str = f" (concerne: {', '.join(c['entities'])})"
             # Truncate individual content to avoid one memory dominating
             content = c["content"][:300]
-            return f"  - {content}{entities_str} [{conf_label}]"
+            return f"  - {content}{entities_str} [{conf_label}]{c.get('tag', '')}"
 
         def _exchange_line(h) -> str:
             when = "?"

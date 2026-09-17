@@ -30,11 +30,8 @@ import pytest
 from unittest.mock import patch
 
 from emotion import circadian, dynamics, pad
-from emotion.engine import (
-    ANCHOR_MAX_NORM,
-    EmotionEngine,
-    TurnEmotionView,
-)
+from emotion.engine import EmotionEngine, TurnEmotionView
+from emotion.physics import ANCHOR_MAX_NORM
 from emotion.state import Temperament
 from emotion.types import Emotion, EmotionData
 from utils.degradation import degradations
@@ -417,7 +414,7 @@ class TestEnveloppeEtAncrage:
 
     def test_une_lecture_d_ancrage_ratee_est_comptee(self):
         engine = _moteur()
-        avant = _compte("emotion.engine._anchor_from_snapshots")
+        avant = _compte("emotion.physics.anchor_from_rows")
 
         class _LigneIllisible:
             @property
@@ -425,7 +422,7 @@ class TestEnveloppeEtAncrage:
                 raise RuntimeError("colonne corrompue")
 
         assert engine._anchor_from_snapshots([_LigneIllisible()]) is None
-        assert _compte("emotion.engine._anchor_from_snapshots") > avant
+        assert _compte("emotion.physics.anchor_from_rows") > avant
 
     def test_une_emotion_inconnue_en_base_est_ignoree_sans_bruit(self):
         engine = _moteur()
@@ -544,7 +541,7 @@ class TestReleve:
         from memory.models import EmotionSnapshot
 
         engine = _moteur()
-        avant = _compte("emotion.engine._save_person_snapshot")
+        avant = _compte("emotion.persistence.save_person_snapshot")
         vrai_create = EmotionSnapshot.objects.create
         appels = {"n": 0}
 
@@ -558,7 +555,7 @@ class TestReleve:
 
         await engine.save_snapshot("p", EmotionData(Emotion.ANGRY, 0.8))
         assert "p" not in engine._last_snapshot_time
-        assert _compte("emotion.engine._save_person_snapshot") > avant
+        assert _compte("emotion.persistence.save_person_snapshot") > avant
 
         await engine.save_snapshot("p", EmotionData(Emotion.ANGRY, 0.8))
         assert len(await self._lignes()) == 1
@@ -600,7 +597,7 @@ class TestReleve:
         from memory.models import EmotionSnapshot
 
         engine = _moteur()
-        avant = _compte("emotion.engine.ensure_person_loaded")
+        avant = _compte("emotion.persistence.ensure_person_loaded")
 
         class _Injoignable:
             def filter(self, **kwargs):
@@ -611,4 +608,4 @@ class TestReleve:
         await engine.ensure_person_loaded("web_absent")
 
         assert "web_absent" not in engine.person_moods
-        assert _compte("emotion.engine.ensure_person_loaded") > avant
+        assert _compte("emotion.persistence.ensure_person_loaded") > avant

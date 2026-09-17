@@ -503,7 +503,8 @@ class TestDivulgationDuRappelSpontane:
         with patch("memory.manager.memory_manager") as mm:
             mm.get_memory_context_multi = AsyncMock(return_value="")
             await MemoryBridge().recall_for_context(["zelda"])
-        assert mm.get_memory_context_multi.await_args.kwargs["disclose_others"] is False
+        from identity.divulgation import FERME
+        assert mm.get_memory_context_multi.await_args.kwargs["divulgation"] is FERME
 
     async def test_un_pas_de_chantier_garde_toute_sa_memoire(self):
         from conscience.memory_bridge import MemoryBridge
@@ -511,22 +512,28 @@ class TestDivulgationDuRappelSpontane:
         with patch("memory.manager.memory_manager") as mm:
             mm.get_memory_context_multi = AsyncMock(return_value="")
             await MemoryBridge().recall_for_context(["zelda"], interne=True)
-        assert mm.get_memory_context_multi.await_args.kwargs["disclose_others"] is True
+        from identity.divulgation import TOUT
+        assert mm.get_memory_context_multi.await_args.kwargs["divulgation"] is TOUT
 
     async def test_un_destinataire_identifie_suit_la_certitude_d_identite(self):
         from types import SimpleNamespace
 
         from conscience.memory_bridge import MemoryBridge
 
+        from identity.divulgation import Divulgation, Niveau
+        niveau = Divulgation(Niveau.PERSONNEL, Niveau.PERSONNEL, fiche_ouverte=True)
         with patch("memory.manager.memory_manager") as mm, \
              patch("identity.resolver.identity_resolver.resolve_context",
-                   new=AsyncMock(return_value=SimpleNamespace(may_disclose=True))) as rc:
+                   new=AsyncMock(return_value=SimpleNamespace(may_disclose=True))) as rc, \
+             patch("pipeline.context_blocks.divulgation_du_tour",
+                   new=AsyncMock(return_value=niveau)) as ddt:
             mm.get_memory_context_multi = AsyncMock(return_value="")
             await MemoryBridge().recall_for_context(
                 ["zelda"], person_id="tg_42", channel="telegram",
             )
         assert rc.await_args.kwargs["channel"] == "telegram"
-        assert mm.get_memory_context_multi.await_args.kwargs["disclose_others"] is True
+        assert ddt.await_args.args[0] is rc.return_value
+        assert mm.get_memory_context_multi.await_args.kwargs["divulgation"] is niveau
 
     async def test_une_panne_d_identite_ferme_la_porte(self):
         from conscience.memory_bridge import MemoryBridge
@@ -536,7 +543,8 @@ class TestDivulgationDuRappelSpontane:
                    new=AsyncMock(side_effect=RuntimeError("db locked"))):
             mm.get_memory_context_multi = AsyncMock(return_value="")
             await MemoryBridge().recall_for_context(["zelda"], person_id="tg_42")
-        assert mm.get_memory_context_multi.await_args.kwargs["disclose_others"] is False
+        from identity.divulgation import FERME
+        assert mm.get_memory_context_multi.await_args.kwargs["divulgation"] is FERME
 
     def test_l_acte_rappelle_apres_avoir_choisi_le_destinataire(self):
         """AST : dans `_act`, l'appel à `recall_for_context` suit l'appel à
@@ -544,11 +552,11 @@ class TestDivulgationDuRappelSpontane:
         import ast
         import inspect
 
-        from conscience import engine
+        from conscience import acte
 
-        tree = ast.parse(inspect.getsource(engine))
+        tree = ast.parse(inspect.getsource(acte))
         fn = next(n for n in ast.walk(tree)
-                  if isinstance(n, ast.AsyncFunctionDef) and n.name == "_act")
+                  if isinstance(n, ast.AsyncFunctionDef) and n.name == "act")
         lignes = {}
         for node in ast.walk(fn):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):

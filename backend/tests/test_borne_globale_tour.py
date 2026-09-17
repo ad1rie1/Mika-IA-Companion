@@ -406,7 +406,7 @@ def _pire_cas() -> ChatPrompt:
     construit à partir des plafonds RÉELS de chaque bloc."""
     from config.personality import personality
     from memory.retrieval.retriever import MemoryRetriever
-    from pipeline.context import (
+    from pipeline.context_blocks import (
         _MODULE_CONTEXT_MAX_CHARS,
         _PROJECT_LIST_ITEMS_MAX,
         _PROJECT_TEXT_MAX_CHARS,
@@ -535,17 +535,17 @@ def _outils_reels() -> list:
 def _contexte_charge(tools: list):
     """Un tour lourd mais réel : chaque couche à SON plafond de production.
 
-    Rien d'inventé ici — les valeurs viennent de `pipeline.context` et du
+    Rien d'inventé ici — les valeurs viennent de `pipeline.context_blocks` et du
     retriever. C'est le tour d'une conversation installée : profil rempli,
     projet actif, rappel mémoire dense, fil long, résumé de compaction.
     """
     from memory.retrieval.retriever import MemoryRetriever
-    from pipeline.context import (
+    from pipeline.context import ConversationContext
+    from pipeline.context_blocks import (
         _MODULE_CONTEXT_MAX_CHARS,
         _PROJECT_LIST_ITEMS_MAX,
         _PROJECT_TEXT_MAX_CHARS,
         _SELF_CONCEPT_MAX_CHARS,
-        ConversationContext,
     )
 
     caps = dict(_CAPS_LIBRES)

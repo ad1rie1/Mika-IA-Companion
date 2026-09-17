@@ -182,9 +182,11 @@ class TestClaudeProvider:
         tool.to_json_schema.return_value = {"type": "object", "properties": {}}
         tool.handler = handler
 
+        from ai.chat import ChatPrompt
+
         p = self._make_provider(mock_client=mock_client)
-        text, calls = await p.complete_with_tools(
-            system_prompt="sys", user_prompt="user", model="claude-3-5-haiku",
+        text, calls = await p.complete_chat_with_tools(
+            ChatPrompt("sys", message="user"), model="claude-3-5-haiku",
             tools=[tool],
         )
         assert text == "fini"

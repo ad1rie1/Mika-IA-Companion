@@ -167,7 +167,7 @@ class TestDemandesDesActionsProgrammees:
         ]
         action = SimpleNamespace(prompt="vérifier mes mails", modules=["email"])
         ctx = _ctx(scheduled_actions=[action])
-        with patch("conscience.engine.drive_engine") as de:
+        with patch("conscience.acte.drive_engine") as de:
             de.states = {}
             trousse = e._preparer_trousse(ctx)
         assert "email" in trousse.modules
@@ -180,7 +180,7 @@ class TestDemandesDesActionsProgrammees:
         e._modules_enregistres = lambda: ["conscience_tools", "memory_tools"]
         action = SimpleNamespace(prompt="dire bonjour")  # pas de .modules
         ctx = _ctx(scheduled_actions=[action])
-        with patch("conscience.engine.drive_engine") as de:
+        with patch("conscience.acte.drive_engine") as de:
             de.states = {}
             trousse = e._preparer_trousse(ctx)
         assert set(trousse.modules) == {"conscience_tools", "memory_tools"}
@@ -740,10 +740,11 @@ class TestQuiLuiManque:
         await self._amie("Chaude", closeness="friend")
         await self._messages("tg_c", [12])
 
-        moods = {"tg_c": SimpleNamespace(anchor=(0.8, 0.0, 0.0))}
+        # La chaleur est lue par ``emotion_engine.chaleur_envers`` (la
+        # composante plaisir de l'ancre, dans [0, 1]) — le même bord que la
+        # divulgation graduée du tour.
         faux_moteur = SimpleNamespace(
-            ensure_person_loaded=AsyncMock(),
-            person_moods=moods,
+            chaleur_envers=AsyncMock(side_effect=lambda pid: 0.8 if pid == "tg_c" else 0.0),
         )
         bridge = MemoryBridge()
         with patch(
@@ -792,7 +793,7 @@ class TestIntentionParPulsion:
 
         kind = DriveKind(nom)
         etat = SimpleNamespace(tension=tension)
-        patcher = patch("conscience.engine.drive_engine")
+        patcher = patch("conscience.intention.drive_engine")
         de = patcher.start()
         de.pulsion_saillante.return_value = kind
         de.states = {kind: etat}
@@ -836,7 +837,7 @@ class TestAnticipation:
         from emotion.types import Emotion
 
         e = self._moteur()
-        with patch("conscience.engine.emotion_engine") as moteur:
+        with patch("conscience.affects.emotion_engine") as moteur:
             await e._peut_etre_esperer(_ctx(), [self._chantier_presque_fini()])
         data, personne = moteur.process_emotion.call_args.args
         assert data.emotion is Emotion.HOPEFUL
@@ -849,7 +850,7 @@ class TestAnticipation:
         e._get_upcoming_actions = AsyncMock(return_value=[
             (SimpleNamespace(priority=0.9, prompt="appeler"), 30),
         ])
-        with patch("conscience.engine.emotion_engine") as moteur:
+        with patch("conscience.affects.emotion_engine") as moteur:
             await e._peut_etre_esperer(_ctx(), [])
         data, _ = moteur.process_emotion.call_args.args
         assert data.emotion is Emotion.HOPEFUL
@@ -860,7 +861,7 @@ class TestAnticipation:
             (SimpleNamespace(priority=0.9, prompt="loin"), 300),
             (SimpleNamespace(priority=0.3, prompt="tiede"), 10),
         ])
-        with patch("conscience.engine.emotion_engine") as moteur:
+        with patch("conscience.affects.emotion_engine") as moteur:
             await e._peut_etre_esperer(_ctx(), [])
         moteur.process_emotion.assert_not_called()
 
@@ -875,13 +876,13 @@ class TestAnticipation:
             identifiant=1, titre="t", envie=0.6,
             pas_effectues=4, pas_max=5, en_attente_de_reponse=True,
         )
-        with patch("conscience.engine.emotion_engine") as moteur:
+        with patch("conscience.affects.emotion_engine") as moteur:
             await e._peut_etre_esperer(_ctx(), [gele])
         moteur.process_emotion.assert_not_called()
 
     async def test_l_espoir_est_espace(self):
         e = self._moteur()
-        with patch("conscience.engine.emotion_engine") as moteur:
+        with patch("conscience.affects.emotion_engine") as moteur:
             await e._peut_etre_esperer(_ctx(), [self._chantier_presque_fini()])
             await e._peut_etre_esperer(_ctx(), [self._chantier_presque_fini()])
         assert moteur.process_emotion.call_count == 1
@@ -933,8 +934,8 @@ class TestEnnuiEtSolitude:
         """Un tour de vide avec la tension SOCIAL contrôlée."""
         from drives.state import DriveKind
 
-        with patch("conscience.engine.emotion_engine") as moteur, patch(
-            "conscience.engine.drive_engine",
+        with patch("conscience.affects.emotion_engine") as moteur, patch(
+            "conscience.affects.drive_engine",
         ) as de:
             de.states = {DriveKind.SOCIAL: SimpleNamespace(tension=social)}
             await e._peut_etre_s_ennuyer(ctx, travaux=list(travaux))
@@ -976,8 +977,8 @@ class TestEnnuiEtSolitude:
 
         e = self._moteur()
         ctx = _ctx(idle_seconds=3 * 3600)
-        with patch("conscience.engine.emotion_engine") as moteur, patch(
-            "conscience.engine.drive_engine",
+        with patch("conscience.affects.emotion_engine") as moteur, patch(
+            "conscience.affects.drive_engine",
         ) as de:
             de.states = {DriveKind.SOCIAL: SimpleNamespace(tension=0.1)}
             await e._peut_etre_s_ennuyer(ctx, travaux=[])
@@ -1469,7 +1470,7 @@ class TestIntegrationAffective:
         presque = TravailEnCours(
             identifiant=1, titre="t", envie=0.6, pas_effectues=4, pas_max=5,
         )
-        with patch("conscience.engine.emotion_engine", emo):
+        with patch("conscience.affects.emotion_engine", emo):
             await e._peut_etre_esperer(_ctx(), [presque])
         position = emo.person_moods["conscience_mika"].dynamic.position
         assert position[0] > 0.02
@@ -1562,7 +1563,7 @@ class TestLesAttentesSeRealisent:
         with patch(
             "identity.resolver.identity_resolver.handles_for_entity_names",
             new=self._resolveur({"Alice": "tg_a"}),
-        ), patch("conscience.engine.emotion_engine") as moteur:
+        ), patch("conscience.ruminations.emotion_engine") as moteur:
             await e._le_retour_d_un_absent()
         data, personne = moteur.process_emotion.call_args.args
         assert data.emotion is Emotion.HAPPY
@@ -1580,7 +1581,7 @@ class TestLesAttentesSeRealisent:
         with patch(
             "identity.resolver.identity_resolver.handles_for_entity_names",
             new=self._resolveur({"Alice": "tg_a"}),
-        ), patch("conscience.engine.emotion_engine") as moteur:
+        ), patch("conscience.ruminations.emotion_engine") as moteur:
             await e._le_retour_d_un_absent()
         moteur.process_emotion.assert_not_called()
         pensee = await sync_to_async(Rumination.objects.get)(pk=pensee.pk)
@@ -1596,7 +1597,7 @@ class TestLesAttentesSeRealisent:
         with patch(
             "identity.resolver.identity_resolver.handles_for_entity_names",
             new=self._resolveur({"Alice": "tg_a"}),
-        ), patch("conscience.engine.emotion_engine") as moteur:
+        ), patch("conscience.ruminations.emotion_engine") as moteur:
             await e._le_retour_d_un_absent()
         moteur.process_emotion.assert_not_called()
 
@@ -1605,7 +1606,7 @@ class TestLesAttentesSeRealisent:
 
         e = _engine()
         e._dernier_retour_scan = _t.monotonic()
-        with patch("conscience.engine.emotion_engine") as moteur:
+        with patch("conscience.ruminations.emotion_engine") as moteur:
             await e._le_retour_d_un_absent()
         moteur.process_emotion.assert_not_called()
 
@@ -1826,7 +1827,7 @@ class TestCongruenceDEntree:
                 dynamic=SimpleNamespace(position=position),
             ),
         )
-        return e, patch("conscience.engine.emotion_engine", faux)
+        return e, patch("conscience.perception.emotion_engine", faux)
 
     def test_un_signal_congruent_pese_un_peu_plus(self):
         from emotion import pad
@@ -1989,9 +1990,8 @@ class TestWhoComforts:
             "Chaude": [{"person_id": "tg_c", "channel": "telegram",
                         "kind": "module"}],
         })
-        moods = {"tg_c": SimpleNamespace(anchor=(0.8, 0.0, 0.0))}
         faux_moteur = SimpleNamespace(
-            ensure_person_loaded=AsyncMock(), person_moods=moods,
+            chaleur_envers=AsyncMock(side_effect=lambda pid: 0.8 if pid == "tg_c" else 0.0),
         )
         bridge = MemoryBridge()
         with patch(

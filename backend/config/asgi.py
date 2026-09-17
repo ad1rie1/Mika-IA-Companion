@@ -1,6 +1,8 @@
 import asyncio
 import os
 import logging
+import signal
+import time
 
 from channels.auth import AuthMiddlewareStack
 from channels.routing import ProtocolTypeRouter, URLRouter
@@ -20,6 +22,108 @@ logger = logging.getLogger(__name__)
 # Above a normal turn, below any patience a restart has: past this the turn
 # is cancelled and picked up again on the next boot via ``awaiting_reply``.
 DRAIN_TIMEOUT_S = 10
+
+# Budget de chaque étape de l'arrêt, en secondes (OPS-02). Rien ne bornait
+# l'arrêt : uvicorn n'a pas de timeout de lifespan, et `consolidator.stop()`
+# attendait un tick entier — N tranches × 120 s d'appels IA — jusqu'à ce que
+# le SIGKILL de systemd tombe au pire endroit. Chaque étape passe sous
+# `wait_for` ; un dépassement est journalisé ET compté (`arret: <étape> hors
+# budget`), jamais propagé — l'étape suivante s'exécute quand même. La somme
+# (`BUDGET_ARRET_TOTAL_S`) reste sous le `TimeoutStopSec` de
+# `deploy/mika.service`, ce qu'un test vérifie en lisant l'unit.
+BUDGETS_ARRET_S: dict[str, float] = {
+    "telegram": 3.0,
+    "file de tours (drain)": float(DRAIN_TIMEOUT_S),
+    "file de tours (stop)": 1.0,
+    "conscience": 3.0,
+    "modules": 5.0,
+    "project runner": 2.0,
+    "sleep cycle": 2.0,
+    "emotion sync": 1.0,
+    "memoire": 12.0,
+    "emotion": 3.0,
+    "diffusions differees": 2.0,
+    "wal checkpoint": 1.0,
+}
+BUDGET_ARRET_TOTAL_S = sum(BUDGETS_ARRET_S.values())
+
+
+def _arreter_le_serveur(exc: BaseException) -> None:
+    """Crochet d'échec fatal du chargement différé de la mémoire longue.
+
+    Le refus (`MemoryUnavailable`) remontait du lifespan et uvicorn sortait
+    en code 3 ; le chargement partant désormais en tâche de fond après
+    l'ouverture du port, le refus n'a plus de pile à remonter. On demande
+    l'arrêt par le signal qu'uvicorn attend (SIGTERM → arrêt propre, lifespan
+    shutdown compris), `/health` répond `failed` entre-temps, et `run.py`
+    sort en code 3 en voyant l'état `failed` — la même sémantique qu'avant :
+    MEMORY_REQUIRE_VECTOR_STORE=1 refuse, il ne dégrade pas.
+    """
+    from config.readiness import etat_processus
+
+    etat_processus.echec_fatal = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+    logger.critical("Arrêt du processus demandé : mémoire longue refusée")
+    signal.raise_signal(signal.SIGTERM)
+
+
+async def _etape(nom: str, coro, budget_s: float) -> bool:
+    """Une étape de l'arrêt, sous budget. Rend True si elle a abouti.
+
+    Un dépassement annule l'étape (le `wait_for` annule la coroutine) et
+    laisse la suivante s'exécuter ; une exception est journalisée. Ni l'un ni
+    l'autre ne remonte : l'arrêt doit atteindre la sauvegarde de l'état
+    émotionnel et le checkpoint WAL quoi qu'il arrive avant.
+    """
+    from utils.degradation import degradations
+
+    debut = time.monotonic()
+    try:
+        await asyncio.wait_for(coro, timeout=budget_s)
+        return True
+    except asyncio.TimeoutError as exc:
+        degradations.record(f"arret: {nom} hors budget", exc)
+        logger.warning(
+            "Arrêt : étape « %s » hors budget (%.1f s) — étape suivante", nom, budget_s,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        degradations.record(f"arret: {nom}", exc)
+        logger.exception("Arrêt : étape « %s » en erreur — étape suivante", nom)
+    finally:
+        logger.info("Arrêt : « %s » en %.2f s", nom, time.monotonic() - debut)
+    return False
+
+
+def _wal_checkpoint_sync() -> None:
+    """`PRAGMA wal_checkpoint(TRUNCATE)` sur la base SQLite, en dernier.
+
+    Sous WAL, les écritures s'accumulent dans `vtuber.db-wal` et ne
+    reviennent dans le fichier principal qu'au checkpoint automatique (1000
+    pages). Après un arrêt propre, un `.db` seul n'est donc pas la base : la
+    sauvegarde par copie de fichier (OPS-10) perdait ce que le WAL tenait.
+    TRUNCATE replie tout et vide le journal ; il ne bloque pas — s'il reste
+    un lecteur (une connexion d'un thread pas encore fermé), SQLite rend
+    `busy=1` et laisse le WAL en place, ce qui est journalisé, pas fatal.
+    Toutes les boucles sont arrêtées à ce stade ; les connexions des threads
+    exécuteurs sont fermées avant pour ne pas être ce lecteur.
+    """
+    from django.db import connection, connections
+
+    if connection.vendor != "sqlite":
+        return
+    connections.close_all()
+    with connection.cursor() as cursor:
+        cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        busy, journal, repliees = cursor.fetchone()
+    if busy:
+        logger.warning(
+            "WAL checkpoint incomplet (busy) : %d page(s) sur %d repliée(s)",
+            repliees, journal,
+        )
+    else:
+        logger.info("WAL checkpoint : %d page(s) repliée(s), journal tronqué", repliees)
+    connections.close_all()
 
 
 class LifespanWrapper:
@@ -44,6 +148,9 @@ class LifespanWrapper:
 
     async def _startup(self):
         from ai.quota import quota_tracker
+        from config.readiness import etat_processus
+
+        etat_processus.passer_a("starting")
         from asgiref.sync import sync_to_async
         from conscience.engine import conscience_engine
         from emotion.engine import emotion_engine
@@ -59,8 +166,15 @@ class LifespanWrapper:
         except Exception:
             logger.warning("Quota hydration failed", exc_info=True)
 
-        await memory_manager.initialize()
-        logger.info("Memory system initialized")
+        # Le fil et la compaction sont prêts au retour ; la mémoire longue
+        # (ChromaDB + encodeur, plusieurs secondes) se charge en thread
+        # APRÈS l'ouverture du port — `/health` dit `starting` d'ici là, et un
+        # tour reçu entre-temps se passe de rappel au lieu d'attendre. Un
+        # refus (`MemoryUnavailable`) arrête le processus via le crochet.
+        await memory_manager.initialize(
+            differe=True, sur_echec_fatal=_arreter_le_serveur,
+        )
+        logger.info("Memory system initialized (mémoire longue en chargement)")
 
         # The pool that actually answers people. Started before anything can
         # submit to it, and before the sockets are served: a turn queued by a
@@ -136,70 +250,72 @@ class LifespanWrapper:
         except Exception:
             logger.exception("Could not resume interrupted turns")
 
+        etat_processus.passer_a("started")
+
     async def _shutdown(self):
+        """Arrêt supervisé — chaque étape sous budget, dans cet ordre :
+
+        1. Telegram cesse de recevoir.
+        2. La file de tours est vidée (borné) puis arrêtée : un tour coupé
+           entre l'appel IA et sa persistance revient comme « tour
+           interrompu » au prochain démarrage.
+        3. Conscience, modules, project runner, sleep cycle, emotion sync
+           sont arrêtés — AVANT les passes finales (OPS-04) : un `notify_ai`
+           de module ou un acte de la conscience passe hors file
+           (`INTERNAL_TRIGGER` → `process_message` direct) et modifiait
+           l'état émotionnel *après* sa sauvegarde, donc le perdait.
+        4. Passes finales : mémoire (consolidateur borné, checkpoint par
+           tranche) puis état émotionnel.
+        5. Diffusions différées vidées, puis `wal_checkpoint(TRUNCATE)` en
+           tout dernier — quand plus rien n'écrit.
+
+        Un dépassement de budget n'arrête pas la séquence : il est compté
+        (`utils.degradation`) et l'étape suivante s'exécute.
+        """
         from communication.channels import telegram_channel
+        from config.readiness import etat_processus
+        from conscience.engine import conscience_engine
         from emotion.engine import emotion_engine
         from emotion.sync import emotion_sync
-        from conscience.engine import conscience_engine
         from memory.sleep import sleep_cycle
-        from projects.runner import project_runner
-
-        try:
-            await telegram_channel.stop()
-        except Exception:
-            logger.exception("Telegram channel failed to stop cleanly")
-
-        # Stop accepting turns, but let the in-flight one finish writing: a
-        # reply cut off between the AI call and its persistence would come
-        # back as an "interrupted turn" and be replayed on the next boot.
+        from pipeline.processor import flush_delayed_broadcasts
         from pipeline.turns import turn_queue
+        from projects.runner import project_runner
+        from asgiref.sync import sync_to_async
 
-        try:
-            await asyncio.wait_for(turn_queue.drain(), timeout=DRAIN_TIMEOUT_S)
-        except (asyncio.TimeoutError, Exception):
-            logger.warning("Turn queue did not drain in time — cancelling")
-        try:
-            await turn_queue.stop()
-        except Exception:
-            logger.exception("Turn queue failed to stop cleanly")
-        # Les diffusions différées (délai « réflexion ») vivent hors du
-        # worker : la file vidée, il peut en rester deux secondes en vol.
-        try:
-            from pipeline.processor import flush_delayed_broadcasts
+        etat_processus.passer_a("stopping")
+        debut = time.monotonic()
+        b = BUDGETS_ARRET_S
 
-            await flush_delayed_broadcasts(timeout=5.0)
-        except Exception:
-            logger.exception("Delayed broadcasts failed to flush cleanly")
+        await _etape("telegram", telegram_channel.stop(), b["telegram"])
+        await _etape("file de tours (drain)", turn_queue.drain(), b["file de tours (drain)"])
+        await _etape("file de tours (stop)", turn_queue.stop(), b["file de tours (stop)"])
 
-        # Stop dedicated loops first — they only call into sleep_cycle /
-        # project_runner state and don't own DB connections, so they shut
-        # down quickly and cannot starve the managers below.
-        try:
-            await emotion_sync.stop()
-        except Exception:
-            logger.exception("Emotion sync loop failed to stop cleanly")
+        await _etape("conscience", conscience_engine.shutdown(), b["conscience"])
+        await _etape("modules", module_manager.stop_all(), b["modules"])
+        await _etape("project runner", project_runner.stop(), b["project runner"])
+        await _etape("sleep cycle", sleep_cycle.stop(), b["sleep cycle"])
+        await _etape("emotion sync", emotion_sync.stop(), b["emotion sync"])
 
-        try:
-            await project_runner.stop()
-        except Exception:
-            logger.exception("Project runner loop failed to stop cleanly")
+        await _etape("memoire", memory_manager.shutdown(), b["memoire"])
+        await _etape("emotion", emotion_engine.shutdown(), b["emotion"])
 
-        try:
-            await sleep_cycle.stop()
-        except Exception:
-            logger.exception("Sleep cycle loop failed to stop cleanly")
+        await _etape(
+            "diffusions differees",
+            flush_delayed_broadcasts(timeout=b["diffusions differees"] - 0.5),
+            b["diffusions differees"],
+        )
+        await _etape(
+            "wal checkpoint",
+            sync_to_async(_wal_checkpoint_sync, thread_sensitive=True)(),
+            b["wal checkpoint"],
+        )
 
-        await conscience_engine.shutdown()
-        logger.info("Conscience shut down")
-
-        await emotion_engine.shutdown()
-        logger.info("Emotion engine shut down")
-
-        await memory_manager.shutdown()
-        logger.info("Memory system shut down")
-
-        await module_manager.stop_all()
-        logger.info("VTuber Engine shut down cleanly")
+        etat_processus.passer_a("stopped")
+        logger.info(
+            "VTuber Engine shut down in %.1f s (budget %.0f s)",
+            time.monotonic() - debut, BUDGET_ARRET_TOTAL_S,
+        )
 
 
 def _websocket_application():

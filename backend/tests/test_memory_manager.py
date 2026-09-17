@@ -76,12 +76,14 @@ class TestGetMemoryContext:
         m.retriever = mock_r
         result = await m.get_memory_context("parle-moi de ton chat", person_id="alice")
         assert result == "Souvenir: chats"
-        # `disclose_others` porte la porte de divulgation jusqu'au rappel : sous
-        # le seuil, `--- TES SOUVENIRS ---` ne doit pas servir les confidences
+        # `divulgation` porte le niveau du tour jusqu'au rappel : sous le
+        # seuil, `--- TES SOUVENIRS ---` ne doit pas servir les confidences
         # d'un tiers alors que le bloc « ce que tu sais de cette personne »
-        # vient d'être fermé pour la même raison. Par défaut, ouverte.
+        # vient d'être fermé pour la même raison. Sans niveau : sa mémoire
+        # entière (un appelant interne).
+        from identity.divulgation import TOUT
         mock_r.retrieve.assert_called_once_with(
-            "parle-moi de ton chat", person_id="alice", disclose_others=True,
+            "parle-moi de ton chat", person_id="alice", divulgation=TOUT,
         )
 
     @pytest.mark.asyncio
@@ -90,9 +92,10 @@ class TestGetMemoryContext:
         mock_r = MagicMock()
         mock_r.retrieve = AsyncMock(return_value="")
         m.retriever = mock_r
+        from identity.divulgation import FERME
         await m.get_memory_context("sante", person_id="web_inconnu",
-                                   disclose_others=False)
-        assert mock_r.retrieve.call_args.kwargs["disclose_others"] is False
+                                   divulgation=FERME)
+        assert mock_r.retrieve.call_args.kwargs["divulgation"] is FERME
 
     @pytest.mark.asyncio
     async def test_retriever_error_returns_empty(self):

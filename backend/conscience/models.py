@@ -27,7 +27,7 @@ class Observation(models.Model):
     #: à trois endroits : un quatrième lecteur qui ignorait la convention
     #: recevait un tuple vide EN SILENCE — le mode de panne précis que ce
     #: moteur passe son temps à chasser. Les lignes d'avant la migration ont
-    #: ``[]`` ici ; ``engine._themes_de`` retombe alors sur ``raw_data``.
+    #: ``[]`` ici ; ``entretien.themes_de`` retombe alors sur ``raw_data``.
     themes = models.JSONField(default=list, blank=True)
 
     # Interpretation (filled by interpreter pipeline)
@@ -131,6 +131,15 @@ class ConscienceLog(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        # Requise toutes les 30 s par l'introspection (`filter(decision="act",
+        # created_at__gte=…).count()` + `order_by("-created_at")[:5]`), au
+        # boot (cooldown, salutations), par la rétention et par le tableau
+        # de bord — sans index, chacune balayait une table qui gagne ~2 880
+        # lignes par jour.
+        indexes = [
+            models.Index(fields=["decision", "-created_at"]),
+            models.Index(fields=["-created_at"]),
+        ]
 
     def __str__(self):
         return f"[{self.decision}] {self.reason[:60]} ({self.created_at:%H:%M})"

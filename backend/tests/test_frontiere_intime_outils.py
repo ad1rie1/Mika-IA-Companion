@@ -153,9 +153,10 @@ class TestFrontiereIntimeOutils:
         assert contenus == ["Tu m'as montre ta guitare"]
 
     async def test_la_lecture_de_perimetre_ne_se_laisse_pas_piper_par_l_orm(self):
-        """``rows_mentioning_others`` en direct : c'est la ou vit le piege.
+        """``read.qualifications`` en direct : c'est la ou vit le piege.
         ``.filter(entities__entity_type="person").exclude(entities__id=<pk>)``
-        rend {solo_tiers} au lieu de {solo_tiers, partage}."""
+        rend {solo_tiers} au lieu de {solo_tiers, partage}. Une ligne qui
+        ne concerne aucun tiers est qualifiee ``None``."""
         from memory import read
         from memory.models import Souvenir
 
@@ -167,15 +168,15 @@ class TestFrontiereIntimeOutils:
         anonyme = await self._souvenir("il pleuvait")
 
         pks = [mien.pk, partage.pk, solo_tiers.pk, anonyme.pk]
-        autrui = await read.rows_mentioning_others(
-            Souvenir, pks, entity_id=moi.pk,
-        )
+        q = await read.qualifications(Souvenir, pks, entity_id=moi.pk)
+        autrui = {pk for pk, v in q.items() if v is not None}
         assert autrui == {partage.pk, solo_tiers.pk}
+        assert q[partage.pk].temoin is True and q[solo_tiers.pk].temoin is False
+        assert q[partage.pk].autres == ("Thomas",)
 
         # Personne non liee : toute entite-personne compte comme autrui.
-        sans_lien = await read.rows_mentioning_others(
-            Souvenir, pks, entity_id=None,
-        )
+        q = await read.qualifications(Souvenir, pks, entity_id=None)
+        sans_lien = {pk for pk, v in q.items() if v is not None}
         assert sans_lien == {mien.pk, partage.pk, solo_tiers.pk}
 
     async def test_tout_ecarte_donne_un_refus_poli(self):

@@ -1,3 +1,4 @@
+import { renderInline } from "./inlineMarkup";
 import { WebSocketClient } from "../network/WebSocketClient";
 import type { HistoryEntry, RejectedAttachment } from "../types";
 import {
@@ -681,7 +682,8 @@ export class ChatOverlay {
     if (msg.sender === "user" && msg.status && msg.status !== "sent") {
       bubble.classList.add(`status-${msg.status}`);
     }
-    bubble.textContent = msg.text;
+    if (msg.sender === "vtuber") renderInline(bubble, msg.text);
+    else bubble.textContent = msg.text;
 
     const parts: string[] = [];
     if (msg.ts) {

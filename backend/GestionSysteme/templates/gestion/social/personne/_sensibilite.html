@@ -1,0 +1,2 @@
+{% comment %} Badge de sensibilité d'une ligne de mémoire (anodin / personnel / confidence). {% endcomment %}
+<span class="badge {% if valeur == 'confidence' %}badge-danger{% elif valeur == 'personnel' %}badge-info{% else %}badge-ok{% endif %}" title="Ce que cette ligne pèse si elle concerne quelqu'un d'autre que l'interlocuteur">{{ valeur|default:"personnel" }}</span>

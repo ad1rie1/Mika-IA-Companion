@@ -553,7 +553,7 @@ class TestDatesDHistoriqueMemorisees:
         return ids
 
     async def test_le_second_appel_ne_relit_pas_la_base(self):
-        from pipeline import context as ctx_module
+        from pipeline import context_history as ctx_module
 
         ids = await self._deux_messages_espaces()
         for pk in ids:
@@ -573,7 +573,7 @@ class TestDatesDHistoriqueMemorisees:
         assert second == premier
 
     async def test_le_memo_reste_borne(self):
-        from pipeline import context as ctx_module
+        from pipeline import context_history as ctx_module
 
         ctx_module._MESSAGE_DATES.update({i: None for i in range(1, ctx_module._MESSAGE_DATES_MAX + 50)})
         ctx_module._prune_message_dates()

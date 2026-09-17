@@ -312,7 +312,7 @@ async def execute_plan(plan: PreparationPlan, person_id: str) -> PlanResults:
     if interne:
         own_scope: list[str] = []
     else:
-        from pipeline.context import own_handles
+        from pipeline.context_history import own_handles
 
         own_scope = await own_handles(person_id)
 

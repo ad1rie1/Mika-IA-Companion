@@ -194,6 +194,19 @@ def _paires_confiance():
         yield f"identity.counter_weight.{kind}", poids
 
 
+def _paires_divulgation():
+    """``identity.divulgation.*`` : repli = attribut de la dataclasse, donc
+    invisible au scanner AST. La barre du ``personnel`` est délibérément la
+    clé de la fiche (``identity.private_context_threshold``), pas une clé
+    à elle."""
+    from identity.divulgation import DEFAULT_DIVULGATION_TUNING as d
+    from identity.trust import DEFAULT_TUNING as t
+    yield "identity.divulgation.certitude_confidence", d.barre_confidence
+    yield "identity.divulgation.chaleur_min", d.chaleur_min
+    yield "identity.private_context_threshold", d.barre_personnel
+    assert d.barre_personnel == t.private_context_threshold
+
+
 def _paires_pulsions():
     from drives.state import DEFAULT_PARAMS
     for kind, base in DEFAULT_PARAMS.items():
@@ -241,6 +254,7 @@ PAIRES_INDIRECTES = [
     for nom, source in (
         ("scoring", _paires_scoring), ("confiance", _paires_confiance),
         ("pulsions", _paires_pulsions), ("voix", _paires_voix),
+        ("divulgation", _paires_divulgation),
         ("personnalite", _paires_personnalite),
     )
     for cle, repli in source()
@@ -251,7 +265,7 @@ def test_les_tables_indirectes_sont_bien_trouvees():
     """Même garde-fou d'inventaire : une table renommée viderait la liste."""
     familles = {nom for nom, _, _ in PAIRES_INDIRECTES}
     assert familles == {"scoring", "confiance", "pulsions", "voix",
-                        "personnalite"}, familles
+                        "divulgation", "personnalite"}, familles
     assert len(PAIRES_INDIRECTES) > 60, len(PAIRES_INDIRECTES)
 
 

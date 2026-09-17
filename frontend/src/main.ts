@@ -14,13 +14,8 @@ import { ChatOverlay } from "./ui/ChatOverlay";
 import { EmotionDisplay } from "./ui/EmotionDisplay";
 import { InnerLifePanel } from "./ui/InnerLifePanel";
 import { LoginOverlay } from "./ui/LoginOverlay";
+import { SpeechPresenter } from "./ui/SpeechPresenter";
 import { WS_URL } from "./network/api";
-import {
-  isEmotionName,
-  type EmotionName,
-  type SleepPhase,
-  type SpeechMessage,
-} from "./types";
 
 function wireIdentityBar(identity: IdentityService, ws: WebSocketClient) {
   const nameInput = document.getElementById("identity-name") as HTMLInputElement;
@@ -58,6 +53,45 @@ function wireIdentityBar(identity: IdentityService, ws: WebSocketClient) {
     nameInput.value = "";
     // A reload is the cleanest way to restart the greeting flow with the new ID.
     window.location.reload();
+  });
+}
+
+// Connection badge: green "Connectée" that fades out after a few seconds,
+// amber spinner while a reconnect attempt is in flight, red with the retry
+// countdown otherwise.
+function wireConnectionBadge(ws: WebSocketClient, connectionStatus: HTMLElement) {
+  let settleTimer: number | null = null;
+  ws.on("connection", (data) => {
+    if (settleTimer !== null) {
+      window.clearTimeout(settleTimer);
+      settleTimer = null;
+    }
+    if (data.status === "unauthorized") {
+      // Terminal: the client stopped retrying on purpose. Say what to do
+      // instead of leaving a spinner turning forever.
+      connectionStatus.className = "disconnected";
+      connectionStatus.textContent = "Session expirée — reconnecte-toi";
+      connectionStatus.onclick = () => window.location.reload();
+      connectionStatus.style.cursor = "pointer";
+      connectionStatus.title = "Cliquer pour se reconnecter";
+      return;
+    }
+    if (data.status === "connected") {
+      connectionStatus.className = "connected";
+      connectionStatus.textContent = "Connectée";
+      settleTimer = window.setTimeout(() => {
+        connectionStatus.classList.add("settled");
+      }, 3000);
+    } else if (data.status === "reconnecting") {
+      connectionStatus.className = "reconnecting";
+      connectionStatus.textContent = "Reconnexion…";
+    } else {
+      connectionStatus.className = "disconnected";
+      const retry = typeof data.retryInMs === "number"
+        ? ` (réessai dans ${Math.round(data.retryInMs / 1000)}s)`
+        : "";
+      connectionStatus.textContent = `Déconnectée${retry}`;
+    }
   });
 }
 
@@ -120,83 +154,25 @@ async function init() {
       createPlaceholder(sceneManager);
     });
 
-  // What the avatar shows: face, body, gaze, hands.
-  const applyAvatarEmotion = (
-    emotion: EmotionName,
-    intensity: number,
-    blend: SpeechMessage["emotion_blend"] = [],
-    persona?: SpeechMessage["voice_persona"],
-    opts: { ambient?: boolean } = {}
-  ) => {
-    emotionController.setEmotion(emotion, intensity);
-    animationSystem.setEmotion(emotion, intensity, blend ?? [], persona, opts);
-  };
-
-  // Avatar + the readout, at once — the debug hooks and silent replies.
-  const applyEmotion = (
-    emotion: EmotionName,
-    intensity: number,
-    blend: SpeechMessage["emotion_blend"] = [],
-    persona?: SpeechMessage["voice_persona"],
-    opts: { ambient?: boolean } = {}
-  ) => {
-    applyAvatarEmotion(emotion, intensity, blend, persona, opts);
-    emotionDisplay.setEmotion(emotion, intensity);
-  };
-
-  // Une réplique vocale possède le visage tant qu'elle sonne. Ce que le
-  // backend pousse entre-temps (`emotion_update`, la dérive de
-  // l'oscillateur — souvent une TROISIÈME émotion, voir CLAUDE.md) est
-  // gardé de côté et appliqué quand la voix s'est tue : la balise
-  // [EMOTION:] est la vérité du tour, et la voix qui la dit ne doit pas
-  // voir le visage glisser vers autre chose au milieu de la phrase.
-  let voicedInFlight = 0;
-  // Quand la première réplique en vol est partie : soupape de sécurité —
-  // un énoncé dont le navigateur n'émet jamais onend/onerror (flake connue
-  // de la Web Speech API) ne doit pas figer le visage jusqu'au rechargement.
-  let voicedSince = 0;
-  const VOICED_HOLD_MAX_MS = 60_000;
-  let pendingDrift: {
-    emotion: EmotionName;
-    intensity: number;
-    blend: SpeechMessage["emotion_blend"];
-  } | null = null;
-  const voiceOwnsFace = () =>
-    voicedInFlight > 0 && performance.now() - voicedSince < VOICED_HOLD_MAX_MS;
-  const flushDrift = () => {
-    if (voiceOwnsFace() || !pendingDrift) return;
-    const drift = pendingDrift;
-    pendingDrift = null;
-    applyAvatarEmotion(drift.emotion, drift.intensity, drift.blend, undefined, {
-      ambient: true,
-    });
-  };
-
-  // TTS with lip-sync + body-animation integration
+  // What the voice says, the face shows — at the moment it sounds. The
+  // presenter holds every bit of voice/drift/sleep state (see
+  // SpeechPresenter.ts); main.ts only wires frames and events into it.
+  // `presenter` is read inside callbacks the TTS fires later, so declaring
+  // it after the TTS it depends on is fine.
   const tts = new TTSService({
-    onSpeakStart: () => {
-      animationSystem.setSpeaking(true);
-    },
+    onSpeakStart: () => presenter.handleSpeakStart(),
     onSpeakEnd: () => {
-      animationSystem.setSpeaking(false);
       lipSyncController.stop();
-      // La voix s'est tue et rien n'attend derrière : le visage est rendu à
-      // la dérive. Ce chemin est aussi celui du reset synchrone de stop() /
-      // setMuted(), là où la promesse de speak() peut ne jamais se résoudre.
-      if (tts.queuedCount === 0) {
-        voicedInFlight = 0;
-        flushDrift();
-      }
+      presenter.handleSpeakEnd();
     },
     // [SIGH]/[LAUGH] tokens fire a body beat in sync with their audio.
     onProsodicCue: (cue) => {
       animationSystem.playCue(cue);
     },
     // Le plan de lip-sync doit suivre l'énoncé qui commence réellement à
-    // jouer, pas celui qu'on vient de mettre en file (voir handleSpeech
-    // ci-dessous) : deux répliques rapprochées faisaient sinon articuler la
-    // bouche sur le texte suivant pendant que l'audio du précédent tournait
-    // encore.
+    // jouer, pas celui qu'on vient de mettre en file : deux répliques
+    // rapprochées faisaient sinon articuler la bouche sur le texte suivant
+    // pendant que l'audio du précédent tournait encore.
     onUtteranceStart: (text, rate) => {
       lipSyncController.startFromPlan(tts.lipSyncPlan(text), msPerCharForRate(rate));
     },
@@ -207,6 +183,20 @@ async function init() {
       lipSyncController.seekToChar(charIndex);
     },
   });
+  const presenter = new SpeechPresenter({
+    voice: tts,
+    face: emotionController,
+    body: animationSystem,
+    stage: environment,
+    readouts: {
+      setEmotion: (emotion, intensity) => emotionDisplay.setEmotion(emotion, intensity),
+      setEmotionBlend: (blend, intensity) => innerLifePanel.setEmotionBlend(blend, intensity),
+      applyInnerState: (state) => innerLifePanel.applyInnerState(state),
+    },
+  });
+  // The InnerLifePanel extracts the phase from every inner_state payload
+  // and fans it out here (animation + environment + wake-up stamp).
+  innerLifePanel.onSleepPhaseChange((phase) => presenter.setSleepPhase(phase));
 
   // Auth: the WebSocket authenticates via the Django session cookie.
   //
@@ -252,6 +242,9 @@ async function init() {
   // identity — or a second account on the same browser — kept the previous
   // person's conversation on screen under a new name.
   const chatOverlay = new ChatOverlay(ws, effectivePersonId);
+  // Approving a project action needs an operator account (the server answers
+  // 403 otherwise). With auth disabled server-side nothing is gated.
+  innerLifePanel.setCanApprove(!auth.authenticated || auth.operator === true);
   // The identity bar lets an anonymous visitor pick a name. Authenticated
   // users have one already, and letting them edit it here would suggest they
   // can change who Mika thinks they are — which is exactly what the session
@@ -262,174 +255,12 @@ async function init() {
     document.getElementById("identity-bar")?.style.setProperty("display", "none");
   }
 
-  // Connection badge: green "Connectée" that fades out after a few seconds,
-  // amber spinner while a reconnect attempt is in flight, red with the retry
-  // countdown otherwise.
-  let settleTimer: number | null = null;
-  ws.on("connection", (data) => {
-    if (settleTimer !== null) {
-      window.clearTimeout(settleTimer);
-      settleTimer = null;
-    }
-    if (data.status === "unauthorized") {
-      // Terminal: the client stopped retrying on purpose. Say what to do
-      // instead of leaving a spinner turning forever.
-      connectionStatus.className = "disconnected";
-      connectionStatus.textContent = "Session expirée — reconnecte-toi";
-      connectionStatus.onclick = () => window.location.reload();
-      connectionStatus.style.cursor = "pointer";
-      connectionStatus.title = "Cliquer pour se reconnecter";
-      return;
-    }
-    if (data.status === "connected") {
-      connectionStatus.className = "connected";
-      connectionStatus.textContent = "Connectée";
-      settleTimer = window.setTimeout(() => {
-        connectionStatus.classList.add("settled");
-      }, 3000);
-    } else if (data.status === "reconnecting") {
-      connectionStatus.className = "reconnecting";
-      connectionStatus.textContent = "Reconnexion…";
-    } else {
-      connectionStatus.className = "disconnected";
-      const retry = typeof data.retryInMs === "number"
-        ? ` (réessai dans ${Math.round(data.retryInMs / 1000)}s)`
-        : "";
-      connectionStatus.textContent = `Déconnectée${retry}`;
-    }
-  });
+  wireConnectionBadge(ws, connectionStatus);
 
-  // Sleep phase plumbing. The InnerLifePanel extracts the phase from
-  // every inner_state payload; the fan-out collapsed to two calls with
-  // the animation rewrite (AnimationSystem forwards to the state
-  // machine, overlays, blink, gaze and hands internally). We also stamp
-  // `lastAsleepAt` while asleep so the TTS can insert a wake-up pause
-  // on the first reply after waking.
-  let lastAsleepAt: number | null = null;
-  const applySleepPhase = (phase: SleepPhase) => {
-    animationSystem.setSleepPhase(phase);
-    environment.setSleepPhase(phase);
-    if (phase !== "awake") {
-      lastAsleepAt = performance.now();
-    }
-  };
-  innerLifePanel.onSleepPhaseChange(applySleepPhase);
-
-  const handleSpeech = (data: SpeechMessage) => {
-    // Validate emotion from backend
-    const emotion: EmotionName = isEmotionName(data.emotion)
-      ? data.emotion
-      : "neutral";
-    const intensity: number =
-      typeof data.emotion_intensity === "number"
-        ? data.emotion_intensity
-        : 0.7;
-    const blend = data.emotion_blend ?? [];
-    const persona = data.voice_persona;
-
-    // The readouts follow the frame; the avatar follows the VOICE (below).
-    emotionDisplay.setEmotion(emotion, intensity);
-    innerLifePanel.setEmotionBlend(blend, intensity);
-    innerLifePanel.applyInnerState(data.inner_state);
-    // Whatever she was composing, this is it: the thinking gaze ends as
-    // the text lands, the voice follows.
-    animationSystem.setReplyPending(false);
-    // A reply supersedes any drift that was waiting for the voice to end.
-    pendingDrift = null;
-
-    const showReply = () => applyAvatarEmotion(emotion, intensity, blend, persona);
-
-    // Wake-up pause: if Mika was asleep within the last 10s (either
-    // she's still marked asleep OR she just transitioned awake in the
-    // same payload), prefix the TTS with ~1.3s of silence so she
-    // sounds like she's surfacing from sleep. Fires once per wake.
-    if (
-      lastAsleepAt !== null &&
-      performance.now() - lastAsleepAt < 10000
-    ) {
-      tts.requestWakeUpDelay(1300);
-      lastAsleepAt = null;
-    }
-
-    // Speak — the backend decides whether this turn is voiced at all, and
-    // in which voice (see backend/pipeline/voice.py). `speak: false` still
-    // shows the text and animates the avatar; it just stays silent.
-    const willSpeak =
-      data.speak !== false &&
-      typeof data.text === "string" &&
-      data.text.length > 0 &&
-      !tts.isMuted;
-    if (!willSpeak) {
-      showReply();
-      return;
-    }
-    // Le plan de lip-sync ET l'émotion du visage/corps partent de l'instant
-    // où CE texte précis commence effectivement à jouer (`onStart` /
-    // `onUtteranceStart`, déclenchés par TTSService au dépilement) — pas
-    // ici, à la simple mise en file, où une réplique encore audible se
-    // ferait voler la bouche et le visage par celle-ci.
-    if (voicedInFlight === 0) voicedSince = performance.now();
-    voicedInFlight++;
-    let shown = false;
-    void tts
-      .speak(data.text as string, emotion, data.voice_profile, {
-        onStart: () => {
-          shown = true;
-          showReply();
-        },
-      })
-      .then(() => {
-        // Never voiced (muted or stopped before its turn): the text is on
-        // screen all the same, so the face should say it.
-        if (!shown) showReply();
-      })
-      .finally(() => {
-        voicedInFlight = Math.max(0, voicedInFlight - 1);
-        flushDrift();
-      });
-  };
-
-  ws.on("speech", handleSpeech);
-
-  // Pure state refresh — no speech, no lip-sync, just inner_state.
-  // Emitted by the backend when Mika's sleep phase transitions during
-  // the night without any conversation turn happening.
-  ws.on("inner_state_update", (data) => {
-    innerLifePanel.applyInnerState(data.inner_state);
-  });
-
-  // Emotional state between turns. The backend oscillators keep moving
-  // while Mika is silent — relaxing toward a home vector that itself
-  // drifts with the time of day, tinted by whatever she's ruminating on —
-  // and this is the only frame that carries that. Without it the face and
-  // the readout stayed on the last reply for as long as nobody spoke.
-  // Applied as drift: expression, gaze and hand mood follow, postures
-  // follow, body one-shots don't (see decideGesture's `ambient` gate).
-  ws.on("emotion_update", (data) => {
-    if (!isEmotionName(data.emotion)) return;
-    const intensity =
-      typeof data.emotion_intensity === "number" ? data.emotion_intensity : 0;
-    emotionDisplay.setEmotion(data.emotion, intensity);
-    innerLifePanel.setEmotionBlend(data.emotion_blend ?? [], intensity);
-    if (voiceOwnsFace()) {
-      // Held until the voice ends — the newest drift wins.
-      pendingDrift = {
-        emotion: data.emotion,
-        intensity,
-        blend: data.emotion_blend ?? [],
-      };
-      return;
-    }
-    applyAvatarEmotion(data.emotion, intensity, data.emotion_blend, undefined, {
-      ambient: true,
-    });
-  });
-
-  // A message the server accepted is a reply she is now composing: the
-  // gaze goes up and to the side until the `speech` frame lands.
-  ws.on("ack", (data) => {
-    if (data.status === "accepted") animationSystem.setReplyPending(true);
-  });
+  ws.on("speech", (data) => presenter.handleSpeech(data));
+  ws.on("inner_state_update", (data) => presenter.handleInnerStateUpdate(data));
+  ws.on("emotion_update", (data) => presenter.handleEmotionUpdate(data));
+  ws.on("ack", (data) => presenter.handleAck(data));
 
   // Project reports — silent by default (no TTS). Show as a message
   // in the chat overlay so the user sees what Mika wrapped up. Prefixed
@@ -459,15 +290,15 @@ async function init() {
     get avatarScene() {
       return vtuberModel.vrm?.scene ?? null;
     },
-    applySleepPhase,
-    applyEmotion: (emotion, intensity) => applyEmotion(emotion, intensity),
+    applySleepPhase: (phase) => presenter.setSleepPhase(phase),
+    applyEmotion: (emotion, intensity) => presenter.showEmotion(emotion, intensity),
   });
 
   // Typing anywhere (outside another field) focuses the chat input, so you
   // can just start writing without clicking the box first.
   const chatInput = document.getElementById("chat-input") as HTMLTextAreaElement | null;
   // Someone typing to her is someone to listen to: eyes on them.
-  chatInput?.addEventListener("input", () => animationSystem.noteUserTyping());
+  chatInput?.addEventListener("input", () => presenter.noteUserTyping());
   document.addEventListener("keydown", (e) => {
     if (!chatInput) return;
     const target = e.target as HTMLElement;

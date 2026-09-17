@@ -8,11 +8,11 @@ from email.utils import getaddresses, parseaddr
 
 from django.db.models import F, Q
 
+from ai.quota import QuotaExceeded
 from modules.base import BaseModule
 from modules.types import (
     ModuleCapability,
     ModuleEvent,
-    ModuleNotification,
     ModuleStatus,
     ModuleTool,
     ToolParameter,
@@ -262,6 +262,16 @@ class EmailModule(BaseModule):
                 was_new = await self._process_email(email_msg, account, entry, allow_actions=not is_initial_sync)
                 if was_new:
                     new_count += 1
+            except QuotaExceeded as exc:
+                # Budget d'appels de fond ou quota épuisé : le courrier n'est
+                # pas en base, donc le relevé incrémental le représentera au
+                # prochain tick. Inutile d'essayer les suivants ce tick-ci —
+                # chaque tentative serait un refus de plus.
+                self.logger.warning(
+                    "[%s] Triage différé (%s) — %d courrier(s) repris au prochain relevé",
+                    account.name, exc, len(emails) - emails.index(email_msg),
+                )
+                break
             except Exception:
                 errors += 1
                 self.logger.exception("[%s] Failed to process email: %s", account.name, email_msg.subject)

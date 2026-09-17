@@ -60,7 +60,7 @@ class TestFeedEmotion:
             themes=[], entities=[], should_remember=False,
         )
         mock_ee = MagicMock()
-        with patch("conscience.engine.emotion_engine", mock_ee):
+        with patch("conscience.perception.emotion_engine", mock_ee):
             ConscienceEngine._feed_emotion(signal)
 
         mock_ee.process_emotion.assert_called_once()
@@ -79,7 +79,7 @@ class TestFeedEmotion:
             themes=[], entities=[], should_remember=False,
         )
         mock_ee = MagicMock()
-        with patch("conscience.engine.emotion_engine", mock_ee):
+        with patch("conscience.perception.emotion_engine", mock_ee):
             ConscienceEngine._feed_emotion(signal)  # should not raise
 
         mock_ee.process_emotion.assert_not_called()
@@ -173,9 +173,9 @@ class TestTrousseBranchee:
         """Sans `disponibles`, `inconnus` reste vide et le filtrage s'éteint."""
         import inspect
 
-        from conscience.engine import ConscienceEngine
+        from conscience import acte
 
-        source = inspect.getsource(ConscienceEngine._preparer_trousse)
+        source = inspect.getsource(acte.preparer_trousse)
         assert "disponibles=" in source
 
     def test_l_inventaire_ne_lit_pas_la_base(self):
@@ -189,10 +189,10 @@ class TestTrousseBranchee:
         import inspect
         import textwrap
 
-        from conscience.engine import ConscienceEngine
+        from conscience import acte
 
         source = textwrap.dedent(
-            inspect.getsource(ConscienceEngine._modules_enregistres)
+            inspect.getsource(acte.modules_enregistres)
         )
         appels = {
             n.func.attr
@@ -383,9 +383,9 @@ class TestIssueDesOutils:
         import inspect
         import textwrap
 
-        from conscience.engine import ConscienceEngine
+        from conscience import acte
 
-        source = textwrap.dedent(inspect.getsource(ConscienceEngine._act))
+        source = textwrap.dedent(inspect.getsource(acte.act))
         arbre = ast.parse(source)
         appels = [
             n for n in ast.walk(arbre)

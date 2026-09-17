@@ -1,9 +1,17 @@
-"""Tests for per-person module context scoping (owner vs public, leak prevention)."""
+"""Tests for per-person module context scoping (owner vs public, leak prevention).
+
+« Owner » est le niveau propriétaire de ``identity/roles.py`` : opérateur
+(``is_staff``), ``OWNER_PERSON_IDS``, canaux internes. Un ``user_*`` sans
+``is_staff`` est un compte de conversation et ne voit pas le contexte privé.
+"""
 
 import pytest
+from django.contrib.auth import get_user_model
 
+from identity import roles
 from modules.base import BaseModule
-from modules.manager import ModuleManager, _is_owner
+from modules.collectors import is_owner
+from modules.manager import ModuleManager
 
 
 class _FakeModule(BaseModule):
@@ -36,27 +44,45 @@ def _running(module):
     return module
 
 
+@pytest.fixture
+def operateur(db):
+    roles.invalidate()
+    return get_user_model().objects.create_user(
+        username="ops", password="x", is_staff=True,
+    )
+
+
+@pytest.fixture
+def invite(db):
+    roles.invalidate()
+    return get_user_model().objects.create_user(username="inv", password="x")
+
+
 class TestIsOwner:
 
-    def test_authenticated_user_is_owner(self):
-        assert _is_owner("user_7") is True
+    def test_operator_account_is_owner(self, operateur):
+        assert is_owner(f"user_{operateur.pk}") is True
+
+    def test_chat_account_is_not_owner(self, invite):
+        assert is_owner(f"user_{invite.pk}") is False
 
     def test_conscience_is_owner(self):
-        assert _is_owner("conscience_mika") is True
+        assert is_owner("conscience_mika") is True
 
     def test_module_internal_is_owner(self):
-        assert _is_owner("module_email") is True
+        assert is_owner("module_email") is True
 
     def test_anonymous_is_not_owner(self):
-        assert _is_owner("anon_abcd1234") is False
+        assert is_owner("anon_abcd1234") is False
 
     def test_empty_is_not_owner(self):
-        assert _is_owner("") is False
+        assert is_owner("") is False
 
     def test_external_contact_is_not_owner(self):
-        assert _is_owner("tg_999") is False
+        assert is_owner("tg_999") is False
 
 
+@pytest.mark.django_db
 class TestCollectContextScoping:
 
     def _manager_with(self, *modules):
@@ -69,10 +95,14 @@ class TestCollectContextScoping:
         mgr = self._manager_with(_OwnerModule("email"))
         assert mgr.collect_context("anon_x") == ""
 
-    def test_owner_context_shown_to_owner(self):
+    def test_owner_context_shown_to_owner(self, operateur):
         mgr = self._manager_with(_OwnerModule("email"))
-        ctx = mgr.collect_context("user_1")
+        ctx = mgr.collect_context(f"user_{operateur.pk}")
         assert "3 nouveaux emails" in ctx
+
+    def test_owner_context_hidden_from_chat_account(self, invite):
+        mgr = self._manager_with(_OwnerModule("email"))
+        assert mgr.collect_context(f"user_{invite.pk}") == ""
 
     def test_public_context_shown_to_anyone(self):
         mgr = self._manager_with(_PublicModule("greeter"))
@@ -82,9 +112,9 @@ class TestCollectContextScoping:
         mgr = self._manager_with(_PublicModule("greeter"))
         assert "bonjour tg_42" in mgr.collect_context("tg_42")
 
-    def test_mixed_modules_filtered_correctly(self):
+    def test_mixed_modules_filtered_correctly(self, operateur):
         mgr = self._manager_with(_OwnerModule("email"), _PublicModule("greeter"))
         anon = mgr.collect_context("anon_x")
         assert "emails" not in anon and "bonjour" in anon
-        owner = mgr.collect_context("user_1")
+        owner = mgr.collect_context(f"user_{operateur.pk}")
         assert "emails" in owner and "bonjour" in owner

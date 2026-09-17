@@ -1,7 +1,6 @@
 """AI client — pure call layer.
 
-Simple completion via the router (any provider).
-Tool-enabled completion is delegated to ai.tool_client (Claude-only).
+Simple completion and structured turns via the router (any provider).
 
 This module carries **no** SDK-specific setup — every credential concern
 (la clé d'API Anthropic, lue dans la configuration et passée au client
@@ -13,7 +12,6 @@ import logging
 
 from ai.chat import ChatPrompt
 from ai.router import AIRole, ai_router
-from ai.tool_client import complete_with_tools as _complete_with_tools
 
 logger = logging.getLogger(__name__)
 
@@ -67,29 +65,6 @@ class AIClient:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             attachments=attachments,
-        )
-
-    # -- Completion with tools (MCP) -------------------------------------------
-
-    async def complete_with_tools(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        tools: list,
-    ) -> tuple[str, list[str]]:
-        """Tool-enabled completion.
-
-        ``tools`` is a list of generic ``ModuleTool`` objects. The
-        provider (resolved via the CONVERSATION_TOOLS role) converts
-        them to its native tool format — MCP for Claude, function
-        calling for others.
-
-        Returns ``(raw_text, tool_names_called)``.
-        """
-        return await _complete_with_tools(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            tools=tools,
         )
 
 

@@ -153,7 +153,7 @@ class TestCourseDigestionConscience:
                 return await vrai(fn, **kw)(*a, **k)
             return _runner
 
-        monkeypatch.setattr("conscience.engine.sync_to_async", _patched)
+        monkeypatch.setattr("conscience.ruminations.sync_to_async", _patched)
         await conscience_engine._decay_ruminations()
 
         final = await vrai(
@@ -561,9 +561,10 @@ class TestFrontiereIntime:
         vs.search_connaissances.return_value = []
         r = MemoryRetriever(vs)
 
+        from identity.divulgation import FERME
         assert "rechute" in await r.retrieve("sante", person_id="web_bob")
         assert "rechute" not in await r.retrieve(
-            "sante", person_id="web_bob", disclose_others=False)
+            "sante", person_id="web_bob", divulgation=FERME)
 
     async def test_les_voies_non_lexicales_sont_filtrees_aussi(self):
         from memory.models import Theme
@@ -575,11 +576,12 @@ class TestFrontiereIntime:
         await sync_to_async(lie.themes.set)([theme])
         await sync_to_async(lie.entities.set)([alice])
 
+        from identity.divulgation import FERME
         r = MemoryRetriever(MagicMock())
         ancre = [{"id": 999_999, "themes": ["santeconf"], "entities": []}]
         assert len(await r._associative_expansion(ancre, set())) == 1
         assert await r._associative_expansion(
-            ancre, set(), disclose_others=False) == []
+            ancre, set(), divulgation=FERME) == []
 
     async def test_on_ne_l_ampute_pas_de_sa_propre_memoire(self):
         """Ce qui concerne la personne EN FACE, et ce qu'elle a vécu seule,
@@ -591,12 +593,13 @@ class TestFrontiereIntime:
         await sync_to_async(avec.entities.set)([bob])
         seule = await self._souvenir("j'ai regarde la pluie", emotion="melancholic")
 
+        from identity.divulgation import FERME
         r = MemoryRetriever(MagicMock())
         for s, nom in ((avec, "BobPropre"), (seule, "")):
             charges = await r._enrich_souvenirs(
                 [{"id": str(s.pk), "content": s.content,
                   "distance": 0.1, "metadata": {}}],
-                boost_name=nom, disclose_others=False)
+                boost_name=nom, divulgation=FERME)
             assert len(charges) == 1
 
     async def test_le_journal_garde_son_fil_sans_nommer_les_gens(self):
@@ -619,9 +622,10 @@ class TestFrontiereIntime:
         # journal d'hier survit au test et ``/api/dev/sleep/status`` (qui
         # sert le plus récent de {aujourd'hui, hier}) le trouve dans une
         # base censée être vide — un échec qui ne se voit qu'après ce fichier.
+        from identity.divulgation import Niveau
         try:
-            ouvert = await _fetch_journal_context(may_disclose=True)
-            ferme = await _fetch_journal_context(may_disclose=False)
+            ouvert = await _fetch_journal_context(niveau=Niveau.PERSONNEL)
+            ferme = await _fetch_journal_context(niveau=Niveau.ANODIN)
         finally:
             await sync_to_async(
                 lambda: DailyJournal.objects.filter(date=hier).delete()

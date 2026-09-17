@@ -1,8 +1,8 @@
 """Journal d'appels d'outils — savoir ce qu'un outil a *réellement* donné.
 
-La boucle d'outils de ``ai/providers/claude.py`` remonte ``calls``, une liste
-de ``block.name``. C'est tout ce que le reste du moteur apprend d'un tour
-outillé. Or ``_execute_tool`` sait déjà distinguer trois issues — outil
+La boucle d'outils (``ai/providers/_tool_loop.py``) remonte ``calls``, une
+liste de noms d'outils. C'est tout ce que le reste du moteur apprend d'un tour
+outillé. Or ``_executer`` sait déjà distinguer trois issues — outil
 inconnu, handler qui lève, handler qui répond ``isError`` — et les trois
 repartent vers le modèle sous forme de ``tool_result`` marqué ``is_error``,
 puis **s'effacent** : en sortie de boucle, trois outils qui plantent et trois
@@ -46,7 +46,7 @@ import logging
 import threading
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any, Iterator
 
 logger = logging.getLogger(__name__)
@@ -385,7 +385,7 @@ def noter_appel(
 ) -> bool:
     """Forme courte de ``noter`` pour un site d'exécution. Ne lève jamais.
 
-    Existe pour que ``_execute_tool`` ait une seule ligne à ajouter par issue
+    Existe pour que le site d'exécution ait une seule ligne à ajouter par issue
     plutôt qu'une construction d'objet dans un ``except`` — un site qui doit
     déjà rendre une erreur au modèle ne doit pas gagner une seconde raison de
     se tromper.

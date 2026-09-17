@@ -27,11 +27,12 @@ Providers choose their optimal rendering:
   boundary, so per-turn state never invalidates the reusable prefix
   (server-side prompt cache for Claude, automatic prefix caching for
   OpenAI-compatibles, KV-cache reuse for Ollama).
-- Providers without a chat method (GLM, Gemini) get the legacy two-string
-  shape via :meth:`legacy_pair` — same rendering as the old pipeline, with
-  two deliberate divergences: history messages are clipped at
-  ``HISTORY_MSG_MAX_CHARS`` on every path, and a turn said by someone else
-  than the current interlocutor is named (see :func:`_speaker_of`).
+- Gemini maps the same structure onto ``system_instruction`` + ``contents``.
+  No provider consumes :meth:`legacy_pair` any more: it survives for the
+  router's own character estimate, and renders the old two-string shape
+  with two deliberate divergences — history messages are clipped at
+  ``HISTORY_MSG_MAX_CHARS``, and a turn said by someone else than the
+  current interlocutor is named (see :func:`_speaker_of`).
 
 This module lives in ``ai/`` because providers consume the type; it must not
 import anything from ``pipeline`` (the dependency points the other way).

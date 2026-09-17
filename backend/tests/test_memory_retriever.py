@@ -919,11 +919,20 @@ class TestFrontiereIntime:
             "Alice m'a confié devant Thomas qu'elle a rechuté", thomas, alice)
         return personne, solo, partage
 
-    async def _pks_retenus(self, boost_name):
+    async def _pks_retenus(self, boost_name, divulgation=None):
+        """Les pks que ``_enrich_souvenirs`` laisse passer sous ce niveau —
+        ``FERME`` par défaut, l'ancienne porte binaire fermée. Les lignes
+        sont créées sans sensibilité, donc ``personnel`` (le défaut)."""
+        from identity.divulgation import FERME
         from memory.models import Souvenir
         r = _make_retriever()
-        qs = r.sans_confidences_d_autrui(Souvenir.objects.all(), boost_name)
-        return await _sync(lambda: set(qs.values_list("pk", flat=True)))
+        r.vector_store.remove_souvenir = MagicMock()
+        pks = await _sync(lambda: list(Souvenir.objects.values_list("pk", flat=True)))
+        hits = [{"id": str(pk), "content": "x", "distance": 0.1, "metadata": {}}
+                for pk in pks]
+        out = await r._enrich_souvenirs(
+            hits, boost_name=boost_name, divulgation=divulgation or FERME)
+        return {s["id"] for s in out}
 
     # ── (1) le filtre lui-même ───────────────────────────────────────
 
@@ -947,6 +956,14 @@ class TestFrontiereIntime:
         s = await self._souvenir("Une balade à Lyon", lieu)
         assert await self._pks_retenus("") == {s.pk}
 
+    async def test_le_temoin_recoit_le_partage_au_niveau_avec_temoin(self):
+        """Thomas était là quand Alice s'est confiée : la facette
+        ``avec_temoin`` s'applique à {Thomas, Alice}, pas à Alice seule."""
+        from identity.divulgation import Divulgation, Niveau
+        personne, solo, partage = await self._triple()
+        d = Divulgation(niveau=Niveau.ANODIN, avec_temoin=Niveau.PERSONNEL)
+        assert await self._pks_retenus("Thomas", d) == {personne.pk, solo.pk, partage.pk}
+
     # ── (2) connaissances et voie épisodique derrière la porte ───────
 
     @staticmethod
@@ -966,9 +983,10 @@ class TestFrontiereIntime:
             content="Le ciel est bleu", confidence=0.9)
         hits = [self._hit(intime.pk, intime.content), self._hit(neutre.pk, neutre.content)]
 
+        from identity.divulgation import FERME
         r = _make_retriever()
         ferme = await r._enrich_connaissances(
-            hits, boost_name="Thomas", disclose_others=False)
+            hits, boost_name="Thomas", divulgation=FERME)
         ouvert = await r._enrich_connaissances(hits)
 
         assert [c["content"] for c in ferme] == ["Le ciel est bleu"]
@@ -977,6 +995,7 @@ class TestFrontiereIntime:
     async def test_la_voie_episodique_se_ferme_sous_le_seuil(self):
         """Dans un groupe, « l'identité de l'interlocuteur » inclut ses DM :
         le verbatim revenait mot pour mot devant l'audience."""
+        from identity.divulgation import FERME
         r = _make_retriever()
         search = AsyncMock(return_value=[])
         with patch("identity.resolver.identity_resolver.handles_for_person",
@@ -984,7 +1003,7 @@ class TestFrontiereIntime:
                        {"person_id": "tg_42"}, {"person_id": "web_thomas"},
                    ])), \
              patch("memory.episodic.api.search_exchanges", search):
-            out = await r._episodic_lane("hier soir", "tg_42", disclose_others=False)
+            out = await r._episodic_lane("hier soir", "tg_42", divulgation=FERME)
         assert out == []
         search.assert_not_called()
 
@@ -1018,13 +1037,14 @@ class TestFrontiereIntime:
              patch.object(r, "_person_boost_name", AsyncMock(return_value="")), \
              patch.object(r, "_associative_expansion", AsyncMock(return_value=[])), \
              patch.object(r, "_importance_intrusion", AsyncMock(return_value=[])):
+            from identity.divulgation import FERME
             bloc = await r.retrieve_multi(
                 ["q"], person_id="tg_42", extra_exchanges=[du_plan],
-                disclose_others=False,
+                divulgation=FERME,
             )
 
-        assert lane.await_args.kwargs.get("disclose_others") is False
-        assert conn.await_args.kwargs.get("disclose_others") is False
+        assert lane.await_args.kwargs.get("divulgation") is FERME
+        assert conn.await_args.kwargs.get("divulgation") is FERME
         assert "secret" not in bloc
 
     # ── (3) une base en panne ferme, elle n'ouvre pas ────────────────
@@ -1036,8 +1056,9 @@ class TestFrontiereIntime:
         r.vector_store.remove_souvenir = MagicMock()
         hit = {"id": "4242", "content": "Alice a rechuté", "distance": 0.2,
                "metadata": {"importance": 0.9}}
+        from identity.divulgation import FERME
         with patch.object(type(r), "_load_by_pk", AsyncMock(return_value=None)):
-            ferme = await r._enrich_souvenirs([hit], boost_name="", disclose_others=False)
+            ferme = await r._enrich_souvenirs([hit], boost_name="", divulgation=FERME)
             ouvert = await r._enrich_souvenirs([hit])
 
         assert ferme == []
@@ -1058,9 +1079,10 @@ class TestFrontiereIntime:
         r = _make_retriever()
         r.vector_store.remove_souvenir = MagicMock()
         hit = {"id": "pas-un-pk", "content": "x", "metadata": {}}
+        from identity.divulgation import FERME
         with patch.object(type(r), "_load_by_pk", AsyncMock(return_value={})):
-            assert await r._enrich_souvenirs([hit], disclose_others=False) == []
-            assert await r._enrich_connaissances([hit], disclose_others=False) == []
+            assert await r._enrich_souvenirs([hit], divulgation=FERME) == []
+            assert await r._enrich_connaissances([hit], divulgation=FERME) == []
 
     async def test_l_echec_de_chargement_est_compte(self):
         from memory.retrieval.retriever import MemoryRetriever

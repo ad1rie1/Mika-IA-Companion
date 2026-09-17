@@ -138,6 +138,25 @@ class TestSettingsScope:
         assert "AI_QUOTA_ROLE_CONVERSATION_DAILY" in constants
         assert "AI_QUOTA_ROLE_VISION_CAPTION_MONTHLY" in constants
 
+    def test_chaque_role_a_sa_paire_de_quotas(self):
+        """OPS-06 : sept rôles sur onze étaient plafonnables — `INNER_VOICE`,
+        `PREPARATION`, `COMPACTION` et `PROJECT_WORK` (la boucle d'outils la
+        plus chère) tombaient sur `getattr(settings, …, 0)` = illimité. La
+        liste est dérivée de l'enum : un rôle ajouté sans sa paire fait
+        tomber ce test, et `.env.example` doit documenter les mêmes noms."""
+        from ai.router import AIRole
+
+        constants = _settings_constants()
+        attendus = {
+            f"AI_QUOTA_ROLE_{role.value.upper()}_{periode}"
+            for role in AIRole for periode in ("DAILY", "MONTHLY")
+        }
+        assert attendus <= constants, f"quotas manquants : {sorted(attendus - constants)}"
+
+        exemple = (pathlib.Path(__file__).resolve().parents[2] / ".env.example").read_text()
+        non_documentes = sorted(n for n in attendus if n not in exemple)
+        assert non_documentes == [], f"absents de .env.example : {non_documentes}"
+
     def test_quota_reads_them_by_computed_name(self):
         import inspect
 

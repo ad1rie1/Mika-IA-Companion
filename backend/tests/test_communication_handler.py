@@ -160,7 +160,14 @@ class TestViews:
             from communication.views import health
             response = health(MagicMock())
         data = json.loads(response.content)
-        assert data["status"] == "ok"
+        # `/health` est une sonde de readiness (OPS-16) : sans lifespan, le
+        # processus est prêt (200, `ready`), au pire « degraded » (rôle
+        # `conversation` non mappé dans une base de test) — jamais 503. Les
+        # états précis sont pinés dans `test_arret_supervise.py`.
+        assert response.status_code == 200
+        assert data["ready"] is True
+        assert data["status"] in ("ok", "degraded")
+        assert "checks" in data
         assert data["vtuber"] == "Mika"
 
     def test_get_personality_returns_fields(self):

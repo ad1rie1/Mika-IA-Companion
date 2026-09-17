@@ -289,7 +289,7 @@ class TestUnRendezVousQuiEchoue:
         l'exception : `tentatives` restait à zéro pour toujours. Compté, et
         l'action n'est plus « due » avant son délai — donc plus rien à
         remonter pour lever le cooldown ou le veto de sommeil."""
-        from conscience.engine import _SCHEDULED_REESSAI_S
+        from conscience.agenda import _SCHEDULED_REESSAI_S
 
         e = _engine()
         action = await _action()
@@ -315,7 +315,7 @@ class TestUnRendezVousQuiEchoue:
     @pytest.mark.asyncio
     async def test_le_delai_croit_avec_les_tentatives(self):
         """5 min × n, et l'action reste `pending` tant que le plafond tient."""
-        from conscience.engine import _SCHEDULED_REESSAI_S
+        from conscience.agenda import _SCHEDULED_REESSAI_S
 
         e = _engine()
         action = await _action()
@@ -437,7 +437,7 @@ class TestLAuditNeDebordePas:
         """Trois pensées d'audit actives, une quatrième arrive : la plus
         faible se fane (jamais supprimée — la nuit la relit), le total reste
         au plafond, et la nouvelle est là."""
-        from conscience.engine import _AUDIT_ACTIVES_MAX
+        from conscience.ruminations import _AUDIT_ACTIVES_MAX
         from conscience.models import Rumination
 
         e = self._moteur()
@@ -488,9 +488,8 @@ class TestLAuditNeDebordePas:
         `test_config_rapatriement` le vérifie sur tous les sites ; ici on
         épingle que les trois clés neuves existent bien."""
         from configs.registry import registry
-        from conscience.engine import (
-            _AUDIT_ACTIVES_MAX, _AUDIT_ESPACEMENT_S, _SCHEDULED_REESSAI_S,
-        )
+        from conscience.agenda import _SCHEDULED_REESSAI_S
+        from conscience.ruminations import _AUDIT_ACTIVES_MAX, _AUDIT_ESPACEMENT_S
 
         assert registry.get("conscience.audit.espacement_s").default \
             == _AUDIT_ESPACEMENT_S
@@ -514,7 +513,7 @@ class TestLeReliefDesPenseesNeCourtPlus:
         digestion nocturne fanait une ligne que le `bulk_update` remettait
         `active`. On rejoue la course : un écrivain passe juste après le
         premier aller-retour en base. Avant, la ligne ressuscitait."""
-        from conscience import engine as moteur_module
+        from conscience import ruminations as moteur_module
         from conscience.engine import ConscienceEngine
         from conscience.models import Rumination
 
@@ -547,10 +546,10 @@ class TestLeReliefDesPenseesNeCourtPlus:
         """Aucun `bulk_update` et un seul `sync_to_async` : par l'AST, jamais
         par le texte — les commentaires de ce dépôt nomment ce qu'il ne faut
         pas faire."""
-        from conscience.engine import ConscienceEngine
+        from conscience import ruminations
 
         arbre = ast.parse(textwrap.dedent(
-            inspect.getsource(ConscienceEngine._resolve_ruminations_after_act)))
+            inspect.getsource(ruminations.resolve_ruminations_after_act)))
         noms = [
             (n.func.attr if isinstance(n.func, ast.Attribute) else
              getattr(n.func, "id", None))

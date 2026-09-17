@@ -72,6 +72,59 @@ _HOSTED_CONCURRENCY_HINT = (
     "tours au lieu de les ralentir."
 )
 
+# Défauts de la cadence de fond, par provider. Un provider absent est
+# illimité. Tenus égaux à ``ai.router._PROVIDER_FALLBACK_BUDGET_DE_FOND`` et
+# ``ai.cadence.DISJONCTEUR_*`` (le repli des sites de lecture) — un test
+# le vérifie, comme pour toute clé lue par ``cfg_*``.
+_BUDGET_DE_FOND_DEFAUTS = {"ollama": 30}
+_DISJONCTEUR_ECHECS_DEFAUT = 3
+_DISJONCTEUR_REPOS_DEFAUT = 60.0
+
+
+def _cadence_items(provider: str, libelle: str) -> tuple[ConfigItem, ...]:
+    """Budget de fond + disjoncteur d'un provider — les trois clés, partout.
+
+    Le libellé porte le nom du fournisseur : les trois champs de six
+    providers vivent dans deux blocs, et « Appels de fond par heure » six
+    fois de suite ne dirait pas lequel.
+    """
+    return (
+        ConfigItem(
+            key=f"ai.{provider}.appels_de_fond_par_heure", type="int",
+            section="ai_cadence", group="Appels de fond par heure",
+            label=libelle,
+            default=_BUDGET_DE_FOND_DEFAUTS.get(provider, 0), min=0, max=10000,
+            hot_reload=True,
+            hint=(
+                "Appels de fond acceptés sur une heure glissante ; 0 = "
+                "illimité. Lu à chaque appel. Un refus n'est pas une panne : "
+                "l'appel est différé et compté sur Système › Santé."
+            ),
+        ),
+        ConfigItem(
+            key=f"ai.{provider}.disjoncteur.echecs", type="int",
+            section="ai_cadence", group="Disjoncteurs",
+            label=f"{libelle} — pannes avant ouverture",
+            default=_DISJONCTEUR_ECHECS_DEFAUT, min=0, max=100, hot_reload=True,
+            hint=(
+                "Pannes de transport consécutives qui ouvrent le disjoncteur ; "
+                "0 = jamais (les pannes sont comptées, rien n'est coupé)."
+            ),
+        ),
+        ConfigItem(
+            key=f"ai.{provider}.disjoncteur.repos_s", type="float",
+            section="ai_cadence", group="Disjoncteurs",
+            label=f"{libelle} — repos (s)",
+            default=_DISJONCTEUR_REPOS_DEFAUT, min=1, max=3600, hot_reload=True,
+            hint=(
+                "Durée pendant laquelle tout appel échoue immédiatement. À "
+                "l'expiration, un appel d'essai passe ; s'il échoue, le repos "
+                "repart."
+            ),
+        ),
+    )
+
+
 # Avertissement commun aux trois parts de fenêtre. Elles ne sont pas trois
 # réglages indépendants : c'est leur somme qui engage la fenêtre, et rien ne
 # l'empêche de dépasser 1.0.
@@ -298,6 +351,55 @@ CONFIG_SCHEMA = [
             + " Le plafond du local (1) n'a aucune raison de s'appliquer "
               "ici : deux machines, deux catalogues, deux budgets."
         ),
+    ),
+
+    # ── Cadence de fond et disjoncteurs ──────────────────────────
+    #
+    # Section à part plutôt que dix-huit champs de plus dans les blocs
+    # d'identifiants : ce sont des bornes de fonctionnement, pas des comptes,
+    # et on les règle en regardant Système › Santé, qui les affiche.
+    ConfigSection(
+        key="ai_cadence", label="Cadence de fond", icon="⏱", order=26,
+        family="intelligence",
+        summary="Combien d'appels de fond par heure chez chaque provider, "
+                "et quand cesser d'insister sur un provider qui ne répond plus.",
+        description=(
+            "Un appel « de fond » est un appel dont personne n'attend la "
+            "réponse : extraction mémoire, interprétation des signaux, tri "
+            "des mails, pas de chantier, actes spontanés, voix intérieure, "
+            "travail de projet. Chaque mécanisme a sa propre cadence et rien "
+            "ne les sommait ; c'est pourtant leur somme qui décide, sur un "
+            "serveur local à un seul créneau, si un tour de conversation "
+            "trouve le modèle libre. Au-dessus du plafond, l'appel est "
+            "différé en silence — le chantier attend, l'extraction repasse "
+            "au tick suivant, le signal est interprété par heuristique — et "
+            "compté sur Système › Santé. Un tour de conversation n'est "
+            "jamais refusé."
+        ),
+    ),
+    ConfigGroup(
+        section="ai_cadence", key="Appels de fond par heure", order=10,
+        description="Fenêtre glissante d'une heure, par provider ; 0 = "
+                    "illimité. Seul le serveur local est plafonné par défaut : "
+                    "chez un hébergé le parallélisme est réel et la dépense "
+                    "est déjà bornée en jetons (IA · Quotas). Un appel "
+                    "imbriqué — un outil qui relance le modèle depuis un pas "
+                    "de chantier — compte une fois.",
+    ),
+    ConfigGroup(
+        section="ai_cadence", key="Disjoncteurs", order=20, advanced=True,
+        description="Après N pannes de transport consécutives (timeout, "
+                    "connexion refusée — jamais une 400, une réponse vide ou "
+                    "un quota), le provider est déclaré indisponible pendant "
+                    "le repos : tout appel échoue immédiatement au lieu "
+                    "d'attendre 120 s, et un tour de conversation sert son "
+                    "texte de repli tout de suite. À l'expiration, un seul "
+                    "appel d'essai passe ; un succès referme, un échec rouvre.",
+    ),
+    *(
+        item
+        for provider, libelle in PROVIDERS
+        for item in _cadence_items(provider, libelle)
     ),
 
     # ── Déclaration des modèles ──────────────────────────────────

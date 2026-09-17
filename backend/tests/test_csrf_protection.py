@@ -111,7 +111,11 @@ class TestProtectedSurfaces:
         """Connecté (le portail /api/ refuse l'anonyme en 401 avant même le
         contrôle CSRF) : c'est précisément la session qui rend une requête
         forgée dangereuse, donc c'est avec une session qu'on mesure."""
-        user = get_user_model().objects.create_user(username="owner", password="pw")
+        # Opérateur : sans ``is_staff`` le portail répondrait 403 avant le
+        # CSRF, et le test mesurerait le mauvais refus.
+        user = get_user_model().objects.create_user(
+            username="owner", password="pw", is_staff=True,
+        )
         strict.force_login(user)
         resp = _json_post(strict, "/api/projects/create", title="forged")
         assert resp.status_code == 403

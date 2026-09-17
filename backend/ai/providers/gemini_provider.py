@@ -7,29 +7,26 @@ use directly instead of offloading the sync API to a thread.
 
 The SDK handles Google's endpoint, so no base URL is required.
 
-Le tour outillé a **deux amorces et un seul corps** : ``complete_with_tools``
-part de deux chaînes, ``complete_chat_with_tools`` d'un ``ChatPrompt``, et les
-deux entrent dans ``_tool_loop`` avec un fil déjà construit. Le fil de départ
-décide de tout ce qui compte (préfixe cacheable, fidélité des rôles) ; la
-boucle, elle, ne fait qu'y empiler ses allers-retours.
+Le tour outillé part d'un ``ChatPrompt`` traduit en ``contents`` et entre
+dans la boucle générique (``_tool_loop``) par ``_AdaptateurGemini``. Le fil
+de départ décide de tout ce qui compte (préfixe cacheable, fidélité des
+rôles) ; la boucle, elle, ne fait qu'y empiler ses allers-retours.
 """
 
 from __future__ import annotations
 
 import logging
 
+from ai.providers._tool_loop import (
+    AdaptateurOutils,
+    AppelOutil,
+    Issue,
+    Reponse,
+    executer_la_boucle,
+)
 from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
-
-
-def _contents_from_pair(user_prompt: str) -> list:
-    """Fil de départ pour un appel à deux chaînes."""
-    from google.genai import types
-
-    return [
-        types.Content(role="user", parts=[types.Part.from_text(text=user_prompt)])
-    ]
 
 
 def _contents_from_chat_prompt(prompt) -> list:
@@ -165,28 +162,6 @@ class GeminiProvider:
         from ai.providers import default_test
         return await default_test(self)
 
-    async def complete_with_tools(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        model: str,
-        tools: list,
-        max_tokens: int = 4096,
-        temperature: float = 0.7,
-        *,
-        max_turns: int = 10,
-    ) -> tuple[str, list[str]]:
-        """Amorce à deux chaînes du même corps de boucle."""
-        return await self._tool_loop(
-            system_instruction=system_prompt or None,
-            contents=_contents_from_pair(user_prompt),
-            model=model,
-            tools=tools,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            max_turns=max_turns,
-        )
-
     async def complete_chat_with_tools(
         self,
         prompt,
@@ -197,7 +172,7 @@ class GeminiProvider:
         *,
         max_turns: int = 10,
     ) -> tuple[str, list[str]]:
-        """Tour outillé structuré — la même boucle, amorcée sur de vrais tours.
+        """Tour outillé structuré — la boucle générique, amorcée sur de vrais tours.
 
         C'est le tour le plus cher du système : les déclarations d'outils
         repartent à chaque aller-retour de la boucle. Amorcée sur
@@ -205,38 +180,45 @@ class GeminiProvider:
         ici ``system_instruction`` et les tours d'historique ne bougent ni
         pendant la boucle, ni d'un tour à l'autre.
         """
-        return await self._tool_loop(
-            system_instruction=prompt.system_stable or None,
-            contents=_contents_from_chat_prompt(prompt),
-            model=model,
+        return await executer_la_boucle(
+            _AdaptateurGemini(
+                self,
+                system_instruction=prompt.system_stable or None,
+                contents=_contents_from_chat_prompt(prompt),
+                model=model,
+                tools=tools,
+                temperature=temperature,
+            ),
             tools=tools,
             max_tokens=max_tokens,
-            temperature=temperature,
             max_turns=max_turns,
         )
 
-    async def _tool_loop(
-        self,
-        *,
-        system_instruction: str | None,
-        contents: list,
-        model: str,
-        tools: list,
-        max_tokens: int,
-        temperature: float,
-        max_turns: int,
-    ) -> tuple[str, list[str]]:
-        """Gemini function-calling loop (google-genai SDK).
 
-        Gemini uses a different shape than OpenAI: tools are wrapped in
-        ``types.Tool(function_declarations=[...])`` and tool results are
-        sent back as ``Part.from_function_response``. Otherwise the
-        ping/pong structure is the same.
-        """
-        import json
+class _AdaptateurGemini(AdaptateurOutils):
+    """La boucle d'outils vue par ``generate_content``.
+
+    Gemini uses a different shape than OpenAI: tools are wrapped in
+    ``types.Tool(function_declarations=[...])`` and tool results are sent
+    back as ``Part.from_function_response``, all the results of one round
+    in a single ``user`` content.
+    """
+
+    LABEL = "Gemini"
+
+    def __init__(
+        self, provider: GeminiProvider, *, system_instruction: str | None,
+        contents: list, model: str, tools: list, temperature: float,
+    ) -> None:
         from google.genai import types
 
-        function_declarations = [
+        self._client = provider._client
+        self._system_instruction = system_instruction
+        self._model = model
+        self._temperature = temperature
+        # Le fil appartient à l'appelant : la boucle y empile ses allers-retours.
+        self.fil = list(contents)
+        declarations = [
             types.FunctionDeclaration(
                 name=t.name,
                 description=t.description,
@@ -244,76 +226,72 @@ class GeminiProvider:
             )
             for t in tools
         ]
-        gemini_tools = (
-            [types.Tool(function_declarations=function_declarations)]
-            if function_declarations else None
+        self._tools = (
+            [types.Tool(function_declarations=declarations)] if declarations else None
         )
-        tools_by_name = {t.name: t for t in tools}
 
-        # Le fil appartient à l'appelant : la boucle y empile ses allers-retours.
-        contents = list(contents)
+    async def appeler(self, max_tokens: int):
+        from google.genai import types
+
         config = types.GenerateContentConfig(
-            system_instruction=system_instruction,
-            temperature=temperature,
+            system_instruction=self._system_instruction,
+            temperature=self._temperature,
             max_output_tokens=max_tokens,
-            tools=gemini_tools,
+            tools=self._tools,
         )
+        resp = await self._client.aio.models.generate_content(
+            model=self._model,
+            contents=self.fil,
+            config=config,
+        )
+        _record_gemini_usage(resp)
+        return resp
 
-        called: list[str] = []
-        final_text = ""
+    def lire(self, resp) -> Reponse:
+        function_calls = getattr(resp, "function_calls", None) or []
+        if not function_calls:
+            return Reponse(texte=(resp.text or "").strip())
+        return Reponse(appels=[
+            AppelOutil(name=fc.name, arguments=dict(fc.args) if fc.args else {})
+            for fc in function_calls
+        ])
 
-        for _ in range(max_turns):
-            resp = await self._client.aio.models.generate_content(
-                model=model,
-                contents=contents,
-                config=config,
+    def rejouer_le_tour(self, resp, reponse: Reponse) -> None:
+        # Replay the model turn (the Content holding function_call parts).
+        try:
+            self.fil.append(resp.candidates[0].content)
+        except (AttributeError, IndexError) as exc:
+            degradations.record(
+                "ai.providers.gemini._AdaptateurGemini.rejouer_le_tour model turn", exc,
             )
-            _record_gemini_usage(resp)
 
-            function_calls = getattr(resp, "function_calls", None) or []
+    def rendre_les_resultats(self, issues: list[Issue]) -> None:
+        from google.genai import types
 
-            if not function_calls:
-                final_text = (resp.text or "").strip()
-                break
+        parts = [
+            types.Part.from_function_response(
+                name=issue.appel.name, response=_charge_utile(issue),
+            )
+            for issue in issues
+        ]
+        self.fil.append(types.Content(role="user", parts=parts))
 
-            # Replay the model turn (the Content holding function_call parts).
-            try:
-                contents.append(resp.candidates[0].content)
-            except (AttributeError, IndexError) as exc:
-                degradations.record("ai.providers.gemini._tool_loop model turn", exc)
 
-            response_parts = []
-            for fc in function_calls:
-                name = fc.name
-                tool = tools_by_name.get(name)
-                args = dict(fc.args) if fc.args else {}
-                if tool is None:
-                    payload = {"error": f"unknown tool '{name}'"}
-                else:
-                    logger.info(
-                        "Gemini called tool: %s (input=%s)", name, str(args)[:200],
-                    )
-                    try:
-                        result = await tool.handler(args)
-                        payload = result if isinstance(result, dict) else {"result": result}
-                    except Exception as exc:  # noqa: BLE001
-                        logger.warning("Tool '%s' handler raised: %s", name, exc)
-                        payload = {"error": str(exc)}
-                    called.append(name)
-                try:
-                    json.dumps(payload, default=str)
-                except TypeError:
-                    payload = {"result": str(payload)}
-                response_parts.append(types.Part.from_function_response(
-                    name=name, response=payload,
-                ))
-            contents.append(types.Content(role="user", parts=response_parts))
-        else:
-            final_text = final_text or "[max_turns atteint avant réponse finale]"
+def _charge_utile(issue: Issue) -> dict:
+    """La ``response`` d'une ``function_response`` : toujours un dict JSON-able."""
+    import json
 
-        if called:
-            logger.info("Gemini tools used in this turn: %s", called)
-        return final_text, called
+    if issue.erreur is not None:
+        payload: dict = {"error": issue.erreur}
+    elif isinstance(issue.resultat, dict):
+        payload = issue.resultat
+    else:
+        payload = {"result": issue.resultat}
+    try:
+        json.dumps(payload, default=str)
+    except (TypeError, ValueError):  # ValueError : référence circulaire
+        payload = {"result": str(payload)}
+    return payload
 
 
 def _record_gemini_usage(resp) -> None:

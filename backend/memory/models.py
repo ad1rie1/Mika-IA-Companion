@@ -108,6 +108,16 @@ class Entity(models.Model):
         return f"{self.name} ({self.entity_type})"
 
 
+#: Les trois sensibilites d'une ligne de memoire (voir memory/sensibilite.py
+#: et identity/divulgation.py). Chaines nues : models.py ne doit pas importer
+#: la couche identite au chargement du registre d'applications.
+SENSIBILITE_CHOICES = [
+    ("anodin", "Anodin"),
+    ("personnel", "Personnel"),
+    ("confidence", "Confidence"),
+]
+
+
 class Souvenir(models.Model):
     """An episodic memory — a log of something that happened, written from
     the VTuber's subjective point of view (colored by personality + emotion).
@@ -121,6 +131,15 @@ class Souvenir(models.Model):
     themes = models.ManyToManyField(Theme, blank=True, related_name="souvenirs")
     entities = models.ManyToManyField(Entity, blank=True, related_name="souvenirs")
     importance = models.FloatField(default=1.0)
+    sensibilite = models.CharField(
+        max_length=12, choices=SENSIBILITE_CHOICES, default="personnel",
+        help_text=(
+            "Ce que cette ligne pese si elle concerne quelqu'un d'autre que "
+            "l'interlocuteur : anodin / personnel / confidence. Notee par "
+            "l'extracteur ; une ligne dont on ne sait rien est personnelle, "
+            "jamais anodine."
+        ),
+    )
     occurred_at = models.DateTimeField()
     conversation = models.ForeignKey(
         Conversation, on_delete=models.SET_NULL, null=True, blank=True,
@@ -160,6 +179,10 @@ class Connaissance(models.Model):
     themes = models.ManyToManyField(Theme, blank=True, related_name="connaissances")
     entities = models.ManyToManyField(Entity, blank=True, related_name="connaissances")
     confidence = models.FloatField(default=1.0)
+    sensibilite = models.CharField(
+        max_length=12, choices=SENSIBILITE_CHOICES, default="personnel",
+        help_text="Meme echelle que Souvenir.sensibilite.",
+    )
     is_valid = models.BooleanField(default=True)
     source_souvenir = models.ForeignKey(
         Souvenir, on_delete=models.SET_NULL, null=True, blank=True,

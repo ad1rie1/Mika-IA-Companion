@@ -46,17 +46,47 @@ async def broadcast_to_websocket(
       else sends: the skip would silently drop every answer.
     - **unresolved** (proactive with no recipient yet, anonymous, ``conscience_*``)
       → fall back to the legacy global broadcast so existing clients still hear it.
+
+    La trame ``speech`` part d'abord ; l'état intérieur suit dans une trame
+    ``inner_state_update`` sur les mêmes groupes (``_follow_with_inner_state``).
     """
     channel_layer = get_channel_layer()
+    targets = _cibles(person_id)
+    payload = _trame_speech(output, source, person_id)
+    await _decider_la_voix(payload, output, source, targets)
 
-    # L'état intérieur (dix chargeurs + quatre requêtes personne, en série
-    # sur l'exécuteur partagé avec les six boucles) était assemblé AVANT
-    # d'envoyer la réponse : la personne attendait la fiche de Mika pour lire
-    # sa phrase. La trame ``speech`` part d'abord ; l'état suit dans une
-    # trame ``inner_state_update`` sur les mêmes groupes (le panneau la
-    # fusionne sans voix ni animation, c'est déjà ce qu'il fait pour les
-    # transitions de sommeil).
-    payload = {
+    if not targets:
+        await _sans_cible(channel_layer, payload, person_id)
+        return
+
+    consumer_groups = await _livrer(
+        channel_layer, payload, output, source, person_id, targets,
+    )
+    if consumer_groups:
+        # Les modules (Telegram) n'ont pas de panneau : l'état ne va qu'aux
+        # navigateurs qui viennent de recevoir la réponse.
+        await _follow_with_inner_state(channel_layer, consumer_groups, person_id)
+
+
+def _cibles(person_id: str | None) -> list:
+    """Où cette personne est joignable en ce moment — rien sans person_id."""
+    if not person_id:
+        return []
+    from communication.presence import presence_registry
+
+    return presence_registry.resolve(person_id)
+
+
+def _trame_speech(output: SpeechOutput, source: str, person_id: str | None) -> dict:
+    """La trame ``speech`` — sans ses champs de voix, posés par
+    ``_decider_la_voix``.
+
+    L'état intérieur (dix chargeurs + quatre requêtes personne, en série sur
+    l'exécuteur partagé avec les six boucles) était assemblé AVANT d'envoyer
+    la réponse : la personne attendait la fiche de Mika pour lire sa phrase.
+    Il suit désormais dans sa propre trame.
+    """
+    return {
         "type": "communication.broadcast",
         "data": {
             "type": "speech",
@@ -79,62 +109,73 @@ async def broadcast_to_websocket(
         },
     }
 
-    targets = []
-    if person_id:
-        from communication.presence import presence_registry
 
-        targets = presence_registry.resolve(person_id)
+async def _decider_la_voix(
+    payload: dict, output: SpeechOutput, source: str, targets: list,
+) -> None:
+    """Pose ``speak`` / ``voice_reason`` / ``voice_persona`` / ``voice_profile``.
 
-    # The frontend is the SCREEN voice sink: it runs its own TTS, so instead
-    # of a clip it gets the policy decision + the voice identity, and honours
-    # both. This keeps "speak" a routing choice rather than a hardcoded
-    # frontend habit, and gives Mika's thinking-aloud its own murmured voice.
+    The frontend is the SCREEN voice sink: it runs its own TTS, so instead
+    of a clip it gets the policy decision + the voice identity, and honours
+    both. This keeps "speak" a routing choice rather than a hardcoded
+    frontend habit, and gives Mika's thinking-aloud its own murmured voice.
+    """
     persona = voice.persona_for_source(source, addressed=bool(targets))
     screen = await _voice_decision(
         voice.VoiceSink.SCREEN, _first_consumer(targets), persona,
     )
     profile = voice.profile_for(persona)
-    payload["data"]["speak"] = screen.speak
-    payload["data"]["voice_reason"] = screen.reason
+    data = payload["data"]
+    data["speak"] = screen.speak
+    data["voice_reason"] = screen.reason
     # An error fallback ("j'ai eu un bug", quota, timeout) is shown as text
     # but never voiced: hearing Mika speak her own error messages out loud
     # reads as broken, while a silent chat line reads as informative.
     if getattr(output, "ai_failed", False):
-        payload["data"]["speak"] = False
-        payload["data"]["voice_reason"] = "error_fallback_muted"
-    payload["data"]["voice_persona"] = persona
-    payload["data"]["voice_profile"] = {
+        data["speak"] = False
+        data["voice_reason"] = "error_fallback_muted"
+    data["voice_persona"] = persona
+    data["voice_profile"] = {
         "pitch": profile.pitch, "rate": profile.rate, "gain": profile.gain,
     }
 
-    if not targets:
-        # Nobody reachable *right now*. Two very different cases hide here,
-        # and treating them alike leaked one person's context to another.
-        #
-        # An identifiable person who is simply not connected must NOT be
-        # broadcast: the payload carries their inner_state — profile,
-        # commitments, per-person affect — so a proactive message composed
-        # for Adrien while he is offline landed in every other open browser.
-        # The rule three lines below ("never dumped on the global group as a
-        # consolation prize") was already stated for the failed-delivery
-        # branch and simply not applied here. Nothing is lost by staying
-        # silent: the turn is persisted, and their client pulls it by cursor
-        # on reconnect (communication/history.py).
-        #
-        # The global group remains right for everything that belongs to no
-        # one — an anonymous socket, `conscience_mika` thinking out loud —
-        # where "whoever is watching" IS the intended audience.
-        if person_id and is_identifiable_person(person_id):
-            logger.info(
-                "No live client for %s — reply persisted, will be delivered "
-                "on reconnect rather than broadcast to everyone",
-                person_id,
-            )
-            return
-        await channel_layer.group_send(BROADCAST_GROUP, payload)
-        await _follow_with_inner_state(channel_layer, [BROADCAST_GROUP], person_id)
-        return
 
+async def _sans_cible(channel_layer, payload: dict, person_id: str | None) -> None:
+    """Nobody reachable *right now*. Two very different cases hide here,
+    and treating them alike leaked one person's context to another.
+
+    An identifiable person who is simply not connected must NOT be
+    broadcast: the payload carries their inner_state — profile,
+    commitments, per-person affect — so a proactive message composed for
+    Adrien while he is offline landed in every other open browser. Nothing
+    is lost by staying silent: the turn is persisted, and their client
+    pulls it by cursor on reconnect (communication/history.py).
+
+    The global group remains right for everything that belongs to no one —
+    an anonymous socket, `conscience_mika` thinking out loud — where
+    "whoever is watching" IS the intended audience.
+    """
+    if person_id and is_identifiable_person(person_id):
+        logger.info(
+            "No live client for %s — reply persisted, will be delivered "
+            "on reconnect rather than broadcast to everyone",
+            person_id,
+        )
+        return
+    await channel_layer.group_send(BROADCAST_GROUP, payload)
+    await _follow_with_inner_state(channel_layer, [BROADCAST_GROUP], person_id)
+
+
+async def _livrer(
+    channel_layer, payload: dict, output: SpeechOutput, source: str,
+    person_id: str | None, targets: list,
+) -> list[str]:
+    """Une remise par cible ; rend les groupes WebSocket servis.
+
+    Toujours le groupe de la *personne*, jamais le socket qui a posé la
+    question — un tour n'a jamais eu besoin de la connexion qui l'a lancé.
+    Un module reçoit une copie adressée au salon d'origine (``_addressed``).
+    """
     delivered = False
     reply_ref = getattr(output, "reply_ref", None)
     consumer_groups: list[str] = []
@@ -160,10 +201,7 @@ async def broadcast_to_websocket(
             "broadcast to everyone",
             person_id, ", ".join(t.channel for t in targets),
         )
-    if consumer_groups:
-        # Les modules (Telegram) n'ont pas de panneau : l'état ne va qu'aux
-        # navigateurs qui viennent de recevoir la réponse.
-        await _follow_with_inner_state(channel_layer, consumer_groups, person_id)
+    return consumer_groups
 
 
 async def _follow_with_inner_state(channel_layer, groups: list[str], person_id) -> None:

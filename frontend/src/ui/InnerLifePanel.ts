@@ -23,23 +23,8 @@ import type {
   ProjectSummary,
   SleepPhase,
 } from "../types";
-import { emotionFr, isSleepPhase } from "../types";
+import { emotionFr, resolveSleepPhase } from "../types";
 import { postJson } from "../network/api";
-
-/**
- * Résout la phase de sommeil reçue par le réseau (payload `inner_state`).
- *
- * Le compilateur croit `InnerState["sleep_phase"]` toujours valide, mais
- * c'est du JSON venu du backend, jamais vérifié à l'exécution — exactement
- * le défaut qu'`isEmotionName` corrige pour l'émotion dans main.ts. Une
- * valeur inconnue atteignait directement `SLEEP_PHASE_META[resolved]`,
- * `undefined`, puis `.icon` : une exception au milieu du handler `speech`
- * qui coupait aussi le TTS et le lip-sync du même tour. Exportée pour être
- * testée sans DOM.
- */
-export function resolveSleepPhase(value: unknown): SleepPhase {
-  return isSleepPhase(value) ? value : "awake";
-}
 
 const PHASE_META: Record<
   "morning" | "afternoon" | "evening" | "night",
@@ -402,6 +387,17 @@ export class InnerLifePanel {
       .join("");
   }
 
+  /**
+   * Whether this viewer may approve/reject pending project actions. A chat
+   * account gets 403 from the server (operator required), so the buttons
+   * are replaced by a note instead of an error after the click.
+   */
+  private canApprove = true;
+
+  setCanApprove(can: boolean) {
+    this.canApprove = can;
+  }
+
   private renderPendingActions(
     pending: PendingProjectAction[] | undefined,
   ) {
@@ -422,8 +418,10 @@ export class InnerLifePanel {
             </div>
             <div class="il-pending-proposal">${escapeHtml(a.proposal)}</div>
             <div class="il-pending-actions">
-              <button class="il-btn il-btn-approve" data-action="approve" data-id="${a.id}">✓ Approuver</button>
-              <button class="il-btn il-btn-reject" data-action="reject" data-id="${a.id}">✗ Rejeter</button>
+              ${this.canApprove
+                ? `<button class="il-btn il-btn-approve" data-action="approve" data-id="${a.id}">✓ Approuver</button>
+              <button class="il-btn il-btn-reject" data-action="reject" data-id="${a.id}">✗ Rejeter</button>`
+                : `<span class="il-pending-note">En attente d'un opérateur</span>`}
             </div>
           </div>
         `,

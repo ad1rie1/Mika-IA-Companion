@@ -13,3 +13,7 @@ class IdentityConfig(AppConfig):
         from identity.module import IdentityToolsModule
         from modules.manager import module_manager
         module_manager.register(IdentityToolsModule())
+        # Le cache des comptes opérateurs (identity/roles.py) s'invalide sur
+        # chaque écriture de ``User`` — le modèle n'est joignable qu'ici.
+        from identity import roles
+        roles.connect_signals()

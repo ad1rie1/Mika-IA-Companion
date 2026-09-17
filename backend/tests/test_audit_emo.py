@@ -25,7 +25,6 @@ import pytest
 from asgiref.sync import sync_to_async
 
 from emotion import circadian, pad
-from emotion import engine as engine_module
 from emotion.engine import EmotionEngine
 from emotion.state import DECLARED_WINDOW_S, GlobalMood, PersonMood, Temperament
 from emotion.types import Emotion, EmotionData
@@ -266,7 +265,7 @@ class TestPortesDeLaConscience:
         e = ConscienceEngine.__new__(ConscienceEngine)
         with _apres_midi():
             engine = _moteur()
-        with patch("conscience.engine.emotion_engine", engine):
+        with patch("conscience.perception.emotion_engine", engine):
             assert e._colorer_par_l_humeur(0.5, "happy") == pytest.approx(0.5)
             engine.process_emotion(EmotionData(Emotion.EXCITED, 0.8), "conscience_mika")
             assert e._colorer_par_l_humeur(0.5, "excited") > 0.5
@@ -327,6 +326,69 @@ class TestSesPropresActes:
                    for k in n.keywords)
         ]
         assert declares, "la balise du tour doit passer declared=True"
+
+    # ── REF-03 : les deux voies d'un identifiant interne, pinées une à une ──
+
+    def test_la_balise_declaree_suit_exactement_la_diffusion_d_une_personne(self):
+        """``declared=True`` sous ``conscience_mika`` N'EST PAS une troisième
+        voie : c'est la diffusion personne → fond ordinaire, au chiffre près.
+        Le fond bouge autant que si quelqu'un d'autre avait déclaré la
+        même balise."""
+        with _apres_midi():
+            elle, autre = _moteur(), _moteur()
+            elle.process_emotion(
+                EmotionData(Emotion.EXCITED, 0.8), "conscience_mika", declared=True,
+            )
+            autre.process_emotion(EmotionData(Emotion.EXCITED, 0.8), "web_p")
+        assert elle.global_mood.dynamic.position == autre.global_mood.dynamic.position
+
+    def test_a_diffusion_nulle_la_balise_declaree_ne_touche_pas_le_fond(self):
+        """La diffusion ordinaire passe par la porte ``global_bleed`` (« à 0
+        elle compartimente entièrement ») ; la voie programmée, elle, l'ignore
+        (``test_a_diffusion_nulle_elle_ressent_quand_meme_pour_elle_meme``).
+        C'est la différence observable entre les deux voies."""
+        with _apres_midi():
+            engine = _moteur(global_bleed=0.0)
+            repos = engine.global_mood.dynamic.position
+            engine.process_emotion(
+                EmotionData(Emotion.EXCITED, 0.8), "conscience_mika", declared=True,
+            )
+            assert engine.global_mood.dynamic.position == repos
+
+            engine.process_emotion(EmotionData(Emotion.EXCITED, 0.8), "conscience_mika")
+            assert engine.global_mood.dynamic.position != repos
+
+    def test_la_vie_interieure_ne_se_declare_jamais(self):
+        """Ennui, blocage, fierté, révision, solitude, espoir, soulagement :
+        toute impulsion programmée par ``conscience/`` passe SANS ``declared``,
+        donc par ``_feel_for_herself``. Parcourt le paquet entier, quel que
+        soit le découpage de ses fichiers."""
+        import pathlib
+
+        import conscience
+
+        racine = pathlib.Path(conscience.__file__).parent
+        appels = []
+        for fichier in racine.rglob("*.py"):
+            tree = ast.parse(fichier.read_text(encoding="utf-8"))
+            for n in ast.walk(tree):
+                if (
+                    isinstance(n, ast.Call)
+                    and isinstance(n.func, ast.Attribute)
+                    and n.func.attr == "process_emotion"
+                ):
+                    appels.append((fichier.name, n))
+        assert appels, "aucune impulsion programmée trouvée dans conscience/"
+        internes = [
+            (f, n) for f, n in appels
+            if any(getattr(a, "value", None) == "conscience_mika" for a in n.args)
+        ]
+        assert internes, "la conscience doit ressentir sous conscience_mika"
+        declares = [
+            f"{f}:{n.lineno}" for f, n in appels
+            if any(k.arg == "declared" for k in n.keywords)
+        ]
+        assert not declares, f"une impulsion de la vie intérieure se déclare : {declares}"
 
 
 # ===================================================================
@@ -520,7 +582,9 @@ class TestPonctuels:
         assert engine.global_mood.dynamic.velocity == pad.zero()
 
     def test_le_rattrapage_vaut_trois_heures(self):
-        assert engine_module._MAX_ADVANCE_SECONDS == pytest.approx(10800.0)
+        from emotion import physics
+
+        assert physics._MAX_ADVANCE_SECONDS == pytest.approx(10800.0)
 
     def test_la_fenetre_declaree_couvre_le_retour_au_repos(self):
         """EMO-06 / DEF-04 : à 700 s la position lisait encore « determined »
@@ -581,9 +645,9 @@ class TestDosagesVisibles:
     def test_la_saignee_d_une_rumination_atteint_le_prompt(self):
         """À 0,15, « Je bloque sur… » (0,35) versait ``frustrated 0.05`` par
         dix minutes : régime permanent à 7 % de l'écart, sous la tolérance."""
-        from conscience.engine import ConscienceEngine
+        from conscience import ruminations
 
-        part = ConscienceEngine._RUMINATION_BLEED_INTENSITY
+        part = ruminations._RUMINATION_BLEED_INTENSITY
         assert part == pytest.approx(0.35)
         with _apres_midi():
             engine = _moteur()
@@ -596,10 +660,10 @@ class TestDosagesVisibles:
         assert "frustrée" in prose, prose
 
     def test_l_ennui_est_un_etat_tenu(self):
-        from conscience.engine import ConscienceEngine
+        from conscience import affects
 
-        assert ConscienceEngine._ENNUI_INTENSITE == pytest.approx(0.2)
-        assert ConscienceEngine._ENNUI_INTERVAL_S == pytest.approx(600.0)
+        assert affects._ENNUI_INTENSITE == pytest.approx(0.2)
+        assert affects._ENNUI_INTERVAL_S == pytest.approx(600.0)
         with _apres_midi():
             engine = _moteur()
             ecarts = []
@@ -642,8 +706,8 @@ class TestSolitudeRelative:
     async def _vide(self, e, social=0.1):
         from drives.state import DriveKind
 
-        with patch("conscience.engine.emotion_engine") as moteur, patch(
-            "conscience.engine.drive_engine",
+        with patch("conscience.affects.emotion_engine") as moteur, patch(
+            "conscience.affects.drive_engine",
         ) as de:
             de.states = {DriveKind.SOCIAL: SimpleNamespace(tension=social)}
             await e._peut_etre_s_ennuyer(self._ctx(), travaux=[])

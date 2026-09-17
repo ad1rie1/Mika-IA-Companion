@@ -269,30 +269,46 @@ class TestOverviewScreen:
 
 
 class TestNoDuplicateQueries:
-    """Guards against a fourth copy appearing. Each consumer is a formatter."""
+    """Guards against a fourth copy appearing. Each consumer is a formatter.
+
+    Lu sur l'AST (un ``X.objects`` cité dans un commentaire n'est pas une
+    requête), et sur les trois modules du contexte : le découpage de
+    ``pipeline.context`` ne doit pas rouvrir la porte dans un voisin.
+    """
+
+    _MODELS = (
+        "DailyJournal", "Dream", "SelfNarrative", "Rumination",
+        "PersonProfile", "Commitment", "EmotionalSummary",
+    )
+
+    @staticmethod
+    def _managers_queried(module) -> set[str]:
+        import ast
+        import inspect
+
+        hits = set()
+        for node in ast.walk(ast.parse(inspect.getsource(module))):
+            if (
+                isinstance(node, ast.Attribute) and node.attr == "objects"
+                and isinstance(node.value, ast.Name)
+            ):
+                hits.add(node.value.id)
+        return hits
 
     def test_broadcast_does_not_query_the_models_directly(self):
-        import inspect
-
         from pipeline import broadcast
 
-        src = inspect.getsource(broadcast)
-        for symbol in ("DailyJournal.objects", "Dream.objects",
-                       "SelfNarrative.objects", "Rumination.objects",
-                       "PersonProfile.objects", "Commitment.objects"):
-            assert symbol not in src, f"{symbol} should come from the read layer"
+        queried = self._managers_queried(broadcast) & set(self._MODELS)
+        assert not queried, f"{queried} should come from the read layer"
 
     def test_context_does_not_query_the_models_directly(self):
-        import inspect
+        from pipeline import context, context_blocks, context_history
 
-        from pipeline import context
-
-        src = inspect.getsource(context)
-        for symbol in ("DailyJournal.objects", "Dream.objects",
-                       "SelfNarrative.objects", "Rumination.objects",
-                       "PersonProfile.objects", "Commitment.objects",
-                       "EmotionalSummary.objects"):
-            assert symbol not in src, f"{symbol} should come from the read layer"
+        for module in (context, context_blocks, context_history):
+            queried = self._managers_queried(module) & set(self._MODELS)
+            assert not queried, (
+                f"{module.__name__}: {queried} should come from the read layer"
+            )
 
     def test_one_clock_convention(self):
         """The reader must share the writer's clock. `memory.sleep` stamps

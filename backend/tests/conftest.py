@@ -226,18 +226,18 @@ def simulate_time_decay(engine: EmotionEngine, seconds: float):
 
 @pytest.fixture(autouse=True)
 def _dates_d_historique_vierges():
-    """Le mémo id → ``created_at`` de ``pipeline.context`` est de portée
+    """Le mémo id → ``created_at`` de ``pipeline.context_history`` est de portée
     process. En production ``created_at`` ne change jamais et un id n'est
     jamais réutilisé ; sous pytest, un test transactionnel annulé rend son
     compteur d'ids, et le test suivant peut recréer le pk 3 avec une autre
     date — le mémo servirait alors un horodatage d'un autre test. Vidé avant
     chaque test ; autouse parce que le piège est invisible depuis le test
     qui le subit."""
-    from pipeline import context as ctx_module
+    from pipeline import context_history
 
-    ctx_module._MESSAGE_DATES.clear()
+    context_history._MESSAGE_DATES.clear()
     yield
-    ctx_module._MESSAGE_DATES.clear()
+    context_history._MESSAGE_DATES.clear()
 
 
 @pytest.fixture(autouse=True)

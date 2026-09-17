@@ -25,6 +25,7 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_POST
 
 from config.personality import personality
+from identity.roles import is_operator_user, person_id_of
 
 logger = logging.getLogger(__name__)
 
@@ -55,8 +56,21 @@ _LOGIN_FAILURES_MAX_TRACKED = 1000
 
 
 def health(request):
-    """Public liveness probe — no auth required."""
-    return JsonResponse({"status": "ok", "vtuber": personality.name})
+    """Public probe — liveness *and* readiness, no auth required.
+
+    ``{"status", "ready", "checks"}`` depuis ``config.readiness`` : 200 quand
+    le processus peut prendre un tour (``ready``), 503 sinon — lifespan en
+    cours de démarrage ou d'arrêt, mémoire longue encore en chargement ou
+    refusée. ``degraded`` reste un 200 : un rôle ``conversation`` non mappé
+    ou une boucle de fond muette dégradent le service sans le rendre
+    incapable de répondre, et une sonde qui redémarrerait le processus pour
+    cela ne réparerait rien.
+    """
+    from config.readiness import readiness
+
+    payload = readiness()
+    payload["vtuber"] = personality.name
+    return JsonResponse(payload, status=200 if payload["ready"] else 503)
 
 
 def _no_users_yet() -> bool:
@@ -157,7 +171,8 @@ def login_view(request):
         "authenticated": True,
         "username": user.get_username(),
         "display_name": _display_name(user),
-        "person_id": f"user_{user.pk}",
+        "person_id": person_id_of(user),
+        "operator": is_operator_user(user),
     })
 
 
@@ -201,7 +216,8 @@ def bootstrap_view(request):
         "authenticated": True,
         "username": user.get_username(),
         "display_name": _display_name(user),
-        "person_id": f"user_{user.pk}",
+        "person_id": person_id_of(user),
+        "operator": is_operator_user(user),
         "created": True,
     })
 
@@ -235,7 +251,11 @@ def whoami(request):
             "authenticated": True,
             "username": request.user.get_username(),
             "display_name": _display_name(request.user),
-            "person_id": f"user_{request.user.pk}",
+            "person_id": person_id_of(request.user),
+            # Ce que ce compte peut faire au-delà de parler : le SPA n'a pas
+            # à deviner d'un 403 que les boutons d'approbation ne sont pas
+            # pour lui.
+            "operator": is_operator_user(request.user),
         })
     return JsonResponse(payload)
 

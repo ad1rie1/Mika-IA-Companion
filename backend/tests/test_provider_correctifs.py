@@ -24,6 +24,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
+from ai.chat import ChatPrompt
 from ai.quota import _usage_ctx
 
 
@@ -210,7 +211,10 @@ class TestRepriseOpenAICompatible:
 class TestReprisesBranchees:
     """La reprise couvre l'appel simple, le tour structuré, la boucle
     d'outils — chez OpenAI comme chez GLM — et le mémo est celui du
-    provider, donc partagé entre ces chemins."""
+    provider, donc partagé entre ces chemins.
+
+    Le tour outillé n'a plus qu'une amorce, la structurée : un
+    ``ChatPrompt`` sans historique rend exactement le fil à deux tours."""
 
     @staticmethod
     def _openai(client):
@@ -263,8 +267,8 @@ class TestReprisesBranchees:
             _reponse_openai("fini"),
         ])
         p = fabrique.__func__(client)
-        texte, appeles = await p.complete_with_tools(
-            "sys", "usr", model="o3", tools=[outil], max_tokens=64,
+        texte, appeles = await p.complete_chat_with_tools(
+            ChatPrompt("sys", message="usr"), model="o3", tools=[outil], max_tokens=64,
         )
         assert (texte, appeles) == ("fini", ["lire"])
         assert outil.calls == [{"q": 1}]
@@ -319,8 +323,8 @@ class TestClaudeArretsDeBoucle:
             _reponse_claude("tool_use", _bloc_outil()),
             _reponse_claude("end_turn", _bloc_texte("fini")),
         ])
-        texte, appeles = await p.complete_with_tools(
-            "sys", "usr", model="claude-opus-5", tools=[outil], max_tokens=1000,
+        texte, appeles = await p.complete_chat_with_tools(
+            ChatPrompt("sys", message="usr"), model="claude-opus-5", tools=[outil], max_tokens=1000,
         )
         assert appeles == ["lire"]
         assert outil.calls == [{"q": 1}]
@@ -329,57 +333,57 @@ class TestClaudeArretsDeBoucle:
         assert "tronquée" not in texte
 
     async def test_tronque_deux_fois_finit_par_le_dire(self):
-        from ai.providers.claude import _TRUNCATED_TOOL_CALL_MARKER
+        from ai.providers._tool_loop import TRUNCATED_TOOL_CALL_MARKER
 
         outil = _Outil("lire")
         p, client = _claude([
             _reponse_claude("max_tokens", _bloc_texte("je vais"), _bloc_outil()),
             _reponse_claude("max_tokens", _bloc_texte("je vais encore"), _bloc_outil()),
         ])
-        texte, appeles = await p.complete_with_tools(
-            "sys", "usr", model="claude-opus-5", tools=[outil], max_tokens=1000,
+        texte, appeles = await p.complete_chat_with_tools(
+            ChatPrompt("sys", message="usr"), model="claude-opus-5", tools=[outil], max_tokens=1000,
         )
         assert appeles == []
         assert outil.calls == []
         assert len(client.requests) == 2
         # Le texte de l'essai tronqué n'est pas gardé, celui du second oui,
         # et le marqueur ferme la réponse.
-        assert texte == "je vais encore\n\n" + _TRUNCATED_TOOL_CALL_MARKER
+        assert texte == "je vais encore\n\n" + TRUNCATED_TOOL_CALL_MARKER
 
     async def test_le_second_essai_est_borne(self):
         """Au plafond, doubler n'achète rien : le marqueur, tout de suite."""
-        from ai.providers.claude import _TOOL_CALL_CAP_CEILING, _TRUNCATED_TOOL_CALL_MARKER
+        from ai.providers._tool_loop import TOOL_CALL_CAP_CEILING, TRUNCATED_TOOL_CALL_MARKER
 
         p, client = _claude([
             _reponse_claude("max_tokens", _bloc_outil()),
         ])
-        texte, _ = await p.complete_with_tools(
-            "sys", "usr", model="claude-opus-5", tools=[_Outil()],
-            max_tokens=_TOOL_CALL_CAP_CEILING,
+        texte, _ = await p.complete_chat_with_tools(
+            ChatPrompt("sys", message="usr"), model="claude-opus-5", tools=[_Outil()],
+            max_tokens=TOOL_CALL_CAP_CEILING,
         )
         assert len(client.requests) == 1
-        assert _TRUNCATED_TOOL_CALL_MARKER in texte
+        assert TRUNCATED_TOOL_CALL_MARKER in texte
 
     async def test_le_doublement_s_arrete_au_plafond(self):
-        from ai.providers.claude import _TOOL_CALL_CAP_CEILING
+        from ai.providers._tool_loop import TOOL_CALL_CAP_CEILING
 
         p, client = _claude([
             _reponse_claude("max_tokens", _bloc_outil()),
             _reponse_claude("end_turn", _bloc_texte("ok")),
         ])
-        await p.complete_with_tools(
-            "sys", "usr", model="claude-opus-5", tools=[_Outil()],
-            max_tokens=_TOOL_CALL_CAP_CEILING - 1,
+        await p.complete_chat_with_tools(
+            ChatPrompt("sys", message="usr"), model="claude-opus-5", tools=[_Outil()],
+            max_tokens=TOOL_CALL_CAP_CEILING - 1,
         )
-        assert client.requests[1]["max_tokens"] == _TOOL_CALL_CAP_CEILING
+        assert client.requests[1]["max_tokens"] == TOOL_CALL_CAP_CEILING
 
     async def test_max_tokens_sans_appel_d_outil_reste_une_fin_ordinaire(self):
         """Une réponse simplement longue n'est pas rejouée."""
         p, client = _claude([
             _reponse_claude("max_tokens", _bloc_texte("long...")),
         ])
-        texte, _ = await p.complete_with_tools(
-            "sys", "usr", model="claude-opus-5", tools=[_Outil()], max_tokens=1000,
+        texte, _ = await p.complete_chat_with_tools(
+            ChatPrompt("sys", message="usr"), model="claude-opus-5", tools=[_Outil()], max_tokens=1000,
         )
         assert texte == "long..."
         assert len(client.requests) == 1
@@ -391,8 +395,8 @@ class TestClaudeArretsDeBoucle:
             _reponse_claude("refusal", _bloc_outil(), stop_details=details),
         ])
         with caplog.at_level(logging.WARNING, logger="ai.providers.claude"):
-            texte, appeles = await p.complete_with_tools(
-                "sys", "usr", model="claude-opus-5", tools=[outil], max_tokens=1000,
+            texte, appeles = await p.complete_chat_with_tools(
+                ChatPrompt("sys", message="usr"), model="claude-opus-5", tools=[outil], max_tokens=1000,
             )
         assert appeles == []
         assert outil.calls == []
@@ -467,8 +471,8 @@ class TestOllamaTourOutil:
             _reponse_ollama("fini"),
         ])
         with _config_ollama(), patch("ai.providers.ollama_provider._record_ollama_usage"):
-            texte, appeles = await p.complete_with_tools(
-                "sys", "usr", model="qwen3", tools=[outil],
+            texte, appeles = await p.complete_chat_with_tools(
+                ChatPrompt("sys", message="usr"), model="qwen3", tools=[outil],
             )
         assert (texte, appeles) == ("fini", ["lire"])
         fil = p._client.chat.await_args_list[1].kwargs["messages"]

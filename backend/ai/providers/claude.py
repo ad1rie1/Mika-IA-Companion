@@ -21,6 +21,14 @@ from __future__ import annotations
 import json
 import logging
 
+from ai.providers._tool_loop import (
+    AdaptateurOutils,
+    AppelOutil,
+    Issue,
+    Reponse,
+    executer_la_boucle,
+)
+
 logger = logging.getLogger(__name__)
 
 # Sampling parameters are rejected (HTTP 400) from Opus 4.7 onward, on
@@ -61,18 +69,6 @@ def _cache_mark() -> dict:
     if ttl in _CACHE_TTL_ALLOWED:
         return {"type": "ephemeral", "ttl": ttl}
     return dict(_CACHE_MARK)
-
-# Plafond du second essai quand une réponse est tronquée en plein appel
-# d'outil (``stop_reason == "max_tokens"`` avec un bloc ``tool_use``).
-# Doubler sans borne finirait au-delà de ce que le SDK accepte hors
-# streaming — son garde-fou de délai se déclenche vers 21 000 jetons de
-# sortie.
-_TOOL_CALL_CAP_CEILING = 16384
-# Ce que le texte rendu porte quand même le second essai n'a pas suffi :
-# l'appel n'a pas eu lieu, et le dire vaut mieux qu'une réponse qui s'arrête
-# net comme si le modèle avait fini.
-_TRUNCATED_TOOL_CALL_MARKER = "[réponse tronquée avant l'appel d'outil]"
-
 
 def _new_totals() -> dict:
     return {"in": 0, "out": 0, "cache_read": 0, "cache_write": 0}
@@ -204,176 +200,16 @@ class ClaudeProvider:
         ~0.1× afterwards — across loop iterations and across turns — instead
         of being re-billed at full price on every iteration.
         """
-        if not tools:
-            text = await self.complete_chat(
-                prompt, model=model, max_tokens=max_tokens, temperature=temperature,
-            )
-            return text, []
-
         system, messages = self._chat_payload(prompt)
-        return await self._native_tool_loop(
-            system=system,
-            messages=messages,
-            model=model,
+        return await executer_la_boucle(
+            _AdaptateurClaude(
+                self, system=system, messages=messages, model=model,
+                tools=tools, temperature=temperature,
+            ),
             tools=tools,
             max_tokens=max_tokens,
-            temperature=temperature,
             max_turns=max_turns,
         )
-
-    async def _native_tool_loop(
-        self,
-        *,
-        system,
-        messages: list[dict],
-        model: str,
-        tools: list,
-        max_tokens: int,
-        temperature: float,
-        max_turns: int,
-    ) -> tuple[str, list[str]]:
-        # Sorted so the serialized declarations are byte-stable from one
-        # request to the next — a reordered tool list is a different prefix
-        # and silently invalidates the whole cache.
-        tool_defs = [
-            {
-                "name": t.name,
-                "description": t.description,
-                "input_schema": t.to_json_schema(),
-            }
-            for t in sorted(tools, key=lambda t: t.name)
-        ]
-        handlers = {t.name: t.handler for t in tools}
-
-        totals = _new_totals()
-        texts: list[str] = []
-        calls: list[str] = []
-        # Only the *newest* tool_result carries a cache breakpoint: markers
-        # accumulate across iterations otherwise, and the API caps them at 4
-        # per request.
-        marked_result: dict | None = None
-        cap = max_tokens
-        cap_raised = False
-
-        try:
-            for _ in range(max_turns):
-                response = await self._create_message(
-                    model=model,
-                    max_tokens=cap,
-                    system=system,
-                    messages=messages,
-                    tools=tool_defs,
-                    temperature=temperature,
-                )
-                self._accumulate_usage(getattr(response, "usage", None), totals)
-                tool_uses = [b for b in response.content if b.type == "tool_use"]
-
-                if (
-                    response.stop_reason == "max_tokens"
-                    and tool_uses
-                    and not cap_raised
-                    and cap < _TOOL_CALL_CAP_CEILING
-                ):
-                    # Tronquée en plein appel d'outil : le bloc ``tool_use``
-                    # est là, mais la sortie s'est arrêtée avant sa fin. La
-                    # boucle sortait comme si le modèle avait fini — l'appel
-                    # disparaissait sans un mot. Cette itération est rejouée
-                    # une fois avec un plafond doublé (borné) ; le texte de
-                    # l'essai tronqué n'est pas gardé, celui-ci le remplace.
-                    cap_raised = True
-                    cap = min(cap * 2, _TOOL_CALL_CAP_CEILING)
-                    logger.warning(
-                        "Claude: réponse tronquée (max_tokens) en plein appel "
-                        "d'outil sur %s — nouvel essai avec max_tokens=%d",
-                        model, cap,
-                    )
-                    response = await self._create_message(
-                        model=model,
-                        max_tokens=cap,
-                        system=system,
-                        messages=messages,
-                        tools=tool_defs,
-                        temperature=temperature,
-                    )
-                    self._accumulate_usage(getattr(response, "usage", None), totals)
-                    tool_uses = [b for b in response.content if b.type == "tool_use"]
-
-                turn_text = "".join(
-                    b.text for b in response.content if b.type == "text"
-                )
-                if turn_text:
-                    texts.append(turn_text)
-
-                if response.stop_reason == "refusal":
-                    # Un refus n'est pas une fin de tour ordinaire : il
-                    # porte une catégorie, et c'est elle qu'on veut lire
-                    # dans le journal quand une réponse manque.
-                    logger.warning(
-                        "Claude a refusé de poursuivre (stop_reason=refusal, "
-                        "stop_details=%s)",
-                        getattr(response, "stop_details", None),
-                    )
-                    break
-                if response.stop_reason == "max_tokens" and tool_uses:
-                    logger.warning(
-                        "Claude: appel d'outil encore tronqué à max_tokens=%d "
-                        "sur %s — l'appel n'a pas eu lieu", cap, model,
-                    )
-                    texts.append(_TRUNCATED_TOOL_CALL_MARKER)
-                    break
-                if response.stop_reason != "tool_use" or not tool_uses:
-                    break
-
-                messages.append({"role": "assistant", "content": response.content})
-
-                if marked_result is not None:
-                    marked_result.pop("cache_control", None)
-
-                results = []
-                for block in tool_uses:
-                    calls.append(block.name)
-                    logger.info(
-                        "Claude called tool: %s (input=%s)",
-                        block.name, str(block.input)[:200],
-                    )
-                    results.append(await self._execute_tool(handlers, block))
-                results[-1]["cache_control"] = _cache_mark()
-                marked_result = results[-1]
-                messages.append({"role": "user", "content": results})
-            else:
-                logger.warning(
-                    "Boucle d'outils Claude: max_turns=%d atteint sans réponse finale",
-                    max_turns,
-                )
-        finally:
-            self._flush_usage(totals)
-
-        if calls:
-            logger.info("Tools used in this turn: %s", calls)
-        return "\n\n".join(texts), calls
-
-    @staticmethod
-    async def _execute_tool(handlers: dict, block) -> dict:
-        """Run one tool call; an error becomes an ``is_error`` result, never a raise."""
-        result: dict = {"type": "tool_result", "tool_use_id": block.id}
-        handler = handlers.get(block.name)
-        if handler is None:
-            result["content"] = f"Outil inconnu: {block.name}"
-            result["is_error"] = True
-            return result
-        try:
-            out = await handler(dict(block.input or {}))
-        except Exception as exc:  # noqa: BLE001 — l'erreur retourne au modèle
-            logger.exception("Outil %s en erreur", block.name)
-            result["content"] = f"Erreur outil {block.name}: {exc}"
-            result["is_error"] = True
-            return result
-        result["content"] = _tool_result_text(out)
-        # Les handlers du repo parlent MCP et signalent l'échec en camelCase
-        # (``isError``) ; on accepte aussi le snake_case par tolérance.
-        if isinstance(out, dict) and (out.get("isError") or out.get("is_error")):
-            result["is_error"] = True
-        return result
 
     # ── Payload construction & plumbing ──────────────────────────
 
@@ -515,50 +351,99 @@ class ClaudeProvider:
         from ai.providers import default_test
         return await default_test(self)
 
-    # ── Tool-enabled completion (flattened two-string shape) ─────
-    async def complete_with_tools(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        model: str,
-        tools: list,
-        max_tokens: int = 4096,
-        temperature: float = 0.7,
-        *,
-        max_turns: int = 10,
-    ) -> tuple[str, list[str]]:
-        """Tool-enabled completion from a plain (system, user) pair.
 
-        Accepts a list of provider-agnostic ``ModuleTool`` objects — each
-        exposing ``name``, ``description``, ``to_json_schema()`` and an
-        async ``handler``. Runs the same native Messages loop as the
-        structured path; only the payload differs.
+class _AdaptateurClaude(AdaptateurOutils):
+    """La boucle d'outils vue par l'API Messages.
 
-        Returns ``(assistant_text, tool_names_called_in_order)``.
-        """
-        if not tools:
-            text = await self.complete(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                model=model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-            )
-            return text, []
+    Trois choses propres à Claude : les déclarations triées par nom (un
+    ordre différent est un préfixe différent, cache invalidé sans un mot),
+    le point de cache mobile sur le résultat d'outil le plus récent (déplacé,
+    jamais accumulé — l'API en plafonne quatre par requête), et l'usage
+    relevé en trois postes, flushé une fois en fin de boucle.
+    """
 
-        # Pas de ``cache_control`` ici, contrairement au chemin structuré :
-        # ce prompt système est le rendu aplati, état par tour compris, donc
-        # le préfixe change à chaque appel. Marquer le bloc paierait l'
-        # écriture en cache (1,25×) pour une lecture qui n'arriverait jamais.
-        return await self._native_tool_loop(
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-            model=model,
-            tools=tools,
+    LABEL = "Claude"
+
+    def __init__(
+        self, provider: ClaudeProvider, *, system, messages: list[dict],
+        model: str, tools: list, temperature: float,
+    ) -> None:
+        self._provider = provider
+        self._system = system
+        self.fil = messages
+        self._model = model
+        self._temperature = temperature
+        self._tool_defs = [
+            {
+                "name": t.name,
+                "description": t.description,
+                "input_schema": t.to_json_schema(),
+            }
+            for t in sorted(tools, key=lambda t: t.name)
+        ] or None
+        self._totals = _new_totals()
+        self._marque: dict | None = None
+
+    async def appeler(self, max_tokens: int):
+        response = await self._provider._create_message(
+            model=self._model,
             max_tokens=max_tokens,
-            temperature=temperature,
-            max_turns=max_turns,
+            system=self._system,
+            messages=self.fil,
+            tools=self._tool_defs,
+            temperature=self._temperature,
         )
+        self._provider._accumulate_usage(getattr(response, "usage", None), self._totals)
+        return response
+
+    def lire(self, response) -> Reponse:
+        tool_uses = [b for b in response.content if b.type == "tool_use"]
+        if response.stop_reason == "refusal":
+            # Un refus n'est pas une fin de tour ordinaire : il porte une
+            # catégorie, et c'est elle qu'on veut lire dans le journal quand
+            # une réponse manque.
+            logger.warning(
+                "Claude a refusé de poursuivre (stop_reason=refusal, "
+                "stop_details=%s)",
+                getattr(response, "stop_details", None),
+            )
+        return Reponse(
+            texte="".join(b.text for b in response.content if b.type == "text"),
+            appels=[
+                AppelOutil(name=b.name, arguments=b.input, id=b.id) for b in tool_uses
+            ],
+            coupee_en_plein_appel=response.stop_reason == "max_tokens" and bool(tool_uses),
+            terminee=response.stop_reason != "tool_use",
+        )
+
+    def rejouer_le_tour(self, response, reponse: Reponse) -> None:
+        self.fil.append({"role": "assistant", "content": response.content})
+
+    def rendre_les_resultats(self, issues: list[Issue]) -> None:
+        # Only the *newest* tool_result carries a cache breakpoint.
+        if self._marque is not None:
+            self._marque.pop("cache_control", None)
+        results = [_bloc_resultat(issue) for issue in issues]
+        results[-1]["cache_control"] = _cache_mark()
+        self._marque = results[-1]
+        self.fil.append({"role": "user", "content": results})
+
+    def clore(self) -> None:
+        self._provider._flush_usage(self._totals)
+
+
+def _bloc_resultat(issue: Issue) -> dict:
+    """Un ``tool_result`` ; toute issue en échec porte ``is_error``, jamais un raise."""
+    result: dict = {"type": "tool_result", "tool_use_id": issue.appel.id}
+    if issue.genre == "inconnu":
+        result["content"] = f"Outil inconnu: {issue.appel.name}"
+    elif issue.erreur is not None:
+        result["content"] = f"Erreur outil {issue.appel.name}: {issue.erreur}"
+    else:
+        result["content"] = _tool_result_text(issue.resultat)
+    if issue.en_echec():
+        result["is_error"] = True
+    return result
 
 
 def _tool_result_text(out) -> str:

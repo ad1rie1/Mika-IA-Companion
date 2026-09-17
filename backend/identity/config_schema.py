@@ -49,6 +49,18 @@ CONFIG_SCHEMA = [
                     "le risque y est l'auditoire, pas l'erreur d'identité.",
     ),
     ConfigGroup(
+        section="identity", key="Divulgation graduée", order=15,
+        description="Ce qu'elle peut raconter des AUTRES à l'interlocuteur, "
+                    "par niveau de sensibilité (anodin / personnel / "
+                    "confidence, notés par l'extracteur). Une salle publique "
+                    "ne dépasse jamais l'anodin ; sous la barre de la fiche, "
+                    "non plus. À partir de la barre, le personnel sort — "
+                    "tagué, pour qu'elle arbitre — si le lien existe : ami ou "
+                    "proche, ancre affective chaude, ou l'interlocuteur était "
+                    "là. La confidence ne sort qu'en privé, à la certitude "
+                    "ci-dessous, pour la personne concernée ou un proche.",
+    ),
+    ConfigGroup(
         section="identity", key="Poids des preuves", order=20,
         description="Ce que vaut chaque raison de croire que la personne en "
                     "face est bien celle qu'elle dit. ⚠ INVARIANT DE CALIBRAGE : "
@@ -103,6 +115,28 @@ CONFIG_SCHEMA = [
         hint="Affecte le ton (« tu reconnais Thomas » plutôt que « tu crois "
              "deviner »), pas ce qu'elle a le droit de dire : c'est la clé "
              "au-dessus qui ouvre la fiche.",
+    ),
+
+    # ── Divulgation graduée ──────────────────────────────────────
+    ConfigItem(
+        key="identity.divulgation.certitude_confidence", type="float",
+        section="identity", group="Divulgation graduée",
+        label="Certitude requise pour qu'une confidence puisse sortir",
+        default=0.85, min=0.0, max=1.0, hot_reload=True,
+        hint="Et seulement en privé, pour la personne concernée elle-même ou "
+             "un proche. 0,85 est la certitude d'un handle qu'elle a décidé de "
+             "lier (BOUND) : un compte Telegram corroboré (0,70) n'y arrive "
+             "pas sans ce geste.",
+    ),
+    ConfigItem(
+        key="identity.divulgation.chaleur_min", type="float",
+        section="identity", group="Divulgation graduée",
+        label="Chaleur d'ancre à partir de laquelle le lien compte",
+        default=0.3, min=0.0, max=1.0, hot_reload=True,
+        hint="Composante plaisir du fond affectif installé envers "
+             "l'interlocuteur (0 = froid ou absent, 0,7 = plafond de "
+             "l'ancre). Un lien chaud ouvre le personnel même quand la fiche "
+             "ne dit encore que « connaissance ».",
     ),
 
     # ── Poids des preuves ────────────────────────────────────────

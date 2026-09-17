@@ -20,6 +20,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from ai.chat import ChatPrompt
+
 
 def _provider(host="https://ollama.com"):
     from ai.providers.ollama_cloud_provider import OllamaCloudProvider
@@ -374,8 +376,8 @@ class TestSeparateBudget:
         with _config({"ai.ollama_cloud.thinking": False,
                       "ai.ollama_cloud.max_reply_tokens": 2048}), \
              patch("ai.providers.ollama_provider._record_ollama_usage"):
-            text, called = await p.complete_with_tools(
-                "sys", "coucou", model="m", tools=[], max_tokens=4096,
+            text, called = await p.complete_chat_with_tools(
+                ChatPrompt("sys", message="coucou"), model="m", tools=[], max_tokens=4096,
             )
 
         assert text == "fini"

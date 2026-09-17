@@ -16,8 +16,6 @@ import logging
 import random
 from dataclasses import dataclass
 
-from django.conf import settings
-
 from ai.quota import QuotaExceeded
 from ai.router import UnconfiguredRoleError
 from emotion.engine import emotion_engine
@@ -156,10 +154,14 @@ async def process_message(
             but a chantier step is not a lived exchange — its affect comes
             from the verdict (fierté, blocage), not from every intermediate
             sentence the model writes to itself.
+
+    L'ordre des étapes est porteur — voir chaque étape. En deux mots : la
+    question est écrite APRÈS le contexte (le tampon court terme la
+    montrerait deux fois) et AVANT l'appel IA (la partie longue et fragile) ;
+    un tour échoué est persisté avec une réponse ``is_internal`` mais ne
+    produit ni impulsion, ni événement, ni annonce ``_turn.completed``.
     """
     request_id = set_new_request_id()
-    tool_calls = []
-
     source = perception.source
     person_id = perception.person_id
     # text property concatenates all text Parts. Preprocessors have
@@ -177,10 +179,89 @@ async def process_message(
     authenticated = bool(perception.metadata.get("authenticated", False))
     is_public = bool(perception.metadata.get("is_public", False))
 
-    # Passive identification: read the turn for "moi c'est Thomas" and file a
-    # claim. This never binds anything on its own — it only gives Mika
-    # something to notice and decide on. Failures are non-fatal by design:
-    # not knowing who someone is must never cost them their answer.
+    await _identifier_passivement(person_id, message, source, authenticated)
+    # Hydrate person mood from DB if evicted from RAM since last interaction
+    await emotion_engine.ensure_person_loaded(person_id)
+    timeout_seconds = _timeout_pour_le_log()
+
+    ai_failed = False
+    user_message_id: int | None = None
+    tool_calls: list[str] = []
+    try:
+        # 1. Assemble context (memory, emotion, modules, self-concept, ...)
+        context = await _contexte_du_tour(
+            context, perception, message, authenticated, is_public,
+        )
+        # 1b. Write the question down, before attempting to answer it.
+        if persist:
+            user_message_id = await _ecrire_la_question(perception, message)
+        # 2. Prompt -> AI call -> emotion extraction.
+        response_text, emotion_data, tool_calls = await _interroger_le_modele(
+            context, message,
+        )
+    except Exception as exc:
+        ai_failed = True
+        emotion_data = None
+        response_text = _texte_de_repli(exc, person_id, source, timeout_seconds)
+
+    # 3. Process emotion (only on success, never in professional mode).
+    declared = await _ressentir(
+        context, person_id, emotion_data, ai_failed, emotion_impulse,
+    )
+
+    # 4. Persist the reply — including a failed turn's fallback.
+    assistant_message_id: int | None = None
+    if persist:
+        assistant_message_id = await _ecrire_la_reponse(
+            response_text, person_id, source, ai_failed, user_message_id,
+        )
+
+    # 5. Announce the turn — event, `_turn.completed`, the dream consumed.
+    if not ai_failed:
+        await _annoncer_le_tour(
+            perception, context, response_text, emotion_data, emit_event,
+        )
+
+    # 6. What this turn's frame carries.
+    vue = await _vue_emotionnelle(person_id, declared)
+    logger.info(
+        "[%s/%s] %s -> %s (emotion=%s intensity=%.2f)",
+        source, person_id,
+        message[:60], response_text[:80],
+        vue["emotion_name"], vue["emotion_intensity"],
+    )
+    output = SpeechOutput(
+        text=response_text,
+        emotion_data=emotion_data,
+        tool_calls=tool_calls,
+        request_id=request_id,
+        ai_failed=ai_failed,
+        message_id=assistant_message_id,
+        user_message_id=user_message_id,
+        client_msg_id=_client_msg_id(perception),
+        reply_ref=_reply_ref(perception),
+        **vue,
+    )
+
+    # 7. Broadcast (inner state follows). An internal trigger that failed is
+    #    NOT broadcast at all: nobody asked a question, so an error fallback
+    #    greeting/murmur would be pure noise — silence is the valid outcome.
+    if broadcast and not (ai_failed and perception.intent is Intent.INTERNAL_TRIGGER):
+        await _diffuser(output, source, person_id)
+
+    return output
+
+
+# -- Steps of a turn ----------------------------------------------------------
+
+
+async def _identifier_passivement(
+    person_id: str, message: str, source: str, authenticated: bool,
+) -> None:
+    """Passive identification: read the turn for "moi c'est Thomas" and file
+    a claim. This never binds anything on its own — it only gives Mika
+    something to notice and decide on. Failures are non-fatal by design:
+    not knowing who someone is must never cost them their answer."""
     try:
         await identity_resolver.ingest_message(
             person_id, message, channel=source, authenticated=authenticated,
@@ -188,396 +269,375 @@ async def process_message(
     except Exception as exc:
         degradations.record("turn: passive identification", exc)
 
-    # Hydrate person mood from DB if evicted from RAM since last interaction
-    await emotion_engine.ensure_person_loaded(person_id)
 
-    ai_failed = False
-    user_message_id: int | None = None
-    assistant_message_id: int | None = None
-    # Lu pour le message de log seulement : la borne elle-même est posée par
-    # le routeur (voir l'étape 2).
+def _timeout_pour_le_log() -> float:
+    """Lu pour le message de log seulement : la borne elle-même est posée par
+    le routeur (voir ``_interroger_le_modele``)."""
     try:
         from configs.service import config_service
-        timeout_seconds = float(config_service.get("ai.call_timeout_seconds"))
+        return float(config_service.get("ai.call_timeout_seconds"))
     except Exception:
-        timeout_seconds = 0.0
+        return 0.0
 
-    try:
-        # 1. Assemble context (memory, emotion, modules, self-concept, ...)
-        if context is None:
-            context = await gather_context(
-                message, person_id, channel=source,
-                authenticated=authenticated, is_public=is_public,
-                intent=perception.intent,
-            )
 
-        # Second statement of the same rule, and deliberately not a duplicate:
-        # a caller assembling its own context (the conscience does) cannot be
-        # made to declare the intent, and this is the only point that sees
-        # both. Without it, an action brief Mika wrote to herself is read as
-        # the recipient's tone — "besoin de vider son sac" about a text
-        # nobody sent.
-        if (
-            perception.intent is not Intent.REQUEST_RESPONSE
-            and context.user_mood_hint
-        ):
-            context = dataclasses.replace(context, user_mood_hint="")
+async def _contexte_du_tour(
+    context: ConversationContext | None, perception: Perception, message: str,
+    authenticated: bool, is_public: bool,
+) -> ConversationContext:
+    """Le contexte du tour — assemblé ici, ou reçu d'un appelant qui a le sien.
 
-        # 1b. Write the question down, before attempting to answer it.
-        #
-        #     Deliberately *after* gather_context and *before* the AI call.
-        #     After, because add_message also appends to the short-term
-        #     buffer that gather_context just read — persisting first would
-        #     hand the model the current message twice, once as history and
-        #     once as the prompt. Before, because the AI call is the long
-        #     fragile part: a restart during it used to erase the question
-        #     itself, leaving someone with a bubble marked delivered and no
-        #     trace on the server that they had spoken at all.
-        if persist:
-            # A turn replayed after a restart already has its question in the
-            # database — that row is precisely how it was found (see
-            # pipeline/turns.py::resume_interrupted_turns). Writing it again
-            # produced a second row with the same text: duplicated in the
-            # person's fiche, duplicated for the consolidator, and displayed
-            # twice in the browser, since the merge only adopts bubbles that
-            # have no id yet and the original already had one.
-            #
-            # The rehydrated short-term buffer still holds that question, so
-            # the replayed turn shows it to the model once as history and
-            # once as the prompt. That is the cheaper of the two artefacts:
-            # dropping it from the buffer would leave the answer standing
-            # alone, without the question, for every turn that follows.
-            replayed_id = perception.metadata.get("original_message_id")
-            if isinstance(replayed_id, int):
-                user_message_id = replayed_id
-            else:
-                internal = perception.intent is Intent.INTERNAL_TRIGGER
-                # Une écriture qui échoue (base verrouillée) n'est pas une
-                # panne d'IA : servir « j'ai eu un petit bug » sans avoir
-                # appelé le modèle privait la personne d'une réponse que
-                # rien n'empêchait. On répond, on compte l'échec, et la
-                # ligne manquante est la seule chose perdue.
-                try:
-                    user_message_id = await persist_user_message(
-                        message=message,
-                        source=source,
-                        person_id=person_id,
-                        attachments_meta=_serialize_attachments_meta(perception),
-                        # The "user" side of an internal trigger is scaffolding
-                        # Mika wrote to herself, not something anyone said.
-                        is_internal=internal,
-                        # Un brief interne n'est jamais rejoué : rien à retenir
-                        # de son transport.
-                        transport_meta=None if internal else _transport_meta(perception),
-                    )
-                except Exception as exc:
-                    degradations.record("turn: persistance de la question", exc)
-                    logger.warning(
-                        "Question non persistée (person=%s, source=%s): %s — "
-                        "le tour continue sans ligne", person_id, source, exc,
-                    )
-                    user_message_id = None
-
-        # 2. Prompt -> AI call -> emotion extraction.
-        #
-        #    UNE seule borne temporelle, celle du routeur (``_metered_call``,
-        #    ``ai.call_timeout_seconds``). Il y en avait deux, égales, l'une
-        #    autour de l'autre : l'externe démarrait avant la construction du
-        #    prompt et l'attente du créneau, donc tombait toujours la
-        #    première — la coroutine interne recevait un ``CancelledError``,
-        #    jamais un ``TimeoutError``, et le routeur ne comptait pas les
-        #    jetons déjà payés d'une boucle d'outils morte à l'itération six.
-        #    Le ``TimeoutError`` du routeur remonte ici tel quel.
-        response_text, emotion_data, tool_calls = await call_ai_and_parse(
-            context, message,
+    Second statement of the mood-hint rule, and deliberately not a
+    duplicate: a caller assembling its own context (the conscience does)
+    cannot be made to declare the intent, and this is the only point that
+    sees both. Without it, an action brief Mika wrote to herself is read as
+    the recipient's tone — "besoin de vider son sac" about a text nobody
+    sent.
+    """
+    if context is None:
+        context = await gather_context(
+            message, perception.person_id, channel=perception.source,
+            authenticated=authenticated, is_public=is_public,
+            intent=perception.intent,
         )
+    if perception.intent is not Intent.REQUEST_RESPONSE and context.user_mood_hint:
+        context = dataclasses.replace(context, user_mood_hint="")
+    return context
 
-        if not (response_text or "").strip():
-            raise _ReponseVide(
-                f"{len(tool_calls)} outil(s) appelé(s), aucun texte produit"
-            )
 
-    except asyncio.TimeoutError:
+async def _ecrire_la_question(perception: Perception, message: str) -> int | None:
+    """Write the question down — deliberately *after* gather_context and
+    *before* the AI call.
+
+    After, because add_message also appends to the short-term buffer that
+    gather_context just read — persisting first would hand the model the
+    current message twice, once as history and once as the prompt. Before,
+    because the AI call is the long fragile part: a restart during it used
+    to erase the question itself, leaving someone with a bubble marked
+    delivered and no trace on the server that they had spoken at all.
+
+    A turn replayed after a restart already has its question in the
+    database — that row is precisely how it was found (see
+    pipeline/turns.py::resume_interrupted_turns). Writing it again produced
+    a second row with the same text: duplicated in the person's fiche,
+    duplicated for the consolidator, and displayed twice in the browser,
+    since the merge only adopts bubbles that have no id yet and the original
+    already had one. The rehydrated short-term buffer still holds that
+    question, so the replayed turn shows it to the model once as history and
+    once as the prompt. That is the cheaper of the two artefacts: dropping it
+    from the buffer would leave the answer standing alone, without the
+    question, for every turn that follows.
+    """
+    replayed_id = perception.metadata.get("original_message_id")
+    if isinstance(replayed_id, int):
+        return replayed_id
+    internal = perception.intent is Intent.INTERNAL_TRIGGER
+    # Une écriture qui échoue (base verrouillée) n'est pas une panne d'IA :
+    # servir « j'ai eu un petit bug » sans avoir appelé le modèle privait la
+    # personne d'une réponse que rien n'empêchait. On répond, on compte
+    # l'échec, et la ligne manquante est la seule chose perdue.
+    try:
+        return await persist_user_message(
+            message=message,
+            source=perception.source,
+            person_id=perception.person_id,
+            attachments_meta=_serialize_attachments_meta(perception),
+            # The "user" side of an internal trigger is scaffolding Mika
+            # wrote to herself, not something anyone said.
+            is_internal=internal,
+            # Un brief interne n'est jamais rejoué : rien à retenir de son
+            # transport.
+            transport_meta=None if internal else _transport_meta(perception),
+        )
+    except Exception as exc:
+        degradations.record("turn: persistance de la question", exc)
+        logger.warning(
+            "Question non persistée (person=%s, source=%s): %s — "
+            "le tour continue sans ligne",
+            perception.person_id, perception.source, exc,
+        )
+        return None
+
+
+async def _interroger_le_modele(
+    context: ConversationContext, message: str,
+) -> tuple[str, EmotionData | None, list[str]]:
+    """Prompt -> AI call -> emotion extraction ; lève ``_ReponseVide`` sur
+    un texte vide.
+
+    UNE seule borne temporelle, celle du routeur (``_metered_call``,
+    ``ai.call_timeout_seconds``). Il y en avait deux, égales, l'une autour
+    de l'autre : l'externe démarrait avant la construction du prompt et
+    l'attente du créneau, donc tombait toujours la première — la coroutine
+    interne recevait un ``CancelledError``, jamais un ``TimeoutError``, et
+    le routeur ne comptait pas les jetons déjà payés d'une boucle d'outils
+    morte à l'itération six. Le ``TimeoutError`` du routeur remonte ici tel
+    quel.
+    """
+    response_text, emotion_data, tool_calls = await call_ai_and_parse(
+        context, message,
+    )
+    if not (response_text or "").strip():
+        raise _ReponseVide(
+            f"{len(tool_calls)} outil(s) appelé(s), aucun texte produit"
+        )
+    return response_text, emotion_data, tool_calls
+
+
+def _texte_de_repli(
+    exc: BaseException, person_id: str, source: str, timeout_seconds: float,
+) -> str:
+    """Le texte servi à la place d'une réponse, selon ce qui a échoué.
+
+    Une seule chaîne de cas, dans l'ordre historique des ``except`` : le
+    dépassement, le rôle non configuré, le quota, la réponse vide, puis
+    tout le reste — qui seul est un vrai bug, journalisé avec sa trace.
+    """
+    if isinstance(exc, asyncio.TimeoutError):
         logger.warning(
             "AI call timed out after %ds (person=%s, source=%s)",
             timeout_seconds, person_id, source,
         )
-        ai_failed = True
-        response_text = "Hmm, je reflechis plus lentement que prevu... Laisse-moi un instant."
-        emotion_data = None
-    except UnconfiguredRoleError as ure:
+        return "Hmm, je reflechis plus lentement que prevu... Laisse-moi un instant."
+    if isinstance(exc, UnconfiguredRoleError):
         # Configuration error, not a runtime bug: no model is mapped to the
         # role. One concise line — a traceback adds nothing actionable here.
         logger.warning(
-            "IA non configurée (person=%s, source=%s): %s",
-            person_id, source, ure,
+            "IA non configurée (person=%s, source=%s): %s", person_id, source, exc,
         )
-        ai_failed = True
         # Nommer le rôle : « pas de modèle associé » sans dire lequel a
         # laissé plus d'une install fraîche chercher du côté de
         # ``conversation`` alors que c'est ``conversation_tools`` qui manquait.
-        role_manquant = getattr(ure, "role", None)
+        role_manquant = getattr(exc, "role", None)
         precision = (
             f" au role '{role_manquant.value}'"
             if getattr(role_manquant, "value", None) else ""
         )
-        response_text = (
+        return (
             "Je ne suis pas encore configurée pour repondre... "
             f"Mon IA n'a pas de modele associe{precision} "
             "(Configuration > IA · Roles)."
         )
-        emotion_data = None
-    except QuotaExceeded as qe:
+    if isinstance(exc, QuotaExceeded):
         # Hit a daily/monthly LLM quota. Return a truthful short message
         # instead of the generic "bug" fallback so the user knows why.
         logger.warning(
-            "AI quota exceeded (person=%s, source=%s): %s",
-            person_id, source, qe,
+            "AI quota exceeded (person=%s, source=%s): %s", person_id, source, exc,
         )
-        ai_failed = True
-        response_text = (
+        return (
             "Desolee, j'ai atteint la limite d'usage IA pour le moment. "
             "Reessaie un peu plus tard."
         )
-        emotion_data = None
-    except _ReponseVide as vide:
+    if isinstance(exc, _ReponseVide):
         logger.warning(
             "Réponse vide du modèle (person=%s, source=%s): %s — "
             "vérifie ai.<provider>.thinking et le plafond de sortie",
-            person_id, source, vide,
+            person_id, source, exc,
         )
-        ai_failed = True
-        response_text = "Attends... j'ai perdu le fil, je n'ai rien reussi a formuler. Tu redis ?"
-        emotion_data = None
+        return "Attends... j'ai perdu le fil, je n'ai rien reussi a formuler. Tu redis ?"
+    logger.error(
+        "AI error while processing message (person=%s, source=%s)",
+        person_id, source, exc_info=exc,
+    )
+    # A light global-mood perturbation reflects Mika's own frustration
+    # at her technical failure — not a relational emotion toward the user.
+    emotion_engine.process_emotion(
+        EmotionData(Emotion.ANXIOUS, 0.1), "conscience_mika",
+    )
+    return "Oups, j'ai eu un petit bug... Tu peux reessayer ?"
+
+
+async def _ressentir(
+    context, person_id: str, emotion_data: EmotionData | None,
+    ai_failed: bool, emotion_impulse: bool,
+) -> EmotionData | None:
+    """Apply the tag as an impulse and snapshot the mood ; returns what this
+    turn is entitled to claim as its emotion (``declared``).
+
+    Only on success — a crashed AI is not the user's fault and should not
+    color Mika's mood toward them — and never when a project with
+    emotion_policy=OFF is active: work-mode replies must not color
+    relational state. Deliberately non-fatal: a bookkeeping error here must
+    not turn a real, already-received answer into the fallback.
+
+    ``declared`` is the tag, when there is one and when nothing forbids it.
+    A failure declared nothing (the fallback is not a sentence Mika wrote),
+    and professional mode already suppresses the impulse — letting the tag
+    colour the frame would put back through the window what
+    emotion_policy=OFF throws out the door.
+    """
+    suppresses_emotion = bool(getattr(context, "project_suppresses_emotion", False))
+    declared = emotion_data if not ai_failed and not suppresses_emotion else None
+    if ai_failed or suppresses_emotion or not emotion_impulse:
+        return declared
+    try:
+        # No tag means *no impulse*. NEUTRAL is not "nothing", it is the
+        # origin of PAD space, so a default one pulled whatever the person
+        # had just provoked back toward zero: a turn she had no tag for was
+        # lived as a soothing.
+        if declared is not None:
+            # ``declared`` : c'est la balise du modèle, pas une impulsion
+            # programmée — pour un acte sans destinataire (``conscience_mika``)
+            # elle passe par la diffusion ordinaire, pas par le pas dosé de
+            # la vie intérieure (voir ``_feel_for_herself``).
+            emotion_engine.process_emotion(declared, person_id, declared=True)
+        # Snapshot runs either way, so the drift between turns keeps being
+        # archived even when a turn declares nothing.
+        await emotion_engine.save_snapshot(person_id, declared=declared)
     except Exception:
         logger.exception(
-            "AI error while processing message (person=%s, source=%s)",
-            person_id, source,
+            "Emotion post-processing failed (person=%s) — the reply itself "
+            "is unaffected", person_id,
         )
-        ai_failed = True
-        response_text = "Oups, j'ai eu un petit bug... Tu peux reessayer ?"
-        emotion_data = None
-        # A light global-mood perturbation reflects Mika's own frustration
-        # at her technical failure — not a relational emotion toward the user.
-        emotion_engine.process_emotion(
-            EmotionData(Emotion.ANXIOUS, 0.1), "conscience_mika",
-        )
+    return declared
 
-    # 3. Process emotion (only on success — a crashed AI is not the user's
-    #    fault and should not color Mika's mood toward them).
-    #    Skipped entirely when a project with emotion_policy=OFF is active:
-    #    we don't want work-mode replies coloring relational state (e.g.
-    #    replying to a tense client email should not make Mika "anxious"
-    #    toward the person the next time they chat).
-    #    Deliberately OUTSIDE the AI try-block and non-fatal: a bookkeeping
-    #    error here must not turn a real, already-received answer into the
-    #    "j'ai eu un petit bug" fallback and drop it from memory.
-    #
-    #    `declared` is what this turn is entitled to claim as its emotion: the
-    #    tag, when there is one and when nothing forbids it. A failure declared
-    #    nothing (the fallback is not a sentence Mika wrote), and professional
-    #    mode already suppresses the impulse — letting the tag colour the frame
-    #    would put back through the window what emotion_policy=OFF throws out
-    #    the door.
-    suppresses_emotion = bool(
-        getattr(context, "project_suppresses_emotion", False)
-    )
-    declared = emotion_data if not ai_failed and not suppresses_emotion else None
-    if not ai_failed and not suppresses_emotion and emotion_impulse:
-        try:
-            # No tag means *no impulse*. NEUTRAL is not "nothing", it is the
-            # origin of PAD space, so the default one pulled whatever the
-            # person had just provoked back toward zero: a turn she had no
-            # tag for was lived as a soothing.
-            if declared is not None:
-                # ``declared`` : c'est la balise du modèle, pas une impulsion
-                # programmée — pour un acte sans destinataire (``conscience_mika``)
-                # elle passe par la diffusion ordinaire, pas par le pas dosé
-                # de la vie intérieure (voir ``_feel_for_herself``).
-                emotion_engine.process_emotion(declared, person_id, declared=True)
-            # Snapshot runs either way, so the drift between turns keeps being
-            # archived even when a turn declares nothing.
-            await emotion_engine.save_snapshot(person_id, declared=declared)
-        except Exception:
-            logger.exception(
-                "Emotion post-processing failed (person=%s) — the reply itself "
-                "is unaffected", person_id,
-            )
 
-    # 4. Persist the reply — including a failed turn's fallback.
-    #
-    #    A failure used to drop the whole exchange, on the grounds that a
-    #    fallback is not a real answer. True of the *answer*; false of the
-    #    question. What someone actually said to Mika happened whether or not
-    #    the model replied in time, and losing it means the message exists
-    #    nowhere — not in the history, not on the person's fiche, not for the
-    #    consolidator — which reads as "you never wrote to me". The question
-    #    is therefore already written down, at step 1b.
-    #
-    #    Only the *reply* is demoted: marked internal, so the extractor never
-    #    turns "j'ai eu un petit bug" into a souvenir and a restart doesn't
-    #    rehydrate it as something Mika said. Everything else a failure
-    #    withholds still is: no emotional impulse, no chat.message event, no
-    #    turn signal. She keeps the trace without pretending she answered.
-    if persist:
-        try:
-            assistant_message_id = await persist_assistant_message(
-                response=response_text,
-                person_id=person_id,
-                is_internal=ai_failed,
-                # Closes the question: answered, well or badly. A fallback still
-                # counts, or every boot would replay the same failing turn.
-                replying_to=user_message_id,
-            )
-        except Exception as exc:
-            # Même règle qu'à l'écriture de la question : une réponse déjà
-            # reçue du modèle ne devient pas une panne parce que la base
-            # n'a pas pu la garder. Elle part à l'écran ; la mémoire longue
-            # en perd la trace et le registre le dit.
-            degradations.record("turn: persistance de la reponse", exc)
-            logger.warning(
-                "Réponse non persistée (person=%s, source=%s): %s",
-                person_id, source, exc,
-            )
-            assistant_message_id = None
+async def _ecrire_la_reponse(
+    response_text: str, person_id: str, source: str, ai_failed: bool,
+    user_message_id: int | None,
+) -> int | None:
+    """Persist the reply — including a failed turn's fallback.
 
-    # 5. Emit module event — also skipped on failure.
-    if emit_event and not ai_failed:
-        await emit_communication_event(source, person_id)
-
-    # 5b. Announce the turn. Everything that merely wants to *know* a turn
-    #     happened — the drives relieving EXPRESSION, the conscience filing
-    #     a "did I say that right?" rumination — subscribes to this instead
-    #     of being called from here. Each of those used to be an inline hook
-    #     with its own try/except and its own idea of when to skip, which
-    #     made this function the place every new subsystem had to edit.
-    #
-    #     Note what is NOT announced: the emotional impulse above and the
-    #     identity ingest at the top are pipeline *steps*, not listeners —
-    #     their effects are read further down this same function. See
-    #     pipeline/signals.py.
-    if not ai_failed:
-        await publish_turn_completed(
+    A failure used to drop the whole exchange, on the grounds that a
+    fallback is not a real answer. True of the *answer*; false of the
+    question — which is why the question is written at step 1b. Only the
+    *reply* is demoted: marked internal, so the extractor never turns
+    "j'ai eu un petit bug" into a souvenir and a restart doesn't rehydrate
+    it as something Mika said. Everything else a failure withholds still
+    is: no emotional impulse, no chat.message event, no turn signal.
+    """
+    try:
+        return await persist_assistant_message(
+            response=response_text,
             person_id=person_id,
-            source=source,
-            intent=perception.intent.name,
-            text=response_text,
-            emotion_name=emotion_data.emotion.value if emotion_data else "",
-            emotion_intensity=emotion_data.intensity if emotion_data else 0.0,
-            project_suppresses_emotion=bool(
-                getattr(context, "project_suppresses_emotion", False)
-            ),
-            # Quel projet la détection a reconnu dans ce tour. Le lanceur en
-            # a besoin pour savoir qu'un humain est repassé sur cet
-            # engagement ; ce qu'il en fait est sa politique, pas la nôtre.
-            project_id=getattr(context, "project_id", None),
+            is_internal=ai_failed,
+            # Closes the question: answered, well or badly. A fallback still
+            # counts, or every boot would replay the same failing turn.
+            replying_to=user_message_id,
         )
+    except Exception as exc:
+        # Même règle qu'à l'écriture de la question : une réponse déjà reçue
+        # du modèle ne devient pas une panne parce que la base n'a pas pu la
+        # garder. Elle part à l'écran ; la mémoire longue en perd la trace
+        # et le registre le dit.
+        degradations.record("turn: persistance de la reponse", exc)
+        logger.warning(
+            "Réponse non persistée (person=%s, source=%s): %s",
+            person_id, source, exc,
+        )
+        return None
 
-    # 5c. Consume the dream, now that the turn actually happened.
-    #
-    #     Marking it during gather_context spent it before the AI call: a
-    #     timeout on the first message of the morning — exactly when a local
-    #     model is cold — burned last night's dream forever, while the
-    #     fallback never mentioned it. It was the only irreversible effect a
-    #     failed turn still produced. The widened window can now inject the
-    #     same dream into two overlapping turns (the conscience calls the
-    #     model outside the single-worker queue); a duplicate in one prompt
-    #     is cheap against losing the dream outright.
-    if not ai_failed:
-        pending_dream = getattr(context, "pending_dream_recall", None)
-        if pending_dream is not None:
-            try:
-                from memory import read
 
-                await read.mark_dream_recalled(pending_dream)
-            except Exception as exc:
-                degradations.record("turn: marquage du reve", exc)
+async def _annoncer_le_tour(
+    perception: Perception, context, response_text: str,
+    emotion_data: EmotionData | None, emit_event: bool,
+) -> None:
+    """Ce qu'un tour RÉUSSI dit au reste du moteur — jamais un tour échoué.
 
-    # 6. What this turn's frame carries. The tag wins when there is one: it is
-    #    what she chose while writing, where the oscillator only says where
-    #    the relation stands — and it only absorbs a share of an impulse, so
-    #    reading it here reported a state closer to the one before the turn
-    #    than to what the reply declared.
+    5.  The ``chat.message`` module event.
+    5b. ``_turn.completed``: everything that merely wants to *know* a turn
+        happened — the drives relieving EXPRESSION, the conscience filing a
+        "did I say that right?" rumination — subscribes to this instead of
+        being called from here. Note what is NOT announced: the emotional
+        impulse and the identity ingest are pipeline *steps*, not listeners —
+        their effects are read within the same turn. See pipeline/signals.py.
+    5c. The dream consumed, now that the turn actually happened. Marking it
+        during gather_context spent it before the AI call: a timeout on the
+        first message of the morning burned last night's dream forever while
+        the fallback never mentioned it. A duplicate in one prompt (two
+        overlapping turns) is cheap against losing the dream outright.
+    """
+    if emit_event:
+        await emit_communication_event(perception.source, perception.person_id)
+
+    await publish_turn_completed(
+        person_id=perception.person_id,
+        source=perception.source,
+        intent=perception.intent.name,
+        text=response_text,
+        emotion_name=emotion_data.emotion.value if emotion_data else "",
+        emotion_intensity=emotion_data.intensity if emotion_data else 0.0,
+        project_suppresses_emotion=bool(
+            getattr(context, "project_suppresses_emotion", False)
+        ),
+        # Quel projet la détection a reconnu dans ce tour. Le lanceur en a
+        # besoin pour savoir qu'un humain est repassé sur cet engagement ;
+        # ce qu'il en fait est sa politique, pas la nôtre.
+        project_id=getattr(context, "project_id", None),
+    )
+
+    pending_dream = getattr(context, "pending_dream_recall", None)
+    if pending_dream is not None:
+        try:
+            from memory import read
+
+            await read.mark_dream_recalled(pending_dream)
+        except Exception as exc:
+            degradations.record("turn: marquage du reve", exc)
+
+
+async def _vue_emotionnelle(person_id: str, declared: EmotionData | None) -> dict:
+    """Les quatre champs émotionnels de la trame ``speech``.
+
+    The tag wins when there is one: it is what she chose while writing,
+    where the oscillator only says where the relation stands — and it only
+    absorbs a share of an impulse, so reading it here reported a state
+    closer to the one before the turn than to what the reply declared.
+    """
     try:
         view = await emotion_engine.turn_emotion_view(person_id, declared)
-        emotion_name = view.emotion
-        emotion_intensity = view.intensity
-        emotion_state = view.state
-        emotion_blend = [
-            {"emotion": name, "weight": round(w, 2)} for name, w in view.blend
-        ]
+        return {
+            "emotion_name": view.emotion,
+            "emotion_intensity": view.intensity,
+            "emotion_state": view.state,
+            "emotion_blend": [
+                {"emotion": name, "weight": round(w, 2)} for name, w in view.blend
+            ],
+        }
     except Exception as exc:
         degradations.record("turn: vue emotionnelle", exc)
         msg_emotion = emotion_engine.compute_message_emotion(person_id)
-        emotion_name = msg_emotion.emotion.value
-        emotion_intensity = msg_emotion.intensity
-        emotion_state = emotion_engine.get_state_dict(person_id)
-        emotion_blend = [
-            {"emotion": e.value, "weight": round(w, 2)}
-            for e, w in msg_emotion.blend
-        ]
+        return {
+            "emotion_name": msg_emotion.emotion.value,
+            "emotion_intensity": msg_emotion.intensity,
+            "emotion_state": emotion_engine.get_state_dict(person_id),
+            "emotion_blend": [
+                {"emotion": e.value, "weight": round(w, 2)}
+                for e, w in msg_emotion.blend
+            ],
+        }
 
-    logger.info(
-        "[%s/%s] %s -> %s (emotion=%s intensity=%.2f)",
-        source, person_id,
-        message[:60], response_text[:80],
-        emotion_name, emotion_intensity,
-    )
 
-    output = SpeechOutput(
-        text=response_text,
-        emotion_data=emotion_data,
-        emotion_name=emotion_name,
-        emotion_intensity=emotion_intensity,
-        emotion_state=emotion_state,
-        tool_calls=tool_calls,
-        request_id=request_id,
-        emotion_blend=emotion_blend,
-        ai_failed=ai_failed,
-        message_id=assistant_message_id,
-        user_message_id=user_message_id,
-        client_msg_id=_client_msg_id(perception),
-        reply_ref=_reply_ref(perception),
-    )
+async def _diffuser(output: SpeechOutput, source: str, person_id: str) -> None:
+    """Broadcast to WebSocket (inner state follows), behind a short
+    "thinking" delay so responses don't pop back instantly. Skipped for
+    internal triggers (Mika already decided deliberately) and for AI errors
+    (fallback messages should come back fast).
 
-    # 7. Broadcast to WebSocket (inner state attached so UI panels refresh).
-    #    Before broadcasting, insert a short "thinking" delay so responses
-    #    don't pop back instantly — feels human, especially for short
-    #    replies. Skipped for internal triggers (Mika already decided
-    #    deliberately; adding hesitation on top would be doubled latency)
-    #    and for AI errors (fallback messages should come back fast).
-    #    An internal trigger that failed is NOT broadcast at all: nobody
-    #    asked a question, so an error fallback greeting/murmur would be
-    #    pure noise — silence is the valid outcome.
-    if ai_failed and perception.intent is Intent.INTERNAL_TRIGGER:
-        broadcast = False
-    if broadcast:
-        thinking_delay = 0.0
-        if not ai_failed:
-            try:
-                from drives.engine import drive_engine
-                energy = drive_engine.energy_level()
-            except Exception:
-                energy = 0.5
-            thinking_delay = _compute_thinking_delay(
-                response_text=response_text, energy=energy, source=source,
+    Le délai cosmétique dormait dans l'unique worker de la file : deux
+    secondes pendant lesquelles le tour suivant — de n'importe qui —
+    attendait. Il vit dans une chaîne de diffusion détachée qui garde
+    l'ordre des réponses ; le worker rend la main dès que le tour est
+    calculé et persisté.
+    """
+    thinking_delay = 0.0
+    if not output.ai_failed:
+        try:
+            from drives.engine import drive_engine
+            energy = drive_engine.energy_level()
+        except Exception:
+            energy = 0.5
+        thinking_delay = _compute_thinking_delay(
+            response_text=output.text, energy=energy, source=source,
+        )
+    if thinking_delay > 0 or _broadcast_chain.pending():
+        if thinking_delay > 0:
+            logger.debug(
+                "Thinking delay: %.2fs (words=%d)",
+                thinking_delay, len(output.text.split()),
             )
-        # Le délai cosmétique dormait ICI, dans l'unique worker de la file :
-        # deux secondes pendant lesquelles le tour suivant — de n'importe
-        # qui — attendait. Il vit maintenant dans une chaîne de diffusion
-        # détachée qui garde l'ordre des réponses ; le worker rend la main
-        # dès que le tour est calculé et persisté.
-        if thinking_delay > 0 or _broadcast_chain.pending():
-            if thinking_delay > 0:
-                logger.debug(
-                    "Thinking delay: %.2fs (words=%d)",
-                    thinking_delay, len(response_text.split()),
-                )
-            _broadcast_chain.schedule(thinking_delay, output, source, person_id)
-        else:
-            await broadcast_to_websocket(output, source, person_id=person_id)
-
-    return output
+        _broadcast_chain.schedule(thinking_delay, output, source, person_id)
+    else:
+        await broadcast_to_websocket(output, source, person_id=person_id)
 
 
 class _BroadcastChain:

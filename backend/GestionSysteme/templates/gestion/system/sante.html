@@ -146,6 +146,114 @@
 
 <section class="card mb-6">
   <div class="card-head">
+    <h3>Appels de fond (dernière heure)</h3>
+    <span class="card-sub">tout appel dont personne n'attend la réponse — au plafond, l'appel est différé sans bruit : le chantier attend, l'extraction repasse au tick suivant, le signal est interprété par heuristique</span>
+  </div>
+  <div class="card-body flush">
+    <div class="table-scroll">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Provider</th>
+            <th class="num">Utilisés</th>
+            <th class="num">Plafond</th>
+            <th class="num">Refusés</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in fond.providers %}
+            <tr>
+              <td class="mono">{{ p.provider }}</td>
+              <td class="num">
+                <span class="badge {% if p.sature %}badge-warn{% endif %}">{{ p.utilises }}</span>
+              </td>
+              <td class="num">{% if p.plafond %}{{ p.plafond }}{% else %}<span class="muted">illimité</span>{% endif %}</td>
+              <td class="num">{% if p.refuses %}<span class="badge badge-warn">{{ p.refuses }}</span>{% else %}0{% endif %}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="4"><span class="muted">Aucun provider déclaré.</span></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if fond.roles %}
+    <div class="table-scroll">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Rôle</th>
+            <th>Provider</th>
+            <th class="num">Utilisés</th>
+            <th class="num">Refusés</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in fond.roles %}
+            <tr>
+              <td class="mono">{{ r.role }}</td>
+              <td class="mono text-xs">{{ r.provider }}</td>
+              <td class="num">{{ r.utilises }}</td>
+              <td class="num">{% if r.refuses %}<span class="badge badge-warn">{{ r.refuses }}</span>{% else %}0{% endif %}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</section>
+
+<section class="card mb-6">
+  <div class="card-head">
+    <h3>Disjoncteurs</h3>
+    <span class="card-sub">un provider qui ne répond plus est déclaré indisponible après N pannes de transport : tout appel échoue immédiatement pendant le repos, puis un appel d'essai passe</span>
+  </div>
+  <div class="card-body flush">
+    <div class="table-scroll">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Provider</th>
+            <th class="fit">État</th>
+            <th class="num">Pannes consécutives</th>
+            <th class="num">Seuil</th>
+            <th class="fit">Réouverture</th>
+            <th class="num">Ouvertures</th>
+            <th style="min-width: 24rem;">Dernière panne</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for d in disjoncteurs %}
+            <tr>
+              <td class="mono">{{ d.provider }}</td>
+              <td class="fit">
+                {% if d.etat == "ouvert" %}
+                  <span class="badge badge-danger">ouvert</span>
+                {% elif d.etat == "essai" %}
+                  <span class="badge badge-warn">essai</span>
+                {% else %}
+                  <span class="badge badge-ok">fermé</span>
+                {% endif %}
+              </td>
+              <td class="num">{% if d.echecs %}<span class="badge badge-warn">{{ d.echecs }}</span>{% else %}0{% endif %}</td>
+              <td class="num">{% if d.seuil %}{{ d.seuil }}{% else %}<span class="muted">jamais</span>{% endif %}</td>
+              <td class="fit">
+                {% if d.etat == "ouvert" %}dans {{ d.reouverture_dans_s|duration }}{% else %}<span class="muted">—</span>{% endif %}
+              </td>
+              <td class="num">{{ d.ouvertures }}</td>
+              <td class="text-xs break">{{ d.derniere_panne|default:"—" }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="7"><span class="muted">Aucun provider déclaré.</span></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="card mb-6">
+  <div class="card-head">
     <h3>Pannes silencieuses</h3>
     <span class="card-sub">triées par nombre d'occurrences</span>
   </div>

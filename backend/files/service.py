@@ -10,7 +10,8 @@ Consumers:
 
 Les ``op_*`` sont la surface *outil* : elles filtrent sur la personne du
 tour en cours (``pipeline.tracing.current_person_id``) et ne rendent que
-ses propres fichiers, sauf pour le propriétaire. Un consommateur interne
+ses propres fichiers, sauf pour le propriétaire (``identity.roles.is_owner`` :
+opérateur, ``OWNER_PERSON_IDS``, canaux internes — pas tout ``user_*``). Un consommateur interne
 qui doit ignorer ce filtre passe par ``get()`` / le registre, pas par un
 ``op_*``.
 """
@@ -207,6 +208,13 @@ class FilesService:
         (``ModuleCollectors.context`` saute les modules ``CONTEXT_VISIBILITY
         == "owner"``). Sans ce filtre, un contact Telegram ou un invité web
         atteint par les outils ce que le prompt lui refuse.
+
+        Le propriétaire (``identity/roles.py`` : opérateur ``is_staff``,
+        ``OWNER_PERSON_IDS``, canaux internes de Mika) voit tout. Un compte
+        de conversation — ``user_*`` sans ``is_staff`` — ne voit que ce
+        qu'il a déposé lui-même : ``is_owner`` reconnaissait tout ``user_*``,
+        et n'importe quel login créé dans *Accès · Comptes* lisait, déplaçait
+        et supprimait les fichiers de tout le monde.
 
         Un ``person_id`` vide (boucle de fond, tick cron) signifie « aucune
         personne en portée » : pas de propriétaire, pas de possesseur, donc

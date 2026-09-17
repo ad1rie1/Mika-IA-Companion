@@ -27,6 +27,7 @@ import pytest
 from asgiref.sync import sync_to_async
 from django.utils import timezone as tz
 
+from conscience import perception
 from conscience.trousse import Trousse
 from conscience.types import DecisionContext, InterpretedSignal
 
@@ -113,7 +114,7 @@ class TestAffectHabitueEtDose:
     def test_le_dosage_borne_une_source_sur_la_fenetre(self):
         e = _engine()
         total = sum(e._doser_l_affect("rss", 0.25) for _ in range(20))
-        assert total == pytest.approx(e._AFFECT_BUDGET_PAR_SOURCE, abs=1e-9)
+        assert total == pytest.approx(perception._AFFECT_BUDGET_PAR_SOURCE, abs=1e-9)
         # Une autre source a son propre budget.
         assert e._doser_l_affect("email", 0.25) == 0.25
 
@@ -151,7 +152,7 @@ class TestAffectHabitueEtDose:
         assert fed[0] == pytest.approx(0.25)
         # Le second est habitué (×0,85), et le total est borné par le budget.
         assert fed[1] == pytest.approx(0.25 * 0.85)
-        assert sum(fed) <= e._AFFECT_BUDGET_PAR_SOURCE + 1e-9
+        assert sum(fed) <= perception._AFFECT_BUDGET_PAR_SOURCE + 1e-9
 
 
 # ===================================================================
@@ -256,10 +257,10 @@ def _item(key):
 class TestClesEtDefauts:
 
     def test_l_inactivite_restauree_est_declaree(self):
-        from conscience.engine import ConscienceEngine
+        from conscience import introspection
 
         item = _item("conscience.inactivite_restauree_max_seconds")
-        assert item.default == ConscienceEngine._INACTIVITE_RESTAUREE_MAX_S == 72 * 3600
+        assert item.default == introspection._INACTIVITE_RESTAUREE_MAX_S == 72 * 3600
 
     def test_les_chantiers_menes_de_front_et_l_espacement(self):
         from conscience import conduite
@@ -273,10 +274,10 @@ class TestClesEtDefauts:
         assert _item("conscience.travail.pas_par_heure_max").default == 4 == ConscienceEngine._PAS_PAR_HEURE_MAX
 
     def test_la_fenetre_d_ignoree_et_son_facteur_telegram(self):
-        from conscience.engine import ConscienceEngine
+        from conscience import reglages
 
-        assert _item("conscience.ignored_reply_window_minutes").default == 20 == ConscienceEngine._IGNORED_REPLY_WINDOW_MIN
-        assert _item("conscience.ignored_reply_window_telegram_factor").default == 3.0 == ConscienceEngine._IGNORED_TELEGRAM_FACTOR
+        assert _item("conscience.ignored_reply_window_minutes").default == 20 == reglages._IGNORED_REPLY_WINDOW_MIN
+        assert _item("conscience.ignored_reply_window_telegram_factor").default == 3.0 == reglages._IGNORED_TELEGRAM_FACTOR
 
     def test_la_porte_f1_a_0_6(self):
         from conscience.scoring import DEFAULT_TUNING
@@ -560,7 +561,7 @@ class TestOrigineDesPensees:
             )
         e = _engine()
         with patch.object(type(e), "_audit_trop_recent", return_value=False), \
-             patch("conscience.engine.estime.lire", new=AsyncMock(return_value=0.5)):
+             patch("conscience.estime.lire", new=AsyncMock(return_value=0.5)):
             await e.post_action_audit(
                 response_text="je crois que je me suis emportée",
                 emotion_name="angry", intensity=0.9, person_id="web_x",
@@ -610,7 +611,7 @@ class TestOrigineDesPensees:
         racine = pathlib.Path(__file__).resolve().parents[1]
         oublis = []
         for fichier in (
-            racine / "conscience" / "engine.py",
+            racine / "conscience" / "ruminations.py",
             racine / "conscience" / "memory_bridge.py",
             racine / "conscience" / "travaux.py",
         ):

@@ -17,6 +17,17 @@ import time
 from contextvars import ContextVar
 from enum import Enum
 
+from ai.cadence import (
+    DISJONCTEUR_ECHECS,
+    DISJONCTEUR_REPOS_S,
+    BudgetDeFondEpuise,
+    _comptes as _comptes_de_fond,
+    appelant_de_fond,
+    cadence_de_fond,
+    disjoncteurs,
+    est_panne_de_transport,
+    est_role_de_fond,
+)
 from ai.providers import AIProvider
 from ai.providers.claude import ClaudeProvider
 from ai.providers.gemini_provider import GeminiProvider
@@ -77,6 +88,16 @@ class AIRole(str, Enum):
     PROJECT_WORK = "project_work"
 
 
+#: Les rôles dont personne n'attend la réponse — dérivés de l'énumération,
+#: jamais recopiés : un rôle ajouté demain est de fond tant qu'il n'est pas
+#: nommé dans ``cadence.ROLES_AU_SERVICE_D_UN_HUMAIN``. Un pas de chantier ou
+#: un acte de la conscience passe par ``conversation_tools`` et n'est donc
+#: pas reconnu ici : l'appelant pose ``cadence.en_fond()``.
+ROLES_DE_FOND: frozenset[AIRole] = frozenset(
+    role for role in AIRole if est_role_de_fond(role.value)
+)
+
+
 # Config-key prefixes that carry a provider's credentials. A change under one
 # of these evicts that provider's cached instance (see _invalidate_provider).
 _PROVIDER_CONFIG_PREFIXES = (
@@ -112,6 +133,22 @@ _PROVIDER_CONFIG_PREFIXES = (
 # qu'il faisait avant l'existence du sémaphore.
 _PROVIDER_FALLBACK_CONCURRENCY: dict[str, int] = {
     "ollama": 1,
+}
+
+# Appels de fond par heure quand ``ai.<provider>.appels_de_fond_par_heure``
+# est illisible. 0 = illimité. Même logique que la concurrence : le champ
+# existe pour les six providers, seul le défaut est propre au local.
+#
+# 30/h pour ollama : à ~15–60 s par génération de fond sur une carte
+# grand public, c'est au plus un quart d'heure de créneau par heure réservé
+# à la vie intérieure — le reste reste libre pour la conversation. Une heure
+# chargée en consomme nominalement dix à vingt (extraction, pas de chantier
+# plafonnés à quatre, tri des mails, voix intérieure) ; 30 laisse de la
+# marge et borne un emballement (un projet sur ``interval:30s`` en ferait
+# 120). Chez un hébergé le parallélisme est réel et la dépense est déjà
+# plafonnée en jetons par ``ai/quota.py`` : illimité, donc rien ne change.
+_PROVIDER_FALLBACK_BUDGET_DE_FOND: dict[str, int] = {
+    "ollama": 30,
 }
 
 # Providers dont le créneau est déjà tenu par l'appel en cours. Un outil MCP
@@ -485,6 +522,109 @@ class AIRouter:
                 )
         return self._semaphores[provider_name]
 
+    # ── Cadence de fond et disjoncteur ───────────────────────────
+
+    def _budget_de_fond(self, provider_name: str) -> int:
+        """Appels de fond par heure pour ce provider (0 = illimité)."""
+        from configs.runtime import cfg_int
+
+        return cfg_int(
+            f"ai.{provider_name}.appels_de_fond_par_heure",
+            _PROVIDER_FALLBACK_BUDGET_DE_FOND.get(provider_name, 0), mini=0,
+        )
+
+    def _reglage_disjoncteur(self, provider_name: str) -> tuple[int, float]:
+        """``(échecs consécutifs avant ouverture, repos en s)``. 0 échec = jamais."""
+        from configs.runtime import cfg_float, cfg_int
+
+        return (
+            cfg_int(f"ai.{provider_name}.disjoncteur.echecs",
+                    DISJONCTEUR_ECHECS, mini=0),
+            cfg_float(f"ai.{provider_name}.disjoncteur.repos_s",
+                      DISJONCTEUR_REPOS_S, mini=1.0),
+        )
+
+    @staticmethod
+    def _est_appel_de_fond(role: AIRole) -> bool:
+        return role in ROLES_DE_FOND or appelant_de_fond()
+
+    def budget_de_fond_disponible(self, role: AIRole) -> bool:
+        """Reste-t-il un appel de fond dans l'heure chez le provider de ce rôle ?
+
+        À consulter AVANT de bâtir un prompt cher (un pas de chantier
+        réserve son pas, un acte choisit son destinataire et rappelle sa
+        mémoire). Un rôle non résolu répond oui : l'appel réel dira
+        pourquoi il échoue, avec sa vraie raison. Un non est compté comme un
+        refus — un consommateur qui diffère sans tenter ne doit pas rendre
+        le plafond invisible sur Santé.
+        """
+        try:
+            provider_name = self._resolve(role)[0]
+        except Exception:
+            return True
+        try:
+            self._exiger_budget_de_fond(provider_name, role.value, reserver=False)
+        except BudgetDeFondEpuise as refus:
+            cadence_de_fond.refuser(provider_name, role.value)
+            degradations.record("ai.router: appel de fond différé", refus)
+            return False
+        return True
+
+    def _exiger_budget_de_fond(self, provider_name: str, role_value: str,
+                               *, reserver: bool) -> None:
+        """Lève ``BudgetDeFondEpuise`` si le plafond horaire est atteint.
+
+        ``reserver=True`` compte l'appel (ou le refus) dans la foulée, sous
+        le verrou du compteur : deux appels ne partagent pas le dernier
+        créneau de l'heure.
+        """
+        plafond = self._budget_de_fond(provider_name)
+        accepte = (
+            cadence_de_fond.reserver(provider_name, role_value, plafond)
+            if reserver else cadence_de_fond.disponible(provider_name, plafond)
+        )
+        if not accepte:
+            raise BudgetDeFondEpuise(
+                provider_name, role_value,
+                cadence_de_fond.utilises(provider_name), plafond,
+            )
+
+    def cadence_stats(self) -> dict:
+        """Les deux instruments pour Système › Santé, tous providers listés."""
+        noms = tuple(_PROVIDER_CLASSES)
+        return {
+            "fond": cadence_de_fond.snapshot(
+                plafond=self._budget_de_fond, providers=noms,
+            ),
+            "disjoncteurs": disjoncteurs.snapshot(
+                reglage=self._reglage_disjoncteur, providers=noms,
+            ),
+        }
+
+    def _noter_reponse(self, provider_name: str, exc: BaseException | None) -> None:
+        """Verdict du disjoncteur après un appel : panne de transport ou réponse.
+
+        Une exception qui n'est pas une panne de transport (400, réponse
+        vide, quota) est une *réponse* : elle rompt la série au même titre
+        qu'un succès.
+        """
+        try:
+            if exc is not None and est_panne_de_transport(exc):
+                seuil, repos_s = self._reglage_disjoncteur(provider_name)
+                if disjoncteurs.echec(provider_name, exc, seuil=seuil, repos_s=repos_s):
+                    # Visible sur Santé (état, ouvertures) ; le registre de
+                    # dégradation, lui, compte les appels que les
+                    # consommateurs avalent — pas la décision de couper.
+                    logger.error(
+                        "Disjoncteur OUVERT provider=%s — %d panne(s) de "
+                        "transport consécutive(s), repos %.0f s : tout appel "
+                        "échoue immédiatement", provider_name, seuil, repos_s,
+                    )
+            else:
+                disjoncteurs.succes(provider_name)
+        except Exception as err:
+            degradations.record("ai.router.disjoncteur", err)
+
     # ── Completion ───────────────────────────────────────────────
 
     def _call_timeout(self, override: float | None) -> float:
@@ -576,6 +716,26 @@ class AIRouter:
             role.value, internal_name, provider_name, model, prompt_chars, project_id,
         )
 
+        # Disjoncteur d'abord : un provider ouvert refuse sans rien consommer
+        # — ni créneau, ni budget de fond. Lève ``ProviderIndisponible``.
+        essai = disjoncteurs.verifier(provider_name)
+
+        # Budget d'appels de fond, AVANT le créneau : un appel refusé ne fait
+        # pas la queue. Un appel imbriqué (outil relançant le modèle depuis
+        # la boucle) tourne dans l'appel déjà compté — compté une fois.
+        compte_token = None
+        deja_comptes = _comptes_de_fond.get()
+        if self._est_appel_de_fond(role) and provider_name not in deja_comptes:
+            try:
+                self._exiger_budget_de_fond(provider_name, role.value, reserver=True)
+            except BudgetDeFondEpuise as refus:
+                if essai:
+                    disjoncteurs.liberer_essai(provider_name)
+                degradations.record("ai.router: appel de fond refusé", refus)
+                logger.info("AI call REFUSÉ %s", refus)
+                raise
+            compte_token = _comptes_de_fond.set(deja_comptes | {provider_name})
+
         # Réservation du créneau. Un appel imbriqué réutilise celui de son
         # appelant : il tourne déjà *dans* le créneau qu'il attendrait.
         #
@@ -593,7 +753,7 @@ class AIRouter:
         if semaphore is not None and provider_name not in held:
             try:
                 await asyncio.wait_for(semaphore.acquire(), timeout=timeout_s)
-            except BaseException:
+            except BaseException as exc:
                 # Le timeout de l'appelant — ou celui du routeur — peut
                 # tomber pendant l'attente : sans cette trace, un tour mort
                 # en file est indiscernable d'un modèle qui n'a pas fini de
@@ -604,6 +764,16 @@ class AIRouter:
                     role.value, provider_name,
                     (time.monotonic() - t_wait) * 1000, timeout_s,
                 )
+                if compte_token is not None:
+                    _comptes_de_fond.reset(compte_token)
+                # Un créneau jamais obtenu dans la borne est la signature
+                # d'un provider figé qui tient le créneau : une panne de
+                # transport pour le disjoncteur. Une annulation n'en est pas
+                # une — l'essai est simplement rendu.
+                if isinstance(exc, asyncio.TimeoutError):
+                    self._noter_reponse(provider_name, exc)
+                elif essai:
+                    disjoncteurs.liberer_essai(provider_name)
                 raise
             slot_token = _held_providers.set(held | {provider_name})
         t_call = time.monotonic()
@@ -676,9 +846,10 @@ class AIRouter:
                 tokens_in, tokens_out, cache_read, cache_write,
                 cost_usd, elapsed_ms, wait_ms,
             )
+            self._noter_reponse(provider_name, None)
             return result
 
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as exc:
             # Dit à voix haute : une boucle de fond qui se fige silencieusement
             # est indiscernable d'une boucle qui n'a rien à faire. L'attente
             # figure à part : une borne dépassée après avoir passé l'essentiel
@@ -693,6 +864,7 @@ class AIRouter:
             self._record_partial_usage(
                 role, provider_name, model, project_id, note="TIMEOUT",
             )
+            self._noter_reponse(provider_name, exc)
             raise
 
         except asyncio.CancelledError:
@@ -713,9 +885,12 @@ class AIRouter:
             self._record_partial_usage(
                 role, provider_name, model, project_id, note="ANNULÉ",
             )
+            # Aucun verdict : l'annulation ne dit rien du provider.
+            if essai:
+                disjoncteurs.liberer_essai(provider_name)
             raise
 
-        except Exception:
+        except Exception as exc:
             elapsed_ms = (time.monotonic() - t_call) * 1000
             logger.error(
                 "AI call FAILED role=%-22s internal=%-18s provider=%-7s model=%-30s "
@@ -726,12 +901,15 @@ class AIRouter:
             self._record_partial_usage(
                 role, provider_name, model, project_id, note="FAILED",
             )
+            self._noter_reponse(provider_name, exc)
             raise
 
         finally:
             if slot_token is not None:
                 _held_providers.reset(slot_token)
                 semaphore.release()
+            if compte_token is not None:
+                _comptes_de_fond.reset(compte_token)
             _restore_usage(usage_token)
 
     def _record_partial_usage(
@@ -818,51 +996,14 @@ class AIRouter:
             calibrate=calibrate,
         )
 
-    async def complete_with_tools(
-        self,
-        role: AIRole,
-        system_prompt: str,
-        user_prompt: str,
-        tools: list,
-        **kwargs,
-    ) -> tuple[str, list[str]]:
-        """Route a tool-enabled completion, metered exactly like ``complete``.
-
-        Renvoie ``(texte, noms_des_outils_appelés)``. La boucle d'outils est
-        interne au provider ; ce qui compte ici est qu'elle soit encadrée par
-        le quota, comptabilisée dans son intégralité, et bornée dans le temps.
-        """
-        timeout = kwargs.pop("timeout", None)
-
-        async def _invoke(provider, model, temperature, max_tokens):
-            # Même règle que ``complete`` : la température du modèle déclaré
-            # s'applique, sauf si l'appelant en impose une.
-            kwargs.setdefault("temperature", temperature)
-            if max_tokens is not None:
-                kwargs.setdefault("max_tokens", max_tokens)
-            text, called = await provider.complete_with_tools(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                model=model,
-                tools=tools or [],
-                **kwargs,
-            )
-            return (text, called), text
-
-        return await self._metered_call(
-            role, system_prompt, user_prompt, _invoke, timeout=timeout,
-            extra_prompt_chars=_tools_prompt_chars(tools),
-            calibrate=False,
-        )
-
     # ── Structured conversation turns ────────────────────────────
 
     async def chat(self, role: AIRole, prompt, **kwargs) -> str:
         """Route a structured ``ChatPrompt`` turn.
 
-        Providers exposing ``complete_chat`` receive the structured form
-        (cacheable prefix + real message turns); the others get the exact
-        legacy two-string shape, so the fallback providers are untouched.
+        Every provider consumes the structured form (cacheable prefix + real
+        message turns); ``legacy_pair()`` only serves the router's own
+        character estimate.
         """
         timeout = kwargs.pop("timeout", None)
         system_est, user_est = prompt.legacy_pair()
@@ -871,17 +1012,7 @@ class AIRouter:
             kwargs.setdefault("temperature", temperature)
             if max_tokens is not None:
                 kwargs.setdefault("max_tokens", max_tokens)
-            if hasattr(provider, "complete_chat"):
-                text = await provider.complete_chat(
-                    prompt=prompt, model=model, **kwargs,
-                )
-            else:
-                text = await provider.complete(
-                    system_prompt=system_est,
-                    user_prompt=user_est,
-                    model=model,
-                    **kwargs,
-                )
+            text = await provider.complete_chat(prompt=prompt, model=model, **kwargs)
             return text, text
 
         return await self._metered_call(
@@ -891,7 +1022,12 @@ class AIRouter:
     async def chat_with_tools(
         self, role: AIRole, prompt, tools: list, **kwargs,
     ) -> tuple[str, list[str]]:
-        """Route a tool-enabled structured turn, metered like the rest."""
+        """Route a tool-enabled structured turn, metered like the rest.
+
+        Renvoie ``(texte, noms_des_outils_appelés)``. La boucle d'outils est
+        interne au provider ; ce qui compte ici est qu'elle soit encadrée par
+        le quota, comptabilisée dans son intégralité, et bornée dans le temps.
+        """
         timeout = kwargs.pop("timeout", None)
         system_est, user_est = prompt.legacy_pair()
 
@@ -899,18 +1035,9 @@ class AIRouter:
             kwargs.setdefault("temperature", temperature)
             if max_tokens is not None:
                 kwargs.setdefault("max_tokens", max_tokens)
-            if hasattr(provider, "complete_chat_with_tools"):
-                text, called = await provider.complete_chat_with_tools(
-                    prompt=prompt, model=model, tools=tools or [], **kwargs,
-                )
-            else:
-                text, called = await provider.complete_with_tools(
-                    system_prompt=system_est,
-                    user_prompt=user_est,
-                    model=model,
-                    tools=tools or [],
-                    **kwargs,
-                )
+            text, called = await provider.complete_chat_with_tools(
+                prompt=prompt, model=model, tools=tools or [], **kwargs,
+            )
             return (text, called), text
 
         return await self._metered_call(

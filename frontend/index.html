@@ -58,6 +58,8 @@
       }
       .chat-bubble.vtuber {
         align-self: flex-start;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
         background: rgba(99, 102, 241, 0.85);
         color: white;
         border-bottom-left-radius: 4px;
@@ -287,6 +289,27 @@
         to { opacity: 1; transform: translateY(0); }
       }
       .chat-bubble.no-anim { animation: none; }
+      /* Markdown léger d'une réponse (ui/inlineMarkup.ts). */
+      .chat-bubble code {
+        font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+        font-size: 0.9em;
+        background: rgba(0, 0, 0, 0.25);
+        border-radius: 4px;
+        padding: 1px 4px;
+      }
+      .chat-bubble pre.chat-code {
+        margin: 6px 0;
+        padding: 8px 10px;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 8px;
+        overflow-x: auto;
+        white-space: pre;
+      }
+      .chat-bubble pre.chat-code code {
+        background: none;
+        padding: 0;
+        font-size: 12px;
+      }
 
       /* Delivery state of a message the user sent. A bubble the server has
          never seen must not look like one it answered — that ambiguity is
@@ -569,6 +592,11 @@
       .il-pending-actions {
         display: flex;
         gap: 6px;
+      }
+      .il-pending-note {
+        font-size: 11px;
+        color: #a5b4fc;
+        font-style: italic;
       }
       .il-btn {
         flex: 1;

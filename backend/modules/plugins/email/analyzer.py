@@ -2,6 +2,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 
+from ai.quota import QuotaExceeded
 from ai.router import AIRole, UnconfiguredRoleError, ai_router
 from modules.plugins.email.prompts import EMAIL_TRIAGE_SYSTEM_PROMPT
 
@@ -69,6 +70,12 @@ class EmailAnalyzer:
         except UnconfiguredRoleError as exc:
             logger.warning("Analyse email ignorée — IA non configurée: %s", exc)
             return EmailAnalysis()
+        except QuotaExceeded:
+            # Un quota ou le budget d'appels de fond (`BudgetDeFondEpuise`)
+            # n'est pas un triage vide : rendre `EmailAnalysis()` ici faisait
+            # stocker le courrier « traité » sans triage, pour toujours. Le
+            # module laisse le courrier hors base et le relit au tick suivant.
+            raise
         except Exception:
             logger.exception("Email analysis API error")
             return EmailAnalysis()

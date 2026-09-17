@@ -710,8 +710,7 @@ class TestToolResultText:
 
 
 # ---------------------------------------------------------------------------
-# 4. Router dispatch — chat-native providers get the structure, others the
-#    legacy pair
+# 4. Router dispatch — every provider gets the structured form
 # ---------------------------------------------------------------------------
 
 
@@ -723,15 +722,6 @@ class _ChatNativeStub:
     async def complete_chat(self, prompt, model, **kwargs):
         self.received = ("chat", prompt, model)
         self.kwargs = kwargs
-        return "ok"
-
-
-class _LegacyStub:
-    def __init__(self):
-        self.received = None
-
-    async def complete(self, system_prompt, user_prompt, model, **kwargs):
-        self.received = ("legacy", system_prompt, user_prompt)
         return "ok"
 
 
@@ -846,21 +836,6 @@ def test_ollama_complete_chat_sends_real_messages(monkeypatch):
     assert msgs[0] == {"role": "system", "content": "STABLE"}
     assert [m["role"] for m in msgs[1:]] == ["user", "user"]
     assert CONTEXT_HEADER in msgs[-1]["content"]
-
-
-def test_router_chat_falls_back_to_the_legacy_pair(routed, monkeypatch):
-    r, router_mod = routed
-    stub = _LegacyStub()
-    monkeypatch.setattr(
-        router_mod.AIRouter, "_get_provider", lambda self, name: stub,
-    )
-    prompt = ChatPrompt("S", "V", [{"role": "user", "content": "a"}], "b")
-    out = asyncio.run(r.chat(router_mod.AIRole.CONVERSATION, prompt))
-    assert out == "ok"
-    kind, system, user = stub.received
-    assert kind == "legacy"
-    assert system == "S\n\nV"
-    assert user == "User: a\n\nUser: b"
 
 
 # ---------------------------------------------------------------------------

@@ -215,15 +215,26 @@ class TestProcessorPublishes:
 
     def test_the_processor_no_longer_names_its_listeners(self):
         """Regression guard: the point of the refactor is that a new
-        subsystem interested in a turn does not edit this function."""
+        subsystem interested in a turn does not edit this module. Lu sur
+        l'AST des appels (les commentaires nomment ce qu'il ne faut pas
+        faire), sur tout le module : l'annonce vit dans une étape nommée
+        de ``process_message``, pas dans son corps."""
+        import ast
         import inspect
 
         from pipeline import processor
 
-        src = inspect.getsource(processor.process_message)
-        assert "drive_engine.on_reply" not in src
-        assert "post_action_audit" not in src
-        assert "publish_turn_completed" in src
+        called = set()
+        for node in ast.walk(ast.parse(inspect.getsource(processor))):
+            if isinstance(node, ast.Call):
+                func = node.func
+                if isinstance(func, ast.Name):
+                    called.add(func.id)
+                elif isinstance(func, ast.Attribute):
+                    called.add(func.attr)
+        assert "on_reply" not in called
+        assert "post_action_audit" not in called
+        assert "publish_turn_completed" in called
 
 
 # ---------------------------------------------------------------------------

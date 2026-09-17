@@ -185,7 +185,8 @@ class TestLeRetourDeLActe:
         compterait comme un acte ignoré — trois pannes suffiraient à brider la
         conscience pour la journée.
         """
-        from conscience.engine import ActeResultat, ConscienceEngine
+        from conscience.acte import ActeResultat
+        from conscience.engine import ConscienceEngine
 
         assert bool(ActeResultat(ai_failed=True)) is True, (
             "c'est précisément le piège : l'objet vide est truthy"
@@ -236,7 +237,7 @@ class TestLeJournalDitTout:
 
     @pytest.mark.asyncio
     async def test_un_acte_journalise_ce_qu_elle_a_dit_et_a_qui(self):
-        from conscience.engine import ActeResultat
+        from conscience.acte import ActeResultat
         from conscience.models import ConscienceLog
 
         e = _engine()

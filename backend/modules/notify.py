@@ -30,8 +30,20 @@ async def notify_ai(notification: ModuleNotification) -> AIDecision:
     initiative flows through exactly the same pipeline as a chat message
     rather than a private path with its own rules.
     """
+    from ai.cadence import en_fond
+    from ai.router import AIRole, ai_router
     from pipeline.perception import Perception
     from pipeline.router import perceive
+
+    # Personne n'attend cette réponse : c'est un appel de fond, et s'il n'en
+    # reste plus dans l'heure chez le provider, elle ne dit rien — ce que le
+    # module sait déjà traiter, un tour qui échoue rendant le même vide.
+    if not ai_router.budget_de_fond_disponible(AIRole.CONVERSATION_TOOLS):
+        logger.info(
+            "[notify_ai/%s] différé : budget d'appels de fond épuisé",
+            notification.source_module,
+        )
+        return AIDecision(response_text="", emotion=None, tool_calls_made=[])
 
     prompt = (
         f"[NOTIFICATION du module '{notification.source_module}']\n"
@@ -64,7 +76,8 @@ async def notify_ai(notification: ModuleNotification) -> AIDecision:
         },
     )
 
-    output = await perceive(perception)
+    with en_fond():
+        output = await perceive(perception)
     if output is None:
         # The router always returns a SpeechOutput for INTERNAL_TRIGGER
         # today; stay defensive so a future routing change degrades to

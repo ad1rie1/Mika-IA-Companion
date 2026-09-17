@@ -4,7 +4,6 @@ import time as _time
 from datetime import date, timedelta
 
 from asgiref.sync import sync_to_async
-from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
@@ -17,6 +16,7 @@ from memory.storage.vector_store import (
     souvenir_metadata,
     vector_call,
 )
+from memory.sensibilite import plus_sensible, sensibilite_extraite
 from memory.themes import PlanExtraction, plan_by_theme, theme_tuning
 from utils.periodic import PeriodicLoop
 from utils.degradation import degradations, degraded
@@ -65,6 +65,14 @@ EXTRACTION_QUIET_S = 300
 # exclusivement du vectoriel, une ligne sans vecteur est irrécupérable.
 REINDEX_INTERVAL_S = 3600
 REINDEX_LOOKBACK_H = 48
+
+# Ce que `stop()` accorde à un tick en cours avant de l'annuler (OPS-02). Le
+# tick d'une fenêtre à N tranches durait N × 120 s d'appels IA sous le
+# verrou, et rien ne le bornait : un SIGKILL systemd tombait alors entre
+# `store_extractions` et le checkpoint. Cinq secondes suffisent au cas
+# courant — un appel IA en vol, annulé proprement (rien n'est stocké tant que
+# le modèle n'a pas répondu) — et le checkpoint par tranche borne le reste.
+STOP_GRACE_S = 5.0
 
 # Pending commitments older than this are dropped (see _expire_commitments).
 COMMITMENT_MAX_AGE_DAYS = 30
@@ -119,6 +127,10 @@ DORMANT_FLOOR = 0.02
 # milieu du barème et non à 1.0 : un défaut haut fait de « ce qui a compté »
 # un synonyme de « ce qui est récent ».
 DEFAULT_IMPORTANCE = 0.5
+
+
+def _nomme_une_personne(entities) -> bool:
+    return any(getattr(e, "entity_type", "") == "person" for e in entities or ())
 
 
 def _extracted_importance(extraction: dict) -> float:
@@ -195,6 +207,12 @@ class MemoryConsolidator:
         self._loop = PeriodicLoop("Consolidator", self._tick, self.interval)
         # Une seule passe à la fois — voir `_consolidate`.
         self._verrou_consolidation = asyncio.Lock()
+        # Posé par `stop()` : la passe en cours abandonne ses tranches
+        # restantes entre deux appels IA plutôt que d'aller au bout.
+        self._arret_demande = False
+        # Ce que les checkpoints par tranche de la passe en cours ont déjà
+        # écrit (messages, créations) — la ligne finale ne compte que le reste.
+        self._pointe_par_tranche = {"messages": 0, "counts": {}}
 
     def _verrou(self) -> asyncio.Lock:
         """Le verrou d'une passe. Créé à la demande : les tests construisent
@@ -211,16 +229,34 @@ class MemoryConsolidator:
         logger.info("Consolidator resumed at last_id=%d", self._last_processed_id)
 
     async def stop(self):
-        """Stop the loop gracefully.
+        """Stop the loop, bounded.
 
-        Sous le verrou : un tick en plein milieu d'une extraction n'est pas
-        annulé, il finit. Annuler entre ``store_extractions`` et le checkpoint
-        laisse des souvenirs écrits sous une fenêtre restée due — la passe
-        forcée de l'arrêt les réécrivait. Un tick qui n'a pas encore le verrou
-        est, lui, annulé proprement : il n'a rien fait.
+        Un tick en plein milieu d'une extraction n'est pas annulé d'emblée :
+        le drapeau d'arrêt lui fait abandonner ses tranches restantes, et la
+        tranche en cours finit — stockée *et* pointée, puisque le checkpoint
+        est écrit par tranche. Passé ``STOP_GRACE_S``, il est annulé : la
+        coupure tombe alors dans un appel IA (rien n'a été stocké, la fenêtre
+        reste due) ou, plus rarement, dans le stockage d'une tranche, qui
+        sera relue au prochain démarrage et absorbée par le
+        dédoublonnage-renforcement. Jamais plus d'une tranche à rejouer, là
+        où un arrêt non borné puis tué rejouait la fenêtre entière.
         """
-        async with self._verrou():
+        self._arret_demande = True
+        verrou = self._verrou()
+        try:
+            await asyncio.wait_for(verrou.acquire(), timeout=STOP_GRACE_S)
+        except asyncio.TimeoutError as exc:
+            degradations.record("consolidator: arret hors delai", exc)
+            logger.warning(
+                "Consolidation : la passe en cours n'a pas rendu la main en "
+                "%.0f s — tick annulé", STOP_GRACE_S,
+            )
             await self._loop.stop()
+            return
+        try:
+            await self._loop.stop()
+        finally:
+            verrou.release()
 
     async def force_consolidate(self):
         """Run consolidation immediately (e.g. on disconnect/shutdown).
@@ -231,6 +267,9 @@ class MemoryConsolidator:
         et la paire sera extraite entière.
         """
         logger.info("Force consolidation triggered")
+        # La passe finale de l'arrêt va au bout de sa fenêtre — c'est le
+        # `wait_for` du lifespan qui la borne, tranche pointée après tranche.
+        self._arret_demande = False
         await self._consolidate(force=True)
 
     # ------------------------------------------------------------------
@@ -322,29 +361,39 @@ class MemoryConsolidator:
         complete = extracted_through >= messages[-1]["id"]
         max_id = (ceiling_id or messages[-1]["id"]) if complete else extracted_through
         if max_id <= self._last_processed_id:
-            # Des tranches ont abouti, mais la tranche en échec portait le
-            # plus petit id de la fenêtre (un message sans chunk, parti dans
-            # le résiduel) : rien n'est réputé extrait sous le checkpoint
-            # courant. Écrire une ligne égale à la précédente ne dirait rien
-            # de vrai ; la fenêtre sera relue, et ce qui a été écrit est
-            # absorbé par le dédoublonnage-renforcement.
-            logger.warning(
-                "Consolidation: tranches partiellement extraites, checkpoint "
-                "inchangé (last_id=%d)",
+            # Soit les checkpoints par tranche ont déjà tout écrit (la borne
+            # finale vaut la dernière pointée), soit la tranche en échec
+            # portait le plus petit id de la fenêtre : rien n'est réputé
+            # extrait sous le checkpoint courant. Écrire une ligne égale à la
+            # précédente ne dirait rien de vrai ; ce qui reste au-dessus sera
+            # relu, et ce qui a été écrit est absorbé par le
+            # dédoublonnage-renforcement.
+            logger.info(
+                "Consolidation: checkpoint inchangé par la passe (last_id=%d)",
                 self._last_processed_id,
             )
-            await self._run_maintenance(regenerate=True)
-            return
-        await self._save_checkpoint(max_id, len(messages), counts)
-        self._last_processed_id = max_id
+        else:
+            deja = self._pointe_par_tranche
+            reste = {
+                k: counts.get(k, 0) - deja["counts"].get(k, 0)
+                for k in ("souvenirs", "connaissances", "commitments")
+            }
+            await self._save_checkpoint(
+                max_id, len(messages) - deja["messages"], reste,
+            )
+            self._last_processed_id = max_id
 
         logger.info(
             "Consolidation complete: %d souvenirs, %d connaissances, "
-            "%d commitments from %d messages",
+            "%d commitments from %d messages (last_id=%d)",
             counts["souvenirs"], counts["connaissances"], counts["commitments"],
-            len(messages),
+            len(messages), self._last_processed_id,
         )
 
+        if getattr(self, "_arret_demande", False):
+            # La maintenance (décroissance, agrégats, régénérations LLM) est
+            # du travail de fond qui se refera au prochain tick.
+            return
         await self._run_maintenance(regenerate=True)
 
     # ── Step 1: pick the window ───────────────────────────────────
@@ -501,9 +550,20 @@ class MemoryConsolidator:
         )
         plan = await self._planifier(messages, taille_tranche)
 
+        self._pointe_par_tranche = {"messages": 0, "counts": {}}
         reussies: list[list[dict]] = []
         en_echec: list[list[dict]] = []
         for rang, batch in enumerate(plan.tranches):
+            if getattr(self, "_arret_demande", False):
+                # Arrêt demandé entre deux tranches : celles qui restent
+                # sont réputées non extraites — la borne s'arrête sous elles,
+                # exactement comme après un échec, et rien n'a été stocké.
+                logger.info(
+                    "Consolidation : arrêt demandé, %d tranche(s) laissée(s) "
+                    "à la prochaine passe", len(plan.tranches) - rang,
+                )
+                en_echec = plan.tranches[rang:]
+                break
             # Who Mika was talking to, as memory entities. The extractor names
             # entities from the *content* ("Thomas said…"), which misses the
             # most basic fact about an exchange: whom it was with. A
@@ -565,8 +625,44 @@ class MemoryConsolidator:
                 en_echec = plan.tranches[rang:]
                 break
             reussies.append(batch)
+            await self._pointer_la_tranche(
+                reussies, plan.tranches[rang + 1:], batch, counts,
+            )
 
         return counts, self._borne_extraite(reussies, en_echec)
+
+    async def _pointer_la_tranche(
+        self, reussies: list[list[dict]], restantes: list[list[dict]],
+        batch: list[dict], counts: dict[str, int],
+    ) -> None:
+        """Checkpoint par tranche (OPS-02) : après chaque tranche stockée, le
+        curseur avance jusqu'où ``_borne_extraite`` l'autorise en comptant
+        les tranches *pas encore faites* comme non extraites — la même règle
+        ensembliste (min des restantes − 1, jamais sous le courant), donc
+        toujours ≤ la borne finale de la passe, et un arrêt entre deux
+        tranches n'a rien à ré-extraire de ce qui est déjà stocké.
+
+        Best-effort : une écriture ratée laisse le curseur où il était, la
+        borne finale de ``_passe`` le rattrape.
+        """
+        borne = self._borne_extraite(reussies, restantes)
+        if borne is None or borne <= int(getattr(self, "_last_processed_id", 0) or 0):
+            return
+        deja = getattr(self, "_pointe_par_tranche", None) or {"messages": 0, "counts": {}}
+        reste = {
+            k: counts.get(k, 0) - deja["counts"].get(k, 0)
+            for k in ("souvenirs", "connaissances", "commitments")
+        }
+        try:
+            await self._save_checkpoint(borne, len(batch), reste)
+        except Exception as exc:
+            degradations.record("consolidator: checkpoint par tranche", exc)
+            return
+        self._last_processed_id = borne
+        self._pointe_par_tranche = {
+            "messages": deja["messages"] + len(batch),
+            "counts": {k: counts.get(k, 0) for k in reste},
+        }
 
     def _borne_extraite(
         self, reussies: list[list[dict]], en_echec: list[list[dict]],
@@ -757,6 +853,12 @@ class MemoryConsolidator:
         occurred = occurred_at or timezone.now()
         emotion = _valid_emotion(extraction.get("emotion"))
         importance = _extracted_importance(extraction)
+        # La sensibilité suit les personnes réellement liées (interlocuteur
+        # compris) : un épisode qui ne concerne personne n'a rien à protéger.
+        linked = _merge_entities(entities, interlocutors)
+        sensibilite = sensibilite_extraite(
+            extraction, a_une_personne=_nomme_une_personne(linked),
+        )
 
         # Le doublon d'abord, comme pour les connaissances. Une tranche relue
         # après un échec partiel, ou le même épisode raconté deux fois,
@@ -767,8 +869,12 @@ class MemoryConsolidator:
         if existing is not None:
             existing.importance = min(1.0, max(existing.importance, importance) + 0.05)
             existing.decayed_at = timezone.now()
-            await sync_to_async(existing.save)(update_fields=["importance", "decayed_at"])
-            linked = _merge_entities(entities, interlocutors)
+            # Redit, un souvenir peut se révéler plus lourd qu'on ne l'avait
+            # noté ; il ne devient jamais plus léger.
+            existing.sensibilite = plus_sensible(existing.sensibilite, sensibilite)
+            await sync_to_async(existing.save)(
+                update_fields=["importance", "decayed_at", "sensibilite"],
+            )
             if linked:
                 await sync_to_async(existing.entities.add)(*linked)
             if themes:
@@ -796,12 +902,12 @@ class MemoryConsolidator:
         souvenir = await sync_to_async(Souvenir.objects.create)(
             content=extraction["content"], emotion=emotion,
             importance=importance, occurred_at=occurred,
+            sensibilite=sensibilite,
         )
         if themes:
             await sync_to_async(souvenir.themes.set)(themes)
         # An episode always involves whoever Mika was talking to, whether or
         # not the extractor thought to name them.
-        linked = _merge_entities(entities, interlocutors)
         if linked:
             await sync_to_async(souvenir.entities.set)(linked)
 
@@ -843,6 +949,10 @@ class MemoryConsolidator:
             # écoulé AVANT le renforcement (MEM-06).
             existing.confidence = min(1.0, existing.confidence + 0.1)
             existing.decayed_at = timezone.now()
+            existing.sensibilite = plus_sensible(
+                existing.sensibilite,
+                sensibilite_extraite(extraction, a_une_personne=True),
+            )
             await sync_to_async(existing.save)()
             await self._index(
                 self.vector_store.add_connaissance, "connaissance", existing.pk,
@@ -861,22 +971,23 @@ class MemoryConsolidator:
 
         await self._check_contradictions(content)
 
-        connaissance = await sync_to_async(Connaissance.objects.create)(
-            content=content, confidence=1.0, is_valid=True,
-        )
-        if themes:
-            await sync_to_async(connaissance.themes.set)(themes)
         # Un fait qui ne nomme personne concerne, presque toujours, celui qui
         # l'a dit : sans ce lien, « ne travaille pas pour une banque » vivait
         # sans entité — absent de la fiche de la personne, invisible au filtre
         # intime, rendu « (concerne: …) » par un nom que l'extracteur n'avait
         # pas. Seulement quand UN interlocuteur est identifié (MEM-02).
         linked = list(entities)
-        if (
-            not any(getattr(e, "entity_type", "") == "person" for e in linked)
-            and len(interlocutors) == 1
-        ):
+        if not _nomme_une_personne(linked) and len(interlocutors) == 1:
             linked = _merge_entities(linked, interlocutors)
+
+        connaissance = await sync_to_async(Connaissance.objects.create)(
+            content=content, confidence=1.0, is_valid=True,
+            sensibilite=sensibilite_extraite(
+                extraction, a_une_personne=_nomme_une_personne(linked),
+            ),
+        )
+        if themes:
+            await sync_to_async(connaissance.themes.set)(themes)
         if linked:
             await sync_to_async(connaissance.entities.set)(linked)
 

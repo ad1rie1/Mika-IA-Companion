@@ -146,32 +146,6 @@ class GLMProvider:
         from ai.providers import default_test
         return await default_test(self)
 
-    async def complete_with_tools(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        model: str,
-        tools: list,
-        max_tokens: int = 4096,
-        temperature: float = 0.7,
-        *,
-        max_turns: int = 10,
-    ) -> tuple[str, list[str]]:
-        """Zhipu exposes OpenAI-compatible function-calling — reuse the loop."""
-        from ai.providers._openai_tools import memo_for, run_openai_tool_loop_from_pair
-        return await run_openai_tool_loop_from_pair(
-            client=self._client,
-            provider_label="GLM",
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            model=model,
-            tools=tools,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            max_turns=max_turns,
-            memo=memo_for(self),
-        )
-
     async def complete_chat_with_tools(
         self,
         prompt,
@@ -182,25 +156,29 @@ class GLMProvider:
         *,
         max_turns: int = 10,
     ) -> tuple[str, list[str]]:
-        """Tour outillé structuré — même boucle, amorcée sur de vrais tours.
+        """Tour outillé structuré — la boucle générique, amorcée sur de vrais tours.
 
         Le cache de préfixe de Zhipu s'indexe comme celui d'OpenAI : ce qui
         compte est que le système et l'historique ne bougent pas d'un
         aller-retour d'outil à l'autre.
         """
         from ai.providers._openai_tools import (
+            AdaptateurOpenAI,
             memo_for,
             messages_from_chat_prompt,
-            run_openai_tool_loop,
         )
-        return await run_openai_tool_loop(
-            client=self._client,
-            provider_label="GLM",
-            messages=messages_from_chat_prompt(prompt),
-            model=model,
+        from ai.providers._tool_loop import executer_la_boucle
+
+        return await executer_la_boucle(
+            AdaptateurOpenAI(
+                self._client, memo_for(self),
+                label="GLM",
+                messages=messages_from_chat_prompt(prompt),
+                model=model,
+                tools=tools,
+                temperature=temperature,
+            ),
             tools=tools,
             max_tokens=max_tokens,
-            temperature=temperature,
             max_turns=max_turns,
-            memo=memo_for(self),
         )

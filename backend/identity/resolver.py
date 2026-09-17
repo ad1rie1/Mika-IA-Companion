@@ -95,6 +95,24 @@ def politique_confiance() -> trust_policy.TrustTuning:
     )
 
 
+def politique_divulgation():
+    """La politique de divulgation graduée effective (``identity.divulgation``).
+
+    La barre du ``personnel`` est celle de la fiche — une seule clé,
+    ``identity.private_context_threshold``, lue une seule fois ici."""
+    from identity import divulgation as div
+
+    d = div.DEFAULT_DIVULGATION_TUNING
+    return div.DivulgationTuning(
+        barre_personnel=politique_confiance().private_context_threshold,
+        barre_confidence=cfg_float(
+            "identity.divulgation.certitude_confidence",
+            d.barre_confidence, mini=0.0, maxi=1.0),
+        chaleur_min=cfg_float(
+            "identity.divulgation.chaleur_min", d.chaleur_min, mini=0.0, maxi=1.0),
+    )
+
+
 def _corroboration_reglages() -> tuple[int, float]:
     """(mots communs requis, saturation) pour ``corroboration_score``."""
     # Les replis sont les constantes du detecteur lui-meme : une seule valeur

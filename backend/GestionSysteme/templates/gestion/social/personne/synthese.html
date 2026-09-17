@@ -222,4 +222,39 @@
     </div>
   {% endif %}
 </section>
+{% if divulgation %}
+<section class="card mt-6">
+  <div class="card-head">
+    <h3>Divulgation graduée</h3>
+    <span class="card-sub">ce que Mika peut lui raconter des <em>autres</em>, aujourd'hui</span>
+  </div>
+  <div class="card-body">
+    <div class="row mb-3">
+      <span class="badge {% if divulgation.niveau == 'confidence' %}badge-ok{% elif divulgation.niveau == 'personnel' %}badge-info{% elif divulgation.niveau == 'anodin' %}badge-warn{% else %}badge-danger{% endif %}">{{ divulgation.niveau }}</span>
+      <span class="text-sm">{{ divulgation.explication }}</span>
+    </div>
+    <dl class="kv">
+      <dt>Certitude effective</dt>
+      <dd class="tabular">{{ divulgation.certitude|num }}
+        <span class="muted text-xs">(personnel dès {{ divulgation.barre_personnel|num }}, confidence dès {{ divulgation.barre_confidence|num }})</span></dd>
+      <dt>Canal</dt>
+      <dd>{{ divulgation.canal }}{% if divulgation.publique %} <span class="muted text-xs">— salle publique : jamais plus qu'anodin</span>{% endif %}</dd>
+      <dt>Proximité</dt>
+      <dd>{{ divulgation.closeness }} <span class="muted text-xs">(le personnel s'ouvre à partir de « friend »)</span></dd>
+      <dt>Chaleur de l'ancre</dt>
+      <dd class="tabular">{% if divulgation.ancre_lue %}{{ divulgation.chaleur|num }}{% else %}— <span class="muted text-xs">aucune ancre en mémoire vive</span>{% endif %}
+        <span class="muted text-xs">(compte comme un lien dès {{ divulgation.chaleur_min|num }})</span></dd>
+      <dt>Ce qu'elle a vécu avec elle</dt>
+      <dd><span class="badge">{{ divulgation.avec_temoin }}</span>
+        <span class="muted text-xs">— un souvenir où cette personne était présente suit cette facette, pas la première</span></dd>
+    </dl>
+    <p class="muted text-xs mt-3">
+      Au-dessus du niveau, un souvenir ou un fait sur quelqu'un d'autre est retiré ;
+      en dessous mais pas anodin, il entre dans l'invite <em>tagué</em>, et c'est
+      Mika qui arbitre. La fiche de la personne elle-même reste régie par la
+      divulgation ci-dessus.
+    </p>
+  </div>
+</section>
+{% endif %}
 {% endblock %}

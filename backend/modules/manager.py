@@ -29,7 +29,7 @@ import logging
 from typing import Any, Awaitable, Callable
 
 from modules.base import BaseModule
-from modules.collectors import ModuleCollectors, is_owner  # noqa: F401 (re-export)
+from modules.collectors import ModuleCollectors
 from modules.lifecycle import ModuleLifecycle
 from modules.notify import notify_ai
 from modules.registry import ModuleRegistry
@@ -47,11 +47,6 @@ from utils.eventbus import (
 )
 
 logger = logging.getLogger(__name__)
-
-# Kept as a module-level alias: ``modules.manager._is_owner`` was importable
-# and a couple of call sites relied on it.
-_is_owner = is_owner
-
 
 class ModuleManager:
     """Registry, lifecycle, scheduling and aggregation for plugin modules.

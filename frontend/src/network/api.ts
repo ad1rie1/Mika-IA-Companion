@@ -32,6 +32,12 @@ export interface AuthState {
   auth_required?: boolean;
   /** True while no account exists yet — the bootstrap window. */
   needs_bootstrap?: boolean;
+  /**
+   * Operator account (`is_staff`). Only operators may approve or reject a
+   * project's pending actions: the server answers 403 to a chat account, so
+   * the panel hides the buttons rather than offering a refusal.
+   */
+  operator?: boolean;
 }
 
 /**

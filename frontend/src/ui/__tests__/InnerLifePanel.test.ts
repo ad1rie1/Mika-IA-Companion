@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { SLEEP_PHASES } from "../../types";
-import { resolveSleepPhase } from "../InnerLifePanel";
+import { SLEEP_PHASES, resolveSleepPhase } from "../../types";
 
-// Ce module importe InnerLifePanel.ts, qui déclare une classe touchant le
-// DOM — mais rien au chargement du module n'appelle `document`, seulement
-// les méthodes d'instance (voir le constructeur), donc importer juste
-// `resolveSleepPhase` ne construit rien et n'a besoin d'aucun DOM.
 describe("resolveSleepPhase", () => {
   it("passes through every known sleep phase", () => {
     for (const phase of SLEEP_PHASES) {

@@ -1,8 +1,27 @@
 """AI provider abstraction layer.
 
-Each provider lives in its own module and uses its native Python SDK.
-The Protocol defines the common interface; the router uses it to
-dispatch completion requests.
+Each provider lives in its own module and uses its native Python SDK. One
+Protocol, ``AIProvider``, is the whole contract; ``AIRouter`` dispatches on
+it without probing capabilities — every provider implements every method.
+
+Adding a provider is two pieces:
+
+- an *adapter* for its API family, a short class deriving from
+  ``_tool_loop.AdaptateurOutils`` (thread in the native shape, tool
+  serialization, one request, one response read, tool-result shape). The
+  tool loop itself — iteration bound, argument decoding, handler outcomes,
+  the ``max_tokens`` replay, the fallback texts, usage flushed on the way
+  out — lives once in ``_tool_loop.executer_la_boucle`` and is never
+  copied. An OpenAI-compatible endpoint reuses ``AdaptateurOpenAI`` as is.
+- a provider class implementing this Protocol: ``complete`` (one prompt,
+  no tools), ``complete_chat`` (a ``ChatPrompt`` — stable prefix as
+  system, real history turns, volatile state in the final user turn),
+  ``complete_chat_with_tools`` (the same prompt + ``ModuleTool`` list,
+  handed to the loop through the adapter), ``list_models`` and ``test``
+  (``default_test`` suffices when ``list_models`` proves the credential).
+
+Then register the class in ``ai.router._PROVIDER_CLASSES`` and declare its
+credential prefix so a rotated key evicts the cached instance.
 """
 
 from __future__ import annotations
@@ -12,23 +31,15 @@ from typing import Protocol, runtime_checkable
 
 @runtime_checkable
 class AIProvider(Protocol):
-    """Minimal interface for AI text completion providers.
+    """What every provider implements — the router calls nothing else.
 
-    Each provider owns four responsibilities:
-      - ``complete()``           — single-turn generation (no streaming, no tools).
-      - ``complete_with_tools()``— tool-enabled generation: caller passes a list of
-        generic ``ModuleTool`` objects, the provider translates to its native tool
-        protocol (MCP for Claude, function-calling for OpenAI/Gemini/GLM, etc.)
-        and runs the tool loop. Callers never see a provider-specific tool format.
-      - ``list_models()``        — discover the models available with the current
-        credentials. Drives the "Charger les modèles" button in the UI.
-      - ``test()``               — lightweight liveness check. Default impl just
-        calls ``list_models()`` and counts the result, but providers may
-        override if they have a cheaper ping.
-
-    Le tour structuré (``complete_chat`` / ``complete_chat_with_tools``) ne
-    figure pas ici : c'est une *capacité*, déclarée par ``ChatNativeProvider``
-    et ``ChatToolsProvider`` ci-dessous.
+    ``complete`` is the single-turn path (extraction, captioning, inner
+    voice…); ``complete_chat`` and ``complete_chat_with_tools`` are the
+    conversation turn, structured so the provider can cache or prefix-match
+    the stable part. ``tools`` is a list of provider-agnostic ``ModuleTool``
+    objects (``name``, ``description``, ``to_json_schema()``, async
+    ``handler``); the provider translates them to its native tool protocol
+    and runs the loop — callers never see a provider-specific tool format.
     """
 
     async def complete(
@@ -41,47 +52,6 @@ class AIProvider(Protocol):
         attachments: list | None = None,
     ) -> str: ...
 
-    async def complete_with_tools(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        model: str,
-        tools: list,              # list[ModuleTool] — quoted to avoid import cycle
-        max_tokens: int = 4096,
-        temperature: float = 0.7,
-        *,
-        max_turns: int = 10,
-    ) -> tuple[str, list[str]]:
-        """Run a completion with tool-calling support.
-
-        Returns ``(assistant_text, names_of_tools_called_in_order)``.
-        Providers that don't support tool calling raise
-        ``NotImplementedError`` — see ``tools_unsupported``.
-        """
-        ...
-
-    async def list_models(self) -> list[dict]:
-        """Return a list of ``{"id": str, "label": str}`` usable models."""
-        ...
-
-    async def test(self) -> dict:
-        """Return ``{"ok": bool, "model_count": int, "error"?: str}``."""
-        ...
-
-
-@runtime_checkable
-class ChatNativeProvider(Protocol):
-    """Provider sachant consommer un ``ChatPrompt`` sans outil.
-
-    Volontairement **hors** de ``AIProvider`` : ``AIRouter.chat`` bascule sur
-    ``hasattr(provider, "complete_chat")`` et retombe sur ``complete()`` avec
-    l'aplatissement à deux chaînes sinon. Un membre de Protocol n'est jamais
-    optionnel — l'exiger dans ``AIProvider`` déclarerait obligatoire ce que le
-    routeur détecte comme une *capacité*, et présenterait le ``hasattr`` comme
-    un test qui ne peut pas échouer, c'est-à-dire comme du code mort. Le socle
-    reste ``AIProvider`` ; ceci nomme la forme que le routeur y cherche.
-    """
-
     async def complete_chat(
         self,
         prompt,                   # ChatPrompt — quoted to avoid import cycle
@@ -92,19 +62,9 @@ class ChatNativeProvider(Protocol):
         """Run a structured turn: cacheable prefix + real message turns."""
         ...
 
-
-@runtime_checkable
-class ChatToolsProvider(Protocol):
-    """Provider sachant consommer un ``ChatPrompt`` **avec** outils.
-
-    Capacité distincte de la précédente, et détectée séparément : le routeur
-    teste ``complete_chat`` dans ``chat()`` et ``complete_chat_with_tools``
-    dans ``chat_with_tools()``. Deux protocoles pour deux ``hasattr``.
-    """
-
     async def complete_chat_with_tools(
         self,
-        prompt,                   # ChatPrompt — quoted to avoid import cycle
+        prompt,                   # ChatPrompt
         model: str,
         tools: list,              # list[ModuleTool]
         max_tokens: int = 4096,
@@ -112,21 +72,16 @@ class ChatToolsProvider(Protocol):
         *,
         max_turns: int = 10,
     ) -> tuple[str, list[str]]:
-        """Same contract as ``complete_with_tools``: ``(texte, outils appelés)``."""
+        """Structured turn with tools; returns ``(texte, outils appelés)``."""
         ...
 
+    async def list_models(self) -> list[dict]:
+        """Return a list of ``{"id": str, "label": str}`` usable models."""
+        ...
 
-async def tools_unsupported(provider_name: str) -> "tuple[str, list[str]]":
-    """Baseline ``complete_with_tools`` for providers that don't implement it yet.
-
-    Raises ``NotImplementedError`` with a message suggesting the user
-    map ``AI_ROLE_CONVERSATION_TOOLS`` to a provider that does.
-    """
-    raise NotImplementedError(
-        f"{provider_name} ne supporte pas encore le tool-calling via l'abstraction. "
-        "Associe le rôle 'conversation_tools' à un modèle Claude dans "
-        "Configuration > Fournisseur IA > IA · Rôles."
-    )
+    async def test(self) -> dict:
+        """Return ``{"ok": bool, "model_count": int, "error"?: str}``."""
+        ...
 
 
 async def default_test(provider: "AIProvider") -> dict:

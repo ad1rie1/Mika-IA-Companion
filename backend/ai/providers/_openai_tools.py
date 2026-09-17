@@ -1,31 +1,31 @@
-"""Shared tool-calling loop for OpenAI-compatible endpoints.
+"""Le côté OpenAI-compatible de la boucle d'outils.
 
-Both ``OpenAIProvider`` and ``GLMProvider`` hit an OpenAI-compatible
-``/chat/completions`` surface, so the tool-loop (serialize tools,
-ping/pong tool_calls, append tool results, stop when no more calls)
-is identical. Keeping it here prevents divergence.
+``OpenAIProvider`` et ``GLMProvider`` parlent tous deux à une surface
+``/chat/completions`` compatible OpenAI : même sérialisation des outils,
+même ping/pong ``tool_calls`` → tour ``tool``, mêmes refus de paramètres. Ce
+module porte ce qui leur est commun — la reprise mémorisée d'un 400
+(``create_chat_completion`` + ``ParamMemo``), le fil de départ d'un
+``ChatPrompt`` et l'adaptateur que la boucle générique
+(``_tool_loop.executer_la_boucle``) pilote.
 
-The caller passes:
-  - an already-configured ``AsyncOpenAI`` client
-  - the model id
-  - the thread to start from, as a ``messages`` array
-  - a list of provider-agnostic ``ModuleTool`` objects
-
-and gets back ``(assistant_text, tool_names_called_in_order)``.
-
-Le fil de départ arrive **déjà construit** : c'est ce qui permet au tour
-outillé de partir de la forme structurée (préfixe stable en système, vrais
-tours d'historique, état du tour dans le dernier tour user) au lieu de
-l'aplatissement à deux chaînes. Deux amorces, un seul corps —
-``run_openai_tool_loop_from_pair`` reste là pour le chemin non structuré
-(``AIRouter.complete_with_tools``), qui ne connaît que deux chaînes.
+Le fil de départ arrive **déjà construit** : le préfixe stable en système,
+de vrais tours d'historique, l'état du tour dans le dernier tour user. La
+boucle n'ajoute qu'à la fin, donc ce préfixe reste identique octet pour
+octet d'un aller-retour à l'autre — ce sur quoi les back-ends compatibles
+OpenAI indexent leur cache de préfixe automatique.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 
+from ai.providers._tool_loop import (
+    AdaptateurOutils,
+    AppelOutil,
+    Issue,
+    Reponse,
+    contenu_json,
+)
 from utils.degradation import degradations
 
 logger = logging.getLogger(__name__)
@@ -126,14 +126,6 @@ async def create_chat_completion(
             raise
 
 
-def messages_from_pair(system_prompt: str, user_prompt: str) -> list[dict]:
-    """Fil de départ pour un appel à deux chaînes."""
-    return [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
-    ]
-
-
 def messages_from_chat_prompt(prompt) -> list[dict]:
     """Fil de départ pour un ``ChatPrompt``.
 
@@ -164,120 +156,77 @@ def _serialize_tools(tools: list) -> list[dict]:
     ]
 
 
-async def _run_handler(tool, raw_args: str) -> str:
-    """Invoke a ``ModuleTool.handler`` with parsed JSON args.
-
-    Errors in the handler are surfaced as tool content so the model
-    sees them and can recover, instead of bubbling up and killing
-    the whole turn.
-    """
-    try:
-        args = json.loads(raw_args) if raw_args else {}
-    except json.JSONDecodeError as exc:
-        return json.dumps({"error": f"invalid JSON arguments: {exc}"})
-    try:
-        result = await tool.handler(args)
-    except Exception as exc:  # noqa: BLE001 — forward to the model
-        logger.warning("Tool '%s' handler raised: %s", tool.name, exc)
-        return json.dumps({"error": str(exc)})
-    try:
-        return json.dumps(result, ensure_ascii=False, default=str)
-    except TypeError:
-        return json.dumps({"result": str(result)})
-
-
-async def run_openai_tool_loop_from_pair(
-    *,
-    client,
-    provider_label: str,
-    system_prompt: str,
-    user_prompt: str,
-    model: str,
-    tools: list,
-    max_tokens: int,
-    temperature: float,
-    max_turns: int,
-    memo: ParamMemo | None = None,
-) -> tuple[str, list[str]]:
-    """Amorce à deux chaînes du même corps de boucle."""
-    return await run_openai_tool_loop(
-        client=client,
-        provider_label=provider_label,
-        messages=messages_from_pair(system_prompt, user_prompt),
-        model=model,
-        tools=tools,
-        max_tokens=max_tokens,
-        temperature=temperature,
-        max_turns=max_turns,
-        memo=memo,
-    )
-
-
-async def run_openai_tool_loop(
-    *,
-    client,
-    provider_label: str,
-    messages: list[dict],
-    model: str,
-    tools: list,
-    max_tokens: int,
-    temperature: float,
-    max_turns: int,
-    memo: ParamMemo | None = None,
-) -> tuple[str, list[str]]:
-    """Run a ping/pong tool loop against an OpenAI-compatible endpoint.
-
-    When ``tools`` is empty the loop collapses to a single completion.
-
-    Also surfaces per-turn token usage to ``ai.quota.set_usage`` so the
-    quota tracker sees real numbers instead of char-estimates.
+class AdaptateurOpenAI(AdaptateurOutils):
+    """La boucle d'outils vue par un endpoint compatible OpenAI.
 
     ``memo`` est celui du provider appelant : un paramètre refusé au premier
     tour ne doit pas être re-tenté à chaque itération de la boucle.
     """
-    from ai.quota import set_usage
 
-    # Le fil appartient à l'appelant : la boucle y empile ses allers-retours.
-    messages = list(messages)
+    def __init__(
+        self,
+        client,
+        memo: ParamMemo | None,
+        *,
+        label: str,
+        messages: list[dict],
+        model: str,
+        tools: list,
+        temperature: float,
+    ) -> None:
+        self.LABEL = label
+        self._client = client
+        self._memo = memo
+        self._model = model
+        self._temperature = temperature
+        # Le fil appartient à l'appelant : la boucle y empile ses allers-retours.
+        self.fil = list(messages)
+        self._serialises = _serialize_tools(tools) if tools else None
 
-    tools_by_name = {t.name: t for t in tools}
-    serialized = _serialize_tools(tools) if tools else None
-
-    called: list[str] = []
-    final_text = ""
-
-    for turn in range(max_turns):
-        extra = {"tools": serialized} if serialized else {}
+    async def appeler(self, max_tokens: int):
+        extra = {"tools": self._serialises} if self._serialises else {}
         response = await create_chat_completion(
-            client, memo,
-            model=model,
-            messages=messages,
+            self._client, self._memo,
+            model=self._model,
+            messages=self.fil,
             max_tokens=max_tokens,
-            temperature=temperature,
+            temperature=self._temperature,
             **extra,
         )
-
+        # Usage natif remonté au quota : de vrais chiffres, pas une
+        # estimation en caractères.
         usage = getattr(response, "usage", None)
         if usage is not None:
             try:
+                from ai.quota import set_usage
+
                 set_usage(
                     input_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
                     output_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
                 )
             except Exception as exc:
                 degradations.record(
-                    "ai.providers._openai_tools.run_openai_tool_loop usage", exc,
+                    "ai.providers._openai_tools.AdaptateurOpenAI.appeler usage", exc,
                 )
+        return response
 
+    def lire(self, response) -> Reponse:
         msg = response.choices[0].message
         tool_calls = getattr(msg, "tool_calls", None) or []
-
         if not tool_calls:
-            final_text = msg.content or ""
-            break
+            return Reponse(texte=msg.content or "")
+        # Le ``content`` d'un tour porteur d'appels est du brouillon : il est
+        # rejoué au modèle, pas rendu à l'appelant.
+        return Reponse(appels=[
+            AppelOutil(
+                name=tc.function.name, arguments=tc.function.arguments or "", id=tc.id,
+            )
+            for tc in tool_calls
+        ])
 
-        # Replay the assistant turn (content + tool_calls) into the thread.
-        messages.append({
+    def rejouer_le_tour(self, response, reponse: Reponse) -> None:
+        msg = response.choices[0].message
+        self.fil.append({
             "role": "assistant",
             "content": msg.content or "",
             "tool_calls": [
@@ -289,32 +238,14 @@ async def run_openai_tool_loop(
                         "arguments": tc.function.arguments,
                     },
                 }
-                for tc in tool_calls
+                for tc in (getattr(msg, "tool_calls", None) or [])
             ],
         })
 
-        for tc in tool_calls:
-            name = tc.function.name
-            tool = tools_by_name.get(name)
-            if tool is None:
-                content = json.dumps({"error": f"unknown tool '{name}'"})
-            else:
-                logger.info(
-                    "%s called tool: %s (input=%s)",
-                    provider_label, name, (tc.function.arguments or "")[:200],
-                )
-                content = await _run_handler(tool, tc.function.arguments or "")
-                called.append(name)
-            messages.append({
+    def rendre_les_resultats(self, issues: list[Issue]) -> None:
+        for issue in issues:
+            self.fil.append({
                 "role": "tool",
-                "tool_call_id": tc.id,
-                "content": content,
+                "tool_call_id": issue.appel.id,
+                "content": contenu_json(issue),
             })
-    else:
-        # Loop exhausted without a tool-free response — surface whatever
-        # text the model produced in the last turn (may be empty).
-        final_text = final_text or "[max_turns atteint avant réponse finale]"
-
-    if called:
-        logger.info("%s tools used in this turn: %s", provider_label, called)
-    return final_text, called

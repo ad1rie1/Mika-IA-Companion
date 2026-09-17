@@ -1,9 +1,9 @@
 """Gemini : le tour outillé consomme la forme structurée, plus l'aplatissement.
 
 Gemini exposait ``complete_chat`` mais pas ``complete_chat_with_tools`` — et
-c'est sur ce second ``hasattr`` que ``AIRouter.chat_with_tools`` bascule. Son
+``AIRouter.chat_with_tools`` retombait alors sur l'aplatissement. Son
 tour outillé, le plus cher du système (les déclarations repartent à CHAQUE
-aller-retour de la boucle), retombait donc sur ``ChatPrompt.legacy_pair()`` :
+aller-retour de la boucle), passait donc par ``ChatPrompt.legacy_pair()`` :
 un préfixe différent à chaque itération, et un historique privé de ses rôles
 (« Assistant: … » redevient du texte que rien ne distingue de ce qu'un
 utilisateur aurait tapé).
@@ -327,8 +327,8 @@ class TestLaBoucleTourneEncore:
 class TestPlusDAplatissement:
 
     def test_gemini_expose_complete_chat_with_tools(self):
-        """C'est sur ce ``hasattr`` que le routeur bascule — sans lui, aucun
-        des tests ci-dessus ne dit quoi que ce soit du chemin réel."""
+        """C'est ce que le routeur appelle — sans lui, aucun des tests
+        ci-dessus ne dit quoi que ce soit du chemin réel."""
         from ai.providers.gemini_provider import GeminiProvider
 
         assert hasattr(GeminiProvider, "complete_chat_with_tools")
@@ -349,8 +349,9 @@ class TestPlusDAplatissement:
         assert offenders == []
 
     def test_un_seul_corps_de_boucle(self):
-        """Deux amorces, un corps : les deux amorces délèguent, elles ne
-        recopient pas la boucle (c'est ainsi que les deux dérivent)."""
+        """La boucle vit dans ``_tool_loop`` : ce module ne fait qu'y
+        brancher un adaptateur, et le seul corps qui appelle l'API pour le
+        tour outillé est celui de l'adaptateur."""
         source = ast.parse(
             (_BACKEND / "ai" / "providers" / "gemini_provider.py").read_text("utf-8")
         )
@@ -364,29 +365,8 @@ class TestPlusDAplatissement:
             )
         }
         # ``complete`` et ``complete_chat`` sont des appels simples, sans
-        # boucle ; le seul corps outillé est ``_tool_loop``.
-        assert corps == {"complete", "complete_chat", "_tool_loop"}
-
-    def test_l_amorce_a_deux_chaines_marche_toujours(self):
-        """Signature inchangée : ``AIRouter.complete_with_tools`` ne connaît
-        que deux chaînes, et des tests existants l'appellent ainsi."""
-        outil = _Outil()
-        provider = _gemini(_FakeGeminiClient([
-            _reponse("", [_appel_gemini(outil.name, {})]),
-            _reponse("voilà"),
-        ]))
-
-        texte, appeles = asyncio.run(provider.complete_with_tools(
-            system_prompt="tu es Mika",
-            user_prompt="mes mails ?",
-            model="gemini-2.0-flash",
-            tools=[outil],
-        ))
-
-        assert (texte, appeles) == ("voilà", [outil.name])
-        requete = provider._client.requests[0]
-        assert requete["system_instruction"] == "tu es Mika"
-        assert requete["contents"] == [("user", [("text", "mes mails ?")])]
+        # boucle ; ``appeler`` est la requête que la boucle générique pilote.
+        assert corps == {"complete", "complete_chat", "appeler"}
 
 
 # =================================================================
@@ -395,7 +375,8 @@ class TestPlusDAplatissement:
 
 class TestLeProtocole:
 
-    def test_les_six_providers_satisfont_les_deux_capacites(self):
+    def test_les_six_providers_satisfont_le_protocole(self):
+        from ai.providers import AIProvider
         from ai.providers.claude import ClaudeProvider
         from ai.providers.gemini_provider import GeminiProvider
         from ai.providers.glm_provider import GLMProvider
@@ -407,43 +388,22 @@ class TestLeProtocole:
             ClaudeProvider, GeminiProvider, GLMProvider,
             OllamaProvider, OllamaCloudProvider, OpenAIProvider,
         ):
-            assert hasattr(cls, "complete_chat"), cls.__name__
-            assert hasattr(cls, "complete_chat_with_tools"), cls.__name__
+            assert isinstance(cls.__new__(cls), AIProvider), cls.__name__
 
-    def test_le_tour_structure_reste_hors_du_socle(self):
-        """Un membre de Protocol n'est pas optionnel : exiger ``complete_chat``
-        dans ``AIProvider`` rendrait le ``hasattr`` du routeur toujours vrai —
-        une détection de capacité qui ne détecte plus rien."""
-        from ai.providers import AIProvider, ChatNativeProvider, ChatToolsProvider
+    def test_le_tour_structure_fait_partie_du_socle(self):
+        """Un seul Protocol : le routeur n'a plus de capacité à détecter,
+        donc la forme structurée est une obligation, pas une option."""
+        from ai.providers import AIProvider
 
-        socle = set(AIProvider.__protocol_attrs__)
-        assert "complete_chat" not in socle
-        assert "complete_chat_with_tools" not in socle
-        assert ChatNativeProvider.__protocol_attrs__ == {"complete_chat"}
-        assert ChatToolsProvider.__protocol_attrs__ == {"complete_chat_with_tools"}
+        assert AIProvider.__protocol_attrs__ == {
+            "complete", "complete_chat", "complete_chat_with_tools",
+            "list_models", "test",
+        }
 
-    def test_un_provider_sans_tour_structure_reste_un_provider(self):
-        """Le socle est ce que TOUT provider tient ; la capacité se teste à
-        part, et son absence n'invalide pas le provider."""
-        from ai.providers import AIProvider, ChatNativeProvider, ChatToolsProvider
+    def test_gemini_satisfait_le_protocole_structurellement(self):
+        from ai.providers import AIProvider
 
-        class _Minimal:
-            async def complete(self, *a, **k): return ""
-            async def complete_with_tools(self, *a, **k): return "", []
-            async def list_models(self): return []
-            async def test(self): return {"ok": True, "model_count": 0}
-
-        minimal = _Minimal()
-        assert isinstance(minimal, AIProvider)
-        assert not isinstance(minimal, ChatNativeProvider)
-        assert not isinstance(minimal, ChatToolsProvider)
-
-    def test_gemini_satisfait_les_deux_capacites_structurellement(self):
-        from ai.providers import ChatNativeProvider, ChatToolsProvider
-
-        provider = _gemini()
-        assert isinstance(provider, ChatNativeProvider)
-        assert isinstance(provider, ChatToolsProvider)
+        assert isinstance(_gemini(), AIProvider)
 
 
 # =================================================================
@@ -479,8 +439,7 @@ def routeur(monkeypatch):
 
 
 class TestRouteurDonneLaFormeStructuree:
-    """Le correctif doit suffire *sans* toucher au routeur : c'est
-    ``hasattr(provider, "complete_chat_with_tools")`` qui décide."""
+    """Bout en bout : ``AIRouter.chat_with_tools`` tend la forme structurée."""
 
     def test_le_provider_recoit_de_vrais_tours(self, routeur, monkeypatch):
         r, router_mod = routeur

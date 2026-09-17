@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from identity.trust import ChannelTrust
-from pipeline.context import (
+from pipeline.context_blocks import (
     _IDENTITY_CLAIMS_MAX,
     _MODULE_CONTEXT_MAX_CHARS,
     _PROJECT_LIST_ITEMS_MAX,

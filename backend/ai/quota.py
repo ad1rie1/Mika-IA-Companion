@@ -1,7 +1,7 @@
 """AI quota tracking + limiter.
 
-Every call routed through ``ai.router.AIRouter`` (``complete`` as well as
-``complete_with_tools``) is metered:
+Every call routed through ``ai.router.AIRouter`` (``complete``, ``chat`` as
+well as ``chat_with_tools``) is metered:
   - token counts (provider-native when available, char-based fallback)
   - USD cost (pricing table; $0 for local Ollama)
   - attributed to a role (AIRole) and, when set, to a project id
@@ -36,7 +36,7 @@ import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date
 from typing import Optional
 
 from django.conf import settings

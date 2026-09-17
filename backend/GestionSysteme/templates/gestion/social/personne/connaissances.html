@@ -14,6 +14,7 @@
               <th style="min-width: 30rem;">Fait</th>
               <th style="min-width: 8rem;">Confiance</th>
               <th class="fit">Valide</th>
+              <th class="fit">Sensibilité</th>
               <th>Thèmes</th>
               <th class="fit">Modifié</th>
             </tr>
@@ -37,6 +38,7 @@
                     <span class="badge badge-danger" title="Contredite puis invalidée par la conscience">invalidée</span>
                   {% endif %}
                 </td>
+                <td class="fit">{% include "gestion/social/personne/_sensibilite.html" with valeur=c.sensibilite %}</td>
                 <td><span class="chips">{% for t in c.themes.all %}<span class="chip">{{ t.name }}</span>{% endfor %}</span></td>
                 <td class="fit muted" title="{{ c.updated_at|dt_full }}">{{ c.updated_at|ago }}</td>
               </tr>

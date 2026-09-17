@@ -68,10 +68,25 @@ def _health(request) -> dict:
         logger.exception("état du murmure indisponible")
         murmure = {}
 
+    # Cadence des appels de fond et disjoncteurs, par provider : un chantier
+    # qui « attend » et une extraction qui « repasse au tick suivant » sont,
+    # sans ce bloc, indiscernables d'un mécanisme qui n'a rien à faire.
+    try:
+        from ai.router import ai_router
+        cadence = ai_router.cadence_stats()
+    except Exception:
+        logger.exception("cadence des appels de fond indisponible")
+        cadence = {"fond": {"providers": [], "roles": []}, "disjoncteurs": []}
+
     subscriptions = bus.get("subscriptions", [])
     boucles = _loops_snapshot()
     return {
         "murmure": murmure,
+        "fond": cadence["fond"],
+        "disjoncteurs": cadence["disjoncteurs"],
+        "disjoncteurs_ouverts": [
+            d for d in cadence["disjoncteurs"] if d["etat"] != "ferme"
+        ],
         "sites_page": tables.paginate(request, sites, per_page=50),
         "total_events": degradations.total(),
         "distinct_sites": len(sites),

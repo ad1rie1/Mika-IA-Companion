@@ -113,28 +113,32 @@ class MemoryBridge:
         if not queries:
             return ""
 
-        disclose_others = await self._peut_divulguer(
+        divulgation = await self._divulgation(
             person_id, channel=channel, interne=interne,
         )
         try:
             return await memory_manager.get_memory_context_multi(
-                queries[:3], person_id=person_id, disclose_others=disclose_others,
+                queries[:3], person_id=person_id, divulgation=divulgation,
             )
         except Exception:
             logger.exception("MemoryBridge: recall_for_context failed")
             return ""
 
     @staticmethod
-    async def _peut_divulguer(person_id: str, *, channel: str, interne: bool) -> bool:
-        """Fermé par défaut : ne pas savoir à qui on parle n'ouvre rien."""
+    async def _divulgation(person_id: str, *, channel: str, interne: bool):
+        """Le niveau du rappel (``identity.divulgation``). Fermé par défaut :
+        ne pas savoir à qui on parle n'ouvre rien."""
+        from identity.divulgation import FERME, TOUT
+
         if interne:
-            return True
+            return TOUT
         from identity.trust import is_identifiable_person
 
         if not person_id or not is_identifiable_person(person_id):
-            return False
+            return FERME
         try:
             from identity.resolver import identity_resolver
+            from pipeline.context_blocks import divulgation_du_tour
 
             # `authenticated=False` n'abaisse rien : le résolveur prend le
             # plus fort entre la confiance STOCKÉE sur le handle (posée à la
@@ -144,10 +148,10 @@ class MemoryBridge:
             ctx = await identity_resolver.resolve_context(
                 person_id, channel=channel or "", authenticated=False, is_public=False,
             )
-            return bool(ctx.may_disclose)
+            return await divulgation_du_tour(ctx)
         except Exception as exc:
             degradations.record("conscience: divulgation du rappel", exc)
-            return False
+            return FERME
 
     # Poids de l'évidence épisodique dans who_is_concerned : un échange
     # récent pèse un peu plus qu'une mention en mémoire curée.
@@ -648,12 +652,8 @@ class MemoryBridge:
 
             meilleur = 0.0
             for pid in person_ids[:3]:
-                await emotion_engine.ensure_person_loaded(pid)
-                mood = emotion_engine.person_moods.get(pid)
-                ancre = getattr(mood, "anchor", None)
-                if ancre:
-                    meilleur = max(meilleur, float(ancre[0]))
-            return 1.0 + _CHALEUR_POIDS * max(0.0, min(1.0, meilleur))
+                meilleur = max(meilleur, await emotion_engine.chaleur_envers(pid))
+            return 1.0 + _CHALEUR_POIDS * meilleur
         except Exception as exc:
             degradations.record("conscience: chaleur du manque", exc)
             return 1.0

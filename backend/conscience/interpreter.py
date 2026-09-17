@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 
+from ai.quota import QuotaExceeded
 from ai.router import AIRole, UnconfiguredRoleError, ai_router
 from configs.runtime import cfg_float, cfg_int
 from utils.degradation import degradations
@@ -271,7 +272,15 @@ class SignalInterpreter:
             )
             return signal
 
-        # LLM path: unknown or rich events
+        # LLM path: unknown or rich events. Un budget de fond épuisé chez
+        # le provider rend le signal heuristique sans bâtir le prompt : le
+        # signal n'est pas perdu, il est interprété à sa pertinence de repli.
+        if not ai_router.budget_de_fond_disponible(AIRole.SIGNAL_INTERPRETATION):
+            logger.info(
+                "Interprétation heuristique pour %s — budget d'appels de fond épuisé",
+                event.event_type,
+            )
+            return self._fallback_signal(event)
         try:
             signal = await asyncio.wait_for(
                 self._interpret_with_llm(event),
@@ -293,6 +302,13 @@ class SignalInterpreter:
             logger.warning(
                 "Interprétation heuristique pour %s — IA non configurée: %s",
                 event.event_type, exc,
+            )
+            return self._fallback_signal(event)
+        except QuotaExceeded as exc:
+            # Quota de jetons ou budget de fond atteint entre la vérification
+            # et l'appel : même repli, sans traceback à chaque événement.
+            logger.warning(
+                "Interprétation heuristique pour %s — %s", event.event_type, exc,
             )
             return self._fallback_signal(event)
         except Exception:

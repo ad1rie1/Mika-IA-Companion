@@ -91,6 +91,7 @@ const ACK_REASONS: Record<string, string> = {
   attachments_rejected: "pièces jointes refusées (format ou taille)",
   frame_too_large: "envoi trop volumineux — retire une pièce jointe",
   send_abandoned: "envoi abandonné après plusieurs tentatives",
+  unauthorized: "session expirée — reconnecte-toi",
 };
 
 /** French wording for a refusal status, for display. */

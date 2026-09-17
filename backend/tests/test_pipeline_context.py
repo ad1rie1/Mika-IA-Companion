@@ -245,14 +245,14 @@ class TestPhraseEcart:
     """Le temps se dit en prose. « depuis 1814400s » n'aide aucun modèle."""
 
     def test_sous_le_plancher_rien_n_est_dit(self):
-        from pipeline.context import _phrase_ecart
+        from pipeline.context_history import _phrase_ecart
 
         assert _phrase_ecart(0) == ""
         assert _phrase_ecart(3600) == ""
         assert _phrase_ecart(5 * 3600) == ""
 
     def test_les_paliers_sont_de_la_prose(self):
-        from pipeline.context import _phrase_ecart
+        from pipeline.context_history import _phrase_ecart
 
         attendus = {
             8 * 3600: "plus tot dans la journee",
@@ -270,7 +270,7 @@ class TestPhraseEcart:
     def test_aucune_sortie_ne_porte_de_secondes(self):
         import re
 
-        from pipeline.context import _phrase_ecart
+        from pipeline.context_history import _phrase_ecart
 
         for jours in range(0, 200):
             phrase = _phrase_ecart(jours * 86400 + 7 * 3600)
@@ -364,7 +364,7 @@ class TestHorodatageDesSegmentsDHistorique:
         return entries
 
     async def test_les_segments_sont_horodates_apres_un_trou(self):
-        from pipeline.context import _stamp_history_gaps
+        from pipeline.context_history import _stamp_history_gaps
 
         history = await self._history(20, 20, 0)
         stamped = await _stamp_history_gaps(history)
@@ -375,7 +375,7 @@ class TestHorodatageDesSegmentsDHistorique:
         assert "m0" in stamped[2]["content"]
 
     async def test_un_fil_continu_n_est_pas_horodate(self):
-        from pipeline.context import _stamp_history_gaps
+        from pipeline.context_history import _stamp_history_gaps
 
         history = await self._history(0, 0, 0)
         stamped = await _stamp_history_gaps(history)
@@ -384,7 +384,7 @@ class TestHorodatageDesSegmentsDHistorique:
 
     async def test_l_horodatage_ne_mute_pas_le_tampon(self):
         """Les dicts sont partagés avec `MemoryManager.short_term`."""
-        from pipeline.context import _stamp_history_gaps
+        from pipeline.context_history import _stamp_history_gaps
 
         history = await self._history(20, 0)
         avant = [dict(m) for m in history]

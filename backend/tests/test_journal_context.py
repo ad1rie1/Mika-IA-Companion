@@ -54,7 +54,7 @@ class TestJournalContext:
     @pytest.mark.asyncio
     async def test_long_narrative_capped(self):
         from memory.models import DailyJournal
-        from pipeline.context import _JOURNAL_MAX_CHARS
+        from pipeline.context_blocks import _JOURNAL_MAX_CHARS
         await sync_to_async(DailyJournal.objects.create)(
             date=date.today() - timedelta(days=1),
             narrative="tres longue journee " * 100,

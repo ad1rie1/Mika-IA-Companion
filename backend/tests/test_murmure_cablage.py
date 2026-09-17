@@ -177,11 +177,11 @@ class TestIntentionStable:
     def test_le_prompt_et_le_murmure_lisent_les_memes_declencheurs(self):
         """Sans source commune, elle murmurerait une intention que le prompt
         ne mentionne pas."""
-        from conscience.engine import ConscienceEngine
+        from conscience import intention
 
         for fonction in (
-            ConscienceEngine._intention_de_lacte,
-            ConscienceEngine._composer_vecu,
+            intention.intention_de_lacte,
+            intention.composer_vecu,
         ):
             noms = {_nom_appele(n) for n in _appels(_corps(fonction))}
             assert "_declencheurs" in noms, fonction.__name__

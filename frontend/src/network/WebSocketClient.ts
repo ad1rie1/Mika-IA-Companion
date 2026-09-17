@@ -380,6 +380,14 @@ export class WebSocketClient {
       this.refuseFrame(data, "frame_too_large");
       return false;
     }
+    // Après un 4401 il n'y aura jamais de prochaine ouverture : la mise en
+    // file laissait la bulle « en attente d'envoi » pour toujours — la purge
+    // du 4401 ne couvrait que ce qui attendait *déjà*, pas ce qu'on tape
+    // ensuite. Même refus à voix haute que le reste, avec sa raison.
+    if (this.stopped) {
+      this.refuseFrame(data, "unauthorized");
+      return false;
+    }
     const entry: OutboxEntry = {
       frame: data,
       attempts: 0,

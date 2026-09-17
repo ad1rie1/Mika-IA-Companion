@@ -76,7 +76,8 @@ class TestPortesFranchissables:
 
     def test_le_plafond_heuristique_franchit_les_portes_vivantes(self):
         """0.55 (RSS apparié) passe promotion, ravivement et curiosité."""
-        from conscience.engine import BOOST_PERTINENCE, PROMOTION_PERTINENCE
+        from conscience.entretien import BOOST_PERTINENCE
+        from conscience.ruminations import PROMOTION_PERTINENCE
         from conscience.interpreter import PERTINENCE_RSS_MATCHED
         from drives.engine import _OBSERVATION_CURIOSITY_GATE
 
@@ -101,7 +102,7 @@ class TestPortesFranchissables:
         nocturne coûte une nuit. Les banaliser en descendant tout serait le
         défaut symétrique de celui qu'on répare.
         """
-        from conscience.engine import CONTRADICTION_PERTINENCE
+        from conscience.entretien import CONTRADICTION_PERTINENCE
         from conscience.interpreter import PERTINENCE_RSS_MATCHED
         from conscience.scoring import SLEEP_WAKE_PERTINENCE
 
@@ -117,7 +118,8 @@ class TestPortesFranchissables:
         Rien ne dit qu'un message de chat vaut davantage qu'avant : seule la
         pertinence portant un intérêt *apparié* a bougé.
         """
-        from conscience.engine import BOOST_PERTINENCE, PROMOTION_PERTINENCE
+        from conscience.entretien import BOOST_PERTINENCE
+        from conscience.ruminations import PROMOTION_PERTINENCE
         from conscience.interpreter import (
             PERTINENCE_CHAT_MESSAGE,
             PERTINENCE_FALLBACK,
@@ -165,9 +167,9 @@ class TestBarreDeReveil:
         """
         import inspect
 
-        from conscience import engine as moteur
+        from conscience import perception
 
-        source = inspect.getsource(moteur.ConscienceEngine.observe)
+        source = inspect.getsource(perception.observe)
         assert "signal.pertinence >= cfg_float(" in source, (
             "le fast-path doit comparer avec >=, comme le veto de sommeil"
         )
@@ -358,7 +360,7 @@ class TestDesaturationDesPulsions:
 class TestPressionDesPensees:
 
     def test_deux_pensees_a_un_demi_ne_saturent_plus(self):
-        from conscience.engine import RUMINATION_PRESSION_PLEINE
+        from conscience.ruminations import RUMINATION_PRESSION_PLEINE
 
         assert RUMINATION_PRESSION_PLEINE > 1.0, (
             "la somme était comparée à 1.0 : deux pensées à 0.5 saturaient "
@@ -368,7 +370,7 @@ class TestPressionDesPensees:
         assert (0.5 + 0.5) / RUMINATION_PRESSION_PLEINE < 0.5
 
     def test_la_pression_pleine_reste_atteignable(self):
-        from conscience.engine import PROMOTION_ACTIVES_MAX, RUMINATION_PRESSION_PLEINE
+        from conscience.ruminations import PROMOTION_ACTIVES_MAX, RUMINATION_PRESSION_PLEINE
 
         # Le plafond de pensées actives doit pouvoir produire une pression
         # pleine, sinon le Facteur 10 ne peut jamais donner son maximum.
@@ -408,9 +410,9 @@ class TestHorlogeLocale:
     def test_le_moteur_ne_recalcule_plus_minuit_lui_meme(self):
         import inspect
 
-        from conscience import engine as moteur
+        from conscience import introspection
 
-        source = inspect.getsource(moteur.ConscienceEngine._introspect)
+        source = inspect.getsource(introspection.introspect)
         assert "debut_du_jour_local()" in source
         assert "replace(hour=0" not in source, (
             "minuit se calcule dans la couche de lecture, en un seul endroit"

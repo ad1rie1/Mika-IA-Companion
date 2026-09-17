@@ -73,6 +73,18 @@ def main():
         ws_max_size=WS_MAX_FRAME_BYTES,
     )
 
+    # La mémoire longue se charge après l'ouverture du port ; un refus
+    # (MEMORY_REQUIRE_VECTOR_STORE=1 et magasin vectoriel en panne) demande
+    # l'arrêt par SIGTERM, qu'uvicorn traite comme une sortie normale. Le
+    # code 3 est celui qu'uvicorn rendait quand le refus remontait du
+    # lifespan : systemd (Restart=on-failure) et l'exploitant voient encore
+    # un échec, pas un arrêt propre.
+    from memory.manager import memory_manager
+
+    if memory_manager.etat_memoire_longue == "failed":
+        logger.critical("Sortie en échec : mémoire longue refusée au démarrage")
+        sys.exit(3)
+
 
 if __name__ == "__main__":
     main()
