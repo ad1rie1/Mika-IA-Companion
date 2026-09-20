@@ -180,6 +180,16 @@ DATABASES = {
         "NAME": PROJECT_ROOT / "data" / "vtuber.db",
         "OPTIONS": {
             "timeout": env.int("DB_LOCK_TIMEOUT", default=30),
+            # BEGIN IMMEDIATE, not SQLite's default DEFERRED. A deferred
+            # transaction starts as a reader and upgrades to a writer at its
+            # first INSERT; in WAL, if another connection committed in the
+            # meantime, that upgrade fails *at once* with "database is
+            # locked" — the busy timeout above is never consulted (measured:
+            # 0.0 s against 30 s). Every `atomic` that reads then writes
+            # (`m2m.set()`, `get_or_create`, `update_or_create`) was exposed
+            # to it under six background writers. Immediate takes the write
+            # lock at BEGIN, where the busy timeout does wait.
+            "transaction_mode": "IMMEDIATE",
             "init_command": (
                 "PRAGMA journal_mode=WAL;"
                 "PRAGMA synchronous=NORMAL;"

@@ -289,6 +289,12 @@
         to { opacity: 1; transform: translateY(0); }
       }
       .chat-bubble.no-anim { animation: none; }
+      /* Pensée murmurée pour elle-même, pas une réponse (voice_persona "inner"). */
+      .chat-bubble.vtuber.inner {
+        font-style: italic;
+        background: rgba(99, 102, 241, 0.4);
+        color: rgba(255, 255, 255, 0.85);
+      }
       /* Markdown léger d'une réponse (ui/inlineMarkup.ts). */
       .chat-bubble code {
         font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;

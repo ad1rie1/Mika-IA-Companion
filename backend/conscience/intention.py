@@ -49,6 +49,56 @@ _INTENTION_PAR_PULSION: dict[str, str] = {
 }
 
 
+def _texte(valeur, limite: int) -> str:
+    return " ".join(str(valeur or "").split())[:limite]
+
+
+def decrire_observation(obs) -> str:
+    """L'intention « réagir à » une observation, **avec d'où elle vient**.
+
+    Le résumé seul ne suffisait pas au modèle de la voix intérieure. Pour un
+    titre France Info (`[France Info] "Une dangerosité particulière": au cœur
+    du transfert…`, coupé à 140 caractères), il ne savait ni que c'était une
+    actualité ni ce qu'elle racontait. Il a lu la citation entre guillemets
+    comme un surnom et murmuré « "dangerosité particulière", c'est qui ça ? ».
+
+    La description nomme donc la nature du signal (actualité, email, message)
+    et sa provenance, avec le titre complet et le chapô tirés de `raw_data`.
+    La chaîne reste stable d'un cycle à l'autre pour une même observation,
+    ce dont dépend la garde anti-répétition du murmure.
+    """
+    source = str(getattr(obs, "source", "") or "")
+    brut = getattr(obs, "raw_data", None)
+    brut = brut if isinstance(brut, dict) else {}
+    resume = _texte(getattr(obs, "summary", ""), 140)
+
+    if source == "rss":
+        flux = _texte(brut.get("feed_name"), 60)
+        titre = _texte(brut.get("title"), 200) or resume
+        if not titre:
+            return ""
+        origine = f"du flux « {flux} »" if flux else "d'un flux RSS"
+        texte = f"réagir à un titre d'actualité lu {origine} : « {titre} »"
+        chapo = _texte(brut.get("summary"), 220)
+        if chapo:
+            texte += f" — l'article dit : {chapo}"
+        return texte
+
+    if source == "email":
+        expediteur = _texte(brut.get("from"), 80)
+        sujet = _texte(brut.get("subject"), 160)
+        if sujet or expediteur:
+            de = f" de {expediteur}" if expediteur else ""
+            objet = f" : « {sujet} »" if sujet else ""
+            return f"réagir à un email reçu{de}{objet}"
+
+    if not resume:
+        return ""
+    if source:
+        return f"réagir à ce que j'ai perçu via {source} : {resume}"
+    return f"réagir à : {resume}"
+
+
 def intention_de_lacte(moteur, ctx: DecisionContext) -> str:
     """Ce qu'elle s'apprête à faire, en une phrase, pour le murmure.
 
@@ -77,9 +127,9 @@ def intention_de_lacte(moteur, ctx: DecisionContext) -> str:
                 ctx.pending_observations,
                 key=lambda o: getattr(o, "pertinence", 0.0),
             )
-            resume = getattr(meilleure, "summary", "")
-            if resume:
-                return f"réagir à : {str(resume)[:140]}"
+            decrite = decrire_observation(meilleure)
+            if decrite:
+                return decrite
 
         declencheurs = moteur._declencheurs(ctx)
         if declencheurs:

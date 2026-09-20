@@ -301,8 +301,14 @@ export class ChatOverlay {
         this.bindServerId(data.client_msg_id, data.user_message_id ?? undefined);
       }
       if (typeof data.text === "string" && data.text) {
+        // Un murmure n'est pas persisté : il n'aura jamais d'id. Sans
+        // `localOnly`, « pas d'id » veut dire « le plus récent » et la pensée
+        // restait épinglée en bas du fil, sous les réponses venues après.
+        const inner = data.voice_persona === "inner";
         this.addMessage(data.text, "vtuber", {
           id: data.message_id ?? undefined,
+          localOnly: inner && data.message_id == null,
+          inner,
         });
       }
     });
@@ -600,6 +606,8 @@ export class ChatOverlay {
       matchText?: string;
       /** For a bubble the server will never give an id — see StoredMessage. */
       localOnly?: boolean;
+      /** Pensée murmurée — voir StoredMessage.inner. */
+      inner?: boolean;
     } = {}
   ) {
     const display = sender === "vtuber" ? stripProsody(text) : text;
@@ -623,6 +631,7 @@ export class ChatOverlay {
       status: opts.status,
       matchText: opts.matchText,
       after: opts.localOnly ? this.cursor() : undefined,
+      inner: opts.inner || undefined,
     });
     this.trimHistory();
     this.persistHistory();
@@ -679,6 +688,7 @@ export class ChatOverlay {
     const bubble = document.createElement("div");
     bubble.className = `chat-bubble ${msg.sender}`;
     if (!animate) bubble.classList.add("no-anim");
+    if (msg.inner) bubble.classList.add("inner");
     if (msg.sender === "user" && msg.status && msg.status !== "sent") {
       bubble.classList.add(`status-${msg.status}`);
     }
@@ -686,6 +696,7 @@ export class ChatOverlay {
     else bubble.textContent = msg.text;
 
     const parts: string[] = [];
+    if (msg.inner) parts.push("pensée à voix haute");
     if (msg.ts) {
       parts.push(
         new Date(msg.ts).toLocaleString("fr-FR", {

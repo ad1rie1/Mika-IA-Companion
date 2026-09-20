@@ -66,6 +66,28 @@ def _make_engine(temperament: Temperament) -> EmotionEngine:
     return e
 
 
+@pytest.fixture(scope="session")
+def django_db_modify_db_settings(django_db_modify_db_settings_parallel_suffix):
+    """Deferred transactions for the test database only.
+
+    Production runs ``transaction_mode=IMMEDIATE`` on a WAL file (see
+    ``config/settings.py``). The test database is an in-memory *shared-cache*
+    SQLite, where ``BEGIN IMMEDIATE`` takes a table lock on the shared cache
+    and every other thread's connection (``sync_to_async``, forge workers)
+    fails on « database table is locked » without waiting. The declaration
+    stays pinned by ``test_runtime_hardening.py``.
+    """
+    from django.db import connections
+
+    # A new dict on the connection: its ``settings_dict`` *is*
+    # ``settings.DATABASES["default"]``, and editing it in place would erase
+    # the declaration the guard reads.
+    connection = connections["default"]
+    options = dict(connection.settings_dict["OPTIONS"])
+    options.pop("transaction_mode", None)
+    connection.settings_dict = {**connection.settings_dict, "OPTIONS": options}
+
+
 @pytest.fixture
 def engine() -> EmotionEngine:
     """Fresh EmotionEngine with default Mika temperament (no async init)."""

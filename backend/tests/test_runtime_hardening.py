@@ -44,6 +44,39 @@ class TestDatabaseConcurrency:
             "en journal_mode=delete un seul writer bloque tous les readers"
         )
         assert options["timeout"] >= 10
+        assert options.get("transaction_mode") == "IMMEDIATE", (
+            "en DEFERRED, une transaction lecture→écriture échoue en WAL sans "
+            "attendre le busy timeout (m2m.set, get_or_create…)"
+        )
+
+    def test_deferred_upgrade_ignores_busy_timeout(self, tmp_path):
+        """Pins the SQLite behaviour the setting exists for, on a real WAL
+        file: the deferred reader→writer upgrade fails immediately, the
+        immediate transaction does not."""
+        import sqlite3
+        import time
+
+        db = tmp_path / "wal.db"
+        a = sqlite3.connect(db, timeout=5, isolation_level=None)
+        b = sqlite3.connect(db, timeout=5, isolation_level=None)
+        a.execute("PRAGMA journal_mode=WAL")
+        a.execute("CREATE TABLE t(x)")
+
+        a.execute("BEGIN DEFERRED")
+        a.execute("SELECT count(*) FROM t").fetchall()
+        b.execute("INSERT INTO t VALUES (1)")
+        debut = time.monotonic()
+        with pytest.raises(sqlite3.OperationalError, match="locked"):
+            a.execute("INSERT INTO t VALUES (2)")
+        assert time.monotonic() - debut < 1, "l'échec n'a pas attendu le timeout"
+        a.execute("ROLLBACK")
+
+        a.execute("BEGIN IMMEDIATE")
+        a.execute("SELECT count(*) FROM t").fetchall()
+        a.execute("INSERT INTO t VALUES (2)")
+        a.execute("COMMIT")
+        a.close()
+        b.close()
 
 
 def _scheduler():

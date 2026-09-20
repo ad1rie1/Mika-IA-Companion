@@ -343,7 +343,19 @@ class RSSModule(BaseModule):
                 except Exception as exc:
                     report.failed += 1
                     report.errors.append(f"{feed.name} : {type(exc).__name__}")
-                    self.logger.exception("Relevé impossible pour %s", feed.name)
+                    if isinstance(exc, OSError):
+                        # Réseau (délai, DNS, refus, HTTP 4xx/5xx — ``URLError``
+                        # et ``HTTPError`` sont des ``OSError``) : un éditeur
+                        # injoignable est un fait ordinaire, pas un bogue. Une
+                        # ligne suffit, la raison est gardée sur le flux ; une
+                        # pile de cinquante lignes à chaque relevé noie le
+                        # journal sans rien apprendre de plus.
+                        self.logger.warning(
+                            "Relevé impossible pour %s : %s", feed.name,
+                            getattr(exc, "reason", None) or exc,
+                        )
+                    else:
+                        self.logger.exception("Relevé impossible pour %s", feed.name)
                     await sync_to_async(self._record_failure)(feed, exc)
                     continue
                 report.new_entries += len(nouveaux)

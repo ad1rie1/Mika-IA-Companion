@@ -72,6 +72,12 @@ export interface StoredMessage {
    * everything displayed then, before everything since.
    */
   after?: number;
+  /**
+   * Pensée murmurée pour elle-même (`voice_persona: "inner"`), pas une
+   * réponse. Affichée en italique : dans une bulle ordinaire, « c'est qui
+   * ça ? » se lisait comme une question posée à l'interlocuteur.
+   */
+  inner?: boolean;
 }
 
 /**
