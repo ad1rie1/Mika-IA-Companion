@@ -72,8 +72,16 @@
     <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
   {% else %}
     <div class="card-body"><div class="empty">
-      <div class="empty-title">Rien en attente</div>
-      Aucune action ne demande ton accord.
+      {% if pending_selection %}
+        <div class="empty-title">Rien en attente</div>
+        {% if project_selection %}Aucune action de ce projet ne demande ton accord.{% else %}Aucune action ne demande ton accord.{% endif %}
+      {% elif filterset.active %}
+        <div class="empty-title">Aucune action pour cette sélection</div>
+        Modifie le projet ou l’état recherché pour consulter les autres actions.
+      {% else %}
+        <div class="empty-title">Aucune action proposée</div>
+        Les demandes d’accord des projets et leurs décisions apparaîtront ici.
+      {% endif %}
     </div></div>
   {% endif %}
 </section>

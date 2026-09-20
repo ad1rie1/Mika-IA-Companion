@@ -43,19 +43,16 @@ _SOUVENIR_ORDERS = {
 
 
 def _souvenirs(request) -> dict:
-    from memory.models import Souvenir, Theme
+    from memory.models import Souvenir
 
     fs = tables.FilterSet(per_page=tables.read_per_page(request))
     search = fs.add(tables.search_filter(
         request, "q", "Recherche", placeholder="dans le contenu",
     ))
-    theme = fs.add(tables.select_filter(
-        request, "theme", "Thème",
-        [(t, t) for t in Theme.objects.order_by("name").values_list("name", flat=True)[:200]],
-    ))
+    theme = fs.add(tables.search_filter(request, "theme", "Thème", placeholder="Rechercher un thème", suggestions="themes"))
     order = fs.add(tables.select_filter(
-        request, "tri", "Tri", list(_SOUVENIR_ORDERS.items()),
-        default="-occurred_at", all_label="Plus récents",
+        request, "tri", "Tri", [(k, v) for k, v in _SOUVENIR_ORDERS.items() if k != "-occurred_at"],
+        all_label="Plus récents",
     ))
 
     entity = fs.add(tables.search_filter(request, "entite", "Entité", placeholder="nom ou #numéro"))
@@ -69,7 +66,7 @@ def _souvenirs(request) -> dict:
     if search.value:
         qs = qs.filter(content__icontains=search.value)
     if theme.value:
-        qs = qs.filter(themes__name=theme.value)
+        qs = qs.filter(themes__name__iexact=theme.value)
     qs = qs.distinct().order_by(order.value or "-occurred_at")
 
     return {"filterset": fs, "page": tables.paginate(request, qs, per_page=fs.per_page)}
@@ -78,14 +75,11 @@ def _souvenirs(request) -> dict:
 # ── Connaissances ───────────────────────────────────────────────────────
 
 def _connaissances(request) -> dict:
-    from memory.models import Connaissance, Theme
+    from memory.models import Connaissance
 
     fs = tables.FilterSet(per_page=tables.read_per_page(request))
     search = fs.add(tables.search_filter(request, "q", "Recherche", placeholder="dans le contenu"))
-    theme = fs.add(tables.select_filter(
-        request, "theme", "Thème",
-        [(t, t) for t in Theme.objects.order_by("name").values_list("name", flat=True)[:200]],
-    ))
+    theme = fs.add(tables.search_filter(request, "theme", "Thème", placeholder="Rechercher un thème", suggestions="themes"))
     validity = fs.add(tables.select_filter(
         request, "validite", "Validité",
         [("valides", "valides seulement"), ("invalides", "invalidées seulement")],
@@ -103,7 +97,7 @@ def _connaissances(request) -> dict:
     if search.value:
         qs = qs.filter(content__icontains=search.value)
     if theme.value:
-        qs = qs.filter(themes__name=theme.value)
+        qs = qs.filter(themes__name__iexact=theme.value)
     if validity.value == "valides":
         qs = qs.filter(is_valid=True)
     elif validity.value == "invalides":
@@ -138,7 +132,7 @@ def _themes(request) -> dict:
     )
     if search.value:
         qs = qs.filter(name__icontains=search.value)
-    qs = qs.order_by("-n_souvenirs", "name")
+    qs = qs.order_by("-n_souvenirs", "name", "pk")
 
     return {"filterset": fs, "page": tables.paginate(request, qs, per_page=fs.per_page)}
 
@@ -167,7 +161,7 @@ def _entities(request) -> dict:
         qs = qs.filter(name__icontains=search.value)
     if kind.value:
         qs = qs.filter(entity_type=kind.value)
-    qs = qs.order_by("-n_souvenirs", "name")
+    qs = qs.order_by("-n_souvenirs", "name", "pk")
 
     return {"filterset": fs, "page": tables.paginate(request, qs, per_page=fs.per_page)}
 

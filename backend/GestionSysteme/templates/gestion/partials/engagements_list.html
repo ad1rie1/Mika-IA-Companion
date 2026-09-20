@@ -1,0 +1,20 @@
+{% load gestion %}
+<section class="card mb-4">{% include "gestion/partials/filters.html" %}<div class="card-foot">{{ page.total }} engagement{{ page.total|pluralize }} · Les promesses à tenir sont présentées en premier, par échéance.</div></section>
+<div class="reading-list">
+{% for c in page.rows %}
+  <article class="reading-item">
+    <div class="reading-meta">
+      <span class="badge {% if c.status == 'pending' %}badge-warn{% elif c.status == 'honored' %}badge-ok{% endif %}">{{ c.status|commitment_label }}</span>
+      {% if c.person_id %}<a href="{% url 'gestionsysteme:person-detail' c.person_id %}">{{ c.person.name }}</a>{% endif %}
+      <span class="push">{% if c.due_at %}Échéance {{ c.due_at|dt }}{% else %}Sans échéance{% endif %}</span>
+    </div>
+    {% include "gestion/partials/long_text.html" with value=c.description limit=450 %}
+    <div class="reading-footer">
+      <span class="muted text-xs" title="{{ c.created_at|dt_full }}">Pris le {{ c.created_at|dt }}</span>
+      {% if c.resolved_at %}<span class="muted text-xs">Résolu le {{ c.resolved_at|dt }}</span>{% endif %}
+      {% if c.source_souvenir_id %}<a class="push" href="{% url 'gestionsysteme:record-detail' 'souvenir' c.source_souvenir_id %}?retour={{ request.get_full_path|urlencode }}">Souvenir à l'origine →</a>{% endif %}
+    </div>
+  </article>
+{% empty %}<div class="card"><div class="empty">{% if filterset.active %}Aucun engagement ne correspond à ces filtres.{% else %}Aucun engagement enregistré ici pour le moment.{% endif %}</div></div>{% endfor %}
+</div>
+<div class="mt-4">{% include "gestion/partials/pager.html" %}</div>

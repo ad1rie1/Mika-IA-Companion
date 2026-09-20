@@ -292,6 +292,7 @@ def _identity_verdict(request, identity, handles, person_ids) -> dict:
         "ledger_total": claims.filter(status="accepted").aggregate(
             total=Sum("applied_weight"),
         )["total"] or 0.0,
+        "pending_claim_count": claims.filter(status="pending").count(),
         "pending_claims": list(
             claims.filter(status="pending").order_by("-created_at")[:5],
         ),
@@ -332,7 +333,8 @@ def _identity_handles(request, identity, handles, person_ids) -> dict:
             "messages": volumes.get(h.person_id, 0),
             "is_primary": primary is not None and h.pk == primary.pk,
         })
-    return {"handle_rows": rows}
+    rows.sort(key=lambda row: not row["is_primary"])
+    return {"handles_page": tables.paginate(request, rows, per_page=25)}
 
 
 # ── Onglet : échanges ───────────────────────────────────────────────────
@@ -749,13 +751,14 @@ def _person_synthese(request, entity, identities, person_ids) -> dict:
         verdicts.append({
             "obj": identity,
             "handle": handle,
-            "handles": handles,
+            "handles": ([handle] + [h for h in handles if h != handle])[:3] if handle else [],
+            "handle_count": len(handles),
             "decision": decision,
             "stored": float(identity.certainty or 0.0),
         })
 
     return {
-        "verdicts": verdicts,
+        "verdicts_page": tables.paginate(request, verdicts, per_page=25, page_param="p_identites"),
         # La divulgation est ce qui décide si la fiche ci-dessus atteint le
         # prompt. Une personne dont aucune identité ne passe le seuil a beau
         # avoir un profil complet, il n'est jamais injecté — et rien ailleurs
@@ -763,10 +766,11 @@ def _person_synthese(request, entity, identities, person_ids) -> dict:
         "may_disclose": any(v["decision"].may_disclose for v in verdicts),
         "threshold": _politique().private_context_threshold,
         "divulgation": _divulgation_graduee(entity, verdicts, person_ids),
-        "affects": _live_affects(person_ids),
-        "projects": list(
-            Project.objects.filter(owner=entity).order_by("-updated_at")[:10],
-        ),
+        "affects_page": tables.paginate(request, _live_affects(person_ids),
+            per_page=3, page_param="p_humeurs"),
+        "projects_page": tables.paginate(request,
+            Project.objects.filter(owner=entity).order_by("-updated_at", "-pk"),
+            per_page=10, page_param="p_projets"),
     }
 
 
@@ -873,11 +877,10 @@ def _person_souvenirs(request, entity, identities, person_ids) -> dict:
     ))
     order = fs.add(tables.select_filter(
         request, "tri", "Tri",
-        [("recent", "les plus récents"), ("important", "les plus importants")],
-        default="recent", all_label="les plus récents",
+        [("important", "les plus importants")], all_label="les plus récents",
     ))
 
-    qs = Souvenir.objects.filter(entities=entity).prefetch_related("themes")
+    qs = Souvenir.objects.filter(entities=entity).prefetch_related("themes", "entities")
     if search.value:
         qs = qs.filter(content__icontains=search.value)
     qs = qs.order_by(*_SOUVENIR_SORTS.get(order.value, _SOUVENIR_SORTS["recent"]))
@@ -900,7 +903,7 @@ def _person_connaissances(request, entity, identities, person_ids) -> dict:
         all_label="Toutes",
     ))
 
-    qs = Connaissance.objects.filter(entities=entity).prefetch_related("themes")
+    qs = Connaissance.objects.filter(entities=entity).prefetch_related("themes", "entities")
     if search.value:
         qs = qs.filter(content__icontains=search.value)
     if validity.value == "valides":
@@ -956,20 +959,20 @@ def _person_affect(request, entity, identities, person_ids) -> dict:
     from memory.models import EmotionalSummary, EmotionSnapshot
 
     if not person_ids:
-        return {"no_handle": True, "summaries": [], "snapshots_page": None,
-                "affects": []}
+        return {"no_handle": True, "summaries_page": None, "snapshots_page": None,
+                "affects_page": None}
 
     period = tables.read_choice(request, "periode", ("daily", "weekly"), default="weekly")
 
     return {
         "no_handle": False,
-        "affects": _live_affects(person_ids),
+        "affects_page": tables.paginate(request, _live_affects(person_ids),
+            per_page=12, page_param="p_humeurs"),
         "period": period,
-        "summaries": list(
+        "summaries_page": tables.paginate(request,
             EmotionalSummary.objects.filter(
                 person_id__in=person_ids, period_type=period,
-            ).order_by("-period_start")[:30],
-        ),
+            ).order_by("-period_start", "-pk"), per_page=15, page_param="resumes"),
         # Paginé sous son propre paramètre : les deux listes de cet onglet ne
         # doivent pas se déplacer ensemble.
         "snapshots_page": tables.paginate(
@@ -992,10 +995,10 @@ def _person_engagements(request, entity, identities, person_ids) -> dict:
         all_label="Tous",
     ))
 
-    qs = Commitment.objects.filter(person_id=entity.id).select_related("source_souvenir")
+    qs = Commitment.objects.filter(person_id=entity.id).select_related("person")
     if status.value:
         qs = qs.filter(status=status.value)
-    qs = qs.order_by("status", "-created_at")
+    qs = _order_commitments(qs)
 
     return {"filterset": fs, "page": tables.paginate(request, qs, per_page=fs.per_page)}
 
@@ -1015,9 +1018,18 @@ def _commitments(request) -> dict:
     qs = Commitment.objects.select_related("person")
     if status.value:
         qs = qs.filter(status=status.value)
-    qs = qs.order_by("status", "-created_at")
+    qs = _order_commitments(qs)
 
     return {"filterset": fs, "page": tables.paginate(request, qs, per_page=fs.per_page)}
+
+
+def _order_commitments(qs):
+    from django.db.models import Case, DateTimeField, F, Value, When
+    # Les promesses à tenir d'abord, puis leur échéance ; l'historique reste récent.
+    return qs.alias(
+        _pending_order=Case(When(status="pending", then=Value(0)), default=Value(1)),
+        _deadline=Case(When(status="pending", then=F("due_at")), output_field=DateTimeField()),
+    ).order_by("_pending_order", F("_deadline").asc(nulls_last=True), "-created_at", "-pk")
 
 
 # ── Politique ───────────────────────────────────────────────────────────

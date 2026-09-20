@@ -20,7 +20,7 @@
     </div>
     <div class="reading-footer"><span class="muted text-xs">Trousse</span><span class="chips">{% for m in l.trousse %}<span class="chip">{{ m }}</span>{% empty %}<span class="muted text-xs">Aucun module</span>{% endfor %}</span><span class="push">{% include "gestion/partials/detail_link.html" with kind="decision" pk=l.pk %}</span></div>
   </article>
-{% empty %}<div class="card"><div class="empty">Aucune décision ne correspond à ces filtres.</div></div>{% endfor %}
+{% empty %}<div class="card"><div class="empty">{% if total_logs %}Aucune décision ne correspond à ces filtres.{% else %}Aucun cycle de décision enregistré pour le moment.{% endif %}</div></div>{% endfor %}
 </div>
 <div class="mt-4">{% include "gestion/partials/pager.html" %}</div>
 {% endblock %}

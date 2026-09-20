@@ -91,9 +91,9 @@ def _attention() -> list[dict]:
     add(_safe(_claims, 0), "revendication(s) d'identité non tranchée(s)",
         reverse("gestionsysteme:social-tab", args=["demandes"]), tone="warn")
     add(_safe(_observations, 0), "observation(s) en attente de traitement",
-        reverse("gestionsysteme:conscience-tab", args=["observations"]), tone="info")
+        reverse("gestionsysteme:conscience-tab", args=["observations"]) + "?statut=pending", tone="info")
     add(_safe(_modules_down, 0), "module(s) activé(s) mais arrêté(s)",
-        reverse("gestionsysteme:modules"), tone="danger")
+        reverse("gestionsysteme:modules") + "?etat=stopped", tone="danger")
     add(_safe(_degradations, 0), "site(s) de dégradation silencieuse",
         reverse("gestionsysteme:system-tab", args=["sante"]), tone="info")
     return items
@@ -253,7 +253,7 @@ def _volumes() -> list[dict]:
                 "label": "Connaissances",
                 "value": Connaissance.objects.filter(is_valid=True).count(),
                 "sub": f"{Connaissance.objects.filter(is_valid=False).count()} invalidée(s)",
-                "href": reverse("gestionsysteme:memory-tab", args=["connaissances"]),
+                "href": reverse("gestionsysteme:memory-tab", args=["connaissances"]) + "?validite=valides",
             },
             {
                 "label": "Personnes",

@@ -10,13 +10,22 @@ from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 
 from GestionSysteme import panels as P, tables
-from GestionSysteme.formatting import dt_full
+from GestionSysteme.formatting import clip, dt, dt_full, display_text, dream_label
 from GestionSysteme.nav import item_for
 from GestionSysteme.retour import retour_sur
 from GestionSysteme.shell import page_context
 
 # type : modèle, destination, onglet, titre, textes, métadonnées, données structurées.
 RECORDS = {
+    "journal": ("memory.DailyJournal", "memory", "journaux", "Journal",
+        (("narrative", "Récit de la journée"),),
+        (("date", "Journée couverte"), ("dominant_emotion", "Ressenti"),
+         ("word_count", "Nombre de mots"), ("created_at", "Écrit le")),
+        (("persons_interacted", "Personnes rencontrées"), ("unresolved_at_sleep", "Pensées encore ouvertes au coucher"))),
+    "reve": ("memory.Dream", "memory", "journaux", "Rêve",
+        (("content", "Récit du rêve"),),
+        (("night_of", "Nuit du"), ("dream_type", "Nature"), ("vividness", "Vivacité"),
+         ("emotion", "Ressenti"), ("recalled_at", "Rappelé le"), ("created_at", "Créé le")), ()),
     "souvenir": ("memory.Souvenir", "memory", "souvenirs", "Souvenir",
         (("content", "Épisode vécu"),),
         (("emotion", "Ressenti"), ("importance", "Importance"), ("sensibilite", "Sensibilité"),
@@ -60,6 +69,10 @@ RECORDS = {
         (("status", "État"), ("source", "Source"), ("priority", "Priorité"), ("scheduled_at", "Prévue le"),
          ("executed_at", "Exécutée le"), ("tentatives", "Tentatives"), ("reessayer_le", "Nouvel essai"),
          ("created_at", "Créée le")), (("modules", "Modules"), ("context_data", "Contexte"))),
+    "prompt-projet": ("projects.ProjectPromptHistory", "projects", "journal", "Trace IA du projet",
+        (("user_prompt", "Demande"), ("raw_response", "Réponse brute"), ("system_prompt", "Contexte transmis")),
+        (("created_at", "Date"), ("outcome", "Issue"), ("duration_ms", "Durée (ms)")),
+        (("parsed_output", "Résultat interprété"),)),
     "execution": ("projects.ProjectLog", "projects", "journal", "Exécution de projet",
         (("summary", "Compte rendu"),), (("action", "Action"), ("created_at", "Exécutée le")),
         (("tools_used", "Outils utilisés"),)),
@@ -68,14 +81,21 @@ RECORDS = {
 
 def _value(obj, key):
     value = getattr(obj, key)
-    if isinstance(value, (date, datetime)):
+    if isinstance(value, datetime):
         return dt_full(value)
+    if isinstance(value, date):
+        return dt(value)
     if value is None or value == "":
         return "Non renseigné"
     if isinstance(value, bool):
         return "Oui" if value else "Non"
     if isinstance(value, float):
         return f"{value:.3f}".rstrip("0").rstrip(".")
+    if key == "dream_type":
+        return dream_label(value)
+    if key in {"emotion", "dominant_emotion", "emotional_reaction", "global_mood"}:
+        from GestionSysteme.formatting import emotion_fr
+        return emotion_fr(value)
     return str(value)
 
 
@@ -92,12 +112,12 @@ def detail(request, kind, pk):
     item = item_for(family)
     back = reverse(f"gestionsysteme:{item.url_name}-tab", args=[tab])
     back = retour_sur(request, back, source="GET", prefix="/gestion/")
-    main = [P.Prose(str(getattr(obj, key) or "Aucun contenu enregistré."), title=title)
+    main = [P.Prose(display_text(getattr(obj, key) or "Aucun contenu enregistré.", limit=100_000), title=title)
             for key, title in texts]
     side = [P.Fields([P.Field(title, _value(obj, key)) for key, title in metadata], title="Repères")]
     for key, title in structured:
         value = getattr(obj, key)
-        main.append(P.Disclosure(title, [P.Code(json.dumps(value, ensure_ascii=False, indent=2, default=str))]))
+        main.append(P.Disclosure(title, [P.Code(display_text(json.dumps(value, ensure_ascii=False, indent=2, default=str), limit=200_000))]))
     if kind == "chantier":
         from conscience.conduite import TravailEnCours, envie_courante
         from django.utils import timezone
@@ -107,6 +127,7 @@ def detail(request, kind, pk):
     relations = []
     for field, target, title in (("source_souvenir_id", "souvenir", "Souvenir source"),
                                  ("souvenir_id", "souvenir", "Souvenir créé"),
+                                 ("source_rumination_id", "rumination", "Rumination source"),
                                  ("observation_id", "observation", "Observation source")):
         value = getattr(obj, field, None)
         if value:
@@ -116,11 +137,11 @@ def detail(request, kind, pk):
         from urllib.parse import urlencode
         href = reverse("gestionsysteme:memory-tab", args=["messages"]) + "?" + urlencode({"conversation": conversation})
         relations.append(P.Field("Conversation source", f"Conversation #{conversation}", kind="link", href=href))
-    if kind == "execution":
+    if kind in {"execution", "prompt-projet"}:
         relations.append(P.Field("Projet", str(obj.project), kind="link",
                                 href=reverse("gestionsysteme:project-detail", args=[obj.project_id])))
-        if obj.task:
-            main.append(P.Prose(obj.task.description, title="Tâche concernée"))
+        if getattr(obj, "task", None):
+            main.append(P.Prose(display_text(obj.task.description, limit=100_000), title="Tâche concernée"))
     if kind in {"souvenir", "connaissance"}:
         from urllib.parse import urlencode
         for theme in obj.themes.all():
@@ -135,6 +156,22 @@ def detail(request, kind, pk):
         main.append(P.Table([P.Column("Connaissance dérivée"), P.Column("Valide")],
             [P.Row((P.text(c.content), P.boolean(c.is_valid)), href=record_url("connaissance", c.pk)) for c in page.rows],
             page=page, caption="Ce qui en a été retenu", empty="Aucune connaissance issue de ce souvenir."))
+    if kind in {"journal", "reve"}:
+        from memory.models import Souvenir
+        if kind == "journal":
+            # Les références peuvent avoir disparu avec la rétention de mémoire.
+            ids = {int(v) for v in (obj.key_moments or [])
+                   if len(str(v)) <= 19 and str(v).isdecimal() and 0 < int(v) <= 9223372036854775807}
+            sources = Souvenir.objects.filter(pk__in=ids)
+            missing = len(ids) - sources.count()
+            if missing:
+                main.append(P.Note(f"{missing} souvenir(s) source ne sont plus conservés.", tone="info"))
+        else:
+            sources = obj.source_souvenirs.all()
+        page = tables.paginate(request, sources.order_by("-occurred_at", "-pk"), per_page=10)
+        main.append(P.Table([P.Column("Souvenir source"), P.Column("Vécu le")],
+            [P.Row((P.text(clip(s.content, 280)), P.text(dt(s.occurred_at))), href=record_url("souvenir", s.pk)) for s in page.rows],
+            page=page, caption="Souvenirs à l'origine", empty="Aucun souvenir source conservé."))
     if relations:
         side.insert(0, P.Fields(relations, title="Liens et sources"))
     ctx = page_context(request, item=item, active_key=family, active_tab=tab, title=f"{label} #{pk}",

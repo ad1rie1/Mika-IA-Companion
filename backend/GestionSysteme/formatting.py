@@ -11,6 +11,11 @@ from datetime import date, datetime
 
 from django.utils import timezone
 
+
+def person_reference(entity) -> str:
+    """Libellé lisible et non ambigu, accepté par la saisie du commanditaire."""
+    return f"{entity.name} (#{entity.pk})"
+
 # Les 29 émotions, dans l'ordre de ``emotion/types.py``. Recopiée ici comme
 # **liste close de noms sûrs** : la valeur sert à composer un nom de variable
 # CSS (``var(--emo-happy)``), donc une chaîne arbitraire venue de la base ne
@@ -113,6 +118,35 @@ def emotion_tone(name: str | None) -> str:
     if key in NEGATIVE_EMOTIONS:
         return "danger"
     return ""
+
+
+TREND_LABELS = {
+    "warming": ("se réchauffe", "ok"), "cooling": ("se refroidit", "warn"),
+    "volatile": ("instable", "warn"), "stable": ("stable", ""),
+}
+
+
+def trend_label(value):
+    return TREND_LABELS.get(value, (value or "—", ""))[0]
+
+
+def closeness_label(value):
+    return {"stranger": "Inconnue", "acquaintance": "Connaissance", "friend": "Amie",
+            "close": "Proche"}.get(value, value or "—")
+
+
+def tone_label(value):
+    return {"direct": "Direct", "gentle": "Doux", "playful": "Enjoué",
+            "formal": "Formel", "unknown": "Non déterminé"}.get(value, value or "—")
+
+
+def commitment_label(value):
+    return {"pending": "En attente", "honored": "Tenu", "dropped": "Abandonné"}.get(value, value)
+
+
+def dream_label(value):
+    return {"associative": "Associatif", "nightmare": "Cauchemar", "pleasant": "Agréable",
+            "mundane": "Ordinaire"}.get(value, value)
 
 
 def pct(value: float | None, digits: int = 0) -> str:

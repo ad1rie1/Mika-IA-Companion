@@ -10,8 +10,13 @@
   </div>
 {% endif %}
 
+<section class="grid c2 mb-6" aria-label="Inventaire des apps">
+  <div class="stat"><div class="stat-label">Apps forgées</div><div class="stat-value">{{ app_count }}</div></div>
+  <div class="stat"><div class="stat-label">Actives</div><div class="stat-value">{{ active_count }}</div></div>
+</section>
+{% include "gestion/partials/filters.html" %}
 <section class="grid auto-lg mb-6">
-  {% for a in rows %}
+  {% for a in page.rows %}
     <article class="card">
       <div class="card-head">
         <h3><a href="{% url 'gestionsysteme:forge-app' a.name %}">{{ a.title }}</a></h3>
@@ -35,7 +40,7 @@
         {% comment %} Le texte que l'app injecte dans le prompte de Mika : c'est ce
            qu'elle en perçoit réellement, et il n'était visible nulle part. {% endcomment %}
         {% if a.context %}
-          <p class="text-sm mb-3">{{ a.context }}</p>
+          {% include "gestion/partials/long_text.html" with value=a.context %}
         {% endif %}
 
         <dl class="kv">
@@ -65,15 +70,17 @@
   {% empty %}
     <div class="card"><div class="card-body">
       <div class="empty">
-        <div class="empty-title">Aucune app forgée</div>
+        {% if app_count %}<div class="empty-title">Aucune app pour ces filtres</div>Essaie un autre nom ou un autre état.
+        {% else %}<div class="empty-title">Aucune app forgée</div>
         Mika en crée elle-même pendant une conversation, avec ses outils
         <span class="mono">forge_write_module</span> et
         <span class="mono">forge_test_module</span>. Elles apparaissent ici dès
-        qu'elles existent sur disque, même désactivées ou cassées.
+        qu'elles existent sur disque, même désactivées ou cassées.{% endif %}
       </div>
     </div></div>
   {% endfor %}
 </section>
+<div class="mb-6">{% include "gestion/partials/pager.html" %}</div>
 
 <section class="card">
   <div class="card-body">

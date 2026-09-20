@@ -15,6 +15,12 @@ register = template.Library()
 
 
 @register.filter
+def display_text(value):
+    """Plafond partagé des textes dépliables, annoncé sans altérer la donnée."""
+    return fmt.display_text(str(value) if value is not None else "—", 100_000)
+
+
+@register.filter
 def safe_href(value):
     from GestionSysteme.panel_payload import safe_href as checked
     return checked(value)
@@ -78,6 +84,11 @@ register.filter("ago", fmt.ago)
 register.filter("duration", fmt.duration)
 register.filter("yes_no", fmt.yes_no)
 register.filter("humanize_key", fmt.humanize_key)
+register.filter("trend_label", fmt.trend_label)
+register.filter("closeness_label", fmt.closeness_label)
+register.filter("tone_label", fmt.tone_label)
+register.filter("commitment_label", fmt.commitment_label)
+register.filter("dream_label", fmt.dream_label)
 
 
 @register.filter

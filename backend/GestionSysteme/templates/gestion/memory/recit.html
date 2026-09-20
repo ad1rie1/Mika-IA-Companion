@@ -3,9 +3,7 @@
 
 {% block content %}
 <div class="alert alert-info mb-4">
-  Régénéré quand le dernier date de plus de 24 h <em>et</em> qu'au moins 5
-  nouveaux souvenirs se sont accumulés. L'historique complet est conservé :
-  c'est ce qui rend la dérive du concept de soi lisible sur plusieurs semaines.
+  Le récit est réécrit à partir des souvenirs récents. Ses versions précédentes permettent de suivre l'évolution de la façon dont Mika se décrit.
 </div>
 
 {% if current %}
@@ -15,8 +13,9 @@
       <span class="card-sub">injectée dans le prompt système</span>
     </div>
     <div class="card-body">
-      <div class="narrative mb-4">{{ current.content }}</div>
+      <div class="narrative mb-4">{% include "gestion/partials/long_text.html" with value=current.content limit=900 %}</div>
       <dl class="kv">
+        <dt>Souvenirs utilisés</dt><dd>{{ current.source_souvenir_count }}</dd>
         <dt>Écrit le</dt><dd>{{ current.created_at|dt_full }}</dd>
         {% if current.dominant_mood %}
           <dt>Humeur dominante</dt>
@@ -48,7 +47,7 @@
                   <span class="emo" style="{{ n.dominant_mood|emo_style }}">{{ n.dominant_mood|emo_fr }}</span>
                 {% endif %}
               </div>
-              <div class="quote">{{ n.content }}</div>
+              <div class="quote">{% include "gestion/partials/long_text.html" with value=n.content limit=450 %}</div>
             </article>
         {% endfor %}
       </div>
@@ -56,7 +55,7 @@
     <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
   {% else %}
     <div class="card-body"><div class="empty">
-      Une seule version pour l'instant — l'évolution deviendra lisible avec le temps.
+      {% if current %}Une seule version pour l'instant — l'évolution deviendra lisible avec le temps.{% else %}Aucun récit de soi pour le moment.{% endif %}
     </div></div>
   {% endif %}
 </section>

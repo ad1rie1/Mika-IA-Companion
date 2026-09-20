@@ -1,69 +1,32 @@
 {% extends "gestion/base.html" %}
 {% load gestion %}
-
 {% block content %}
-<div class="alert alert-info mb-4">
-  Un journal porte la date du jour qu'il <strong>couvre</strong>, pas celle où
-  il est écrit : le sommeil léger le rédige tard le soir même. Le plus récent
-  peut donc porter la date d'aujourd'hui — ce qu'un panneau « journal du jour »
-  doit montrer, et qu'un bloc de prompt « ton fil d'hier » ne doit surtout pas.
-</div>
-
-<section class="card mb-6">
-  <div class="card-head"><h3>Journaux</h3></div>
-  {% if journals_page.rows %}
-    <div class="card-body">
-      <div class="col" style="gap: var(--sp-4);">
-        {% for j in journals_page.rows %}
-          <article>
-            <div class="row-wrap mb-2">
-              <strong>{{ j.date|dt }}</strong>
-              {% if j.dominant_emotion %}
-                <span class="emo" style="{{ j.dominant_emotion|emo_style }}">{{ j.dominant_emotion|emo_fr }}</span>
-              {% endif %}
-              <span class="chip">{{ j.word_count }} mots</span>
-              {% for p in j.persons_interacted %}<span class="chip">{{ p }}</span>{% endfor %}
-            </div>
-            <div class="quote">{{ j.narrative }}</div>
-          </article>
-        {% endfor %}
-      </div>
-    </div>
-    <div class="card-foot">{% include "gestion/partials/pager.html" with page=journals_page %}</div>
-  {% else %}
-    <div class="card-body"><div class="empty">Aucun journal.</div></div>
-  {% endif %}
-</section>
-
-<section class="card">
-  <div class="card-head">
-    <h3>Rêves</h3>
-    <span class="card-sub">un rêve rappelé le matin n'est injecté qu'une fois</span>
+<div class="alert alert-info mb-4">Le journal raconte la journée indiquée. Le rêve porte la date de la nuit où il a été produit ; sa fiche précise ses sources et son éventuel rappel.</div>
+<nav class="page-outline" aria-label="Dans cette page"><a href="#journaux">Journaux · {{ journals_page.total }}</a><a href="#reves">Rêves · {{ dreams_page.total }}</a></nav>
+<section id="journaux" class="mb-6">
+  <div class="section-heading mb-3"><h3>Journaux</h3></div>
+  <div class="reading-list">
+  {% for j in journals_page.rows %}
+    <article class="reading-item">
+      <div class="reading-meta"><strong>{{ j.date|dt }}</strong>{% if j.dominant_emotion %}<span class="emo" style="{{ j.dominant_emotion|emo_style }}">{{ j.dominant_emotion|emo_fr }}</span>{% endif %}<span class="push">{{ j.word_count }} mots</span></div>
+      {% include "gestion/partials/long_text.html" with value=j.narrative limit=450 %}
+      <div class="reading-footer"><span class="chips">{% for p in j.persons_interacted %}<span class="chip">{{ p }}</span>{% endfor %}</span><span class="muted text-xs">{{ j.key_moments|length }} souvenir(s) · {{ j.unresolved_at_sleep|length }} pensée(s) ouverte(s)</span><span class="push">{% include "gestion/partials/detail_link.html" with kind="journal" pk=j.pk %}</span></div>
+    </article>
+  {% empty %}<div class="card"><div class="empty">Aucun journal conservé.</div></div>{% endfor %}
   </div>
-  {% if dreams_page.rows %}
-    <div class="card-body">
-      <div class="col" style="gap: var(--sp-4);">
-        {% for d in dreams_page.rows %}
-          <article>
-            <div class="row-wrap mb-2">
-              <strong>Nuit du {{ d.night_of|dt }}</strong>
-              <span class="badge {% if d.dream_type == 'nightmare' %}badge-danger{% elif d.dream_type == 'pleasant' %}badge-ok{% endif %}">{{ d.dream_type }}</span>
-              {% if d.emotion %}<span class="emo" style="{{ d.emotion|emo_style }}">{{ d.emotion|emo_fr }}</span>{% endif %}
-              <span class="chip">vivacité {{ d.vividness|pct }}</span>
-              {% if d.recalled_at %}
-                <span class="chip" title="{{ d.recalled_at|dt_full }}">rappelé</span>
-              {% else %}
-                <span class="chip">jamais rappelé</span>
-              {% endif %}
-            </div>
-            <div class="quote">{{ d.content }}</div>
-          </article>
-        {% endfor %}
-      </div>
-    </div>
-    <div class="card-foot">{% include "gestion/partials/pager.html" with page=dreams_page %}</div>
-  {% else %}
-    <div class="card-body"><div class="empty">Aucun rêve.</div></div>
-  {% endif %}
+  <div class="mt-4">{% include "gestion/partials/pager.html" with page=journals_page %}</div>
+</section>
+<section id="reves">
+  <div class="section-heading mb-3"><h3>Rêves</h3></div>
+  <div class="reading-list">
+  {% for d in dreams_page.rows %}
+    <article class="reading-item">
+      <div class="reading-meta"><strong>Nuit du {{ d.night_of|dt }}</strong><span class="badge {% if d.dream_type == 'nightmare' %}badge-danger{% elif d.dream_type == 'pleasant' %}badge-ok{% endif %}">{{ d.dream_type|dream_label }}</span>{% if d.emotion %}<span class="emo" style="{{ d.emotion|emo_style }}">{{ d.emotion|emo_fr }}</span>{% endif %}<span class="push">Vivacité {{ d.vividness|pct }}</span></div>
+      {% include "gestion/partials/long_text.html" with value=d.content limit=450 %}
+      <div class="reading-footer"><span class="muted text-xs">{% if d.recalled_at %}Rappelé le {{ d.recalled_at|dt }}{% else %}Pas encore rappelé{% endif %}</span><span class="push">{% include "gestion/partials/detail_link.html" with kind="reve" pk=d.pk %}</span></div>
+    </article>
+  {% empty %}<div class="card"><div class="empty">Aucun rêve conservé.</div></div>{% endfor %}
+  </div>
+  <div class="mt-4">{% include "gestion/partials/pager.html" with page=dreams_page %}</div>
 </section>
 {% endblock %}

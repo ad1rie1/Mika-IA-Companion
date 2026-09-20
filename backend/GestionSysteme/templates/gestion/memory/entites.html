@@ -40,7 +40,7 @@
     </div>
     <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
   {% else %}
-    <div class="card-body"><div class="empty">Aucune entité.</div></div>
+    <div class="card-body"><div class="empty">{% if filterset.active %}Aucune entité ne correspond à ces filtres.{% else %}Aucune entité mémorisée pour le moment.{% endif %}</div></div>
   {% endif %}
 </section>
 {% endblock %}

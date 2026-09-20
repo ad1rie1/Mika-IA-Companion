@@ -87,6 +87,16 @@ def _emotions(request) -> dict:
             "history_size": len(getattr(mood, "history", ()) or ()),
         })
     people.sort(key=lambda r: r["intensity"], reverse=True)
+    fs = tables.FilterSet(per_page=tables.read_per_page(request))
+    search = fs.add(tables.search_filter(request, "q", "Identifiant", placeholder="identifiant de transport"))
+    if search.value:
+        people = [p for p in people if search.value.casefold() in p["person_id"].casefold()]
+    people_page = tables.paginate(request, people, per_page=fs.per_page)
+    bound = _bound_entities([p["person_id"] for p in people_page.rows])
+    for person in people_page.rows:
+        entity = bound.get(person["person_id"])
+        person["entity_id"] = entity[0] if entity else None
+        person["entity_name"] = entity[1] if entity else ""
 
     try:
         analytics = emotion_engine.get_analytics()
@@ -108,7 +118,8 @@ def _emotions(request) -> dict:
             "pad": [round(x, 3) for x in position],
             "velocity": pad.norm(emotion_engine.global_mood.dynamic.velocity),
         },
-        "people_page": tables.paginate(request, people, default_per_page=25),
+        "people_page": people_page,
+        "filterset": fs,
         "analytics": _analytics_view(analytics),
         # Le tempérament s'édite maintenant en Configuration ; la carte qui le
         # recopiait ici est partie avec. On garde le lien : c'est ce qui règle
@@ -178,6 +189,8 @@ def _drives(request) -> dict:
             "tone": fmt.tone_for_ratio(state.tension, invert=True),
             "dominant": kind == dominant_kind,
             "growth_rate": params.growth_rate,
+            "growth_horizon": params.growth_horizon,
+            "growth_tau": params.growth_tau,
             "decay_on_satisfy": params.decay_on_satisfy,
             "weight": params.weight,
             "satisfy_threshold": params.satisfy_threshold,
@@ -255,7 +268,10 @@ def _travaux(request) -> dict:
         request, "statut", "État", tuple(_TRAVAIL_FR.items()),
     ))
 
-    qs = Travail.objects.order_by("-envie", "-created_at")
+    search = fs.add(tables.search_filter(request, "q", "Recherche", placeholder="titre du chantier"))
+    qs = Travail.objects.order_by("-updated_at", "-pk")
+    if search.value:
+        qs = qs.filter(titre__icontains=search.value)
     if statut.value:
         qs = qs.filter(statut=statut.value)
 
@@ -371,14 +387,6 @@ GLOBAL_PERSON_ID = "__global__"
 #: d'un pixel ; en deçà on ne voit plus de tendance.
 TIMELINE_POINTS = 72
 
-#: Les quatre valeurs produites par ``consolidator._compute_emotion_trend``.
-_TREND_FR = {
-    "warming": ("se réchauffe", "ok"),
-    "cooling": ("se refroidit", "warn"),
-    "volatile": ("instable", "warn"),
-    "stable": ("stable", ""),
-}
-
 _PERIOD_FR = {"daily": "jour", "weekly": "semaine"}
 
 
@@ -397,12 +405,6 @@ def _handle_kind(person_id: str) -> str:
     if is_ephemeral_person(person_id):
         return "éphémère"
     return ""
-
-
-def _handle_label(person_id: str) -> str:
-    """Libellé d'un handle dans une liste de choix."""
-    kind = _handle_kind(person_id)
-    return f"{person_id} · {kind}" if kind else person_id
 
 
 def _bound_entities(person_ids) -> dict[str, tuple[int, str]]:
@@ -437,28 +439,10 @@ def _bound_entities(person_ids) -> dict[str, tuple[int, str]]:
 def _history(request) -> dict:
     from memory.models import EmotionalSummary, EmotionSnapshot
 
-    # Liste **close** de handles, construite depuis les relevés existants :
-    # une valeur d'URL qui atteint l'ORM n'est jamais du texte libre, et on ne
-    # peut pas filtrer sur un handle qu'on n'aurait pas su écrire de mémoire.
-    #
-    # ``order_by()`` vide avant ``distinct()`` : le modèle déclare un
-    # ``Meta.ordering`` sur ``created_at``, que Django ajoute alors au SELECT
-    # — la colonne de tri entre dans la clé de dédoublonnage et chaque relevé
-    # ressort comme un handle distinct (sept fois le même dans la liste).
-    handles = sorted(
-        EmotionSnapshot.objects
-        .exclude(person_id=GLOBAL_PERSON_ID)
-        .order_by()
-        .values_list("person_id", flat=True)
-        .distinct()
-    )
-
     fs = tables.FilterSet(per_page=tables.read_per_page(request))
-    person = fs.add(tables.select_filter(
-        request, "personne", "Personne",
-        [(h, _handle_label(h)) for h in handles],
-        all_label="Toutes",
-    ))
+    person = fs.add(tables.search_filter(request, "personne", "Personne ou identifiant", placeholder="Nom, tg_123, user_7…", suggestions="handles"))
+    fs.preserve(request, page_param="p_instantanes")
+    fs.hidden = [(k, v) for k, v in fs.hidden if k != "p_resumes"]
 
     # ``__global__`` a sa propre carte : le laisser dans le tableau des
     # personnes, c'est présenter son humeur à elle comme un interlocuteur.
@@ -495,6 +479,9 @@ def _history(request) -> dict:
     return {
         "filterset": fs,
         "global_timeline": _global_timeline(),
+        "global_page": tables.paginate(request,
+            EmotionSnapshot.objects.filter(person_id=GLOBAL_PERSON_ID).order_by("-created_at", "-pk"),
+            per_page=25, page_param="p_global"),
         "snapshot_rows": [_snapshot_row(s, bound) for s in snapshots_page.rows],
         "summary_rows": [_summary_row(s, bound) for s in summaries_page.rows],
         # Deux paginations indépendantes sur le même écran : chacune a son
@@ -503,7 +490,6 @@ def _history(request) -> dict:
         "snapshots_page": snapshots_page,
         "summaries_page": summaries_page,
         "retention_days": _snapshot_retention_days(),
-        "has_person_filter": bool(handles),
         "period": period,
     }
 
@@ -586,7 +572,7 @@ def _snapshot_row(snap, bound: dict) -> dict:
 
 def _summary_row(summary, bound: dict) -> dict:
     entity = bound.get(summary.person_id)
-    trend_fr, trend_tone = _TREND_FR.get(
+    trend_fr, trend_tone = fmt.TREND_LABELS.get(
         summary.trend, (summary.trend or "—", ""),
     )
     distribution = summary.emotion_distribution or {}

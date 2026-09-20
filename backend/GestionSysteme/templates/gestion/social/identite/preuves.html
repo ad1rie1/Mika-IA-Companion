@@ -1,60 +1,21 @@
 {% extends "gestion/social/identite/_base.html" %}
 {% load gestion %}
-
 {% block panneau %}
-<div class="alert alert-info mb-4">
-  Chaque raison de croire — et de cesser de croire — est une ligne, avec ce
-  qu'elle valait. La certitude affichée sur le verdict est le total courant ;
-  ceci est le registre. Une revendication en attente ne compte pour rien tant
-  que personne n'a tranché : c'est délibéré, elle attend un humain.
-</div>
-
-<section class="card">
-  {% include "gestion/partials/filters.html" %}
-
-  {% if page.rows %}
-    <div class="card-body flush">
-      <div class="table-scroll">
-        <table class="table">
-          <thead>
-            <tr>
-              <th class="fit">Quand</th>
-              <th>Se dit</th>
-              <th class="fit">Type</th>
-              <th>Preuve</th>
-              <th class="num" title="Poids réellement appliqué à la certitude">Poids</th>
-              <th class="fit">Canal</th>
-              <th class="fit">État</th>
-              <th>Résolution</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for c in page.rows %}
-              <tr>
-                <td class="fit muted" title="{{ c.created_at|dt_full }}">{{ c.created_at|ago }}</td>
-                <td>{{ c.claimed_name|default:"—" }}</td>
-                <td class="fit">
-                  <span class="badge">{{ c.get_kind_display }}</span>
-                  {% with w=evidence_weights|get:c.kind %}{% if w %}<div class="text-xs muted tabular">barème {{ w|num }}</div>{% endif %}{% endwith %}
-                  {% with w=counter_weights|get:c.kind %}{% if w %}<div class="text-xs muted tabular">barème {{ w|num }}</div>{% endif %}{% endwith %}
-                </td>
-                <td>{% include "gestion/partials/long_text.html" with value=c.evidence|default:"—" %}</td>
-                <td class="num">{{ c.applied_weight|num }}</td>
-                <td class="fit">{{ c.channel|default:"—" }} <span class="muted text-xs">{{ c.trust }}</span></td>
-                <td class="fit">
-                  <span class="badge {% if c.status == 'pending' %}badge-warn{% elif c.status == 'accepted' %}badge-ok{% else %}badge-danger{% endif %}">{{ c.get_status_display }}</span>
-                </td>
-                <td>
-                  {% if c.status == "pending" %}
-                    {% comment %} Traitable ici : on lit le motif du doute sur cet
-                       écran, aller cliquer sur un autre était une navigation de
-                       trop. `retour` ramène l'onglet et ses filtres — la vue le
-                       revalide côté serveur, il ne sort jamais du site. {% endcomment %}
-                    <form method="post" action="{% url 'gestionsysteme:claim-action' c.pk %}" class="col">
+<div class="alert alert-info mb-4">Le registre conserve les preuves, leur poids et les décisions prises. Une revendication en attente ne modifie pas la certitude tant qu'elle n'a pas été acceptée.</div>
+<section class="card mb-4">{% include "gestion/partials/filters.html" %}<div class="card-foot">{{ page.total }} preuve{{ page.total|pluralize }}</div></section>
+<div class="reading-list">
+{% for c in page.rows %}
+  <article class="reading-item">
+    <div class="reading-meta"><strong>{{ c.claimed_name|default:"Nom non revendiqué" }}</strong><span class="badge">{{ c.get_kind_display }}</span><span class="badge {% if c.status == 'pending' %}badge-warn{% elif c.status == 'accepted' %}badge-ok{% else %}badge-danger{% endif %}">{{ c.get_status_display }}</span><time class="push" title="{{ c.created_at|dt_full }}">{{ c.created_at|dt }}</time></div>
+    {% include "gestion/partials/long_text.html" with value=c.evidence|default:"Aucun détail enregistré." limit=450 %}
+    <div class="reading-footer"><span class="text-sm">Poids appliqué {{ c.applied_weight|num }}</span><span class="muted text-xs">{{ c.channel|default:"Canal inconnu" }} · {{ c.trust }}</span>{% with w=evidence_weights|get:c.kind %}{% if w %}<span class="muted text-xs">Barème {{ w|num }}</span>{% endif %}{% endwith %}{% with w=counter_weights|get:c.kind %}{% if w %}<span class="muted text-xs">Barème {{ w|num }}</span>{% endif %}{% endwith %}</div>
+    {% if c.status == "pending" %}
+      <details class="task-actions mt-3"><summary class="btn btn-sm">Traiter cette revendication</summary>
+                    <form method="post" action="{% url 'gestionsysteme:claim-action' c.pk %}" class="col mt-3">
                       {% csrf_token %}
                       <input type="hidden" name="retour" value="{{ request.get_full_path }}">
                       <input type="text" name="reason" placeholder="motif" aria-label="Motif de la décision">
-                      <div class="row">
+                      <div class="row-wrap">
                         <select name="evidence_kind" aria-label="Type de preuve à l'acceptation">
                           <option value="">barème du type déclaré</option>
                           {% for k in accept_kinds %}
@@ -65,31 +26,13 @@
                         <button class="btn btn-sm btn-danger" type="submit" name="action" value="rejeter">Rejeter</button>
                       </div>
                     </form>
-                  {% else %}
-                    <span class="muted text-xs">{{ c.resolution_note|default:"—" }}</span>
-                    {% if c.resolved_at %}<div class="muted text-xs" title="{{ c.resolved_at|dt_full }}">{{ c.resolved_at|ago }}</div>{% endif %}
-                  {% endif %}
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-    <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
-  {% else %}
-    <div class="card-body">
-      <div class="empty">
-        {% if filterset.active %}
-          Aucune preuve ne correspond à ce filtre.
-        {% else %}
-          <div class="empty-title">Registre vide</div>
-          Rien n'a jamais été avancé sur cette identité. Sa certitude ne vient
-          donc d'aucune conversation : elle est entièrement celle que le canal
-          accorde de lui-même.
-        {% endif %}
-      </div>
-    </div>
-  {% endif %}
-</section>
+      </details>
+    {% else %}
+      <div class="mt-3 text-sm">{% include "gestion/partials/long_text.html" with value=c.resolution_note|default:"Aucun motif de résolution enregistré." %}</div>
+      {% if c.resolved_at %}<div class="muted text-xs mt-2">Résolue le {{ c.resolved_at|dt_full }}</div>{% endif %}
+    {% endif %}
+  </article>
+{% empty %}<div class="card"><div class="empty">Aucune preuve ne correspond à ces filtres.</div></div>{% endfor %}
+</div>
+<div class="mt-4">{% include "gestion/partials/pager.html" %}</div>
 {% endblock %}

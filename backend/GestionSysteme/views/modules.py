@@ -26,8 +26,7 @@ from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST
 
-from configs.service import config_service
-from GestionSysteme import forms, panels
+from GestionSysteme import forms, panels, tables
 from GestionSysteme.nav import item_for
 from GestionSysteme.shell import page_context
 from GestionSysteme.views import config as config_view
@@ -85,11 +84,30 @@ def modules(request):
         })
     rows.sort(key=lambda r: r["label"].lower())
 
+    total, running = len(rows), sum(bool(r["running"]) for r in rows)
+    fs = tables.FilterSet(show_per_page=False, prefix="modules")
+    search = fs.add(tables.search_filter(request, "module", "Module", placeholder="nom, capacité"))
+    status = fs.add(tables.select_filter(request, "etat", "État", [
+        ("running", "En marche"), ("stopped", "Activé mais arrêté"), ("disabled", "Désactivé")]))
+    fs.preserve(request, page_param="p_modules")
+    if search.value:
+        rows = [r for r in rows if search.value.casefold() in " ".join([r["name"], r["label"], *r["capabilities"]]).casefold()]
+    if status.value:
+        rows = [r for r in rows if ("running" if r["running"] else "stopped" if r["enabled"] else "disabled") == status.value]
+    tool_filters = tables.FilterSet(show_per_page=False, prefix="tools")
+    query = tool_filters.add(tables.search_filter(request, "outil", "Outil", placeholder="nom, module, description"))
+    tool_filters.preserve(request, page_param="p_outils")
+    tools = _tool_rows()
+    tool_count = len(tools)
+    if query.value:
+        tools = [t for t in tools if query.value.casefold() in " ".join([t["name"], t["module"], t["description"]]).casefold()]
     item = item_for("modules")
     ctx = page_context(request, item=item, active_key="modules")
     ctx.update({
-        "rows": rows,
-        "tools": _tool_rows(),
+        "page": tables.paginate(request, rows, per_page=12, page_param="p_modules"),
+        "filterset": fs, "tool_filters": tool_filters,
+        "tools_page": tables.paginate(request, tools, per_page=25, page_param="p_outils"),
+        "module_count": total, "running_count": running, "tool_count": tool_count,
     })
     return render(request, "gestion/modules/liste.html", ctx)
 
@@ -128,7 +146,7 @@ def _tool_rows() -> list[dict]:
                 "name": tool.name,
                 "description": tool.description,
                 "module": module.name,
-                "params": [p.name for p in (tool.parameters or [])],
+                "params": tool.parameters or [],
             })
     rows.sort(key=lambda r: (r["module"], r["name"]))
     return rows
@@ -311,7 +329,7 @@ def _module_config(request, module: str):
     # Même mise en forme que le cœur : recherche, sommaire, blocs repliables,
     # pastille « modifié ». Elle vient du contexte partagé, donc un module qui
     # déclare ses ``ConfigGroup`` en profite sans que cette vue le sache.
-    listes = _module_record_lists(section_key, items)
+    listes = config_view.record_lists(request, section_key, items)
     ctx.update(config_view.contexte_reglages(request, section_key, form, listes))
     ctx.update({
         "form": form,
@@ -320,30 +338,6 @@ def _module_config(request, module: str):
         "record_lists": listes,
     })
     return render(request, "gestion/modules/configuration.html", ctx)
-
-
-def _module_record_lists(section_key: str, items) -> list[dict]:
-    out = []
-    for item in forms.record_list_items(items):
-        try:
-            rows = config_service.list_rows(item.key, decrypt_secrets=False)
-        except Exception as exc:
-            out.append({"item": item, "rows": [], "columns": [], "error": str(exc)})
-            continue
-        out.append({
-            "item": item,
-            "columns": [f.label or f.key for f in item.record.fields],
-            "rows": [
-                {"row": row, "values": [v for _, v in forms.row_summary(item, row)]}
-                for row in rows
-            ],
-            "error": "",
-            "full": item.max_items is not None and len(rows) >= item.max_items,
-            # Les lignes réutilisent les routes de configuration : la section
-            # est celle du module, donc les contrôles d'appartenance passent.
-            "section_key": section_key,
-        })
-    return out
 
 
 # ── Cycle de vie ────────────────────────────────────────────────────────

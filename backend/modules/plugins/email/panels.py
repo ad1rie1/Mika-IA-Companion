@@ -74,7 +74,7 @@ def inbox(request):
         request, "q", "Recherche", placeholder="sujet, expéditeur, corps",
     ))
 
-    qs = Email.objects.select_related("account")
+    qs = Email.objects.select_related("account").defer("body_text", "body_html", "references")
     if compte is not None and compte.value:
         qs = qs.filter(account_id=compte.value)
     if sens.value:
@@ -112,7 +112,7 @@ def inbox(request):
         ],
         rows=[_ligne_message(request, e) for e in page.rows],
         page=page,
-        empty="Aucun message ne correspond à ces filtres.",
+        empty="Aucun message ne correspond à ces filtres." if fs.active else "Aucun message collecté. Vérifie les comptes dans Configuration.",
     ))
     return P.Blocks(items=blocs)
 
@@ -144,8 +144,10 @@ def _fiche_message(request):
     from modules.plugins.email.models import Email
 
     brut = (request.GET.get("message") or "").strip()
-    if not brut.isdigit():
+    if not brut:
         return None
+    if not brut.isascii() or not brut.isdecimal() or len(brut) > 19 or not 0 < int(brut) <= 9223372036854775807:
+        return [P.Note("Identifiant de message invalide.", tone="warn")]
 
     e = Email.objects.select_related("account").filter(pk=int(brut)).first()
     if e is None:
@@ -173,9 +175,7 @@ def _fiche_message(request):
 
     blocs = [P.Fields(title="Message", items=champs)]
 
-    # Seul le texte est affiché, jamais ``body_html`` : un corps d'e-mail est
-    # du contenu hostile par défaut, et le rendu par cellules typées est ce
-    # qui garantit qu'il ne peut pas devenir du balisage.
+    # Le HTML est seulement converti en texte ; aucun balisage du mail n'est rendu.
     corps = (e.body_text or "").strip()
     if corps:
         blocs.append(P.Prose(title="Corps", text=display_text(corps, MAX_CORPS)))
@@ -275,12 +275,12 @@ def contacts(request):
             ), detail=P.Blocks([
                 P.Fields([P.Field("Premier contact", _date(c.first_seen)),
                           P.Field("Dernier contact", _date(c.last_seen))], title=c.display_name or c.email_address),
-                P.Prose(c.notes or "Aucune note.", title="Notes"),
+                P.Prose(display_text(c.notes or "Aucune note.", MAX_CORPS), title="Notes"),
             ]))
             for c in page.rows
         ],
         page=page,
-        empty="Aucun contact ne correspond à ces filtres.",
+        empty="Aucun contact ne correspond à ces filtres." if fs.active else "Aucun contact enregistré. Les contacts apparaissent au fil des échanges.",
     )
 
 

@@ -102,7 +102,7 @@
     </div>
   </section>
 
-  {% if projects %}
+  {% if projects_page.total %}
     <section class="card">
       <div class="card-head">
         <h3>Par projet</h3>
@@ -112,22 +112,24 @@
         <div class="table-scroll">
           <table class="table">
             <thead>
-              <tr><th>Projet</th><th class="num">Jetons (jour)</th><th class="num">Jetons (mois)</th><th class="num">Appels (mois)</th><th class="num">Coût (mois)</th></tr>
+              <tr><th>Projet</th><th class="num">Jetons (jour)</th><th class="num">Jetons (mois)</th><th class="num">Appels (mois)</th><th class="num">Coût (mois)</th><th class="num">Budget mensuel</th></tr>
             </thead>
             <tbody>
-              {% for pid, c in projects.items %}
+              {% for c in projects_page.rows %}
                 <tr>
-                  <td><a href="{% url 'gestionsysteme:project-detail' pid %}">#{{ pid }}</a></td>
+                  <td>{% if c.title %}<a href="{% url 'gestionsysteme:project-detail' c.pid %}">{{ c.title }}</a>{% else %}<span class="muted">Projet supprimé #{{ c.pid }}</span>{% endif %}</td>
                   <td class="num">{{ c.tokens_day }}</td>
                   <td class="num">{{ c.tokens_month }}</td>
                   <td class="num">{{ c.calls_month }}</td>
                   <td class="num">{{ c.cost_usd_month|num:4 }} $</td>
+                  <td class="num">{% if c.limit_monthly %}<span class="{% if c.tokens_month >= c.limit_monthly %}badge badge-danger{% endif %}">{{ c.limit_monthly }} jetons</span>{% else %}illimité{% endif %}</td>
                 </tr>
               {% endfor %}
             </tbody>
           </table>
         </div>
       </div>
+      <div class="card-foot">{% include "gestion/partials/pager.html" with page=projects_page %}</div>
     </section>
   {% endif %}
 {% endif %}

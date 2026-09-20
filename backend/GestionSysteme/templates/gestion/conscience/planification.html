@@ -1,62 +1,45 @@
 {% extends "gestion/base.html" %}
 {% load gestion %}
-
 {% block content %}
-<section class="card">
-  {% include "gestion/partials/filters.html" %}
-
-  {% if page.rows %}
-    <div class="card-body flush">
-      <div class="table-scroll">
-        <table class="table">
-          <thead>
-            <tr>
-              <th class="fit">Prévue</th>
-              <th style="min-width: 28rem;">Consigne</th>
-              <th class="num">Priorité</th>
-              <th class="fit">Source</th>
-              <th class="fit">État</th>
-              <th style="min-width: 16rem;">Ce que ça a donné</th>
-              <th class="fit">Exécutée</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for a in page.rows %}
-              <tr>
-                <td class="fit" title="{{ a.scheduled_at|dt_full }}">
-                  {{ a.scheduled_at|dt }}
-                  <small>{{ a.scheduled_at|ago }}</small>
-                </td>
-                <td>{% include "gestion/partials/long_text.html" with value=a.prompt %}
-{% include "gestion/partials/detail_link.html" with kind="planification" pk=a.pk %}</td>
-                <td class="num">{{ a.priority|num }}</td>
-                <td class="fit"><span class="badge">{{ a.source|default:"—" }}</span></td>
-                <td class="fit">
-                  <span class="badge {% if a.status == 'pending' %}badge-warn{% elif a.status == 'executed' %}badge-ok{% elif a.status == 'failed' %}badge-danger{% endif %}">{{ a.status }}</span>
-                  {% if a.tentatives %}<span class="text-xs muted">{{ a.tentatives }} tentative{{ a.tentatives|pluralize }}</span>{% endif %}
-                </td>
-                <td class="text-xs">
-                  {% if a.raison_echec %}
-                    <span class="muted">{{ a.raison_echec }}</span>
-                  {% elif a.resultat %}
-                    {% include "gestion/partials/long_text.html" with value=a.resultat %}
-                  {% else %}
-                    <span class="muted">—</span>
-                  {% endif %}
-                </td>
-                <td class="fit muted">{% if a.executed_at %}{{ a.executed_at|ago }}{% else %}—{% endif %}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-    <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
-  {% else %}
-    <div class="card-body"><div class="empty">
-      <div class="empty-title">Rien de planifié</div>
-      Les actions différées sont créées par l'outil <span class="mono">schedule_action</span>.
-    </div></div>
-  {% endif %}
+<details class="disclosure mb-4"><summary>Comment planifier une intention ?</summary><div class="disclosure-body">
+  Demande à Mika de prévoir une action : son outil <code>schedule_action</code> l’ajoute à cet agenda.
+  L’échéance indique quand elle devient disponible ; son exécution dépend du prochain cycle et peut être reportée.
+</div></details>
+<section class="grid c3 mb-6" aria-label="Agenda des intentions">
+  <a class="stat" href="?statut=pending"><div class="stat-label">En attente</div><div class="stat-value">{{ scheduled_counts.pending }}</div></a>
+  <div class="stat"><div class="stat-label">Échéance atteinte</div><div class="stat-value">{{ scheduled_counts.due }}</div><div class="stat-sub">Reprise possible au prochain cycle</div></div>
+  <a class="stat" href="?statut=failed"><div class="stat-label">Échouées</div><div class="stat-value">{{ scheduled_counts.failed }}</div></a>
 </section>
+<section class="card mb-4">{% include "gestion/partials/filters.html" %}</section>
+<div class="reading-list">
+{% for a in page.rows %}
+  <article class="reading-item">
+    <div class="reading-meta">
+      {% if a.status == 'pending' %}
+        {% if a.prochaine_tentative > now %}<strong>{{ a.prochaine_tentative|ago }}</strong>{% else %}<strong>Échéance atteinte</strong>{% endif %}
+        <time title="Prochaine tentative">{{ a.prochaine_tentative|dt_full }}</time>
+      {% else %}<time title="Date prévue initialement">{{ a.scheduled_at|dt_full }}</time>{% endif %}
+      <span class="badge {% if a.status == 'pending' %}badge-warn{% elif a.status == 'executed' %}badge-ok{% elif a.status == 'failed' %}badge-danger{% endif %}">{% if a.status == 'pending' %}En attente{% elif a.status == 'executed' %}Exécutée{% elif a.status == 'cancelled' %}Annulée{% else %}Échouée{% endif %}</span>
+      <span>Source : {{ a.source|default:"—" }}</span><span class="push">Priorité {{ a.priority|num }}</span>
+    </div>
+    <div class="narrative mb-3">{% include "gestion/partials/long_text.html" with value=a.prompt %}</div>
+    {% if a.status == 'pending' %}
+      {% if a.prochaine_tentative > a.scheduled_at %}<p class="field-hint">Reportée · échéance initiale : {{ a.scheduled_at|dt_full }}.</p>{% endif %}
+      {% if a.prochaine_tentative <= now %}<p class="field-hint">Attend un cycle disponible.</p>{% endif %}
+    {% endif %}
+    {% if a.raison_echec %}<div class="alert alert-danger mb-3">{% include "gestion/partials/long_text.html" with value=a.raison_echec %}</div>{% endif %}
+    {% if a.resultat %}<details class="panel-disclosure mb-3"><summary>Résultat</summary><div class="narrative">{% include "gestion/partials/long_text.html" with value=a.resultat %}</div></details>{% endif %}
+    <div class="reading-footer">
+      <span class="chips">{% for m in a.modules %}<span class="chip">{{ m }}</span>{% endfor %}</span>
+      <span class="muted text-xs">{{ a.tentatives }} tentative{{ a.tentatives|pluralize }}{% if a.executed_at %} · exécutée le {{ a.executed_at|dt_full }}{% endif %}</span>
+      <span class="push">{% include "gestion/partials/detail_link.html" with kind="planification" pk=a.pk %}</span>
+    </div>
+  </article>
+{% empty %}<div class="card"><div class="empty">
+  {% if pending_selection %}<div class="empty-title">Rien de prévu</div>Aucune intention en attente. Demande à Mika de planifier une action pour remplir l’agenda.
+  {% elif filterset.active %}<div class="empty-title">Aucune intention pour ces filtres</div>Essaie une autre recherche ou un autre état.
+  {% else %}<div class="empty-title">L’agenda est encore vide</div>Les intentions planifiées et leur historique apparaîtront ici.{% endif %}
+</div></div>{% endfor %}
+</div>
+<div class="mt-4">{% include "gestion/partials/pager.html" %}</div>
 {% endblock %}

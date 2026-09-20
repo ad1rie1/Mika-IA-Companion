@@ -30,8 +30,7 @@ from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST
 
-from configs.service import config_service
-from GestionSysteme import forms, panels
+from GestionSysteme import forms, panels, tables
 from GestionSysteme.shell import page_context
 from GestionSysteme.views import config as config_view
 
@@ -160,7 +159,17 @@ def forge_apps(request):
             "état, configuration et pages au même endroit."
         ),
     )
-    ctx.update({"rows": rows, "forge_absent": host is None})
+    total = len(rows)
+    active = sum(r["status"] == "actif" for r in rows)
+    fs = tables.FilterSet(show_per_page=False)
+    search = fs.add(tables.search_filter(request, "q", "Recherche", placeholder="nom, description"))
+    status = fs.add(tables.select_filter(request, "statut", "État", [(v, v) for v in sorted({r["status"] for r in rows})]))
+    if search.value:
+        rows = [r for r in rows if search.value.casefold() in " ".join(str(r[k] or "") for k in ("name", "title", "context")).casefold()]
+    if status.value:
+        rows = [r for r in rows if r["status"] == status.value]
+    ctx.update({"page": tables.paginate(request, rows, per_page=12), "filterset": fs,
+                "app_count": total, "active_count": active, "forge_absent": host is None})
     return render(request, "gestion/forge/liste.html", ctx)
 
 
@@ -322,7 +331,7 @@ def forge_app_config(request, app: str):
     # Même mise en forme que le cœur : recherche, sommaire, blocs repliables,
     # pastille « modifié ». Elle vient du contexte partagé, donc un module qui
     # déclare ses ``ConfigGroup`` en profite sans que cette vue le sache.
-    listes = _record_lists(section_key, items)
+    listes = config_view.record_lists(request, section_key, items)
     ctx.update(config_view.contexte_reglages(request, section_key, form, listes))
     ctx.update({
         "form": form,
@@ -331,32 +340,3 @@ def forge_app_config(request, app: str):
         "record_lists": listes,
     })
     return render(request, "gestion/forge/configuration.html", ctx)
-
-
-def _record_lists(section_key: str, items) -> list[dict]:
-    """Listes d'objets de l'app, rendues comme celles du cœur.
-
-    Les lignes réutilisent les routes ``config-record-*`` : la section leur
-    appartient, donc le contrôle d'appartenance passe, et le retour est
-    aiguillé vers cette page par ``config._back_to``.
-    """
-    out = []
-    for item in forms.record_list_items(items):
-        try:
-            rows = config_service.list_rows(item.key, decrypt_secrets=False)
-        except Exception as exc:
-            out.append({"item": item, "rows": [], "columns": [], "error": str(exc),
-                        "section_key": section_key})
-            continue
-        out.append({
-            "item": item,
-            "columns": [f.label or f.key for f in item.record.fields],
-            "rows": [
-                {"row": row, "values": [v for _, v in forms.row_summary(item, row)]}
-                for row in rows
-            ],
-            "error": "",
-            "full": item.max_items is not None and len(rows) >= item.max_items,
-            "section_key": section_key,
-        })
-    return out

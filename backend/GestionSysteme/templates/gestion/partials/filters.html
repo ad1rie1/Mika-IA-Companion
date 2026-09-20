@@ -17,7 +17,8 @@
       <label class="field-label" for="{{ filterset.prefix }}-{{ f.param }}">{{ f.label }}</label>
       {% if f.kind == "search" %}
         <input type="search" id="{{ filterset.prefix }}-{{ f.param }}" name="{{ f.param }}"
-               value="{{ f.value }}" placeholder="{{ f.placeholder }}">
+               value="{{ f.value }}" placeholder="{{ f.placeholder }}"
+               {% if f.suggestions_url %}data-suggestions="{{ f.suggestions_url }}" autocomplete="off"{% endif %}>
       {% else %}
         <select id="{{ filterset.prefix }}-{{ f.param }}" name="{{ f.param }}"
                 {% if f.autosubmit %}data-autosubmit{% endif %}>

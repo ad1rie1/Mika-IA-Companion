@@ -74,7 +74,7 @@ def articles(request):
         request, "q", "Recherche", placeholder="titre, résumé, auteur",
     ))
 
-    qs = RSSEntry.objects.select_related("feed")
+    qs = RSSEntry.objects.select_related("feed").defer("summary")
     if flux is not None and flux.value:
         qs = qs.filter(feed_id=flux.value)
     if categorie is not None and categorie.value:
@@ -149,8 +149,10 @@ def _fiche_article(request):
     from modules.plugins.rss.models import RSSEntry
 
     brut = (request.GET.get("article") or "").strip()
-    if not brut.isdigit():
+    if not brut:
         return None
+    if not brut.isascii() or not brut.isdecimal() or len(brut) > 19 or not 0 < int(brut) <= 9223372036854775807:
+        return [P.Note("Identifiant d'article invalide.", tone="warn")]
 
     e = RSSEntry.objects.select_related("feed").filter(pk=int(brut)).first()
     if e is None:

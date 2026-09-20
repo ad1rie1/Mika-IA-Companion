@@ -8,16 +8,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="alert alert-warn mb-4">
-  <div>
-    <strong>Mode professionnel par défaut.</strong> Un projet est créé avec
-    <span class="mono">emotion_policy = off</span> : quand il est actif et
-    correspond au tour en cours, Mika supprime son étiquette d'émotion, son
-    bloc de variabilité et l'impulsion affective envers la personne. Passer en
-    <span class="mono">muted</span> ou <span class="mono">full</span> est un
-    choix explicite.
-  </div>
-</div>
+<p class="field-hint mb-4"><strong>Mode professionnel par défaut.</strong> Pendant un projet, Mika suit son mandat sans faire intervenir ses émotions. Ce comportement se règle dans chaque projet.</p>
 
 <section class="card">
   {% include "gestion/partials/filters.html" %}
@@ -44,7 +35,7 @@
                 <td>
                   <a href="{% url 'gestionsysteme:project-detail' p.pk %}">{{ p.title }}</a>
                   <small>
-                    {{ p.get_origin_display }}
+                    <span class="badge">{{ p.get_status_display }}</span> · {{ p.get_origin_display }}
                     {% if p.owner %} · {{ p.owner.name }}{% endif %}
                     {% if p.n_blocked %} · <span class="badge badge-danger">{{ p.n_blocked }} bloquée(s)</span>{% endif %}
                   </small>
@@ -72,10 +63,10 @@
                   {% else %}—{% endif %}
                 </td>
                 <td class="fit">
-                  {% if p.runs_since_user_input >= 10 %}
-                    <span class="badge badge-danger" title="Plafond atteint : le projet n'avance plus sans retour humain">{{ p.runs_since_user_input }}/10</span>
+                  {% if p.runs_since_user_input >= runs_cap %}
+                    <span class="badge badge-danger" title="Plafond atteint : le projet n'avance plus sans retour humain">{{ p.runs_since_user_input }}/{{ runs_cap }}</span>
                   {% else %}
-                    <span class="tabular text-xs">{{ p.runs_since_user_input }}/10</span>
+                    <span class="tabular text-xs">{{ p.runs_since_user_input }}/{{ runs_cap }}</span>
                   {% endif %}
                 </td>
                 <td class="fit"><a class="btn btn-sm" href="{% url 'gestionsysteme:project-detail' p.pk %}">Ouvrir</a></td>
@@ -88,7 +79,7 @@
     <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
   {% else %}
     <div class="card-body"><div class="empty">
-      <div class="empty-title">Aucun projet</div>
+      <div class="empty-title">Aucun projet pour cette sélection</div>
       <p>
         Mika en crée elle-même en conversation, via l'outil
         <span class="mono">create_project</span>, quand on lui confie un travail.

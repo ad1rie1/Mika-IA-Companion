@@ -15,13 +15,13 @@
   <section class="card mb-6">
     <div class="card-head">
       <h3>{{ rl.item.label }}</h3>
-      <span class="card-sub">{{ rl.rows|length }} élément{{ rl.rows|length|pluralize }}</span>
+      <span class="card-sub">{{ rl.total }} élément{{ rl.total|pluralize }}</span>
       <span class="card-head-actions">
         {% if rl.full %}
           <span class="badge badge-warn">limite atteinte ({{ rl.item.max_items }})</span>
         {% else %}
           <a class="btn btn-sm btn-primary"
-             href="{% url 'gestionsysteme:config-record-new' rl.section_key rl.item.key %}">Ajouter</a>
+             href="{% url 'gestionsysteme:config-record-new' rl.section_key rl.item.key %}?retour={{ request.get_full_path|urlencode }}">Ajouter</a>
         {% endif %}
       </span>
     </div>
@@ -32,9 +32,10 @@
       </div>
     {% endif %}
 
+    {% include "gestion/partials/filters.html" with filterset=rl.filterset %}
     {% if rl.error %}
       <div class="card-body"><div class="alert alert-danger">{{ rl.error }}</div></div>
-    {% elif rl.rows %}
+    {% elif rl.page.rows %}
       <div class="card-body flush">
         <div class="table-scroll">
           <table class="table">
@@ -46,18 +47,18 @@
               </tr>
             </thead>
             <tbody>
-              {% for entry in rl.rows %}
+              {% for entry in rl.page.rows %}
                 <tr>
-                  {% for v in entry.values %}<td class="break">{{ v }}</td>{% endfor %}
+                  {% for v in entry.values %}<td class="break">{% include "gestion/partials/long_text.html" with value=v %}</td>{% endfor %}
                   <td class="fit">{{ entry.row.enabled|yes_no }}</td>
                   <td class="fit">
                     <div class="row">
                       <a class="btn btn-sm"
-                         href="{% url 'gestionsysteme:config-record-edit' rl.section_key rl.item.key entry.row.row_id %}">Modifier</a>
+                         href="{% url 'gestionsysteme:config-record-edit' rl.section_key rl.item.key entry.row.row_id %}?retour={{ request.get_full_path|urlencode }}">Modifier</a>
                       <form method="post"
                             action="{% url 'gestionsysteme:config-record-delete' rl.section_key rl.item.key entry.row.row_id %}"
                             data-confirm="Supprimer cet élément ?">
-                        {% csrf_token %}
+                        {% csrf_token %}<input type="hidden" name="retour" value="{{ request.get_full_path }}">
                         <button class="btn btn-sm btn-danger" type="submit">Supprimer</button>
                       </form>
                     </div>
@@ -71,6 +72,7 @@
     {% else %}
       <div class="card-body"><div class="empty">Aucun élément.</div></div>
     {% endif %}
+    <div class="card-foot">{% include "gestion/partials/pager.html" with page=rl.page %}</div>
   </section>
 {% endwith %}
 {% endif %}

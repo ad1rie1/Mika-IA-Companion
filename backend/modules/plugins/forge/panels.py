@@ -23,7 +23,12 @@ _TONS_STATUT = {
 
 def modules_panel(host):
     def handler(request):
-        infos = host.module_infos()
+        infos = sorted(host.module_infos(), key=lambda i: i["name"])
+        fs = tables.FilterSet(per_page=tables.read_per_page(request))
+        search = fs.add(tables.search_filter(request, "q", "Recherche", placeholder="nom, titre"))
+        if search.value:
+            infos = [i for i in infos if search.value.casefold() in (i["name"] + " " + str(i.get("title") or "")).casefold()]
+        page = tables.paginate(request, infos, per_page=fs.per_page)
 
         blocs = [P.Note(
             "Chaque app a son propre espace (menu « Forge apps ») : sa "
@@ -43,7 +48,7 @@ def modules_panel(host):
                 P.Column("Échecs", align="num"),
                 P.Column("Dernière erreur"),
             ],
-            rows=[_ligne_module(request, i) for i in infos],
+            rows=[_ligne_module(request, i) for i in page.rows], page=page, filters=fs,
             empty=(
                 "Aucun module forgé. Mika en crée elle-même via ses outils "
                 "forge_write_module / forge_test_module."
@@ -165,23 +170,8 @@ def journal_panel(host):
     def handler(request):
         from modules.plugins.forge.models import ForgeLog
 
-        # ``order_by()`` vide avant ``distinct()`` : le modèle déclare un
-        # ``Meta.ordering`` sur ``created_at``, que Django ajoute alors au
-        # SELECT — la colonne de tri entre dans la clé de dédoublonnage et
-        # chaque ligne de journal ressort comme un module distinct. Le plafond
-        # de 100 ne gardait donc que les modules ayant écrit le plus
-        # récemment : les autres disparaissaient du filtre.
-        noms = sorted(
-            ForgeLog.objects
-            .order_by()
-            .values_list("module_name", flat=True)
-            .distinct()[:100]
-        )
-
         fs = tables.FilterSet(per_page=tables.read_per_page(request, default=50))
-        module = fs.add(tables.select_filter(
-            request, "module", "Module", [(n, n) for n in noms if n],
-        ))
+        module = fs.add(tables.search_filter(request, "module", "Module", placeholder="Rechercher une app", suggestions="forge-modules"))
         niveau = fs.add(tables.select_filter(
             request, "niveau", "Niveau",
             [(v, v) for v, _ in ForgeLog.Level.choices],
@@ -192,7 +182,7 @@ def journal_panel(host):
 
         qs = ForgeLog.objects.all()
         if module.value:
-            qs = qs.filter(module_name=module.value)
+            qs = qs.filter(module_name__iexact=module.value)
         if niveau.value:
             qs = qs.filter(level=niveau.value)
         if recherche.value:
@@ -213,7 +203,7 @@ def journal_panel(host):
             ],
             rows=[_ligne_journal(r) for r in page.rows],
             page=page,
-            empty="Aucune entrée.",
+            empty="Aucune entrée pour ces filtres." if fs.active else "Aucun événement enregistré par les apps forgées.",
         )
 
     return handler

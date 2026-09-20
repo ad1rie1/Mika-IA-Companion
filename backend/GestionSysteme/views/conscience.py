@@ -37,11 +37,6 @@ def conscience(request, tab: str | None = None):
 def _observations(request) -> dict:
     from conscience.models import Observation
 
-    categories = list(
-        Observation.objects.order_by("category")
-        .values_list("category", flat=True).distinct()[:50]
-    )
-
     fs = tables.FilterSet(per_page=tables.read_per_page(request))
     search = fs.add(tables.search_filter(request, "q", "Recherche", placeholder="dans le résumé"))
     status = fs.add(tables.select_filter(
@@ -49,9 +44,11 @@ def _observations(request) -> dict:
         [("pending", "en attente"), ("acted", "traitée"),
          ("skipped", "ignorée"), ("failed", "échouée")],
     ))
-    category = fs.add(tables.select_filter(
-        request, "categorie", "Catégorie", [(c, c) for c in categories if c],
-    ))
+    category_labels = {Observation.Category.COMMUNICATION: "Communication", Observation.Category.EMOTIONAL: "Émotion",
+                       Observation.Category.MEMORY: "Mémoire", Observation.Category.TEMPORAL: "Temps",
+                       Observation.Category.EXTERNAL: "Extérieur", Observation.Category.SYSTEM: "Système"}
+    category = fs.add(tables.select_filter(request, "categorie", "Catégorie",
+        [(value, category_labels.get(value, label)) for value, label in Observation.Category.choices]))
 
     qs = Observation.objects.order_by("-created_at")
     if search.value:
@@ -132,17 +129,31 @@ def _decisions(request) -> dict:
 
 
 def _scheduled(request) -> dict:
+    from django.db.models import Count, Q
+    from django.db.models.functions import Greatest, Coalesce
+    from django.utils import timezone
     from conscience.models import ScheduledAction
 
     fs = tables.FilterSet(per_page=tables.read_per_page(request))
-    status = fs.add(tables.select_filter(
-        request, "statut", "État",
-        [("pending", "en attente"), ("executed", "exécutée"),
-         ("cancelled", "annulée"), ("failed", "échouée")],
-    ))
-
-    qs = ScheduledAction.objects.order_by("scheduled_at")
+    status = fs.add(tables.select_filter(request, "statut", "État", [
+        ("pending", "En attente"), ("executed", "Exécutée"),
+        ("cancelled", "Annulée"), ("failed", "Échouée")], default="pending"))
+    search = fs.add(tables.search_filter(request, "q", "Recherche", placeholder="consigne, source"))
+    now = timezone.now()
+    qs = ScheduledAction.objects.annotate(
+        prochaine_tentative=Greatest("scheduled_at", Coalesce("reessayer_le", "scheduled_at")))
+    counts = qs.aggregate(
+        pending=Count("pk", filter=Q(status="pending")),
+        due=Count("pk", filter=Q(status="pending", prochaine_tentative__lte=now)),
+        failed=Count("pk", filter=Q(status="failed")),
+    )
     if status.value:
         qs = qs.filter(status=status.value)
-
-    return {"filterset": fs, "page": tables.paginate(request, qs, per_page=fs.per_page)}
+    if search.value:
+        qs = qs.filter(Q(prompt__icontains=search.value) | Q(source__icontains=search.value))
+    # Une intention reportée doit apparaître à son prochain essai. L'historique
+    # part des événements récents, au lieu d'enfouir le présent après des années.
+    qs = qs.order_by("prochaine_tentative", "-priority", "pk") if status.value == "pending" else qs.order_by("-scheduled_at", "-pk")
+    return {"filterset": fs, "page": tables.paginate(request, qs, per_page=fs.per_page),
+            "scheduled_counts": counts, "now": now,
+            "pending_selection": status.value == "pending" and not search.value}

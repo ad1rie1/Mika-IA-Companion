@@ -25,11 +25,52 @@ Trois règles que le formulaire ajoute au modèle :
 """
 from __future__ import annotations
 
+import re
+
 from django import forms
+from django.urls import reverse_lazy
 from django.utils import timezone
 
 from projects import schedule
 from projects.models import Project, ProjectTask
+from memory.models import Entity
+
+
+_TASK_LABELS = {ProjectTask.Status.TODO: "À faire", ProjectTask.Status.IN_PROGRESS: "En cours",
+                ProjectTask.Status.DONE: "Terminée", ProjectTask.Status.BLOCKED: "Bloquée"}
+TASK_STATUSES = tuple((state.value, _TASK_LABELS.get(state, state.label)) for state in ProjectTask.Status)
+
+
+class EntityLookupField(forms.ModelChoiceField):
+    """Résout un nom exact ou un identifiant sans rendre toutes les entités."""
+
+    widget = forms.TextInput
+
+    def prepare_value(self, value):
+        from GestionSysteme.formatting import person_reference
+
+        pk = super().prepare_value(value)
+        if isinstance(pk, int):
+            entity = self.queryset.filter(pk=pk).first()
+            return person_reference(entity) if entity else f"#{pk}"
+        return pk
+
+    def to_python(self, value):
+        if value in self.empty_values:
+            return None
+        value = str(value).strip()
+        if len(value) > 240:
+            raise forms.ValidationError("Saisir un nom ou un identifiant de moins de 240 caractères.")
+        reference = re.fullmatch(r"(?:.* \(#([0-9]+)\)|#?([0-9]+))", value)
+        if reference:
+            pk = int(reference.group(1) or reference.group(2))
+            if 0 < pk < 2**63:
+                return super().to_python(pk)
+            raise forms.ValidationError("Identifiant invalide.")
+        matches = list(self.queryset.filter(name__iexact=value)[:2])
+        if len(matches) != 1:
+            raise forms.ValidationError("Nom absent ou ambigu : utiliser le #identifiant de la fiche.")
+        return matches[0]
 
 
 class LineListField(forms.CharField):
@@ -72,6 +113,11 @@ def _modules_disponibles() -> list[tuple[str, str]]:
 
 
 class ProjectForm(forms.ModelForm):
+    owner = EntityLookupField(
+        queryset=Entity.objects.filter(entity_type="person"), required=False, label="Confié par",
+        widget=forms.TextInput(attrs={"data-suggestions": reverse_lazy("gestionsysteme:api-suggestions", args=["personnes"]), "autocomplete": "off", "placeholder": "Rechercher une personne"}),
+        help_text="Choisir une personne parmi les suggestions, saisir son nom exact ou son #identifiant. Laisser vide sans commanditaire.",
+    )
     keywords = LineListField(
         required=False, label="Mots-clés",
         help_text="Un par ligne. Servent à détecter qu'un tour de conversation concerne ce projet.",
@@ -148,11 +194,7 @@ class ProjectForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["title"].required = True
-        # Seules les entités de type personne peuvent posséder un projet ;
-        # le modèle le déclare via ``limit_choices_to``, on le reflète ici
-        # pour que la liste déroulante ne propose pas le reste.
         self.fields["owner"].required = False
-        self.fields["owner"].empty_label = "— personne —"
         self.fields["schedule_rule"].required = False
         self.fields["schedule_rule"].help_text = (
             "Vide ou « manual » : le projet n'avance que sur demande. "
@@ -201,6 +243,8 @@ class ProjectForm(forms.ModelForm):
 
 
 class ProjectTaskForm(forms.ModelForm):
+    status = forms.ChoiceField(choices=TASK_STATUSES, label="État", initial="todo")
+
     class Meta:
         model = ProjectTask
         fields = ("description", "status", "order", "result", "blocked_reason")

@@ -1,4 +1,1 @@
-{% load gestion %}
-{% if value|length > 180 %}
-<details class="read-more"{% if text_title %} title="{{ text_title }}"{% endif %}><summary><span>{{ value|clip:180 }}</span><span class="read-more-label">Lire la suite</span></summary><div class="narrative">{{ value }}</div></details>
-{% else %}<span class="preserve-lines"{% if text_title %} title="{{ text_title }}"{% endif %}>{{ value|default_if_none:"—" }}</span>{% endif %}
+{% load gestion %}{% with value=value|display_text preview_limit=limit|default:180 %}{% if value|length > preview_limit %}<details class="read-more"{% if text_title %} title="{{ text_title }}"{% endif %}><summary><span>{{ value|clip:preview_limit }}</span><span class="read-more-label">Lire la suite</span></summary><div class="narrative">{{ value }}</div></details>{% else %}<span class="preserve-lines"{% if text_title %} title="{{ text_title }}"{% endif %}>{{ value|default_if_none:"—" }}</span>{% endif %}{% endwith %}

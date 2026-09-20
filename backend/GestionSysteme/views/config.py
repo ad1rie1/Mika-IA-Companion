@@ -28,7 +28,8 @@ from django.views.decorators.http import require_POST
 from configs.registry import registry
 from configs.types import ConfigFamily
 from configs.service import ValidationError, config_service
-from GestionSysteme import forms
+from GestionSysteme import forms, tables
+from GestionSysteme.retour import retour_sur
 from GestionSysteme.families import family_of
 from GestionSysteme.nav import item_for
 from GestionSysteme.shell import page_context
@@ -298,7 +299,7 @@ def panneaux_de_section(form, record_lists) -> list[dict]:
             "cle": item.key.replace(".", "-"),
             "libelle": item.label,
             "nature": "liste",
-            "compte": len(liste.get("rows") or ()),
+            "compte": liste["total"],
             "liste": liste,
         })
     return panneaux
@@ -415,7 +416,7 @@ def config_section(request, section: str):
 
     # Recherche et filtre vivent dans l'URL, comme partout ailleurs ici : un
     # écran filtré se partage, se met en favori, et le retour arrière le défait.
-    listes = _record_lists(section, items)
+    listes = record_lists(request, section, items)
     reglages = contexte_reglages(request, section, form, listes)
 
     item = item_for("config")
@@ -433,34 +434,39 @@ def config_section(request, section: str):
     return render(request, "gestion/config/section.html", ctx)
 
 
-def _record_lists(section_key: str, items) -> list[dict]:
+def record_lists(request, section_key: str, items) -> list[dict]:
+    """Listes configurables du cœur, des plugins et de la Forge.
+
+    Le service fournit une collection complète ; seule la page demandée est
+    rendue. Recherche sur les valeurs publiques, jamais dans les secrets.
+    """
     out = []
     for item in forms.record_list_items(items):
+        fs = tables.FilterSet(per_page=tables.read_per_page(request), prefix="records")
+        search = fs.add(tables.search_filter(request, "ligne", "Recherche", placeholder="valeur d’un champ"))
+        fs.preserve(request, page_param="p_lignes")
+        # Même quand la liste est le premier onglet, le filtrage y reste.
+        fs.hidden = [(k, v) for k, v in fs.hidden if k != "panneau"]
+        fs.hidden.append(("panneau", item.key.replace(".", "-")))
+        fs.reset_url = request.path + "?panneau=" + item.key.replace(".", "-")
+        error = ""
         try:
             rows = config_service.list_rows(item.key, decrypt_secrets=False)
         except Exception as exc:
             logger.exception("lecture des lignes de %s impossible", item.key)
-            out.append({"section_key": section_key, "item": item, "rows": [],
-                        "error": str(exc), "columns": []})
-            continue
+            rows, error = [], str(exc)
+        entries = [{"row": row, "values": [v for _, v in forms.row_summary(item, row)]}
+                   for row in rows]
+        total = len(entries)
+        if search.value:
+            needle = search.value.casefold()
+            entries = [e for e in entries if any(needle in v.casefold() for v in e["values"])]
+        page = tables.paginate(request, entries, per_page=fs.per_page, page_param="p_lignes")
         out.append({
-            # Exposé comme dans les espaces module et forge : le partiel des
-            # listes construit ses URL avec, et n'a donc pas trois façons de
-            # savoir à quelle section il appartient.
-            "section_key": section_key,
-            "item": item,
+            "section_key": section_key, "item": item,
             "columns": [f.label or f.key for f in item.record.fields],
-            "rows": [
-                {
-                    "row": row,
-                    "values": [v for _, v in forms.row_summary(item, row)],
-                }
-                for row in rows
-            ],
-            "error": "",
-            "full": (
-                item.max_items is not None and len(rows) >= item.max_items
-            ),
+            "page": page, "total": total, "filterset": fs, "error": error,
+            "full": item.max_items is not None and total >= item.max_items,
         })
     return out
 
@@ -494,6 +500,12 @@ def _back_to(section: str) -> str:
         return reverse("gestionsysteme:forge-app-config",
                        args=[forge_app_of(section)])
     return reverse("gestionsysteme:config-section", args=[section])
+
+
+def _record_return(request, section: str, key: str) -> str:
+    default = _back_to(section) + "?panneau=" + key.replace(".", "-")
+    return retour_sur(request, default,
+                      source="POST" if request.method == "POST" else "GET", prefix="/gestion/")
 
 
 # Nom du bouton qui recharge les options d'un champ dynamique au lieu
@@ -530,7 +542,7 @@ def record_new(request, section: str, key: str):
         try:
             config_service.add_row(key, payload, actor=forms.actor_for(request))
             messages.success(request, "Élément ajouté.")
-            return redirect(_back_to(section))
+            return redirect(_record_return(request, section, key))
         except ValidationError as exc:
             messages.error(request, str(exc))
             form = forms.build_record_form(item, {"payload": payload})
@@ -564,7 +576,7 @@ def record_edit(request, section: str, key: str, row_id: str):
         try:
             config_service.update_row(key, row_id, payload, actor=forms.actor_for(request))
             messages.success(request, "Élément modifié.")
-            return redirect(_back_to(section))
+            return redirect(_record_return(request, section, key))
         except ValidationError as exc:
             messages.error(request, str(exc))
         except Exception as exc:
@@ -589,7 +601,7 @@ def _render_record_form(request, section: str, item, form):
         "section": spec,
         "form": form,
         "list_item": item,
-        "back_url": _back_to(section),
+        "back_url": _record_return(request, section, item.key),
         "post_url": (
             reverse("gestionsysteme:config-record-new", args=[section, item.key])
             if form.is_new else
@@ -614,7 +626,7 @@ def record_delete(request, section: str, key: str, row_id: str):
                 "Modèle utilisé par : " + ", ".join(refs)
                 + ". Retire ces associations avant de supprimer.",
             )
-            return redirect(_back_to(section))
+            return redirect(_record_return(request, section, key))
 
     try:
         config_service.delete_row(key, row_id, actor=forms.actor_for(request))
@@ -626,7 +638,7 @@ def record_delete(request, section: str, key: str, row_id: str):
     except Exception as exc:
         logger.exception("suppression impossible dans %s", key)
         messages.error(request, f"Suppression impossible : {exc}")
-    return redirect(_back_to(section))
+    return redirect(_record_return(request, section, key))
 
 
 def _model_references(key: str, row_id: str) -> list[str]:

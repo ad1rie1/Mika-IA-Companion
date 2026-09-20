@@ -1,6 +1,7 @@
 {% extends "gestion/base.html" %}
 {% load gestion %}
 {% block content %}
+<p class="muted mb-4">Derniers mouvements d’abord. L’envie est recalculée à l’instant de la consultation.</p>
 <section class="grid c3 mb-6">
   <div class="stat"><div class="stat-label">En cours</div><div class="stat-value">{{ en_cours }}</div><div class="stat-sub">Chantiers actifs</div></div>
   <div class="stat"><div class="stat-label">Résultats</div><div class="stat-value">{{ page.total }}</div><div class="stat-sub">Selon les filtres actuels</div></div>

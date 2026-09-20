@@ -1,18 +1,4 @@
 {% extends "gestion/base.html" %}
-{% load gestion %}
 {% block content %}
-<section class="card mb-4">{% include "gestion/partials/filters.html" %}<div class="card-foot"><span class="muted">{{ page.total }} souvenir{{ page.total|pluralize }} · Épisodes vécus et liens vers leurs sources.</span></div></section>
-<div class="reading-list">
-{% for s in page.rows %}
-  <article class="reading-item">
-    <div class="reading-meta"><span class="emo" style="{{ s.emotion|emo_style }}">{{ s.emotion|emo_fr }}</span><span title="{{ s.occurred_at|dt_full }}">Vécu le {{ s.occurred_at|dt }}</span><span class="badge">{{ s.get_sensibilite_display }}</span><span class="push tabular">Importance {{ s.importance|num }}</span></div>
-    {% include "gestion/partials/long_text.html" with value=s.content %}
-    <div class="reading-footer">
-      <span class="chips">{% for t in s.themes.all %}<a class="chip" href="{% qs theme=t.name page='' %}">{{ t.name }}</a>{% endfor %}{% for e in s.entities.all %}<a class="chip" href="{% qs entite=e.pk page='' %}">{{ e.name }}</a>{% endfor %}</span>
-      <span class="push">{% include "gestion/partials/detail_link.html" with kind="souvenir" pk=s.pk %}</span>
-    </div>
-  </article>
-{% empty %}<div class="card"><div class="empty">Aucun souvenir ne correspond à ces filtres.</div></div>{% endfor %}
-</div>
-<div class="mt-4">{% include "gestion/partials/pager.html" %}</div>
+{% include "gestion/partials/souvenirs_list.html" %}
 {% endblock %}

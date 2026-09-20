@@ -35,7 +35,7 @@
     </div>
     <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
   {% else %}
-    <div class="card-body"><div class="empty">Aucun thème.</div></div>
+    <div class="card-body"><div class="empty">{% if filterset.active %}Aucun thème ne correspond à cette recherche.{% else %}Aucun thème. Ils apparaîtront avec les souvenirs et les connaissances extraits.{% endif %}</div></div>
   {% endif %}
 </section>
 {% endblock %}

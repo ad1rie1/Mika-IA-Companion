@@ -90,6 +90,63 @@
     });
   }
 
+  /* Suggestions natives, recherchées à la demande. La saisie et le bouton
+     restent utilisables sans JS ; aucune valeur n'est imposée par la liste. */
+  function wireSuggestions() {
+    document.querySelectorAll("input[data-suggestions]").forEach(function (input, index) {
+      var list = document.createElement("datalist");
+      list.id = "gestion-suggestions-" + index;
+      input.setAttribute("list", list.id);
+      var hint = document.createElement("span");
+      hint.id = list.id + "-hint";
+      hint.className = "field-hint";
+      hint.setAttribute("role", "status");
+      hint.textContent = "Suggestions disponibles en cliquant ou en saisissant un nom.";
+      input.setAttribute("aria-describedby", [input.getAttribute("aria-describedby"), hint.id].filter(Boolean).join(" "));
+      input.insertAdjacentElement("afterend", list);
+      list.insertAdjacentElement("afterend", hint);
+      var timer;
+      var controller;
+      var revision = 0;
+      function search(delay) {
+        window.clearTimeout(timer);
+        if (controller) controller.abort();
+        var current = ++revision;
+        list.replaceChildren();
+        timer = window.setTimeout(function () {
+          var url = new URL(input.dataset.suggestions, window.location.href);
+          if (url.origin !== window.location.origin) return;
+          url.searchParams.set("q", input.value.trim());
+          var requestController = new AbortController();
+          controller = requestController;
+          var timeout = window.setTimeout(function () { requestController.abort(); }, 8000);
+          fetch(url, { credentials: "same-origin", signal: requestController.signal, headers: { "Accept": "application/json" } })
+            .then(function (response) {
+              if (!response.ok) throw new Error("Suggestions indisponibles");
+              return response.json();
+            })
+            .then(function (data) {
+              if (current !== revision) return;
+              data.results.forEach(function (result) {
+                var option = document.createElement("option");
+                option.value = result.value;
+                option.label = result.label;
+                list.appendChild(option);
+              });
+              hint.textContent = data.more ? "20 suggestions · précise la recherche pour voir les autres." :
+                data.results.length ? data.results.length + " suggestion(s) disponible(s)." : "Aucune suggestion pour cette saisie.";
+            })
+            .catch(function () {
+              if (current === revision) hint.textContent = "Suggestions indisponibles. La saisie manuelle reste possible.";
+            })
+            .finally(function () { window.clearTimeout(timeout); });
+        }, delay);
+      }
+      input.addEventListener("focus", function () { search(0); });
+      input.addEventListener("input", function () { search(180); });
+    });
+  }
+
   /* ── Indicateurs vitaux ──────────────────────────────────────────────
      Rafraîchit la barre supérieure sans recharger la page. Rendu serveur
      au premier chargement : si ce script échoue, les valeurs sont juste
@@ -200,6 +257,7 @@
     wireTheme();
     wireConfirm();
     wireFilters();
+    wireSuggestions();
     wireVitals();
     wireOutline();
     wireNavigation();

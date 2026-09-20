@@ -10,7 +10,7 @@
 </div>
 
 <section class="card">
-  {% if handle_rows %}
+  {% if handles_page.rows %}
     <div class="card-body flush">
       <div class="table-scroll">
         <table class="table">
@@ -27,7 +27,7 @@
             </tr>
           </thead>
           <tbody>
-            {% for r in handle_rows %}
+            {% for r in handles_page.rows %}
               <tr {% if r.obj.is_ephemeral %}class="is-muted"{% endif %}>
                 <td class="mono text-xs">
                   {{ r.obj.person_id }}
@@ -41,7 +41,7 @@
                 <td class="num">{{ r.ceiling|num }}</td>
                 <td class="num">
                   {% if r.messages %}
-                    <a href="{% url 'gestionsysteme:identity-detail-tab' identity.pk 'echanges' %}?handle={{ r.obj.person_id }}">{{ r.messages }}</a>
+                    <a href="{% url 'gestionsysteme:identity-detail-tab' identity.pk 'echanges' %}?handle={{ r.obj.person_id|urlencode }}">{{ r.messages }}</a>
                   {% else %}0{% endif %}
                 </td>
                 <td class="fit mono text-xs">{{ r.obj.delivery_ref|default:"—" }}</td>
@@ -62,5 +62,6 @@
       </div>
     </div>
   {% endif %}
+  <div class="card-foot">{% include "gestion/partials/pager.html" with page=handles_page %}</div>
 </section>
 {% endblock %}

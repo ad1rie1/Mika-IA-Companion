@@ -68,7 +68,7 @@
     </div>
     <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
   {% else %}
-    <div class="card-body"><div class="empty">Aucune observation.</div></div>
+    <div class="card-body"><div class="empty">{% if filterset.active %}Aucune observation ne correspond à ces filtres.{% else %}Aucune observation. Les prochains signaux interprétés apparaîtront ici.{% endif %}</div></div>
   {% endif %}
 </section>
 {% endblock %}

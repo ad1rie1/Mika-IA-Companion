@@ -22,13 +22,13 @@
     {% if block.caption %}<div class="card-head"><h3>{{ block.caption }}</h3>{% if block.page %}<span class="badge">{{ block.page.total }} résultat{{ block.page.total|pluralize }}</span>{% endif %}</div>{% endif %}
     {% if block.filters %}{% include "gestion/partials/filters.html" with filterset=block.filters %}{% endif %}
     {% if block.rows %}
-      <div class="card-body flush"><div class="table-scroll" tabindex="0" role="region" aria-label="{{ block.caption|default:'Tableau' }}">
+      <div class="card-body flush"><div class="table-scroll panel-table-scroll" tabindex="0" role="region" aria-label="{{ block.caption|default:'Tableau' }}">
         <table class="table">
           <thead><tr>{% for col in block.columns %}<th scope="col" class="{{ col.align }}"{% if col.hint %} title="{{ col.hint }}"{% endif %}>{{ col.label }}</th>{% endfor %}</tr></thead>
           <tbody>
             {% for row in block.rows %}
               <tr{% if row.tone %} class="is-{{ row.tone }}"{% endif %}>
-                {% for cell in row.cells %}{% with col=block.columns|at:forloop.counter0 %}<td class="{% if cell.render_kind == 'num' or col.align == 'num' %}num{% elif col.align == 'fit' %}fit{% endif %}">
+                {% for cell in row.cells %}{% with col=block.columns|at:forloop.counter0 %}<td class="{% if cell.render_kind == 'num' or col.align == 'num' %}num{% elif col.align == 'fit' %}fit{% elif cell.render_kind == 'text' %}wrap{% endif %}">
                   {% if forloop.first and row.href|safe_href and cell.render_kind != 'link' %}
                     {% if cell.render_kind == 'text' and cell.clamp and cell.text|length > 180 %}
                       {% include "gestion/partials/cell.html" %}
@@ -76,7 +76,7 @@
 {% elif block.block == "timeline" %}
   <section class="card mb-4">
     {% if block.title %}<div class="card-head"><h3>{{ block.title }}</h3></div>{% endif %}
-    <div class="card-body"><ol class="timeline">
+    <div class="card-body"><ol class="event-timeline">
       {% for entry in block.items %}<li>
         <div class="spread"><strong>{% if entry.href|safe_href %}<a href="{{ entry.href|safe_href }}">{{ entry.title }}</a>{% else %}{{ entry.title }}{% endif %}</strong><span class="badge{% if entry.tone %} badge-{{ entry.tone }}{% endif %}">{{ entry.meta }}</span></div>
         <div class="narrative">{{ entry.text }}</div>

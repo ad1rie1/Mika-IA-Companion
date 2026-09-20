@@ -27,6 +27,7 @@ from GestionSysteme.views import (
     records,
     projects,
     social,
+    suggestions,
     system,
 )
 
@@ -116,8 +117,9 @@ urlpatterns = [
     path("systeme/", system.system, name="system"),
     path("systeme/<slug:tab>/", system.system, name="system-tab"),
 
-    # ── Point d'accès JSON ───────────────────────────────────────────
-    # Les pages sont rendues côté serveur ; le schéma documente les panneaux.
+    # ── Points d'accès JSON ──────────────────────────────────────────
+    # Pages rendues côté serveur, suggestions de saisie à la demande.
     path("api/vitaux", api.vitals, name="api-vitals"),
     path("api/panneaux/schema", api.panel_schema, name="api-panel-schema"),
+    path("api/suggestions/<slug:kind>", suggestions.suggestions, name="api-suggestions"),
 ]

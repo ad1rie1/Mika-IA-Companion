@@ -12,7 +12,10 @@ Ce que ces tests protègent en priorité, par ordre de coût d'une régression :
    vérifient qu'elle ne peut pas revenir.
 3. **Aucun secret ne descend au navigateur.** Une page de configuration doit
    pouvoir s'afficher sans exposer une clé.
-4. **Aucune valeur d'URL n'atteint l'ORM sans passer par une liste fermée.**
+4. **États, catégories et tris restent des choix fermés.** Les recherches
+   textuelles sont bornées et passent par les paramètres ORM. Les suggestions
+   aident à choisir sans restreindre la recherche aux premières valeurs affichées ;
+   leur contrôle d’accès et les contraintes métier sont testés séparément.
 """
 from __future__ import annotations
 
@@ -656,7 +659,7 @@ def test_l_humeur_vive_se_lit_sur_le_handle_pas_sur_la_cle_primaire(client, pers
         response = client.get(
             reverse("gestionsysteme:person-detail-tab", args=[personne.pk, "synthese"]),
         )
-        affects = response.context["affects"]
+        affects = response.context["affects_page"].rows
         assert [a["person_id"] for a in affects] == ["web_abc123"]
     finally:
         emotion_engine.person_moods.pop("web_abc123", None)
@@ -818,35 +821,21 @@ def test_le_tableau_des_personnes_ne_contient_jamais_le_global(client, releves):
 
 
 @pytest.mark.django_db
-def test_la_liste_des_handles_est_dedoublonnee(client, releves):
-    """``Meta.ordering`` entre dans la clé de ``distinct()``.
-
-    ``EmotionSnapshot`` trie par ``created_at`` : sans ``order_by()`` vide, la
-    colonne de tri rejoint le SELECT et chaque relevé ressort comme un handle
-    distinct — la liste déroulante affichait le même handle une fois par ligne
-    en base.
-    """
+def test_le_filtre_handle_est_une_recherche_sans_inventaire_non_borne(client, releves):
     reponse = _historique(client)
-    choix = [
-        c.value
-        for f in reponse.context["filterset"].filters
-        if f.param == "personne"
-        for c in f.choices if c.value
-    ]
-
-    assert choix == sorted(set(choix)), f"doublons dans la liste : {choix}"
-    assert set(choix) == {"web_abc123", "conscience_mika"}
+    filtre = next(f for f in reponse.context["filterset"].filters if f.param == "personne")
+    assert filtre.kind == "search"
+    assert not filtre.choices
 
 
 @pytest.mark.django_db
-def test_un_handle_hors_liste_est_ignore(client, releves):
-    """Le filtre est une liste close — aucune valeur d'URL n'atteint l'ORM."""
+def test_une_recherche_handle_hostile_ne_contourne_pas_le_filtre(client, releves):
+    """Le texte recherché reste une valeur littérale, jamais une expression SQL."""
     reponse = _historique(client, personne="' OR 1=1")
 
     assert reponse.status_code == 200
-    assert {r["person_id"] for r in reponse.context["snapshot_rows"]} == {
-        "web_abc123", "conscience_mika",
-    }
+    assert reponse.context["snapshot_rows"] == []
+    assert reponse.context["summary_rows"] == []
 
 
 @pytest.mark.django_db
@@ -1125,9 +1114,9 @@ def test_le_handle_principal_est_celui_au_plafond_le_plus_haut(client, identite)
     response = client.get(
         reverse("gestionsysteme:identity-detail-tab", args=[identite.pk, "handles"]),
     )
-    principaux = [r["obj"].person_id for r in response.context["handle_rows"] if r["is_primary"]]
+    principaux = [r["obj"].person_id for r in response.context["handles_page"].rows if r["is_primary"]]
     assert principaux == ["tg_42"], "le handle public le plus récent ne doit pas primer"
-    assert recent.person_id in [r["obj"].person_id for r in response.context["handle_rows"]]
+    assert recent.person_id in [r["obj"].person_id for r in response.context["handles_page"].rows]
 
 
 @pytest.mark.django_db

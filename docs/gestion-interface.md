@@ -4,6 +4,9 @@ L'interface `/gestion/` utilise les gabarits Django et une amélioration progres
 JavaScript. Les pages, filtres, détails et formulaires restent utilisables sans JS.
 Le frontend de conversation est une application distincte.
 
+L’inventaire détaillé des parcours, paginations et limites est dans
+[Audit des pages](gestion-audit-pages.md).
+
 ## Organisation des pages
 
 | Pages | Présentation et accès aux informations |
@@ -15,20 +18,24 @@ Le frontend de conversation est une application distincte.
 | Souvenirs, connaissances | Cartes de lecture, sensibilité, thèmes et entités filtrables ; fiches avec provenance et dates. |
 | Messages | Fil de lecture, pièces jointes signalées, état d'attente ; filtre de conversation chronologique et fiche complète. |
 | Thèmes, entités | Index comparables ; liens vers souvenirs et faits, y compris pour les entités autres que les personnes. |
-| Journaux, rêves | Lecture en colonnes avec paginations indépendantes. |
+| Journaux, rêves | Cartes et paginations indépendantes ; fiches avec souvenirs sources, pensées du coucher et rappel. |
 | Récit de soi | Version courante stable et historique séparé, même en changeant de page. |
-| Identités, personnes | Fiches à onglets conservées ; accès au détail des messages, souvenirs et connaissances. |
+| Identités, personnes | Fiches à onglets ; mêmes composants de lecture que Mémoire pour les messages, souvenirs et connaissances ; humeurs et handles paginés. |
 | Revendications, engagements | Comparaison et actions dans la liste ; preuves, notes et descriptions intégrales dépliables. |
 | Politique de confiance | Tables de référence, adaptées à la comparaison des seuils et permissions. |
 | Observations, décisions, planification | Liste de suivi et fiche explicative : données source, paroles, outils, conditions et résultat. |
-| Projets, accords, journal | Fiches et formulaires existants ; compte rendu d'exécution complet avec tâche et projet liés. |
+| Projets, accords, journal | Avancement et plan de travail ; tâches, fichiers, logs et traces IA paginés indépendamment ; liens d’accord filtrés par projet. |
 | Modules | Catalogue de cartes, état, configuration et panneaux dans chaque espace. |
 | Email, RSS | Corps et résumés lisibles ; métadonnées des messages, contacts et flux inspectables. Les emails HTML sont convertis en texte échappé. |
 | Forge apps | État et journal avant le code ; source repliable, accès au journal complet. |
 | Atelier Forge | Modules, journal filtré, collections et inspection des valeurs JSON paginées. |
-| Configuration | Groupes, recherche et listes éditables conservés ; même formulaire pour cœur, modules et apps. |
+| Configuration | Groupes et recherche ; listes éditables paginées par un constructeur commun au cœur, aux modules et aux apps ; contexte conservé après écriture. |
 | Santé, routage, quotas, consolidation | Tables de comparaison et indicateurs ; sommaire des grandes pages, valeurs et diagnostics consultables. |
 | Journal de configuration | Avant/après intégralement dépliable, avec les protections existantes sur les secrets. |
+
+Les listes distinguent un filtre absent (défaut) du choix vide « Tous ». Les petits
+référentiels finis restent visibles ensemble ; les collections croissantes sont
+paginées, en base ou à partir de l’instantané disponible.
 
 Les textes longs ne sont plus uniquement limités par une hauteur CSS. Le composant
 `long_text.html` propose une ouverture native `<details>`. Les fiches ont une URL
@@ -39,11 +46,27 @@ Aucun modèle arbitraire n'est exposé : les types et champs sont déclarés dan
 `GestionSysteme/views/records.py`.
 
 Les gros contenus ont un plafond d'affichage annoncé par la mention « tronqué » :
-100 000 caractères pour un corps de mail, 40 000 pour un résumé RSS, 200 000
-pour chaque source ou manifeste forgé. La conversion d'un mail HTML lit au plus
+100 000 caractères pour les textes dépliables, les textes des fiches et un corps de mail, 40 000 pour un résumé RSS, 200 000
+pour chaque source ou manifeste forgé et chaque bloc JSON d’une fiche. La conversion d'un mail HTML lit au plus
 250 000 caractères de source avant d'appliquer le plafond du corps. Les données
 stockées restent intactes. Le filtre Entité recherche en base par nom ou numéro
 (`123` ou `#123`), sans charger la liste complète des entités.
+
+## Filtres et suggestions
+
+Les filtres natifs proposent des suggestions sur les grands référentiels (thèmes,
+handles de l’historique affectif, apps du journal Forge et personnes commanditaires).
+`GET /gestion/api/suggestions/<source>?q=…` accepte seulement ces quatre sources,
+cherche en base et renvoie au plus 20 suggestions avec un indicateur `more`.
+Ce plafond ne limite pas les valeurs filtrables : préciser la recherche retrouve
+les suivantes. Les réponses ne sont pas mises en cache et passent par le même
+contrôle d’accès que les pages. Le navigateur remplit une `datalist` sans HTML
+injecté ; la saisie manuelle reste utilisable sans JavaScript.
+
+Les catégories d’observation, états et tris restent des choix fermés. Les noms de
+thèmes et d’apps se filtrent sans sensibilité à la casse ; les handles restent des
+identifiants exacts. Le commanditaire accepte uniquement une personne, affichée
+comme « Nom (#id) » pour lever l’ambiguïté des homonymes.
 
 ## Un seul contrat JSON, version 2
 

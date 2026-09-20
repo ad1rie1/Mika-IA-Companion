@@ -79,7 +79,8 @@ def _health(request) -> dict:
         cadence = {"fond": {"providers": [], "roles": []}, "disjoncteurs": []}
 
     subscriptions = bus.get("subscriptions", [])
-    boucles = _loops_snapshot()
+    boucles = sorted(_loops_snapshot(), key=lambda b: (not b["en_retard"], b["nom"]))
+    failing = sorted([s for s in subscriptions if s.get("failed")], key=lambda s: -s["failed"])
     return {
         "murmure": murmure,
         "fond": cadence["fond"],
@@ -87,12 +88,13 @@ def _health(request) -> dict:
         "disjoncteurs_ouverts": [
             d for d in cadence["disjoncteurs"] if d["etat"] != "ferme"
         ],
-        "sites_page": tables.paginate(request, sites, per_page=50),
+        "sites_page": tables.paginate(request, sites, per_page=50, page_param="p_sites"),
         "total_events": degradations.total(),
         "distinct_sites": len(sites),
         "bus_emitted": bus.get("emitted", 0),
-        "subscriptions": subscriptions,
-        "failing": [s for s in subscriptions if s.get("failed")],
+        "subscriptions_page": tables.paginate(request, subscriptions, per_page=25, page_param="p_bus"),
+        "failing_count": len(failing),
+        "failing_subscriptions": failing,
         "boucles": boucles,
         "boucles_muettes": [b for b in boucles if b["en_retard"]],
     }
@@ -168,25 +170,15 @@ def _routing(request) -> dict:
         except Exception:
             return default
 
-    providers = [
-        {
-            "name": "claude",
-            "details": [
-                ("Clé d'API", bool(cfg("ai.claude.api_key"))),
-            ],
-        },
-        {
-            "name": "openai",
-            "details": [
-                ("Clé d'API", bool(cfg("ai.openai.api_key"))),
-                ("URL de base", cfg("ai.openai.base_url") or "(défaut)"),
-            ],
-        },
-        {
-            "name": "ollama",
-            "details": [("URL de base", cfg("ai.ollama.base_url") or "(défaut)")],
-        },
-    ]
+    from ai.config_schema import PROVIDERS
+    providers = []
+    for name, label in PROVIDERS:
+        details = []
+        if name != "ollama":
+            details.append(("Clé d’API", bool(cfg(f"ai.{name}.api_key"))))
+        if name in {"ollama", "ollama_cloud"}:
+            details.append(("URL de base", cfg(f"ai.{name}.base_url") or "(défaut)"))
+        providers.append({"name": label, "details": details})
 
     models = []
     try:
@@ -194,11 +186,15 @@ def _routing(request) -> dict:
     except Exception:
         logger.debug("liste des modèles déclarés indisponible", exc_info=True)
 
+    fs = tables.FilterSet(show_per_page=False)
+    search = fs.add(tables.search_filter(request, "modele", "Modèle", placeholder="nom, fournisseur, identifiant"))
+    if search.value:
+        models = [m for m in models if search.value.casefold() in " ".join(str(m.get("payload", {}).get(k, "")) for k in ("internal_name", "provider", "model_id")).casefold()]
     return {
         "roles": roles,
         "router_error": "",
         "providers": providers,
-        "models": models,
+        "models_page": tables.paginate(request, models, per_page=25), "model_filters": fs,
         "unconfigured": [r for r in roles if r["error"] or not r["model"]],
     }
 
@@ -228,12 +224,17 @@ def _quota(request) -> dict:
         logger.exception("agrégat du cache de prompt indisponible")
         cache = []
 
+    from projects.models import Project
+    projects = sorted(snap.projects.items(), key=lambda entry: (-entry[1]["tokens_month"], entry[0]))
+    project_page = tables.paginate(request, projects, per_page=25)
+    titles = dict(Project.objects.filter(pk__in=[pid for pid, _ in project_page.rows]).values_list("pk", "title"))
+    project_page.rows = [{"pid": pid, "title": titles.get(int(pid)), **usage} for pid, usage in project_page.rows]
     return {
         "available": True,
         "today": snap.today,
         "month": snap.month,
         "roles": snap.roles,
-        "projects": snap.projects,
+        "projects_page": project_page,
         "limits": snap.limits,
         "cache": cache,
     }

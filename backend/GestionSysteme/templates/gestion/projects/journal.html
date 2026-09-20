@@ -45,7 +45,7 @@
     </div>
     <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
   {% else %}
-    <div class="card-body"><div class="empty">Aucune ligne de journal.</div></div>
+    <div class="card-body"><div class="empty">{% if filterset.active %}Aucune ligne de journal ne correspond à ces filtres.{% else %}Aucune activité de projet enregistrée pour le moment.{% endif %}</div></div>
   {% endif %}
 </section>
 {% endblock %}

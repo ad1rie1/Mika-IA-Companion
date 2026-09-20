@@ -1,0 +1,17 @@
+{% load gestion %}
+<section class="card mb-4">{% include "gestion/partials/filters.html" %}<div class="card-foot"><span class="muted">{{ page.total }} message{{ page.total|pluralize }}{% if conversation_id %} · Conversation #{{ conversation_id }} · ordre chronologique{% else %} · les plus récents d'abord{% endif %}</span></div></section>
+<div class="reading-list">
+{% for m in page.rows %}
+  <article class="reading-item{% if m.is_internal %} is-internal{% endif %}" id="message-{{ m.pk }}">
+    <div class="reading-meta"><span class="badge{% if m.role == 'assistant' %} badge-info{% endif %}">{% if m.role == 'assistant' %}Mika{% elif m.role == "user" %}Utilisateur{% else %}{{ m.role }}{% endif %}</span><time title="{{ m.created_at|dt_full }}">{{ m.created_at|dt_full }}</time><span>{{ m.source }}</span>{% if m.person_id %}<span>{{ m.person_id }}</span>{% endif %}{% if m.is_internal %}<span class="badge badge-warn">Interne</span>{% endif %}{% if m.awaiting_reply %}<span class="badge badge-warn">Attend une réponse</span>{% endif %}</div>
+    {% include "gestion/partials/long_text.html" with value=m.content limit=450 %}
+    <div class="reading-footer">
+      {% if m.emotion %}<span class="emo" style="{{ m.emotion|emo_style }}">{{ m.emotion|emo_fr }} <span class="emo-weight">{{ m.emotion_intensity|pct }}</span></span>{% endif %}
+      {% if m.attachments_meta %}<span class="badge">{{ m.attachments_meta|length }} pièce(s) jointe(s)</span>{% endif %}
+      <a href="{% url 'gestionsysteme:memory-tab' 'messages' %}?conversation={{ m.conversation_id }}">Conversation #{{ m.conversation_id }}</a>
+      <span class="push">{% include "gestion/partials/detail_link.html" with kind="message" pk=m.pk %}</span>
+    </div>
+  </article>
+{% empty %}<div class="card"><div class="empty">{% if filterset.active %}Aucun message ne correspond à ces filtres.{% else %}Aucun message conservé pour le moment.{% endif %}</div></div>{% endfor %}
+</div>
+<div class="mt-4">{% include "gestion/partials/pager.html" %}</div>

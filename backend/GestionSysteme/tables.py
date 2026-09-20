@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, Sequence
 
 from django.core.paginator import EmptyPage, Paginator
+from django.db.models import QuerySet
 
 DEFAULT_PER_PAGE = 25
 MAX_PER_PAGE = 200
@@ -143,6 +144,18 @@ def paginate(
     )
     number = read_page(request, param=page_param)
 
+    # Des dates ou scores identiques ne doivent pas déplacer des lignes d'une
+    # page à l'autre. Ne pas ajouter le PK aux agrégats ni aux values/distinct :
+    # cela modifierait leurs groupes au lieu de stabiliser leur ordre.
+    if (isinstance(queryset, QuerySet) and queryset._fields is None
+            and queryset.query.group_by is None and not queryset.query.is_sliced):
+        ordering = queryset.query.order_by or (
+            queryset.model._meta.ordering if queryset.query.default_ordering else ()
+        ) or ()
+        pk_names = {"pk", queryset.model._meta.pk.name}
+        if not any(isinstance(o, str) and o.lstrip("-") in pk_names for o in ordering):
+            queryset = queryset.order_by(*ordering, "pk")
+
     paginator = Paginator(queryset, size)
     try:
         page = paginator.page(number)
@@ -183,6 +196,7 @@ class Filter:
     value: str = ""
     placeholder: str = ""
     autosubmit: bool = True
+    suggestions_url: str = ""
 
 
 def url_with(request, **overrides) -> str:
@@ -210,6 +224,8 @@ def read_choice(request, param: str, allowed: Iterable[str], *, default: str = "
     qui empêche un ``?order=`` bricolé de devenir un tri arbitraire — voire
     une fuite via une relation traversée.
     """
+    if param not in request.GET:
+        return default
     raw = (request.GET.get(param) or "").strip()
     return raw if raw in set(allowed) else default
 
@@ -230,17 +246,20 @@ def select_filter(
 ) -> Filter:
     """Construit un filtre à choix + lit sa valeur courante en une fois."""
     opts = (Choice("", all_label),) + tuple(Choice(v, l) for v, l in choices)
-    value = read_choice(request, param, [c.value for c in opts if c.value], default=default)
+    value = read_choice(request, param, [c.value for c in opts], default=default)
     return Filter(param=param, label=label, kind="select", choices=opts, value=value)
 
 
 def search_filter(
     request, param: str = "q", label: str = "Recherche", *, placeholder: str = "",
+    suggestions: str = "",
 ) -> Filter:
+    from django.urls import reverse
     return Filter(
         param=param, label=label, kind="search",
         value=read_text(request, param), placeholder=placeholder,
         autosubmit=False,
+        suggestions_url=reverse("gestionsysteme:api-suggestions", args=[suggestions]) if suggestions else "",
     )
 
 
@@ -258,10 +277,26 @@ class FilterSet:
         self.filters.append(f)
         return f
 
+    def preserve(self, request, *, page_param: str = "page") -> None:
+        """Conserve les autres listes de l'écran, y compris leurs filtres vides.
+
+        Seule la pagination de cette liste est remise à zéro au filtrage.
+        Les paramètres répétés restent répétés.
+        """
+        excluded = {f.param for f in self.filters} | {page_param}
+        if self.show_per_page:
+            excluded.add("per_page")
+        self.hidden = [(k, v) for k, values in request.GET.lists()
+                       if k not in excluded for v in values]
+        params = request.GET.copy()
+        for key in excluded:
+            params.pop(key, None)
+        self.reset_url = request.path + ("?" + params.urlencode() if params else "")
+
     @property
     def active(self) -> bool:
         return any(f.value for f in self.filters)
 
     @property
     def per_page_choices(self) -> tuple[int, ...]:
-        return PER_PAGE_CHOICES
+        return tuple(sorted(set(PER_PAGE_CHOICES) | {self.per_page}))

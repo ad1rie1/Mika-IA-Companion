@@ -2,8 +2,18 @@
 {% load gestion %}
 
 {% block content %}
+<details class="disclosure mb-4"><summary>Installer un greffon</summary><div class="disclosure-body">
+  Les greffons natifs se trouvent dans <code>backend/modules/plugins/</code>. Après installation, redémarre le backend pour leur découverte.
+  Les apps créées par Mika se gèrent dans <a href="{% url 'gestionsysteme:forge-apps' %}">Forge apps</a>.
+</div></details>
+<section class="grid c3 mb-6" aria-label="Inventaire des modules">
+  <div class="stat"><div class="stat-label">Modules installés</div><div class="stat-value">{{ module_count }}</div></div>
+  <div class="stat"><div class="stat-label">En marche</div><div class="stat-value">{{ running_count }}</div></div>
+  <div class="stat"><div class="stat-label">Outils disponibles</div><div class="stat-value">{{ tool_count }}</div></div>
+</section>
+{% include "gestion/partials/filters.html" %}
 <section class="grid auto-lg mb-6">
-  {% for m in rows %}
+  {% for m in page.rows %}
     <article class="card">
       <div class="card-head">
         <h3><a href="{% url 'gestionsysteme:module-space' m.name %}">{{ m.label }}</a></h3>
@@ -55,29 +65,34 @@
   {% empty %}
     <div class="card"><div class="card-body">
       <div class="empty">
-        <div class="empty-title">Aucun module</div>
-        Les greffons se déclarent dans <span class="mono">backend/modules/plugins/</span>.
+        {% if module_count %}<div class="empty-title">Aucun module pour ces filtres</div>Essaie un autre nom ou un autre état.
+        {% else %}<div class="empty-title">Aucun module installé</div>Les modules installés et leur état apparaîtront ici.{% endif %}
       </div>
     </div></div>
   {% endfor %}
 </section>
+<div class="mb-6">{% include "gestion/partials/pager.html" %}</div>
 
 <section class="card">
   <div class="card-head">
     <h3>Outils exposés à l'IA</h3>
-    <span class="card-sub">{{ tools|length }} outil(s) MCP des modules en marche</span>
+    <span class="card-sub">{{ tool_count }} outil(s) MCP des modules en marche</span>
   </div>
+  {% include "gestion/partials/filters.html" with filterset=tool_filters %}
   <div class="card-body flush">
     <div class="table-scroll">
       <table class="table">
         <thead><tr><th>Outil</th><th class="fit">Module</th><th style="min-width:26rem;">Description</th><th>Paramètres</th></tr></thead>
         <tbody>
-          {% for t in tools %}
+          {% for t in tools_page.rows %}
             <tr>
               <td class="mono text-xs">{{ t.name }}</td>
               <td class="fit"><a href="{% url 'gestionsysteme:module-space' t.module %}">{{ t.module }}</a></td>
               <td>{% include "gestion/partials/long_text.html" with value=t.description %}</td>
-              <td><span class="chips">{% for p in t.params %}<span class="chip mono">{{ p }}</span>{% endfor %}</span></td>
+              <td>{% if t.params %}<details class="panel-disclosure"><summary>{{ t.params|length }} paramètre(s)</summary>
+                <dl>{% for p in t.params %}<dt class="mono">{{ p.name }} <span class="badge">{{ p.type.value }}</span> {% if p.required %}<span class="badge badge-info">requis</span>{% endif %}</dt>
+                <dd>{{ p.description }}{% if p.enum %}<div class="field-hint">Valeurs : {{ p.enum|join:", " }}</div>{% endif %}{% if p.default is not None %}<div class="field-hint">Défaut : {{ p.default }}</div>{% endif %}</dd>{% endfor %}</dl>
+              </details>{% else %}<span class="muted">Aucun paramètre</span>{% endif %}</td>
             </tr>
           {% empty %}
             <tr><td colspan="4"><span class="muted">Aucun outil exposé.</span></td></tr>
@@ -86,5 +101,6 @@
       </table>
     </div>
   </div>
+  <div class="card-foot">{% include "gestion/partials/pager.html" with page=tools_page %}</div>
 </section>
 {% endblock %}

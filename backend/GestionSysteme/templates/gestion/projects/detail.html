@@ -10,31 +10,90 @@
 
 {% block tabs %}{% endblock %}
 
-{% block page_actions %}
+{% block page_head %}
+<div class="page-head">
+  <div><h2>{{ project.title }}</h2>
+    {% if project.description %}<div class="page-desc narrative">{% include "gestion/partials/long_text.html" with value=project.description limit=600 %}</div>{% endif %}
+  </div>
   <div class="page-actions">
     <a class="btn" href="{% url 'gestionsysteme:project-edit' project.pk %}">Modifier</a>
   </div>
+</div>
 {% endblock %}
 
 {% block content %}
-{% if pending %}
+{% if pending_count %}
   <div class="alert alert-warn mb-4">
     <div>
-      <strong>{{ pending|length }} action(s) attendent ton accord.</strong>
-      <a href="{% url 'gestionsysteme:projects-tab' 'attente' %}">Les traiter →</a>
+      <strong>{{ pending_count }} action(s) attendent ton accord.</strong>
+      <a href="{% url 'gestionsysteme:projects-tab' 'attente' %}?projet={{ project.pk }}&amp;statut=pending">Les traiter →</a>
     </div>
   </div>
 {% endif %}
 
-<section class="split mb-6">
+<section class="grid c3 mb-6" aria-label="État du projet">
+  <div class="card"><div class="card-head"><h3>Avancement</h3><span class="badge">{{ project.get_status_display }}</span></div>
+    <div class="card-body"><p class="meter-label">{{ done_count }} / {{ task_count }} tâches terminées</p><div class="meter ok"><span style="width: {{ progress|bar_width }}%;"></span></div>
+    {% if blocked_count %}<a class="badge badge-danger mt-3" href="{% qs etat_tache='blocked' p_taches='' %}">{{ blocked_count }} tâche(s) bloquée(s)</a>{% endif %}</div></div>
+  <div class="card"><div class="card-head"><h3>Prochain passage</h3></div><div class="card-body">
+    {% if project.next_run_at %}{{ project.next_run_at|dt_full }}{% else %}<span class="muted">Aucun passage planifié</span>{% endif %}
+    <p class="field-hint">{{ project.schedule_rule|default:"Exécution manuelle" }}</p>
+    {% if project.runs_since_user_input >= runs_cap %}<p class="badge badge-danger">Intervention humaine attendue</p>{% endif %}
+  </div></div>
+  <div class="card"><div class="card-head"><h3>Dernière activité</h3></div><div class="card-body">
+    {% if project.last_run_at %}{{ project.last_run_at|dt_full }}{% else %}<span class="muted">Le projet n’a pas encore été exécuté</span>{% endif %}
+    <p class="field-hint">{{ project.runs_since_user_input }} / {{ runs_cap }} passages sans retour humain</p>
+  </div></div>
+</section>
+
+
+<section class="card mb-6">
+  <div class="card-head"><h3>Plan de travail</h3><span class="card-sub">{{ tasks_page.total }} tâche(s) dans cette sélection</span><a class="btn btn-sm push" href="#ajouter-tache">Ajouter une tâche</a></div>
+  {% include "gestion/partials/filters.html" with filterset=task_filters %}
+  <div class="card-body task-list">
+    {% for t in tasks_page.rows %}
+      <article class="task-item">
+        <div class="reading-meta"><span class="mono">Étape {{ t.order }}</span><span class="badge {% if t.status == 'done' %}badge-ok{% elif t.status == 'blocked' %}badge-danger{% elif t.status == 'in_progress' %}badge-info{% endif %}">{{ task_status_labels|get:t.status }}</span></div>
+        <div class="narrative">{% include "gestion/partials/long_text.html" with value=t.description %}</div>
+        {% if t.blocked_reason %}<div class="alert alert-warn">{% include "gestion/partials/long_text.html" with value=t.blocked_reason %}</div>{% endif %}
+        {% if t.result %}<details class="disclosure"><summary>Résultat de la tâche</summary><div class="disclosure-body narrative">{% include "gestion/partials/long_text.html" with value=t.result %}</div></details>{% endif %}
+        <div class="task-actions row-wrap">
+          <form method="post" action="{% url 'gestionsysteme:task-update' project.pk t.pk %}" class="row-wrap" aria-label="Changer l’état de la tâche {{ t.order }}">
+            {% csrf_token %}<input type="hidden" name="retour" value="{{ request.get_full_path }}"><input type="hidden" name="action" value="etat">
+            {% for valeur, libelle in task_statuses %}{% if valeur != t.status %}<button class="btn btn-sm" type="submit" name="status" value="{{ valeur }}" aria-label="Passer la tâche {{ t.order }} à l’état {{ libelle }}">{{ libelle }}</button>{% endif %}{% endfor %}
+          </form>
+          <details class="disclosure"><summary>Autres actions</summary><div class="disclosure-body">
+          <form method="post" action="{% url 'gestionsysteme:task-update' project.pk t.pk %}" data-confirm="Supprimer cette tâche ?">
+            {% csrf_token %}<input type="hidden" name="retour" value="{{ request.get_full_path }}"><input type="hidden" name="action" value="supprimer"><button class="btn btn-sm btn-danger" type="submit">Supprimer</button>
+          </form>
+          </div></details>
+        </div>
+      </article>
+    {% empty %}<div class="empty">{% if task_count %}Aucune tâche ne correspond à ces filtres.{% else %}Le plan de travail est encore vide. Ajoute une première tâche ci-dessous.{% endif %}</div>{% endfor %}
+  </div>
+  <div class="card-foot">{% include "gestion/partials/pager.html" with page=tasks_page %}</div>
+  <div class="card-foot">
+    <form method="post" action="{% url 'gestionsysteme:task-create' project.pk %}"
+          class="task-create" id="ajouter-tache">
+      {% csrf_token %}<input type="hidden" name="retour" value="{{ request.get_full_path }}">
+      <div class="task-description">
+        {% include "gestion/partials/django_field.html" with field=task_form.description %}
+      </div>
+      <div>
+        {% include "gestion/partials/django_field.html" with field=task_form.status %}
+      </div>
+      <button class="btn btn-primary" type="submit">Ajouter la tâche</button>
+    </form>
+  </div>
+</section>
+
+<details class="card panel-disclosure mb-6"><summary>Consignes, périmètre et cadre d’exécution</summary><section class="split">
   <div class="card">
     <div class="card-head">
       <h3>Cadre d'exécution</h3>
       <span class="card-sub">ce qui gouverne son comportement pendant ce projet</span>
     </div>
     <div class="card-body">
-      {% if project.description %}<p class="narrative mb-4">{{ project.description }}</p>{% endif %}
-
       <dl class="kv">
         <dt>État</dt><dd><span class="badge">{{ project.get_status_display }}</span></dd>
         <dt>Priorité</dt><dd>{{ project.get_priority_display }}</dd>
@@ -67,7 +126,7 @@
           {% endif %}
           {% if project.runs_since_user_input %}
             <form method="post" action="{% url 'gestionsysteme:project-resume' project.pk %}" class="mt-2">
-              {% csrf_token %}
+              {% csrf_token %}<input type="hidden" name="retour" value="{{ request.get_full_path }}">
               <button class="btn btn-sm" type="submit"
                       title="Signale une intervention humaine : le compteur repart de zéro">
                 Remettre le compteur à zéro
@@ -92,17 +151,6 @@
   </div>
 
   <div class="col" style="gap: var(--sp-4);">
-    <div class="card">
-      <div class="card-head"><h3>Avancement</h3></div>
-      <div class="card-body">
-        <div class="spread mb-2">
-          <span class="meter-label">Tâches terminées</span>
-          <span class="meter-val">{{ done_count }} / {{ tasks|length }}</span>
-        </div>
-        <div class="meter ok"><span style="width: {{ progress|bar_width }}%;"></span></div>
-      </div>
-    </div>
-
     <div class="card">
       <div class="card-head"><h3>Ressources autorisées</h3></div>
       <div class="card-body">
@@ -130,75 +178,7 @@
       </div>
     </div>
   </div>
-</section>
-
-<section class="card mb-6">
-  <div class="card-head"><h3>Tâches</h3></div>
-  <div class="card-body flush">
-    <div class="table-scroll">
-      <table class="table">
-        <thead>
-          <tr>
-            <th class="num">#</th>
-            <th style="min-width:24rem;">Description</th>
-            <th class="fit">État</th>
-            <th>Résultat</th>
-            <th class="fit"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for t in tasks %}
-            <tr {% if t.status == "done" %}class="is-muted"{% endif %}>
-              <td class="num">{{ t.order }}</td>
-              <td>{{ t.description }}</td>
-              <td class="fit">
-                <span class="badge {% if t.status == 'done' %}badge-ok{% elif t.status == 'blocked' %}badge-danger{% elif t.status == 'in_progress' %}badge-info{% endif %}">{{ t.get_status_display }}</span>
-                {% if t.blocked_reason %}<small>{{ t.blocked_reason }}</small>{% endif %}
-              </td>
-              <td class="muted">{% include "gestion/partials/long_text.html" with value=t.result|default:"—" %}</td>
-              <td class="fit">
-                <div class="row">
-                  <form method="post" action="{% url 'gestionsysteme:task-update' project.pk t.pk %}" class="row">
-                    {% csrf_token %}
-                    <input type="hidden" name="action" value="etat">
-                    <select name="status" aria-label="État de la tâche" data-autosubmit>
-                      {% for valeur, libelle in task_statuses %}
-                        <option value="{{ valeur }}" {% if valeur == t.status %}selected{% endif %}>{{ libelle }}</option>
-                      {% endfor %}
-                    </select>
-                    <button class="btn btn-sm" type="submit">Appliquer</button>
-                  </form>
-                  <form method="post" action="{% url 'gestionsysteme:task-update' project.pk t.pk %}"
-                        data-confirm="Supprimer cette tâche ?">
-                    {% csrf_token %}
-                    <input type="hidden" name="action" value="supprimer">
-                    <button class="btn btn-sm btn-danger" type="submit">Supprimer</button>
-                  </form>
-                </div>
-              </td>
-            </tr>
-          {% empty %}
-            <tr><td colspan="5"><span class="muted">Aucune tâche.</span></td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <div class="card-foot">
-    <form method="post" action="{% url 'gestionsysteme:task-create' project.pk %}"
-          style="display: flex; gap: var(--sp-3); align-items: flex-end; flex-wrap: wrap; width: 100%;">
-      {% csrf_token %}
-      <div style="flex: 1; min-width: 18rem;">
-        {% include "gestion/partials/django_field.html" with field=task_form.description %}
-      </div>
-      <div>
-        {% include "gestion/partials/django_field.html" with field=task_form.status %}
-      </div>
-      <button class="btn btn-primary" type="submit">Ajouter la tâche</button>
-    </form>
-  </div>
-</section>
+</section></details>
 
 {% if atelier %}
 <section class="card mb-6">
@@ -210,10 +190,11 @@
     <div class="split">
       <div>
         <h4 class="muted">Fichiers</h4>
-        {% if atelier.fichiers %}
+        {% if atelier.files_page.rows %}
           <ul class="plain mono small">
-            {% for f in atelier.fichiers %}<li>{{ f }}</li>{% endfor %}
+            {% for f in atelier.files_page.rows %}<li>{{ f }}</li>{% endfor %}
           </ul>
+          {% include "gestion/partials/pager.html" with page=atelier.files_page %}
         {% else %}
           <div class="empty">L'atelier est encore vide.</div>
         {% endif %}
@@ -222,7 +203,7 @@
         {% endif %}
       </div>
       <div>
-        <h4 class="muted">Derniers enregistrements</h4>
+        <h4 class="muted">10 derniers enregistrements</h4>
         {% if atelier.historique %}
           <div class="table-scroll"><pre class="mono small">{{ atelier.historique }}</pre></div>
         {% else %}
@@ -266,4 +247,13 @@
     <div class="card-body"><div class="empty">Aucun passage enregistré.</div></div>
   {% endif %}
 </section>
+<details class="card panel-disclosure mt-6"{% if request.GET.p_prompts %} open{% endif %}>
+  <summary>Diagnostic des appels IA · {{ prompts_page.total }} trace(s) conservée(s)</summary>
+  <p class="field-hint card-body">Retrouver la demande, le contexte, la réponse brute et le résultat interprété d’un passage.</p>
+  <div class="table-scroll"><table class="table"><thead><tr><th>Quand</th><th>Issue</th><th class="num">Durée</th><th>Détail</th></tr></thead><tbody>
+    {% for p in prompts_page.rows %}<tr><td>{{ p.created_at|dt_full }}</td><td><span class="badge {% if p.outcome != 'ok' %}badge-warn{% endif %}">{{ p.outcome }}</span></td><td class="num">{{ p.duration_ms|default_if_none:"—" }} ms</td><td>{% include "gestion/partials/detail_link.html" with kind="prompt-projet" pk=p.pk %}</td></tr>
+    {% empty %}<tr><td colspan="4">Aucun appel IA conservé pour ce projet.</td></tr>{% endfor %}
+  </tbody></table></div>
+  <div class="card-foot">{% include "gestion/partials/pager.html" with page=prompts_page %}</div>
+</details>
 {% endblock %}

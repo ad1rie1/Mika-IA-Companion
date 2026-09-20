@@ -8,17 +8,17 @@
   <section class="card mb-6">
     <div class="card-head">
       <h3>Humeur vive</h3>
-      <span class="card-sub">l'oscillateur PAD en RAM — ne survit pas à un redémarrage</span>
+      <span class="card-sub">état courant du moteur affectif</span>
     </div>
     <div class="card-body">
       <div class="grid c3">
-        {% for a in affects %}
+        {% for a in affects_page.rows %}
           <div class="stat">
             <div class="stat-label mono">{{ a.person_id }}</div>
             <div class="stat-value">
               <span class="emo" style="{{ a.emotion|emo_style }}">{{ a.emotion|emo_fr }}</span>
             </div>
-            <div class="meter {{ a.intensity|tone_ratio }} mt-2">
+            <div class="meter {{ a.emotion|emo_tone }} mt-2">
               <span style="width: {{ a.intensity|bar_width }}%;"></span>
             </div>
             <div class="stat-sub">
@@ -35,6 +35,7 @@
         {% endfor %}
       </div>
     </div>
+    {% if affects_page.has_next or affects_page.has_prev %}<div class="card-foot">{% include "gestion/partials/pager.html" with page=affects_page %}</div>{% endif %}
   </section>
 
   <section class="card mb-6">
@@ -44,6 +45,8 @@
     </div>
 
     <form class="filters" method="get" role="search">
+      {% if request.GET.p_humeurs %}<input type="hidden" name="p_humeurs" value="{{ request.GET.p_humeurs }}">{% endif %}
+      {% if request.GET.instantanes %}<input type="hidden" name="instantanes" value="{{ request.GET.instantanes }}">{% endif %}
       <div class="field">
         <label class="field-label" for="filtre-periode">Période</label>
         <select id="filtre-periode" name="periode" data-autosubmit>
@@ -56,13 +59,13 @@
       </div>
     </form>
 
-    {% if summaries %}
+    {% if summaries_page.rows %}
       <div class="card-body flush">
         <div class="table-scroll">
           <table class="table">
             <thead>
               <tr>
-                <th class="fit">Début</th>
+                <th class="fit">Début</th><th>Handle</th>
                 <th>Émotion dominante</th>
                 <th style="min-width: 8rem;">Intensité</th>
                 <th class="fit">Tendance</th>
@@ -71,25 +74,25 @@
               </tr>
             </thead>
             <tbody>
-              {% for s in summaries %}
+              {% for s in summaries_page.rows %}
                 <tr>
-                  <td class="fit">{{ s.period_start|dt }}</td>
+                  <td class="fit">{{ s.period_start|dt }}</td><td class="mono text-xs">{{ s.person_id }}</td>
                   <td><span class="emo" style="{{ s.dominant_emotion|emo_style }}">{{ s.dominant_emotion|emo_fr }}</span></td>
                   <td>
                     <div class="row">
-                      <span class="meter {{ s.dominant_intensity|tone_ratio }}" style="flex:1; min-width:4rem;">
+                      <span class="meter {{ s.dominant_emotion|emo_tone }}" style="flex:1; min-width:4rem;">
                         <span style="width: {{ s.dominant_intensity|bar_width }}%;"></span>
                       </span>
                       <span class="tabular text-xs">{{ s.dominant_intensity|num }}</span>
                     </div>
                   </td>
-                  <td class="fit"><span class="badge">{{ s.trend }}</span></td>
+                  <td class="fit"><span class="badge">{{ s.trend|trend_label }}</span></td>
                   <td class="num">{{ s.snapshot_count }}</td>
                   <td>
                     <span class="chips">
                       {% for nom, poids in s.emotion_distribution.items %}
                         <span class="chip emo" style="{{ nom|emo_style }}">{{ nom|emo_fr }}
-                          <span class="emo-weight">{{ poids|num }}</span>
+                          <span class="emo-weight">{{ poids|pct }}</span>
                         </span>
                       {% endfor %}
                     </span>
@@ -108,6 +111,7 @@
         </div>
       </div>
     {% endif %}
+    <div class="card-foot">{% include "gestion/partials/pager.html" with page=summaries_page %}</div>
   </section>
 
   <section class="card">
@@ -136,7 +140,7 @@
                   <td><span class="emo" style="{{ s.primary_emotion|emo_style }}">{{ s.primary_emotion|emo_fr }}</span></td>
                   <td>
                     <div class="row">
-                      <span class="meter {{ s.primary_intensity|tone_ratio }}" style="flex:1; min-width:4rem;">
+                      <span class="meter {{ s.primary_emotion|emo_tone }}" style="flex:1; min-width:4rem;">
                         <span style="width: {{ s.primary_intensity|bar_width }}%;"></span>
                       </span>
                       <span class="tabular text-xs">{{ s.primary_intensity|num }}</span>

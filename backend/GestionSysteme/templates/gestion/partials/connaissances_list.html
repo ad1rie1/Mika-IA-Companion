@@ -1,0 +1,16 @@
+{% load gestion %}
+<section class="card mb-4">{% include "gestion/partials/filters.html" %}<div class="card-foot"><span class="muted">{{ page.total }} connaissance{{ page.total|pluralize }} · Faits retenus, confiance et provenance.</span></div></section>
+<div class="reading-list">
+{% for c in page.rows %}
+  <article class="reading-item">
+    <div class="reading-meta"><span class="badge {% if c.is_valid %}badge-ok{% else %}badge-danger{% endif %}">{% if c.is_valid %}Valide{% else %}Invalidée{% endif %}</span><span class="badge">{{ c.get_sensibilite_display }}</span><span title="{{ c.updated_at|dt_full }}">Modifiée le {{ c.updated_at|dt }}</span><span class="push">Confiance {{ c.confidence|pct }}</span></div>
+    {% include "gestion/partials/long_text.html" with value=c.content limit=450 %}
+    <div class="reading-footer">
+      <span class="chips">{% for t in c.themes.all %}<a class="chip" href="{% url 'gestionsysteme:memory-tab' 'connaissances' %}?theme={{ t.name|urlencode }}">{{ t.name }}</a>{% endfor %}{% for e in c.entities.all %}<a class="chip" href="{% url 'gestionsysteme:memory-tab' 'connaissances' %}?entite={{ e.pk }}">{{ e.name }}</a>{% endfor %}</span>
+      {% if c.source_souvenir_id %}<a href="{% url 'gestionsysteme:record-detail' 'souvenir' c.source_souvenir_id %}">Souvenir source</a>{% endif %}
+      <span class="push">{% include "gestion/partials/detail_link.html" with kind="connaissance" pk=c.pk %}</span>
+    </div>
+  </article>
+{% empty %}<div class="card"><div class="empty">{% if filterset.active %}Aucune connaissance ne correspond à ces filtres.{% else %}Aucune connaissance enregistrée ici pour le moment.{% endif %}</div></div>{% endfor %}
+</div>
+<div class="mt-4">{% include "gestion/partials/pager.html" %}</div>

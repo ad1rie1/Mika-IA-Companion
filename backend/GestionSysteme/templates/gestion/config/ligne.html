@@ -23,7 +23,7 @@
      s'affichait deux fois de suite. {% endcomment %}
 
   <form method="post" action="{{ post_url }}">
-    {% csrf_token %}
+    {% csrf_token %}<input type="hidden" name="retour" value="{{ back_url }}">
     <div class="card-body">
 
       {% if form.dynamic %}

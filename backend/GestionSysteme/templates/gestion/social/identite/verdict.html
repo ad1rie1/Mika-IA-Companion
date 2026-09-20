@@ -44,8 +44,10 @@
           <dt>Liée le</dt><dd>{{ identity.bound_at|dt_full }} <small>via {{ identity.bound_via }}</small></dd>
         {% endif %}
         {% if identity.binding_reason %}
-          <dt>Motif</dt><dd>{{ identity.binding_reason }}</dd>
+          <dt>Motif</dt><dd>{% include "gestion/partials/long_text.html" with value=identity.binding_reason %}</dd>
         {% endif %}
+        {% if identity.notes %}<dt>Notes</dt><dd>{% include "gestion/partials/long_text.html" with value=identity.notes %}</dd>{% endif %}
+        <dt>Créée le</dt><dd>{{ identity.created_at|dt_full }}</dd>
         <dt>Vue</dt><dd title="{{ identity.last_seen|dt_full }}">{{ identity.last_seen|ago }}</dd>
       </dl>
     </div>
@@ -59,7 +61,7 @@
   <div class="card">
     <div class="card-head">
       <h3>Comment on arrive là</h3>
-      <span class="card-sub">servi depuis <span class="mono">identity/trust.py</span>, jamais recopié</span>
+      <span class="card-sub">règles de confiance actuellement appliquées</span>
     </div>
     <div class="card-body">
       <dl class="kv">
@@ -115,7 +117,7 @@
 {% if pending_claims %}
   <section class="card mb-6">
     <div class="card-head">
-      <h3>En attente de décision</h3>
+      <h3>En attente de décision ({{ pending_claim_count }})</h3>
       <span class="card-sub">une revendication n'est pas comptée tant que personne n'a tranché</span>
     </div>
     <div class="card-body">
@@ -132,6 +134,7 @@
         {% endfor %}
       </div>
     </div>
+    <div class="card-foot"><a href="{% url 'gestionsysteme:identity-detail-tab' identity.pk 'preuves' %}?statut=pending">Voir toutes les revendications en attente →</a></div>
   </section>
 {% endif %}
 

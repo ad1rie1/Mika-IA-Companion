@@ -48,10 +48,10 @@
     </div>
     <div class="card-body">
       {% if profile %}
-        <div class="narrative mb-4">{{ profile.summary }}</div>
+        <div class="narrative mb-4">{% include "gestion/partials/long_text.html" with value=profile.summary limit=600 %}</div>
         <dl class="kv">
-          <dt>Proximité</dt><dd><span class="badge">{{ profile.get_closeness_display }}</span></dd>
-          <dt>Ton préféré</dt><dd>{{ profile.get_preferred_tone_display|default:"—" }}</dd>
+          <dt>Proximité</dt><dd><span class="badge">{{ profile.closeness|closeness_label }}</span></dd>
+          <dt>Ton préféré</dt><dd>{{ profile.preferred_tone|tone_label }}</dd>
           <dt>Échanges</dt><dd class="tabular">{{ profile.interaction_count }}</dd>
           <dt>Confiance</dt>
           <dd>
@@ -76,8 +76,7 @@
       {% else %}
         <div class="empty">
           <div class="empty-title">Pas encore de fiche</div>
-          Elle se génère après ≥ 3 souvenirs mentionnant cette personne et ≥ 24 h
-          depuis la dernière génération.
+          Le profil sera rédigé lorsque les souvenirs disponibles suffiront à décrire cette personne.
         </div>
       {% endif %}
     </div>
@@ -87,10 +86,10 @@
     <div class="card">
       <div class="card-head">
         <h3>Ce qu'elle ressent</h3>
-        <span class="card-sub">mémoire vive, un oscillateur par handle</span>
+        <span class="card-sub">humeur actuelle selon ses identifiants</span>
       </div>
       <div class="card-body">
-        {% for a in affects %}
+        {% for a in affects_page.rows %}
           <div class="{% if not forloop.last %}mb-4{% endif %}">
             <div class="spread mb-2">
               <span class="emo text-lg" style="{{ a.emotion|emo_style }}">{{ a.emotion|emo_fr }}</span>
@@ -108,8 +107,7 @@
         {% empty %}
           <p class="muted text-sm">
             {% if person_ids %}
-              Aucune humeur en mémoire vive pour ses handles. L'état affectif se
-              reconstruit au fil des échanges et ne survit pas à un redémarrage.
+              Aucune humeur en mémoire vive pour ses handles. L'état affectif évolue au fil des échanges et peut être restauré depuis les états conservés.
             {% else %}
               Aucun handle lié — l'humeur est tenue par identifiant de transport,
               elle n'a donc rien à quoi se rattacher ici.
@@ -117,9 +115,10 @@
           </p>
         {% endfor %}
       </div>
+      {% if affects_page.has_next or affects_page.has_prev %}<div class="card-foot">{% include "gestion/partials/pager.html" with page=affects_page %}</div>{% endif %}
     </div>
 
-    {% if projects %}
+    {% if projects_page.total %}
       <div class="card">
         <div class="card-head">
           <h3>Projets confiés</h3>
@@ -127,7 +126,7 @@
         </div>
         <div class="card-body">
           <div class="col">
-            {% for p in projects %}
+            {% for p in projects_page.rows %}
               <div class="spread">
                 <a href="{% url 'gestionsysteme:project-detail' p.pk %}">{{ p.title }}</a>
                 <span class="badge">{{ p.get_status_display }}</span>
@@ -135,6 +134,7 @@
             {% endfor %}
           </div>
         </div>
+        <div class="card-foot">{% include "gestion/partials/pager.html" with page=projects_page %}</div>
       </div>
     {% endif %}
   </div>
@@ -145,7 +145,7 @@
     <h3>Identités &amp; handles</h3>
     <span class="card-sub">par où elle la joint, et à quel point elle en est sûre</span>
   </div>
-  {% if verdicts %}
+  {% if verdicts_page.rows %}
     <div class="card-body flush">
       <div class="table-scroll">
         <table class="table">
@@ -160,7 +160,7 @@
             </tr>
           </thead>
           <tbody>
-            {% for v in verdicts %}
+            {% for v in verdicts_page.rows %}
               <tr>
                 <td>
                   <a href="{% url 'gestionsysteme:identity-detail' v.obj.pk %}">
@@ -192,6 +192,7 @@
                       <span class="muted text-sm">aucun</span>
                     {% endfor %}
                   </span>
+                  <a class="detail-link" href="{% url 'gestionsysteme:identity-detail-tab' v.obj.pk 'handles' %}">Voir les {{ v.handle_count }} identifiants →</a>
                 </td>
                 <td class="fit muted" title="{{ v.obj.last_seen|dt_full }}">{{ v.obj.last_seen|ago }}</td>
               </tr>
@@ -221,6 +222,7 @@
       </div>
     </div>
   {% endif %}
+  <div class="card-foot">{% include "gestion/partials/pager.html" with page=verdicts_page %}</div>
 </section>
 {% if divulgation %}
 <section class="card mt-6">
@@ -240,7 +242,7 @@
       <dt>Canal</dt>
       <dd>{{ divulgation.canal }}{% if divulgation.publique %} <span class="muted text-xs">— salle publique : jamais plus qu'anodin</span>{% endif %}</dd>
       <dt>Proximité</dt>
-      <dd>{{ divulgation.closeness }} <span class="muted text-xs">(le personnel s'ouvre à partir de « friend »)</span></dd>
+      <dd>{{ divulgation.closeness|closeness_label }} <span class="muted text-xs">(le personnel s'ouvre à partir d'une relation amicale)</span></dd>
       <dt>Chaleur de l'ancre</dt>
       <dd class="tabular">{% if divulgation.ancre_lue %}{{ divulgation.chaleur|num }}{% else %}— <span class="muted text-xs">aucune ancre en mémoire vive</span>{% endif %}
         <span class="muted text-xs">(compte comme un lien dès {{ divulgation.chaleur_min|num }})</span></dd>

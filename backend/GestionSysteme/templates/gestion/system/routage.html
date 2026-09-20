@@ -14,7 +14,7 @@
       modèle sous <em>IA · Modèles</em>, puis associe les rôles sous
       <em>IA · Rôles</em>. Tant que <span class="mono">conversation</span> n'est
       pas associé, chaque tour répond « Mon IA n'a pas de modèle associé ».
-      <a href="{% url 'gestionsysteme:config' %}">Aller à la configuration →</a>
+      <a href="{% url 'gestionsysteme:config-section' 'ai_roles' %}">Aller à la configuration →</a>
     </div>
   </div>
 {% endif %}
@@ -54,7 +54,7 @@
 <section class="grid c2 mb-6">
   <div class="card">
     <div class="card-head">
-      <h3>Fournisseurs</h3>
+      <h3>Fournisseurs</h3><a class="btn btn-sm" href="{% url 'gestionsysteme:config-section' 'ai_providers' %}">Configurer</a>
       <span class="card-sub">présence des identifiants, jamais leur valeur</span>
     </div>
     <div class="card-body">
@@ -85,12 +85,13 @@
       <h3>Modèles déclarés</h3>
       <span class="card-sub">un rôle ne peut viser qu'un nom déclaré ici</span>
     </div>
+    {% include "gestion/partials/filters.html" with filterset=model_filters %}
     <div class="card-body flush">
       <div class="table-scroll">
         <table class="table">
           <thead><tr><th>Nom interne</th><th class="fit">Fournisseur</th><th>Identifiant</th><th class="fit">Actif</th></tr></thead>
           <tbody>
-            {% for row in models %}
+            {% for row in models_page.rows %}
               <tr>
                 <td class="mono">{{ row.payload.internal_name|default:"—" }}</td>
                 <td class="fit">{{ row.payload.provider|default:"—" }}</td>
@@ -104,6 +105,7 @@
         </table>
       </div>
     </div>
+    <div class="card-foot">{% include "gestion/partials/pager.html" with page=models_page %}<a class="btn btn-sm" href="{% url 'gestionsysteme:config-section' 'ai_models' %}">Gérer les modèles</a></div>
   </div>
 </section>
 {% endblock %}

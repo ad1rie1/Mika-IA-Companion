@@ -13,7 +13,7 @@
         <span class="emo text-lg" style="{{ global_mood.label|emo_style }}">{{ global_mood.label|emo_fr }}</span>
         <span class="tabular muted">{{ global_mood.intensity|pct }}</span>
       </div>
-      <div class="meter {{ global_mood.intensity|tone_ratio }} mb-4">
+      <div class="meter {{ global_mood.label|emo_tone }} mb-4">
         <span style="width: {{ global_mood.intensity|bar_width }}%;"></span>
       </div>
 
@@ -87,9 +87,10 @@
 <section class="card">
   <div class="card-head">
     <h3>Affect par personne</h3>
-    <span class="card-sub">état vivant, en mémoire — remis à zéro au redémarrage</span>
+    <span class="card-sub">état courant, restauré au démarrage quand une sauvegarde existe</span>
   </div>
 
+  {% include "gestion/partials/filters.html" %}
   {% if people_page.rows %}
     <div class="card-body flush">
       <div class="table-scroll">
@@ -110,11 +111,11 @@
           <tbody>
             {% for p in people_page.rows %}
               <tr>
-                <td class="mono">{{ p.person_id }}</td>
+                <td>{% if p.entity_id %}<a href="{% url 'gestionsysteme:person-detail-tab' p.entity_id 'affect' %}">{{ p.entity_name }}</a>{% endif %}<div class="mono text-xs">{{ p.person_id }}</div></td>
                 <td><span class="emo" style="{{ p.emotion|emo_style }}">{{ p.emotion|emo_fr }}</span></td>
                 <td>
                   <div class="row">
-                    <span class="meter {{ p.intensity|tone_ratio }}" style="flex:1; min-width:4rem;">
+                    <span class="meter {{ p.emotion|emo_tone }}" style="flex:1; min-width:4rem;">
                       <span style="width: {{ p.intensity|bar_width }}%;"></span>
                     </span>
                     <span class="tabular text-xs">{{ p.intensity|pct }}</span>
@@ -133,8 +134,10 @@
   {% else %}
     <div class="card-body">
       <div class="empty">
-        <div class="empty-title">Aucune personne suivie</div>
-        Les humeurs par personne sont reconstruites au fil des conversations.
+        {% if filterset.active %}Aucun identifiant ne correspond à cette recherche.{% else %}
+          <div class="empty-title">Aucune personne suivie</div>
+          Les humeurs par personne évoluent au fil des conversations.
+        {% endif %}
       </div>
     </div>
   {% endif %}

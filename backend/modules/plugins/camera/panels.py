@@ -20,8 +20,8 @@ from __future__ import annotations
 
 import time
 
-from GestionSysteme import panels as P
-from GestionSysteme.formatting import ago_span, clip, duration
+from GestionSysteme import panels as P, tables
+from GestionSysteme.formatting import ago_span, clip, duration, display_text
 
 # Repli de ``camera.panel_observation_chars`` — même valeur que le ``default``
 # déclaré dans ``config_schema.py``. Troncature d'affichage seulement.
@@ -39,10 +39,15 @@ def devices(request):
     now = time.time()
     etats = sorted(module._devices.values(), key=lambda s: s.label.lower())
 
-    return P.Blocks(items=[
-        _boucle(module, conf),
-        _tableau(etats, now),
-    ])
+    page = tables.paginate(request, etats, per_page=25)
+    table = _tableau(page.rows, now)
+    table.page = page
+    table.caption = f"Caméras · retrait après {duration(conf.device_stale_timeout)} sans image"
+    return P.Blocks(items=[_boucle(module, conf), table, P.Disclosure(
+        title="Connecter une caméra", items=[P.Note(
+            "Le client caméra envoie ses images au WebSocket ws/camera?device=<identifiant>&label=<nom>. "
+            "Chaque appareil utilise un identifiant distinct ; il apparaît ici à la réception de ses images. "
+            "Le panneau affiche les observations, pas la vidéo.")])])
 
 
 # ── Blocs ───────────────────────────────────────────────────────────────
@@ -50,12 +55,14 @@ def devices(request):
 def _boucle(module, conf) -> P.Fields:
     """État de la boucle d'analyse : ce qu'elle a le droit de faire, et si
     elle le fait en ce moment."""
-    actif = conf.proactive_enabled and module._analysis_allowed(conf)
+    actif = module.is_running and conf.proactive_enabled and module._analysis_allowed(conf)
 
-    if not conf.proactive_enabled:
+    if not module.is_running:
+        etat, ton = "module arrêté", "warn"
+    elif not conf.proactive_enabled:
         etat, ton = "désactivée", "warn"
     elif actif:
-        etat, ton = "en cours", "ok"
+        etat, ton = "autorisée", "ok"
     else:
         etat, ton = "suspendue (sommeil ou inactivité)", "info"
 
@@ -93,21 +100,24 @@ def _tableau(etats, now: float) -> P.Table:
         frame_age = now - state.frame_ts
         vivant = frame_age <= seuil_vivant
         rows.append(P.Row(cells=(
-            P.mono(state.device_id),
             P.text(state.label),
+            P.mono(state.device_id),
             P.badge("en ligne" if vivant else "silencieux",
                     tone="ok" if vivant else "warn"),
             P.text(ago_span(frame_age)),
             P.text(_depuis(state.last_analysis_ts, now)),
             P.text(_depuis(state.last_notify_ts, now)),
-            P.text(clip(state.observation, obs_max) or "—", clamp=True),
+            P.text(clip(state.observation, obs_max) or "—"),
             P.text(state.notable_reason or "—", clamp=True),
-        )))
+        ), detail=P.Blocks([
+            P.Prose(display_text(state.observation or "Aucune observation.", limit=100_000), title="Observation complète"),
+            P.Prose(display_text(state.notable_reason or "Aucun motif notable.", limit=20_000), title="Motif notable"),
+        ])))
 
     return P.Table(
         columns=[
-            P.Column("Device"),
-            P.Column("Libellé"),
+            P.Column("Caméra", align="fit"),
+            P.Column("Identifiant"),
             P.Column("Flux", align="fit"),
             P.Column("Dernière frame", align="fit"),
             P.Column("Dernière analyse", align="fit"),
@@ -116,8 +126,7 @@ def _tableau(etats, now: float) -> P.Table:
             P.Column("Motif notable"),
         ],
         rows=rows,
-        empty="Aucun device connecté — ws/camera?device=<id>&label=<nom>.",
-        caption="Un device disparaît de lui-même après 10 min sans frame.",
+        empty="Aucune caméra connectée.",
     )
 
 
@@ -151,7 +160,7 @@ def _depuis(ts: float, now: float) -> str:
 def get_panels() -> list:
     return [
         P.ModulePanel(
-            key="devices", label="Devices", icon="◉", order=10,
+            key="devices", label="Caméras", icon="◉", order=10,
             handler=devices,
             description=(
                 "Caméras connectées, dernière observation produite pour "

@@ -69,13 +69,16 @@ def _active(request) -> dict:
         qs = qs.filter(title__icontains=search.value)
     if status.value:
         qs = qs.filter(status=status.value)
-    qs = qs.order_by("-priority", "-updated_at")
+    qs = qs.order_by("-priority", "-updated_at", "-pk")
 
     page = tables.paginate(request, qs, per_page=fs.per_page)
     for project in page.rows:
         project.progress = (project.n_done / project.n_tasks) if project.n_tasks else 0.0
 
-    return {"filterset": fs, "page": page}
+    from configs.runtime import cfg_int
+    from projects.runner import RUNS_SINCE_INPUT_CAP
+    return {"filterset": fs, "page": page,
+            "runs_cap": cfg_int("projects.runs_since_input_cap", RUNS_SINCE_INPUT_CAP, mini=1)}
 
 
 # ── Création / édition ──────────────────────────────────────────────────
@@ -154,7 +157,7 @@ def project_resume(request, project_id: int):
         request,
         f"Compteur remis à zéro : « {projet.title} » peut repartir.",
     )
-    return redirect("gestionsysteme:project-detail", project_id=projet.pk)
+    return _return_project(request, projet)
 
 
 @require_POST
@@ -198,7 +201,7 @@ def task_create(request, project_id: int):
         messages.success(request, "Tâche ajoutée.")
     else:
         messages.error(request, _premier_message(form) or "Tâche invalide.")
-    return redirect("gestionsysteme:project-detail", project_id=projet.pk)
+    return _return_project(request, projet)
 
 
 @require_POST
@@ -229,7 +232,14 @@ def task_update(request, project_id: int, task_id: int):
     else:
         messages.error(request, "Action inconnue.")
 
-    return redirect("gestionsysteme:project-detail", project_id=projet.pk)
+    return _return_project(request, projet)
+
+
+def _return_project(request, project):
+    return redirect(retour_sur(
+        request, reverse("gestionsysteme:project-detail", args=[project.pk]),
+        prefix="/gestion/",
+    ))
 
 
 def _premier_message(form) -> str:
@@ -275,38 +285,58 @@ def _lire_atelier(project) -> dict | None:
 
 
 def project_detail(request, project_id: int):
-    from projects.models import ProjectLog, ProjectPendingAction, ProjectTask
+    from django.db.models import Count, Q
+    from projects.models import ProjectLog, ProjectPendingAction, ProjectTask, ProjectPromptHistory
     from configs.runtime import cfg_int
     from projects.runner import RUNS_SINCE_INPUT_CAP
 
-    from GestionSysteme.project_forms import ProjectTaskForm
+    from GestionSysteme.project_forms import ProjectTaskForm, TASK_STATUSES
 
     project = _project_or_404(project_id)
 
-    tasks = ProjectTask.objects.filter(project=project).order_by("order", "id")
-    done = sum(1 for t in tasks if t.status == "done")
+    tasks = ProjectTask.objects.filter(project=project)
+    counts = tasks.aggregate(total=Count("pk"), done=Count("pk", filter=Q(status="done")),
+                             blocked=Count("pk", filter=Q(status="blocked")))
+    fs = tables.FilterSet(per_page=25, show_per_page=False, prefix="tasks")
+    search = fs.add(tables.search_filter(request, "tache", "Tâche", placeholder="description, résultat"))
+    status = fs.add(tables.select_filter(request, "etat_tache", "État", TASK_STATUSES))
+    fs.preserve(request, page_param="p_taches")
+    if search.value:
+        tasks = tasks.filter(Q(description__icontains=search.value) | Q(result__icontains=search.value))
+    if status.value:
+        tasks = tasks.filter(status=status.value)
+    atelier = _lire_atelier(project)
+    if atelier is not None:
+        atelier["files_page"] = tables.paginate(request, atelier.pop("fichiers"), per_page=25, page_param="p_fichiers")
 
     item = item_for("projects")
     ctx = page_context(
         request, item=item, active_key="projects", active_tab="actifs",
         title=project.title,
-        description=project.description or "Engagement de travail.",
+        description=project.description,
     )
     ctx.update({
         "project": project,
-        "tasks": tasks,
-        "progress": (done / len(tasks)) if tasks else 0.0,
-        "done_count": done,
-        "pending": ProjectPendingAction.objects.filter(
+        "tasks_page": tables.paginate(request, tasks.order_by("order", "pk"), per_page=25, page_param="p_taches"),
+        "task_filters": fs,
+        "task_count": counts["total"],
+        "blocked_count": counts["blocked"],
+        "progress": counts["done"] / counts["total"] if counts["total"] else 0.0,
+        "done_count": counts["done"],
+        "pending_count": ProjectPendingAction.objects.filter(
             project=project, status="pending",
-        ).order_by("-created_at"),
+        ).count(),
         "logs_page": tables.paginate(
             request,
-            ProjectLog.objects.filter(project=project).select_related("task"),
-            per_page=25,
+            ProjectLog.objects.filter(project=project).select_related("task").order_by("-created_at", "-pk"),
+            per_page=25, page_param="p_journal",
         ),
+        "prompts_page": tables.paginate(request,
+            ProjectPromptHistory.objects.filter(project=project).defer("system_prompt", "raw_response", "parsed_output", "user_prompt").order_by("-created_at", "-pk"),
+            per_page=10, page_param="p_prompts"),
         "task_form": ProjectTaskForm(),
-        "task_statuses": ProjectTask.Status.choices,
+        "task_statuses": TASK_STATUSES,
+        "task_status_labels": dict(TASK_STATUSES),
         # Le plafond vient du lanceur : la fiche annonce « n / plafond » et
         # décide d'afficher la reprise, elle n'a pas à en garder sa copie.
         # Lu dans la configuration, pas sur la constante : celle-ci n'est plus
@@ -314,7 +344,7 @@ def project_detail(request, project_id: int):
         # lanceur s'arrête à 5 se lit comme un projet bloqué sans raison.
         "runs_cap": cfg_int(
             "projects.runs_since_input_cap", RUNS_SINCE_INPUT_CAP, mini=1),
-        "atelier": _lire_atelier(project),
+        "atelier": atelier,
     })
     return render(request, "gestion/projects/detail.html", ctx)
 
@@ -332,11 +362,14 @@ def _pending(request) -> dict:
     ))
 
     qs = ProjectPendingAction.objects.select_related("project", "task")
+    qs = _project_filter(request, fs, qs)
     if status.value:
         qs = qs.filter(status=status.value)
-    qs = qs.order_by("-created_at")
+    qs = qs.order_by("-created_at", "-pk")
 
-    return {"filterset": fs, "page": tables.paginate(request, qs, per_page=fs.per_page)}
+    return {"filterset": fs, "page": tables.paginate(request, qs, per_page=fs.per_page),
+            "pending_selection": status.value == "pending",
+            "project_selection": any(f.value for f in fs.filters if f.param == "projet")}
 
 
 @require_POST
@@ -441,23 +474,29 @@ def _after_user_input(project_id: int) -> None:
 # ── Journal d'exécution ─────────────────────────────────────────────────
 
 def _log(request) -> dict:
-    from projects.models import Project, ProjectLog
+    from projects.models import ProjectLog
 
     fs = tables.FilterSet(per_page=tables.read_per_page(request))
-    project = fs.add(tables.select_filter(
-        request, "projet", "Projet",
-        [(str(p.pk), p.title) for p in Project.objects.order_by("title")[:200]],
-    ))
     action = fs.add(tables.select_filter(
         request, "action", "Action",
         [(v, l) for v, l in ProjectLog.Action.choices],
     ))
 
     qs = ProjectLog.objects.select_related("project", "task")
-    if project.value:
-        qs = qs.filter(project_id=project.value)
+    qs = _project_filter(request, fs, qs)
     if action.value:
         qs = qs.filter(action=action.value)
-    qs = qs.order_by("-created_at")
+    qs = qs.order_by("-created_at", "-pk")
 
     return {"filterset": fs, "page": tables.paginate(request, qs, per_page=fs.per_page)}
+
+
+def _project_filter(request, fs, queryset):
+    project = fs.add(tables.search_filter(request, "projet", "Projet", placeholder="titre ou #identifiant"))
+    value = project.value
+    if not value:
+        return queryset
+    if value.lstrip("#").isdigit():
+        pk = int(value.lstrip("#"))
+        return queryset.filter(project_id=pk) if pk < 2**63 else queryset.none()
+    return queryset.filter(project__title__icontains=value)

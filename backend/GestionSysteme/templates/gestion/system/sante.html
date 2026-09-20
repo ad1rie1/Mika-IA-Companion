@@ -20,7 +20,7 @@
   </div>
   <div class="stat">
     <div class="stat-label">Abonnés en échec</div>
-    <div class="stat-value">{{ failing|length }}</div>
+    <div class="stat-value">{{ failing_count }}</div>
     <div class="stat-sub">un abonné cassé n'arrête jamais la diffusion</div>
   </div>
 </section>
@@ -68,7 +68,7 @@
   mémoire vive et repart de zéro à chaque redémarrage.
 </div>
 
-{% if failing %}
+{% if failing_count %}
   <section class="card mb-6">
     <div class="card-head">
       <h3>Abonnés du bus en échec</h3>
@@ -79,7 +79,7 @@
         <table class="table">
           <thead><tr><th>Abonné</th><th>Motif</th><th class="num">Livrés</th><th class="num">Échecs</th><th>Dernière erreur</th></tr></thead>
           <tbody>
-            {% for s in failing %}
+            {% for s in failing_subscriptions %}
               <tr>
                 <td class="mono">{{ s.name }}</td>
                 <td class="mono text-xs">{{ s.pattern }}</td>
@@ -92,7 +92,7 @@
         </table>
       </div>
     </div>
-  </section>
+</section>
 {% endif %}
 
 <section class="card mb-6">
@@ -301,19 +301,19 @@
 <section class="card">
   <div class="card-head">
     <h3>Abonnements au bus</h3>
-    <span class="card-sub">qui écoute quoi</span>
+    <span class="card-sub">ordre de diffusion · priorité croissante, puis nom</span>
   </div>
   <div class="card-body flush">
     <div class="table-scroll">
       <table class="table">
         <thead><tr><th>Abonné</th><th>Motif</th><th class="fit">Mode</th><th class="num">Priorité</th><th class="num">Livrés</th><th class="num">Échecs</th></tr></thead>
         <tbody>
-          {% for s in subscriptions %}
+          {% for s in subscriptions_page.rows %}
             <tr>
               <td class="mono">{{ s.name }}</td>
               <td class="mono text-xs">{{ s.pattern }}</td>
               <td class="fit"><span class="badge">{{ s.mode|default:"—" }}</span></td>
-              <td class="num">{{ s.priority|default:"—" }}</td>
+              <td class="num">{{ s.priority|default_if_none:"—" }}</td>
               <td class="num">{{ s.delivered }}</td>
               <td class="num">{% if s.failed %}<span class="badge badge-danger">{{ s.failed }}</span>{% else %}0{% endif %}</td>
             </tr>
@@ -324,5 +324,6 @@
       </table>
     </div>
   </div>
+<div class="card-foot">{% include "gestion/partials/pager.html" with page=subscriptions_page %}</div>
 </section>
 {% endblock %}
