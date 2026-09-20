@@ -1,127 +1,30 @@
 {% extends "gestion/base.html" %}
 {% load gestion %}
-
 {% block content %}
 <section class="grid c3 mb-6">
-  <div class="stat">
-    <div class="stat-label">Chantiers en cours</div>
-    <div class="stat-value">{{ en_cours }}</div>
-    <div class="stat-sub">menés de front, un pas à la fois</div>
-  </div>
-  <div class="stat">
-    <div class="stat-label">Total enregistré</div>
-    <div class="stat-value">{{ page.paginator.count }}</div>
-    <div class="stat-sub">clos gardés 90 jours</div>
-  </div>
-  <div class="stat">
-    <div class="stat-label">Demi-vie du désir</div>
-    <div class="stat-value">6 h</div>
-    <div class="stat-sub">en temps d'horloge, pas en cycles</div>
-  </div>
+  <div class="stat"><div class="stat-label">En cours</div><div class="stat-value">{{ en_cours }}</div><div class="stat-sub">Chantiers actifs</div></div>
+  <div class="stat"><div class="stat-label">Résultats</div><div class="stat-value">{{ page.total }}</div><div class="stat-sub">Selon les filtres actuels</div></div>
+  <div class="stat"><div class="stat-label">En attente de réponse</div><div class="stat-value">{{ en_attente }}</div><div class="stat-sub">Parmi les chantiers en cours</div></div>
 </section>
-
-<div class="alert alert-info mb-4">
-  Une pensée qui insiste, une curiosité saillante ou un signal venu du dehors
-  peut lui ouvrir un <strong>chantier</strong> : quelque chose qu'elle a décidé
-  de faire et sur lequel elle revient, un pas par quart d'heure, en silence. Le
-  désir décroît en temps réel — un chantier dont plus personne ne veut
-  s'abandonne tout seul. <strong>L'inachevé n'est pas effacé</strong> : une
-  ligne abandonnée reste lisible, c'est une information sur elle.
-</div>
-
-<section class="card">
-  {% include "gestion/partials/filters.html" %}
-
-  {% if lignes %}
-    <div class="card-body flush">
-      <div class="table-scroll">
-        <table class="table">
-          <thead>
-            <tr>
-              <th style="min-width: 22rem;">Ce qu'elle fait</th>
-              <th>Venu de</th>
-              <th style="min-width: 9rem;">Désir</th>
-              <th style="min-width: 8rem;">Pas</th>
-              <th class="fit">État</th>
-              <th style="min-width: 14rem;">Où ça en est</th>
-              <th class="fit">Ouvert</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for l in lignes %}
-              <tr>
-                <td>
-                  <div class="cell-clamp">{{ l.row.titre }}</div>
-                  {% if l.row.themes %}
-                    <span class="chips">
-                      {% for t in l.row.themes %}<span class="chip">{{ t }}</span>{% endfor %}
-                    </span>
-                  {% endif %}
-                </td>
-                <td class="text-xs muted">
-                  {% with label=origine_labels|get:l.row.origine %}{{ label|default:l.row.origine }}{% endwith %}
-                </td>
-                <td>
-                  {% comment %}
-                    Le désir COURANT, facturé du temps écoulé — jamais le champ
-                    stocké, qui n'est qu'une moitié de couple (valeur, ancre)
-                    et devient faux dès la seconde suivante.
-                  {% endcomment %}
-                  <div class="row">
-                    <span class="meter {{ l.envie|tone_ratio:"invert" }}" style="flex:1; min-width:5rem;">
-                      <span style="width: {{ l.envie|bar_width }}%;"></span>
-                    </span>
-                    <span class="tabular text-xs">{{ l.envie|pct }}</span>
-                  </div>
-                </td>
-                <td>
-                  <div class="row">
-                    <span class="meter" style="flex:1; min-width:4rem;">
-                      <span style="width: {{ l.progression|bar_width }}%;"></span>
-                    </span>
-                    <span class="tabular text-xs">{{ l.row.pas_effectues }}/{{ l.row.pas_max }}</span>
-                  </div>
-                </td>
-                <td class="fit">
-                  <span class="badge {% with tone=statut_tones|get:l.row.statut %}{% if tone %}badge-{{ tone }}{% endif %}{% endwith %}">{% with label=statut_labels|get:l.row.statut %}{{ label|default:l.row.statut }}{% endwith %}</span>
-                </td>
-                <td class="text-xs">
-                  {% if l.row.en_attente_de_reponse %}
-                    {% comment %}
-                      Une attente sans son motif rendait l'écran menteur : le
-                      chantier semblait simplement immobile. Le nom vient du
-                      verdict ; l'échéance est relevée plus tôt si la personne
-                      répond.
-                    {% endcomment %}
-                    <div class="muted">
-                      ⏸ {% if l.row.attend_qui %}attend {{ l.row.attend_qui }}{% else %}en attente{% endif %}{% if l.row.reprendre_le %} · reprise {{ l.row.reprendre_le|dt_full }}{% endif %}
-                    </div>
-                  {% endif %}
-                  {% if l.row.raison_blocage %}
-                    <span class="muted">{{ l.row.raison_blocage }}</span>
-                  {% elif l.row.resultat %}
-                    <div class="cell-clamp muted">{{ l.row.resultat|truncatechars:180 }}</div>
-                  {% elif not l.row.en_attente_de_reponse %}
-                    <span class="muted">aucun pas encore</span>
-                  {% endif %}
-                </td>
-                <td class="fit muted" title="{{ l.row.created_at|dt_full }}">{{ l.row.created_at|ago }}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-    <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
-  {% else %}
+<section class="card mb-4">{% include "gestion/partials/filters.html" %}</section>
+<div class="grid auto-lg">
+{% for l in lignes %}
+  <article class="card">
+    <div class="card-head"><h3>{{ l.row.titre }}</h3><span class="badge {% with tone=statut_tones|get:l.row.statut %}{% if tone %}badge-{{ tone }}{% endif %}{% endwith %}">{% with label=statut_labels|get:l.row.statut %}{{ label|default:l.row.statut }}{% endwith %}</span></div>
     <div class="card-body">
-      <div class="empty">
-        <div class="empty-title">Elle n'a rien entrepris</div>
-        Aucun chantier ne correspond à ce filtre. Une amorce doit dépasser le
-        seuil d'ouverture pour en devenir un — voir
-        <em>Configuration → Conscience → Ce qu'elle entreprend</em>.
-      </div>
+      <div class="reading-meta mb-3"><span>{% with label=origine_labels|get:l.row.origine %}{{ label|default:l.row.origine }}{% endwith %}</span><time title="{{ l.row.created_at|dt_full }}">Ouvert {{ l.row.created_at|ago }}</time></div>
+      <div class="spread mb-2"><span>Envie actuelle</span><span class="tabular">{{ l.envie|pct }}</span></div>
+      <div class="meter mb-4"><span style="width: {{ l.envie|bar_width }}%;"></span></div>
+      <div class="spread mb-2"><span>Étapes effectuées</span><span class="tabular">{{ l.row.pas_effectues }} / {{ l.row.pas_max }}</span></div>
+      <div class="meter mb-4"><span style="width: {{ l.progression|bar_width }}%;"></span></div>
+      {% if l.row.en_attente_de_reponse %}<div class="alert alert-warn mb-3">{% if l.row.attend_qui %}Attend {{ l.row.attend_qui }}{% else %}En attente de réponse{% endif %}{% if l.row.reprendre_le %} · reprise {{ l.row.reprendre_le|dt_full }}{% endif %}</div>{% endif %}
+      {% if l.row.raison_blocage %}<div class="muted">{% include "gestion/partials/long_text.html" with value=l.row.raison_blocage %}</div>{% endif %}
+      {% if l.row.resultat %}{% include "gestion/partials/long_text.html" with value=l.row.resultat %}{% elif not l.row.raison_blocage and not l.row.en_attente_de_reponse %}<p class="muted">Aucun résultat enregistré pour le moment.</p>{% endif %}
+      {% if l.row.themes %}<div class="chips mt-3">{% for t in l.row.themes %}<span class="chip">{{ t }}</span>{% endfor %}</div>{% endif %}
     </div>
-  {% endif %}
-</section>
+    <div class="card-foot">{% include "gestion/partials/detail_link.html" with kind="chantier" pk=l.row.pk %}</div>
+  </article>
+{% empty %}<div class="card"><div class="empty">Aucun chantier ne correspond à ces filtres.</div></div>{% endfor %}
+</div>
+<div class="mt-4">{% include "gestion/partials/pager.html" %}</div>
 {% endblock %}

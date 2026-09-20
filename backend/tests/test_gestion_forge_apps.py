@@ -55,13 +55,24 @@ async def app_forgee(tmp_path, settings):
         "def on_tick(api):\n"
         "    api.storage.set('c', 'n', 1)\n\n"
         "def view_stats(api, params):\n"
-        "    return {'columns': [{'key': 'k', 'label': 'Clé'}],\n"
-        "            'rows': [{'id': 'n', 'k': 'valeur-visible'}]}\n"
+        "    return {'version': 2, 'blocks': [{'type': 'table', 'columns': [{'key': 'k', 'label': 'Clé'}],\n"
+        "            'rows': [{'cells': {'k': 'valeur-visible'}}],\n"
+        "            'filters': [{'key': 'q', 'label': 'Recherche', 'kind': 'search'}],\n"
+        "            'pagination': {'page': 1, 'per_page': 1, 'total': 2}},\n"
+        "            {'type': 'stats', 'items': [{'label': 'Page des logs plus dix', 'value': params['p_logs'] + 10}]}]}\n"
+        "def action_stats_ajouter(api, data):\n"
+        "    api.storage.set('actions', 'last', data)\n"
+        "    return {'ok': True, 'message': 'Valeur enregistrée'}\n"
     ), manifest_patch={
         "title": "Appli de test",
         "description": "Écrite par le test",
         "schedule": "interval:5s",
-        "views": [{"key": "stats", "label": "Stats"}],
+        "views": [{"key": "stats", "label": "Stats", "page_params": ["p_logs"], "actions": [
+            {"key": "ajouter", "label": "Ajouter", "fields": [
+                {"key": "titre", "label": "Titre", "required": True, "max_length": 40},
+                {"key": "nombre", "label": "Nombre", "type": "integer", "minimum": 1, "maximum": 5},
+            ]},
+        ]}],
         "config": [{"key": "ville", "label": "Ville", "type": "str",
                     "default": "Paris"}],
         "context": False,
@@ -213,3 +224,50 @@ async def test_le_menu_place_forge_apps_juste_apres_forge(app_forgee):
     liens = await sync_to_async(lambda: [s.key for s in shell.sidebar_spaces()])()
     assert "forge" in liens, liens
     assert liens[liens.index("forge") + 1] == "forge_apps", liens
+
+
+async def test_action_forge_validee_et_executee_dans_le_bac(client, app_forgee):
+    from modules.plugins.forge.models import ForgeRecord
+    url = reverse("gestionsysteme:forge-app-action", args=["appli_test", "stats", "ajouter"])
+    invalid = await sync_to_async(client.post)(url, {"titre": "", "nombre": 99})
+    assert invalid.status_code == 400
+    assert not await sync_to_async(ForgeRecord.objects.filter(collection="actions").exists)()
+    result = await sync_to_async(client.post)(url + "?q=contexte", {"titre": "Une note", "nombre": "3", "inconnu": "ignoré"})
+    assert result.status_code == 302
+    assert result.url.endswith("/p/stats/?q=contexte")
+    row = await sync_to_async(ForgeRecord.objects.get)(collection="actions", key="last")
+    assert row.value == {"titre": "Une note", "nombre": 3}
+    assert (await sync_to_async(client.get)(url)).status_code == 405
+    unknown = reverse("gestionsysteme:forge-app-action", args=["appli_test", "stats", "inconnue"])
+    assert (await sync_to_async(client.post)(unknown, {})).status_code == 404
+
+
+async def test_action_forge_csrf_et_erreurs_visibles(app_forgee):
+    from django.test import Client
+    import re
+    client = Client(enforce_csrf_checks=True)
+    page_url = reverse("gestionsysteme:forge-app-panel", args=["appli_test", "stats"])
+    url = reverse("gestionsysteme:forge-app-action", args=["appli_test", "stats", "ajouter"])
+    assert (await sync_to_async(client.post)(url, {})).status_code == 403
+    page = await sync_to_async(client.get)(page_url)
+    token = client.cookies["csrftoken"].value
+    instance = re.search(r'name="_panel_instance" value="([^"]+)"', page.content.decode()).group(1)
+    invalid = await sync_to_async(client.post)(url, {"csrfmiddlewaretoken": token, "_panel_instance": instance,
+                                                    "titre": "Texte conservé", "nombre": "99"})
+    assert invalid.status_code == 400
+    html = invalid.content.decode()
+    assert "Texte conservé" in html
+    assert 'class="errorlist"' in html
+    assert 'value="99"' in html
+    # Le formulaire corrigé reste sur le POST, la navigation revient au GET.
+    assert f'method="get" action="{page_url}"' in html
+    assert f'href="{page_url}?page=2"' in html
+    assert (await _page(client, page_url + '?page=2')).status_code == 200
+
+
+@pytest.mark.parametrize("query,expected", [("", "11"), ("?p_logs=7", "17"), ("?p_logs=-8", "11"), ("?p_logs=oops", "11")])
+async def test_pagination_personnalisee_validee_avant_le_handler(client, app_forgee, query, expected):
+    url = reverse("gestionsysteme:forge-app-panel", args=["appli_test", "stats"])
+    page = await _page(client, url + query)
+    assert page.status_code == 200
+    assert page.context["blocks"][1].items[0].value == expected

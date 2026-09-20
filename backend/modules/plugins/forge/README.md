@@ -37,7 +37,7 @@ def on_start(api): ...              # au chargement
 def on_tick(api): ...               # selon schedule
 def on_event(api, event): ...       # event = {"type", "source", "data"}
 def get_context(api): return "..."  # injecté dans le prompt (si context: true)
-def view_stats(api, params): return {"columns": [...], "rows": [...]}
+def view_stats(api, params): return {"version": 2, "blocks": [{"type": "stats", "items": [{"label": "Total", "value": 42}]}]}
 ```
 
 Modules sûrs déjà disponibles (pas d'`import`) : `math, json, re, datetime,
@@ -150,11 +150,17 @@ def get_context(api):
     return f"dernier relevé météo: {dernier[0]['value']['temp']}°C" if dernier else ""
 
 def view_releves(api, params):
-    lignes = api.storage.find('releves', limit=int(params.get('limit') or 50))
-    return {
-        'columns': [{'key': 'key', 'label': 'Quand'}, {'key': 'temp', 'label': '°C'}],
-        'rows': [{'id': l['key'], 'key': l['key'], 'temp': l['value']['temp']} for l in lignes],
-    }
+    taille = params["per_page"]
+    total = api.storage.count("releves")
+    page = min(params["page"], max(1, (total + taille - 1) // taille))
+    lignes = api.storage.find("releves", limit=taille, offset=(page - 1) * taille)
+    return {"version": 2, "blocks": [{
+        "type": "table", "title": "Relevés",
+        "columns": [{"key": "quand", "label": "Quand"}, {"key": "temp", "label": "°C"}],
+        "rows": [{"cells": {"quand": l["key"], "temp": l["value"]["temp"]}} for l in lignes],
+        "pagination": {"total": total, "page": page, "per_page": taille},
+    }]}
+
 ```
 
 ## Organiser l'écran de configuration d'une app
@@ -209,3 +215,15 @@ deadline), `test_forge_store.py` (manifest, versions, corbeille),
 `test_forge_api.py` (quotas, HTTP, cooldowns), `test_forge_host.py`
 (cycle de vie complet : écriture → tick → événements → disjoncteur →
 commandes → vues → config dynamique → outils MCP).
+
+## Interfaces de gestion v2
+
+Le [contrat commun](../../../../docs/gestion-interface.md) décrit les blocs,
+les détails de lignes, filtres, liens et formulaires. Les anciens formats
+`columns/rows`, `tabs` et `fields` sans enveloppe sont supprimés. Une vue
+renvoie obligatoirement `{"version": 2, "blocks": [...]}`.
+
+Les actions sont déclarées dans `views[].actions`. Une action `ajouter` de la
+vue `liste` appelle `action_liste_ajouter(api, data)` dans le bac à sable.
+`data` contient les champs validés, avec nombres et booléens convertis.
+Aucune action n'est découverte à partir d'un nom transmis par le navigateur.

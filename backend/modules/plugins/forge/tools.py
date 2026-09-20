@@ -25,7 +25,21 @@ CONTRAT DU CODE (module.py) — fonctions top-level optionnelles, toutes synchro
   def on_tick(api): ...                 # selon 'schedule'
   def on_event(api, event): ...         # event = {type, source, data} selon 'events'
   def get_context(api): return "..."    # injecté dans ton propre prompt (si context=true)
-  def view_<key>(api, params): return {"columns": [{"key":..,"label":..}], "rows": [...]}
+  def view_<key>(api, params): return {"version": 2, "blocks": [...]}
+  def action_<vue>_<action>(api, data): return {"ok": True, "message": "Enregistré"}
+
+INTERFACE v2 (un seul contrat, pas de HTML/JS/template):
+- prose/code/note: {type, title, text, tone?}; stats: {type:"stats", items:[{label,value,sub?,tone?}]}
+- fields: {type:"fields", title, items:[{label,value}]}; value peut être une cellule {kind:"badge"|"link"|"meter"|"num"|"bool"|"emotion"|"text",text,href?,ratio?,tone?}.
+- grid/section/disclosure: {type,items:[blocs],columns?:2,title?,description?,open?}.
+- timeline: {type:"timeline",items:[{title,text,meta?,tone?}]}.
+- table: {type:"table",columns:[{key,label}],rows:[{cells:{clé:valeur},detail?:bloc,href?}],pagination?:{page,per_page,total,param?:"page"},filters?:[{key,label,kind:"search"|"select",choices?:[{value,label}]}]}.
+- form: {type:"form",action:"clé déclarée",initial:{champ:valeur},title?} pour agir depuis une fiche/ligne.
+Pagination: params['page'] commence à 1, params['per_page'] vaut 25 par défaut (max 200); renvoie seulement cette tranche. Les filtres sont dans params; ton handler filtre et trie les données.
+Pour plusieurs tableaux, déclare page_params:["p_logs","p_notes"] sur la vue du manifeste et utilise pagination.param sur chaque tableau. Ces paramètres arrivent en entiers >=1, défaut 1 (y compris si la saisie est invalide). Les paramètres non déclarés restent des chaînes.
+Déclare les actions dans views: [{key:"liste",label:"Liste",description:"...",actions:[{key:"ajouter",label:"Ajouter",fields:[{key:"titre",type:"text",required:true}],confirm?:"...",danger?:true}]}].
+Champs: text, textarea, integer, number, boolean, select (choices), email, url, hidden; minimum, maximum, max_length, initial, help. Les actions sont POST+CSRF; data contient seulement les champs déclarés et validés. Par défaut required:false pour boolean (décoché = false), true pour les autres types. required:true exige de cocher une case.
+Une action renvoie ok/message (500 caractères affichés au plus); jamais du HTML. Les liens sont HTTP(S) ou chemins /, ? et #. Au plus 200 blocs, 200 lignes/table, 8 niveaux. Schéma: /gestion/api/panneaux/schema.
 
 L'objet api: api.storage.set/get/delete/find/keys/count/clear(collection, ...) (BDD clé-valeur JSON, quotas),
 api.config.get(key) / api.config.rows(key) (valeurs éditées par l'utilisateur dans le dashboard),

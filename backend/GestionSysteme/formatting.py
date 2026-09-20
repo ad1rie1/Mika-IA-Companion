@@ -221,6 +221,15 @@ def clip(text: str | None, length: int = 160) -> str:
     return cut.rstrip(" ,.;:") + "…"
 
 
+def display_text(value: str, limit: int) -> str:
+    """Borne un texte volumineux en annonçant la partie non affichée."""
+    if len(value) <= limit:
+        return value
+    maximum = f"{limit:,}".replace(",", " ")
+    total = f"{len(value):,}".replace(",", " ")
+    return value[:limit] + f"\n\n[Affichage tronqué : {maximum} caractères sur {total}.]"
+
+
 def yes_no(value) -> str:
     return "oui" if value else "non"
 

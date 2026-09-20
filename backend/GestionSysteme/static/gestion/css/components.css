@@ -134,16 +134,6 @@ table.table td.fit, table.table th.fit { width: 1%; white-space: nowrap; }
 table.table td.wrap { min-width: 22ch; }
 table.table td small { display: block; color: var(--text-subtle); font-size: var(--fs-xs); margin-top: 2px; }
 
-/* Cellule de texte long : bornée en hauteur, sinon une seule ligne de
-   souvenir de 900 caractères impose sa hauteur à toute la rangée. */
-.cell-clamp {
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  max-width: 68ch;
-}
-
 table.table tr.is-muted td { color: var(--text-subtle); }
 
 /* En-tête triable */

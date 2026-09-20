@@ -155,7 +155,7 @@
                 <span class="badge {% if t.status == 'done' %}badge-ok{% elif t.status == 'blocked' %}badge-danger{% elif t.status == 'in_progress' %}badge-info{% endif %}">{{ t.get_status_display }}</span>
                 {% if t.blocked_reason %}<small>{{ t.blocked_reason }}</small>{% endif %}
               </td>
-              <td class="muted"><div class="cell-clamp">{{ t.result|default:"—" }}</div></td>
+              <td class="muted">{% include "gestion/partials/long_text.html" with value=t.result|default:"—" %}</td>
               <td class="fit">
                 <div class="row">
                   <form method="post" action="{% url 'gestionsysteme:task-update' project.pk t.pk %}" class="row">
@@ -252,7 +252,8 @@
                 <td class="fit">
                   <span class="badge {% if l.action == 'error' %}badge-danger{% elif l.action == 'advanced' %}badge-ok{% endif %}">{{ l.get_action_display }}</span>
                 </td>
-                <td><div class="cell-clamp">{{ l.summary }}</div></td>
+                <td>{% include "gestion/partials/long_text.html" with value=l.summary %}
+{% include "gestion/partials/detail_link.html" with kind="execution" pk=l.pk %}</td>
                 <td><span class="chips">{% for t in l.tools_used %}<span class="chip mono">{{ t }}</span>{% endfor %}</span></td>
               </tr>
             {% endfor %}

@@ -1,59 +1,20 @@
 {% extends "gestion/base.html" %}
 {% load gestion %}
-
 {% block content %}
-<div class="alert alert-info mb-4">
-  L'« échafaudage interne » désigne le message d'amorce d'une perception
-  déclenchée par Mika elle-même (salutation, notification de module). Il est
-  marqué <span class="mono">is_internal</span> et exclu de l'extraction : sans
-  ce drapeau, ces consignes devenaient des souvenirs fictifs. Sa réponse, elle,
-  reste incluse.
-</div>
-
-<section class="card">
-  {% include "gestion/partials/filters.html" %}
-
-  {% if page.rows %}
-    <div class="card-body flush">
-      <div class="table-scroll">
-        <table class="table">
-          <thead>
-            <tr>
-              <th class="fit">Quand</th>
-              <th class="fit">Rôle</th>
-              <th style="min-width: 30rem;">Contenu</th>
-              <th>Ressenti</th>
-              <th>Personne</th>
-              <th class="fit">Source</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for m in page.rows %}
-              <tr {% if m.is_internal %}class="is-muted"{% endif %}>
-                <td class="fit muted" title="{{ m.created_at|dt_full }}">{{ m.created_at|ago }}</td>
-                <td class="fit">
-                  <span class="badge {% if m.role == 'assistant' %}badge-info{% endif %}">{{ m.role }}</span>
-                  {% if m.is_internal %}<span class="badge" title="Échafaudage interne, exclu de l'extraction">interne</span>{% endif %}
-                </td>
-                <td><div class="cell-clamp">{{ m.content }}</div></td>
-                <td>
-                  {% if m.emotion %}
-                    <span class="emo" style="{{ m.emotion|emo_style }}">{{ m.emotion|emo_fr }}
-                      <span class="emo-weight">{{ m.emotion_intensity|pct }}</span>
-                    </span>
-                  {% else %}—{% endif %}
-                </td>
-                <td class="mono text-xs">{{ m.person_id|default:"—" }}</td>
-                <td class="fit muted">{{ m.source|default:"—" }}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
+<section class="card mb-4">{% include "gestion/partials/filters.html" %}<div class="card-foot"><span class="muted">{{ page.total }} message{{ page.total|pluralize }}{% if conversation_id %} · Conversation #{{ conversation_id }} · ordre chronologique{% else %} · les plus récents d'abord{% endif %}</span></div></section>
+<div class="reading-list">
+{% for m in page.rows %}
+  <article class="reading-item{% if m.is_internal %} is-internal{% endif %}" id="message-{{ m.pk }}">
+    <div class="reading-meta"><span class="badge{% if m.role == 'assistant' %} badge-info{% endif %}">{% if m.role == 'assistant' %}Mika{% elif m.role == "user" %}Utilisateur{% else %}{{ m.role }}{% endif %}</span><time title="{{ m.created_at|dt_full }}">{{ m.created_at|dt_full }}</time><span>{{ m.source }}</span>{% if m.person_id %}<span>{{ m.person_id }}</span>{% endif %}{% if m.is_internal %}<span class="badge badge-warn">Interne</span>{% endif %}{% if m.awaiting_reply %}<span class="badge badge-warn">Attend une réponse</span>{% endif %}</div>
+    {% include "gestion/partials/long_text.html" with value=m.content %}
+    <div class="reading-footer">
+      {% if m.emotion %}<span class="emo" style="{{ m.emotion|emo_style }}">{{ m.emotion|emo_fr }} <span class="emo-weight">{{ m.emotion_intensity|pct }}</span></span>{% endif %}
+      {% if m.attachments_meta %}<span class="badge">{{ m.attachments_meta|length }} pièce(s) jointe(s)</span>{% endif %}
+      <a href="{% url 'gestionsysteme:memory-tab' 'messages' %}?conversation={{ m.conversation_id }}">Conversation #{{ m.conversation_id }}</a>
+      <span class="push">{% include "gestion/partials/detail_link.html" with kind="message" pk=m.pk %}</span>
     </div>
-    <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
-  {% else %}
-    <div class="card-body"><div class="empty">Aucun message.</div></div>
-  {% endif %}
-</section>
+  </article>
+{% empty %}<div class="card"><div class="empty">Aucun message ne correspond à ces filtres.</div></div>{% endfor %}
+</div>
+<div class="mt-4">{% include "gestion/partials/pager.html" %}</div>
 {% endblock %}

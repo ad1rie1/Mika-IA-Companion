@@ -20,7 +20,6 @@ from asgiref.sync import sync_to_async
 from django.http import JsonResponse
 
 from modules.types import ModuleRoute
-from utils.sanitize import STRIPPED_KEYS, sanitize_payload
 
 logger = logging.getLogger("module.forge")
 
@@ -28,28 +27,24 @@ logger = logging.getLogger("module.forge")
 # déclaré dans ``config_schema.py``.
 MAX_VIEW_PAYLOAD_BYTES = 512 * 1024
 
-# Le même garde-fou s'applique désormais à TOUS les modules (le dashboard le
-# pose lui-même) — on réexporte l'implémentation partagée plutôt que d'en
-# maintenir deux versions qui peuvent diverger.
-_STRIPPED_KEYS = STRIPPED_KEYS
-sanitize_view_payload = sanitize_payload
-
-
 # ── Vues des modules forgés ───────────────────────────────────────
 
 
-def _make_data_handler(host, module_name: str, view_key: str):
+def _make_data_handler(host, module_name: str, view_key: str, *, page_params=()):
     async def handler(request):
         lm = host._loaded.get(module_name)
         if lm is None:
             return {"error": f"module forgé '{module_name}' non chargé"}
         params = {k: v for k, v in request.GET.items()}
-        for int_key in ("page", "limit", "offset"):
-            if int_key in params:
-                try:
-                    params[int_key] = int(params[int_key])
-                except ValueError:
-                    params.pop(int_key)
+        for key in ("page", *page_params):
+            try:
+                params[key] = max(1, int(params.get(key, 1)))
+            except (TypeError, ValueError):
+                params[key] = 1
+        try:
+            params["per_page"] = max(1, min(200, int(params.get("per_page", 25))))
+        except (TypeError, ValueError):
+            params["per_page"] = 25
         ok, result, error = await host._run_handler(
             lm, f"view_{view_key}", (params,),
             source="view", count_failure=False,
@@ -64,17 +59,17 @@ def _normalize_view_result(result):
     from configs.runtime import cfg_int
 
     if not isinstance(result, dict):
-        result = {"value": result}
+        return {"error": 'La vue doit renvoyer {"version": 2, "blocks": [...]}'}
     try:
-        encoded = json.dumps(result, default=str)
-    except (TypeError, ValueError) as exc:
+        encoded = json.dumps(result, default=str, allow_nan=False)
+    except (TypeError, ValueError, RecursionError) as exc:
         return {"error": f"payload non sérialisable: {exc}"}
     plafond_ko = cfg_int("forge.max_view_payload_kb",
                          MAX_VIEW_PAYLOAD_BYTES // 1024, mini=8, maxi=8192)
     if len(encoded.encode("utf-8", errors="replace")) > plafond_ko * 1024:
         return {"error": f"payload de vue trop gros ({plafond_ko} Ko max) — "
-                         "pagine avec params['page'] / params['limit']"}
-    return sanitize_view_payload(json.loads(encoded))
+                         "pagine avec params['page'] / params['per_page']"}
+    return json.loads(encoded)
 
 
 # ── Routes HTTP techniques (/api/modules/forge/…) ─────────────────

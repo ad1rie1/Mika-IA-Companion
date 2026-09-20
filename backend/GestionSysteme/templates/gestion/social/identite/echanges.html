@@ -39,7 +39,8 @@
                     <span class="badge {% if m.role == 'assistant' %}badge-info{% endif %}">{{ m.role }}</span>
                     {% if m.is_internal %}<span class="badge" title="Échafaudage interne, exclu de l'extraction">interne</span>{% endif %}
                   </td>
-                  <td><div class="cell-clamp">{{ m.content }}</div></td>
+                  <td>{% include "gestion/partials/long_text.html" with value=m.content %}
+{% include "gestion/partials/detail_link.html" with kind="message" pk=m.pk %}</td>
                   <td>
                     {% if m.emotion %}
                       <span class="emo" style="{{ m.emotion|emo_style }}">{{ m.emotion|emo_fr }}

@@ -319,18 +319,8 @@ CONFIG_SCHEMA = [
         default=512, min=8, max=8192, hot_reload=True,
         description=(
             "Au-delà, la page affiche une erreur invitant à paginer avec "
-            "params['page'] / params['limit'] plutôt que de sérialiser un "
+            "params['page'] / params['per_page'] plutôt que de sérialiser un "
             "tableau entier à chaque affichage."
-        ),
-    ),
-    ConfigItem(
-        key="forge.panel_code_chars", type="int", section="module_forge",
-        group="Plafonds par exécution", label="Code affiché dans la fiche (caractères)",
-        default=8000, min=500, max=200000, hot_reload=True,
-        description=(
-            "Troncature d'affichage du source dans l'espace d'un module "
-            "forgé. N'a aucun effet sur ce qui est exécuté : la taille du "
-            "code lui-même est bornée par « Taille max du code (Ko) »."
         ),
     ),
 ]

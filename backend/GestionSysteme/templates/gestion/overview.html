@@ -55,7 +55,7 @@
         {% endif %}
 
         <dl class="kv">
-          <dt>Tempérament</dt><dd>{{ mood.default_mood }}</dd>
+          <dt>Tempérament</dt><dd>{{ mood.default_mood|emo_fr }}</dd>
           <dt title="Vitesse de déplacement dans l'espace PAD — élevée = humeur en train de bouger">Dynamique</dt>
           <dd class="tabular">{{ mood.velocity|num }}</dd>
           <dt>Personnes suivies</dt><dd class="tabular">{{ mood.tracked_persons }}</dd>
@@ -140,7 +140,7 @@
 
         {% if sleep.dream %}
           <div class="field-desc">Rêve de la nuit du {{ sleep.dream.night_of|dt }}</div>
-          <div class="quote mb-3">{{ sleep.dream.content|clip:400 }}</div>
+          <div class="quote mb-3">{% include "gestion/partials/long_text.html" with value=sleep.dream.content %}</div>
           <div class="chips">
             <span class="chip">{{ sleep.dream.dream_type }}</span>
             <span class="chip">vivacité {{ sleep.dream.vividness|pct }}</span>
@@ -154,7 +154,7 @@
 
         {% if sleep.journal %}
           <div class="field-desc mt-4">Journal du {{ sleep.journal.date|dt }}</div>
-          <div class="quote">{{ sleep.journal.narrative|clip:400 }}</div>
+          <div class="quote">{% include "gestion/partials/long_text.html" with value=sleep.journal.narrative %}</div>
         {% endif %}
       {% else %}
         <div class="empty">Cycle de sommeil indisponible.</div>

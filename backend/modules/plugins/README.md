@@ -14,7 +14,7 @@ Un module est un plugin auto-contenu qui vit sous `backend/modules/plugins/<nom>
 - déclarer ses propres **tables Django** (`get_models`)
 - exposer des **paramètres** dans l'éditeur de configuration (`config_schema`)
 - monter des **routes HTTP** techniques (`get_routes`)
-- **contribuer des pages au dashboard** (`get_views`) ← documenté ici
+- **contribuer des pages de gestion** (`get_panels`)
 
 Toutes ces capacités sont opt-in. Un module minimal n'implémente que `instantiate()` + `shutdown()`.
 
@@ -30,7 +30,7 @@ backend/modules/plugins/<nom>/
 ├── module.py            ← la classe qui hérite de BaseModule
 ├── models.py            ← (optionnel) modèles Django
 ├── config_schema.py     ← (optionnel) sections + items pour l'éditeur de config
-├── views.py             ← (optionnel) ModuleView[] exposés au dashboard
+├── panels.py            ← (optionnel) ModulePanel[] de gestion
 ├── templates/<nom>/     ← (optionnel) templates Django custom
 │   └── <view>.html
 └── static/<nom>/        ← (optionnel) JS/CSS custom
@@ -44,7 +44,7 @@ from modules.plugins.<nom> import <NomModule>
 module_manager.register(<NomModule>())
 ```
 
-Les modules inactifs (config manquante, `is_available()==False`) apparaissent quand même dans l'admin, mais leurs outils / routes / vues ne sont montés qu'une fois activés.
+Les modules inactifs (config manquante, `is_available()==False`) apparaissent quand même dans l'admin, mais leurs panneaux restent accessibles ; leurs outils et routes techniques dépendent de leur activation.
 
 ---
 
@@ -172,6 +172,12 @@ Puis dans `module.py` :
 | `Note(text, tone=, title=)` | un encadré (info / ok / warn / danger) |
 | `Prose(text, title=)` | du texte long (narratif, corps de message) |
 | `Blocks(items=[...])` | plusieurs blocs dans un panneau |
+| `Grid(items, columns=2)` | composition adaptative |
+| `Section(title, items, description=)` | groupe nommé |
+| `Disclosure(title, items, open=False)` | détails repliables |
+| `Timeline(items=[TimelineEntry(title, text, meta=)])` | chronologie |
+| `Code(text, title=)` | code ou JSON échappé |
+| `ActionForm(action, initial={}, title=)` | formulaire lié à une action déclarée |
 | `Template(name, context)` | ton propre gabarit Django (voir plus bas) |
 
 ### Les cellules disponibles
@@ -227,3 +233,14 @@ savent pas exprimer.
 Elle ne passe pas par les panneaux : déclare `config_schema()` et
 GestionSystème la rend elle-même dans l'onglet *Configuration* de ton espace.
 Rien de ton côté à écrire pour l'affichage.
+
+## Formulaires et compositions
+
+Le [contrat de gestion](../../../docs/gestion-interface.md) est partagé avec
+la Forge. En Python, `PanelAction(fields=(Input(...),))` déclare les champs
+(`Input` vient de `GestionSysteme.panel_forms`). Le handler lit
+`request.panel_data`, validé côté serveur. `ActionForm("modifier",
+initial={"id": 42})` place cette action dans une fiche ou dans `Row.detail`.
+Les valeurs initiales sont des données utilisateur : le handler doit vérifier
+l'existence de la cible et son appartenance au module avant toute écriture.
+Les erreurs restent affichées avec les valeurs saisies.

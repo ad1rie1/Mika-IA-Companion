@@ -36,13 +36,11 @@ def get_context(api):
 def view_stats(api, params):
     n = api.storage.get('compteur', 'ticks', default=0)
     return {
+        'version': 2, 'blocks': [{'type': 'table',
         'columns': [{'key': 'nom', 'label': 'Nom'}, {'key': 'val', 'label': 'Valeur'}],
-        'rows': [{'id': 'ticks', 'nom': 'ticks', 'val': n}],
-        'html': '<script>alert(1)</script>',
+        'rows': [{'cells': {'nom': 'ticks', 'val': n}}]}],
     }
 
-def view_stats_detail(api, item_id):
-    return {'fields': [{'label': 'id', 'value': item_id}]}
 """
 
 MANIFEST_BASIC = dict(
@@ -121,7 +119,7 @@ class TestWriteAndLoad:
         assert "compteur_test" in host._loaded
         lm = host._loaded["compteur_test"]
         assert set(lm.handlers) >= {"on_tick", "on_event", "get_context",
-                                    "view_stats", "view_stats_detail"}
+                                    "view_stats"}
         assert lm.next_run_at is not None
 
     async def test_invalid_code_rejected_atomically(self, host):
@@ -430,7 +428,7 @@ class TestPanels:
         await _create_basic(host)
         info = next(i for i in host.module_infos() if i["name"] == "compteur_test")
         blocs = await sync_to_async(blocs_app)(host, "compteur_test", info)
-        titres = [b.title for b in blocs if isinstance(b, P.Prose)]
+        titres = [b.title for root in blocs for b in P.walk_blocks(root) if isinstance(b, P.Code)]
         assert "module.py" in titres
         assert "manifest.yaml" in titres
 
@@ -447,7 +445,7 @@ class TestPanels:
         await _create_basic(host)
         panneau = next(p for p in panels_for_app(host, "compteur_test")
                        if p.key == "stats")
-        bloc = await sync_to_async(panneau.handler)(_FakeRequest(page="0"))
+        bloc = await sync_to_async(panneau.handler)(_FakeRequest(page="1"))
         blocs = list(P.iter_blocks(P.blocks_from_payload(bloc)
                                   if isinstance(bloc, dict) else bloc))
         assert blocs, "le panneau doit produire au moins un bloc"

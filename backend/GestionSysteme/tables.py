@@ -250,6 +250,9 @@ class FilterSet:
     filters: list[Filter] = field(default_factory=list)
     per_page: int = DEFAULT_PER_PAGE
     show_per_page: bool = True
+    prefix: str = "filtre"
+    hidden: list[tuple[str, str]] = field(default_factory=list)
+    reset_url: str = ""
 
     def add(self, f: Filter) -> Filter:
         self.filters.append(f)

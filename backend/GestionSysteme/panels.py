@@ -1,45 +1,13 @@
-"""Espaces de modules — le contrat par lequel un greffon expose une interface.
+"""Composants de gestion partagés par le cœur, les plugins et la Forge.
 
-**Ce qu'il remplace.** Un module déclarait des ``ModuleView`` dont le
-``data_handler`` renvoyait du JSON, rendu dans le navigateur par un script
-générique qui l'injectait via ``innerHTML``. Deux conséquences :
-
-1. Un module qui faisait transiter un corps d'e-mail, un article RSS ou une
-   page aspirée par une clé ``html`` obtenait du XSS stocké sur l'interface
-   d'administration — celle qui édite les clés d'API. Il a fallu écrire une
-   couche d'assainissement retirant ``html``/``js``/``template`` de *toutes*
-   les charges utiles, avec ``allow_raw_html`` comme dérogation.
-2. Chaque module obtenait des **pages éparpillées** dans le menu global, sans
-   endroit où voir sa configuration, son état et ses données ensemble.
-
-Ici :
-
-- Un gestionnaire renvoie des **blocs typés** (``Table``, ``Fields``,
-  ``Stats``, ``Note``) composés de **cellules typées**. Un module déclare une
-  *intention* (« ceci est un badge d'alerte », « ceci est une jauge »), jamais
-  du balisage. Le rendu est fait par les gabarits de GestionSystème, avec
-  l'échappement automatique de Django. Il n'y a plus rien à assainir : la
-  classe de vulnérabilité a disparu au lieu d'être filtrée.
-- L'échappatoire légitime reste ``Template`` : le module fournit son propre
-  gabarit Django. C'est du code qu'il possède, pas une donnée qu'il relaie, et
-  il passe quand même par le moteur de gabarits.
-- Chaque module reçoit un **espace** : ses panneaux, sa configuration et son
-  état au même endroit, sous ``/gestion/modules/<nom>/``.
-
-``ModuleView`` a été supprimé avec l'application ``dashboard`` plutôt que
-gardé en chemin de compatibilité : les deux modules livrés déclarent des
-panneaux, et une capacité sans déclarant est une capacité dont le défaut est
-la seule réponse que quiconque reçoit.
-
-``blocks_from_payload`` reste, mais ce n'est pas un vestige : c'est par là que
-passent les charges utiles des **modules forgés**, écrites par l'IA à
-l'exécution. Elles n'ont pas de type statique, et les convertir en cellules
-typées est précisément ce qui les empêche de produire du balisage.
+Les plugins produisent ces objets typés. Les apps forgées produisent le
+contrat JSON v2, décodé par panel_payload. Django assure le rendu échappé.
 """
 from __future__ import annotations
 
 import inspect
 import logging
+import math
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Sequence
 
@@ -67,7 +35,7 @@ class Cell:
     title: str = ""           # infobulle (valeur exacte, date absolue…)
     ratio: float | None = None
     emotion: str = ""
-    clamp: bool = False       # borne un texte long à 3 lignes
+    clamp: bool = False       # aperçu dépliable, texte intégral toujours disponible
 
     @property
     def render_kind(self) -> str:
@@ -144,7 +112,8 @@ def _tone(value: str) -> str:
 
 def _ratio(value) -> float | None:
     try:
-        return max(0.0, min(1.0, float(value)))
+        value = float(value)
+        return max(0.0, min(1.0, value)) if math.isfinite(value) else None
     except (TypeError, ValueError):
         return None
 
@@ -165,6 +134,7 @@ class Row:
     cells: tuple[Cell, ...]
     href: str = ""       # rend la ligne cliquable vers une fiche
     tone: str = ""
+    detail: Any = None   # blocs consultables sans perdre la liste
 
 
 @dataclass
@@ -193,6 +163,15 @@ class Field:
     kind: str = "text"
     tone: str = ""
     href: str = ""
+    ratio: float | None = None
+    title: str = ""
+    emotion: str = ""
+
+    @property
+    def cell(self) -> Cell:
+        return Cell(text=_str(self.value), kind=self.kind, tone=_tone(self.tone),
+                    href=self.href, ratio=_ratio(self.ratio), title=self.title,
+                    emotion=(self.emotion or self.value) if self.kind == "emotion" else "")
 
     @property
     def render_kind(self) -> str:
@@ -213,6 +192,7 @@ class Stat:
     value: str
     sub: str = ""
     tone: str = ""
+    href: str = ""
 
 
 @dataclass
@@ -260,7 +240,69 @@ class Blocks:
     block = "blocks"
 
 
-BLOCK_TYPES = (Table, Fields, Stats, Note, Prose, Template, Blocks)
+@dataclass
+class Grid:
+    """Composition adaptative, de une à trois colonnes."""
+    items: Sequence[Any]
+    columns: int = 2
+    block = "grid"
+
+
+@dataclass
+class Section:
+    title: str
+    items: Sequence[Any]
+    description: str = ""
+    block = "section"
+
+
+@dataclass
+class Disclosure:
+    title: str
+    items: Sequence[Any]
+    open: bool = False
+    block = "disclosure"
+
+
+@dataclass
+class Code:
+    text: str
+    title: str = ""
+    block = "code"
+
+
+@dataclass(frozen=True)
+class TimelineEntry:
+    title: str
+    text: str = ""
+    meta: str = ""
+    tone: str = ""
+    href: str = ""
+
+
+@dataclass
+class Timeline:
+    items: Sequence[TimelineEntry]
+    title: str = ""
+    empty: str = "Aucun événement."
+    block = "timeline"
+
+
+@dataclass
+class ActionForm:
+    """Instance d'une action déclarée, éventuellement liée à une ligne.
+
+    Les valeurs initiales ne changent jamais la définition ni le destinataire
+    de l'action. La validation est faite à nouveau au POST.
+    """
+    action: str
+    initial: dict = field(default_factory=dict)
+    title: str = ""
+    block = "form"
+
+
+BLOCK_TYPES = (Table, Fields, Stats, Note, Prose, Template, Blocks,
+               Grid, Section, Disclosure, Code, Timeline, ActionForm)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -280,6 +322,8 @@ class PanelAction:
     handler: Callable                 # (request) -> str | Note | None
     confirm: str = ""
     danger: bool = False
+    fields: tuple = ()             # panel_forms.Input ; request.panel_data après validation
+    description: str = ""
 
 
 @dataclass(frozen=True)
@@ -388,7 +432,7 @@ def _icon_for(panels: Sequence[ModulePanel]) -> str:
 
 
 def panels_for(module_name: str) -> list[ModulePanel]:
-    """Panneaux d'un module — natifs si déclarés, adaptés sinon.
+    """Panneaux déclarés par un module Python.
 
     Un module qui n'expose rien mais possède une configuration reçoit tout de
     même son espace : la page de réglages est construite par GestionSystème,
@@ -417,121 +461,9 @@ def _native_panels(module) -> list[ModulePanel]:
     return panels
 
 
-def blocks_from_payload(payload: dict):
-    """Convertit ``{columns, rows, …}`` (ou ``{tabs: [...]}``) en blocs."""
-    if payload.get("tabs"):
-        items = []
-        for tab in payload["tabs"]:
-            if not isinstance(tab, dict):
-                continue
-            title = str(tab.get("label") or tab.get("key") or "")
-            if tab.get("columns") is not None:
-                table = _table_from_payload(tab)
-                table.caption = title
-                items.append(table)
-            else:
-                items.append(Fields(
-                    title=title,
-                    items=[
-                        Field(label=str(k), value=_str(v))
-                        for k, v in tab.items()
-                        if k not in ("key", "label", "columns", "rows", "html", "js", "template")
-                    ],
-                ))
-        return Blocks(items=items)
-
-    if payload.get("columns") is not None:
-        return _table_from_payload(payload)
-
-    return Fields(items=[
-        Field(label=str(k), value=_str(v))
-        for k, v in payload.items()
-        if k not in ("html", "js", "template")
-    ])
-
-
-def _table_from_payload(payload: dict) -> Table:
-    raw_columns = payload.get("columns") or []
-    columns: list[Column] = []
-    keys: list[str] = []
-    for c in raw_columns:
-        if isinstance(c, dict):
-            keys.append(str(c.get("key", "")))
-            columns.append(Column(label=str(c.get("label") or c.get("key") or "")))
-        else:
-            keys.append(str(c))
-            columns.append(Column(label=str(c)))
-
-    rows: list[Row] = []
-    for raw in payload.get("rows") or []:
-        if isinstance(raw, dict):
-            cells = tuple(text(raw.get(k), clamp=True) for k in keys)
-        elif isinstance(raw, (list, tuple)):
-            cells = tuple(text(v, clamp=True) for v in raw)
-        else:
-            cells = (text(raw),)
-        rows.append(Row(cells=cells))
-
-    return Table(columns=columns, rows=rows, page=_payload_page(payload, len(rows)))
-
-
-@dataclass
-class _PayloadPage:
-    """Pagination reconstituée depuis ``{total, page, limit}``.
-
-    L'ancien contrat compte les pages à partir de **zéro** ; l'interface
-    compte à partir de un. La conversion est faite ici, à l'unique endroit
-    qui connaît les deux conventions.
-    """
-    total: int
-    number: int
-    per_page: int
-    num_pages: int
-    param: str = "page"
-    zero_based: bool = True
-
-    @property
-    def has_prev(self) -> bool: return self.number > 1
-
-    @property
-    def has_next(self) -> bool: return self.number < self.num_pages
-
-    @property
-    def prev_number(self) -> int: return max(1, self.number - 1)
-
-    @property
-    def next_number(self) -> int: return min(self.num_pages, self.number + 1)
-
-    @property
-    def start_index(self) -> int:
-        return 0 if not self.total else (self.number - 1) * self.per_page + 1
-
-    @property
-    def end_index(self) -> int:
-        return min(self.total, self.number * self.per_page)
-
-    @property
-    def page_links(self):
-        from GestionSysteme.tables import _elided_range
-        return _elided_range(self.number, self.num_pages)
-
-
-def _payload_page(payload: dict, fallback_rows: int) -> _PayloadPage | None:
-    if "total" not in payload:
-        return None
-    try:
-        total = int(payload.get("total") or 0)
-        per_page = int(payload.get("limit") or fallback_rows or 25) or 25
-        zero_based_page = int(payload.get("page") or 0)
-    except (TypeError, ValueError):
-        return None
-    num_pages = max(1, -(-total // per_page))
-    return _PayloadPage(
-        total=total,
-        number=min(num_pages, zero_based_page + 1),
-        per_page=per_page,
-        num_pages=num_pages,
-    )
+def blocks_from_payload(payload: dict, *, request=None):
+    from GestionSysteme.panel_payload import decode
+    return decode(payload, request=request)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -541,9 +473,8 @@ def _payload_page(payload: dict, fallback_rows: int) -> _PayloadPage | None:
 def _call(handler: Callable, *args):
     """Appelle un gestionnaire synchrone ou asynchrone indifféremment.
 
-    Les modules historiques déclarent des coroutines ; le nouveau contrat
-    accepte les deux, parce qu'un panneau qui lit trois lignes en base n'a
-    aucune raison d'être asynchrone.
+    Le contrat accepte les deux pour convenir aux lectures en base comme aux
+    appels de services asynchrones.
     """
     if inspect.iscoroutinefunction(handler):
         return async_to_sync(handler)(*args)
@@ -577,7 +508,7 @@ def run_panel(request, module_name: str, panel: ModulePanel):
     if isinstance(result, BLOCK_TYPES):
         return result
     if isinstance(result, dict):
-        return blocks_from_payload(result)
+        return blocks_from_payload(result, request=request)
     return Prose(text=str(result))
 
 
@@ -585,6 +516,11 @@ def run_action(request, module_name: str, panel: ModulePanel, action_key: str) -
     action = next((a for a in panel.actions if a.key == action_key), None)
     if action is None:
         return Note("Action inconnue.", tone="danger")
+    from GestionSysteme.panel_forms import build_form, InvalidAction
+    form = build_form(action, data=request.POST)
+    if not form.is_valid():
+        raise InvalidAction(action_key, form)
+    request.panel_data = form.cleaned_data
     try:
         result = _call(action.handler, request)
     except Exception as exc:
@@ -611,3 +547,20 @@ def iter_blocks(block) -> Iterable[Any]:
             yield from iter_blocks(item)
     elif block is not None:
         yield block
+
+
+def walk_blocks(block) -> Iterable[Any]:
+    """Parcourt la composition sans l'aplatir pour le rendu."""
+    yield block
+    if isinstance(block, (Blocks, Grid, Section, Disclosure)):
+        for child in block.items:
+            yield from walk_blocks(child)
+    elif isinstance(block, Table):
+        for row in block.rows:
+            if row.detail is not None:
+                yield from walk_blocks(row.detail)
+
+
+def header_actions(panel, block):
+    inline = {b.action for b in walk_blocks(block) if isinstance(b, ActionForm)}
+    return [a for a in panel.actions if a.key not in inline]

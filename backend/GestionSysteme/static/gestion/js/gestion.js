@@ -77,6 +77,11 @@
      restreindre au conteneur revenait à décider du comportement d'après
      l'endroit plutôt que d'après l'intention déclarée sur le contrôle. */
   function wireFilters() {
+    if (window.matchMedia("(max-width: 700px)").matches) {
+      document.querySelectorAll('[data-filter-panel][data-active="false"]').forEach(function (panel) {
+        panel.open = false;
+      });
+    }
     document.addEventListener("change", function (ev) {
       var el = ev.target;
       if (!el.matches || !el.matches("[data-autosubmit]")) return;
@@ -95,37 +100,100 @@
     var url = bar.dataset.vitals;
     var period = parseInt(bar.dataset.vitalsInterval || "10000", 10);
     if (!url || !(period > 0)) return;
+    var timer = null;
+    var inFlight = false;
+    var indicator = document.querySelector("[data-refresh-status]");
 
-    var stopped = false;
-
-    function paint(d) {
-      for (var key in d) {
-        if (!Object.prototype.hasOwnProperty.call(d, key)) continue;
-        var slot = bar.querySelector('[data-vital="' + key + '"]');
-        // textContent, jamais innerHTML : la charge utile vient du serveur
-        // mais rien n'oblige un futur champ à être sûr en balisage.
-        if (slot) slot.textContent = d[key];
-      }
+    function schedule() {
+      window.clearTimeout(timer);
+      if (!document.hidden) timer = window.setTimeout(tick, period);
     }
-
     function tick() {
-      if (stopped) return;
-      fetch(url, { credentials: "same-origin", headers: { "Accept": "application/json" } })
-        .then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (d) { if (d) paint(d); })
-        .catch(function () { /* réseau coupé : on garde le dernier état affiché */ })
-        .then(function () { if (!stopped) window.setTimeout(tick, period); });
+      if (document.hidden || inFlight) return;
+      inFlight = true;
+      var controller = new AbortController();
+      var timeout = window.setTimeout(function () { controller.abort(); }, 8000);
+      fetch(url, { credentials: "same-origin", signal: controller.signal,
+                   headers: { "Accept": "application/json" } })
+        .then(function (response) {
+          if (!response.ok) throw new Error("Actualisation indisponible");
+          return response.json();
+        })
+        .then(function (data) {
+          ["status", "phase", "energy", "mood", "sleep"].forEach(function (key) {
+            var slot = bar.querySelector('[data-vital="' + key + '"]');
+            if (slot && data[key] != null) slot.textContent = data[key];
+          });
+          var dot = bar.querySelector(".dot");
+          if (dot) dot.className = "dot " + (data.status === "en ligne" ? "dot-ok" : "dot-danger");
+          var brand = document.querySelector(".brand-sub");
+          if (brand && data.status != null) brand.textContent = data.status;
+          if (indicator) {
+            indicator.textContent = "À jour";
+            indicator.title = "Actualisé à " + new Date().toLocaleTimeString("fr-FR");
+            indicator.classList.remove("tone-warn");
+          }
+        })
+        .catch(function () {
+          if (indicator) {
+            indicator.textContent = "Actualisation interrompue";
+            indicator.title = "Les valeurs affichées sont celles du dernier chargement réussi.";
+            indicator.classList.add("tone-warn");
+          }
+        })
+        .finally(function () {
+          window.clearTimeout(timeout);
+          inFlight = false;
+          schedule();
+        });
     }
-
-    // Ne pas sonder un onglet en arrière-plan : sur une installation
-    // personnelle, c'est une requête toutes les 10 s pour une page que
-    // personne ne regarde.
     document.addEventListener("visibilitychange", function () {
-      if (document.hidden) { stopped = true; }
-      else if (stopped) { stopped = false; tick(); }
+      window.clearTimeout(timer);
+      if (!document.hidden) tick();
     });
+    schedule();
+  }
 
-    window.setTimeout(tick, period);
+  function wireOutline() {
+    var main = document.querySelector("main.content");
+    if (!main) return;
+    var headings = Array.from(main.querySelectorAll(".card-head > h3, .section-heading > h3"))
+      .filter(function (heading) { return !heading.closest("details"); });
+    if (headings.length < 4) return;
+    var nav = document.createElement("nav");
+    nav.className = "page-outline";
+    nav.setAttribute("aria-label", "Dans cette page");
+    var label = document.createElement("span");
+    label.className = "page-outline-label";
+    label.textContent = "Dans cette page";
+    nav.appendChild(label);
+    headings.forEach(function (heading, index) {
+      if (!heading.id) heading.id = "section-" + (index + 1);
+      var anchor = document.createElement("a");
+      anchor.href = "#" + heading.id;
+      anchor.textContent = heading.textContent.trim();
+      nav.appendChild(anchor);
+    });
+    var tabs = main.querySelector(":scope > .tabs");
+    var head = main.querySelector(":scope > .page-head");
+    var before = tabs || head;
+    if (before) before.insertAdjacentElement("afterend", nav);
+  }
+
+  function wireNavigation() {
+    document.querySelectorAll(".tabs").forEach(function (tabs) {
+      var active = tabs.querySelector('[aria-current="page"]');
+      if (active && tabs.scrollWidth > tabs.clientWidth) {
+        tabs.scrollLeft = active.offsetLeft - tabs.offsetLeft - 16;
+      }
+    });
+    var toggle = document.getElementById("nav-toggle");
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && toggle && toggle.checked) {
+        toggle.checked = false;
+        toggle.focus();
+      }
+    });
   }
 
   function init() {
@@ -133,6 +201,8 @@
     wireConfirm();
     wireFilters();
     wireVitals();
+    wireOutline();
+    wireNavigation();
   }
 
   if (document.readyState === "loading") {

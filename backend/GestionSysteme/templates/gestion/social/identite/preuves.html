@@ -38,7 +38,7 @@
                   {% with w=evidence_weights|get:c.kind %}{% if w %}<div class="text-xs muted tabular">barème {{ w|num }}</div>{% endif %}{% endwith %}
                   {% with w=counter_weights|get:c.kind %}{% if w %}<div class="text-xs muted tabular">barème {{ w|num }}</div>{% endif %}{% endwith %}
                 </td>
-                <td><div class="cell-clamp">{{ c.evidence|default:"—" }}</div></td>
+                <td>{% include "gestion/partials/long_text.html" with value=c.evidence|default:"—" %}</td>
                 <td class="num">{{ c.applied_weight|num }}</td>
                 <td class="fit">{{ c.channel|default:"—" }} <span class="muted text-xs">{{ c.trust }}</span></td>
                 <td class="fit">

@@ -2,14 +2,7 @@
 {% load gestion %}
 
 {% block content %}
-<div class="alert alert-info mb-4">
-  Chaque événement du bus devient une observation. Les flux à gros volume
-  (<span class="mono">chat.*</span>, <span class="mono">telegram.message</span>,
-  <span class="mono">rss.new_entry</span>, <span class="mono">forge.*</span>)
-  sont classés par heuristique ; seul <span class="mono">email.received</span>
-  passe encore par un appel LLM, parce qu'un e-mail est un contenu dont
-  l'importance ne se lit pas dans une table de mots-clés.
-</div>
+<p class="muted mb-4">Les observations relient un signal reçu à son interprétation et à la réponse éventuelle de Mika. Filtrez par état ou par catégorie pour retrouver ce qui attend encore une suite.</p>
 
 <section class="card">
   {% include "gestion/partials/filters.html" %}
@@ -38,7 +31,8 @@
                   <small class="mono">{{ o.event_type }}</small>
                 </td>
                 <td>
-                  <div class="cell-clamp">{{ o.summary }}</div>
+                  {% include "gestion/partials/long_text.html" with value=o.summary %}
+{% include "gestion/partials/detail_link.html" with kind="observation" pk=o.pk %}
                   {% if o.action_response %}
                     <details class="disclosure mt-2">
                       <summary>Réponse produite</summary>

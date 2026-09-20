@@ -1,15 +1,4 @@
-"""Le seul point d'accès JSON de l'interface.
-
-Il n'alimente que la barre supérieure. Tout le reste est rendu par le
-serveur : c'est ce qui permet de supprimer les 29 fichiers de vues
-JavaScript, les 125 injections ``innerHTML`` et la couche d'assainissement
-qui existait pour les rattraper.
-
-Les valeurs sont déjà mises en forme ici, par les mêmes fonctions que le
-rendu initial : un seul endroit décide comment une humeur s'écrit, donc la
-barre ne change pas d'apparence entre le chargement et le premier
-rafraîchissement.
-"""
+"""API de gestion : vitaux et schéma public du contrat de panneaux."""
 from __future__ import annotations
 
 from django.http import JsonResponse
@@ -21,3 +10,9 @@ from GestionSysteme import shell
 @require_GET
 def vitals(request):
     return JsonResponse(shell.vitals())
+
+
+@require_GET
+def panel_schema(request):
+    from GestionSysteme.panel_schema import schema
+    return JsonResponse(schema(), json_dumps_params={"ensure_ascii": False})

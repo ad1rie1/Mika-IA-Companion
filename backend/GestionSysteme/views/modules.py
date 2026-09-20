@@ -213,8 +213,12 @@ def _capabilities(module: str) -> list[str]:
         return []
 
 
-def module_panel(request, module: str, panel: str):
+def module_panel(request, module: str, panel: str, *, action_error=None):
     """Un panneau déclaré par le module, ou sa configuration."""
+    panel_url = reverse("gestionsysteme:module-panel", args=[module, panel])
+    if action_error:
+        from GestionSysteme.panel_forms import request_for_panel
+        request = request_for_panel(request, panel_url)
     if panel == "configuration":
         return _module_config(request, module)
 
@@ -230,8 +234,11 @@ def module_panel(request, module: str, panel: str):
     ctx.update({
         "panel": found,
         "blocks": list(panels.iter_blocks(block)),
+        "action_error": action_error,
+        "panel_url": panel_url,
+        "header_actions": panels.header_actions(found, block),
     })
-    return render(request, "gestion/modules/panneau.html", ctx)
+    return render(request, "gestion/modules/panneau.html", ctx, status=400 if action_error else 200)
 
 
 @require_POST
@@ -240,7 +247,13 @@ def module_action(request, module: str, panel: str, action: str):
     if found is None:
         raise Http404(f"Panneau inconnu : {module}/{panel}")
 
-    note = panels.run_action(request, module, found, action)
+    from GestionSysteme.panel_forms import InvalidAction
+    if not any(a.key == action for a in found.actions):
+        raise Http404("Action inconnue")
+    try:
+        note = panels.run_action(request, module, found, action)
+    except InvalidAction as exc:
+        return module_panel(request, module, panel, action_error=exc)
     if note.tone == "danger":
         messages.error(request, note.text)
     elif note.tone == "warn":

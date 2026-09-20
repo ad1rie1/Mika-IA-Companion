@@ -73,6 +73,9 @@ class ManifestView:
     label: str
     icon: str = "▦"
     order: int = 100
+    description: str = ""
+    actions: list[dict] = field(default_factory=list)
+    page_params: tuple[str, ...] = ()
 
 
 @dataclass
@@ -160,6 +163,10 @@ def validate_manifest(data: dict, name: str) -> tuple[ForgeManifest | None, list
             if not isinstance(v, dict):
                 errors.append(f"views[{i}] doit être un objet")
                 continue
+            unknown = set(v) - {"key", "label", "icon", "order", "description", "actions", "page_params"}
+            if unknown:
+                errors.append(f"views[{i}] : options inconnues {', '.join(sorted(map(str, unknown)))}")
+                continue
             key = str(v.get("key") or "").strip()
             if not VIEW_KEY_RE.match(key):
                 errors.append(f"views[{i}].key invalide: {key!r}")
@@ -167,12 +174,32 @@ def validate_manifest(data: dict, name: str) -> tuple[ForgeManifest | None, list
             if key in seen_keys:
                 errors.append(f"views[{i}].key dupliquée: {key}")
                 continue
+            if key in {"etat", "configuration"}:
+                errors.append(f"views[{i}].key réservée : {key}")
+                continue
             seen_keys.add(key)
+            actions = _validate_view_actions(v.get("actions", []), i, errors)
+            from GestionSysteme.panel_payload import PARAM
+            page_params = v.get("page_params", [])
+            if (not isinstance(page_params, list) or len(page_params) > 20
+                    or any(not isinstance(p, str) or not PARAM.fullmatch(p) or p in {"page", "per_page"}
+                           for p in page_params)
+                    or len(set(page_params)) != len(page_params)):
+                errors.append(f"views[{i}].page_params : au plus 20 clés uniques, hors page et per_page")
+                page_params = []
+            try:
+                order = int(v.get("order", 100))
+            except (TypeError, ValueError):
+                errors.append(f"views[{i}].order doit être un entier")
+                order = 100
             views.append(ManifestView(
                 key=key,
                 label=str(v.get("label") or key)[:48],
                 icon=str(v.get("icon") or "▦")[:2],
-                order=int(v.get("order") or 100),
+                order=order,
+                description=str(v.get("description") or "")[:500],
+                actions=actions,
+                page_params=tuple(page_params),
             ))
 
     config: list[dict] = []
@@ -214,6 +241,39 @@ def validate_manifest(data: dict, name: str) -> tuple[ForgeManifest | None, list
         context=bool(data.get("context", False)),
         version=int(data.get("version") or 1),
     ), []
+
+
+def _validate_view_actions(raw, view_index, errors):
+    from GestionSysteme.panel_forms import input_from_spec, KEY
+    if not isinstance(raw, list) or len(raw) > 20:
+        errors.append(f"views[{view_index}].actions : liste de 20 actions maximum")
+        return []
+    actions, seen = [], set()
+    for a in raw:
+        try:
+            if not isinstance(a, dict) or not KEY.fullmatch(str(a.get("key", ""))):
+                raise ValueError("clé d'action invalide")
+            unknown = set(a) - {"key", "label", "description", "confirm", "danger", "fields"}
+            if unknown:
+                raise ValueError(f"options d'action inconnues : {', '.join(sorted(map(str, unknown)))}")
+            if "danger" in a and not isinstance(a["danger"], bool):
+                raise ValueError("danger doit être un booléen")
+            if a["key"] in seen:
+                raise ValueError("clé d'action dupliquée")
+            seen.add(a["key"])
+            fields = a.get("fields", [])
+            if not isinstance(fields, list) or len(fields) > 30:
+                raise ValueError("fields : liste de 30 champs maximum")
+            inputs = tuple(input_from_spec(f) for f in fields)
+            if len({f.key for f in inputs}) != len(inputs):
+                raise ValueError("clé de champ dupliquée")
+            actions.append({"key": a["key"], "label": str(a.get("label") or a["key"])[:100],
+                            "confirm": str(a.get("confirm", ""))[:500],
+                            "danger": bool(a.get("danger", False)),
+                            "description": str(a.get("description", ""))[:500], "fields": inputs})
+        except (ValueError, TypeError, OverflowError) as exc:
+            errors.append(f"views[{view_index}].actions : {exc}")
+    return actions
 
 
 def _validate_config_field(c, i: int, seen: set[str], errors: list[str]) -> dict | None:

@@ -13,26 +13,11 @@
 {% block tabs %}{% include "gestion/modules/_nav.html" %}{% endblock %}
 
 {% block page_actions %}
-  {% if panel.actions %}
-    <div class="page-actions">
-      {% comment %} La chaîne de requête est reportée sur l'URL d'action : une
-         action porte sur ce que l'écran montre (la fiche ouverte, le filtre
-         en place), pas sur le panneau en général. Sans elle, un bouton
-         « Recharger » ne saurait pas quel module est sélectionné.
-      {% endcomment %}
-      {% for a in panel.actions %}
-        <form method="post"
-              action="{% url 'gestionsysteme:module-action' module_name panel.key a.key %}{% qs %}"
-              {% if a.confirm %}data-confirm="{{ a.confirm }}"{% endif %}>
-          {% csrf_token %}
-          <button class="btn {% if a.danger %}btn-danger{% endif %}" type="submit">{{ a.label }}</button>
-        </form>
-      {% endfor %}
-    </div>
-  {% endif %}
+<div class="page-actions">{% for a in header_actions %}{% if not a.fields %}{% panel_action_ui a.key %}{% endif %}{% endfor %}</div>
 {% endblock %}
 
 {% block content %}
+{% include "gestion/partials/panel_actions.html" %}
 {% comment %} Chaque bloc a été *déclaré* par le module, jamais rendu par lui : il décrit
    ce qu'il veut montrer, la mise en forme appartient à GestionSystème. C'est
    ce qui fait qu'un module ne peut pas injecter de balisage — la classe de

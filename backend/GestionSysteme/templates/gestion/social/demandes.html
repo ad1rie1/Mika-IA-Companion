@@ -38,7 +38,7 @@
                 </td>
                 <td class="fit"><span class="badge">{{ c.get_kind_display }}</span></td>
                 <td class="fit">{{ c.channel|default:"—" }}<small>{{ c.trust }}</small></td>
-                <td><div class="cell-clamp">{{ c.evidence|default:"—" }}</div></td>
+                <td>{% include "gestion/partials/long_text.html" with value=c.evidence|default:"—" %}</td>
                 <td class="fit">
                   <span class="badge {% if c.status == 'pending' %}badge-warn{% elif c.status == 'accepted' %}badge-ok{% else %}badge-danger{% endif %}">
                     {{ c.get_status_display }}
@@ -67,7 +67,7 @@
                       </form>
                     </div>
                   {% else %}
-                    <span class="muted text-xs" title="{{ c.resolved_at|dt_full }}">{{ c.resolution_note|default:"—"|truncatechars:40 }}</span>
+                    <div class="muted text-xs" title="{{ c.resolved_at|dt_full }}">{% include "gestion/partials/long_text.html" with value=c.resolution_note|default:"—" %}</div>
                   {% endif %}
                 </td>
               </tr>

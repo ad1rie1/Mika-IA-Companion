@@ -30,7 +30,7 @@
           <tbody>
             {% for c in page.rows %}
               <tr {% if c.status != "pending" %}class="is-muted"{% endif %}>
-                <td><div class="cell-clamp">{{ c.description }}</div></td>
+                <td>{% include "gestion/partials/long_text.html" with value=c.description %}</td>
                 <td class="fit">
                   {% if c.person_id %}
                     <a href="{% url 'gestionsysteme:person-detail' c.person_id %}">{{ c.person.name }}</a>

@@ -1,35 +1,15 @@
-"""Panneaux de la Forge pour GestionSystème.
-
-Remplacent la vue unique à onglets déclarée dans ``views.py`` — laquelle
-restait rendue par un script générique côté navigateur. Ce que le portage
-apporte :
-
-- **Trois panneaux au lieu d'un onglet client** : Modules, Journal, Stockage.
-  Chacun a sa propre URL, donc son propre état de pagination et de filtres.
-- **Le journal est filtrable et paginé côté serveur.** L'ancienne vue en
-  chargeait 200 lignes d'un coup, sans filtre : sur une installation où
-  plusieurs modules forgés tournent en boucle, c'est la seule table qui
-  grossit vite, et c'est celle qu'on lit quand quelque chose casse.
-- **Les commandes sont des boutons.** Le disjoncteur désactive un module
-  après cinq échecs consécutifs ; le réactiver demandait jusqu'ici un outil
-  MCP ou un appel HTTP.
-- **Les vues des modules forgés deviennent des panneaux.** Leur charge utile
-  est produite par du code que l'IA écrit à l'exécution : elle passe par le
-  convertisseur de charges utiles historiques, donc par des cellules typées.
-  Le rendu n'a aucun chemin d'une clé de charge utile vers du balisage.
-"""
+"""Atelier de la Forge, inspection des apps et adaptation du contrat v2."""
 from __future__ import annotations
 
 import logging
 
 from GestionSysteme import panels as P
 from GestionSysteme import tables
+from GestionSysteme.formatting import display_text
+
+MAX_SOURCE_DISPLAY = 200_000
 
 logger = logging.getLogger("module.forge")
-
-# Repli de ``forge.panel_code_chars`` — même valeur que le ``default``
-# déclaré dans ``config_schema.py``. Troncature d'affichage seulement.
-MAX_CODE = 8000
 
 _TONS_STATUT = {
     "actif": "ok",
@@ -129,13 +109,16 @@ def blocs_app(host, nom: str, info: dict) -> list:
     blocs = [P.Fields(title="État", items=champs)]
 
     manifeste, code = _source(nom)
+    sources = []
     if manifeste:
-        blocs.append(P.Prose(title="manifest.yaml", text=manifeste))
+        sources.append(P.Code(title="manifest.yaml", text=manifeste))
     if code:
-        blocs.append(P.Prose(title="module.py", text=code))
+        sources.append(P.Code(title="module.py", text=code))
+    if sources:
+        blocs.append(P.Disclosure("Source et manifeste", sources))
 
     blocs.append(P.Table(
-        caption="Journal",
+        caption="Journal · 30 dernières entrées",
         columns=[
             P.Column("Quand", align="fit"),
             P.Column("Niveau", align="fit"),
@@ -145,6 +128,10 @@ def blocs_app(host, nom: str, info: dict) -> list:
         rows=[_ligne_journal(r, avec_module=False) for r in _journal(nom, 30)],
         empty="Aucune entrée pour cette app.",
     ))
+    from django.urls import reverse
+    from urllib.parse import urlencode
+    blocs.append(P.Fields([P.Field("Historique complet", "Ouvrir le journal filtré", kind="link",
+        href=reverse("gestionsysteme:module-panel", args=["forge", "journal"]) + "?" + urlencode({"module": nom}))]))
     return blocs
 
 
@@ -156,7 +143,6 @@ def _source(nom: str) -> tuple[str, str]:
     """
     import yaml
 
-    from configs.runtime import cfg_int
     from modules.plugins.forge import store
 
     try:
@@ -170,11 +156,7 @@ def _source(nom: str) -> tuple[str, str]:
     except Exception as exc:
         manifeste = f"(non sérialisable : {exc})"
     code = data.get("code") or ""
-    plafond = cfg_int("forge.panel_code_chars", MAX_CODE,
-                      mini=500, maxi=200000)
-    if len(code) > plafond:
-        code = code[:plafond] + "\n… (tronqué)"
-    return manifeste, code
+    return display_text(manifeste, MAX_SOURCE_DISPLAY), display_text(code, MAX_SOURCE_DISPLAY)
 
 
 # ── Journal ─────────────────────────────────────────────────────────────
@@ -266,39 +248,40 @@ def _journal(nom: str, limite: int):
 
 def stockage_panel(host):
     def handler(request):
+        import json
         from django.db.models import Count
-
         from modules.plugins.forge.models import ForgeRecord
+        from GestionSysteme.formatting import dt_full
 
-        lignes = (
-            ForgeRecord.objects.values("module_name", "collection")
-            .annotate(n=Count("id"))
-            .order_by("module_name", "collection")
-        )
-        page = tables.paginate(request, list(lignes), per_page=50)
-
+        collection = tables.read_text(request, "collection")
+        module = tables.read_text(request, "module")
+        if module and collection:
+            fs = tables.FilterSet(per_page=tables.read_per_page(request))
+            query = fs.add(tables.search_filter(request, "q", "Clé"))
+            fs.hidden = [("module", module), ("collection", collection)]
+            fs.reset_url = tables.url_with(request, q=None, page=None)
+            qs = ForgeRecord.objects.filter(module_name=module, collection=collection)
+            if query.value:
+                qs = qs.filter(key__icontains=query.value)
+            page = tables.paginate(request, qs.order_by("-updated_at", "-pk"), per_page=fs.per_page)
+            return P.Blocks([
+                P.Fields([P.Field("Collections", "← Retour aux collections", kind="link", href=request.path)]),
+                P.Table([P.Column("Clé"), P.Column("Modifiée le"), P.Column("Valeur")], [
+                    P.Row((P.mono(r.key), P.text(dt_full(r.updated_at)), P.text("Données JSON")),
+                          detail=P.Code(json.dumps(r.value, ensure_ascii=False, indent=2), title=r.key))
+                    for r in page.rows
+                ], page=page, filters=fs, caption=f"{module} / {collection}", empty="Aucune donnée pour ces filtres."),
+            ])
+        qs = ForgeRecord.objects.values("module_name", "collection").annotate(n=Count("id")).order_by("module_name", "collection")
+        page = tables.paginate(request, qs, per_page=50)
         return P.Table(
-            caption="Stockage par module",
-            columns=[
-                P.Column("Module"),
-                P.Column("Collection"),
-                P.Column("Lignes", align="num"),
-            ],
-            rows=[
-                P.Row(cells=(
-                    P.mono(r["module_name"]),
-                    P.text(r["collection"]),
-                    P.num(r["n"]),
-                ))
-                for r in page.rows
-            ],
-            page=page,
-            empty=(
-                "Aucune donnée stockée. Les modules forgés n'ont jamais de DDL : "
-                "ils écrivent dans une table partagée, par collection."
-            ),
+            caption="Collections stockées",
+            columns=[P.Column("Module"), P.Column("Collection"), P.Column("Lignes", align="num")],
+            rows=[P.Row((P.mono(r["module_name"]), P.text(r["collection"]), P.num(r["n"])),
+                        href=tables.url_with(request, module=r["module_name"], collection=r["collection"], page=None))
+                  for r in page.rows],
+            page=page, empty="Aucune donnée stockée par les apps.",
         )
-
     return handler
 
 
@@ -333,13 +316,13 @@ def _panneau_forge(host, module_forge, vue):
     """Adapte une vue déclarée dans le manifeste d'un module forgé.
 
     Le gestionnaire est du code écrit par l'IA, exécuté dans le bac à sable.
-    Sa charge utile passe par le convertisseur historique — donc par des
-    cellules typées — et le résultat reste borné en taille par
+    Sa charge utile respecte le contrat v2, décodé en composants typés.
+    Le résultat reste borné en taille par
     ``views._normalize_view_result``.
     """
     from modules.plugins.forge.views import _make_data_handler
 
-    brut = _make_data_handler(host, module_forge.name, vue.key)
+    brut = _make_data_handler(host, module_forge.name, vue.key, page_params=vue.page_params)
 
     def handler(request):
         from asgiref.sync import async_to_sync
@@ -356,8 +339,33 @@ def _panneau_forge(host, module_forge, vue):
         icon=vue.icon or "▦",
         order=vue.order,
         handler=handler,
-        description="Page déclarée par cette app.",
+        description=vue.description or "Page déclarée par cette app.",
+        actions=tuple(P.PanelAction(
+            key=a["key"], label=a["label"], confirm=a["confirm"], danger=a["danger"],
+            description=a["description"], fields=a["fields"],
+            handler=_action_handler(host, module_forge.name, vue.key, a["key"]),
+        ) for a in vue.actions),
     )
+
+
+def _action_handler(host, app, view, action):
+    async def handler(request):
+        lm = host._loaded.get(app)
+        if lm is None:
+            return P.Note("Cette app n'est pas chargée.", tone="danger")
+        handler_name = f"action_{view}_{action}"
+        if handler_name not in lm.handlers:
+            return P.Note(f"Action non implémentée : {handler_name}", tone="danger")
+        ok, result, error = await host._run_handler(
+            lm, handler_name, (request.panel_data,), source="action", count_failure=False,
+        )
+        if not ok:
+            return P.Note(str(error)[:500], tone="danger")
+        if isinstance(result, dict):
+            return P.Note(str(result.get("message", "Action exécutée."))[:500],
+                          tone="ok" if result.get("ok", True) else "danger")
+        return P.Note(str(result or "Action exécutée.")[:500], tone="ok")
+    return handler
 
 
 # ── Déclaration ─────────────────────────────────────────────────────────

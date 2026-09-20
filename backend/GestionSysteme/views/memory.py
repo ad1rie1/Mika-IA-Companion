@@ -58,7 +58,14 @@ def _souvenirs(request) -> dict:
         default="-occurred_at", all_label="Plus récents",
     ))
 
+    entity = fs.add(tables.search_filter(request, "entite", "Entité", placeholder="nom ou #numéro"))
+    sensitivity = fs.add(tables.select_filter(request, "sensibilite", "Sensibilité",
+        [("anodin", "Anodin"), ("personnel", "Personnel"), ("confidence", "Confidence")]))
     qs = Souvenir.objects.prefetch_related("themes", "entities")
+    if entity.value:
+        qs = _filter_entity(qs, entity.value)
+    if sensitivity.value:
+        qs = qs.filter(sensibilite=sensitivity.value)
     if search.value:
         qs = qs.filter(content__icontains=search.value)
     if theme.value:
@@ -85,7 +92,14 @@ def _connaissances(request) -> dict:
         all_label="Toutes",
     ))
 
+    entity = fs.add(tables.search_filter(request, "entite", "Entité", placeholder="nom ou #numéro"))
+    sensitivity = fs.add(tables.select_filter(request, "sensibilite", "Sensibilité",
+        [("anodin", "Anodin"), ("personnel", "Personnel"), ("confidence", "Confidence")]))
     qs = Connaissance.objects.prefetch_related("themes", "entities")
+    if entity.value:
+        qs = _filter_entity(qs, entity.value)
+    if sensitivity.value:
+        qs = qs.filter(sensibilite=sensitivity.value)
     if search.value:
         qs = qs.filter(content__icontains=search.value)
     if theme.value:
@@ -97,6 +111,17 @@ def _connaissances(request) -> dict:
     qs = qs.distinct().order_by("-confidence", "-updated_at")
 
     return {"filterset": fs, "page": tables.paginate(request, qs, per_page=fs.per_page)}
+
+
+def _filter_entity(queryset, value):
+    """Recherche en base : aucune liste exhaustive d'entités à charger."""
+    if value.startswith("#") or value.isdecimal():
+        try:
+            pk = int(value.removeprefix("#"))
+        except ValueError:
+            return queryset.none()
+        return queryset.filter(entities__pk=pk) if 0 < pk <= 9223372036854775807 else queryset.none()
+    return queryset.filter(entities__name__icontains=value)
 
 
 # ── Thèmes ──────────────────────────────────────────────────────────────
@@ -159,12 +184,23 @@ def _messages(request) -> dict:
     ))
     person = fs.add(tables.search_filter(request, "personne", "Personne", placeholder="person_id"))
     scaffolding = fs.add(tables.select_filter(
-        request, "interne", "Échafaudage",
+        request, "interne", "Messages internes",
         [("oui", "interne seulement"), ("non", "conversation seulement")],
         all_label="Tout",
     ))
 
-    qs = Message.objects.order_by("-created_at")
+    conversation = fs.add(tables.search_filter(request, "conversation", "Conversation", placeholder="numéro"))
+    qs = Message.objects.order_by("-created_at", "-pk")
+    conversation_id = None
+    if conversation.value:
+        try:
+            conversation_id = int(conversation.value)
+            if not 0 < conversation_id <= 9223372036854775807:
+                raise ValueError
+        except ValueError:
+            qs = qs.none()
+        else:
+            qs = qs.filter(conversation_id=conversation_id).order_by("created_at", "pk")
     if search.value:
         qs = qs.filter(content__icontains=search.value)
     if role.value:
@@ -176,7 +212,7 @@ def _messages(request) -> dict:
     elif scaffolding.value == "non":
         qs = qs.filter(is_internal=False)
 
-    return {"filterset": fs, "page": tables.paginate(request, qs, per_page=fs.per_page)}
+    return {"conversation_id": conversation_id, "filterset": fs, "page": tables.paginate(request, qs, per_page=fs.per_page)}
 
 
 # ── Journaux & rêves ────────────────────────────────────────────────────
@@ -207,6 +243,8 @@ def _nights(request) -> dict:
 def _narrative(request) -> dict:
     from memory.models import SelfNarrative
 
-    qs = SelfNarrative.objects.order_by("-created_at")
-    page = tables.paginate(request, qs, per_page=10)
-    return {"page": page, "current": page.rows[0] if page.rows else None}
+    qs = SelfNarrative.objects.order_by("-created_at", "-pk")
+    current = qs.first()
+    history = qs.exclude(pk=current.pk) if current else qs
+    page = tables.paginate(request, history, per_page=10)
+    return {"page": page, "current": current}

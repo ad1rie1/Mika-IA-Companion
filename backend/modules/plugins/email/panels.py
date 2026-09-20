@@ -26,8 +26,10 @@ from __future__ import annotations
 
 from GestionSysteme import panels as P
 from GestionSysteme import tables
+from GestionSysteme.formatting import display_text
 
-MAX_CORPS = 20_000
+MAX_CORPS = 100_000
+MAX_HTML_SOURCE = 250_000
 
 
 # ── Filtres partagés ────────────────────────────────────────────────────
@@ -163,6 +165,8 @@ def _fiche_message(request):
                 tone=_ton_priorite(e.priority)),
         P.Field("Lu", "oui" if e.is_read else "non"),
         P.Field("Pièces jointes", "oui" if e.has_attachments else "non"),
+        P.Field("Réponse envoyée", "oui" if e.replied else "non"),
+        P.Field("Signalé à Mika", "oui" if e.notified else "non"),
         P.Field("Fermer la fiche", "retour à la liste", kind="link",
                 href=_lien_avec(request, message=None)),
     ]
@@ -174,13 +178,54 @@ def _fiche_message(request):
     # qui garantit qu'il ne peut pas devenir du balisage.
     corps = (e.body_text or "").strip()
     if corps:
-        blocs.append(P.Prose(title="Corps", text=corps[:MAX_CORPS]))
+        blocs.append(P.Prose(title="Corps", text=display_text(corps, MAX_CORPS)))
     elif e.body_html:
-        blocs.append(P.Note(
-            "Ce message n'a qu'une version HTML ; elle n'est pas affichée ici.",
-            tone="info",
-        ))
+        blocs.append(P.Prose(title="Corps · version HTML convertie en texte",
+                             text=_html_text(e.body_html) or "Aucun texte lisible dans ce message."))
+    blocs.append(P.Disclosure("Informations de réception", [P.Fields([
+        P.Field("Identifiant du message", e.message_id, kind="mono"),
+        P.Field("En réponse à", e.in_reply_to or "—", kind="mono"),
+        P.Field("Références", e.references or "—", kind="mono"),
+        P.Field("Relevé le", _date(e.fetched_at)),
+    ])]))
     return blocs
+
+
+def _html_text(raw: str) -> str:
+    """Lecture du texte d'un mail HTML, sans charger ni interpréter ses ressources."""
+    from html.parser import HTMLParser
+    import re
+
+    class Reader(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.parts = []
+            self.hidden = 0
+
+        def handle_starttag(self, tag, attrs):
+            if tag in {"script", "style", "head"}:
+                self.hidden += 1
+            elif not self.hidden and tag in {"p", "div", "br", "li", "tr", "h1", "h2", "h3"}:
+                self.parts.append("\n")
+
+        def handle_endtag(self, tag):
+            if tag in {"script", "style", "head"}:
+                self.hidden = max(0, self.hidden - 1)
+            elif not self.hidden and tag in {"p", "div", "li", "tr"}:
+                self.parts.append("\n")
+
+        def handle_data(self, data):
+            if not self.hidden:
+                self.parts.append(data)
+
+    reader = Reader()
+    reader.feed(raw[:MAX_HTML_SOURCE])
+    reader.close()
+    value = re.sub(r"[ \t\r\f\v]+", " ", "".join(reader.parts))
+    value = display_text(re.sub(r"\n\s*\n", "\n\n", value).strip(), MAX_CORPS)
+    if len(raw) > MAX_HTML_SOURCE:
+        value += "\n\n[Source HTML tronquée à 250 000 caractères avant conversion.]"
+    return value
 
 
 # ── Contacts ────────────────────────────────────────────────────────────
@@ -227,7 +272,11 @@ def contacts(request):
                 P.num(c.emails_sent),
                 P.text(", ".join(a.name for a in c.accounts.all()) or "—"),
                 P.mono(_date(c.last_seen), title=str(c.last_seen or "")),
-            ))
+            ), detail=P.Blocks([
+                P.Fields([P.Field("Premier contact", _date(c.first_seen)),
+                          P.Field("Dernier contact", _date(c.last_seen))], title=c.display_name or c.email_address),
+                P.Prose(c.notes or "Aucune note.", title="Notes"),
+            ]))
             for c in page.rows
         ],
         page=page,

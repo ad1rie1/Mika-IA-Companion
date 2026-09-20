@@ -130,8 +130,8 @@ def get_context(api):
     return f"{n} entrées"
 
 def view_stats(api, params):
-    page = int(params.get('page') or 0)
-    return {'columns': [{'key': 'k', 'label': 'K'}], 'rows': [], 'page': page}
+    page = int(params.get('page') or 1)
+    return {'version': 2, 'blocks': [{'type': 'table', 'columns': [{'key': 'k', 'label': 'K'}], 'rows': []}]}
 """
         assert sandbox.validate_source(code) == []
 

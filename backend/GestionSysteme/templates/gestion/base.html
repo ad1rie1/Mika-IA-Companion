@@ -22,18 +22,20 @@
 <link rel="stylesheet" href="{% static 'gestion/css/base.css' %}">
 <link rel="stylesheet" href="{% static 'gestion/css/layout.css' %}">
 <link rel="stylesheet" href="{% static 'gestion/css/components.css' %}">
+<link rel="stylesheet" href="{% static 'gestion/css/workspace.css' %}">
 {% block head_extra %}{% endblock %}
 </head>
 <body>
+<a class="skip-link" href="#main-content">Aller au contenu</a>
 
 {% comment %} La case pilote l'ouverture du menu sur petit écran. Elle précède .app pour
    que le sélecteur frère `:checked ~ .app` fonctionne — pas de JavaScript
    dans le chemin de la navigation. {% endcomment %}
-<input type="checkbox" id="nav-toggle" class="nav-toggle-input" aria-hidden="true" tabindex="-1">
+<input type="checkbox" id="nav-toggle" class="nav-toggle-input" aria-label="Ouvrir ou fermer la navigation" aria-controls="primary-navigation">
 
 <div class="app">
 
-  <aside class="sidebar" aria-label="Navigation principale">
+  <aside id="primary-navigation" class="sidebar" aria-label="Navigation principale">
     <a class="brand" href="{% url 'gestionsysteme:overview' %}">
       <span class="brand-mark" aria-hidden="true">M</span>
       <span>
@@ -103,10 +105,11 @@
         <span class="vital">Énergie <b data-vital="energy">{{ vitals.energy }}</b></span>
         <span class="vital">Humeur <b data-vital="mood">{{ vitals.mood }}</b></span>
         <span class="vital">Sommeil <b data-vital="sleep">{{ vitals.sleep }}</b></span>
+        <span class="subtle" data-refresh-status aria-live="polite">À jour</span>
       </div>
     </header>
 
-    <main class="content">
+    <main class="content" id="main-content" tabindex="-1">
       {% block breadcrumbs %}{% endblock %}
 
       {% if messages %}

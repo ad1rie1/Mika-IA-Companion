@@ -37,11 +37,10 @@
 
 <section class="card">
   <div class="card-head"><h3>Historique</h3></div>
-  {% if page.rows|length > 1 %}
+  {% if page.rows %}
     <div class="card-body">
       <div class="col" style="gap: var(--sp-4);">
         {% for n in page.rows %}
-          {% if not forloop.first or page.number > 1 %}
             <article>
               <div class="row-wrap mb-2">
                 <strong>{{ n.created_at|dt_full }}</strong>
@@ -51,7 +50,6 @@
               </div>
               <div class="quote">{{ n.content }}</div>
             </article>
-          {% endif %}
         {% endfor %}
       </div>
     </div>

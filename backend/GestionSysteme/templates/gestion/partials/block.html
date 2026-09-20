@@ -1,116 +1,92 @@
 {% load gestion %}
-{% comment %} Rend un bloc de panneau (panels.Table / Fields / Stats / Note / Prose /
-   Template). Le module a décrit *ce qu'il veut montrer* ; la mise en forme
-   appartient entièrement à GestionSystème, donc tous les modules se
-   ressemblent et aucun ne peut casser la page. {% endcomment %}
-
-{% if block.block == "table" %}
-  <div class="card mb-4">
-    {% if block.caption %}
-      <div class="card-head"><h3>{{ block.caption }}</h3></div>
-    {% endif %}
-    {% if block.filters %}
-      {% include "gestion/partials/filters.html" with filterset=block.filters %}
-    {% endif %}
-    {% if block.rows %}
-      <div class="card-body flush">
-        <div class="table-scroll">
-          <table class="table">
-            <thead>
-              <tr>
-                {% for col in block.columns %}
-                  <th class="{{ col.align }}"{% if col.hint %} title="{{ col.hint }}"{% endif %}>{{ col.label }}</th>
-                {% endfor %}
-              </tr>
-            </thead>
-            <tbody>
-              {% for row in block.rows %}
-                <tr {% if row.tone %}class="is-{{ row.tone }}"{% endif %}>
-                  {% for cell in row.cells %}
-                    <td class="{% if cell.render_kind == 'num' %}num{% endif %}">
-                      {% if forloop.first and row.href %}
-                        <a href="{{ row.href }}">{% include "gestion/partials/cell.html" %}</a>
-                      {% else %}
-                        {% include "gestion/partials/cell.html" %}
-                      {% endif %}
-                    </td>
-                  {% endfor %}
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      {% if block.page %}
-        <div class="card-foot">{% include "gestion/partials/pager.html" with page=block.page %}</div>
-      {% endif %}
-    {% else %}
-      <div class="card-body"><div class="empty">{{ block.empty }}</div></div>
-    {% endif %}
+{% if block.block == "blocks" %}
+  {% for child in block.items %}{% include "gestion/partials/block.html" with block=child %}{% endfor %}
+{% elif block.block == "grid" %}
+  <div class="panel-grid panel-grid-{{ block.columns }} mb-4">
+    {% for child in block.items %}<div>{% include "gestion/partials/block.html" with block=child %}</div>{% endfor %}
   </div>
-
+{% elif block.block == "section" %}
+  <section class="panel-section mb-6">
+    <div class="section-heading"><h3>{{ block.title }}</h3>{% if block.description %}<p class="muted">{{ block.description }}</p>{% endif %}</div>
+    {% for child in block.items %}{% include "gestion/partials/block.html" with block=child %}{% endfor %}
+  </section>
+{% elif block.block == "disclosure" %}
+  {% panel_has_errors block as block_has_errors %}
+  <details class="card panel-disclosure mb-4"{% if block.open or block_has_errors %} open{% endif %}>
+    <summary>{{ block.title }}</summary><div class="card-body">
+      {% for child in block.items %}{% include "gestion/partials/block.html" with block=child %}{% endfor %}
+    </div>
+  </details>
+{% elif block.block == "table" %}
+  <section class="card mb-4">
+    {% if block.caption %}<div class="card-head"><h3>{{ block.caption }}</h3>{% if block.page %}<span class="badge">{{ block.page.total }} résultat{{ block.page.total|pluralize }}</span>{% endif %}</div>{% endif %}
+    {% if block.filters %}{% include "gestion/partials/filters.html" with filterset=block.filters %}{% endif %}
+    {% if block.rows %}
+      <div class="card-body flush"><div class="table-scroll" tabindex="0" role="region" aria-label="{{ block.caption|default:'Tableau' }}">
+        <table class="table">
+          <thead><tr>{% for col in block.columns %}<th scope="col" class="{{ col.align }}"{% if col.hint %} title="{{ col.hint }}"{% endif %}>{{ col.label }}</th>{% endfor %}</tr></thead>
+          <tbody>
+            {% for row in block.rows %}
+              <tr{% if row.tone %} class="is-{{ row.tone }}"{% endif %}>
+                {% for cell in row.cells %}{% with col=block.columns|at:forloop.counter0 %}<td class="{% if cell.render_kind == 'num' or col.align == 'num' %}num{% elif col.align == 'fit' %}fit{% endif %}">
+                  {% if forloop.first and row.href|safe_href and cell.render_kind != 'link' %}
+                    {% if cell.render_kind == 'text' and cell.clamp and cell.text|length > 180 %}
+                      {% include "gestion/partials/cell.html" %}
+                      <a class="detail-link" href="{{ row.href|safe_href }}"{% if cell.title %} title="{{ cell.title }}"{% endif %}>Ouvrir la fiche →</a>
+                    {% else %}
+                      <a href="{{ row.href|safe_href }}"{% if cell.title %} title="{{ cell.title }}"{% endif %}>{% include "gestion/partials/cell.html" %}</a>
+                    {% endif %}
+                  {% else %}{% include "gestion/partials/cell.html" %}{% endif %}
+                </td>{% endwith %}{% endfor %}
+              </tr>
+              {% if row.detail %}<tr class="row-inspect"><td colspan="{{ block.columns|length }}">
+                {% panel_has_errors row.detail as row_has_errors %}
+                <details class="row-detail"{% if row_has_errors %} open{% endif %}><summary>Voir les détails · {{ row.cells.0.text|clip:70 }}</summary><div class="row-detail-body">{% include "gestion/partials/block.html" with block=row.detail %}</div></details>
+              </td></tr>{% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div></div>
+    {% else %}<div class="card-body"><div class="empty">{{ block.empty }}</div></div>{% endif %}
+    {% if block.page %}<div class="card-foot">{% include "gestion/partials/pager.html" with page=block.page %}</div>{% endif %}
+  </section>
 {% elif block.block == "fields" %}
-  <div class="card mb-4">
+  <section class="card mb-4">
     {% if block.title %}<div class="card-head"><h3>{{ block.title }}</h3></div>{% endif %}
     <div class="card-body">
-      {% if block.items %}
-        <dl class="kv">
-          {% for f in block.items %}
-            <dt>{{ f.label }}</dt>
-            <dd>
-              {% if f.render_kind == "badge" %}
-                <span class="badge {% if f.tone %}badge-{{ f.tone }}{% endif %}">{{ f.value }}</span>
-              {% elif f.render_kind == "emotion" %}
-                <span class="emo" style="{{ f.value|emo_style }}">{{ f.value|emo_fr }}</span>
-              {% elif f.render_kind == "link" %}
-                <a href="{{ f.href }}">{{ f.value }}</a>
-              {% elif f.render_kind == "mono" %}
-                <span class="mono">{{ f.value }}</span>
-              {% else %}
-                {{ f.value }}
-              {% endif %}
-            </dd>
-          {% endfor %}
-        </dl>
-      {% else %}
-        <div class="empty">Aucune donnée.</div>
-      {% endif %}
+      {% if block.items %}<dl class="kv">{% for f in block.items %}<dt>{{ f.label }}</dt><dd>{% include "gestion/partials/cell.html" with cell=f.cell %}</dd>{% endfor %}</dl>
+      {% else %}<div class="empty">Aucune donnée.</div>{% endif %}
     </div>
-  </div>
-
+  </section>
 {% elif block.block == "stats" %}
   {% if block.title %}<h3 class="mb-3">{{ block.title }}</h3>{% endif %}
-  <div class="grid auto mb-4">
-    {% for s in block.items %}
-      <div class="stat">
-        <div class="stat-label">{{ s.label }}</div>
-        <div class="stat-value {% if s.tone %}tone-{{ s.tone }}{% endif %}">{{ s.value }}</div>
-        {% if s.sub %}<div class="stat-sub">{{ s.sub }}</div>{% endif %}
-      </div>
-    {% endfor %}
-  </div>
-
-{% elif block.block == "note" %}
-  <div class="alert alert-{{ block.tone }} mb-4">
-    <div>
-      {% if block.title %}<strong>{{ block.title }}</strong><br>{% endif %}
-      {{ block.text }}
+  <div class="stats-grid mb-4">{% for s in block.items %}
+    <div class="stat"><div class="stat-label">{{ s.label }}</div>
+      <div class="stat-value{% if s.tone %} tone-{{ s.tone }}{% endif %}">{% if s.href|safe_href %}<a href="{{ s.href|safe_href }}">{{ s.value }}</a>{% else %}{{ s.value }}{% endif %}</div>
+      {% if s.sub %}<div class="stat-sub">{{ s.sub }}</div>{% endif %}
     </div>
-  </div>
-
-{% elif block.block == "prose" %}
-  <div class="card mb-4">
+  {% endfor %}</div>
+{% elif block.block == "note" %}
+  <div class="alert alert-{{ block.tone }} mb-4"><div>{% if block.title %}<strong>{{ block.title }}</strong><br>{% endif %}{{ block.text }}</div></div>
+{% elif block.block == "prose" or block.block == "code" %}
+  <section class="card mb-4">
     {% if block.title %}<div class="card-head"><h3>{{ block.title }}</h3></div>{% endif %}
-    <div class="card-body"><div class="narrative">{{ block.text }}</div></div>
-  </div>
-
+    <div class="card-body">{% if block.block == "code" %}<pre><code>{{ block.text }}</code></pre>{% else %}<div class="narrative">{{ block.text }}</div>{% endif %}</div>
+  </section>
+{% elif block.block == "timeline" %}
+  <section class="card mb-4">
+    {% if block.title %}<div class="card-head"><h3>{{ block.title }}</h3></div>{% endif %}
+    <div class="card-body"><ol class="timeline">
+      {% for entry in block.items %}<li>
+        <div class="spread"><strong>{% if entry.href|safe_href %}<a href="{{ entry.href|safe_href }}">{{ entry.title }}</a>{% else %}{{ entry.title }}{% endif %}</strong><span class="badge{% if entry.tone %} badge-{{ entry.tone }}{% endif %}">{{ entry.meta }}</span></div>
+        <div class="narrative">{{ entry.text }}</div>
+      </li>{% empty %}<li class="empty">{{ block.empty }}</li>{% endfor %}
+    </ol></div>
+  </section>
+{% elif block.block == "form" %}
+  <div class="mb-4">{% panel_action_ui block.action block.initial block.title %}</div>
 {% elif block.block == "template" %}
-  {% comment %} Échappatoire assumée : le module fournit son propre gabarit Django,
-     résolu depuis son dossier `templates/`. C'est du code qu'il possède, pas
-     une donnée qu'il relaie — et il passe quand même par le moteur de
-     gabarits, donc échappé par défaut. {% endcomment %}
   {% include block.name with panel_context=block.context only %}
-
 {% else %}
   <div class="alert alert-warn mb-4">Bloc non affichable.</div>
 {% endif %}

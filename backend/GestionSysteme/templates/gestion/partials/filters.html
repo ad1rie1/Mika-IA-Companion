@@ -8,15 +8,18 @@
    La taille de page est un champ du formulaire, sinon elle serait perdue au
    premier filtrage. {% endcomment %}
 {% if filterset and filterset.filters %}
-<form class="filters" method="get" role="search">
+<details class="filter-panel" data-filter-panel data-active="{{ filterset.active|yesno:'true,false' }}" open>
+<summary>Filtres et recherche{% if filterset.active %} <span class="badge badge-info">Filtres actifs</span>{% endif %}</summary>
+<form class="filters" method="get" action="{% firstof panel_url request.path %}" role="search">
+  {% for key, value in filterset.hidden %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
   {% for f in filterset.filters %}
     <div class="field">
-      <label class="field-label" for="filtre-{{ f.param }}">{{ f.label }}</label>
+      <label class="field-label" for="{{ filterset.prefix }}-{{ f.param }}">{{ f.label }}</label>
       {% if f.kind == "search" %}
-        <input type="search" id="filtre-{{ f.param }}" name="{{ f.param }}"
+        <input type="search" id="{{ filterset.prefix }}-{{ f.param }}" name="{{ f.param }}"
                value="{{ f.value }}" placeholder="{{ f.placeholder }}">
       {% else %}
-        <select id="filtre-{{ f.param }}" name="{{ f.param }}"
+        <select id="{{ filterset.prefix }}-{{ f.param }}" name="{{ f.param }}"
                 {% if f.autosubmit %}data-autosubmit{% endif %}>
           {% for c in f.choices %}
             <option value="{{ c.value }}" {% if c.value == f.value %}selected{% endif %}>{{ c.label }}</option>
@@ -28,8 +31,8 @@
 
   {% if filterset.show_per_page %}
     <div class="field">
-      <label class="field-label" for="filtre-taille">Par page</label>
-      <select id="filtre-taille" name="per_page" data-autosubmit>
+      <label class="field-label" for="{{ filterset.prefix }}-taille">Par page</label>
+      <select id="{{ filterset.prefix }}-taille" name="per_page" data-autosubmit>
         {% for n in filterset.per_page_choices %}
           <option value="{{ n }}" {% if n == filterset.per_page %}selected{% endif %}>{{ n }}</option>
         {% endfor %}
@@ -40,8 +43,9 @@
   <div class="filters-actions">
     <button type="submit" class="btn">Filtrer</button>
     {% if filterset.active %}
-      <a class="btn btn-ghost" href="{{ request.path }}">Réinitialiser</a>
+      <a class="btn btn-ghost" href="{% firstof filterset.reset_url panel_url request.path %}">Réinitialiser</a>
     {% endif %}
   </div>
 </form>
+</details>
 {% endif %}

@@ -12,9 +12,13 @@
 
 {% block tabs %}{% include "gestion/forge/_nav.html" %}{% endblock %}
 
+{% block page_actions %}
+<div class="page-actions">{% for a in header_actions %}{% if not a.fields %}{% panel_action_ui a.key %}{% endif %}{% endfor %}</div>
+{% endblock %}
 {% block content %}
+{% include "gestion/partials/panel_actions.html" %}
 {% comment %} Le contenu vient d'un handler écrit par Mika, exécuté dans le bac à sable.
-   Il a *déclaré* des colonnes et des lignes ; la mise en forme appartient à
+   Il a déclaré une composition de composants typés ; la mise en forme appartient à
    GestionSystème. Une app forgée ne peut donc produire aucun balisage — ce
    n'est pas assaini, ce n'est jamais lu. {% endcomment %}
 {% for block in blocks %}

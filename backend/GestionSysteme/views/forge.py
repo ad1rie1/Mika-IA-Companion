@@ -27,6 +27,7 @@ from asgiref.sync import async_to_sync
 from django.contrib import messages
 from django.http import Http404
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from configs.service import config_service
@@ -243,8 +244,12 @@ def forge_app_command(request, app: str):
     return redirect("gestionsysteme:forge-app", app=app)
 
 
-def forge_app_panel(request, app: str, panel: str):
+def forge_app_panel(request, app: str, panel: str, *, action_error=None):
     """Une page déclarée par l'app, exécutée dans le bac à sable."""
+    panel_url = reverse("gestionsysteme:forge-app-panel", args=[app, panel])
+    if action_error:
+        from GestionSysteme.panel_forms import request_for_panel
+        request = request_for_panel(request, panel_url)
     ctx = _space_context(request, app, active_panel=panel)
     found = next((p for p in ctx["panels"] if p.key == panel), None)
     if found is None:
@@ -253,8 +258,28 @@ def forge_app_panel(request, app: str, panel: str):
     ctx["page_title"] = found.label
     ctx["page_description"] = found.description
     block = panels.run_panel(request, f"forge/{app}", found)
-    ctx.update({"panel": found, "blocks": list(panels.iter_blocks(block))})
-    return render(request, "gestion/forge/panneau.html", ctx)
+    ctx.update({"panel": found, "blocks": list(panels.iter_blocks(block)), "action_error": action_error, "panel_url": panel_url,
+                "header_actions": panels.header_actions(found, block)})
+    return render(request, "gestion/forge/panneau.html", ctx, status=400 if action_error else 200)
+
+
+@require_POST
+def forge_app_action(request, app: str, panel: str, action: str):
+    from GestionSysteme.panel_forms import InvalidAction
+    host = _host()
+    _app_or_404(host, app)
+    found = next((p for p in _panels_for(host, app) if p.key == panel), None)
+    if found is None or not any(a.key == action for a in found.actions):
+        raise Http404("Action inconnue")
+    try:
+        note = panels.run_action(request, f"forge/{app}", found, action)
+    except InvalidAction as exc:
+        return forge_app_panel(request, app, panel, action_error=exc)
+    level = messages.ERROR if note.tone == "danger" else messages.WARNING if note.tone == "warn" else messages.SUCCESS
+    messages.add_message(request, level, note.text)
+    url = reverse("gestionsysteme:forge-app-panel", args=[app, panel])
+    query = request.GET.urlencode()
+    return redirect(url + (f"?{query}" if query else ""))
 
 
 # ── Configuration de l'app ──────────────────────────────────────────────

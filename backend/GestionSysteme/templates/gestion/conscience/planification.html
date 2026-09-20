@@ -27,7 +27,8 @@
                   {{ a.scheduled_at|dt }}
                   <small>{{ a.scheduled_at|ago }}</small>
                 </td>
-                <td><div class="cell-clamp">{{ a.prompt }}</div></td>
+                <td>{% include "gestion/partials/long_text.html" with value=a.prompt %}
+{% include "gestion/partials/detail_link.html" with kind="planification" pk=a.pk %}</td>
                 <td class="num">{{ a.priority|num }}</td>
                 <td class="fit"><span class="badge">{{ a.source|default:"—" }}</span></td>
                 <td class="fit">
@@ -38,7 +39,7 @@
                   {% if a.raison_echec %}
                     <span class="muted">{{ a.raison_echec }}</span>
                   {% elif a.resultat %}
-                    <div class="cell-clamp muted">{{ a.resultat|truncatechars:140 }}</div>
+                    {% include "gestion/partials/long_text.html" with value=a.resultat %}
                   {% else %}
                     <span class="muted">—</span>
                   {% endif %}

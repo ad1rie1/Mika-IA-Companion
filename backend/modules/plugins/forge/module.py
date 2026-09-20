@@ -10,7 +10,7 @@ surveille et expose N mini-modules écrits par Mika dans l'espace confiné
 - **timeouts** : chaque handler tourne dans un thread avec deadline —
   un module forgé lent ne bloque jamais le scheduler partagé
 - **espace de config par module** injecté dans l'éditeur du dashboard
-- **pages dashboard par module** (Option A générique, payload assaini)
+- **panneaux de gestion par app** (contrat v2, rendu Django échappé)
 - **signaux** : schedule (interval/cron/idle), abonnements aux événements
   du bus, ``api.emit`` inter-modules, ``api.notify_ai`` rate-limité
 """

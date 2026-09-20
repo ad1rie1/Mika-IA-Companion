@@ -56,13 +56,13 @@
 
   /* ── Rayons ─────────────────────────────────────────────────────────── */
   --radius-sm: 3px;
-  --radius:    5px;
-  --radius-md: 7px;
-  --radius-lg: 10px;
+  --radius:    8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
   --radius-pill: 999px;
 
   /* ── Chrome ─────────────────────────────────────────────────────────── */
-  --sidebar-w: 236px;
+  --sidebar-w: 244px;
   --topbar-h: 52px;
   --content-max: 1600px;
 

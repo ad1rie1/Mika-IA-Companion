@@ -34,7 +34,8 @@
           <tbody>
             {% for r in page.rows %}
               <tr>
-                <td><div class="cell-clamp">{{ r.summary }}</div></td>
+                <td>{% include "gestion/partials/long_text.html" with value=r.summary %}
+{% include "gestion/partials/detail_link.html" with kind="rumination" pk=r.pk %}</td>
                 <td>
                   {% if r.emotion %}
                     <span class="emo" style="{{ r.emotion|emo_style }}">{{ r.emotion|emo_fr }}</span>

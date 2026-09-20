@@ -1,0 +1,4 @@
+{% extends "gestion/base.html" %}
+{% block breadcrumbs %}<nav class="crumbs" aria-label="Fil d'Ariane"><a href="{{ back_url }}">← Retour à la liste</a><span class="sep">/</span><span>{{ record_label }}</span></nav>{% endblock %}
+{% block tabs %}{% endblock %}
+{% block content %}<div class="record-layout"><div>{% for block in main_blocks %}{% include "gestion/partials/block.html" %}{% endfor %}</div><aside aria-label="Contexte et sources">{% for block in side_blocks %}{% include "gestion/partials/block.html" %}{% endfor %}</aside></div>{% endblock %}

@@ -198,17 +198,16 @@ def test_une_charge_utile_de_module_devient_un_tableau_type():
     # C'est la forme que produisent les modules **forgés** : du code écrit par
     # l'IA à l'exécution, sans type statique. La conversion en cellules typées
     # est ce qui l'empêche de produire du balisage.
-    payload = {
+    payload = {"version": 2, "blocks": [{
+        "type": "table",
         "columns": [{"key": "id", "label": "#"}, {"key": "sujet", "label": "Sujet"}],
-        "rows": [{"id": 1, "sujet": "Bonjour"}],
-        "total": 1, "page": 0, "limit": 25,
-    }
-    block = panels.blocks_from_payload(payload)
+        "rows": [{"cells": {"id": 1, "sujet": "Bonjour"}}],
+        "pagination": {"total": 1, "page": 1, "per_page": 25},
+    }]}
+    block = panels.blocks_from_payload(payload).items[0]
     assert isinstance(block, panels.Table)
     assert [c.label for c in block.columns] == ["#", "Sujet"]
     assert block.rows[0].cells[1].text == "Bonjour"
-    # Ces charges utiles comptent les pages à partir de zéro, l'interface à
-    # partir de un : la conversion se fait à l'unique endroit qui sait les deux.
     assert block.page.number == 1
 
 
@@ -223,9 +222,9 @@ def test_une_charge_utile_html_ne_peut_plus_rien_rendre():
     block = panels.blocks_from_payload(
         {"html": "<script>alert(1)</script>", "js": "x", "template": "y", "ok": "1"},
     )
-    assert isinstance(block, panels.Fields)
-    etiquettes = {f.label for f in block.items}
-    assert etiquettes == {"ok"}
+    assert isinstance(block, panels.Note)
+    assert block.tone == "danger"
+    assert "<script>" not in block.text
 
 
 def test_le_balisage_d_un_module_est_echappe_dans_le_rendu(client):
@@ -1401,7 +1400,7 @@ def test_un_corps_d_email_hostile_est_echappe(client, deux_comptes_email):
 
 
 @pytest.mark.django_db
-def test_le_corps_html_n_est_jamais_rendu(client, deux_comptes_email):
+def test_le_corps_html_est_converti_en_texte_sans_script(client, deux_comptes_email):
     from modules.plugins.email.models import Email
 
     perso, _ = deux_comptes_email
@@ -1413,13 +1412,10 @@ def test_le_corps_html_n_est_jamais_rendu(client, deux_comptes_email):
     )
     url = reverse("gestionsysteme:module-panel", args=["email", "reception"])
     html = client.get(url, {"message": str(message.pk)}).content.decode()
-    # Le contenu ne doit pas apparaître **du tout** — pas même échappé. Ne
-    # vérifier que l'absence de `<b>gras</b>` littéral testerait seulement
-    # l'échappement de Django, qui est couvert ailleurs, et laisserait passer
-    # un rendu de `body_html` en texte.
-    assert "gras" not in html
-    # Sans apostrophe : Django l'échappe en &#x27; dans la sortie.
-    assert "version HTML" in html
+    assert "gras" in html
+    assert "<b>gras</b>" not in html
+    assert "alert(1)" not in html
+    assert "version HTML convertie en texte" in html
 
 
 def test_url_with_retire_un_parametre(rf):

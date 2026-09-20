@@ -22,8 +22,9 @@ from __future__ import annotations
 
 from GestionSysteme import panels as P
 from GestionSysteme import tables
+from GestionSysteme.formatting import display_text
 
-RESUME_MAX = 8_000
+RESUME_MAX = 40_000
 
 
 # ── Filtres partagés ────────────────────────────────────────────────────
@@ -180,7 +181,7 @@ def _fiche_article(request):
     blocs = [P.Fields(title="Article", items=champs)]
     resume = (e.summary or "").strip()
     if resume:
-        blocs.append(P.Prose(title="Résumé", text=resume[:RESUME_MAX]))
+        blocs.append(P.Prose(title="Résumé", text=display_text(resume, RESUME_MAX)))
     else:
         blocs.append(P.Note(
             "Ce flux ne publie pas de résumé — seul le titre et le lien sont disponibles.",
@@ -258,13 +259,22 @@ def _ligne_flux(f) -> P.Row:
         # Cliquer un flux ouvre ses articles : c'est la question suivante.
         href=f"{_url_articles()}?flux={f.pk}",
         cells=(
-            P.link(f.name, f.url, title=f.url),
+            P.text(f.name, title=f.url),
             P.badge(f.category or "—"),
             P.num(f.nb),
             P.num(f.nb_non_lus),
             P.mono(_date(f.last_polled), title=str(f.last_polled or "")),
             etat,
         ),
+        detail=P.Fields([
+            P.Field("Adresse du flux", f.url, kind="link", href=f.url),
+            P.Field("Dernier succès", _date(f.last_success_at)),
+            P.Field("Dernière erreur", f.last_error or "Aucune"),
+            P.Field("Erreur survenue le", _date(f.last_error_at)),
+            P.Field("Articles relevés depuis la création", str(f.entries_total)),
+            P.Field("Mots-clés surveillés", f.keywords or "Tous"),
+            P.Field("Événements activés", "oui" if f.emit_events else "non"),
+        ], title="Santé du flux"),
     )
 
 

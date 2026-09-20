@@ -10,16 +10,16 @@
   <span class="emo" style="{{ cell.emotion|emo_style }}"{% if cell.title %} title="{{ cell.title }}"{% endif %}>{{ cell.text }}{% if cell.ratio is not None %} <span class="emo-weight">{{ cell.ratio|pct }}</span>{% endif %}</span>
 
 {% elif cell.render_kind == "link" %}
-  <a href="{{ cell.href }}"{% if cell.title %} title="{{ cell.title }}"{% endif %}>{{ cell.text }}</a>
+  {% if cell.href|safe_href %}<a href="{{ cell.href|safe_href }}"{% if cell.title %} title="{{ cell.title }}"{% endif %}>{{ cell.text }}</a>{% else %}<span{% if cell.title %} title="{{ cell.title }}"{% endif %}>{{ cell.text }}</span>{% endif %}
 
 {% elif cell.render_kind == "meter" %}
   <span class="row" style="min-width: 7rem;">
-    <span class="meter {{ cell.tone }}" style="flex: 1;"{% if cell.title %} title="{{ cell.title }}"{% endif %}><span style="width: {{ cell.ratio|bar_width }}%;"></span></span>
+    <span class="meter {{ cell.tone }}" style="flex: 1;"{% if cell.ratio is not None %} role="meter" aria-label="{{ cell.title|default:cell.text|default:'Progression' }}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ cell.ratio|bar_width }}"{% endif %}{% if cell.title %} title="{{ cell.title }}"{% endif %}><span style="width: {{ cell.ratio|bar_width }}%;"></span></span>
     {% if cell.text %}<span class="text-xs tabular">{{ cell.text }}</span>{% endif %}
   </span>
 
 {% elif cell.render_kind == "bool" %}
-  <span class="row"><span class="dot {% if cell.tone %}dot-{{ cell.tone }}{% endif %}"></span>{{ cell.text }}</span>
+  <span class="row"{% if cell.title %} title="{{ cell.title }}"{% endif %}><span class="dot {% if cell.tone %}dot-{{ cell.tone }}{% endif %}"></span>{{ cell.text }}</span>
 
 {% elif cell.render_kind == "mono" %}
   <span class="mono text-xs"{% if cell.title %} title="{{ cell.title }}"{% endif %}>{{ cell.text }}</span>
@@ -31,6 +31,6 @@
   <span class="subtle"{% if cell.title %} title="{{ cell.title }}"{% endif %}>{{ cell.text }}</span>
 
 {% else %}
-  <span{% if cell.clamp %} class="cell-clamp"{% endif %}{% if cell.title %} title="{{ cell.title }}"{% endif %}>{{ cell.text }}</span>
+  {% if cell.clamp %}{% include "gestion/partials/long_text.html" with value=cell.text text_title=cell.title %}{% else %}<span class="preserve-lines"{% if cell.title %} title="{{ cell.title }}"{% endif %}>{{ cell.text }}</span>{% endif %}
 {% endif %}
 {% endspaceless %}

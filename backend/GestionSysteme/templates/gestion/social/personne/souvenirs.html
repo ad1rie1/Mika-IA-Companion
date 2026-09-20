@@ -22,7 +22,8 @@
           <tbody>
             {% for s in page.rows %}
               <tr>
-                <td><div class="cell-clamp">{{ s.content }}</div></td>
+                <td>{% include "gestion/partials/long_text.html" with value=s.content %}
+{% include "gestion/partials/detail_link.html" with kind="souvenir" pk=s.pk %}</td>
                 <td><span class="emo" style="{{ s.emotion|emo_style }}">{{ s.emotion|emo_fr }}</span></td>
                 <td>
                   <div class="row">

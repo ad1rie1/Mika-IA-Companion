@@ -14,6 +14,60 @@ from GestionSysteme import formatting as fmt
 register = template.Library()
 
 
+@register.filter
+def safe_href(value):
+    from GestionSysteme.panel_payload import safe_href as checked
+    return checked(value)
+
+
+@register.filter
+def at(values, index):
+    try:
+        return values[int(index)]
+    except (IndexError, KeyError, TypeError, ValueError):
+        return None
+
+
+@register.inclusion_tag("gestion/partials/action.html", takes_context=True)
+def panel_action_ui(context, key, initial=None, title=""):
+    from django.urls import reverse
+    from GestionSysteme.panel_forms import build_form, action_instance
+
+    panel = context.get("panel")
+    action = next((a for a in panel.actions if a.key == key), None) if panel else None
+    if action is None:
+        return {"unavailable": True}
+    initial = initial or {}
+    instance = action_instance(key, initial)
+    request = context["request"]
+    invalid = context.get("action_error")
+    bound = bool(invalid and invalid.key == key and request.POST.get("_panel_instance") == instance)
+    form = build_form(action, data=request.POST if bound else None, initial=initial)
+    form.auto_id = f"action-{instance}-%s"
+    if bound:
+        form.is_valid()
+    if context.get("app_name"):
+        url = reverse("gestionsysteme:forge-app-action", args=[context["app_name"], panel.key, key])
+    else:
+        url = reverse("gestionsysteme:module-action", args=[context["module_name"], panel.key, key])
+    query = request.GET.urlencode()
+    return {"action": action, "action_form": form, "action_url": url + (f"?{query}" if query else ""),
+            "instance": instance, "bound": bound, "title": title,
+            "csrf_token": context.get("csrf_token")}
+
+
+@register.simple_tag(takes_context=True)
+def panel_has_errors(context, block):
+    from GestionSysteme.panels import walk_blocks, ActionForm
+    from GestionSysteme.panel_forms import action_instance
+    invalid = context.get("action_error")
+    if not invalid:
+        return False
+    instance = context["request"].POST.get("_panel_instance")
+    return any(isinstance(b, ActionForm) and b.action == invalid.key
+               and action_instance(b.action, b.initial) == instance for b in walk_blocks(block))
+
+
 # ── Mise en forme ───────────────────────────────────────────────────────
 
 register.filter("pct", fmt.pct)

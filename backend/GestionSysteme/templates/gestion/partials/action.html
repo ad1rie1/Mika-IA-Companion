@@ -1,0 +1,20 @@
+{% if unavailable %}<div class="alert alert-warn">Action non déclarée dans ce panneau.</div>{% else %}
+{% if action.fields %}<details class="disclosure panel-action"{% if bound %} open{% endif %}><summary>{{ title|default:action.label }}</summary><div class="disclosure-body">{% endif %}
+<form method="post" action="{{ action_url }}"{% if action.confirm %} data-confirm="{{ action.confirm }}"{% endif %} class="action-form">
+  {% csrf_token %}
+  <input type="hidden" name="_panel_instance" value="{{ instance }}">
+  {% if action.description %}<p class="muted">{{ action.description }}</p>{% endif %}
+  {{ action_form.non_field_errors }}
+  {% for field in action_form %}
+    {% if field.is_hidden %}{{ field }}{{ field.errors }}{% else %}
+    <div class="field mb-3">
+      {{ field.label_tag }}{% if field.field.required %}<span class="subtle"> · requis</span>{% endif %}
+      {{ field }}{{ field.errors }}
+      {% if field.help_text %}<p class="field-hint">{{ field.help_text }}</p>{% endif %}
+    </div>
+    {% endif %}
+  {% endfor %}
+  <button class="btn {% if action.danger %}btn-danger{% else %}btn-primary{% endif %}" type="submit">{{ action.label }}</button>
+</form>
+{% if action.fields %}</div></details>{% endif %}
+{% endif %}

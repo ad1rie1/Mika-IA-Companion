@@ -29,6 +29,8 @@
                   {% if e.entity_type == "person" %}
                     <a class="btn btn-sm" href="{% url 'gestionsysteme:person-detail' e.id %}">Fiche</a>
                   {% endif %}
+                  <a class="btn btn-sm" href="{% url 'gestionsysteme:memory-tab' 'souvenirs' %}?entite={{ e.pk }}">Souvenirs</a>
+                  <a class="btn btn-sm" href="{% url 'gestionsysteme:memory-tab' 'connaissances' %}?entite={{ e.pk }}">Faits</a>
                 </td>
               </tr>
             {% endfor %}

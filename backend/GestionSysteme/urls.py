@@ -24,6 +24,7 @@ from GestionSysteme.views import (
     memory,
     modules,
     overview,
+    records,
     projects,
     social,
     system,
@@ -33,6 +34,7 @@ app_name = "gestionsysteme"
 
 urlpatterns = [
     path("", overview.overview, name="overview"),
+    path("fiche/<slug:kind>/<int:pk>/", records.detail, name="record-detail"),
 
     # ── État de l'IA ─────────────────────────────────────────────────
     path("interieur/", inner.inner, name="inner"),
@@ -98,6 +100,7 @@ urlpatterns = [
     path("forge/<str:app>/commande/", forge.forge_app_command, name="forge-app-command"),
     path("forge/<str:app>/configuration/", forge.forge_app_config, name="forge-app-config"),
     path("forge/<str:app>/p/<slug:panel>/", forge.forge_app_panel, name="forge-app-panel"),
+    path("forge/<str:app>/p/<slug:panel>/action/<slug:action>/", forge.forge_app_action, name="forge-app-action"),
 
     path("configuration/", config.config_home, name="config"),
     path("configuration/<slug:section>/", config.config_section, name="config-section"),
@@ -114,7 +117,7 @@ urlpatterns = [
     path("systeme/<slug:tab>/", system.system, name="system-tab"),
 
     # ── Point d'accès JSON ───────────────────────────────────────────
-    # Le seul de toute l'application : il n'alimente que la barre supérieure.
-    # Tout le reste est rendu par le serveur.
+    # Les pages sont rendues côté serveur ; le schéma documente les panneaux.
     path("api/vitaux", api.vitals, name="api-vitals"),
+    path("api/panneaux/schema", api.panel_schema, name="api-panel-schema"),
 ]

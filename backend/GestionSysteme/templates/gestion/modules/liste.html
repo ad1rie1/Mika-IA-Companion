@@ -76,7 +76,7 @@
             <tr>
               <td class="mono text-xs">{{ t.name }}</td>
               <td class="fit"><a href="{% url 'gestionsysteme:module-space' t.module %}">{{ t.module }}</a></td>
-              <td><div class="cell-clamp">{{ t.description }}</div></td>
+              <td>{% include "gestion/partials/long_text.html" with value=t.description %}</td>
               <td><span class="chips">{% for p in t.params %}<span class="chip mono">{{ p }}</span>{% endfor %}</span></td>
             </tr>
           {% empty %}

@@ -2,13 +2,7 @@
 {% load gestion %}
 
 {% block content %}
-<div class="alert alert-info mb-4">
-  Le consolidateur lit d'abord le plafond d'identifiants, puis les messages
-  <span class="mono">id ≤ plafond</span>. Lire les messages d'abord et prendre
-  le maximum ensuite laissait un tour enregistré entre les deux requêtes être
-  compté par le point de reprise sans jamais être extrait — cet échange était
-  perdu pour toujours.
-</div>
+<p class="muted mb-4">Chaque passage transforme les échanges récents en souvenirs et en connaissances. Les compteurs permettent de suivre cette activité et son point de reprise.</p>
 
 <section class="card">
   {% if page.rows %}

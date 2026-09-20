@@ -31,8 +31,8 @@
                 <td class="fit muted" title="{{ l.created_at|dt_full }}">{{ l.created_at|ago }}</td>
                 <td class="mono text-xs">{{ l.key }}</td>
                 <td class="fit"><span class="badge">{{ l.action }}</span></td>
-                <td class="mono text-xs break"><div class="cell-clamp">{{ l.before|default:"—" }}</div></td>
-                <td class="mono text-xs break"><div class="cell-clamp">{{ l.after|default:"—" }}</div></td>
+                <td class="mono text-xs break">{% include "gestion/partials/long_text.html" with value=l.before|default:"—" %}</td>
+                <td class="mono text-xs break">{% include "gestion/partials/long_text.html" with value=l.after|default:"—" %}</td>
                 <td class="fit muted">{{ l.actor|default:"—" }}</td>
               </tr>
             {% endfor %}

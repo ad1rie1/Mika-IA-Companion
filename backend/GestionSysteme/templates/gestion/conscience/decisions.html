@@ -1,107 +1,26 @@
 {% extends "gestion/base.html" %}
 {% load gestion %}
-
 {% block content %}
 <section class="grid c3 mb-6">
-  <div class="stat">
-    <div class="stat-label">Inactivité</div>
-    <div class="stat-value">{% if idle_seconds %}{{ idle_seconds|duration }}{% else %}—{% endif %}</div>
-    <div class="stat-sub">depuis la dernière interaction</div>
-  </div>
-  <div class="stat">
-    <div class="stat-label">Cycles enregistrés</div>
-    <div class="stat-value">{{ total_logs }}</div>
-    <div class="stat-sub">une ligne par cycle, borné par la rétention</div>
-  </div>
-  <div class="stat">
-    <div class="stat-label">Seuil d'action</div>
-    <div class="stat-value">{{ act_threshold|num }}</div>
-    <div class="stat-sub">11 facteurs pondérés</div>
-  </div>
+  <div class="stat"><div class="stat-label">Inactivité</div><div class="stat-value">{% if idle_seconds is not None %}{{ idle_seconds|duration }}{% else %}—{% endif %}</div><div class="stat-sub">Depuis la dernière interaction</div></div>
+  <div class="stat"><div class="stat-label">Cycles enregistrés</div><div class="stat-value">{{ total_logs }}</div><div class="stat-sub">Une décision par cycle</div></div>
+  <div class="stat"><div class="stat-label">Seuil d'action actuel</div><div class="stat-value">{{ act_threshold|num }}</div><div class="stat-sub">Configuration du moteur</div></div>
 </section>
-
-<div class="alert alert-info mb-4">
-  Une salutation n'est marquée comme faite que si le cycle décide
-  <strong>d'agir</strong>. La valider dès le calcul du score dépensait la
-  salutation du jour sur un cycle qui choisissait finalement de se taire — et
-  le facteur ne pèse que 0,35 contre un seuil de 0,50.
-</div>
-
-<section class="card">
-  {% include "gestion/partials/filters.html" %}
-
-  {% if page.rows %}
-    <div class="card-body flush">
-      <div class="table-scroll">
-        <table class="table">
-          <thead>
-            <tr>
-              <th class="fit">Quand</th>
-              <th class="fit">Conduite</th>
-              <th style="min-width: 22rem;">Motif</th>
-              <th class="num">Score</th>
-              <th>Trousse</th>
-              <th class="num">Observations</th>
-              <th class="num">Pertinence max</th>
-              <th>Humeur</th>
-              <th class="fit">Inactivité</th>
-              <th>Mémoire</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for l in page.rows %}
-              <tr>
-                <td class="fit muted" title="{{ l.created_at|dt_full }}">{{ l.created_at|ago }}</td>
-                <td class="fit">
-                  <span class="badge {% with tone=decision_tones|get:l.decision %}{% if tone %}badge-{{ tone }}{% endif %}{% endwith %}">{% with label=decision_labels|get:l.decision %}{{ label|default:l.decision }}{% endwith %}</span>
-                </td>
-                <td>
-                  <div class="cell-clamp">{{ l.reason }}</div>
-                  {% if l.texte %}
-                    <div class="cell-clamp text-xs muted">« {{ l.texte|truncatechars:120 }} »</div>
-                  {% endif %}
-                  {% if l.cooldown_restant_s %}
-                    <span class="badge badge-warn text-xs">encore {{ l.cooldown_restant_s|duration }}</span>
-                  {% endif %}
-                </td>
-                <td class="num tabular">
-                  {% if l.score is not None %}{{ l.score|num }}{% else %}<span class="muted">—</span>{% endif %}
-                </td>
-                <td class="text-xs">
-                  {% comment %}
-                    Ce qu'elle avait réellement en main. Vide sur un cycle qui
-                    n'a rien tenté — c'est une information, pas un trou : sans
-                    cette colonne, « elle n'a pas utilisé ses outils » et « on
-                    ne lui en a donné aucun » sont indiscernables après coup.
-                  {% endcomment %}
-                  {% if l.trousse %}
-                    <span class="chips">
-                      {% for m in l.trousse %}<span class="chip">{{ m }}</span>{% endfor %}
-                    </span>
-                  {% else %}<span class="muted">—</span>{% endif %}
-                </td>
-                <td class="num">{{ l.observations_count }}</td>
-                <td class="num">{{ l.max_pertinence|num }}</td>
-                <td>
-                  {% if l.global_mood %}
-                    <span class="emo" style="{{ l.global_mood|emo_style }}">
-                      {{ l.global_mood|emo_fr }} <span class="emo-weight">{{ l.global_intensity|pct }}</span>
-                    </span>
-                  {% else %}—{% endif %}
-                </td>
-                <td class="fit muted">{{ l.idle_seconds|duration }}</td>
-                <td class="text-xs muted">
-                  {% if l.memory_actions %}{{ l.memory_actions }}{% else %}—{% endif %}
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
+<section class="card mb-4">{% include "gestion/partials/filters.html" %}</section>
+<div class="reading-list">
+{% for l in page.rows %}
+  <article class="reading-item">
+    <div class="reading-meta"><time title="{{ l.created_at|dt_full }}">{{ l.created_at|dt_full }}</time><span class="badge {% with tone=decision_tones|get:l.decision %}{% if tone %}badge-{{ tone }}{% endif %}{% endwith %}">{% with label=decision_labels|get:l.decision %}{{ label|default:l.decision }}{% endwith %}</span>{% if l.person_id %}<span>À {{ l.person_id }}</span>{% endif %}<span class="push">Score {% if l.score is not None %}{{ l.score|num }}{% else %}non mesuré{% endif %}</span></div>
+    <div class="narrative">{{ l.reason|default:"Motif non renseigné." }}</div>
+    {% if l.texte %}<div class="quote mb-3">{% include "gestion/partials/long_text.html" with value=l.texte %}</div>{% endif %}
+    <div class="reading-meta mb-3">
+      <span>{{ l.observations_count }} observation{{ l.observations_count|pluralize }} · pertinence max {{ l.max_pertinence|num }}</span>
+      {% if l.global_mood %}<span class="emo" style="{{ l.global_mood|emo_style }}">{{ l.global_mood|emo_fr }} {{ l.global_intensity|pct }}</span>{% endif %}
+      <span>Inactivité {{ l.idle_seconds|duration }}</span>{% if l.cooldown_restant_s %}<span class="badge badge-warn">Délai restant {{ l.cooldown_restant_s|duration }}</span>{% endif %}
     </div>
-    <div class="card-foot">{% include "gestion/partials/pager.html" %}</div>
-  {% else %}
-    <div class="card-body"><div class="empty">Aucune décision enregistrée.</div></div>
-  {% endif %}
-</section>
+    <div class="reading-footer"><span class="muted text-xs">Trousse</span><span class="chips">{% for m in l.trousse %}<span class="chip">{{ m }}</span>{% empty %}<span class="muted text-xs">Aucun module</span>{% endfor %}</span><span class="push">{% include "gestion/partials/detail_link.html" with kind="decision" pk=l.pk %}</span></div>
+  </article>
+{% empty %}<div class="card"><div class="empty">Aucune décision ne correspond à ces filtres.</div></div>{% endfor %}
+</div>
+<div class="mt-4">{% include "gestion/partials/pager.html" %}</div>
 {% endblock %}

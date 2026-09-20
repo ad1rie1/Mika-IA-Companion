@@ -22,7 +22,8 @@
           <tbody>
             {% for c in page.rows %}
               <tr {% if not c.is_valid %}class="is-muted"{% endif %}>
-                <td><div class="cell-clamp">{{ c.content }}</div></td>
+                <td>{% include "gestion/partials/long_text.html" with value=c.content %}
+{% include "gestion/partials/detail_link.html" with kind="connaissance" pk=c.pk %}</td>
                 <td>
                   <div class="row">
                     <span class="meter {{ c.confidence|tone_ratio }}" style="flex:1; min-width:4rem;">

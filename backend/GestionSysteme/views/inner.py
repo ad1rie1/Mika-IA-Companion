@@ -290,6 +290,7 @@ def _travaux(request) -> dict:
         "statut_tones": _TRAVAIL_TONS,
         "origine_labels": _ORIGINE_FR,
         "en_cours": Travail.objects.filter(statut="en_cours").count(),
+        "en_attente": Travail.objects.filter(statut="en_cours", en_attente_de_reponse=True).count(),
     }
 
 

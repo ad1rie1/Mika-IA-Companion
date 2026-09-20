@@ -29,7 +29,8 @@
                 <td class="fit">
                   <span class="badge {% if l.action == 'error' %}badge-danger{% elif l.action == 'blocked' %}badge-warn{% elif l.action == 'advanced' %}badge-ok{% endif %}">{{ l.get_action_display }}</span>
                 </td>
-                <td><div class="cell-clamp">{{ l.summary }}</div></td>
+                <td>{% include "gestion/partials/long_text.html" with value=l.summary %}
+{% include "gestion/partials/detail_link.html" with kind="execution" pk=l.pk %}</td>
                 <td class="muted text-xs">{% if l.task %}{{ l.task.description|truncatechars:40 }}{% else %}—{% endif %}</td>
                 <td>
                   <span class="chips">
