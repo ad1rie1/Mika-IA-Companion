@@ -1,0 +1,145 @@
+"""La faculté du noyau : démarrages, baux, paramètres journalisés, sélections.
+
+Les paramètres d'une faculté sont des événements (``kernel.params_changed``) :
+un réducteur reçoit toujours les paramètres *en vigueur à l'instant de
+l'événement*, rejeu compris.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field, replace
+
+from pydantic import BaseModel, ConfigDict
+
+from mika.kernel.events import Payload
+from mika.kernel.facts import FactFamily, FactKey
+from mika.kernel.faculty import Faculty
+from mika.kernel.state import FrozenDict
+
+
+class KernelParams(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    tz: str = "UTC"
+
+
+@dataclass(frozen=True, slots=True)
+class Lease:
+    holder: str
+    until: int
+
+
+@dataclass(frozen=True, slots=True)
+class ParamsRecord:
+    version: int
+    data: str  # JSON canonique des paramètres
+
+
+@dataclass(frozen=True, slots=True)
+class KernelState:
+    boots: int = 0
+    leases: FrozenDict[str, Lease] = field(default_factory=FrozenDict)
+    params: FrozenDict[str, ParamsRecord] = field(default_factory=FrozenDict)
+    selections: int = 0
+
+
+class Boot(Payload):
+    code: str = ""
+
+
+class LeaseAcquired(Payload):
+    resource: str
+    holder: str
+    until: int
+
+
+class LeaseReleased(Payload):
+    resource: str
+    holder: str
+
+
+class ParamsChanged(Payload):
+    owner: str
+    data: str
+
+
+class RowRecord(Payload):
+    kind: str
+    target: str
+    parts: tuple[tuple[str, str, float], ...]
+    shift: float
+    vetoes: tuple[tuple[str, str], ...]
+    score: float
+    hazard: float
+
+
+class Selected(Payload):
+    rows: tuple[RowRecord, ...]
+    fired: tuple[str, ...]
+    draw: float
+
+
+KERNEL = Faculty(
+    "kernel",
+    state=KernelState,
+    init=lambda p: KernelState(),
+    params=KernelParams,
+)
+
+BOOT = KERNEL.event("kernel.boot", Boot, public=True)
+LEASE_ACQUIRED = KERNEL.event("kernel.lease_acquired", LeaseAcquired, public=True)
+LEASE_RELEASED = KERNEL.event("kernel.lease_released", LeaseReleased, public=True)
+PARAMS_CHANGED = KERNEL.event("kernel.params_changed", ParamsChanged, public=True)
+SELECTED = KERNEL.event("kernel.selected", Selected, public=True)
+
+LEASE = FactFamily(
+    "kernel.lease", arg=str, type=Lease, time_varying=True,
+    doc="Le bail en cours (non expiré) sur une ressource, ou None.",
+)
+BOOTS = FactKey("kernel.boots", type=int)
+
+
+@KERNEL.reducer(BOOT)
+def _boot(s: KernelState, e, cx) -> KernelState:
+    return replace(s, boots=s.boots + 1, leases=FrozenDict())
+
+
+@KERNEL.reducer(LEASE_ACQUIRED)
+def _lease_acquired(s: KernelState, e, cx) -> KernelState:
+    current = s.leases.get(e.data.resource)
+    if current is not None and current.holder != e.data.holder and current.until > e.at:
+        return s  # transition illégale : sans effet (la garde aurait dû la refuser)
+    return replace(s, leases=s.leases.set(e.data.resource, Lease(e.data.holder, e.data.until)))
+
+
+@KERNEL.reducer(LEASE_RELEASED)
+def _lease_released(s: KernelState, e, cx) -> KernelState:
+    current = s.leases.get(e.data.resource)
+    if current is None or current.holder != e.data.holder:
+        return s
+    return replace(s, leases=s.leases.delete(e.data.resource))
+
+
+@KERNEL.reducer(PARAMS_CHANGED)
+def _params_changed(s: KernelState, e, cx) -> KernelState:
+    previous = s.params.get(e.data.owner)
+    version = 1 if previous is None else previous.version + 1
+    return replace(s, params=s.params.set(e.data.owner, ParamsRecord(version, e.data.data)))
+
+
+@KERNEL.reducer(SELECTED)
+def _selected(s: KernelState, e, cx) -> KernelState:
+    return replace(s, selections=s.selections + 1)
+
+
+@KERNEL.fact(LEASE)
+def _lease(s: KernelState, cx, resource: str) -> Lease | None:
+    lease = s.leases.get(resource)
+    if lease is None or lease.until <= cx.now:
+        return None
+    return lease
+
+
+@KERNEL.fact(BOOTS)
+def _boots(s: KernelState, cx) -> int:
+    return s.boots
