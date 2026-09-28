@@ -113,11 +113,20 @@ def _stance(s: AffectState, cx, person: str) -> c.StanceReading:
 
 @AFFECT.fact(c.WARMTH, reads=[body_c.RHYTHM])
 def _warmth(s: AffectState, cx, person: str) -> float:
+    """Combien ce que cette personne a installé est plus chaleureux que le
+    repos de tout le monde : la part du chemin parcourue du plaisir du repos
+    vers le plaisir maximal. Lu dans l'absolu, le repos (déjà positif
+    l'après-midi) rendait chacun « chaleureux » dès le premier échange."""
     stored = s.stances.get(person)
     if stored is None or stored.anchor is None:
         return 0.0
-    anchor = ph.heal(stored.anchor, stored.osc.at, cx.now, _params(cx.params), _clockwork(cx))
-    return 0.0 if anchor is None else max(0.0, min(1.0, anchor[0]))
+    p = _params(cx.params)
+    cw = _clockwork(cx)
+    anchor = ph.heal(stored.anchor, stored.osc.at, cx.now, p, cw)
+    if anchor is None:
+        return 0.0
+    rest = ph.common_home(cx.now, p, cw)[0]
+    return max(0.0, min(1.0, (anchor[0] - rest) / max(1e-6, 1.0 - rest)))
 
 
 @AFFECT.fact(c.FACE, reads=[body_c.RHYTHM])

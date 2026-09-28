@@ -1,5 +1,9 @@
 """``transcript`` : le fil de conversation.
 
+Quand le fil avec quelqu'un devient long, son début — déjà relu par la
+mémoire — se replie en un résumé (``compact``) : le modèle voit le résumé puis
+les derniers échanges ; le verbatim reste au journal et dans l'historique.
+
 Un message = l'événement qui l'a créé (perception reçue, énoncé visible) ;
 son identifiant est le ``seq`` de cet événement. Le texte vit dans la
 projection T0 ``thread`` (même transaction que l'ajout : un client qui
@@ -15,13 +19,18 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
 from mika.contracts import expression as expression_c
+from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
 from mika.contracts import transcript as c
-from mika.kernel.faculty import Faculty, Tier, Zone
+from mika.kernel.events import Content
+from mika.kernel.faculty import CatchUp, Faculty, Tier, Zone
 from mika.kernel.frame import Frame
 from mika.kernel.prompt import ChatTurn, SectionBody
 from mika.kernel.state import FrozenDict
+from mika.ports.llm import LLMRequest, Message
 from mika.ports.store import Sql
 from mika.vocab.affect import Declared, strip_prosody
 from mika.vocab.episodes import CONVERSATIONAL, Kind
@@ -30,14 +39,37 @@ from mika.vocab.episodes import CONVERSATIONAL, Kind
 THREAD_WINDOW = 60
 
 
+class TranscriptParams(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    window: int = THREAD_WINDOW
+    #: au-delà de tant de messages depuis le dernier résumé, le début se replie…
+    compact_after: int = 120
+    #: … en gardant les derniers tels quels
+    keep: int = 60
+
+
 @dataclass(frozen=True, slots=True)
 class TranscriptState:
     head: int = 0
     last_from: FrozenDict[str, int] = field(default_factory=FrozenDict)
     last_to: FrozenDict[str, int] = field(default_factory=FrozenDict)
+    #: personne → (dernier message résumé, référence du texte du résumé)
+    summaries: FrozenDict[str, tuple[int, str]] = field(default_factory=FrozenDict)
 
 
-TRANSCRIPT = Faculty("transcript", state=TranscriptState, init=lambda p: TranscriptState())
+TRANSCRIPT = Faculty("transcript", state=TranscriptState, init=lambda p: TranscriptState(), params=TranscriptParams)
+TRANSCRIPT.declare(c.COMPACTED)
+
+
+def _params(p: TranscriptParams | None) -> TranscriptParams:
+    return p if p is not None else TranscriptParams()
+
+
+@TRANSCRIPT.reducer(c.COMPACTED)
+def _compacted(s: TranscriptState, e, cx) -> TranscriptState:
+    ref = e.data.summary.ref or ""
+    return replace(s, summaries=s.summaries.set(e.data.person, (e.data.upto, ref)))
 
 
 @TRANSCRIPT.reducer(rt.PERCEPTION_RECEIVED)
@@ -143,13 +175,13 @@ def after(store: Any, person: str, after_id: int, limit: int) -> tuple[list[dict
     return [dict(zip(_COLUMNS, r, strict=True)) for r in reversed(rows)], truncated
 
 
-def thread_of(store: Any, person: str, limit: int, before: int | None = None) -> list[dict[str, Any]]:
-    """Le fil avec une personne, avant ``before`` (le message en cours de
-    réponse n'y est pas : il arrive comme dernier tour)."""
+def thread_of(store: Any, person: str, limit: int, before: int | None = None, after: int = 0) -> list[dict[str, Any]]:
+    """Le fil avec une personne, entre ``after`` et ``before`` (le message en
+    cours de réponse n'y est pas : il arrive comme dernier tour)."""
     bound = before if before is not None else 2**62
     rows = store.query_mind(
-        f"SELECT {','.join(_COLUMNS)} FROM {c.THREAD_TABLE} WHERE person=? AND id<? ORDER BY id DESC LIMIT ?",
-        (person, bound, limit),
+        f"SELECT {','.join(_COLUMNS)} FROM {c.THREAD_TABLE} WHERE person=? AND id<? AND id>? ORDER BY id DESC LIMIT ?",
+        (person, bound, after, limit),
     )
     return [dict(zip(_COLUMNS, r, strict=True)) for r in reversed(rows)]
 
@@ -166,8 +198,74 @@ async def _thread(s: TranscriptState, frame: Frame, ports: Mapping[str, Any]) ->
     ep = frame.episode
     if store is None or ep is None or not ep.target:
         return ()
-    rows = thread_of(store, ep.target, THREAD_WINDOW, before=ep.attrs.get("reply_to"))
-    return tuple(ChatTurn("assistant" if r["role"] == "assistant" else "user", r["text"], id=r["id"]) for r in rows)
+    p = _params(frame.env.params_of("transcript", frame.root))
+    summary = s.summaries.get(ep.target)
+    since = summary[0] if summary else 0
+    rows = thread_of(store, ep.target, p.window, before=ep.attrs.get("reply_to"), after=since)
+    turns = [ChatTurn("assistant" if r["role"] == "assistant" else "user", r["text"], id=r["id"]) for r in rows]
+    if summary:
+        text = store.content([summary[1]]).get(summary[1])
+        if text:
+            turns.insert(0, ChatTurn("user", f"(Plus tôt, entre vous — en résumé : {text})", id=since))
+    return tuple(turns)
+
+
+COMPACT_SYSTEM = """Tu aides Mika à se souvenir d'une longue conversation. On te donne le début de son fil avec \
+quelqu'un (et le résumé des échanges encore plus anciens, s'il existe). Écris un résumé à la première personne, du \
+point de vue de Mika (« On a parlé de… », « Il m'a dit que… »), en 5 à 10 phrases : les faits, ce qui a été promis, \
+le ton de la relation. N'invente rien. Réponds seulement par le résumé."""
+
+
+@TRANSCRIPT.process("transcript.compact", wake_on=[memory_c.CONSOLIDATED], lane="background",
+                    catch_up=CatchUp.ONCE, max_quantum_s=3600)
+class Compact:
+    """Replie le début des fils trop longs, un fil par passage (les appels de
+    modèle restent rares), et seulement ce que la mémoire a déjà relu."""
+
+    def __init__(self) -> None:
+        self.seen = -1
+        self.retry_at = 0
+
+    def next_due(self, state: TranscriptState, frame: Frame, last_run: int | None) -> int | None:
+        checkpoint = frame.get(memory_c.CHECKPOINT)
+        if checkpoint == self.seen:
+            return None
+        return max(frame.now, self.retry_at)
+
+    async def run(self, ctx: Any) -> None:
+        frame: Frame = ctx.frame
+        state: TranscriptState = ctx.state
+        store = ctx.ports.get("store")
+        checkpoint = frame.get(memory_c.CHECKPOINT)
+        if store is None or ctx.llm is None:
+            self.seen = checkpoint
+            return
+        p = _params(frame.env.params_of("transcript", frame.root))
+        for (person,) in store.query_mind(f"SELECT DISTINCT person FROM {c.THREAD_TABLE} ORDER BY person"):
+            summary = state.summaries.get(person)
+            since = summary[0] if summary else 0
+            rows = thread_of(store, person, 10_000, after=since)
+            if len(rows) <= p.compact_after:
+                continue
+            fold = [r for r in rows[: len(rows) - p.keep] if r["id"] <= checkpoint]
+            if len(fold) < 10:
+                continue
+            previous = store.content([summary[1]]).get(summary[1]) if summary else None
+            lines = "\n".join(f"{'Mika' if r['role'] == 'assistant' else 'Elle ou lui'} : {r['text']}" for r in fold)
+            prompt = (f"Résumé précédent : {previous}\n\n" if previous else "") + f"Suite des échanges :\n{lines}"
+            self.retry_at = frame.now + 600 * 1_000_000  # si l'appel lève, pas de rafale
+            request = LLMRequest(role="compact", call_id=f"{ctx.run_id}#{person}", system_stable=COMPACT_SYSTEM,
+                                 messages=(Message("user", prompt),), max_tokens=800, lane="background", priority=3)
+            response = await ctx.llm.call(request)
+            self.retry_at = 0
+            text = (response.text or "").strip()
+            if not text:
+                self.seen = checkpoint  # rien d'utilisable : on réessaiera à la prochaine consolidation
+                return
+            await ctx.emit(c.COMPACTED.draft(person=person, upto=fold[-1]["id"], summary=Content.of(text, level=2),
+                                             count=len(fold), call_id=request.call_id, model=response.model))
+            return  # un fil par passage ; le suivant au prochain réveil
+        self.seen = checkpoint
 
 
 @TRANSCRIPT.section("history", zone=Zone.HISTORY, episodes=CONVERSATIONAL)

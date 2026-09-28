@@ -55,6 +55,8 @@ FALLBACKS = {
     Role.DREAM: Role.REPLY, Role.NARRATIVE: Role.REPLY,
     Role.VALIDATE: Role.EXTRACT, Role.PROFILE: Role.EXTRACT, Role.INTERPRET: Role.EXTRACT,
     Role.TRIAGE: Role.EXTRACT, Role.COMPACT: Role.EXTRACT, Role.PLAN: Role.EXTRACT,
+    # un seul modèle déclaré suffit : les utilitaires retombent sur celui qui répond
+    Role.EXTRACT: Role.REPLY, Role.CAPTION: Role.REPLY,
 }
 
 

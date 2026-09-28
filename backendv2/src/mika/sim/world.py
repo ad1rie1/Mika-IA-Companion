@@ -17,6 +17,7 @@ from typing import Any
 
 from mika.adapters.llm.gateway import Gateway
 from mika.adapters.store_sqlite import SqliteStore
+from mika.adapters.vectors import HashEmbedder, SqliteVectorIndex
 from mika.contracts import presence as presence_c
 from mika.contracts.runtime import PerceptionReceived
 from mika.kernel.events import Content, Origin
@@ -26,6 +27,7 @@ from mika.ports.llm import LLMBackend
 from mika.runtime.bootstrap import Kernel, KernelDeps
 from mika.runtime.effects import with_content
 from mika.sim.clock import SimClock
+from mika.vocab.episodes import FALLBACKS
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,10 +108,12 @@ class Driver:
         roles = {r: self.llm.name for r in self.composition.voice_roles}
         gateway = Gateway({self.llm.name: self.llm}, roles, clock=self.clock,
                           voice_roles=self.composition.voice_roles, slots={self.llm.name: self.slots},
-                          preempt=frozenset({self.llm.name}) if self.slots == 1 else frozenset())
+                          preempt=frozenset({self.llm.name}) if self.slots == 1 else frozenset(),
+                          fallbacks={str(k): str(v) for k, v in FALLBACKS.items()})
         store = SqliteStore(self.root / "mind.db", self.root / "views.db", threaded=False)
+        ports = {"delivery": self.transport, "vectors": SqliteVectorIndex(store, HashEmbedder())}
         deps = self.composition.deps(store=store, clock=self.clock, ids=SeededIdGen(f"{self.seed}:{self.boots}"),
-                                     gateway=gateway, ports={"delivery": self.transport}, seed=f"{self.seed}:{self.boots}")
+                                     gateway=gateway, ports=ports, seed=f"{self.seed}:{self.boots}")
         self.kernel = Kernel(deps)
         self.boots += 1
         await self.kernel.start()

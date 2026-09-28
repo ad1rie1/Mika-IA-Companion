@@ -145,11 +145,20 @@ def energy_word(value: float) -> str:
     return "très basse"
 
 
+DAYS_FR = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
+MONTHS_FR = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre",
+             "novembre", "décembre")
+
+
+def date_fr(dt: datetime) -> str:
+    return f"{DAYS_FR[dt.weekday()]} {dt.day} {MONTHS_FR[dt.month - 1]} {dt.year}"
+
+
 def describe(dt: datetime, profile: Profile = DEFAULT, level: float | None = None) -> str:
-    """« Il est 23h. En phase nuit, … Ton énergie est basse (35 %). »"""
+    """« Nous sommes lundi 28 septembre 2026, il est 23h05. En phase nuit, … »"""
     phase = phase_of(dt, profile)
     value = energy(dt, profile) if level is None else level
     return (
-        f"Il est {dt.hour:02d}h{dt.minute:02d}. En phase {PHASE_FR[phase]}, {_TENDENCY_FR[phase]}. "
-        f"Ton énergie est {energy_word(value)} ({round(value * 100)} %)."
+        f"Nous sommes {date_fr(dt)}, il est {dt.hour:02d}h{dt.minute:02d}. En phase {PHASE_FR[phase]}, "
+        f"{_TENDENCY_FR[phase]}. Ton énergie est {energy_word(value)} ({round(value * 100)} %)."
     )

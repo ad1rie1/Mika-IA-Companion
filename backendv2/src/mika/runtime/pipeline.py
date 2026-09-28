@@ -175,7 +175,8 @@ class EpisodeRunner:
                 enrich = await self._enrich(frame, policy)
                 blocks = self._sections(frame, enrich)
                 prompt, trace = self.composer.compose(
-                    blocks, kind=req.kind, audience_level=audience.level, muted_tags=policy.muted_tags,
+                    blocks, kind=req.kind, audience_level=audience.level, witness_level=audience.witness_level,
+                    muted_tags=policy.muted_tags,
                     message=message, budget=self.budget, thread_key=req.target or req.kind,
                 )
                 report.trace = trace
@@ -199,7 +200,7 @@ class EpisodeRunner:
 
                 def make_ctx(spec: Any, call_id: str) -> ToolContext:
                     return ToolContext(mind, spec, call_id, eid, Frame(mind.root, mind.clock.now(),
-                                       mind.registry, audience, episode), guard=None)
+                                       mind.registry, audience, episode), guard=None, ports=self.ports)
 
                 assert self.gateway is not None, "pas de passerelle LLM"
                 gateway = self.gateway
@@ -228,7 +229,7 @@ class EpisodeRunner:
                         reply_to=req.reply_to, visible=policy.visible,
                         annotations=tuple(sorted(annotations.items())),
                         tools=tuple(ToolOutcome(name=n, ok=ok) for n, ok in loop.calls),
-                        sections=trace.included,
+                        sections=trace.included, provenance=trace.provenance,
                     )],
                     emitter="runtime", correlation=eid, origin=Origin.KERNEL, basis=basis,
                     guard=guard, holder=eid,

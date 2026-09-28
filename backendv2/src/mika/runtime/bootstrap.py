@@ -145,6 +145,10 @@ class Kernel:
         failures = self.registry.check_invariants(self.mind.root)
         if failures:
             raise RuntimeError("invariants de composition violés :\n" + "\n".join(failures))
+        for port in self.deps.ports.values():
+            opener = getattr(port, "open", None)
+            if opener is not None:
+                await opener()  # index, caches : prêts avant la première perception
         await self.mind.append([BOOT.draft(code=self.deps.code)], emitter="kernel", origin=Origin.KERNEL,
                                correlation="boot")
         self.lanes.start()
@@ -213,6 +217,16 @@ class Kernel:
             message=data.text.text or "", priority=0, channel=data.channel, room=data.room,
         ))
         return Perceived(commit, fut, overloaded=fut is None)
+
+    async def forget(self, subject: str) -> dict[str, int]:
+        """L'oubli d'un sujet : contenus et projections (le Mind), puis tout
+        port qui garde une trace dérivée (index de vecteurs…)."""
+        out = {"contents": await self.mind.forget(subject)}
+        for name, port in sorted(self.deps.ports.items()):
+            hook = getattr(port, "forget", None)
+            if hook is not None:
+                out[name] = await hook(subject)
+        return out
 
     async def set_params(self, owner: str, params: BaseModel) -> bool:
         """Journalise de nouveaux paramètres s'ils diffèrent de ceux en vigueur."""

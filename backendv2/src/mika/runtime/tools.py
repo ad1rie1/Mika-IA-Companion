@@ -49,6 +49,7 @@ class ToolContext:
     episode_id: str
     frame: Frame
     guard: Guard | None = None
+    ports: Mapping[str, Any] = field(default_factory=dict)
     _emitted: int = 0
 
     @property

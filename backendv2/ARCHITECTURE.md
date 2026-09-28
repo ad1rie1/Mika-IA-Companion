@@ -41,13 +41,14 @@ Règles vérifiées à chaque test (`lint-imports`) : une couche n'importe que l
 
 Deux fichiers SQLite : `mind.db` (journal, contenus, dédoublonnage, instantanés, file de sortie, projections T0, comptes, réglages — sa vie, qu'on sauvegarde) et `views.db` (projections différées — jetable). T0 dans la transaction d'ajout ; T1 différées avec point de contrôle transactionnel ; T2 préparées dans un **processus** séparé ; un événement empoisonné est mis en quarantaine ; une nouvelle version se construit à côté puis bascule. Une tranche dont la version change est reconstruite par **clôture de lecture** depuis la genèse.
 
-## Les facultés de M1
+## Les facultés (M1–M2)
 
 | Faculté | Tient | Fournit |
 |---|---|---|
 | `presence` (volatile) | les connexions vivantes | `PRESENT`, `SINCE(poignée)` |
 | `identity` | poignées, confiance du canal, certitude, liaison d'un compte | `PERSON`, `IDENTITY`, `DISCLOSURE(poignée, canal, public)` ; section « qui tu as en face » ; l'audience d'un épisode |
-| `transcript` | le fil (projection T0 `thread`, id d'un message = son `seq`) | `LAST_FROM`, `LAST_TO`, `HEAD` ; l'historique du prompt (le fil **avec** l'interlocuteur) |
+| `transcript` | le fil (T0 `thread`, id d'un message = son `seq`), les résumés des fils longs | `LAST_FROM`, `LAST_TO`, `HEAD` ; l'historique du prompt (le fil **avec** l'interlocuteur, résumé compris) |
+| `memory` | souvenirs, croyances, promesses (T0 `memory_items`), échanges (T0 `memory_chunks`) ; consolidation, indexation | `CHECKPOINT`, `PROMISES_TO` ; rappel filtré par la divulgation ; outils `memory_search`, `memory_promise_done` (ADR 0010) |
 | `body` | le rythme circadien (décalé par le chronotype) | `RHYTHM`, `PHASE`, `ENERGY`, `SLEEP` ; section « ton rythme » |
 | `affect` | humeur générale, posture par personne, ancres qui guérissent, balise récente | `MOOD`, `STANCE`, `WARMTH`, `FACE` ; sections humeur et posture ; preuve « débordement » |
 | `self` | la persona (un document), le tempérament | `PERSONA` ; le fournisseur de persona des voix |
@@ -60,6 +61,7 @@ L'affect est exact à tout instant : oscillateurs en forme close, repos constant
 ## Autour du noyau
 
 - **Web** (`adapters/web/`) : le protocole que lit le frontend ; comptes et sessions dans `mind.db` (scrypt), CSRF à double soumission, CORS avec identifiants, 4401 après `accept()`. Une réponse ne part qu'aux connexions de sa personne ; une réponse ratée est dite, sans voix.
+- **Vecteurs** (`adapters/vectors/`) : un cache (SQLite + numpy), plongement sentence-transformers local ou par hachage (simulateur) ; reconstructible à l'octet.
 - **Modèles** (`adapters/llm/`) : Claude, OpenAI-compatible, Ollama / Ollama Cloud ; passerelle rechargeable à chaud ; clés chiffrées (Fernet) dans `settings`.
 - **Inspecteur** (`/inspecteur/`, opérateurs) : vue d'ensemble, chronologie, chaîne d'un épisode, décisions de l'arbitre, état, modèles.
 - **Simulateur** (`sim/`) : le vrai noyau sur temps virtuel, des interlocuteurs, un modèle factice « persona » (qui répète tout secret qu'on lui montre), des pannes (magasin scellé), des mesures, un rapport. Voie rapide : S01, S03, S13 réduit. On valide par cibles d'intention (ADR 0007).

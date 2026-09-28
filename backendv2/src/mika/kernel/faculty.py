@@ -116,7 +116,7 @@ class ModulatorSpec:
 class ProcessSpec:
     owner: str
     name: str
-    process: Any  # objet avec next_due(state, frame) et run(ctx)
+    process: Any  # classe (instanciée par ordonnanceur) ou objet : next_due(state, frame, dernier) et run(ctx)
     wake_on: frozenset[str] = frozenset()
     priority: int = 50
     catch_up: CatchUp = CatchUp.ONCE
@@ -343,10 +343,11 @@ class Faculty(Generic[S, Pm]):
         wake = frozenset(w if isinstance(w, str) else w.name for w in wake_on)
 
         def deco(obj: Any) -> Any:
-            instance = obj() if isinstance(obj, type) else obj
+            # une classe est instanciée par chaque ordonnanceur : deux noyaux (tests,
+            # simulateur) ne partagent jamais l'état en mémoire d'un processus
             self.processes.append(
                 ProcessSpec(
-                    self.name, name, instance, wake, priority, catch_up,
+                    self.name, name, obj, wake, priority, catch_up,
                     int(max_quantum_s * 1_000_000), lane, _names(reads),
                 )
             )

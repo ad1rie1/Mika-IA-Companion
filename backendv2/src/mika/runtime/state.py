@@ -96,3 +96,8 @@ def _proposed(s: RuntimeState, e, cx) -> RuntimeState:
 @RUNTIME.reducer(rt.EFFECT_RESOLVED)
 def _resolved(s: RuntimeState, e, cx) -> RuntimeState:
     return replace(s, effects=s.effects.delete(e.data.proposal))
+
+
+@RUNTIME.fact(rt.AWAITING)
+def _awaiting(s: RuntimeState, cx) -> tuple[int, ...]:
+    return tuple(s.pending.keys())

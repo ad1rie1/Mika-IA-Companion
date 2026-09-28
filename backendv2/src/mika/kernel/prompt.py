@@ -38,9 +38,13 @@ class ChatTurn:
 @dataclass(frozen=True, slots=True)
 class SectionBody:
     content: str | tuple[ChatTurn, ...]
+    #: la sensibilité la plus haute de ce que la section dit d'autrui
     level: int = 0
     provenance: tuple[str, ...] = ()
     title: str | None = None
+    #: vrai quand ce qui est dit d'autrui concerne aussi l'interlocuteur (il était
+    #: là) : la garde compare alors au niveau « témoin » de l'audience
+    witness: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +132,7 @@ class Composer:
         message: str,
         budget: Budget,
         thread_key: str = "",
+        witness_level: int | None = None,
     ) -> tuple[ChatPrompt, ComposeTrace]:
         kept: list[_Block] = []
         dropped: list[tuple[str, str]] = []
@@ -137,7 +142,8 @@ class Composer:
             if spec.tags & muted_tags:
                 dropped.append((spec.key, "coupée pour cet épisode"))
                 continue
-            if body.level > audience_level:
+            limit = witness_level if (body.witness and witness_level is not None) else audience_level
+            if body.level > limit:
                 dropped.append((spec.key, "trop sensible pour l'audience"))
                 continue
             b = _Block(spec, body)

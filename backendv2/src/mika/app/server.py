@@ -18,6 +18,7 @@ from starlette.applications import Starlette
 from mika.adapters.llm.config import LiveGateway, build_gateway
 from mika.adapters.store_sqlite import SqliteStore
 from mika.adapters.system import RandomIdGen, RealClock
+from mika.adapters.vectors import SentenceEmbedder, SqliteVectorIndex
 from mika.adapters.web import protocol
 from mika.adapters.web.accounts import Accounts
 from mika.adapters.web.app import WebConfig, create_app
@@ -59,7 +60,7 @@ class Live:
 
 
 def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
-          gateway: LiveGateway | None = None, **deps: Any) -> tuple[Starlette, Live]:
+          gateway: LiveGateway | None = None, embedder: Any = None, **deps: Any) -> tuple[Starlette, Live]:
     """L'application et ce qu'elle fait vivre. Tout est construit ici ; le
     cycle de vie ouvre, démarre et arrête."""
     data.mkdir(parents=True, exist_ok=True)
@@ -68,8 +69,9 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     fixed = gateway is not None
     gateway = gateway or LiveGateway()
     hub = Hub(port=None)  # type: ignore[arg-type] — relié au port juste après
+    vectors = SqliteVectorIndex(store, embedder or SentenceEmbedder())
     kernel = Kernel(composition.deps(store=store, clock=clock, ids=RandomIdGen(), gateway=gateway,
-                                     ports={"delivery": hub}, **deps))
+                                     ports={"delivery": hub, "vectors": vectors}, **deps))
     port = KernelPort(kernel)
     hub.port = port
     live = Live(kernel, hub, port, Accounts(store), Settings(store, SecretBox.for_data(data)), gateway, fixed)

@@ -43,6 +43,9 @@ def log_metrics(events: Sequence[Any], driver: Driver) -> dict[str, Any]:
         "heard": len(transport.heard),
         "undelivered_online": sum(1 for u in utterances if u.id not in heard_keys and u.data.visible
                                   and u.data.target in driver.online),
+        "consolidations": sum(1 for e in events if e.type.name == "memory.consolidated"),
+        "retained": sum(1 for e in events if e.type.name in ("memory.remembered", "memory.believed")),
+        "reinforced": sum(1 for e in events if e.type.name == "memory.reinforced"),
         "repeats": transport.repeats,
         "transport_failures": transport.failures,
         "crashes": driver.crashes,
@@ -58,3 +61,12 @@ def thread_consistent(driver: Driver, events: Sequence[Any]) -> tuple[bool, str]
     rows = {r[0] for r in driver.kernel.mind.store.query_mind(f"SELECT id FROM {transcript_c.THREAD_TABLE}")}
     missing, extra = expected - rows, rows - expected
     return not missing and not extra, f"manquants {sorted(missing)[:5]}, en trop {sorted(extra)[:5]}"
+
+
+def duplicate_items(driver: Driver) -> list[tuple[str, str]]:
+    """Des éléments retenus en double (même sorte, même texte) — une panne
+    entre l'appel du modèle et l'enregistrement ne doit jamais en créer."""
+    assert driver.kernel is not None
+    rows = driver.kernel.mind.store.query_mind(
+        "SELECT kind, text, COUNT(*) FROM memory_items GROUP BY kind, text HAVING COUNT(*) > 1")
+    return [(k, t) for k, t, _n in rows]

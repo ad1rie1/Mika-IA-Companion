@@ -218,7 +218,7 @@ class _Session:
         if account is not None:
             kw = {"handle": account.handle, "authenticated": True, "account": account.id,
                   "operator": account.operator, "display_name": account.display_name}
-        self.conn: Conn = hub.open(self.send, **kw)
+        self.conn: Conn = hub.attach(self.send, **kw)
 
     async def send(self, frame: dict[str, Any]) -> None:
         async with self._lock:
@@ -244,7 +244,7 @@ class _Session:
         except WebSocketDisconnect:
             pass
         finally:
-            self.hub.close(self.conn)
+            self.hub.detach(self.conn)
             if self.conn.announced:
                 await self.port.disconnected(self.conn.handle, self.conn.id)
 

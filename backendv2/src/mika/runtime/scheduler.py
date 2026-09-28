@@ -79,6 +79,10 @@ class Scheduler:
         )
         self.llm = llm
         self.ports = dict(ports or {})
+        #: une instance par processus et par ordonnanceur (jamais partagée entre noyaux)
+        self.instances: dict[str, Any] = {
+            s.name: s.process() if isinstance(s.process, type) else s.process for s in self.specs
+        }
         self._lanes = {name: asyncio.Semaphore(n) for name, n in (lanes or {"background": 2, "night": 1}).items()}
         self._last_run: dict[str, int] = {}
         self._running: dict[str, asyncio.Task[None]] = {}
@@ -117,7 +121,7 @@ class Scheduler:
                 if spec.name in self._running:
                     continue
                 state = frame.root.slices.get(spec.owner)
-                nd = call(spec.process.next_due, state, frame, self._last_run.get(spec.name),
+                nd = call(self.instances[spec.name].next_due, state, frame, self._last_run.get(spec.name),
                           label=f"échéance de {spec.name}")
                 if isinstance(nd, Failed):
                     self.failures[spec.name] = self.failures.get(spec.name, 0) + 1
@@ -168,7 +172,7 @@ class Scheduler:
 
     async def _execute(self, spec: ProcessSpec, run_id: str, missed: tuple[int, int] | None) -> None:
         ctx = ProcessContext(self.mind, spec, run_id, self.mind.frame(), missed, self.llm, self.ports)
-        out = await acall(spec.process.run, ctx, label=f"processus {spec.name}")
+        out = await acall(self.instances[spec.name].run, ctx, label=f"processus {spec.name}")
         self.runs[spec.name] = self.runs.get(spec.name, 0) + 1
         if isinstance(out, Failed):
             self.failures[spec.name] = self.failures.get(spec.name, 0) + 1

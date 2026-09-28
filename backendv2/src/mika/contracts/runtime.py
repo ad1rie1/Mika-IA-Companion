@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from mika.kernel.events import Content, Payload, VoiceProvenance, event_type
+from mika.kernel.facts import FactKey
 
 OWNER = "runtime"
 NAMESPACES = ("perception", "episode", "effect", "runtime")
@@ -54,6 +55,8 @@ class Utterance(Payload):
     annotations: tuple[tuple[str, str], ...] = ()
     tools: tuple[ToolOutcome, ...] = ()
     sections: tuple[str, ...] = ()
+    #: ce que le prompt lui montrait (souvenirs, contenus) : ``"memory:12"``…
+    provenance: tuple[str, ...] = ()
 
     def annotation(self, key: str) -> str | None:
         for k, v in self.annotations:
@@ -116,3 +119,6 @@ ALL = (
     PERCEPTION_RECEIVED, EPISODE_STARTED, UTTERANCE, EPISODE_ENDED, PROCESS_FAILED,
     EFFECT_PROPOSED, EFFECT_RESOLVED, EFFECT_EXECUTED,
 )
+
+#: Les messages (``seq``) qui attendent encore leur réponse.
+AWAITING = FactKey("runtime.awaiting", type=tuple, doc="perceptions sans réponse encore réglée")

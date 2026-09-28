@@ -13,6 +13,7 @@ from starlette.websockets import WebSocketDisconnect
 from mika.adapters.llm.config import LiveGateway
 from mika.adapters.llm.gateway import Gateway
 from mika.adapters.system import RealClock
+from mika.adapters.vectors import HashEmbedder
 from mika.adapters.web.app import WebConfig
 from mika.app.server import build
 from mika.kernel.registry import ArbitrationPolicy
@@ -42,7 +43,8 @@ def world(tmp_path) -> Iterator[tuple[TestClient, object, Echo]]:
     roles = {str(r): "fake" for r in VOICE_ROLES}
     gateway = LiveGateway(Gateway({"fake": backend}, roles, clock=RealClock(),
                                   voice_roles=frozenset(roles), slots={"fake": 1}))
-    app, live = build(tmp_path / "data", web=WebConfig(), gateway=gateway, arbitration=ArbitrationPolicy())
+    app, live = build(tmp_path / "data", web=WebConfig(), gateway=gateway, embedder=HashEmbedder(),
+                      arbitration=ArbitrationPolicy())
     with TestClient(app, base_url="http://localhost:8001", headers={"Origin": ORIGIN}) as client:
         yield client, live, backend
 
@@ -233,20 +235,17 @@ def test_a_reply_goes_only_to_its_person(world):
     client, live, _ = world
     bootstrap(client)
 
-    async def second():
-        await live.accounts.create("bea", "un-mot-de-passe-long", operator=False)
+    async def second_session() -> str:
+        bea = await live.accounts.create("bea", "un-mot-de-passe-long", operator=False)
+        return await live.accounts.open_session(bea)
 
-    client.portal.call(second)
-    # un second navigateur : autre jar de cookies, même application déjà démarrée
-    other = TestClient(client.app, base_url="http://localhost:8001", headers={"Origin": ORIGIN})
-    other.portal = client.portal
-    h = csrf(other)
-    assert other.post("/auth/login", json={"username": "bea", "password": "un-mot-de-passe-long"},
-                      headers=h).status_code == 200
-    with client.websocket_connect(WS) as a, other.websocket_connect(WS) as b:
+    key_b = client.portal.call(second_session)
+    # une seule application, deux navigateurs : le second passe sa propre session
+    with client.websocket_connect(WS) as a, client.websocket_connect(WS, headers={"cookie": f"sessionid={key_b}"}) as b:
         a.receive_json(), a.receive_json(), b.receive_json(), b.receive_json()
         a.send_json({"type": "chat", "message": "un secret d'Adrien", "client_msg_id": "s1"})
-        recv_until(a, "speech")
+        speech = recv_until(a, "speech")[-1]
+        assert speech["person_id"] == "user_1"
         b.send_json({"type": "ping", "t": 7})
         frames = recv_until(b, "pong")
         assert [f["type"] for f in frames] == ["pong"]  # rien de la réponse d'Adrien

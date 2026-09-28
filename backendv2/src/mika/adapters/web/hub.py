@@ -55,13 +55,13 @@ class Hub:
         self.delivered: list[str] = []
 
     # ── connexions ──
-    def open(self, send: Send, *, handle: str | None = None, **kw: Any) -> Conn:
+    def attach(self, send: Send, *, handle: str | None = None, **kw: Any) -> Conn:
         cid = f"ws{next(self._counter)}-{secrets.token_hex(4)}"
         conn = Conn(cid, send, handle or f"anon_{secrets.token_hex(6)}", **kw)
         self.conns[cid] = conn
         return conn
 
-    def close(self, conn: Conn) -> None:
+    def detach(self, conn: Conn) -> None:
         self.conns.pop(conn.id, None)
         if not self.of(conn.handle):
             self._sent_face.pop(conn.handle, None)

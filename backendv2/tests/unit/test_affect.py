@@ -305,3 +305,19 @@ def _doc(**temperament):
     from tests.fixtures.mika import DOC
 
     return DOC.model_copy(update={"temperament": DOC.temperament.model_copy(update=temperament)})
+
+
+def test_warmth_is_earned_not_given_by_the_time_of_day(tmp_path):
+    """Un échange banal ne rend personne « chaleureux » ; des tours tendres, si."""
+    async def scenario(kernel, script):
+        await turn(kernel, script, "user_9", "happy", 0.4)
+        stranger = kernel.mind.frame().get(affect_c.WARMTH("user_9"))
+        for _ in range(8):
+            await turn(kernel, script, "user_1", "love", 0.9)
+            await asyncio.sleep(60)
+        friend = kernel.mind.frame().get(affect_c.WARMTH("user_1"))
+        return stranger, friend
+
+    stranger, friend = run(tmp_path, scenario)
+    assert stranger < 0.1, stranger
+    assert friend >= 0.3, friend
