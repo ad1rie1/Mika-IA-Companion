@@ -86,8 +86,10 @@ class EpisodeRunner:
         composer: Composer | None = None,
         budget: Budget | None = None,
         lease_margin_s: float = 30.0,
+        ports: Mapping[str, Any] | None = None,
     ) -> None:
         self.mind = mind
+        self.ports = dict(ports or {})
         self.gateway = gateway
         self.policies = dict(policies)
         self.persona = persona
@@ -154,15 +156,23 @@ class EpisodeRunner:
                     guard=guard, holder=eid,
                 )
                 mind.track(eid, guard, start.root, eid, on_supersede)
-                episode = EpisodeRef(eid, req.kind, req.target, policy.muted_tags,
-                                     FrozenDict({"channel": req.channel or audience.channel}))
+                attrs: dict[str, Any] = {"channel": req.channel or audience.channel, "reply_to": req.reply_to,
+                                         "reason": req.reason}
+                if req.selected is not None:
+                    attrs["reasons"] = tuple(sorted({p[1] for p in req.selected.parts}))
+                    attrs["args"] = req.selected.args
+                episode = EpisodeRef(eid, req.kind, req.target, policy.muted_tags, FrozenDict(attrs))
                 frame = Frame(start.root, mind.clock.now(), mind.registry, audience, episode)
+                message = req.message
+                if not message and policy.brief is not None:
+                    got = call(policy.brief, frame, req, label=f"consigne {req.kind}")
+                    message = "" if isinstance(got, Failed) else str(got or "")
 
                 enrich = await self._enrich(frame, policy)
                 blocks = self._sections(frame, enrich)
                 prompt, trace = self.composer.compose(
                     blocks, kind=req.kind, audience_level=audience.level, muted_tags=policy.muted_tags,
-                    message=req.message, budget=self.budget, thread_key=req.target or req.kind,
+                    message=message, budget=self.budget, thread_key=req.target or req.kind,
                 )
                 report.trace = trace
                 if policy.role is None:
@@ -173,7 +183,9 @@ class EpisodeRunner:
                 llm_req = LLMRequest(
                     role=policy.role, call_id=f"{eid}#0",
                     system_stable=(persona.text + "\n\n" + prompt.system_stable).strip() if persona else prompt.system_stable,
-                    system_volatile=prompt.system_volatile,
+                    # l'état volatil voyage dans le dernier tour utilisateur (après les
+                    # points de cache) : ne pas le répéter dans le système
+                    system_volatile="",
                     messages=tuple(Message(m["role"], m["content"]) for m in prompt.chat_messages()),
                     tools=declare(list(tools.values())), max_tokens=policy.max_tokens, persona=persona,
                     lane=policy.lane, priority=req.priority,
@@ -293,7 +305,8 @@ class EpisodeRunner:
         async def one(spec: Any) -> tuple[str, Any]:
             try:
                 async with asyncio.timeout(spec.deadline_ms / 1000):
-                    out = await acall(spec.fn, frame.state(spec.owner), frame, label=f"enrichisseur {spec.key}")
+                    out = await acall(spec.fn, frame.state(spec.owner), frame, self.ports,
+                                      label=f"enrichisseur {spec.key}")
             except TimeoutError:
                 return spec.key, None
             return spec.key, None if isinstance(out, Failed) else out

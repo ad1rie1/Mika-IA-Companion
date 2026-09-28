@@ -29,6 +29,9 @@ if TYPE_CHECKING:
 TOOL_CALL_CAP_CEILING = 16_384
 TRUNCATED_MARKER = "[réponse tronquée avant l'appel d'outil]"
 MAX_TURNS_MARKER = "[trop d'appels d'outils : j'arrête là]"
+#: Clé que posent les fournisseurs quand les arguments d'un appel ne sont pas
+#: du JSON : l'appel est refusé au modèle, jamais exécuté avec des défauts.
+RAW_ARGS_KEY = "_raw"
 
 
 class ToolResult(BaseModel):
@@ -122,6 +125,10 @@ async def run_tool_loop(
             limit = spec.max_calls_per_episode
             if limit is not None and counts.get(call.name, 0) >= limit:
                 outputs.append(Message("tool", f"{call.name} : plafond d'appels atteint pour cet épisode",
+                                       tool_call_id=call.id, name=call.name, is_error=True))
+                continue
+            if RAW_ARGS_KEY in call.args:
+                outputs.append(Message("tool", "arguments illisibles : ce n'était pas du JSON valide",
                                        tool_call_id=call.id, name=call.name, is_error=True))
                 continue
             try:

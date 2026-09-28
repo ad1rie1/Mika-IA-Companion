@@ -42,6 +42,10 @@ class Lanes:
     def pending(self, lane: str) -> int:
         return self._queues[lane].qsize()
 
+    def full(self, kind: str) -> bool:
+        """Une demande de ce type serait-elle refusée faute de place ?"""
+        return self._queues[self.lane_of(kind)].qsize() >= self.max_pending
+
     def submit(self, req: EpisodeRequest) -> asyncio.Future[EpisodeReport] | None:
         lane = self.lane_of(req.kind)
         q = self._queues[lane]

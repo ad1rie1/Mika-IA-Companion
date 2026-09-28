@@ -20,8 +20,10 @@ class Audience:
     """Qui entend, résolu une fois au bord de l'épisode.
 
     ``level`` est le niveau de sensibilité maximal qu'on peut dire devant elle
-    (les niveaux sont nommés dans ``vocab``) ; toute panne de résolution doit
-    donner l'audience fermée (niveau 0, publique).
+    sur autrui (les niveaux sont nommés dans ``vocab``), ``witness_level``
+    celui d'un contenu où l'interlocuteur figure lui-même, ``private_ok`` la
+    porte de sa propre fiche. Toute panne de résolution doit donner
+    l'audience fermée (niveaux 0, publique, fiche fermée).
     """
 
     persons: tuple[str, ...] = ()
@@ -30,6 +32,10 @@ class Audience:
     public: bool = True
     level: int = 0
     trust: str = ""
+    witness_level: int = 0
+    private_ok: bool = False
+    certainty: float = 0.0
+    name: str = ""
 
 
 CLOSED = Audience()

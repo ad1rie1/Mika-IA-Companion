@@ -71,15 +71,34 @@ class KernelDeps:
     max_pending: int = 100
 
 
+class ReadOnlyStore:
+    """Ce que les facultés peuvent lire du magasin (enrichisseurs, effets) :
+    des requêtes SQL en lecture, jamais une écriture."""
+
+    __slots__ = ("_store",)
+
+    def __init__(self, store: EventStore) -> None:
+        self._store = store
+
+    def query_mind(self, sql: str, params: Sequence[Any] = ()) -> list[tuple[Any, ...]]:
+        return self._store.query_mind(sql, params)
+
+    def query_views(self, sql: str, params: Sequence[Any] = ()) -> list[tuple[Any, ...]]:
+        return self._store.query_views(sql, params)
+
+    def content(self, refs: Sequence[str]) -> dict[str, str]:
+        return self._store.content(list(refs))
+
+
 @dataclass(frozen=True, slots=True)
 class Perceived:
-    commit: Commit
+    commit: Commit | None
     reply: asyncio.Future[EpisodeReport] | None
     overloaded: bool = False
 
     @property
-    def seq(self) -> int:
-        return self.commit.seqs[-1]
+    def seq(self) -> int | None:
+        return self.commit.seqs[-1] if self.commit is not None else None
 
 
 class Kernel:
@@ -88,18 +107,20 @@ class Kernel:
         registry = Registry([RUNTIME, *deps.faculties], arbitration=deps.arbitration)
         self.mind = Mind(registry, deps.store, deps.clock, deps.ids, code=deps.code,
                          snapshot_every=deps.snapshot_every)
+        ports = {"store": ReadOnlyStore(deps.store), "frame": self._head_frame, **dict(deps.ports)}
+        self.ports = ports
         self.runner = EpisodeRunner(
             self.mind, deps.gateway, policies=deps.policies, persona=deps.persona,
-            audience_of=deps.audience_of, parsers=deps.parsers, budget=deps.budget,
+            audience_of=deps.audience_of, parsers=deps.parsers, budget=deps.budget, ports=ports,
         )
         self.lanes = Lanes(self.runner, capacities=deps.lanes, max_pending=deps.max_pending)
         self.arbiter = Arbiter(lambda: self.mind.registry, self._submit_selected, seed=deps.seed)
         self.mind.subscribe(self.arbiter.invalidate)
         self.scheduler = Scheduler(
             self.mind, extra=[arbiter_spec(self.arbiter, quantum_s=deps.arbiter_quantum_s)],
-            lanes=deps.process_lanes, llm=deps.gateway, ports=deps.ports,
+            lanes=deps.process_lanes, llm=deps.gateway, ports=ports,
         )
-        self.effects = EffectExecutor(self.mind, deps.ports)
+        self.effects = EffectExecutor(self.mind, ports)
         self.projections = ProjectionWorker(self.mind)
         self._tasks: list[asyncio.Task[None]] = []
         self.started = False
@@ -107,6 +128,10 @@ class Kernel:
     @property
     def registry(self) -> Registry:
         return self.mind.registry
+
+    def _head_frame(self) -> Frame:
+        """Une vue en lecture sur la tête (effets, enrichisseurs)."""
+        return self.mind.frame()
 
     # ── cycle de vie ──
     async def start(self) -> BootReport:
@@ -154,6 +179,11 @@ class Kernel:
     # ── entrées ──
     async def perceive(self, data: PerceptionReceived, *, dedupe_key: str | None = None,
                        correlation: str | None = None) -> Perceived:
+        """Une perception : journalisée, puis une réponse demandée. File pleine →
+        refusée avant d'être journalisée (sinon la reprise au démarrage
+        répondrait des heures plus tard à un message qu'on a dit refusé)."""
+        if self.deps.reply_kind in self.runner.policies and self.lanes.full(self.deps.reply_kind):
+            return Perceived(None, None, overloaded=True)
         commit = await self.mind.append(
             [PERCEPTION_RECEIVED.draft(data, dedupe_key=dedupe_key)], emitter="runtime", origin=Origin.EXTERNAL,
             correlation=correlation or f"perception:{self.mind.ids.new(self.mind.clock.now())}",

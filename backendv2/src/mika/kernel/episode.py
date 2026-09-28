@@ -11,6 +11,7 @@ from __future__ import annotations
 import enum
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.guards import Guard
@@ -43,6 +44,9 @@ class Outcome(enum.StrEnum):
 
 
 GuardFactory = Callable[[Frame, str | None, Audience | None], Guard | None]
+#: Le message final d'un épisode que personne n'a demandé (initiative, pas,
+#: murmure) : la consigne « c'est toi qui prends la parole, et pourquoi ».
+Brief = Callable[[Frame, Any], str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,4 +65,5 @@ class EpisodePolicy:
     tool_bundles: frozenset[str] = frozenset()
     muted_tags: frozenset[str] = frozenset()
     guard: GuardFactory | None = None
+    brief: Brief | None = None
     phases: frozenset[Phase] = ALL_PHASES

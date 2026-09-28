@@ -35,7 +35,11 @@ class Oscillator:
 
 
 def _coefficients(osc: Oscillator, t: float) -> tuple[float, float, float, float]:
-    """Les quatre coefficients de exp(A·t) : y' = a·y + b·v ; v' = c·y + d·v."""
+    """Les quatre coefficients de exp(A·t) : y' = a·y + b·v ; v' = c·y + d·v.
+
+    Sur-amorti, ``e^{st}·cosh(dt)`` s'écrit comme demi-somme d'exponentielles
+    décroissantes : aucun débordement, même à très grand ``t``.
+    """
     m, c, k = osc.mass, osc.damping, osc.stiffness
     s = -c / (2.0 * m)
     disc = s * s - k / m
@@ -43,20 +47,23 @@ def _coefficients(osc: Oscillator, t: float) -> tuple[float, float, float, float
     eps = 1e-12 * max(1.0, scale)
     if disc > eps:
         d = math.sqrt(disc)
-        f0 = math.cosh(d * t)
-        f1 = math.sinh(d * t) / d
-    elif disc < -eps:
-        w = math.sqrt(-disc)
-        f0 = math.cos(w * t)
-        f1 = math.sin(w * t) / w
+        e_plus = math.exp((s + d) * t)
+        e_minus = math.exp((s - d) * t)
+        ef0 = 0.5 * (e_plus + e_minus)
+        ef1 = (e_plus - e_minus) / (2.0 * d)
     else:
-        f0 = 1.0
-        f1 = t
-    e = math.exp(s * t)
-    a = e * (f0 - s * f1)
-    b = e * f1
-    cc = e * (-(k / m) * f1)
-    dd = e * (f0 + s * f1)
+        e = math.exp(s * t)
+        if disc < -eps:
+            w = math.sqrt(-disc)
+            ef0 = e * math.cos(w * t)
+            ef1 = e * math.sin(w * t) / w
+        else:
+            ef0 = e
+            ef1 = e * t
+    a = ef0 - s * ef1
+    b = ef1
+    cc = -(k / m) * ef1
+    dd = ef0 + s * ef1
     return a, b, cc, dd
 
 
@@ -72,6 +79,41 @@ def propagate(osc: Oscillator, position: Vec3, velocity: Vec3, home: Vec3, dt_s:
         pos.append(h + a * y + b * v)
         vel.append(c * y + d * v)
     return (pos[0], pos[1], pos[2]), (vel[0], vel[1], vel[2])
+
+
+def propagate_toward(
+    osc: Oscillator, position: Vec3, velocity: Vec3, home_end: Vec3, home_offset: Vec3, rate: float, dt_s: float
+) -> tuple[Vec3, Vec3]:
+    """État après ``dt_s`` secondes quand le repos lui-même glisse
+    exponentiellement : ``repos(t) = home_end + home_offset·e^{−rate·t}``.
+
+    Solution exacte : une particulière ``home_end + B·e^{−rate·t}`` avec
+    ``B = k·offset / (m·rate² − c·rate + k)``, plus la solution libre de
+    l'écart restant. À ``rate = 0`` c'est ``propagate`` vers un repos fixe.
+    """
+    if dt_s <= 0:
+        return position, velocity
+    m, c, k = osc.mass, osc.damping, osc.stiffness
+    denom = m * rate * rate - c * rate + k
+    if abs(denom) < 1e-18:
+        raise ValueError("résonance : le repos glisse au rythme propre de l'oscillateur")
+    coeff = k / denom
+    decay = math.exp(-rate * dt_s)
+    pos = []
+    vel = []
+    for x, v, h, off in zip(position, velocity, home_end, home_offset, strict=True):
+        big_b = coeff * off
+        z0 = x - h - big_b
+        w0 = v + rate * big_b
+        (z,), (w,) = _free1(osc, z0, w0, dt_s)
+        pos.append(h + big_b * decay + z)
+        vel.append(-rate * big_b * decay + w)
+    return (pos[0], pos[1], pos[2]), (vel[0], vel[1], vel[2])
+
+
+def _free1(osc: Oscillator, y: float, v: float, dt_s: float) -> tuple[tuple[float], tuple[float]]:
+    a, b, c, d = _coefficients(osc, dt_s)
+    return (a * y + b * v,), (c * y + d * v,)
 
 
 def euler_reference(osc: Oscillator, position: Vec3, velocity: Vec3, home: Vec3, dt_s: float, step_s: float = 0.5) -> tuple[Vec3, Vec3]:
