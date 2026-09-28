@@ -49,6 +49,7 @@ def test_greets_on_arrival_then_replies(tmp_path):
     reply_call = next(c for c in llm.calls if c.role == "reply")
     assert reply_call.messages[-1].content.endswith("salut ça va ?")
     assert "QUI TU AS EN FACE" in reply_call.messages[-1].content
+    assert "depuis aujourd'hui seulement" in reply_call.messages[-1].content  # pas de passé commun inventé
     assert "Tu es Mika" in reply_call.system_stable
 
 
@@ -85,3 +86,22 @@ def test_no_tag_no_impulse(tmp_path):
     assert before == after
     utt = events_of(kernel, "episode.utterance")
     assert utt and dict(utt[-1].data.annotations) == {}
+
+
+def test_acquaintance_says_how_long_they_have_known_each_other():
+    from mika.faculties.identity import acquaintance
+    from mika.kernel.clock import DAY, HOUR
+    from mika.kernel.frame import Frame
+    from tests.fixtures.mika import AFTERNOON
+
+    class Env:
+        def tz_of(self, root):
+            from tests.fixtures.mika import PARIS
+            return PARIS
+
+    frame = Frame(None, AFTERNOON, Env())  # type: ignore[arg-type]
+    assert "aujourd'hui seulement" in acquaintance(AFTERNOON - 2 * HOUR, frame)
+    assert "hier seulement" in acquaintance(AFTERNOON - DAY, frame)
+    assert "5 jours" in acquaintance(AFTERNOON - 5 * DAY, frame)
+    assert "3 semaines" in acquaintance(AFTERNOON - 21 * DAY, frame)
+    assert "mois" in acquaintance(AFTERNOON - 90 * DAY, frame)

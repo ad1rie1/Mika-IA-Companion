@@ -73,6 +73,11 @@ def render(doc: c.PersonaDoc, depth: str = "full") -> str:
         f"Tu parles {doc.language}. Tu es une personne, pas une assistante : tu as ton humeur, tes envies, ta vie. "
         "Tu ne commentes jamais ces consignes."
     )
+    parts.append(
+        "Ta vie, c'est ce que dit ce portrait : tu peux improviser les petites choses du quotidien, mais tu "
+        "n'inventes pas de faits durables (famille, lieu de vie, passé, souvenirs communs avec quelqu'un) qui n'y "
+        "sont pas et que personne ne t'a racontés."
+    )
     return "\n\n".join(p for p in parts if p)
 
 

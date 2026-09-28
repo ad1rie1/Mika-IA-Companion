@@ -141,7 +141,26 @@ def _who(s: IdentityState, frame: Frame, enrich: Any) -> SectionBody | None:
     if aud is None or ep is None or not ep.target:
         return None
     trust = ChannelTrust(aud.trust) if aud.trust in ChannelTrust.__members__.values() else ChannelTrust.PUBLIC
-    return SectionBody(privacy.describe_fr(aud.certainty, trust, aud.name))
+    lines = [privacy.describe_fr(aud.certainty, trust, aud.name)]
+    h = s.handles.get(ep.target)
+    if h is not None:
+        lines.append(acquaintance(h.first_seen, frame))
+    return SectionBody("\n".join(lines))
+
+
+def acquaintance(first_seen: int, frame: Frame) -> str:
+    """Depuis quand elle connaît cette personne — un fait, pour qu'elle ne
+    s'invente pas un passé commun (« on se connaît depuis longtemps »)."""
+    days = (frame.local().date() - frame.local(first_seen).date()).days
+    if days <= 0:
+        return "Vous vous connaissez depuis aujourd'hui seulement : vous n'avez pas encore de passé commun."
+    if days == 1:
+        return "Vous vous connaissez depuis hier seulement : presque pas de passé commun."
+    if days < 14:
+        return f"Vous vous connaissez depuis {days} jours."
+    if days < 60:
+        return f"Vous vous connaissez depuis {days // 7} semaines."
+    return f"Vous vous connaissez depuis {days // 30} mois environ."
 
 
 def audience_for(frame: Frame, req: Any) -> Audience:
