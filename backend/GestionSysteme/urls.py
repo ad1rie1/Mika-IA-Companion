@@ -62,6 +62,8 @@ urlpatterns = [
     path("social/<slug:tab>/", social.social, name="social-tab"),
 
     path("conscience/", conscience.conscience, name="conscience"),
+    path("conscience/planification/<int:action_id>/action/", conscience.scheduled_action,
+         name="scheduled-action"),
     path("conscience/<slug:tab>/", conscience.conscience, name="conscience-tab"),
 
     # Les segments littéraux sont déclarés avant ``<slug:tab>``, qui les

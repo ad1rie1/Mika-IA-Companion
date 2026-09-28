@@ -47,15 +47,10 @@ CONFIG_SCHEMA = [
     ),
     ConfigGroup(
         section="projects", key="Exécution", order=26,
-        description="La frontière retenue est le sous-processus borné : pas de "
-                    "shell, exécutables déclarés, dossier verrouillé, "
-                    "environnement reconstruit et non hérité (sans quoi un "
-                    "script écrit par le modèle recevrait CONFIG_ENCRYPTION_KEY "
-                    "et DJANGO_SECRET_KEY), entrée fermée, délai qui tue tout "
-                    "le groupe de processus. ⚠ Elle protège de l'accident, pas "
-                    "d'un adversaire : le programme lancé tourne avec les "
-                    "droits du serveur et peut lire le disque. N'expose pas "
-                    "Mika à d'autres personnes tant que c'est ce mode.",
+        description="Les programmes tournent dans un espace isolé par bubblewrap : "
+                    "atelier en écriture, système en lecture, environnement reconstruit, "
+                    "réseau coupé selon le réglage et délai borné. Si cette isolation "
+                    "est indisponible, aucune commande n’est lancée avec les droits du serveur.",
     ),
     ConfigGroup(
         section="projects", key="Traçabilité", order=40, advanced=True,
@@ -106,16 +101,39 @@ CONFIG_SCHEMA = [
         ),
     ),
     ConfigItem(
-        key="projects.runs_since_input_cap", type="int", section="projects",
+        key="projects.stagnation_runs_cap", type="int", section="projects",
         group="Garde-fous d'autonomie",
-        label="Avances max sans retour humain",
+        label="Avances sans progrès avant temporisation",
         default=10, min=1, max=100, hot_reload=True,
         hint=(
-            "Au-delà, le projet cesse d'être dû jusqu'à ce que quelqu'un "
-            "revienne (message, avance manuelle, mise à jour). Sans ce "
-            "plafond, un projet mal cadré tourne indéfiniment tout seul en "
-            "brûlant des appels."
+            "Après ce nombre de passes sans résultat nouveau, reprise différée "
+            "de 5 minutes à 6 heures. Un progrès ou un retour humain "
+            "réinitialise la temporisation."
         ),
+    ),
+    ConfigItem(
+        key="projects.daily_runs_per_project", type="int", section="projects",
+        group="Garde-fous d'autonomie", label="Avances autonomes par projet et par jour",
+        default=24, min=0, max=10000, hot_reload=True,
+        hint="Crédits consommés avant chaque avance, réussie ou non. 0 suspend le fond. "
+             "Les avances manuelles restent possibles. Renouvellement à minuit UTC.",
+    ),
+    ConfigItem(
+        key="projects.daily_runs_total", type="int", section="projects",
+        group="Garde-fous d'autonomie", label="Avances autonomes de tous les projets par jour",
+        default=96, min=0, max=10000, hot_reload=True,
+        hint="Plafond commun persistant, en plus des quotas de jetons. "
+             "Créer plusieurs projets ou redémarrer ne le remet pas à zéro. Minuit UTC.",
+    ),
+    ConfigItem(
+        key="projects.stagnation_backoff_seconds", type="int", section="projects",
+        group="Garde-fous d'autonomie", label="Première temporisation sans progrès (s)",
+        default=300, min=1, max=86400, hot_reload=True,
+    ),
+    ConfigItem(
+        key="projects.stagnation_max_backoff_seconds", type="int", section="projects",
+        group="Garde-fous d'autonomie", label="Temporisation maximale sans progrès (s)",
+        default=21600, min=1, max=604800, hot_reload=True,
     ),
     ConfigItem(
         key="projects.match_confidence_threshold", type="float",
@@ -193,15 +211,13 @@ CONFIG_SCHEMA = [
         key="projects.exec.max_output_chars", type="int", section="projects",
         group="Exécution", label="Sortie maximale d'une commande",
         default=20000, min=200, max=200000, hot_reload=True,
-        hint="Le début et la fin sont gardés, le milieu coupé — c'est aux deux "
-             "bouts que se lit un échec de test.",
+        hint="La sortie est drainée avec une mémoire bornée puis tronquée pour le modèle.",
     ),
     ConfigItem(
         key="projects.exec.block_network", type="bool", section="projects",
         group="Exécution", label="Couper le réseau des commandes",
         default=True, hot_reload=True,
-        hint="Utilise `unshare -rn` quand la machine le permet. Si le noyau "
-             "refuse les espaces de noms, la coupure N'A PAS LIEU et la "
-             "commande le signale plutôt que de le taire.",
+        hint="Isole le réseau avec bubblewrap. Une isolation indisponible "
+             "fait échouer la commande ; aucun repli sans isolation.",
     ),
 ]

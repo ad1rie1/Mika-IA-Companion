@@ -418,17 +418,24 @@ async def _fetch_rumination_context() -> str:
         degradations.record("prompt: rumination context", exc)
         return ""
 
+    return format_ruminations([
+        {"summary": r.summary, "intensity": r.intensity, "emotion": r.emotion}
+        for r in items
+    ])
+
+
+def format_ruminations(items: list[dict]) -> str:
+    """Même présentation pour le rappel courant et le lot retenu d'un acte."""
     if not items:
         return ""
-
     lines = []
     for r in items:
-        label = "fortement" if r.intensity > 0.7 else (
-            "encore" if r.intensity > 0.4 else "par intermittence"
+        label = "fortement" if r["intensity"] > 0.7 else (
+            "encore" if r["intensity"] > 0.4 else "par intermittence"
         )
-        line = f"- Tu repenses {label} a : {r.summary[:140]}"
-        if r.emotion:
-            line += f" (teinte : {r.emotion})"
+        line = f"- Tu repenses {label} a : {r['summary'][:140]}"
+        if r.get("emotion"):
+            line += f" (teinte : {r['emotion']})"
         lines.append(line)
     return (
         "Meme si tu reponds a ce qui arrive maintenant, ces pensees restent "

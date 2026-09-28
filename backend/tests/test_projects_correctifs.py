@@ -122,7 +122,8 @@ class TestTempeteDeRelances:
         )()
         assert derniere is not None
         assert derniere.outcome == "apply_error"
-        assert derniere.parsed_output == {"summary": "fait"}
+        assert derniere.parsed_output["summary"] == "fait"
+        assert derniere.parsed_output["_execution"]["total"] == 0
 
     async def test_un_tick_qui_leve_avant_l_application_avance_aussi(self, ateliers):
         """Le tick attrapait l'exception, la journalisait, et laissait
@@ -319,7 +320,7 @@ class TestRegleEvenementNettoyee:
         from projects.tools import ProjectToolsModule
 
         mod = ProjectToolsModule()
-        await mod._tool_create({"title": "Outil", "schedule_rule": " event:email.received "})
+        await mod._tool_create({"title": "Outil", "origin": "self", "schedule_rule": " event:email.received "})
         p = await sync_to_async(lambda: Project.objects.get(title="Outil"))()
         assert p.schedule_rule == "event:email.received"
 
@@ -337,7 +338,7 @@ class TestDestinataireDansLesContacts:
     def _action(self, contacts, to):
         from projects.models import Project, ProjectPendingAction
 
-        p = Project.objects.create(title="Courrier", contacts=contacts, requires_approval=True)
+        p = Project.objects.create(title="Courrier", contacts=contacts, requires_approval=True, allowed_modules=["email"])
         return ProjectPendingAction.objects.create(
             project=p, proposal="écrire",
             payload={"kind": "send_email", "to": to, "subject": "s", "body": "b"},

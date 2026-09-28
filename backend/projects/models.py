@@ -70,6 +70,10 @@ class Project(models.Model):
     priority = models.CharField(
         max_length=10, choices=Priority.choices, default=Priority.NORMAL,
     )
+    stalled_runs = models.PositiveIntegerField(default=0)
+    retry_after = models.DateTimeField(null=True, blank=True)
+    pause_reason = models.CharField(max_length=300, blank=True, default="")
+    progress_signature = models.CharField(max_length=64, blank=True, default="")
 
     # Who confided the project (user or contact). Null for self-initiated.
     owner = models.ForeignKey(
@@ -147,8 +151,7 @@ class Project(models.Model):
     )
     next_run_at = models.DateTimeField(null=True, blank=True)
     last_run_at = models.DateTimeField(null=True, blank=True)
-    # Number of consecutive runs without user intervention. Safety gauge —
-    # forces a cooldown if it grows too large.
+    # Statistic only: autonomy is governed by stalled_runs/retry_after.
     runs_since_user_input = models.IntegerField(default=0)
 
     # ── Quota / budget ───────────────────────────────────────────
@@ -180,6 +183,19 @@ class Project(models.Model):
     @property
     def is_active(self) -> bool:
         return self.status == self.Status.ACTIVE
+
+
+class ProjectRunReservation(models.Model):
+    """Crédit d'une avance de fond, consommé avant l'appel même s'il plante.
+
+    Indépendant du progrès et des logs : un commit ou un redémarrage ne
+    renouvelle jamais le budget choisi par l'opérateur.
+    """
+
+    project = models.ForeignKey(
+        Project, on_delete=models.SET_NULL, null=True, related_name="run_reservations",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
 
 class ProjectTask(models.Model):

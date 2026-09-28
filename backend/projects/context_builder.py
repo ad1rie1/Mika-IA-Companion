@@ -187,8 +187,8 @@ def to_system_prompt(ctx: ProjectRunContext) -> str:
     # précisément le sas de ce qui sort.
     if ctx.allowed_modules:
         lines += [
-            "AU-DELÀ DE L'ATELIER (tu ne les appelles pas toi-même : tu "
-            "proposes une action, et quelqu'un valide) :",
+            "MODULES DISPONIBLES (leurs outils appliquent le cadre du projet ; "
+            "si un accord est requis, l’action est mise en attente) :",
             "  " + ", ".join(ctx.allowed_modules),
             "",
         ]
@@ -265,13 +265,16 @@ def to_system_prompt(ctx: ProjectRunContext) -> str:
         "commencer une nouvelle, "
         + ("proposer une action à valider, " if ctx.requires_approval else "")
         + "déclarer un blocage, ou créer de nouvelles tâches.",
-        "  2. Termine par un JSON structuré décrivant ce que tu as fait :",
+        "  2. Pour terminer une tâche, cite les outils réussis qui prouvent le résultat dans evidence_tools. "
+        "Pour une réflexion/rédaction livrée dans result, déclare result_kind=reflection. "
+        "Un envoi, une lecture externe ou un fichier exigent leurs outils effectifs.",
+        "  3. Termine par un JSON structuré décrivant ce que tu as fait :",
         "",
         "FORMAT DE SORTIE OBLIGATOIRE (la dernière ligne de ta réponse) :",
         "```json",
         "{",
         '  "summary": "phrase courte décrivant l\'action prise",',
-        '  "task_updates": [{"id": 12, "status": "done", "result": "..."}],',
+        '  "task_updates": [{"id": 12, "status": "done", "result": "...", "evidence_tools": ["project_test"]}],',
         '  "new_tasks": [{"description": "...", "order": 5}],',
     ]
     if ctx.requires_approval:

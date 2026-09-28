@@ -25,6 +25,9 @@ import time as _t
 from datetime import timedelta
 from unittest.mock import patch
 
+from utils.tool_results import BilanOutils
+from utils.tool_trace import JournalOutils
+
 import pytest
 from asgiref.sync import sync_to_async
 from django.utils import timezone as tz
@@ -69,7 +72,7 @@ def _ctx(**kw) -> DecisionContext:
 def _patches_acte(e, sortie):
     """Les doubles d'un `_act` qui ne mesure que ce qu'il écrit en base."""
     return (
-        patch.object(type(e), "_appeler_le_modele", return_value=(sortie, "", 0)),
+        patch.object(type(e), "_appeler_le_modele", return_value=(sortie, BilanOutils(JournalOutils()), 0)),
         patch.object(type(e), "_select_recipient", return_value=None),
         patch.object(type(e), "_preparer_trousse", return_value=Trousse()),
         patch.object(type(e), "_composer_vecu", return_value=""),
@@ -518,7 +521,7 @@ class TestLeReliefDesPenseesNeCourtPlus:
         from conscience.models import Rumination
 
         r = await sync_to_async(Rumination.objects.create)(
-            summary="encore là", intensity=0.8, status="active",
+            summary="encore là", intensity=0.8, status="active", themes=["audit"],
         )
         vrai = moteur_module.sync_to_async
         appels: list = []
@@ -537,7 +540,7 @@ class TestLeReliefDesPenseesNeCourtPlus:
 
         e = ConscienceEngine()
         with patch.object(moteur_module, "sync_to_async", espion):
-            await e._resolve_ruminations_after_act()
+            await e._resolve_ruminations_after_act(themes=["audit"])
 
         await sync_to_async(r.refresh_from_db)()
         assert r.status == "faded", "le relief a ressuscité une pensée fanée"
@@ -566,11 +569,11 @@ class TestLeReliefDesPenseesNeCourtPlus:
         from conscience.models import Rumination
 
         forte = await sync_to_async(Rumination.objects.create)(
-            summary="forte", intensity=0.8, status="active")
+            summary="forte", intensity=0.8, status="active", themes=["audit"])
         faible = await sync_to_async(Rumination.objects.create)(
-            summary="faible", intensity=0.15, status="active")
+            summary="faible", intensity=0.15, status="active", themes=["audit"])
 
-        await ConscienceEngine()._resolve_ruminations_after_act()
+        await ConscienceEngine()._resolve_ruminations_after_act(themes=["audit"])
 
         await sync_to_async(forte.refresh_from_db)()
         await sync_to_async(faible.refresh_from_db)()

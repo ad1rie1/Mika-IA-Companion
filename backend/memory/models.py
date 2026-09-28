@@ -178,7 +178,13 @@ class Connaissance(models.Model):
     content = models.TextField()
     themes = models.ManyToManyField(Theme, blank=True, related_name="connaissances")
     entities = models.ManyToManyField(Entity, blank=True, related_name="connaissances")
-    confidence = models.FloatField(default=1.0)
+    confidence = models.FloatField(default=0.65)
+    epistemic_kind = models.CharField(
+        max_length=12, default="unknown",
+        choices=[("unknown", "Origine inconnue"), ("reported", "Rapporté"), ("observed", "Observé"),
+                 ("inferred", "Déduit"), ("uncertain", "Supposé")],
+    )
+    source_message_ids = models.JSONField(default=list, blank=True)
     sensibilite = models.CharField(
         max_length=12, choices=SENSIBILITE_CHOICES, default="personnel",
         help_text="Meme echelle que Souvenir.sensibilite.",

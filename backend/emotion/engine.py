@@ -3,6 +3,7 @@ import dataclasses
 import logging
 import time
 from dataclasses import dataclass
+from functools import cached_property
 
 from configs.runtime import cfg_float, cfg_int
 from emotion import dynamics, pad, persistence, physics
@@ -232,7 +233,32 @@ class EmotionEngine:
         return await persistence.restore_state(self)
 
     async def ensure_person_loaded(self, person_id: str) -> None:
-        await persistence.ensure_person_loaded(self, person_id)
+        from asgiref.sync import sync_to_async
+        from identity.continuity import cle_relation
+
+        try:
+            cle, aliases = await sync_to_async(cle_relation)(person_id)
+        except Exception as exc:
+            # Comme l'hydratation des snapshots, l'identité est enrichissante,
+            # jamais une condition pour répondre pendant une panne de base.
+            degradations.record("emotion: continuity unavailable", exc)
+            await persistence.ensure_person_loaded(self, self.relation_key(person_id))
+            return
+        ancienne = self._relation_aliases.get(person_id)
+        for alias in aliases:
+            self._relation_aliases[alias] = cle
+        # Lors d'une correction d'identité, ne pas recopier la relation de
+        # l'ancienne personne vers la nouvelle.
+        if cle not in self.person_moods and ancienne in (None, cle):
+            candidates = [self.person_moods[a] for a in aliases if a in self.person_moods]
+            if candidates:
+                mood = max(candidates, key=lambda m: m.last_interaction)
+                mood.person_id = cle
+                self.person_moods[cle] = mood
+        await persistence.ensure_person_loaded(self, cle, aliases=aliases)
+        for alias in aliases:
+            if alias != cle:
+                self.person_moods.pop(alias, None)
 
     def _person_tau(self) -> float:
         return physics.tau_of(self._person_params)
@@ -274,6 +300,7 @@ class EmotionEngine:
         # et ``conscience_mika``, rechargés en RAM trente jours au boot.
         if not is_identifiable_person(person_id):
             return
+        person_id = self.relation_key(person_id)
         async with self._snapshot_lock:
             now = time.time()
             last = self._last_snapshot_time.get(person_id, 0)
@@ -287,6 +314,19 @@ class EmotionEngine:
     # Person mood management
     # ------------------------------------------------------------------
 
+    @cached_property
+    def _relation_aliases(self) -> dict[str, str]:
+        # Par instance, y compris les moteurs de test construits par __new__.
+        return {}
+
+    def relation_key(self, person_id: str) -> str:
+        """Clé affective chargée ; le handle reste réservé au transport."""
+        return self._relation_aliases.get(person_id, person_id)
+
+    def person_mood(self, person_id: str) -> PersonMood | None:
+        """Lecture sans création, commune aux consommateurs de l'affect."""
+        return self.person_moods.get(self.relation_key(person_id))
+
     def _get_person_mood(self, person_id: str) -> PersonMood:
         """Get or create mood state for a person. New persons start AT REST.
 
@@ -296,6 +336,7 @@ class EmotionEngine:
         une émotion. Le repos commun est là où un inconnu commence, ce que
         ``ensure_person_loaded`` posait déjà pour un relevé illisible.
         """
+        person_id = self.relation_key(person_id)
         if person_id not in self.person_moods:
             mood = PersonMood(person_id=person_id)
             mood.dynamic.position = self._home_vector()
@@ -726,7 +767,7 @@ class EmotionEngine:
         conscience — qui ne doivent pas s'importer l'un l'autre.
         """
         await self.ensure_person_loaded(person_id)
-        mood = self.person_moods.get(person_id)
+        mood = self.person_mood(person_id)
         ancre = getattr(mood, "anchor", None)
         if not ancre:
             return 0.0
@@ -924,8 +965,9 @@ class EmotionEngine:
         from communication.presence import presence_registry
         from emotion.sync import emotion_sync
 
+        aliases = self._relation_aliases
         connectes = {
-            i.person_id for i in presence_registry.reachable() if i.is_consumer
+            aliases.get(i.person_id, i.person_id) for i in presence_registry.reachable() if i.is_consumer
         }
         for pid in person_ids:
             if pid in connectes:
@@ -939,6 +981,11 @@ class EmotionEngine:
             # l'origine.
             self._last_snapshot_time.pop(pid, None)
             emotion_sync.forget(pid)
+            for alias, cle in list(aliases.items()):
+                if cle == pid:
+                    emotion_sync.forget(alias)
+                    self._last_snapshot_time.pop(alias, None)
+                    aliases.pop(alias, None)
 
 
     # ------------------------------------------------------------------

@@ -489,7 +489,7 @@ class TestPendingEndpoints:
     def test_approve_send_email_executes_real_send(self, client: Client):
         """An approved send_email must reach the email module's send path."""
         from projects.models import Project, ProjectPendingAction
-        p = Project.objects.create(title="X")
+        p = Project.objects.create(title="X", allowed_modules=["email"])
         a = ProjectPendingAction.objects.create(
             project=p, proposal="send email",
             payload={"kind": "send_email", "to": "a@b.c",
@@ -516,7 +516,7 @@ class TestPendingEndpoints:
     def test_approve_send_email_failure_marks_failed(self, client: Client):
         """A send failure must yield FAILED — never a green 'executed'."""
         from projects.models import Project, ProjectPendingAction
-        p = Project.objects.create(title="X")
+        p = Project.objects.create(title="X", allowed_modules=["email"])
         a = ProjectPendingAction.objects.create(
             project=p, proposal="send email",
             payload={"kind": "send_email", "to": "a@b.c",
@@ -538,7 +538,7 @@ class TestPendingEndpoints:
 
     def test_approve_send_email_without_module_marks_failed(self, client: Client):
         from projects.models import Project, ProjectPendingAction
-        p = Project.objects.create(title="X")
+        p = Project.objects.create(title="X", allowed_modules=["email"])
         a = ProjectPendingAction.objects.create(
             project=p, proposal="send email",
             payload={"kind": "send_email", "to": "a@b.c",

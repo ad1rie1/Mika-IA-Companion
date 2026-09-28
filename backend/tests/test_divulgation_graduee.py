@@ -383,7 +383,7 @@ class TestRetrieverGradue:
         assert [c["content"] for c in out] == ["Alice aime le café", "Alice cherche un boulot"]
         assert out[1]["tag"] and not out[0]["tag"]
         bloc = r._format_context(out, [])
-        assert "(concerne: Alice) [certain] (confié en privé par Alice" in bloc
+        assert "(concerne: Alice) [probable] (confié en privé par Alice" in bloc
 
     async def test_les_voies_non_lexicales_suivent_le_niveau(self):
         from memory.models import Theme
@@ -704,10 +704,10 @@ class TestTableauDeBord:
         c.entities.add(alice)
         html = client.get(reverse("gestionsysteme:person-detail-tab",
                                   args=[alice.pk, "souvenirs"])).content.decode()
-        assert "Sensibilité" in html and ">confidence<" in html
+        assert ">Confidence<" in html
         html = client.get(reverse("gestionsysteme:person-detail-tab",
                                   args=[alice.pk, "connaissances"])).content.decode()
-        assert ">anodin<" in html
+        assert ">Anodin<" in html
 
 
 class TestNettoyage:

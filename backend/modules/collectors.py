@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-import time
 
 from django.urls import path
 
@@ -27,19 +26,9 @@ from identity.roles import is_owner  # noqa: F401 (réexport)
 from modules.registry import ModuleRegistry
 from modules.types import ModuleCapability, ModuleTool
 from utils.degradation import degraded
-from utils.tool_trace import noter_appel
 
 
-def _signale_une_erreur(resultat) -> bool:
-    """Un résultat qui dit lui-même avoir échoué, sans avoir levé.
-
-    Convention MCP (`isError`), telle que le fournisseur Claude la relit déjà
-    pour poser `is_error` sur le `tool_result`. Les deux orthographes existent
-    dans le dépôt selon les modules.
-    """
-    if not isinstance(resultat, dict):
-        return False
-    return bool(resultat.get("isError") or resultat.get("is_error"))
+from utils.tool_results import en_echec as _signale_une_erreur, instrumenter
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +78,7 @@ class ModuleCollectors:
                     continue
                 seen.add(tool.name)
                 tools.append(dataclasses.replace(
-                    tool, handler=self._wrap_handler(tool.name, tool.handler),
+                    tool, handler=self._wrap_handler(tool.name, tool.handler), module_name=module.name,
                 ))
         self._tools_cache = tools
         return tools
@@ -115,7 +104,7 @@ class ModuleCollectors:
                 owner_of.update({t.name: module_name for t in module.return_tools()})
             except Exception:
                 logger.exception("return_tools() failed for module %s", module_name)
-        return [t for t in self.tools() if owner_of.get(t.name) in wanted]
+        return [t for t in self.tools() if t.module_name in wanted]
 
     def tool_names(self) -> list[str]:
         return [t.name for t in self.tools()]
@@ -139,27 +128,7 @@ class ModuleCollectors:
         `isError`) n'a jamais levé : sans cette lecture, la moitié des échecs
         resterait comptée comme des succès.
         """
-        async def logged_handler(params):
-            logger.info("tool called: %s (params=%s)", name, params)
-            debut = time.monotonic()
-            try:
-                result = await handler(params)
-            except Exception as exc:
-                noter_appel(
-                    name, ok=False, extrait=f"{type(exc).__name__}: {exc}",
-                    ms=(time.monotonic() - debut) * 1000.0,
-                )
-                logger.exception("tool %s failed", name)
-                raise
-            logger.info("tool %s returned: %s", name, str(result)[:200])
-            noter_appel(
-                name,
-                ok=not _signale_une_erreur(result),
-                extrait=result,
-                ms=(time.monotonic() - debut) * 1000.0,
-            )
-            return result
-        return logged_handler
+        return instrumenter(name, handler)
 
     # ── Capabilities ──────────────────────────────────────────────
 

@@ -127,6 +127,7 @@ class AppelOutil:
     ok: bool = True
     extrait: str = ""
     ms: float = 0.0
+    en_attente: bool = False
 
     def __post_init__(self) -> None:
         # La borne est appliquée à la *construction*, pas à l'écriture dans
@@ -134,7 +135,7 @@ class AppelOutil:
         # d'exécution veut souvent le relire) tiendrait les 40 ko que le
         # journal a refusés, et la borne ne bornerait que l'affichage.
         object.__setattr__(self, "nom", borne_extrait(self.nom, 120))
-        object.__setattr__(self, "ok", bool(self.ok))
+        object.__setattr__(self, "ok", bool(self.ok) and not self.en_attente)
         object.__setattr__(self, "extrait", borne_extrait(self.extrait))
         object.__setattr__(self, "ms", _flottant(self.ms))
 
@@ -144,11 +145,12 @@ class AppelOutil:
             "ok": self.ok,
             "extrait": self.extrait,
             "ms": self.ms,
+            **({"en_attente": True} if self.en_attente else {}),
         }
 
     def ligne(self) -> str:
         """Une ligne lisible : ``memory_search ✗ (12 ms) base verrouillée``."""
-        marque = "✓" if self.ok else "✗"
+        marque = "…" if self.en_attente else ("✓" if self.ok else "✗")
         morceaux = [f"{self.nom} {marque}"]
         if self.ms:
             morceaux.append(f"({self.ms:g} ms)")
@@ -177,6 +179,7 @@ class JournalOutils:
         self._total = 0
         self._ok = 0
         self._echecs = 0
+        self._attentes = 0
         self._ms = 0.0
         self._tronques = 0
         #: Notes perdues faute d'objet exploitable. Compté ici plutôt que
@@ -197,7 +200,9 @@ class JournalOutils:
         try:
             with self._lock:
                 self._total += 1
-                if appel.ok:
+                if appel.en_attente:
+                    self._attentes += 1
+                elif appel.ok:
                     self._ok += 1
                 else:
                     self._echecs += 1
@@ -270,6 +275,7 @@ class JournalOutils:
         """
         with self._lock:
             total, ok, echecs = self._total, self._ok, self._echecs
+            attentes = self._attentes
             appels = list(self._appels)
             tronques, ms = self._tronques, self._ms
         if total == 0:
@@ -277,6 +283,8 @@ class JournalOutils:
 
         tete = f"{total} appel{'s' if total > 1 else ''}"
         tete += f" : {ok} ok, {echecs} échec{'s' if echecs > 1 else ''}"
+        if attentes:
+            tete += f", {attentes} en attente"
         if ms:
             tete += f" en {round(ms, 1):g} ms"
         if tronques:
@@ -305,6 +313,7 @@ class JournalOutils:
                 "tronques": self._tronques,
                 "ms": round(self._ms, 1),
                 "notes_perdues": self.notes_perdues,
+                **({"attentes": self._attentes} if self._attentes else {}),
             }
         charge["appels"] = appels
         charge["resume"] = self.resume()
@@ -382,6 +391,7 @@ def noter_appel(
     ok: bool = True,
     extrait: Any = "",
     ms: float = 0.0,
+    en_attente: bool = False,
 ) -> bool:
     """Forme courte de ``noter`` pour un site d'exécution. Ne lève jamais.
 
@@ -392,11 +402,9 @@ def noter_appel(
     """
     try:
         appel = AppelOutil(
-            nom=nom, ok=ok, extrait=extrait, ms=ms,
+            nom=nom, ok=ok, extrait=extrait, ms=ms, en_attente=en_attente,
         )
     except Exception as exc:  # pragma: no cover - __post_init__ est total
         logger.debug("tool_trace: appel non construit (%s)", exc)
         return False
     return noter(appel)
-
-

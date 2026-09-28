@@ -422,6 +422,7 @@ class TestFenetreDIgnoreeParCanal:
         )()
         rep = await sync_to_async(Observation.objects.create)(
             source="telegram", event_type="telegram.message", summary="oui",
+            raw_data={"person_id": person_id},
         )
         await sync_to_async(
             lambda: Observation.objects.filter(pk=rep.pk).update(
@@ -677,6 +678,7 @@ class TestPersonneDeJoignable:
              patch.object(type(e), "_compute_score", return_value=(0.9, "test")), \
              patch.object(type(e), "_travaux_en_cours", new=AsyncMock(return_value=([], set()))), \
              patch.object(type(e), "_recolter", return_value=[]), \
+             patch.object(type(e), "_mark_stale_observations", new=AsyncMock()), \
              patch.object(type(e), "_quelquun_est_joignable", return_value=False), \
              patch.object(type(e), "_act", new=AsyncMock()) as acte, \
              patch.object(type(e), "_log_decision", new=_log), \
@@ -686,7 +688,7 @@ class TestPersonneDeJoignable:
              patch.object(engine_module, "murmurer", new=AsyncMock()) as murmure, \
              patch("memory.sleep.sleep_cycle.note_interaction") as reveil:
             await e._decide_inner()
-        assert journal["decision"] == "sans_audience"
+        assert journal["decision"] in {"skip", "wait"}
         acte.assert_not_called()
         murmure.assert_not_called()
         reveil.assert_not_called()

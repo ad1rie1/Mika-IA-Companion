@@ -29,13 +29,12 @@ from projects.workspace import Atelier, HorsAtelier
 logger = logging.getLogger(__name__)
 
 
-def _texte(contenu: str) -> dict:
-    return {"content": [{"type": "text", "text": contenu}]}
+from utils.tool_results import texte as _texte
 
 
 def _echec(quoi: str, exc: Exception) -> dict:
     """Un échec est une information rendue au modèle, pas une panne du tour."""
-    return _texte(f"{quoi} : {exc}")
+    return _texte(f"{quoi} : {exc}", erreur=True)
 
 
 def construire_trousse(atelier: Atelier, *, commande_de_test: str = "") -> list[ModuleTool]:
@@ -70,7 +69,7 @@ def construire_trousse(atelier: Atelier, *, commande_de_test: str = "") -> list[
         chemin = str(args.get("chemin") or "").strip()
         contenu = args.get("contenu")
         if contenu is None:
-            return _texte("Il manque le contenu à écrire.")
+            return _texte("Il manque le contenu à écrire.", erreur=True)
         try:
             ecrit = await sync_to_async(atelier.ecrire)(chemin, str(contenu))
         except (HorsAtelier, OSError) as exc:
@@ -82,7 +81,7 @@ def construire_trousse(atelier: Atelier, *, commande_de_test: str = "") -> list[
         ancien = args.get("ancien")
         nouveau = args.get("nouveau")
         if ancien is None or nouveau is None:
-            return _texte("Il faut 'ancien' et 'nouveau'.")
+            return _texte("Il faut 'ancien' et 'nouveau'.", erreur=True)
         try:
             ecrit = await sync_to_async(atelier.remplacer)(
                 chemin, str(ancien), str(nouveau),
@@ -109,7 +108,7 @@ def construire_trousse(atelier: Atelier, *, commande_de_test: str = "") -> list[
             morceaux.append("--- erreurs ---\n" + resultat.stderr.rstrip())
         if resultat.ok and not resultat.stdout.strip() and not resultat.stderr.strip():
             morceaux.append("(aucune sortie)")
-        return _texte("\n".join(morceaux))
+        return _texte("\n".join(morceaux), erreur=not resultat.ok)
 
     async def executer(args: dict) -> dict:
         brut = args.get("commande")
@@ -118,7 +117,7 @@ def construire_trousse(atelier: Atelier, *, commande_de_test: str = "") -> list[
         else:
             argv = [str(a) for a in (brut or [])]
         if not argv:
-            return _texte("Il manque la commande.")
+            return _texte("Il manque la commande.", erreur=True)
         return _rendre(await run_bounded(racine=atelier.racine, argv=argv))
 
     async def tester(args: dict) -> dict:
@@ -126,7 +125,7 @@ def construire_trousse(atelier: Atelier, *, commande_de_test: str = "") -> list[
         if not brut:
             return _texte(
                 "Aucune commande de test n'est déclarée pour ce projet. "
-                "Passe-la en argument, ou renseigne-la dans la fiche du projet."
+                "Passe-la en argument, ou renseigne-la dans la fiche du projet.", erreur=True
             )
         return _rendre(await run_bounded(racine=atelier.racine, argv=brut.split()))
 

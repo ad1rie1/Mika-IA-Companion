@@ -41,6 +41,7 @@ class ModuleTool:
     description: str
     parameters: list[ToolParameter]
     handler: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
+    module_name: str = ""
 
     def to_json_schema(self) -> dict:
         """Convert parameters to JSON Schema for MCP tool registration."""

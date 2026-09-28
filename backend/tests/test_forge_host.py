@@ -138,19 +138,17 @@ class TestWriteAndLoad:
         assert result["version"] == 2
         assert host._loaded["compteur_test"].handlers.keys() == {"on_tick"}
 
-    async def test_broken_update_reports_and_rollback_recovers(self, host):
+    async def test_broken_update_restores_previous_version(self, host):
+        from modules.plugins.forge import store
         await _create_basic(host)
-        # code valide au sandbox mais qui explose au chargement (top-level)
-        broken = "x = 1 / 0\n"
+        before = store.read_module("compteur_test")["code"]
         result = await host.write_module(
-            "compteur_test", code=broken, manifest_patch={},
+            "compteur_test", code="x = 1 / 0\n", manifest_patch={},
         )
         assert not result["ok"]
-        assert "compteur_test" not in host._loaded
-        assert "compteur_test" in host._load_errors
-        outcome = await host.command("compteur_test", "rollback")
-        assert outcome["ok"], outcome
         assert "compteur_test" in host._loaded
+        assert "compteur_test" not in host._load_errors
+        assert store.read_module("compteur_test")["code"] == before
 
     async def test_max_modules_enforced(self, host, monkeypatch):
         async def tiny_cfg(key, default):

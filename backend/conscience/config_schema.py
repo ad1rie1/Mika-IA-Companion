@@ -411,10 +411,11 @@ CONFIG_SCHEMA = [
              "cinq et l'acte en clôturait vingt.",
     ),
     ConfigItem(
-        key="conscience.brief.actions_max", type="int",
+        key="conscience.brief.include_scheduled_action", type="bool",
         section="conscience", group=_GROUPE_TRAVAIL_CAL,
-        label="Actions programmées montrées au modèle par acte",
-        default=3, min=0, max=50, hot_reload=True,
+        label="Traiter une action programmée par acte",
+        default=True, hot_reload=True,
+        hint="Une seule intention est réservée par acte pour attribuer correctement ses effets.",
     ),
     ConfigItem(
         key="conscience.scheduled.tentatives_max", type="int",

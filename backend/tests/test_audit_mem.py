@@ -382,7 +382,7 @@ class TestDedupALEcriture:
 @pytest.mark.django_db(transaction=True)
 class TestAncreDeRenforcement:
 
-    async def test_renforcer_une_connaissance_repose_decayed_at(self):
+    async def test_reextraction_ne_renforce_pas_la_certitude(self):
         from memory.models import Connaissance
 
         await sync_to_async(Connaissance.objects.all().delete)()
@@ -402,8 +402,8 @@ class TestAncreDeRenforcement:
             interlocutors=[],
         )
         await sync_to_async(row.refresh_from_db)()
-        assert row.confidence == pytest.approx(0.7)
-        assert (timezone.now() - row.decayed_at).total_seconds() < 60
+        assert row.confidence == pytest.approx(0.6)
+        assert row.decayed_at > vieille
 
 
 # ===================================================================

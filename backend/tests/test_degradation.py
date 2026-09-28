@@ -353,11 +353,11 @@ class TestHealthEndpoint:
 
     def test_it_reports_bus_subscriptions(self, client):
         ctx = client.get(self.URL).context
-        names = [s["name"] for s in ctx["subscriptions"]]
+        names = [s["name"] for s in ctx["subscriptions_page"].rows]
         assert "projects" in names
 
     def test_a_healthy_process_reports_nothing_failing(self, client):
-        assert client.get(self.URL).context["failing"] == []
+        assert client.get(self.URL).context["failing_subscriptions"] == []
 
     def test_la_page_montre_l_age_du_dernier_tick_reussi(self, client):
         """Un `database is locked` persistant laissait la boucle « running »,

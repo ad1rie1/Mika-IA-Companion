@@ -439,15 +439,17 @@ class ConscienceEngine:
         else:
             maintenant = None
 
+        action_interne = bool(ctx.scheduled_actions and
+            ctx.scheduled_actions[0].context_data.get("mode") == "internal")
         conduite = choisir_conduite(
             score=score,
             seuil=self._threshold,
             travaux=travaux_en_cours,
             graines=graines,
             maintenant=maintenant,
-            # Le veto est déjà dans le score : 0.0 en cooldown, 0.0 endormie.
-            # Le répéter ici ferait deux politiques pour une même règle.
-            peut_parler=True,
+            # Le score porte sommeil et cooldown ; cette garde distincte
+            # empêche la parole sans destinataire, pas le travail intérieur.
+            peut_parler=action_interne or self._quelquun_est_joignable(),
             peut_travailler=ctx.sleep_phase == "awake",
             tuning=self._conduite_tuning(),
         )
@@ -471,7 +473,7 @@ class ConscienceEngine:
         elif decision == "skip":
             self._consecutive_waits = 0
 
-        if decision == "act" and not self._quelquun_est_joignable():
+        if decision == "act" and not action_interne and not self._quelquun_est_joignable():
             # Personne, nulle part : ni navigateur, ni handle module joignable.
             # Vérifié ICI, avant `note_interaction()` et le murmure — sinon un
             # rendez-vous prioritaire à 3 h la réveillait pour de bon, la
@@ -524,14 +526,16 @@ class ConscienceEngine:
             # `generate_inner_thought`, contre une branche qui tient déjà
             # `_decision_lock` jusqu'à ~135 s — et il n'est payé que dans cette
             # branche, jamais aux 2 880 tours quotidiens.
-            intention_ = self._intention_de_lacte(ctx)
-            with degraded("conscience: murmure avant l'acte"):
-                await murmurer(
-                    intention_,
-                    mood=ctx.global_mood,
-                    mode_professionnel=await self._mode_professionnel(intention_),
-                    tuning=murmure_tuning(),
-                )
+            # Une intention intérieure ne doit pas parler par son préambule.
+            if not action_interne:
+                intention_ = self._intention_de_lacte(ctx)
+                with degraded("conscience: murmure avant l'acte"):
+                    await murmurer(
+                        intention_,
+                        mood=ctx.global_mood,
+                        mode_professionnel=await self._mode_professionnel(intention_),
+                        tuning=murmure_tuning(),
+                    )
 
             # `resultat.dit` et **jamais** `if resultat:` — un dataclass est
             # toujours vrai. Tester l'objet ferait journaliser « act » sur un
@@ -539,7 +543,9 @@ class ConscienceEngine:
             # recevoir aucune réponse, compterait comme un acte ignoré : trois
             # pannes suffiraient à brider la conscience pour la journée.
             resultat = await self._act(ctx, reason)
-            if resultat.dit:
+            if resultat.interne:
+                decision = "travail_interne" if resultat.dit else "failed"
+            elif resultat.dit:
                 # The greeting is spent only now that Mika really speaks.
                 self._commit_greeting()
                 self._consecutive_waits = 0
@@ -857,9 +863,9 @@ class ConscienceEngine:
         """Délégué — voir `ruminations.rumination_snapshot`."""
         return await ruminations.rumination_snapshot()
 
-    async def _resolve_ruminations_after_act(self) -> None:
+    async def _resolve_ruminations_after_act(self, *, themes=()) -> None:
         """Délégué — voir `ruminations.resolve_ruminations_after_act`."""
-        return await ruminations.resolve_ruminations_after_act()
+        return await ruminations.resolve_ruminations_after_act(themes=themes)
 
     async def _decay_ruminations(self) -> None:
         """Délégué — voir `ruminations.decay_ruminations`."""

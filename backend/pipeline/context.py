@@ -200,6 +200,11 @@ async def gather_context(
         rappel, message, person_id, divulgation,
     )
     tools, tool_names = _outils_de_la_conversation(include_tools)
+    if include_tools and project_id and not is_public:
+        from projects.capabilities import completer_conversation
+
+        tools = await completer_conversation(project_id, identity_ctx, tools)
+        tool_names = [t.name for t in tools]
 
     return ConversationContext(
         memory_context=memory_context,

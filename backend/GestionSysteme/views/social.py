@@ -798,7 +798,7 @@ def _divulgation_graduee(entity, verdicts, person_ids) -> dict | None:
         from emotion.engine import emotion_engine
 
         for person_id in person_ids:
-            mood = emotion_engine.person_moods.get(person_id)
+            mood = emotion_engine.person_mood(person_id)
             ancre = getattr(mood, "anchor", None)
             if ancre:
                 ancre_lue = True
@@ -829,11 +829,8 @@ def _divulgation_graduee(entity, verdicts, person_ids) -> dict | None:
 def _live_affects(person_ids: list[str]) -> list[dict]:
     """Humeurs vivantes envers cette personne (mémoire vive).
 
-    Une par handle : l'oscillateur est tenu par identifiant de transport, donc
-    quelqu'un joint sur le web et sur Telegram en a deux, qui n'ont aucune
-    raison d'être au même endroit. Interroger avec la clé primaire de l'entité
-    ne renvoyait jamais rien — c'est la même confusion entité/handle que la
-    couche identité a été écrite pour supprimer.
+    Les handles d'une même identité partagent un oscillateur après hydratation.
+    On le montre une seule fois ; les handles encore inconnus restent séparés.
     """
     if not person_ids:
         return []
@@ -842,10 +839,12 @@ def _live_affects(person_ids: list[str]) -> list[dict]:
         from emotion.engine import emotion_engine
 
         out = []
+        vues = set()
         for person_id in person_ids:
-            mood = emotion_engine.person_moods.get(person_id)
-            if mood is None:
+            mood = emotion_engine.person_mood(person_id)
+            if mood is None or mood.person_id in vues:
                 continue
+            vues.add(mood.person_id)
             label, intensity = pad.pad_to_label(mood.dynamic.position)
             out.append({
                 "person_id": person_id,

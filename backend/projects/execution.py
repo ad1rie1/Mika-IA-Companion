@@ -1,45 +1,7 @@
-"""Le point de passage unique de toute exécution dans un atelier.
+"""Exécution isolée d'un atelier Linux via bubblewrap.
 
-**Une seule fonction lance des processus dans ce dépôt.** C'est délibéré et
-c'est le cœur du dispositif : la frontière retenue est « sous-processus borné,
-mêmes droits », qui protège de l'accident et de la maladresse, pas d'un
-adversaire. Elle laisse donc des résidus assumés — un script écrit par le
-modèle tourne avec les droits du serveur, peut lire ``$HOME`` et, sans espace
-de noms, atteindre le réseau. La seule barrière réelle serait un namespace
-(``bubblewrap``, ``systemd-run``). En faisant passer *toute* exécution par
-``run_bounded``, cette barrière reste ajoutable à un seul endroit.
-
-Les bornes, et pourquoi chacune :
-
-``exec`` et jamais ``shell``
-    La commande vient du modèle. Une chaîne passée à un shell offrirait
-    l'injection gratuitement (``pytest; curl … | sh``). Une liste d'arguments
-    n'a pas de métacaractères.
-
-Exécutables déclarés
-    L'argument zéro est le seul endroit où poser une porte qu'un humain peut
-    relire. ``projects.exec.allowed_commands``.
-
-Répertoire verrouillé
-    ``cwd`` = racine de l'atelier, pour que les chemins relatifs que le modèle
-    écrit restent dans son bac.
-
-Environnement reconstruit, jamais hérité
-    Le processus du serveur porte ``CONFIG_ENCRYPTION_KEY`` et
-    ``DJANGO_SECRET_KEY`` dans son ``os.environ``. Le comportement par défaut
-    de ``create_subprocess_exec`` est d'hériter : ce serait remettre les
-    secrets de l'installation à un script écrit par un modèle. ``HOME`` pointe
-    dans l'atelier, si bien qu'un outil qui écrit un cache l'écrit là.
-
-Entrée fermée
-    Sans ``stdin=DEVNULL``, un ``input()`` oublié bloque jusqu'au délai entier.
-
-Délai dur sur le *groupe*
-    ``start_new_session=True`` puis ``killpg`` : tuer le seul enfant laisse
-    ses petits-enfants tourner, et c'est ainsi qu'un worker survit à son test.
-
-Sortie plafonnée
-    Une boucle bavarde ne doit remplir ni la base ni l'invite du tour suivant.
+L'atelier seul est inscriptible ; les exécutables système sont en lecture.
+Aucun repli aux droits du serveur si l'isolation est indisponible.
 """
 
 from __future__ import annotations
@@ -68,6 +30,28 @@ EXEC_BLOCK_NETWORK = True
 
 # Sous-dossier servant de ``HOME`` aux processus de l'atelier.
 HOME_DIRNAME = ".atelier-home"
+SYSTEM_PATH = "/usr/local/bin:/usr/bin:/bin"
+
+
+def _chemin_de_recherche(racine: Path) -> str:
+    return f"{racine}/.venv/bin:{racine}/node_modules/.bin:{SYSTEM_PATH}"
+
+
+def _executable_visible(programme: str, racine: Path) -> str | None:
+    """Résoudre dans le PATH du bac, sans importer les dépendances du serveur."""
+    if "/" in programme:
+        candidat = Path(programme)
+        candidat = candidat if candidat.is_absolute() else racine / candidat
+        chemin = str(candidat)
+    else:
+        chemin = shutil.which(programme, path=_chemin_de_recherche(racine))
+    if not chemin:
+        return None
+    cible = Path(chemin).resolve()
+    visibles = [racine, *(Path(p).resolve() for p in ("/usr", "/bin", "/sbin", "/lib", "/lib64"))]
+    if not any(cible.is_relative_to(p) for p in visibles):
+        return None
+    return chemin if cible.is_file() and os.access(cible, os.X_OK) else None
 
 
 @dataclass
@@ -105,37 +89,32 @@ def _commandes_autorisees() -> tuple[str, ...]:
     return tuple(str(v).strip() for v in valeurs if str(v or "").strip())
 
 
-_prefixe_reseau: list[str] | None = None
-
-
-def _prefixe_sans_reseau() -> list[str]:
-    """``unshare -rn`` quand la machine le permet, sinon rien.
-
-    Opportuniste et **annoncé comme tel** : sur un noyau sans espaces de noms
-    utilisateur non privilégiés, la coupure réseau n'a pas lieu. Prétendre le
-    contraire serait pire que de ne rien faire — la note remonte donc dans
-    ``ExecResult.notes`` et de là au modèle et au journal.
-    """
-    global _prefixe_reseau
-    if _prefixe_reseau is not None:
-        return _prefixe_reseau
-
-    chemin = shutil.which("unshare")
-    if not chemin:
-        _prefixe_reseau = []
-        return _prefixe_reseau
-    try:
-        import subprocess  # noqa: PLC0415 — sonde unique, au premier appel
-
-        sonde = subprocess.run(  # noqa: S603 — argv figé, aucun shell
-            [chemin, "-r", "-n", "--", "true"],
-            capture_output=True, timeout=5,
-        )
-        _prefixe_reseau = [chemin, "-r", "-n", "--"] if sonde.returncode == 0 else []
-    except Exception as exc:  # noqa: BLE001 — une sonde qui échoue = pas de coupure
-        logger.info("Ateliers : unshare indisponible (%s)", exc)
-        _prefixe_reseau = []
-    return _prefixe_reseau
+def _commande_isolee(racine: Path, commande: list[str], *, reseau: bool) -> list[str]:
+    bwrap = shutil.which("bwrap")
+    if not bwrap:
+        raise OSError("bubblewrap (bwrap) requis : exécution isolée indisponible")
+    args = [bwrap, "--die-with-parent", "--new-session", "--unshare-all",
+            "--cap-drop", "ALL"]
+    if reseau:
+        args += ["--share-net"]
+    for dossier in ("/usr", "/bin", "/sbin", "/lib", "/lib64"):
+        chemin = Path(dossier)
+        if chemin.is_symlink():
+            args += ["--symlink", os.readlink(chemin), dossier]
+        elif chemin.is_dir():
+            args += ["--ro-bind", dossier, dossier]
+    args += ["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp"]
+    # Fichiers de résolution système, jamais /etc entier (qui contient les
+    # secrets de services). Certains exécutables consultent uid/gid et ld.so.
+    for fichier in ("/etc/passwd", "/etc/group", "/etc/nsswitch.conf", "/etc/ld.so.cache"):
+        if Path(fichier).is_file():
+            args += ["--ro-bind", fichier, fichier]
+    if reseau:
+        for fichier in ("/etc/resolv.conf", "/etc/ssl/certs"):
+            if Path(fichier).exists():
+                args += ["--ro-bind", fichier, fichier]
+    args += ["--bind", str(racine), str(racine), "--chdir", str(racine)]
+    return [*args, "--", *commande]
 
 
 def _environnement(racine: Path) -> dict[str, str]:
@@ -147,7 +126,7 @@ def _environnement(racine: Path) -> dict[str, str]:
         logger.warning("Ateliers : %s incréable (%s)", maison, exc)
         maison = racine
     return {
-        "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+        "PATH": _chemin_de_recherche(racine),
         "HOME": str(maison),
         "TMPDIR": str(maison),
         "LANG": "C.UTF-8",
@@ -202,23 +181,24 @@ async def run_bounded(
             ),
         )
 
-    chemin = shutil.which(argv[0])
+    racine = racine.resolve()
+    chemin = _executable_visible(argv[0], racine)
     if not chemin:
         return ExecResult(
             argv=argv, returncode=None,
-            refused=f"'{argv[0]}' est introuvable sur cette machine",
+            refused=(f"'{argv[0]}' est absent de l'environnement isolé. "
+                     "Installe-le dans l'atelier (.venv/bin ou node_modules/.bin), "
+                     "ou utilise un exécutable système. Le venv et ~/.local du serveur ne sont pas montés."),
         )
 
     notes: list[str] = []
-    reel = [chemin, *argv[1:]]
-    if cfg_bool("projects.exec.block_network", EXEC_BLOCK_NETWORK):
-        prefixe = _prefixe_sans_reseau()
-        if prefixe:
-            reel = [*prefixe, *reel]
-        else:
-            notes.append(
-                "réseau NON coupé : unshare indisponible sur cette machine"
-            )
+    try:
+        reel = _commande_isolee(
+            racine, [chemin, *argv[1:]],
+            reseau=not cfg_bool("projects.exec.block_network", EXEC_BLOCK_NETWORK),
+        )
+    except OSError as exc:
+        return ExecResult(argv=argv, returncode=None, refused=str(exc))
 
     delai = timeout_s or cfg_int(
         "projects.exec.timeout_seconds", EXEC_TIMEOUT_SECONDS, mini=1,
@@ -246,21 +226,39 @@ async def run_bounded(
             notes=notes,
         )
 
+    async def lire_borne(flux):
+        # Continuer à drainer, sans accumuler toute la sortie en mémoire.
+        contenu = bytearray()
+        coupe = False
+        while morceau := await flux.read(8192):
+            reste = max(0, maxi * 4 - len(contenu))
+            contenu.extend(morceau[:reste])
+            coupe |= len(morceau) > reste
+        return bytes(contenu), coupe
+
+    async def recolter():
+        sortie, erreur = await asyncio.gather(lire_borne(proc.stdout), lire_borne(proc.stderr))
+        await proc.wait()
+        return sortie, erreur
+
+    collecte = asyncio.create_task(recolter())
     expire = False
     try:
-        sortie, erreur = await asyncio.wait_for(proc.communicate(), timeout=delai)
-    except asyncio.TimeoutError:
-        expire = True
-        sortie, erreur = b"", b""
+        (sortie, coupe_flux_a), (erreur, coupe_flux_b) = await asyncio.wait_for(
+            asyncio.shield(collecte), timeout=delai,
+        )
+    except (asyncio.TimeoutError, asyncio.CancelledError) as exc:
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        except (ProcessLookupError, PermissionError) as exc:
-            logger.warning("Ateliers : groupe %s non tuable (%s)", proc.pid, exc)
-            proc.kill()
-        try:
-            sortie, erreur = await asyncio.wait_for(proc.communicate(), timeout=5)
-        except (asyncio.TimeoutError, ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
             pass
+        try:
+            (sortie, coupe_flux_a), (erreur, coupe_flux_b) = await asyncio.wait_for(collecte, 5)
+        except asyncio.TimeoutError:
+            sortie, erreur, coupe_flux_a, coupe_flux_b = b"", b"", True, True
+        if isinstance(exc, asyncio.CancelledError):
+            raise
+        expire = True
 
     duree = int((time.perf_counter() - debut) * 1000)
     texte_sortie, coupe_a = _tronquer(sortie or b"", maxi)
@@ -272,6 +270,6 @@ async def run_bounded(
         stderr=texte_erreur,
         duration_ms=duree,
         timed_out=expire,
-        truncated=coupe_a or coupe_b,
+        truncated=coupe_a or coupe_b or coupe_flux_a or coupe_flux_b,
         notes=notes,
     )

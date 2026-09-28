@@ -5,10 +5,11 @@
   Demande à Mika de prévoir une action : son outil <code>schedule_action</code> l’ajoute à cet agenda.
   L’échéance indique quand elle devient disponible ; son exécution dépend du prochain cycle et peut être reportée.
 </div></details>
-<section class="grid c3 mb-6" aria-label="Agenda des intentions">
+<section class="grid c4 mb-6" aria-label="Agenda des intentions">
   <a class="stat" href="?statut=pending"><div class="stat-label">En attente</div><div class="stat-value">{{ scheduled_counts.pending }}</div></a>
   <div class="stat"><div class="stat-label">Échéance atteinte</div><div class="stat-value">{{ scheduled_counts.due }}</div><div class="stat-sub">Reprise possible au prochain cycle</div></div>
   <a class="stat" href="?statut=failed"><div class="stat-label">Échouées</div><div class="stat-value">{{ scheduled_counts.failed }}</div></a>
+  <a class="stat" href="?statut=uncertain"><div class="stat-label">À vérifier</div><div class="stat-value">{{ scheduled_counts.uncertain }}</div></a>
 </section>
 <section class="card mb-4">{% include "gestion/partials/filters.html" %}</section>
 <div class="reading-list">
@@ -19,7 +20,7 @@
         {% if a.prochaine_tentative > now %}<strong>{{ a.prochaine_tentative|ago }}</strong>{% else %}<strong>Échéance atteinte</strong>{% endif %}
         <time title="Prochaine tentative">{{ a.prochaine_tentative|dt_full }}</time>
       {% else %}<time title="Date prévue initialement">{{ a.scheduled_at|dt_full }}</time>{% endif %}
-      <span class="badge {% if a.status == 'pending' %}badge-warn{% elif a.status == 'executed' %}badge-ok{% elif a.status == 'failed' %}badge-danger{% endif %}">{% if a.status == 'pending' %}En attente{% elif a.status == 'executed' %}Exécutée{% elif a.status == 'cancelled' %}Annulée{% else %}Échouée{% endif %}</span>
+      <span class="badge {% if a.status == 'pending' %}badge-warn{% elif a.status == 'executed' %}badge-ok{% elif a.status == 'failed' %}badge-danger{% endif %}">{% if a.status == 'pending' %}En attente{% elif a.status == 'executed' %}Exécutée{% elif a.status == 'uncertain' %}À vérifier{% elif a.status == 'cancelled' %}Annulée{% else %}Échouée{% endif %}</span>
       <span>Source : {{ a.source|default:"—" }}</span><span class="push">Priorité {{ a.priority|num }}</span>
     </div>
     <div class="narrative mb-3">{% include "gestion/partials/long_text.html" with value=a.prompt %}</div>
@@ -29,6 +30,15 @@
     {% endif %}
     {% if a.raison_echec %}<div class="alert alert-danger mb-3">{% include "gestion/partials/long_text.html" with value=a.raison_echec %}</div>{% endif %}
     {% if a.resultat %}<details class="panel-disclosure mb-3"><summary>Résultat</summary><div class="narrative">{% include "gestion/partials/long_text.html" with value=a.resultat %}</div></details>{% endif %}
+    {% if a.status == 'uncertain' %}
+      <p class="field-hint">Vérifie le résultat avant de relancer : un effet a pu avoir lieu. Une tentative encore en cours ne peut pas être relancée.</p>
+      <form method="post" action="{% url 'gestionsysteme:scheduled-action' a.pk %}" class="mb-3">
+        {% csrf_token %}
+        <input type="hidden" name="attempt_token" value="{{ a.context_data.attempt_token|default:'' }}">
+        <button class="btn" name="action" value="retry">Relancer après vérification</button>
+        <button class="btn" name="action" value="close">Clore sans réexécuter</button>
+      </form>
+    {% endif %}
     <div class="reading-footer">
       <span class="chips">{% for m in a.modules %}<span class="chip">{{ m }}</span>{% endfor %}</span>
       <span class="muted text-xs">{{ a.tentatives }} tentative{{ a.tentatives|pluralize }}{% if a.executed_at %} · exécutée le {{ a.executed_at|dt_full }}{% endif %}</span>

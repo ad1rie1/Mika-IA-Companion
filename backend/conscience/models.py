@@ -262,6 +262,7 @@ class Travail(models.Model):
 
     class Statut(models.TextChoices):
         EN_COURS = "en_cours"
+        TRANSFERE = "transfere"
         ABOUTIE = "aboutie"
         BLOQUEE = "bloquee"
         ABANDONNEE = "abandonnee"     # l'envie est tombée sous le plancher
@@ -272,6 +273,8 @@ class Travail(models.Model):
         PULSION = "pulsion"           # une envie endogène, sans objet extérieur
 
     titre = models.CharField(max_length=200)
+    projet = models.ForeignKey("projects.Project", null=True, blank=True,
+                               on_delete=models.SET_NULL, related_name="intentions")
     origine = models.CharField(max_length=20, choices=Origine.choices)
     #: Ce qui permet de retrouver la ligne d'origine — pk d'Observation, pk de
     #: Rumination, ou nom de pulsion. Stocké en texte parce que les trois
@@ -373,6 +376,7 @@ class ScheduledAction(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending"
         EXECUTED = "executed"
+        UNCERTAIN = "uncertain"
         CANCELLED = "cancelled"
         #: Tentée assez de fois pour qu'on cesse d'y croire. Le filtre de
         #: l'écran proposait déjà « échouée » — une valeur qui ne correspondait

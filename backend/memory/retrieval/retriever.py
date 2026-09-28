@@ -443,7 +443,7 @@ class MemoryRetriever:
 
             if is_internal_person(person_id):
                 return None
-            mood = emotion_engine.person_moods.get(person_id)
+            mood = emotion_engine.person_mood(person_id)
             return mood.dynamic.position if mood is not None else None
         except Exception as exc:
             degradations.record("prompt: humeur pour saillance", exc)
@@ -953,6 +953,8 @@ class MemoryRetriever:
                 enriched.append({
                     "content": conn.content,
                     "confidence": conn.confidence,
+                    "epistemic_kind": conn.epistemic_kind,
+                    "source_message_ids": conn.source_message_ids,
                     "themes": themes,
                     "entities": entities,
                     "tag": sensibilite.tag(qualif),
@@ -1031,7 +1033,9 @@ class MemoryRetriever:
                 entities_str = f" (concerne: {', '.join(c['entities'])})"
             # Truncate individual content to avoid one memory dominating
             content = c["content"][:300]
-            return f"  - {content}{entities_str} [{conf_label}]{c.get('tag', '')}"
+            origine = {"reported": "rapporté", "observed": "observé", "inferred": "déduit", "uncertain": "supposé"}.get(c.get("epistemic_kind"), "")
+            provenance = f" (source : {origine})" if origine else ""
+            return f"  - {content}{entities_str} [{conf_label}]{c.get('tag', '')}{provenance}"
 
         def _exchange_line(h) -> str:
             when = "?"

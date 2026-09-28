@@ -39,13 +39,13 @@ from projects.models import (
 logger = logging.getLogger(__name__)
 
 try:
-    from projects.runner import RUNS_SINCE_INPUT_CAP
+    from projects.runner import STAGNATION_RUNS_CAP
 except Exception:  # pragma: no cover - defensive fallback
-    RUNS_SINCE_INPUT_CAP = 10
+    STAGNATION_RUNS_CAP = 10
 
 
 def _runs_cap() -> int:
-    """Plafond d'avances sans retour humain, tel que le runner l'applique.
+    """Seuil de stagnation, tel que le runner l'applique.
 
     Lu au moment du rendu et non figé à l'import : ce que l'API annonce doit
     être ce que ``_list_due`` vient de comparer. Le repli ci-dessus n'est plus
@@ -54,7 +54,7 @@ def _runs_cap() -> int:
     """
     from configs.runtime import cfg_int
 
-    return cfg_int("projects.runs_since_input_cap", RUNS_SINCE_INPUT_CAP, mini=1)
+    return cfg_int("projects.stagnation_runs_cap", STAGNATION_RUNS_CAP, mini=1)
 
 
 # ── Helpers ──────────────────────────────────────────────────────
@@ -80,7 +80,10 @@ def _project_to_dict(p: Project, *, include_tasks: bool = False, quota: dict | N
         "next_run_at": p.next_run_at.isoformat() if p.next_run_at else None,
         "last_run_at": p.last_run_at.isoformat() if p.last_run_at else None,
         "runs_since_user_input": p.runs_since_user_input,
-        "max_runs_without_input": _runs_cap(),
+        "stalled_runs": p.stalled_runs,
+        "retry_after": p.retry_after.isoformat() if p.retry_after else None,
+        "pause_reason": p.pause_reason,
+        "stagnation_runs_cap": _runs_cap(),
         "monthly_token_budget": p.monthly_token_budget,
         "keywords": list(p.keywords or []),
         "owner": p.owner.name if p.owner_id else None,
@@ -428,7 +431,11 @@ def approve_pending(request, action_id: int):
     a.status = ProjectPendingAction.Status.APPROVED
     a.user_note = note
     a.resolved_at = timezone.now()
-    a.save()
+    claimed = ProjectPendingAction.objects.filter(pk=a.pk, status="pending").update(
+        status=a.status, user_note=note, resolved_at=a.resolved_at,
+    )
+    if not claimed:
+        return _error("action already claimed", status=409)
 
     # Execute
     try:
@@ -583,7 +590,13 @@ def _execute_pending_payload(a: ProjectPendingAction) -> tuple[bool, str]:
     if not kind:
         return False, "charge sans 'kind' : rien à exécuter (trace seulement)"
 
+    if kind == "tool":
+        from projects.capabilities import executer_proposition
+        return async_to_sync(executer_proposition)(a)
+
     if kind == "send_email":
+        if "email" not in (a.project.allowed_modules or []):
+            raise RuntimeError("module email hors du cadre de ce projet")
         # Delegate to the email module's real send path. Schema:
         #   {"kind": "send_email", "to": "...", "subject": "...", "body": "..."}
         _verifier_le_destinataire(a.project, a.payload.get("to", ""))

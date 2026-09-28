@@ -11,13 +11,56 @@ from __future__ import annotations
 
 import logging
 
-from django.shortcuts import render
+from django.contrib import messages
+from django.http import HttpResponseBadRequest
+from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
+from django.views.decorators.http import require_POST
 
 from GestionSysteme import tables
 from GestionSysteme.nav import item_for
 from GestionSysteme.shell import page_context
 
 logger = logging.getLogger(__name__)
+
+
+@require_POST
+def scheduled_action(request, action_id: int):
+    """Résoudre explicitement une tentative ambiguë, sans rejouer son effet ici."""
+    from conscience.models import ScheduledAction
+
+    choix = request.POST.get("action")
+    if choix not in {"retry", "close"}:
+        return HttpResponseBadRequest("Action inconnue.")
+    action = get_object_or_404(ScheduledAction, pk=action_id)
+    contexte = action.context_data or {}
+    borne = parse_datetime(str(contexte.get("reserved_until") or ""))
+    maintenant = timezone.now()
+    if (action.status != "uncertain"
+            or request.POST.get("attempt_token", "") != contexte.get("attempt_token", "")
+            or (borne and borne > maintenant)):
+        messages.error(request, "Tentative encore en cours ou déjà traitée. Recharge la page.")
+    else:
+        # Conserver la preuve précédente et la décision humaine. Comparer le
+        # contexte entier ferme aussi la course entre deux formulaires ouverts.
+        nouveau = {**contexte, "operator_resolution": choix,
+                   "operator_resolved_at": maintenant.isoformat()}
+        nouveau.pop("attempt_token", None)
+        nouveau.pop("reserved_until", None)
+        compte = ScheduledAction.objects.filter(
+            pk=action.pk, status="uncertain", context_data=contexte,
+        ).update(
+            status="pending" if choix == "retry" else "cancelled",
+            reessayer_le=maintenant if choix == "retry" else None,
+            raison_echec="Relance demandée après vérification." if choix == "retry" else "Close après vérification.",
+            context_data=nouveau,
+        )
+        if compte:
+            messages.success(request, "Relance planifiée." if choix == "retry" else "Intention close sans réexécution.")
+        else:
+            messages.error(request, "Cette tentative a déjà été traitée.")
+    return redirect("gestionsysteme:conscience-tab", tab="planification")
 
 
 def conscience(request, tab: str | None = None):
@@ -76,6 +119,7 @@ def _observations(request) -> dict:
 _DECISION_FR = {
     "act": "parler",
     "poursuivre": "avancer un chantier",
+    "travail_interne": "activité sans diffusion",
     "ouvrir": "ouvrir un chantier",
     "wait": "attendre",
     "skip": "rien à faire",
@@ -85,6 +129,7 @@ _DECISION_FR = {
 _DECISION_TONS = {
     "act": "ok",
     "poursuivre": "ok",
+    "travail_interne": "ok",
     "ouvrir": "ok",
     "failed": "danger",
     "wait": "warn",
@@ -137,7 +182,7 @@ def _scheduled(request) -> dict:
     fs = tables.FilterSet(per_page=tables.read_per_page(request))
     status = fs.add(tables.select_filter(request, "statut", "État", [
         ("pending", "En attente"), ("executed", "Exécutée"),
-        ("cancelled", "Annulée"), ("failed", "Échouée")], default="pending"))
+        ("cancelled", "Annulée"), ("failed", "Échouée"), ("uncertain", "À vérifier")], default="pending"))
     search = fs.add(tables.search_filter(request, "q", "Recherche", placeholder="consigne, source"))
     now = timezone.now()
     qs = ScheduledAction.objects.annotate(
@@ -146,6 +191,7 @@ def _scheduled(request) -> dict:
         pending=Count("pk", filter=Q(status="pending")),
         due=Count("pk", filter=Q(status="pending", prochaine_tentative__lte=now)),
         failed=Count("pk", filter=Q(status="failed")),
+        uncertain=Count("pk", filter=Q(status="uncertain")),
     )
     if status.value:
         qs = qs.filter(status=status.value)

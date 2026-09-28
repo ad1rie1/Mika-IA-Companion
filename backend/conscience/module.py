@@ -117,6 +117,16 @@ class ConscienceToolsModule(BaseModule):
                         required=False,
                     ),
                     ToolParameter(
+                        name="expected_tools", type=ToolParameterType.ARRAY,
+                        description="Noms des outils dont la réussite prouve l’action (ex. send_email pour un envoi).",
+                        required=False,
+                    ),
+                    ToolParameter(
+                        name="mode", type=ToolParameterType.STRING,
+                        description="message : parler plus tard ; internal : agir sans audience ni diffusion.",
+                        enum=["message", "internal"], required=False,
+                    ),
+                    ToolParameter(
                         name="modules",
                         type=ToolParameterType.ARRAY,
                         description=(
@@ -131,7 +141,7 @@ class ConscienceToolsModule(BaseModule):
             ),
             ModuleTool(
                 name="list_scheduled_actions",
-                description="List all pending scheduled actions",
+                description="List pending scheduled actions and uncertain attempts requiring operator review",
                 parameters=[],
                 handler=self._tool_list_scheduled,
             ),
@@ -172,12 +182,20 @@ class ConscienceToolsModule(BaseModule):
             str(m).strip() for m in list(brut)[:5] if str(m or "").strip()
         ]
 
+        attendus = args.get("expected_tools") or []
+        if not isinstance(attendus, list) or any(not isinstance(n, str) for n in attendus):
+            from utils.tool_results import texte
+            return texte("expected_tools doit être une liste de noms d'outils.", erreur=True)
+        attendus = list(dict.fromkeys(n.strip() for n in attendus if n.strip()))[:10]
+
         action = await sync_to_async(ScheduledAction.objects.create)(
             scheduled_at=scheduled_at,
             prompt=args["prompt"],
             priority=priority,
             source="ai_tool",
             modules=modules,
+            context_data={"mode": "internal" if args.get("mode") == "internal" else "message",
+                          "expected_tools": attendus},
         )
 
         self.logger.info(
@@ -206,11 +224,11 @@ class ConscienceToolsModule(BaseModule):
         now = timezone.now()
         actions = await sync_to_async(
             lambda: list(
-                ScheduledAction.objects.filter(status="pending")
-                .order_by("scheduled_at")
+                ScheduledAction.objects.filter(status__in=["pending", "uncertain"])
+                .order_by("-status", "scheduled_at")
                 .values(
                     "id", "prompt", "scheduled_at", "priority", "source",
-                    "modules",
+                    "modules", "status", "raison_echec",
                 )[:20]
             )
         )()
@@ -223,6 +241,8 @@ class ConscienceToolsModule(BaseModule):
             delta = a["scheduled_at"] - now
             mins = int(delta.total_seconds() / 60)
             status = f"dans {mins}min" if mins > 0 else "DUE"
+            if a["status"] == "uncertain":
+                status = "À VÉRIFIER dans Gestion > Conscience > Planification ; ne pas reprogrammer"
             # Les modules que le rendez-vous emportera : sans eux dans la
             # liste, elle ne peut pas relire ce qu'elle s'est promis d'avoir
             # en main — ni corriger un oubli en annulant/reprogrammant.
@@ -233,7 +253,7 @@ class ConscienceToolsModule(BaseModule):
                 ) + "]"
             lines.append(
                 f"- [#{a['id']}] ({status}, priorite {a['priority']}) "
-                f"{a['prompt'][:80]} [source: {a['source']}]{outils}"
+                f"{a['prompt'][:80]} [source: {a['source']}]{outils} {a['raison_echec']}"
             )
         return {"content": [{"type": "text", "text": "\n".join(lines)}]}
 

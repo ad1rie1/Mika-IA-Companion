@@ -76,9 +76,9 @@ def _active(request) -> dict:
         project.progress = (project.n_done / project.n_tasks) if project.n_tasks else 0.0
 
     from configs.runtime import cfg_int
-    from projects.runner import RUNS_SINCE_INPUT_CAP
+    from projects.runner import STAGNATION_RUNS_CAP
     return {"filterset": fs, "page": page,
-            "runs_cap": cfg_int("projects.runs_since_input_cap", RUNS_SINCE_INPUT_CAP, mini=1)}
+            "runs_cap": cfg_int("projects.stagnation_runs_cap", STAGNATION_RUNS_CAP, mini=1)}
 
 
 # ── Création / édition ──────────────────────────────────────────────────
@@ -288,7 +288,7 @@ def project_detail(request, project_id: int):
     from django.db.models import Count, Q
     from projects.models import ProjectLog, ProjectPendingAction, ProjectTask, ProjectPromptHistory
     from configs.runtime import cfg_int
-    from projects.runner import RUNS_SINCE_INPUT_CAP
+    from projects.runner import STAGNATION_RUNS_CAP
 
     from GestionSysteme.project_forms import ProjectTaskForm, TASK_STATUSES
 
@@ -343,7 +343,7 @@ def project_detail(request, project_id: int):
         # que le repli, et une fiche qui annonce « 7 / 10 » pendant que le
         # lanceur s'arrête à 5 se lit comme un projet bloqué sans raison.
         "runs_cap": cfg_int(
-            "projects.runs_since_input_cap", RUNS_SINCE_INPUT_CAP, mini=1),
+            "projects.stagnation_runs_cap", STAGNATION_RUNS_CAP, mini=1),
         "atelier": atelier,
     })
     return render(request, "gestion/projects/detail.html", ctx)
@@ -401,7 +401,12 @@ def pending_action(request, action_id: int):
         action.status = ProjectPendingAction.Status.APPROVED
         action.user_note = note
         action.resolved_at = timezone.now()
-        action.save()
+        claimed = ProjectPendingAction.objects.filter(pk=action.pk, status="pending").update(
+            status=action.status, user_note=note, resolved_at=action.resolved_at,
+        )
+        if not claimed:
+            messages.error(request, "Cette action a déjà été prise en charge.")
+            return redirect(back)
 
         # L'exécution de la charge utile n'est PAS réimplémentée ici : c'est
         # elle qui envoie réellement un e-mail. Un envoi qui échoue marque

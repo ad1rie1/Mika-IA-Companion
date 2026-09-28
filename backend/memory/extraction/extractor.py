@@ -69,7 +69,10 @@ TROIS TYPES A EXTRAIRE:
                       avoue — ne sort jamais, sauf a la personne elle-meme
      Sans personne concernee (vecu seule, une nouvelle lue) : "anodin".
 
-2. CONNAISSANCE (fait objectif durable):
+2. CONNAISSANCE (croyance durable, qui peut être erronée):
+   - "epistemic_kind": "reported" (quelqu’un l’affirme), "observed" (observation directe), "inferred" (déduction), "uncertain" (hypothèse)
+   - "confidence": 0.0-1.0, respecte les doutes et conditionnels ; une affirmation ne prouve pas sa vérité.
+   - N’invente pas d’observation directe à partir du récit de quelqu’un.
    - Ecrit de maniere OBJECTIVE (3eme personne), sans emotion
    - Fait factuel sur une personne, un objet, un lieu
    - "sensibilite" : meme echelle que pour un souvenir (anodin / personnel / confidence)
@@ -118,6 +121,8 @@ Format:
       "type": "connaissance",
       "store": true,
       "content": "Thomas aime les jeux retro",
+      "epistemic_kind": "reported",
+      "confidence": 0.65,
       "sensibilite": "anodin",
       "themes": ["gaming", "preference"],
       "entities": [{{"name": "Thomas", "type": "person"}}]

@@ -90,9 +90,9 @@ def test_projets_tous_et_actions_filtrees_par_projet(client):
 def test_liste_projets_utilise_le_plafond_configure(client, monkeypatch):
     from projects.models import Project
     from configs import runtime
-    Project.objects.create(title="Au plafond", runs_since_user_input=4)
+    Project.objects.create(title="Au plafond", stalled_runs=4)
     original = runtime.cfg_int
-    monkeypatch.setattr(runtime, "cfg_int", lambda key, *a, **kw: 4 if key == "projects.runs_since_input_cap" else original(key, *a, **kw))
+    monkeypatch.setattr(runtime, "cfg_int", lambda key, *a, **kw: 4 if key == "projects.stagnation_runs_cap" else original(key, *a, **kw))
     response = client.get(url("projects"))
     assert response.context["runs_cap"] == 4
     assert "4/4" in response.content.decode()
@@ -120,7 +120,7 @@ def test_agenda_montre_la_prochaine_tentative_et_pas_un_vieux_succes(client):
     due = ScheduledAction.objects.create(prompt="À traiter", scheduled_at=now - timedelta(minutes=5))
     response = client.get(url("conscience-tab", "planification"))
     assert [r.pk for r in response.context["page"].rows] == [due.pk, retried.pk]
-    assert response.context["scheduled_counts"] == {"pending": 2, "due": 1, "failed": 0}
+    assert response.context["scheduled_counts"] == {"pending": 2, "due": 1, "failed": 0, "uncertain": 0}
     assert "Prochaine tentative" in response.content.decode()
     assert client.get(url("conscience-tab", "planification"), {"statut": ""}).context["page"].total == 3
 

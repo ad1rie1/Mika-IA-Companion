@@ -38,7 +38,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from conscience.trousse import CURIOSITE, modules_pour_source
+from conscience.trousse import CURIOSITE, SOCIAL, modules_pour_source
 from utils.degradation import degradations
 
 # ---------------------------------------------------------------------------
@@ -460,6 +460,14 @@ def recolter_graines(
         try:
             nom, tension = pulsion
             nom = str(nom)
+            if nom == "social" and _flottant(tension) >= t.graine_pulsion_tension:
+                graines.append(Graine(
+                    origine="pulsion", reference="social",
+                    intitule="Choisir de qui j'aimerais prendre des nouvelles, et si je souhaite lui écrire",
+                    poids=min(1.0, max(0.0, _flottant(tension))),
+                    themes=(), modules=tuple(SOCIAL),
+                ))
+                continue
             if nom not in PULSIONS_FECONDES:
                 continue
             tension = _flottant(tension)

@@ -330,11 +330,11 @@ class TestConscienceRuminationHelpers:
         from conscience.models import Rumination
 
         r = await sync_to_async(Rumination.objects.create)(
-            summary="still bothered", intensity=0.8, status="active"
+            summary="still bothered", intensity=0.8, status="active", themes=["audit"]
         )
 
         engine = ConscienceEngine()
-        await engine._resolve_ruminations_after_act()
+        await engine._resolve_ruminations_after_act(themes=["audit"])
 
         await sync_to_async(r.refresh_from_db)()
         assert abs(r.intensity - 0.4) < 0.01
@@ -347,11 +347,11 @@ class TestConscienceRuminationHelpers:
         from conscience.models import Rumination
 
         r = await sync_to_async(Rumination.objects.create)(
-            summary="almost gone", intensity=0.15, status="active"
+            summary="almost gone", intensity=0.15, status="active", themes=["audit"]
         )
 
         engine = ConscienceEngine()
-        await engine._resolve_ruminations_after_act()
+        await engine._resolve_ruminations_after_act(themes=["audit"])
 
         await sync_to_async(r.refresh_from_db)()
         # 0.15 × 0.5 = 0.075 < 0.1 → resolved
@@ -374,7 +374,7 @@ class TestConscienceRuminationHelpers:
         from conscience.models import Rumination
 
         r = await sync_to_async(Rumination.objects.create)(
-            summary="very weak", intensity=0.105, status="active"
+            summary="very weak", intensity=0.105, status="active", themes=["audit"]
         )
         # Une heure d'ancienneté : 0.105 × 0.5^(1/6) = 0.0936 < 0.1 → faded.
         vieux = timezone.now() - timedelta(hours=1)
@@ -406,7 +406,7 @@ class TestConscienceRuminationHelpers:
         from conscience.models import Rumination
 
         r = await sync_to_async(Rumination.objects.create)(
-            summary="toute fraiche", intensity=0.9, status="active",
+            summary="toute fraiche", intensity=0.9, status="active", themes=["audit"],
         )
 
         engine = ConscienceEngine()

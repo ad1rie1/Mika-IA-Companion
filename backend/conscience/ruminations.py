@@ -200,18 +200,11 @@ async def rumination_snapshot() -> tuple[float, int, list[dict]]:
 # ── Soulagement ───────────────────────────────────────────────────
 
 
-async def resolve_ruminations_after_act() -> None:
-    """When Mika speaks up, every active rumination loses half its charge.
-
-    The relief is *unconditional*, not matched against what she actually
-    said: the model here is "she got it off her chest", and the act of
-    breaking her own silence is what does it, whatever the subject.
-    Anything falling below 0.1 afterwards is marked resolved.
-
-    The docstring used to promise theme-matching against the response
-    text, and the signature carried a ``response_text`` nothing ever
-    read — describing a behaviour the code has never had.
-    """
+async def resolve_ruminations_after_act(*, themes=()) -> None:
+    """Soulager uniquement les préoccupations abordées par cet acte."""
+    themes = {str(t).casefold().strip() for t in themes if str(t).strip()}
+    if not themes:
+        return
     try:
         from conscience.models import Rumination
     except ImportError:
@@ -231,11 +224,13 @@ async def resolve_ruminations_after_act() -> None:
         from django.db import transaction
 
         with transaction.atomic():
-            n = Rumination.objects.filter(status="active").update(
+            ids = [r.pk for r in Rumination.objects.filter(status="active")
+                   if themes.intersection(str(t).casefold().strip() for t in (r.themes or []))]
+            n = Rumination.objects.filter(pk__in=ids, status="active").update(
                 intensity=F("intensity") * 0.5,
             )
             Rumination.objects.filter(
-                status="active", intensity__lt=0.1,
+                pk__in=ids, status="active", intensity__lt=0.1,
             ).update(status="resolved")
         return n
 

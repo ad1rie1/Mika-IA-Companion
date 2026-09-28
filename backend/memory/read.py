@@ -314,11 +314,13 @@ async def qualifications(model, pks, *, entity_id) -> dict:
 async def recent_daily_summaries(person_id: str, *, days: int = 7) -> list:
     """Per-day emotional summaries for a person, newest first."""
     from memory.models import EmotionalSummary
+    from identity.continuity import cle_relation
+    cle, aliases = await sync_to_async(cle_relation)(person_id)
 
     return await sync_to_async(
         lambda: list(
             EmotionalSummary.objects
-            .filter(person_id=person_id, period_type="daily")
+            .filter(person_id__in=[cle, *aliases], period_type="daily")
             .order_by("-period_start")[:days]
         )
     )()

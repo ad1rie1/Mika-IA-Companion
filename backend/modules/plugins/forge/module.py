@@ -831,11 +831,17 @@ class ForgeModule(BaseModule):
         if state.get("enabled", True):
             ok, message = await self._load_one(name, reason="write")
             if not ok:
+                retour = "Premier module : corrige le candidat avant de le relancer."
+                if exists:
+                    await sync_to_async(store.write_module, thread_sensitive=False)(
+                        name, existing_manifest, existing_code,
+                    )
+                    restaure, detail = await self._load_one(name, reason="automatic rollback")
+                    retour = ("Version précédente restaurée." if restaure
+                              else f"Code précédent restauré, rechargement en échec : {detail}")
+                    await self._log(name, "warning", "system", retour)
                 return {"ok": False, "errors": [
-                    f"écrit (v{merged['version']}) mais le chargement a "
-                    f"échoué: {message}",
-                    "utilise forge_command(rollback) pour revenir à la "
-                    "version précédente",
+                    f"Candidat v{merged['version']} refusé au chargement : {message}", retour,
                 ]}
             lm = self._loaded.get(name)
             return {"ok": True, "version": merged["version"],

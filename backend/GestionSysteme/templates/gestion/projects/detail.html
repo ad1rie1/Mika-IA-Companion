@@ -38,11 +38,11 @@
   <div class="card"><div class="card-head"><h3>Prochain passage</h3></div><div class="card-body">
     {% if project.next_run_at %}{{ project.next_run_at|dt_full }}{% else %}<span class="muted">Aucun passage planifié</span>{% endif %}
     <p class="field-hint">{{ project.schedule_rule|default:"Exécution manuelle" }}</p>
-    {% if project.runs_since_user_input >= runs_cap %}<p class="badge badge-danger">Intervention humaine attendue</p>{% endif %}
+    {% if project.pause_reason %}<p class="field-hint">{{ project.pause_reason }}{% if project.retry_after %} Reprise : {{ project.retry_after|dt_full }}.{% endif %}</p>{% endif %}
   </div></div>
   <div class="card"><div class="card-head"><h3>Dernière activité</h3></div><div class="card-body">
     {% if project.last_run_at %}{{ project.last_run_at|dt_full }}{% else %}<span class="muted">Le projet n’a pas encore été exécuté</span>{% endif %}
-    <p class="field-hint">{{ project.runs_since_user_input }} / {{ runs_cap }} passages sans retour humain</p>
+    <p class="field-hint">{{ project.stalled_runs }} / {{ runs_cap }} passages sans progrès constaté</p>
   </div></div>
 </section>
 
@@ -116,20 +116,16 @@
         <dd>{% if project.next_run_at %}{{ project.next_run_at|dt_full }}{% else %}—{% endif %}</dd>
         <dt>Dernier passage</dt>
         <dd>{% if project.last_run_at %}{{ project.last_run_at|dt_full }}{% else %}—{% endif %}</dd>
-        <dt title="Au-delà du plafond, le projet n'avance plus sans retour humain">Passages sans retour</dt>
+        <dt>Passages sans progrès</dt>
         <dd>
-          {% if project.runs_since_user_input >= runs_cap %}
-            <span class="badge badge-danger">{{ project.runs_since_user_input }} / {{ runs_cap }}</span>
-            <div class="field-hint">Plafond atteint : plus aucun passage tant qu'un humain n'est pas repassé dessus.</div>
-          {% else %}
-            <span class="tabular">{{ project.runs_since_user_input }} / {{ runs_cap }}</span>
-          {% endif %}
+          <span class="tabular">{{ project.stalled_runs }} / {{ runs_cap }}</span>
+          {% if project.pause_reason %}<div class="field-hint">{{ project.pause_reason }}</div>{% endif %}
           {% if project.runs_since_user_input %}
             <form method="post" action="{% url 'gestionsysteme:project-resume' project.pk %}" class="mt-2">
               {% csrf_token %}<input type="hidden" name="retour" value="{{ request.get_full_path }}">
               <button class="btn btn-sm" type="submit"
                       title="Signale une intervention humaine : le compteur repart de zéro">
-                Remettre le compteur à zéro
+                Lever la temporisation
               </button>
             </form>
           {% endif %}

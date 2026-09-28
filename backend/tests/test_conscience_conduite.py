@@ -146,10 +146,10 @@ class TestRecolteDesPulsions:
         ce que REST demande."""
         assert recolter_graines(pulsions=[("rest", 0.99)]) == []
 
-    def test_le_social_ne_seme_jamais(self):
-        """SOCIAL se soulage en parlant à quelqu'un, pas en ouvrant un
-        dossier : sa relève est la conduite PARLER."""
-        assert recolter_graines(pulsions=[("social", 0.99)]) == []
+    def test_le_social_peut_preparer_un_contact_hors_chat(self):
+        graines = recolter_graines(pulsions=[("social", 0.99)])
+        assert len(graines) == 1 and graines[0].reference == "social"
+        assert graines[0].modules == ("email", "identity_tools")
 
     def test_une_pulsion_sous_la_porte_ne_seme_pas(self):
         assert recolter_graines(pulsions=[("curiosity", 0.3)]) == []

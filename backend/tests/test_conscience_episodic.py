@@ -68,7 +68,7 @@ class TestExchangeEvidence:
         assert scores == {"Alice": 0.5}
 
 
-@pytest.mark.django_db
+@pytest.mark.django_db(transaction=True)
 class TestObservationEntities:
 
     async def test_interpreted_entities_land_in_raw_data(self):

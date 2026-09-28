@@ -200,8 +200,8 @@ class ProjectToolsModule(BaseModule):
             ),
             ModuleTool(
                 name="update_project",
-                description="Modifier un champ du projet (pause, tune du ton, "
-                            "changement de schedule, etc).",
+                description="Modifier le statut, la priorité ou la cadence d'un projet. "
+                            "Le ton est modifiable seulement pour un projet personnel.",
                 parameters=[
                     ToolParameter(name="project_id", type=ToolParameterType.INTEGER,
                                   description="ID du projet"),
@@ -492,6 +492,10 @@ class ProjectToolsModule(BaseModule):
                 p = Project.objects.get(pk=pid)
             except Project.DoesNotExist:
                 return None
+            # Pause et cadence organisent le travail ; le ton appartient au
+            # mandat. Refuser le lot entier évite une modification partielle.
+            if p.origin == Project.Origin.USER and args.get("tone_directive") is not None:
+                return False
             if args.get("status") in dict(Project.Status.choices):
                 p.status = args["status"]
             if args.get("tone_directive") is not None:
@@ -510,8 +514,13 @@ class ProjectToolsModule(BaseModule):
             return p
 
         p = await sync_to_async(_upd)()
+        if p is False:
+            from utils.tool_results import texte
+            return texte("Le cadre de ce projet confié appartient à l’utilisateur. "
+                         "Propose-lui une révision ; tu peux organiser les tâches et signaler un blocage.",
+                         erreur=True)
         if p is None:
-            return {"content": [{"type": "text", "text": f"Projet #{pid} introuvable."}]}
+            return {"isError": True, "content": [{"type": "text", "text": f"Projet #{pid} introuvable."}]}
         return {
             "content": [{
                 "type": "text",

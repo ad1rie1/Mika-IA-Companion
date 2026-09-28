@@ -53,8 +53,7 @@ Un handler a ~10s max. 5 échecs consécutifs = disjoncteur (module auto-désact
 Itère: forge_test_module pour exécuter un handler tout de suite et voir logs+résultat."""
 
 
-def _text(message: str) -> dict:
-    return {"content": [{"type": "text", "text": message}]}
+from utils.tool_results import texte as _text
 
 
 def _parse_json_list(value, what: str) -> tuple[list | None, str | None]:
@@ -100,7 +99,7 @@ def build_tools(host) -> list[ModuleTool]:
             data = await sync_to_async(store.read_module,
                                        thread_sensitive=False)(name)
         except store.StoreError as exc:
-            return _text(f"Erreur: {exc}")
+            return _text(f"Erreur: {exc}", erreur=True)
         manifest_yaml = yaml.safe_dump(
             data["manifest_raw"], allow_unicode=True, sort_keys=False,
         )
@@ -125,7 +124,7 @@ def build_tools(host) -> list[ModuleTool]:
         for key in ("events", "views", "config", "allowed_domains"):
             value, error = _parse_json_list(args.get(key), key)
             if error:
-                return _text(f"Erreur: {error}")
+                return _text(f"Erreur: {error}", erreur=True)
             if value is not None:
                 patch[key] = value
         if args.get("context_enabled") is not None:
@@ -140,7 +139,7 @@ def build_tools(host) -> list[ModuleTool]:
         if not result["ok"]:
             return _text(
                 "Refusé — corrige et renvoie:\n- "
-                + "\n- ".join(result["errors"])
+                + "\n- ".join(result["errors"]), erreur=True
             )
         handlers = ", ".join(result.get("handlers") or []) or "aucun handler détecté"
         note = f"\n{result['note']}" if result.get("note") else ""
@@ -155,7 +154,7 @@ def build_tools(host) -> list[ModuleTool]:
         cmd = str(args.get("command") or "")
         result = await host.command(name, cmd)
         prefix = "OK — " if result["ok"] else "Échec — "
-        return _text(prefix + result["message"])
+        return _text(prefix + result["message"], erreur=not result["ok"])
 
     async def test_module(args: dict) -> dict:
         name = str(args.get("name") or "")
@@ -166,7 +165,7 @@ def build_tools(host) -> list[ModuleTool]:
             try:
                 payload = json.loads(raw) if isinstance(raw, str) else dict(raw)
             except (ValueError, TypeError):
-                return _text("Erreur: payload doit être un objet JSON")
+                return _text("Erreur: payload doit être un objet JSON", erreur=True)
         result = await host.test_module(name, handler, payload)
         lines = [f"test {name}.{handler}: "
                  + ("SUCCÈS" if result["ok"] else "ÉCHEC")]
@@ -179,7 +178,7 @@ def build_tools(host) -> list[ModuleTool]:
         logs = result.get("logs") or []
         if logs:
             lines.append("Logs produits:\n" + "\n".join(logs))
-        return _text("\n".join(lines))
+        return _text("\n".join(lines), erreur=not result["ok"])
 
     async def read_logs(args: dict) -> dict:
         name = str(args.get("name") or "") or None

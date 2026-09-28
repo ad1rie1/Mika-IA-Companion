@@ -41,6 +41,9 @@ from __future__ import annotations
 
 import json
 import logging
+
+from utils.tool_results import en_echec, instrumenter
+from utils.tool_trace import noter_appel
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -113,11 +116,7 @@ class Issue:
     def en_echec(self) -> bool:
         if self.erreur is not None:
             return True
-        # Les handlers du repo parlent MCP et signalent l'échec en camelCase
-        # (``isError``) ; on accepte aussi le snake_case par tolérance.
-        return isinstance(self.resultat, dict) and bool(
-            self.resultat.get("isError") or self.resultat.get("is_error")
-        )
+        return en_echec(self.resultat)
 
 
 class AdaptateurOutils:
@@ -240,6 +239,7 @@ async def _executer(handlers: dict, appel: AppelOutil, label: str) -> Issue:
     """Un appel d'outil : aucune issue ne lève, toutes reviennent au modèle."""
     handler = handlers.get(appel.name)
     if handler is None:
+        noter_appel(appel.name, ok=False, extrait="outil inconnu")
         return Issue(appel, genre="inconnu", erreur=f"unknown tool '{appel.name}'")
 
     args = appel.arguments
@@ -247,14 +247,19 @@ async def _executer(handlers: dict, appel: AppelOutil, label: str) -> Issue:
         try:
             args = json.loads(args) if args else {}
         except json.JSONDecodeError as exc:
+            noter_appel(appel.name, ok=False, extrait="arguments JSON invalides")
             return Issue(
                 appel, genre="arguments", erreur=f"invalid JSON arguments: {exc}",
             )
-    args = dict(args or {})
+    if args is None:
+        args = {}
+    if not isinstance(args, dict):
+        noter_appel(appel.name, ok=False, extrait="arguments non objet")
+        return Issue(appel, genre="arguments", erreur="arguments must be a JSON object")
 
     logger.info("%s called tool: %s (input=%s)", label, appel.name, str(args)[:200])
     try:
-        resultat = await handler(args)
+        resultat = await instrumenter(appel.name, handler)(args)
     except Exception as exc:  # noqa: BLE001 — l'erreur retourne au modèle
         logger.warning("Tool '%s' handler raised: %s", appel.name, exc)
         return Issue(appel, genre="exception", erreur=str(exc))

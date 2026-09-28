@@ -93,9 +93,8 @@
         {% include "gestion/partials/django_field.html" with field=form.monthly_token_budget %}
       </div>
       <p class="field-hint mt-3">
-        Un projet sans retour humain s'arrête de lui-même au bout de 10 passages
-        (<span class="mono">runs_since_user_input</span>) : c'est le garde-fou
-        contre l'avance perpétuelle.
+        Un projet qui avance continue sans retour humain. Après plusieurs passes
+        sans progrès constaté, il espace ses tentatives, puis reprend de lui-même.
       </p>
     </div>
   </section>

@@ -30,17 +30,6 @@ from projects.execution import ExecResult, run_bounded
 from projects.workspace import Atelier, HorsAtelier
 
 
-@pytest.fixture(autouse=True)
-def _sans_namespace(monkeypatch):
-    """Neutralise la coupure réseau opportuniste.
-
-    Sa disponibilité dépend du noyau de la machine : un test qui en dépend
-    passe ici et échoue ailleurs. Ce qui doit être épinglé, c'est que son
-    absence est DITE — pas qu'elle est présente.
-    """
-    monkeypatch.setattr(execution, "_prefixe_reseau", [])
-
-
 @pytest.fixture
 def atelier(tmp_path) -> Atelier:
     racine = tmp_path / "atelier"
@@ -212,11 +201,11 @@ class TestFrontiere:
         r = await run_bounded(racine=atelier.racine, argv=[])
         assert r.refused
 
-    async def test_l_absence_de_coupure_reseau_est_dite(self, atelier, monkeypatch):
-        """Prétendre couper sans couper serait pire que ne rien faire."""
-        monkeypatch.setattr(execution, "_prefixe_reseau", [])
+    async def test_absence_isolation_refuse_execution(self, atelier, monkeypatch):
+        original = execution.shutil.which
+        monkeypatch.setattr(execution.shutil, "which", lambda p, **kw: None if p == "bwrap" else original(p, **kw))
         r = await run_bounded(racine=atelier.racine, argv=["python3", "-c", "pass"])
-        assert any("réseau NON coupé" in n for n in r.notes)
+        assert r.refused and "bubblewrap" in r.refused
 
 
 # ── Trousse ───────────────────────────────────────────────────────
@@ -278,7 +267,7 @@ class TestTrousse:
 # ── Lanceur ───────────────────────────────────────────────────────
 
 
-@pytest.mark.django_db
+@pytest.mark.django_db(transaction=True)
 class TestLanceurOutille:
 
     def test_le_role_retombe_quand_il_n_est_pas_mappe(self):

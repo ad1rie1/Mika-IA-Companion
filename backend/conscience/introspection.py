@@ -90,15 +90,29 @@ async def introspect(moteur) -> tuple[int, int]:
                 event_type__in=("chat.message", "telegram.message"),
                 created_at__gt=oldest,
                 created_at__lte=newest_window_end,
-            ).values_list("created_at", flat=True)
+            ).values_list("created_at", "raw_data")
         )
 
+        from django.utils import timezone
+        from identity.continuity import cle_relation
+        from identity.trust import is_identifiable_person
+        cles = {}
+        def cle(pid):
+            if pid not in cles:
+                cles[pid] = cle_relation(pid)[0]
+            return cles[pid]
+
+        maintenant = timezone.now()
         consecutive_ignored = 0
         for act_time, pid in recent_acts:
             deadline = act_time + _fenetre_de(pid)
-            if any(act_time < reply <= deadline for reply in replies):
+            if any(act_time < reply <= deadline and (
+                not is_identifiable_person(pid)
+                or cle(str(data.get("person_id") or "")) == cle(pid)
+            ) for reply, data in replies):
                 break
-            consecutive_ignored += 1
+            if deadline <= maintenant:
+                consecutive_ignored += 1
         return acts_today, consecutive_ignored
 
     try:

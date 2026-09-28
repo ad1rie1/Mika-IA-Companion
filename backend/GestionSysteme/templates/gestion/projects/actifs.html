@@ -63,10 +63,10 @@
                   {% else %}—{% endif %}
                 </td>
                 <td class="fit">
-                  {% if p.runs_since_user_input >= runs_cap %}
-                    <span class="badge badge-danger" title="Plafond atteint : le projet n'avance plus sans retour humain">{{ p.runs_since_user_input }}/{{ runs_cap }}</span>
+                  {% if p.pause_reason %}
+                    <span class="badge badge-warn" title="{{ p.pause_reason }}">{% if p.retry_after %}Reprise {{ p.retry_after|ago }}{% else %}Validation attendue{% endif %}</span>
                   {% else %}
-                    <span class="tabular text-xs">{{ p.runs_since_user_input }}/{{ runs_cap }}</span>
+                    <span class="tabular text-xs">{{ p.stalled_runs }}/{{ runs_cap }}</span>
                   {% endif %}
                 </td>
                 <td class="fit"><a class="btn btn-sm" href="{% url 'gestionsysteme:project-detail' p.pk %}">Ouvrir</a></td>

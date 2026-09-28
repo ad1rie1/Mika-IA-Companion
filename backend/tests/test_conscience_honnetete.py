@@ -12,6 +12,9 @@ import inspect
 import textwrap
 from unittest.mock import patch
 
+from utils.tool_results import BilanOutils
+from utils.tool_trace import JournalOutils
+
 import pytest
 from asgiref.sync import sync_to_async
 from django.utils import timezone as tz
@@ -106,7 +109,7 @@ class TestOnNeClotQueCeQuiAEteMontre:
         ctx = _ctx(observations=obs)
 
         with patch.object(type(e), "_appeler_le_modele",
-                          return_value=(_Sortie(), "", 0)), \
+                          return_value=(_Sortie(), BilanOutils(JournalOutils()), 0)), \
              patch.object(type(e), "_select_recipient", return_value=None), \
              patch.object(type(e), "_preparer_trousse", return_value=Trousse()), \
              patch.object(type(e), "_composer_vecu", return_value=""), \
@@ -134,7 +137,7 @@ class TestOnNeClotQueCeQuiAEteMontre:
         ctx = _ctx(actions=actions)
 
         with patch.object(type(e), "_appeler_le_modele",
-                          return_value=(_Sortie(), "", 0)), \
+                          return_value=(_Sortie(), BilanOutils(JournalOutils()), 0)), \
              patch.object(type(e), "_select_recipient", return_value=None), \
              patch.object(type(e), "_preparer_trousse", return_value=Trousse()), \
              patch.object(type(e), "_composer_vecu", return_value=""), \
@@ -146,8 +149,8 @@ class TestOnNeClotQueCeQuiAEteMontre:
             lambda: ScheduledAction.objects.filter(status="executed").count())()
         restantes = await sync_to_async(
             lambda: ScheduledAction.objects.filter(status="pending").count())()
-        assert faites == 3
-        assert restantes == 5
+        assert faites == 1
+        assert restantes == 7
 
     @pytest.mark.asyncio
     async def test_une_action_executee_porte_son_resultat(self):
@@ -160,7 +163,7 @@ class TestOnNeClotQueCeQuiAEteMontre:
         actions = await sync_to_async(lambda: list(ScheduledAction.objects.all()))()
 
         with patch.object(type(e), "_appeler_le_modele",
-                          return_value=(_Sortie("voilà, c'est relu"), "", 0)), \
+                          return_value=(_Sortie("voilà, c'est relu"), BilanOutils(JournalOutils()), 0)), \
              patch.object(type(e), "_select_recipient", return_value=None), \
              patch.object(type(e), "_preparer_trousse", return_value=Trousse()), \
              patch.object(type(e), "_composer_vecu", return_value=""), \

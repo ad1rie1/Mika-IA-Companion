@@ -595,6 +595,7 @@ class MemoryConsolidator:
             batch_counts = await self.store_extractions(
                 extractions, interlocutors=interlocutors,
                 occurred_at=batch[-1].get("created_at"),
+                source_message_ids=[m["id"] for m in batch if isinstance(m.get("id"), int)],
             )
             for key, value in batch_counts.items():
                 counts[key] = counts.get(key, 0) + value
@@ -746,7 +747,7 @@ class MemoryConsolidator:
 
     async def store_extractions(
         self, extractions: list[dict], *, interlocutors: list,
-        occurred_at=None,
+        occurred_at=None, source_message_ids=(),
     ) -> dict[str, int]:
         """Persiste une liste d'extractions (souvenirs, connaissances,
         engagements) — le second temps de ``_extract_and_store``. Public :
@@ -783,9 +784,11 @@ class MemoryConsolidator:
             counts["tentees"] += 1
             try:
                 themes, entities = await self._resolve_tags(extraction)
+                provenance = ({"source_message_ids": source_message_ids}
+                              if extraction.get("type") == "connaissance" else {})
                 created = await handler(
                     extraction, themes=themes, entities=entities,
-                    interlocutors=interlocutors, occurred_at=occurred_at,
+                    interlocutors=interlocutors, occurred_at=occurred_at, **provenance,
                 )
                 if created:
                     counts[created] += 1
@@ -929,11 +932,24 @@ class MemoryConsolidator:
 
     async def _store_connaissance(
         self, extraction: dict, *, themes: list, entities: list,
-        interlocutors: list, occurred_at=None,
+        interlocutors: list, occurred_at=None, source_message_ids=(),
     ) -> str | None:
         from memory.models import Connaissance
 
+        import math
         content = extraction["content"]
+        plafonds = {"observed": 0.9, "reported": 0.8, "inferred": 0.6, "uncertain": 0.35}
+        nature = extraction.get("epistemic_kind", "reported")
+        if nature not in plafonds:
+            nature = "reported"
+        try:
+            confiance = float(extraction.get("confidence", 0.65))
+        except (TypeError, ValueError):
+            confiance = 0.65
+        if not math.isfinite(confiance):
+            confiance = 0.65
+        confiance = max(0.0, min(plafonds[nature], confiance))
+        sources = list(dict.fromkeys(i for i in source_message_ids if isinstance(i, int) and i > 0))[:256]
 
         # Le doublon d'abord : en régime établi c'est le cas courant (un fait
         # déjà connu re-extrait), et la vérification de contradiction coûte un
@@ -943,12 +959,14 @@ class MemoryConsolidator:
         # a été enregistré la première fois.
         existing = await self._find_similar_connaissance(content)
         if existing:
-            # Saying the same thing twice is evidence, not a duplicate row.
-            # L'ancre de décroissance repart d'ici : `save()` ne déplaçait que
-            # `updated_at`, et la passe suivante facturait tout le temps
-            # écoulé AVANT le renforcement (MEM-06).
-            existing.confidence = min(1.0, existing.confidence + 0.1)
-            existing.decayed_at = timezone.now()
+            # Se rappeler n'est pas vérifier : la confiance n'augmente pas.
+            # En revanche, une nouvelle occurrence entretient la disponibilité
+            # du souvenir. Rejouer les mêmes messages ne rajeunit pas l'ancre.
+            if not sources or set(sources).difference(existing.source_message_ids or []):
+                existing.decayed_at = timezone.now()
+            existing.source_message_ids = list(dict.fromkeys(
+                [*(existing.source_message_ids or []), *sources],
+            ))[-256:]
             existing.sensibilite = plus_sensible(
                 existing.sensibilite,
                 sensibilite_extraite(extraction, a_une_personne=True),
@@ -981,7 +999,8 @@ class MemoryConsolidator:
             linked = _merge_entities(linked, interlocutors)
 
         connaissance = await sync_to_async(Connaissance.objects.create)(
-            content=content, confidence=1.0, is_valid=True,
+            content=content, confidence=confiance, is_valid=True,
+            epistemic_kind=nature, source_message_ids=sources,
             sensibilite=sensibilite_extraite(
                 extraction, a_une_personne=_nomme_une_personne(linked),
             ),
@@ -996,7 +1015,7 @@ class MemoryConsolidator:
             connaissance_id=connaissance.pk,
             content=content,
             metadata=connaissance_metadata(
-                confidence=1.0,
+                confidence=connaissance.confidence,
                 is_valid=True,
                 themes=[t.name for t in themes],
             ),

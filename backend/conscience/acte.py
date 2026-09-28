@@ -16,25 +16,31 @@ cycle de décision et le journal.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import re
 import time
 from dataclasses import dataclass
+from datetime import timedelta
+from uuid import uuid4
 
 from asgiref.sync import sync_to_async
 
 from ai.budget import tools_prompt_chars
 from ai.cadence import en_fond
 from ai.router import AIRole, ai_router
-from configs.runtime import cfg_int
+from configs.runtime import cfg_bool, cfg_int
 from conscience.trousse import (
     DEFAULT_TUNING as DEFAULT_TROUSSE_TUNING,
     preparer,
     resume_capacites,
 )
 from conscience.types import DecisionContext
+from conscience.agenda import enregistrer_tentative
 from drives.engine import drive_engine
 from utils.degradation import degradations, degraded
 from utils.tool_trace import journal_outils
+from utils.tool_results import BilanOutils
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +49,6 @@ logger = logging.getLogger(__name__)
 #: Ce sont les bornes qui rendent le marquage honnête possible : jusqu'ici le
 #: prompt en montrait 5 et 3 pendant que l'acte en clôturait 20 et 10.
 _BRIEF_OBSERVATIONS_MAX = 5
-_BRIEF_ACTIONS_MAX = 3
 
 # Budget de la passe 1, alignee sur les 15 s de l'interpreteur : meme role
 # (SIGNAL_INTERPRETATION), meme travail — classer un signal court — et le
@@ -78,6 +83,7 @@ class ActionBrief:
     texte: str
     observations: tuple = ()
     actions: tuple = ()
+    ruminations: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -105,6 +111,7 @@ class ActeResultat:
     differe: bool = False
     trousse: tuple = ()
     ai_failed: bool = False
+    interne: bool = False
 
 
 # ── Le tour de modèle ─────────────────────────────────────────────
@@ -153,7 +160,17 @@ async def appeler_le_modele(
         include_memory=not memory_context,
     )
 
+    if metadata is not None and "ruminations" in metadata:
+        from pipeline.context_blocks import format_ruminations
+
+        # Retenir le même lot pour le prompt et son soulagement, même si la
+        # digestion nocturne change le classement pendant l'appel.
+        base_context.rumination_context = format_ruminations(metadata["ruminations"])
+
     tools = module_manager.get_tools_for_modules(modules) if modules else []
+    if (metadata or {}).get("travail"):
+        from conscience.activities import outils
+        tools = [*tools, *outils()]
     tool_names = [t.name for t in tools]
 
     # ``replace`` plutôt qu'une recopie champ à champ : la transcription
@@ -183,16 +200,21 @@ async def appeler_le_modele(
     # `conversation_tools`, le rôle d'une conversation, et seul l'appelant
     # sait qu'il n'y a pas d'interlocuteur. Le marqueur suit les `await`,
     # donc un outil qui relance le modèle depuis la boucle est couvert.
-    with journal_outils() as carnet, en_fond():
-        output = await process_message(
-            perception,
-            context=context,
-            emit_event=False,
-            broadcast=broadcast,
-            persist=persist,
-            emotion_impulse=ressentir,
-        )
-        return output, carnet.resume(), carnet.reussites
+    from conscience.activities import travail_courant
+    jeton_travail = travail_courant.set((metadata or {}).get("travail"))
+    try:
+        with journal_outils() as carnet, en_fond():
+            output = await process_message(
+                perception,
+                context=context,
+                emit_event=False,
+                broadcast=broadcast,
+                persist=persist,
+                emotion_impulse=ressentir,
+            )
+            return output, BilanOutils(carnet), carnet.reussites
+    finally:
+        travail_courant.reset(jeton_travail)
 
 
 # ── Qui est là ────────────────────────────────────────────────────
@@ -233,6 +255,39 @@ def canal_de(person_id: str | None) -> str:
 
 
 # ── L'acte ────────────────────────────────────────────────────────
+
+
+def action_confirmee(action, bilan):
+    from modules.manager import module_manager
+    if not isinstance(bilan, BilanOutils) or not bilan.permet_aboutissement(
+        outils_requis=bool(action.modules or action.context_data.get("expected_tools")),
+    ):
+        return False
+    reussis = {a["nom"] for a in bilan.preuves["appels"] if a["ok"]}
+    attendus = set(action.context_data.get("expected_tools") or [])
+    if attendus:
+        return attendus.issubset(reussis)
+    if action.modules:
+        disponibles = {t.name for t in module_manager.get_tools_for_modules(action.modules)}
+        return bool(reussis.intersection(disponibles))
+    return True
+
+
+async def action_non_confirmee(moteur, actions, bilan):
+    """Une tentative outillée ambiguë ne se rejoue pas aveuglément."""
+    from conscience.models import ScheduledAction
+    if isinstance(bilan, BilanOutils) and bilan.preuves["total"]:
+        for action in actions:
+            action.status = ScheduledAction.Status.UNCERTAIN
+            action.raison_echec = "Effets à vérifier avant toute nouvelle tentative."
+            action.tentatives += 1
+            action.context_data = {**action.context_data, "execution": bilan.preuves}
+            action.context_data.pop("reserved_until", None)
+            await sync_to_async(enregistrer_tentative)(
+                action, ["status", "raison_echec", "tentatives", "context_data"],
+            )
+    else:
+        await moteur._compter_tentative(list(actions))
 
 
 async def act(moteur, ctx: DecisionContext, reason: str) -> ActeResultat:
@@ -288,7 +343,8 @@ async def act(moteur, ctx: DecisionContext, reason: str) -> ActeResultat:
     # Decide WHOM to address (pass 1). If a concerned, reachable person is
     # chosen, the response is composed with THEIR context and delivered to
     # them; otherwise it stays Mika's internal/broadcast voice.
-    target = await moteur._select_recipient(ctx)
+    interne = bool(brief.actions and brief.actions[0].context_data.get("mode") == "internal")
+    target = None if interne else await moteur._select_recipient(ctx)
     person_id = target or "conscience_mika"
 
     # Le rappel vient APRÈS le choix du destinataire, et avec sa porte :
@@ -308,7 +364,7 @@ async def act(moteur, ctx: DecisionContext, reason: str) -> ActeResultat:
     # reste en attente, vieillit, et devient une pensée (promotion en
     # rumination) plutôt qu'une phrase dans le vide. `_last_action_time`
     # est déjà posé : le cooldown espace les tentatives, gratuites.
-    if target is None and not moteur._audience_presente():
+    if not interne and target is None and not moteur._audience_presente():
         logger.info(
             "Conscience act withheld [%s]: personne à qui parler ni pour "
             "entendre — les observations restent en attente", reason,
@@ -318,13 +374,35 @@ async def act(moteur, ctx: DecisionContext, reason: str) -> ActeResultat:
             sans_audience=True,
         )
 
+    # Réserver AVANT tout effet. Un crash laisse une action à vérifier,
+    # jamais une action pending susceptible de renvoyer le même message.
+    if brief.actions:
+        from django.utils import timezone
+
+        action = brief.actions[0]
+        # L'opérateur peut reprendre un effet incertain, pas une tentative
+        # encore en vol. La marge couvre la clôture après le timeout IA.
+        delai = cfg_int("ai.call_timeout_seconds", 120, mini=1) + 60
+        action.context_data = {**action.context_data,
+                               "attempt_token": uuid4().hex,
+                               "reserved_until": (timezone.now() + timedelta(seconds=delai)).isoformat()}
+        pris = await sync_to_async(lambda: ScheduledAction.objects.filter(
+            pk=action.pk, status=ScheduledAction.Status.PENDING,
+        ).update(status=ScheduledAction.Status.UNCERTAIN,
+                 context_data=action.context_data,
+                 raison_echec="Tentative réservée ; vérifier ses effets si elle est interrompue."))()
+        if not pris:
+            return ActeResultat(person_id=person_id, differe=True)
+
     try:
         output, bilan_outils, outils_reussis = await moteur._appeler_le_modele(
             prompt,
             person_id=person_id,
             modules=relevant_modules,
             memory_context=memory_context,
-            metadata={"reason": reason, "relevant_modules": relevant_modules},
+            metadata={"reason": reason, "relevant_modules": relevant_modules,
+                      "ruminations": list(brief.ruminations)},
+            broadcast=not interne, persist=not interne, ressentir=not interne,
         )
 
         if output.ai_failed:
@@ -345,7 +423,7 @@ async def act(moteur, ctx: DecisionContext, reason: str) -> ActeResultat:
             )
             if brief.actions:
                 with degraded("conscience: tentative d'action programmee"):
-                    await moteur._compter_tentative(list(brief.actions))
+                    await action_non_confirmee(moteur, brief.actions, bilan_outils)
             return ActeResultat(
                 person_id=person_id, trousse=tuple(relevant_modules),
                 ai_failed=True,
@@ -375,24 +453,30 @@ async def act(moteur, ctx: DecisionContext, reason: str) -> ActeResultat:
         # planté, alors que trois seulement figuraient dans le prompt : sept
         # intentions disparaissaient à chaque acte, et le journal annonçait
         # « Executed 10 scheduled action(s) ».
-        if brief.actions:
+        if brief.actions and all(action_confirmee(a, bilan_outils) for a in brief.actions):
             from django.utils import timezone as tz
             now_tz = tz.now()
             montrees_actions = list(brief.actions)
             for action in montrees_actions:
                 action.status = ScheduledAction.Status.EXECUTED
+                action.raison_echec = ""
+                action.reessayer_le = None
                 action.executed_at = now_tz
                 action.tentatives = (action.tentatives or 0) + 1
                 action.resultat = output.text[:500]
-            await sync_to_async(ScheduledAction.objects.bulk_update)(
-                montrees_actions,
-                ["status", "executed_at", "tentatives", "resultat"],
-                batch_size=50,
-            )
+                action.context_data = {**action.context_data, "execution": bilan_outils.preuves}
+                action.context_data.pop("reserved_until", None)
+                await sync_to_async(enregistrer_tentative)(action, [
+                    "status", "executed_at", "tentatives", "resultat", "context_data",
+                    "raison_echec", "reessayer_le",
+                ])
             logger.info(
                 "Exécuté %d action(s) programmée(s) sur %d dues",
                 len(montrees_actions), len(ctx.scheduled_actions),
             )
+
+        elif brief.actions:
+            await action_non_confirmee(moteur, brief.actions, bilan_outils)
 
         if bilan_outils:
             logger.info("Conscience tool calls: %s", bilan_outils)
@@ -409,8 +493,15 @@ async def act(moteur, ctx: DecisionContext, reason: str) -> ActeResultat:
             word_count=len(output.text.split()),
         )
 
-        # Speaking at all fades every active rumination by half.
-        await moteur._resolve_ruminations_after_act()
+        # Seules les préoccupations présentées et évoquées sont soulagées.
+        themes_montres = {
+            t for o in brief.observations for t in (o.themes or [])
+        } | {t for r in brief.ruminations for t in (r.get("themes") or [])}
+        await moteur._resolve_ruminations_after_act(
+            themes={t for t in themes_montres if re.search(
+                r"(?<!\w)" + re.escape(str(t)) + r"(?!\w)", output.text, re.IGNORECASE,
+            )},
+        )
 
         logger.info(
             "Conscience acted [%s] (modules=%s, outils=%s): %s",
@@ -420,6 +511,7 @@ async def act(moteur, ctx: DecisionContext, reason: str) -> ActeResultat:
         return ActeResultat(
             dit=output.text,
             person_id=person_id,
+            interne=interne,
             outils=bilan_outils,
             outils_reussis=outils_reussis,
             trousse=tuple(relevant_modules),
@@ -442,12 +534,8 @@ async def act(moteur, ctx: DecisionContext, reason: str) -> ActeResultat:
                     "Could not mark %d observation(s) as failed",
                     len(montrees), exc_info=True,
                 )
-        # Les rendez-vous montrés comptent une tentative, sans être clos :
-        # un échec de notre côté ne doit pas leur coûter leur existence,
-        # mais une action qui échoue indéfiniment doit finir par céder.
-        if brief.actions:
-            with degraded("conscience: tentative d'action programmee"):
-                await moteur._compter_tentative(list(brief.actions))
+        # La réservation persiste : une exception peut survenir APRÈS un
+        # effet externe. Sans preuve de non-exécution, aucun rejeu automatique.
         return ActeResultat(person_id=person_id, ai_failed=True)
 
 
@@ -731,17 +819,14 @@ async def build_action_prompt(
     croit avoir faites. Ce qui est en main est appelable ; ce qui est
     ailleurs se dit a voix haute, faute d'outil pour l'ouvrir.
     """
-    import json as _json
-
     parts = []
 
     # Les deux bornes sont retenues, pas seulement appliquées : l'acte ne
     # doit clore que ce qui a été mis sous les yeux du modèle.
-    actions_max = cfg_int(
-        "conscience.brief.actions_max", _BRIEF_ACTIONS_MAX, mini=0)
+    inclure_action = cfg_bool("conscience.brief.include_scheduled_action", True)
     observations_max = cfg_int(
         "conscience.brief.observations_max", _BRIEF_OBSERVATIONS_MAX, mini=0)
-    actions_montrees = tuple(ctx.scheduled_actions[:actions_max])
+    actions_montrees = tuple(ctx.scheduled_actions[:1]) if inclure_action else ()
     observations_montrees = tuple(ctx.pending_observations[:observations_max])
 
     # Scheduled actions due (highest priority — these are self-assigned tasks)
@@ -751,7 +836,7 @@ async def build_action_prompt(
             action_lines.append(f"- {act_.prompt[:200]}")
             if act_.context_data:
                 action_lines.append(
-                    f"  Contexte: {_json.dumps(act_.context_data, ensure_ascii=False)[:200]}"
+                    f"  Contexte: {json.dumps(act_.context_data, ensure_ascii=False)[:200]}"
                 )
         parts.append(
             "Actions que tu avais programmees et qui sont maintenant dues:\n"
@@ -821,4 +906,7 @@ async def build_action_prompt(
         texte="\n\n".join(parts),
         observations=observations_montrees,
         actions=actions_montrees,
+        ruminations=tuple(
+            r for r in ctx.rumination_lignes if r.get("intensity", 0) >= 0.2
+        )[:3],
     )

@@ -29,9 +29,11 @@ tourne en rond consommerait sinon un budget entier sur un seul tick.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import time
+from datetime import timedelta
 from typing import Optional
 
 from asgiref.sync import sync_to_async
@@ -45,6 +47,7 @@ from projects import context_builder, schedule, toolkit, workspace
 from utils.parsing import strip_markdown_json
 from utils.periodic import PeriodicLoop
 from utils.degradation import degradations
+from utils.tool_trace import journal_outils
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +60,9 @@ LLM_TIMEOUT_SECONDS = 90
 # providers est 10 ; lire un fichier avant de l'éditer en coûte déjà deux,
 # donc un atelier en demande un peu plus qu'une conversation.
 MAX_TOOL_TURNS = 12
-RUNS_SINCE_INPUT_CAP = 10         # beyond this, force a pause until user comes back
+STAGNATION_RUNS_CAP = 10
+STAGNATION_BACKOFF_SECONDS = 300
+STAGNATION_MAX_BACKOFF_SECONDS = 21600
 
 
 class ProjectRunner:
@@ -133,6 +138,8 @@ class ProjectRunner:
         )
         for project_id in due[:plafond]:
             try:
+                if not await self._reserve_background_run(project_id):
+                    continue
                 success = await self._advance(project_id)
                 if success:
                     advanced += 1
@@ -146,6 +153,33 @@ class ProjectRunner:
                 await self._bump_next_run(project_id)
         return advanced
 
+    async def _reserve_background_run(self, project_id: int) -> bool:
+        """Le coût est borné même si chaque passage produit un nouveau commit."""
+        from django.db import transaction
+        from projects.models import Project, ProjectRunReservation
+
+        par_projet = cfg_int("projects.daily_runs_per_project", 24, mini=0)
+        total = cfg_int("projects.daily_runs_total", 96, mini=0)
+        maintenant = timezone.now()
+        debut = maintenant.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        def reserver():
+            with transaction.atomic():
+                projet = Project.objects.select_for_update().get(pk=project_id)
+                credits = ProjectRunReservation.objects.filter(created_at__gte=debut)
+                if credits.count() >= total or credits.filter(project=projet).count() >= par_projet:
+                    projet.retry_after = debut + timedelta(days=1)
+                    projet.pause_reason = "Budget quotidien d'avances autonomes atteint (reprise à minuit UTC)."
+                    projet.save(update_fields=["retry_after", "pause_reason"])
+                    return False
+                ProjectRunReservation.objects.create(project=projet)
+                ProjectRunReservation.objects.filter(created_at__lt=debut - timedelta(days=32)).delete()
+                return True
+
+        # Le verrou du runner sérialise les avances dans le processus ; la
+        # transaction conserve le débit et le crédit ensemble après redémarrage.
+        return await sync_to_async(reserver)()
+
     # ── Due detection ────────────────────────────────────────────
 
     async def _list_due(self) -> list[int]:
@@ -155,7 +189,7 @@ class ProjectRunner:
           - Active
           - Either next_run_at <= now (for interval/cron/event) OR rule
             is "idle" with conscience idle >= window
-          - Haven't hit the runs_since_user_input cap
+          - La temporisation d'absence de progrès est écoulée
         """
         from projects.models import Project
 
@@ -163,6 +197,7 @@ class ProjectRunner:
             projects = await sync_to_async(
                 lambda: list(
                     Project.objects.filter(status=Project.Status.ACTIVE)
+                    .exclude(pending_actions__status="pending")
                 )
             )()
         except Exception as exc:
@@ -170,10 +205,8 @@ class ProjectRunner:
             return []
 
         due_ids: list[int] = []
-        cap = cfg_int("projects.runs_since_input_cap", RUNS_SINCE_INPUT_CAP, mini=1)
         for p in projects:
-            if p.runs_since_user_input >= cap:
-                # Don't spin forever without user feedback
+            if p.retry_after and p.retry_after > timezone.now():
                 continue
             try:
                 if schedule.is_due(p):
@@ -229,31 +262,35 @@ class ProjectRunner:
             atelier, commande_de_test=ctx.test_command,
         )
 
+        from projects.capabilities import construire
+        trousse = await construire(project_id, locaux=trousse)
+
         # Attribute this LLM call to the project so the quota tracker
         # charges `Project.monthly_token_budget`.
         token = current_project_id.set(project_id)
         try:
-            raw, outils_appeles = await asyncio.wait_for(
-                ai_router.chat_with_tools(
-                    role=self._role_de_travail(),
-                    prompt=ChatPrompt(
-                        # Le cadre d'un projet ne bouge pas d'un tick à
-                        # l'autre ; l'état du chantier, si. Les séparer fait
-                        # tomber le cadre du bon côté du point de césure du
-                        # cache, gratuitement.
-                        system_stable=system_prompt,
-                        message=user_prompt,
+            with journal_outils() as carnet:
+                raw, outils_appeles = await asyncio.wait_for(
+                    ai_router.chat_with_tools(
+                        role=self._role_de_travail(),
+                        prompt=ChatPrompt(
+                            # Le cadre d'un projet ne bouge pas d'un tick à
+                            # l'autre ; l'état du chantier, si. Les séparer fait
+                            # tomber le cadre du bon côté du point de césure du
+                            # cache, gratuitement.
+                            system_stable=system_prompt,
+                            message=user_prompt,
+                        ),
+                        tools=trousse,
+                        max_turns=cfg_int(
+                            "projects.max_tool_turns_per_advance",
+                            MAX_TOOL_TURNS, mini=1,
+                        ),
                     ),
-                    tools=trousse,
-                    max_turns=cfg_int(
-                        "projects.max_tool_turns_per_advance",
-                        MAX_TOOL_TURNS, mini=1,
+                    timeout=cfg_int(
+                        "projects.llm_timeout_seconds", LLM_TIMEOUT_SECONDS, mini=1,
                     ),
-                ),
-                timeout=cfg_int(
-                    "projects.llm_timeout_seconds", LLM_TIMEOUT_SECONDS, mini=1,
-                ),
-            )
+                )
         except QuotaExceeded as qe:
             logger.warning(
                 "Project %s: quota dépassé — %s. Pause du prochain run.",
@@ -368,9 +405,10 @@ class ProjectRunner:
         # d'historique porte alors ``apply_error`` — ce qui a été dit est
         # gardé, ce qui n'a pas pu en être fait est nommé.
         outcome = "ok"
+        artefact = ""
         try:
-            await self._apply_structured(ctx, structured, raw=raw)
-            await self._enregistrer_le_travail(
+            await self._apply_structured(ctx, structured, raw=raw, evidence=carnet.as_dict())
+            artefact = await self._enregistrer_le_travail(
                 atelier, str(structured.get("summary") or "travail"), outils_appeles,
             )
         except Exception as exc:  # noqa: BLE001 — l'échéance avance quand même
@@ -387,11 +425,16 @@ class ProjectRunner:
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 raw_response=raw,
-                parsed_output=structured,
+                parsed_output={**structured, "_execution": carnet.as_dict()},
                 outcome=outcome,
                 duration_ms=duration_ms,
             )
-            await self._bump_next_run(project_id)
+            utiles = [(a.nom, a.extrait) for a in carnet.appels if a.ok and a.nom not in {
+                "project_list_files", "project_history", "project_diff",
+            }]
+            signature = (hashlib.sha256(json.dumps([artefact, utiles], ensure_ascii=False).encode()).hexdigest()
+                         if (artefact or utiles) and not carnet.rate() and outcome == "ok" else "")
+            await self._bump_next_run(project_id, progress_signature=signature)
         return outcome == "ok"
 
     @staticmethod
@@ -415,7 +458,7 @@ class ProjectRunner:
 
     async def _enregistrer_le_travail(
         self, atelier, resume: str, outils: list[str],
-    ) -> None:
+    ) -> str:
         """Un commit par tick AYANT modifié quelque chose.
 
         Pas de commit vide : un historique où chaque tick laisse une trace ne
@@ -427,15 +470,16 @@ class ProjectRunner:
             sha = await atelier.git_commit(resume)
         except Exception as exc:  # noqa: BLE001 — l'historique n'est pas le travail
             degradations.record("projects: commit de l'atelier", exc)
-            return
+            return ""
         if not sha:
-            return
+            return ""
         suffixe = f" · outils : {', '.join(outils[:8])}" if outils else ""
         await self._record_log(
             atelier.project_id,
             action="committed",
             summary=f"[{sha}] {resume[:200]}{suffixe}",
         )
+        return sha
 
     # ── Prompt history buffer ────────────────────────────────────
 
@@ -489,7 +533,7 @@ class ProjectRunner:
     # ── Applying LLM output ──────────────────────────────────────
 
     async def _apply_structured(
-        self, ctx: context_builder.ProjectRunContext, data: dict, raw: str
+        self, ctx: context_builder.ProjectRunContext, data: dict, raw: str, *, evidence=None
     ) -> None:
         """Translate the LLM's JSON into DB writes + log entries."""
         from projects.models import (
@@ -520,13 +564,30 @@ class ProjectRunner:
                 )()
                 if not task:
                     continue
+                if new_status == "done" and evidence is not None:
+                    derniers = {a["nom"]: a["ok"] for a in evidence["appels"]}
+                    demandes = upd.get("evidence_tools") or []
+                    confirme = (isinstance(demandes, list) and bool(demandes)
+                                and all(isinstance(n, str) and derniers.get(n, False) for n in demandes)
+                                and any(n not in {"project_list_files", "project_history", "project_diff"}
+                                        for n in demandes)
+                                and not evidence["tronques"] and not evidence.get("notes_perdues"))
+                    # Une tâche de rédaction/réflexion peut livrer son texte.
+                    declaratif = (upd.get("result_kind") == "reflection" and bool(result)
+                                  and not evidence["echecs"] and not evidence.get("attentes"))
+                    if not confirme and not declaratif:
+                        # Un champ oublié ne bloque pas toute la tâche. Elle
+                        # reste ouverte, avec son résultat à vérifier au pas suivant.
+                        new_status = "blocked" if demandes else "in_progress"
+                        if demandes:
+                            blocked_reason = "Achèvement annoncé sans preuve d'exécution ; vérifier le résultat."
+                        else:
+                            result = f"[Achèvement à vérifier : preuves manquantes]\n{result}"
                 task.status = new_status
                 if result:
                     task.result = result
-                if blocked_reason:
-                    task.blocked_reason = blocked_reason
-                if new_status == "done":
-                    task.completed_at = timezone.now()
+                task.blocked_reason = blocked_reason if new_status == "blocked" else ""
+                task.completed_at = timezone.now() if new_status == "done" else None
                 await sync_to_async(task.save)()
             except Exception as exc:
                 degradations.record("projects: update task", exc)
@@ -678,7 +739,7 @@ class ProjectRunner:
             project_id, ProjectLog.Action.ERROR, summary,
         )
 
-    async def _bump_next_run(self, project_id: int) -> None:
+    async def _bump_next_run(self, project_id: int, *, progress_signature="") -> None:
         """Advance next_run_at + last_run_at + runs_since_user_input."""
         from projects.models import Project
         try:
@@ -688,14 +749,35 @@ class ProjectRunner:
             if p is None:
                 return
             now = timezone.now()
+            cap = cfg_int("projects.stagnation_runs_cap", STAGNATION_RUNS_CAP, mini=1)
+            avance = bool(progress_signature and progress_signature != p.progress_signature)
+            attente = await sync_to_async(p.pending_actions.filter(status="pending").exists)()
+            if not attente:
+                p.stalled_runs = 0 if avance else p.stalled_runs + 1
+            if progress_signature:
+                p.progress_signature = progress_signature
+            p.retry_after = None
+            p.pause_reason = "Validation attendue avant de poursuivre." if attente else ""
+            if not attente and p.stalled_runs >= cap:
+                base = cfg_int("projects.stagnation_backoff_seconds", STAGNATION_BACKOFF_SECONDS, mini=1)
+                maximum = cfg_int("projects.stagnation_max_backoff_seconds", STAGNATION_MAX_BACKOFF_SECONDS, mini=1)
+                delai = min(maximum, base * 2 ** min(p.stalled_runs - cap, 20))
+                p.retry_after = now + timedelta(seconds=delai)
+                p.pause_reason = (
+                    f"{p.stalled_runs} avances sans progrès constaté ; "
+                    "nouvelle tentative après temporisation."
+                )
             p.last_run_at = now
             p.runs_since_user_input = p.runs_since_user_input + 1
             try:
                 p.next_run_at = schedule.compute_next_run(p.schedule_rule, now)
             except Exception:
                 p.next_run_at = None
+            if p.retry_after and p.next_run_at and p.next_run_at < p.retry_after:
+                p.next_run_at = p.retry_after
             await sync_to_async(p.save)(
-                update_fields=["last_run_at", "next_run_at", "runs_since_user_input"]
+                update_fields=["last_run_at", "next_run_at", "runs_since_user_input",
+                               "stalled_runs", "retry_after", "pause_reason", "progress_signature"]
             )
         except Exception as exc:
             degradations.record("projects: bump_next_run", exc)
@@ -705,12 +787,19 @@ class ProjectRunner:
     async def notify_user_input(self, project_id: int) -> None:
         """Call when the user interacts with a project (talks about it,
         approves/rejects an action). Resets the runs_since_user_input
-        counter so the cap is lifted."""
+        counter and clears the stagnation backoff."""
+        from django.db.models import Case, F, Value, When
         from projects.models import Project
         try:
             await sync_to_async(
                 lambda: Project.objects.filter(pk=project_id).update(
-                    runs_since_user_input=0,
+                    runs_since_user_input=0, stalled_runs=0, retry_after=None, pause_reason="",
+                    # Seule l'échéance reportée par le backoff est libérée ;
+                    # une vraie échéance de calendrier conserve son sens.
+                    next_run_at=Case(
+                        When(next_run_at=F("retry_after"), then=Value(timezone.now())),
+                        default=F("next_run_at"),
+                    ),
                 )
             )()
         except Exception as exc:

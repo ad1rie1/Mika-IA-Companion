@@ -402,7 +402,8 @@ def recolter(ctx, semees: set) -> list:
             pulsions=pulsions,
             tuning=conduite_tuning(),
         )
-        graines = list(graines) + graines_des_modules(pulsion, pulsions, semees)
+        graines = sorted([*graines_des_modules(pulsion, pulsions, semees), *graines],
+                         key=lambda g: g.poids, reverse=True)
         return [
             g for g in graines
             if (g.origine, str(g.reference)) not in semees
@@ -561,7 +562,9 @@ async def build_work_prompt(row) -> str:
     parts.append(
         "Fais UN pas, un seul — le plus utile maintenant. Tu peux te "
         "servir de tes outils. Personne ne te lit : c'est un travail, pas "
-        "une conversation."
+        "une conversation. Si un outil te manque, utilise discover_capabilities puis "
+        "prepare_activity pour choisir les modules du prochain pas. Si ce chantier "
+        "mérite un suivi durable, prepare_activity peut en faire un projet personnel."
     )
     parts.append(CONSIGNE_VERDICT)
     return "\n\n".join(parts)
@@ -674,7 +677,15 @@ async def faire_un_pas(moteur, identifiant) -> bool:
     from conscience.verdict import depouiller_verdict
 
     dit, verdict = depouiller_verdict(output.text, verdict_tuning())
-    await moteur._appliquer_verdict(identifiant, verdict, dit, bilan)
+    from utils.tool_results import BilanOutils
+    if isinstance(bilan, BilanOutils) and any(
+        a["nom"] == "prepare_activity" and a["ok"] for a in bilan.preuves["appels"]
+    ):
+        from dataclasses import replace
+        verdict = replace(verdict, etat=EtatVerdict.CONTINUE, notable=0.0)
+    verdict_applique = await moteur._appliquer_verdict(identifiant, verdict, dit, bilan)
+    if verdict_applique is not None:
+        verdict = verdict_applique
     await moteur._peut_etre_dire_le_travail(
         verdict, dit, row.titre, tuple(row.themes or ()),
     )
@@ -702,7 +713,24 @@ async def rendre_le_pas(identifiant) -> None:
 # ── Le verdict et ses suites ──────────────────────────────────────────────
 
 
-async def appliquer_verdict(moteur, identifiant, verdict, dit, bilan) -> None:
+def verifier_aboutissement(verdict, bilan, *, outils_requis=False):
+    from dataclasses import replace
+    from utils.tool_results import BilanOutils
+
+    if verdict.etat is not EtatVerdict.FINI:
+        return verdict
+    if isinstance(bilan, BilanOutils):
+        confirme = bilan.permet_aboutissement(outils_requis=outils_requis)
+    else:
+        confirme = not outils_requis and not bilan
+    if confirme:
+        return verdict
+    return replace(verdict, etat=EtatVerdict.BLOQUE,
+                   motif_blocage="Aboutissement non confirmé par les outils ; résultat à vérifier.",
+                   notable=0.0)
+
+
+async def appliquer_verdict(moteur, identifiant, verdict, dit, bilan):
     """Écrire ce que le pas a produit — **un seul callable synchrone**.
 
     Lire, décider en RAM puis réécrire laisserait un autre écrivain
@@ -727,11 +755,14 @@ async def appliquer_verdict(moteur, identifiant, verdict, dit, bilan) -> None:
     maintenant = tz.now()
 
     def _ecrire() -> dict | None:
+        nonlocal verdict
         row = Travail.objects.filter(pk=identifiant).first()
-        if row is None:
+        if row is None or row.statut != Travail.Statut.EN_COURS:
             return None
 
-        journal = (row.resultat + "\n\n" + dit).strip() if dit else row.resultat
+        verdict = verifier_aboutissement(verdict, bilan, outils_requis=bool(row.modules))
+        compte_rendu = dit + (f"\n[Outils : {bilan}]" if bilan else "")
+        journal = (row.resultat + "\n\n" + compte_rendu).strip()
         row.resultat = journal[-6000:]
 
         if verdict.etat is EtatVerdict.FINI:
@@ -884,6 +915,7 @@ async def appliquer_verdict(moteur, identifiant, verdict, dit, bilan) -> None:
             await estime.ressentir(
                 estime.COUP_TRAVAIL_ABOUTI, "travail abouti",
             )
+    return verdict
 
 
 async def _closeness_de(person_id: str) -> str:

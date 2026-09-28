@@ -143,7 +143,7 @@ async def save_person_snapshot(
 # Lecture : d'un relevé à une humeur
 # ----------------------------------------------------------------------
 
-async def recent_rows(person_id: str) -> list:
+async def recent_rows(person_id: str, *, aliases=()) -> list:
     """Les derniers relevés d'une personne, le plus récent en tête.
 
     Une requête, servie par l'index (person_id, -created_at) : la tête donne
@@ -155,7 +155,7 @@ async def recent_rows(person_id: str) -> list:
     return await sync_to_async(
         lambda: list(
             EmotionSnapshot.objects
-            .filter(person_id=person_id)
+            .filter(person_id__in=[person_id, *aliases])
             .order_by("-created_at")[:echantillon]
         )
     )()
@@ -198,6 +198,7 @@ def mood_from_rows(engine, person_id: str, rows: list, now_ts: float) -> PersonM
     elapsed = max(0.0, now_ts - snap.created_at.timestamp())
     home = engine._home_vector()
     mood = PersonMood(person_id=person_id)
+    mood.last_interaction = snap.created_at.timestamp()
     ancre = physics.anchor_from_rows(rows, home)
     mood.anchor = ancre if ancre is not None else home
     repos = engine._person_home(mood, home)
@@ -225,7 +226,7 @@ async def backfill_anchor(engine, mood: PersonMood) -> None:
         mood.anchor = engine._home_vector()
 
 
-async def ensure_person_loaded(engine, person_id: str) -> None:
+async def ensure_person_loaded(engine, person_id: str, *, aliases=()) -> None:
     """Hydrate a person's mood from DB if they are not currently in RAM.
 
     La question « est-ce une vraie personne ? » a un seul domicile,
@@ -255,7 +256,7 @@ async def ensure_person_loaded(engine, person_id: str) -> None:
         return
 
     try:
-        rows = await recent_rows(person_id)
+        rows = await recent_rows(person_id, aliases=aliases)
         if rows:
             mood = mood_from_rows(engine, person_id, rows, time.time())
             engine.person_moods[person_id] = mood
