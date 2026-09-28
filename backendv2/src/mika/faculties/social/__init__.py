@@ -1,8 +1,9 @@
 """``social`` : les liens. En M1 : saluer quelqu'un qui arrive.
 
 On salue à l'arrivée (dans les dix minutes), une fois par heure et par
-personne, et jamais quelqu'un qui a déjà écrit depuis son arrivée — à
-celui-là, on répond. Une personne présente offre aussi une cible aux autres
+personne, jamais quelqu'un qui a déjà écrit depuis son arrivée — à celui-là,
+on répond — ni quelqu'un avec qui on parlait il y a moins d'une demi-heure
+(une reconnexion n'est pas une arrivée). Une personne présente offre aussi une cible aux autres
 raisons de parler (une humeur qui déborde cherche quelqu'un à qui parler).
 """
 
@@ -27,6 +28,7 @@ from mika.vocab.people import is_internal
 GREETING_WINDOW = 10 * MINUTE
 GREETING_SPACING = HOUR
 GREETING_EVIDENCE = 11.0
+RECENT_CONVERSATION = 30 * MINUTE
 #: Après un échange, parler de soi-même à la même personne attend un peu.
 CONVERSATION_COOLDOWN = 5 * MINUTE
 CONVERSATION_SHIFT = -4.0
@@ -55,7 +57,7 @@ def _greeted(s: SocialState, cx, person: str) -> int:
 
 @SOCIAL.propose(kinds=[Kind.INITIATIVE], reasons={c.GREETING: (0.0, GREETING_EVIDENCE), c.PRESENT_PERSON: (0.0, 0.0)},
                 reads=[presence_c.PRESENT, presence_c.SINCE, identity_c.PERSON, identity_c.IDENTITY,
-                       transcript_c.LAST_FROM])
+                       transcript_c.LAST_FROM, transcript_c.LAST_TO])
 def _propose(s: SocialState, frame: Frame) -> list[Candidate]:
     out: list[Candidate] = []
     now = frame.now
@@ -69,7 +71,10 @@ def _propose(s: SocialState, frame: Frame) -> list[Candidate]:
         since = frame.get(presence_c.SINCE(handle))
         if since is None or now - since > GREETING_WINDOW:
             continue
-        if frame.get(transcript_c.LAST_FROM(handle)) >= since:
+        # une reconnexion n'est pas une arrivée : on ne re-salue pas quelqu'un
+        # avec qui on parlait encore il y a peu (ni quelqu'un qui a déjà écrit)
+        last = max(frame.get(transcript_c.LAST_FROM(handle)), frame.get(transcript_c.LAST_TO(handle)))
+        if last >= since - RECENT_CONVERSATION:
             continue
         person = frame.get(identity_c.PERSON(handle))
         if now - s.greeted.get(person, -GREETING_SPACING) < GREETING_SPACING:

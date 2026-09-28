@@ -308,6 +308,10 @@ def is_ambivalent(parts: list[tuple[Emotion, float]], ratio: float = 0.4) -> boo
 #: espaces et la virgule décimale. Seule la première balise compte ; toutes
 #: sont retirées du texte.
 TAG = re.compile(r"\[\s*EMOTION\s*:\s*([A-Za-z_]+)\s*(?::\s*(\d+(?:[.,]\d+)?))?\s*\]", re.IGNORECASE)
+#: La forme abrégée qu'écrivent souvent les modèles : ``[playful:0.8]``,
+#: ``[SAD]`` — reconnue seulement quand le nom est l'une des 29 émotions
+#: (``[PAUSE:500]`` ou ``[LAUGH]`` sont des jetons de voix, pas des émotions).
+SHORT_TAG = re.compile(r"\[\s*([A-Za-z_]+)\s*(?::\s*(\d+(?:[.,]\d+)?))?\s*\]")
 #: Les jetons prosodiques : pour la voix seulement (le frontend les cale sur
 #: l'audio). Partout ailleurs — fil relu par le modèle, mémoire, Telegram —
 #: ce sont des didascalies parasites.
@@ -359,10 +363,13 @@ def parse_tag(text: str) -> Tag:
     """Pas de balise → ``declared=None`` (aucune impulsion) ; nom hors des 29
     → ``declared=None`` et ``unknown`` renseigné ; ``neutral`` explicite est
     une déclaration comme une autre (une impulsion vers l'origine)."""
-    match = TAG.search(text or "")
+    text = text or ""
+    short = [m for m in SHORT_TAG.finditer(text) if emotion_of(m.group(1)) is not None]
+    match = TAG.search(text) or (short[0] if short else None)
     if match is None:
-        return Tag((text or "").strip(), None)
-    clean = _tidy(TAG.sub("", text))
+        return Tag(text.strip(), None)
+    clean = SHORT_TAG.sub(lambda m: "" if emotion_of(m.group(1)) is not None else m.group(0), TAG.sub("", text))
+    clean = _tidy(clean)
     emotion = emotion_of(match.group(1))
     if emotion is None:
         return Tag(clean, None, match.group(1).lower())

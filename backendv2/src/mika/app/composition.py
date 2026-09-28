@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from mika.app.paths import PERSONA
 from mika.contracts import identity as identity_c
 from mika.contracts import self_ as self_c
 from mika.faculties.affect import AFFECT
@@ -20,7 +21,7 @@ from mika.faculties.expression import EXPRESSION
 from mika.faculties.expression import parse as parse_reply
 from mika.faculties.identity import IDENTITY, audience_for
 from mika.faculties.presence import PRESENCE
-from mika.faculties.self import SELF, persona_for
+from mika.faculties.self import SELF, load, persona_for
 from mika.faculties.social import SOCIAL
 from mika.faculties.transcript import TRANSCRIPT
 from mika.kernel.builtin import KernelParams
@@ -31,7 +32,8 @@ from mika.kernel.frame import Audience, Frame
 from mika.kernel.guards import Guard
 from mika.kernel.registry import ArbitrationPolicy
 from mika.runtime.bootstrap import Kernel, KernelDeps
-from mika.vocab.episodes import Kind, Role
+from mika.sim.world import Composition
+from mika.vocab.episodes import VOICE_ROLES, Kind, Role
 
 
 def faculties() -> list[Faculty[Any, Any]]:
@@ -101,3 +103,10 @@ async def configure(kernel: Kernel, doc: self_c.PersonaDoc, overrides: Mapping[s
         params = f.derive(doc.temperament, (overrides or {}).get(f.name))
         changed |= await kernel.set_params(f.name, params)
     return changed
+
+
+def for_simulation(persona: self_c.PersonaDoc | None = None) -> Composition:
+    """La même racine, pour le simulateur (qui ne connaît aucune faculté)."""
+
+    return Composition(deps=deps, configure=configure, persona=persona or load(PERSONA),
+                       voice_roles=frozenset(str(r) for r in VOICE_ROLES))

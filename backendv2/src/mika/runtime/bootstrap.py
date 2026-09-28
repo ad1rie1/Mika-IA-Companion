@@ -44,7 +44,7 @@ from mika.runtime.pipeline import (
 )
 from mika.runtime.projections import ProjectionWorker, ensure_t0
 from mika.runtime.scheduler import Scheduler
-from mika.runtime.state import MAX_REPLY_ATTEMPTS, RUNTIME
+from mika.runtime.state import MAX_REPLY_ATTEMPTS, RETRY_NOW, RUNTIME
 
 
 @dataclass(slots=True)
@@ -69,6 +69,9 @@ class KernelDeps:
     reply_kind: str = "REPLY"
     arbiter_quantum_s: float = 600.0
     max_pending: int = 100
+    #: Au-delà, une question restée sans réponse au démarrage n'est plus reprise :
+    #: répondre des heures plus tard à « t'es là ? » serait pire que se taire.
+    max_reply_age_s: float = 600.0
 
 
 class ReadOnlyStore:
@@ -116,6 +119,8 @@ class Kernel:
         self.lanes = Lanes(self.runner, capacities=deps.lanes, max_pending=deps.max_pending)
         self.arbiter = Arbiter(lambda: self.mind.registry, self._submit_selected, seed=deps.seed)
         self.mind.subscribe(self.arbiter.invalidate)
+        self.mind.subscribe(self._retry_replies)
+        self._retries: set[asyncio.Task[None]] = set()
         self.scheduler = Scheduler(
             self.mind, extra=[arbiter_spec(self.arbiter, quantum_s=deps.arbiter_quantum_s)],
             lanes=deps.process_lanes, llm=deps.gateway, ports=ports,
@@ -153,6 +158,9 @@ class Kernel:
         return report
 
     async def stop(self) -> None:
+        self.started = False
+        for t in list(self._retries):
+            t.cancel()
         self.scheduler.stop()
         self.effects.stop()
         self.projections.stop()
@@ -166,13 +174,22 @@ class Kernel:
         self.started = False
 
     async def abort(self) -> None:
-        """Arrêt brutal (simulation d'un ``kill -9`` : rien n'est écrit)."""
-        for t in self._tasks:
+        """Arrêt brutal (simulation d'un ``kill -9`` : plus rien n'est écrit à
+        partir de cet instant — les gestionnaires d'annulation qui voudraient
+        encore journaliser trouvent le magasin scellé)."""
+        seal = getattr(self.mind.store, "seal", None)
+        if seal is not None:
+            seal()
+        self.started = False
+        for t in [*self._tasks, *self._retries]:
             t.cancel()
         await self.scheduler.cancel_all()
         await self.lanes.stop()
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
+        unseal = getattr(self.mind.store, "unseal", None)
+        if unseal is not None:
+            unseal()
         await self.mind.close()
         self.started = False
 
@@ -219,11 +236,14 @@ class Kernel:
             interrupted += 1
         rs = self.mind.root.slices["runtime"]
         resumed = abandoned = 0
+        now = self.mind.clock.now()
         for seq, pending in rs.pending.items():
-            if pending.attempts >= MAX_REPLY_ATTEMPTS:
+            too_old = now - pending.at > self.deps.max_reply_age_s * 1_000_000
+            if pending.attempts >= MAX_REPLY_ATTEMPTS or too_old:
+                detail = "trop tard pour répondre" if too_old else "abandonnée après deux tentatives"
                 await self.mind.append(
                     [EPISODE_ENDED.draft(kind=self.deps.reply_kind, outcome="failed", target=pending.handle,
-                                         reply_to=seq, detail="abandonnée après deux tentatives")],
+                                         reply_to=seq, detail=detail)],
                     emitter="runtime", correlation=f"abandon:{seq}", origin=Origin.KERNEL,
                 )
                 abandoned += 1
@@ -238,12 +258,41 @@ class Kernel:
             resumed += 1
         return {"interrupted": interrupted, "resumed": resumed, "abandoned": abandoned}
 
-    async def _submit_selected(self, row: Row, frame: Frame) -> None:
+    def _retry_replies(self, events: Sequence[Any], root: Any) -> None:
+        """Une réponse supplantée (ce qu'elle avait composé ne valait plus pour
+        cette audience) ou préemptée est recomposée tout de suite, tant que la
+        question attend encore — jamais perdue en silence."""
+        rs = root.slices["runtime"]
+        for e in events:
+            if e.type.name != EPISODE_ENDED.name or e.data.kind != self.deps.reply_kind:
+                continue
+            if e.data.outcome not in RETRY_NOW or e.data.reply_to not in rs.pending:
+                continue
+            if self.deps.reply_kind not in self.runner.policies or not self.started:
+                continue
+            task = asyncio.ensure_future(self._resubmit(e.data.reply_to))
+            self._retries.add(task)
+            task.add_done_callback(self._retries.discard)
+
+    async def _resubmit(self, seq: int) -> None:
+        stored = self.mind.store.get_events([seq])
+        if not stored:
+            return
+        ev = with_content(self.mind, self.mind.decode(stored[0]))
+        self.lanes.submit(EpisodeRequest(
+            kind=self.deps.reply_kind, target=ev.data.handle, trigger=f"reprise:{seq}", reply_to=seq,
+            message=ev.data.text.text or "", priority=0, channel=ev.data.channel, room=ev.data.room,
+        ))
+
+    async def _submit_selected(self, row: Row, frame: Frame) -> bool:
+        """Lance l'épisode choisi ; ``True`` s'il est en file (un épisode viendra
+        le régler), ``False`` sinon (décision sans modèle, file pleine)."""
         policy = self.runner.policies.get(row.kind)
         if policy is None or policy.role is None:
-            return  # DECISION : l'événement kernel.selected est l'action
+            return False  # DECISION : l'événement kernel.selected est l'action
         target = None if row.target in ("none", "any") else row.target
-        self.lanes.submit(EpisodeRequest(
+        queued = self.lanes.submit(EpisodeRequest(
             kind=row.kind, target=target, selected=row, reason=",".join(p[1] for p in row.parts),
-            trigger=f"selected:{frame.seq}", priority=policy.priority,
+            trigger=f"selected:{frame.seq}", priority=policy.priority, basis=frame.root,
         ))
+        return queued is not None

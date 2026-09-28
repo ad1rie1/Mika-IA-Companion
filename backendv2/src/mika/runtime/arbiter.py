@@ -50,9 +50,15 @@ class Arbiter:
         self.last_rows: list[Row] = []
         self.anomalies: list[str] = []
         self.fired: list[tuple[int, str]] = []
+        #: lignes déjà choisies dont l'épisode n'est pas terminé : on ne les
+        #: choisit pas deux fois pendant qu'elles attendent leur tour
+        self.queued: set[str] = set()
 
     def invalidate(self, events: Sequence[Event[Any]] = (), root: Root | None = None) -> None:
         self.next_at = None
+        for e in events:
+            if e.type.name == "episode.ended":
+                self.queued.discard(f"{e.data.kind}:{e.data.target or 'none'}")
 
     # ── lignes ──
     def rows(self, frame: Frame) -> list[Row]:
@@ -91,7 +97,7 @@ class Arbiter:
         for k in keys:
             self.first_seen.setdefault(k, now)
         ages = {k: (now - t) / 1_000_000 for k, t in self.first_seen.items()}
-        rows = pool(proposals, reg.arbitration, modulate, ages)
+        rows = [r for r in pool(proposals, reg.arbitration, modulate, ages) if r.key not in self.queued]
         self.last_rows = rows
         return rows
 
@@ -123,7 +129,8 @@ class Arbiter:
             emitter="kernel",
         )
         self.fired.append((ctx.now, row.key))
-        await self._submit(row, frame)
+        if await self._submit(row, frame):
+            self.queued.add(row.key)
 
 
 def arbiter_spec(arbiter: Arbiter, *, quantum_s: float = 600.0) -> ProcessSpec:

@@ -1,6 +1,9 @@
 """Le port d'entrée : ce que les adaptateurs (web, Telegram…) peuvent
 demander au cœur. Ils ne voient jamais le Mind ni les facultés : ils
 soumettent des stimulus, lisent des vues, et reçoivent les livraisons.
+
+Rangé dans ``contracts`` : c'est le contrat public du cœur envers les
+adaptateurs, et il parle la langue des contrats (perceptions, présence).
 """
 
 from __future__ import annotations

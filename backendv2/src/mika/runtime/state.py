@@ -11,6 +11,12 @@ from mika.kernel.state import FrozenDict
 
 REPLY = "REPLY"
 MAX_REPLY_ATTEMPTS = 2
+#: Issues qui ne règlent pas la question : elle reste en attente (dans la
+#: limite des tentatives). Un arrêt, une panne, une supplantation ou une
+#: préemption ne sont pas des réponses.
+UNSETTLED = frozenset({"interrupted", "cancelled", "superseded", "preempted"})
+#: Celles qui appellent une reprise immédiate (le processus tourne encore).
+RETRY_NOW = frozenset({"superseded", "preempted"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,7 +80,7 @@ def _ended(s: RuntimeState, e, cx) -> RuntimeState:
     d = e.data
     if d.reply_to is not None and d.reply_to in s.pending:
         attempts = s.pending[d.reply_to].attempts
-        keep = d.outcome == "interrupted" and attempts < MAX_REPLY_ATTEMPTS
+        keep = d.outcome in UNSETTLED and attempts < MAX_REPLY_ATTEMPTS
         if not keep:
             s = replace(s, pending=s.pending.delete(d.reply_to))
     return s

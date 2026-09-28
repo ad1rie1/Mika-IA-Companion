@@ -1,0 +1,130 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mika"
+version = "0.1.0"
+description = "Mika v2 — une psyché à journal d'événements, faits typés et arbitrage par preuves"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.7",
+    "immutables>=0.20",
+    "starlette>=0.40",
+    "uvicorn[standard]>=0.30",
+    "jinja2>=3.1",
+    "itsdangerous>=2.1",
+    "cryptography>=42",
+    "httpx>=0.27",
+    "pyyaml>=6.0",
+    "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+llm = ["anthropic>=0.40", "openai>=1.40", "ollama>=0.4", "google-genai>=1.0"]
+memory = ["numpy>=1.26", "sentence-transformers>=3.0"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "hypothesis>=6.100", "import-linter>=2.0", "ruff>=0.6", "time-machine>=2.14"]
+
+[project.scripts]
+mika = "mika.app.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "slow: tests longs (performances, scénarios complets)",
+]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "BLE", "TID251", "PLC0415", "DTZ"]
+ignore = ["E501", "UP040", "UP046", "UP047", "B008"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"time.time".msg = "Le temps vient de l'horloge injectée (mika.kernel.clock)."
+"time.time_ns".msg = "Le temps vient de l'horloge injectée (mika.kernel.clock)."
+"time.monotonic".msg = "Le temps vient de l'horloge injectée (mika.kernel.clock)."
+"time.perf_counter".msg = "Le temps vient de l'horloge injectée (mika.kernel.clock)."
+"datetime.datetime.now".msg = "Le temps vient de l'horloge injectée (mika.kernel.clock)."
+"datetime.datetime.utcnow".msg = "Le temps vient de l'horloge injectée (mika.kernel.clock)."
+"datetime.date.today".msg = "Le temps vient de l'horloge injectée (mika.kernel.clock)."
+"random.random".msg = "Le hasard vient du contexte (rng dérivé de l'événement) ou du RngTree."
+"random.choice".msg = "Le hasard vient du contexte (rng dérivé de l'événement) ou du RngTree."
+"random.uniform".msg = "Le hasard vient du contexte (rng dérivé de l'événement) ou du RngTree."
+"random.randint".msg = "Le hasard vient du contexte (rng dérivé de l'événement) ou du RngTree."
+"random.seed".msg = "Le hasard vient du contexte (rng dérivé de l'événement) ou du RngTree."
+"uuid.uuid1".msg = "Les identifiants viennent de l'IdGen injecté."
+"uuid.uuid4".msg = "Les identifiants viennent de l'IdGen injecté."
+"os.urandom".msg = "Les identifiants et le hasard sont injectés."
+
+[tool.ruff.lint.per-file-ignores]
+# Les seules sources réelles du temps, du hasard et des identifiants.
+"src/mika/adapters/**" = ["TID251", "BLE001"]
+"src/mika/runtime/boundary.py" = ["BLE001"]
+"src/mika/sim/**" = ["TID251", "BLE001"]
+"src/mika/app/**" = ["TID251"]
+"tests/**" = ["TID251", "BLE001", "PLC0415", "DTZ", "B"]
+
+[tool.importlinter]
+root_package = "mika"
+include_external_packages = false
+
+[[tool.importlinter.contracts]]
+name = "Couches de mika"
+type = "layers"
+layers = [
+    "mika.app",
+    "mika.inspector | mika.sim",
+    "mika.runtime",
+    "mika.faculties | mika.plugins | mika.adapters",
+    "mika.contracts",
+    "mika.ports",
+    "mika.vocab",
+    "mika.kernel",
+]
+
+[[tool.importlinter.contracts]]
+name = "Les facultés ne se connaissent pas"
+type = "independence"
+modules = [
+    "mika.faculties.body",
+    "mika.faculties.affect",
+    "mika.faculties.needs",
+    "mika.faculties.presence",
+    "mika.faculties.identity",
+    "mika.faculties.social",
+    "mika.faculties.transcript",
+    "mika.faculties.memory",
+    "mika.faculties.attention",
+    "mika.faculties.goals",
+    "mika.faculties.self",
+    "mika.faculties.expression",
+    "mika.faculties.agency",
+]
+
+[[tool.importlinter.contracts]]
+name = "Les adaptateurs n'importent ni facultés ni runtime"
+type = "forbidden"
+source_modules = ["mika.adapters"]
+forbidden_modules = ["mika.faculties", "mika.plugins", "mika.runtime", "mika.inspector", "mika.sim", "mika.app"]
+
+[[tool.importlinter.contracts]]
+name = "Les facultés n'importent ni adaptateurs ni runtime"
+type = "forbidden"
+source_modules = ["mika.faculties", "mika.plugins"]
+forbidden_modules = ["mika.adapters", "mika.runtime", "mika.inspector", "mika.sim", "mika.app"]
+
+[[tool.importlinter.contracts]]
+name = "Le runtime ne nomme aucune faculté"
+type = "forbidden"
+source_modules = ["mika.runtime"]
+forbidden_modules = ["mika.faculties", "mika.plugins", "mika.adapters"]

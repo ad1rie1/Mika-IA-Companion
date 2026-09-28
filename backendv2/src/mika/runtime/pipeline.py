@@ -54,6 +54,10 @@ class EpisodeRequest:
     extra_guard: Guard | None = None
     channel: str | None = None
     room: str | None = None
+    #: L'état sur lequel la décision a été prise (une sélection de l'arbitre) :
+    #: la garde se vérifie contre lui, pas contre l'état au démarrage — une
+    #: initiative restée en file pendant que la personne écrivait est devancée.
+    basis: Any = None
 
 
 @dataclass(slots=True)
@@ -152,8 +156,8 @@ class EpisodeRunner:
                 start = await mind.append(
                     [EPISODE_STARTED.draft(kind=req.kind, target=req.target, trigger=req.trigger,
                                            reason=req.reason, reply_to=req.reply_to)],
-                    emitter="runtime", correlation=eid, origin=Origin.KERNEL, basis=frame0.root,
-                    guard=guard, holder=eid,
+                    emitter="runtime", correlation=eid, origin=Origin.KERNEL,
+                    basis=req.basis if req.basis is not None else frame0.root, guard=guard, holder=eid,
                 )
                 mind.track(eid, guard, start.root, eid, on_supersede)
                 attrs: dict[str, Any] = {"channel": req.channel or audience.channel, "reply_to": req.reply_to,
@@ -198,7 +202,14 @@ class EpisodeRunner:
                                        mind.registry, audience, episode), guard=None)
 
                 assert self.gateway is not None, "pas de passerelle LLM"
-                loop = await run_tool_loop(self.gateway, llm_req, tools, make_ctx, max_turns=policy.max_tool_turns)
+                gateway = self.gateway
+                loop = await acall(
+                    lambda: run_tool_loop(gateway, llm_req, tools, make_ctx, max_turns=policy.max_tool_turns),
+                    label=f"appel du modèle ({policy.role})",
+                )
+                if isinstance(loop, Failed):
+                    return await self._settle(eid, req, report, Outcome.FAILED, None,
+                                              detail=_describe(loop.error))
                 report.tools = loop.calls
                 text, annotations = self._parse(loop.text)
                 if not text.strip() or text.strip() == SILENCE:
@@ -361,12 +372,16 @@ class EpisodeRunner:
         )
 
     async def _settle(self, eid: str, req: EpisodeRequest, report: EpisodeReport, outcome: Outcome,
-                      failure: Superseded | None) -> EpisodeReport:
+                      failure: Superseded | None, detail: str = "") -> EpisodeReport:
         self.mind.untrack(eid)
-        await self._end(eid, req, outcome, failure)
+        await self._end(eid, req, outcome, failure, detail=detail)
         report.outcome = outcome
-        report.detail = str(failure) if failure else ""
+        report.detail = str(failure) if failure else detail
         return report
+
+
+def _describe(error: BaseException) -> str:
+    return f"{type(error).__name__}: {error}"[:500]
 
 
 class _Busy(Exception):
