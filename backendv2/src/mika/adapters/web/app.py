@@ -174,7 +174,16 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
             return JSONResponse({"error": "Authentification requise."}, status_code=401)
         if not account.operator:
             return JSONResponse({"error": "Réservé aux opérateurs."}, status_code=403)
-        return JSONResponse({"error": "Action inconnue."}, status_code=404)
+        decision = request.path_params["decision"]
+        if decision not in ("approve", "reject"):
+            return JSONResponse({"error": "Décision inconnue (approve ou reject)."}, status_code=400)
+        data = await body(request)
+        status = await port.resolve_effect(int(request.path_params["action_id"]), decision == "approve",
+                                           by=account.handle, note=str(data.get("note") or "")[:500])
+        if status == "unknown":
+            return JSONResponse({"error": "Action inconnue ou déjà décidée."}, status_code=404)
+        await hub.refresh_panels()  # chacun voit la file d'approbation à jour
+        return JSONResponse({"ok": True, "status": status})
 
     async def ws(websocket: WebSocket) -> None:
         origin = websocket.headers.get("origin")

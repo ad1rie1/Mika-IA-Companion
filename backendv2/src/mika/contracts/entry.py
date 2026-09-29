@@ -56,5 +56,11 @@ class MindPort(Protocol):
 
     def person_panel(self, handle: str) -> dict[str, Any] | None:
         """Ce que le panneau montre de la personne (identité ; profil et
-        promesses seulement si sa fiche est ouverte)."""
+        promesses seulement si sa fiche est ouverte ; projets et actions en
+        attente seulement pour une propriétaire)."""
+        ...
+
+    async def resolve_effect(self, proposal: int, approved: bool, *, by: str, note: str = "") -> str:
+        """Approuver ou refuser un effet externe proposé : ``"approved"``,
+        ``"rejected"``, ``"unknown"`` (rien en attente sous ce numéro)."""
         ...

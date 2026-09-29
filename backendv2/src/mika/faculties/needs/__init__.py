@@ -21,6 +21,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 from mika.contracts import body as body_c
+from mika.contracts import goals as goals_c
 from mika.contracts import memory as memory_c
 from mika.contracts import needs as c
 from mika.contracts import runtime as rt
@@ -49,6 +50,7 @@ class NeedsParams(BaseModel):
     reply_expression: float = 0.6
     initiative_expression: float = 0.2
     learned_curiosity: float = 0.8
+    explored_curiosity: float = 0.4
     # preuves d'initiative (log-odds) : de rien au seuil à tout à ``full``
     social_floor: float = 0.35
     social_evidence: float = 6.0
@@ -123,6 +125,24 @@ def _received(s: NeedsState, e, cx) -> NeedsState:
     s = _touch(s, e.at, p)
     s = _relieve(_relieve(s, c.SOCIAL, p.received_social, e.at, p), c.CURIOSITY, p.received_curiosity, e.at, p)
     return replace(s, idle_since=e.at)
+
+
+@NEEDS.reducer(goals_c.STEP_REPORTED)
+def _explored(s: NeedsState, e, cx) -> NeedsState:
+    """Un pas d'exploration comble un peu la curiosité (on a appris quelque chose)."""
+    if e.data.kind != goals_c.EXPLORATION or not e.data.tools:
+        return s
+    p = params(cx.params)
+    return _relieve(_touch(s, e.at, p), c.CURIOSITY, p.learned_curiosity, e.at, p)
+
+
+@NEEDS.reducer(goals_c.GOAL_CLOSED)
+def _satisfied(s: NeedsState, e, cx) -> NeedsState:
+    """Mener une exploration à bout comble franchement la curiosité."""
+    if e.data.kind != goals_c.EXPLORATION or e.data.status != goals_c.ACHIEVED:
+        return s
+    p = params(cx.params)
+    return _relieve(_touch(s, e.at, p), c.CURIOSITY, p.explored_curiosity, e.at, p)
 
 
 @NEEDS.reducer(rt.UTTERANCE)

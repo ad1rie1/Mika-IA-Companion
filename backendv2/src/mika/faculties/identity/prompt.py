@@ -12,7 +12,7 @@ from mika.kernel.frame import CLOSED as CLOSED_AUDIENCE
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.prompt import SectionBody
 from mika.vocab import privacy
-from mika.vocab.episodes import CONVERSATIONAL, Kind
+from mika.vocab.episodes import CONVERSATIONAL, Kind, goal_of
 from mika.vocab.privacy import ChannelTrust
 
 CHANNEL_FR = {"web": "sur l'application", "telegram": "par Telegram"}
@@ -90,7 +90,7 @@ def audience_for(frame: Frame, req: Any) -> Audience:
     """L'audience d'un épisode, résolue une fois au bord. Toute panne → fermée."""
     target = getattr(req, "target", None)
     kind = getattr(req, "kind", "")
-    if not target:
+    if not target or goal_of(target) is not None:
         if kind in (Kind.REPLY, Kind.INITIATIVE):
             return CLOSED_AUDIENCE
         # un épisode sans destinataire (pas de travail, murmure, journal) : personne n'écoute

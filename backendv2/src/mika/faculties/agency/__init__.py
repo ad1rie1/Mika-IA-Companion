@@ -8,8 +8,8 @@
 - **Être ignorée l'espace** : chaque initiative restée sans réponse (d'affilée)
   allonge la période réfractaire (×2,5, jusqu'à six heures) et abaisse
   l'envie de recommencer.
-- La salutation n'est pas concernée — saluer quelqu'un qui arrive n'est pas
-  « prendre la parole ».
+- La salutation et le rappel promis ne sont pas concernés — saluer
+  quelqu'un qui arrive, tenir parole, ce n'est pas « prendre la parole ».
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict
 
 from mika.contracts import agency as c
 from mika.contracts import attention as attention_c
+from mika.contracts import goals as goals_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.kernel.arbitration import Modulation, RowView
@@ -65,7 +66,7 @@ def _started(s: AgencyState, e, cx) -> AgencyState:
     d = e.data
     if d.kind == Kind.MURMUR:
         return replace(s, murmured_at=e.at)
-    if d.kind != Kind.INITIATIVE or social_c.GREETING in d.reason.split(","):
+    if d.kind != Kind.INITIATIVE or _owed(d.reason.split(",")):
         return s
     p = _params(cx.params)
     kept = tuple(t for t in s.initiatives if e.at - t < DAY)
@@ -87,9 +88,15 @@ def _agency(s: AgencyState, cx) -> c.AgencyReading:
     return reading(s, cx.now, _params(cx.params), cx.tz, cx.facts.get(attention_c.IGNORED))
 
 
+def _owed(reasons: Any) -> bool:
+    """Saluer qui arrive, dire un rappel promis : ce n'est pas « prendre la
+    parole » — ni le plafond ni la période réfractaire ne s'y appliquent."""
+    return social_c.GREETING in reasons or goals_c.REMIND in reasons
+
+
 @AGENCY.modulate(kinds=[Kind.INITIATIVE], reads=[c.AGENCY, attention_c.IGNORED])
 def _budget(s: AgencyState, frame: Frame, row: RowView) -> Modulation:
-    if social_c.GREETING in row.reasons:
+    if _owed(row.reasons):
         return Modulation()
     p = _params(frame.env.params_of("agency", frame.root))
     r = frame.get(c.AGENCY)

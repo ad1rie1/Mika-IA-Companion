@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from mika.kernel.events import Payload, event_type
-from mika.kernel.facts import FactFamily
+from mika.kernel.facts import FactFamily, FactKey
 from mika.vocab.privacy import ChannelTrust, Disclosure
 
 OWNER = "identity"
@@ -98,3 +98,5 @@ HANDLES = FactFamily("identity.handles", arg=str, type=tuple)
 REACHABLE = FactFamily("identity.reachable", arg=str, type=tuple)
 #: La personne est-elle une propriétaire (opératrice, ou déclarée) ?
 IS_OWNER = FactFamily("identity.is_owner", arg=str, type=bool)
+#: Ses propriétaires (clés de personne), triés.
+OWNERS = FactKey("identity.owners", type=tuple)

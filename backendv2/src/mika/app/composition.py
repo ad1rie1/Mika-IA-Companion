@@ -20,6 +20,7 @@ from mika.faculties.attention import ATTENTION
 from mika.faculties.body import BODY
 from mika.faculties.expression import EXPRESSION
 from mika.faculties.expression import parse as parse_reply
+from mika.faculties.goals import GOALS, step_brief
 from mika.faculties.identity import IDENTITY, audience_for
 from mika.faculties.memory import MEMORY
 from mika.faculties.needs import NEEDS
@@ -40,9 +41,9 @@ from mika.vocab.episodes import VOICE_ROLES, Kind, Role
 
 
 def faculties() -> list[Faculty[Any, Any]]:
-    """Les facultés de Mika (M4)."""
+    """Les facultés de Mika (M6)."""
     return [PRESENCE, IDENTITY, TRANSCRIPT, MEMORY, BODY, AFFECT, NEEDS, ATTENTION, SELF, EXPRESSION, SOCIAL,
-            AGENCY]
+            AGENCY, GOALS]
 
 
 def _reply_guard(frame: Frame, target: str | None, audience: Audience | None) -> Guard | None:
@@ -57,10 +58,15 @@ def policies() -> dict[str, EpisodePolicy]:
     return {
         Kind.REPLY: EpisodePolicy(kind=Kind.REPLY, role=Role.REPLY, priority=0, lane="conversation",
                                   guard=_reply_guard, max_tokens=1024, deadline_s=180.0,
-                                  tool_bundles=frozenset({"memory", "identity"})),
+                                  tool_bundles=frozenset({"memory", "identity", "goals"})),
         Kind.INITIATIVE: EpisodePolicy(kind=Kind.INITIATIVE, role=Role.INITIATIVE, priority=1, lane="conversation",
                                        brief=initiative_brief, max_tokens=600, deadline_s=180.0,
                                        tool_bundles=frozenset({"memory", "identity"})),
+        # un pas de travail : sa voix (compacte), pour elle seule — ni fil, ni livraison ; le verdict fait l'affect
+        Kind.STEP: EpisodePolicy(kind=Kind.STEP, role=Role.STEP, priority=2, lane="background",
+                                 persona_depth="compact", visible=False, delivered=False, brief=step_brief,
+                                 max_tool_turns=12, max_tokens=2048, deadline_s=300.0,
+                                 tool_bundles=frozenset({"goals", "memory", "workshop"})),
         # une pensée à voix haute : sa voix brève, pas dans le fil, à l'écran seulement
         Kind.MURMUR: EpisodePolicy(kind=Kind.MURMUR, role=Role.MURMUR, priority=1, lane="conversation",
                                    persona_depth="compact", visible=False, max_tokens=80, deadline_s=60.0),
@@ -70,11 +76,13 @@ def policies() -> dict[str, EpisodePolicy]:
 def arbitration() -> ArbitrationPolicy:
     """Seuils en log-odds, taux maximaux par seconde. Une raison forte (saluer
     quelqu'un qui arrive) se déclenche en secondes ; le fond (une présence
-    sans raison) presque jamais ; une humeur qui déborde, en minutes."""
+    sans raison) presque jamais ; une humeur qui déborde, en minutes. Un pas de
+    travail, en quelques minutes quand l'envie est là ; rarement quand elle
+    s'use."""
     return ArbitrationPolicy(
-        thresholds={Kind.INITIATIVE: 9.0},
-        max_rates={Kind.INITIATIVE: 0.1},
-        aging_per_hour={Kind.INITIATIVE: 0.0},
+        thresholds={Kind.INITIATIVE: 9.0, Kind.STEP: 8.0},
+        max_rates={Kind.INITIATIVE: 0.1, Kind.STEP: 1 / 120},
+        aging_per_hour={Kind.INITIATIVE: 0.0, Kind.STEP: 0.0},
     )
 
 

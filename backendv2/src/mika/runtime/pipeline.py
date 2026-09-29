@@ -58,6 +58,8 @@ class EpisodeRequest:
     #: la garde se vérifie contre lui, pas contre l'état au démarrage — une
     #: initiative restée en file pendant que la personne écrivait est devancée.
     basis: Any = None
+    #: ce sur quoi porte l'épisode quand ce n'est pas sa cible (``goal:12``)
+    subject: str | None = None
 
 
 @dataclass(slots=True)
@@ -169,13 +171,14 @@ class EpisodeRunner:
                 held = await self._acquire(eid, sorted(resources), policy, req)
                 start = await mind.append(
                     [EPISODE_STARTED.draft(kind=req.kind, target=req.target, trigger=req.trigger,
-                                           reason=req.reason, reply_to=req.reply_to)],
+                                           reason=req.reason, reply_to=req.reply_to, subject=req.subject)],
                     emitter="runtime", correlation=eid, origin=Origin.KERNEL,
                     basis=req.basis if req.basis is not None else frame0.root, guard=guard, holder=eid,
                 )
                 mind.track(eid, guard, start.root, eid, on_supersede)
                 attrs: dict[str, Any] = {"channel": req.channel or audience.channel, "reply_to": req.reply_to,
-                                         "reason": req.reason, "room": req.room or audience.room}
+                                         "reason": req.reason, "room": req.room or audience.room,
+                                         "subject": req.subject}
                 if req.selected is not None:
                     attrs["reasons"] = tuple(sorted({p[1] for p in req.selected.parts}))
                     attrs["args"] = req.selected.args
@@ -198,7 +201,8 @@ class EpisodeRunner:
                     await self._end(eid, req, Outcome.DONE)
                     return report
                 persona = self.persona(frame, policy.persona_depth) if (policy.voice and self.persona) else None
-                tools = self._tools(policy, req.kind, audience)
+                tools = self._tools(policy, req.kind, audience,
+                                    req.selected.args.get("bundles") if req.selected is not None else None)
                 llm_req = LLMRequest(
                     role=policy.role, call_id=f"{eid}#0",
                     system_stable=(persona.text + "\n\n" + prompt.system_stable).strip() if persona else prompt.system_stable,
@@ -354,10 +358,16 @@ class EpisodeRunner:
             out.append((spec, body))
         return out
 
-    def _tools(self, policy: EpisodePolicy, kind: str, audience: Audience) -> dict[str, Any]:
+    def _tools(self, policy: EpisodePolicy, kind: str, audience: Audience, only: Any = None) -> dict[str, Any]:
+        """Les outils offerts : les lots de la politique — restreints, quand le
+        candidat le dit (``bundles`` : « goals,workshop »), à ceux-là seuls. Un
+        lot est offert entier ou pas du tout."""
+        bundles = policy.tool_bundles
+        if only:
+            bundles = bundles & frozenset(b.strip() for b in str(only).split(",") if b.strip())
         out = {}
         for name, spec in self.mind.registry.tools.items():
-            if kind not in spec.episodes or spec.bundle not in policy.tool_bundles:
+            if kind not in spec.episodes or spec.bundle not in bundles:
                 continue
             if spec.min_level is not None and audience.level < spec.min_level:
                 continue

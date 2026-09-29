@@ -78,8 +78,7 @@ def build(
 
 
 async def boot(kernel: Kernel, doc=DOC) -> None:
-    await kernel.start()
-    await composition.configure(kernel, doc)
+    await kernel.start(configure=lambda k: composition.configure(k, doc))
 
 
 async def connect(kernel: Kernel, handle: str, name: str = "", *, authenticated: bool = True,

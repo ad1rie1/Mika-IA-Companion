@@ -25,6 +25,7 @@ from mika.kernel.events import EventRegistry
 from mika.kernel.facts import FactSpec, UnknownFact
 from mika.kernel.faculty import (
     AppraisalSpec,
+    CapabilitySpec,
     EffectSpec,
     EnricherSpec,
     Faculty,
@@ -202,6 +203,13 @@ class Registry:
         self.effects: dict[str, list[EffectSpec]] = defaultdict(list)
         for s in (s for f in facs for s in f.effects):
             self.effects[s.type.name].append(s)
+        self.capabilities: dict[str, CapabilitySpec] = {}
+        for s in (s for f in facs for s in f.capabilities):
+            if s.name in self.capabilities:
+                problems.append(f"capacité déclarée deux fois : {s.name}")
+            if not s.name.startswith(f"{s.owner}."):
+                problems.append(f"capacité {s.name} hors de l'espace de {s.owner}")
+            self.capabilities[s.name] = s
 
         for p in self.proposers:
             for reason, (lo, hi) in p.reasons.items():

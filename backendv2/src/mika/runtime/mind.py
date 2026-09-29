@@ -383,7 +383,17 @@ class Mind:
                     or root.at - self._last_snapshot_at >= self._snapshot_interval):
                 snapshot = SnapshotRow(root.seq, root.at, self.snapshot_data(root))
             batch = AppendBatch(stored, contents, dedupe, outbox, snapshot, self._t0_apply(full))
-            await self.store.append(batch)
+            # Une écriture lancée va au bout : si l'appelant est annulé pendant qu'elle
+            # attend le fil d'écriture, la transaction peut être validée quand même — il
+            # faut alors publier la racine, sinon l'ajout suivant réutiliserait ses ``seq``.
+            write = asyncio.ensure_future(self.store.append(batch))
+            interrupted: asyncio.CancelledError | None = None
+            while not write.done():
+                try:
+                    await asyncio.shield(write)
+                except asyncio.CancelledError as exc:
+                    interrupted = interrupted or exc
+            write.result()  # une écriture refusée lève ici, rien n'est publié
 
             # 7. publication
             self._root = root
@@ -398,6 +408,8 @@ class Mind:
         self._recheck_inflight(correlation, root)
         for fn in list(self._listeners):
             call(fn, events, root, label="écouteur du Mind")
+        if interrupted is not None:
+            raise interrupted  # l'annulation est rendue, une fois l'écriture publiée
         return commit
 
     def _validate(self, d: Draft[Any], emitter: str) -> None:

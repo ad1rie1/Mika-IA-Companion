@@ -18,6 +18,7 @@ from typing import Any
 from mika.adapters.llm.gateway import Gateway
 from mika.adapters.store_sqlite import SqliteStore
 from mika.adapters.vectors import HashEmbedder, SqliteVectorIndex
+from mika.adapters.workshop import BwrapWorkshop
 from mika.contracts import presence as presence_c
 from mika.contracts.runtime import PerceptionReceived
 from mika.kernel.events import Content, Origin
@@ -104,6 +105,8 @@ class Driver:
     online: set[str] = field(default_factory=set)
     connections: dict[str, str] = field(default_factory=dict)
     names: dict[str, str] = field(default_factory=dict)
+    #: les poignées d'opératrices (ses propriétaires, connectées avec leur compte)
+    operators: set[str] = field(default_factory=set)
     transport: Transport | None = None
 
     def __post_init__(self) -> None:
@@ -118,13 +121,13 @@ class Driver:
                           preempt=frozenset({self.llm.name}) if self.slots == 1 else frozenset(),
                           fallbacks={str(k): str(v) for k, v in FALLBACKS.items()})
         store = SqliteStore(self.root / "mind.db", self.root / "views.db", threaded=False)
-        ports = {"delivery": self.transport, "vectors": SqliteVectorIndex(store, HashEmbedder())}
+        ports = {"delivery": self.transport, "vectors": SqliteVectorIndex(store, HashEmbedder()),
+                 "workshop": BwrapWorkshop(self.root / "ateliers")}
         deps = self.composition.deps(store=store, clock=self.clock, ids=SeededIdGen(f"{self.seed}:{self.boots}"),
                                      gateway=gateway, ports=ports, seed=f"{self.seed}:{self.boots}")
         self.kernel = Kernel(deps)
         self.boots += 1
-        await self.kernel.start()
-        await self.composition.configure(self.kernel, self.composition.persona)
+        await self.kernel.start(configure=lambda k: self.composition.configure(k, self.composition.persona))
         # les clients encore là se reconnectent (la présence est volatile)
         for handle in sorted(self.online):
             await self._announce(handle)
@@ -154,6 +157,7 @@ class Driver:
         await self.kernel.mind.append(
             [presence_c.CONNECTED.draft(handle=handle, channel="web", connection=conn, authenticated=True,
                                         account=int(handle.split("_", 1)[1]) if handle.startswith("user_") else None,
+                                        operator=handle in self.operators,
                                         display_name=name or self.names.get(handle, ""))],
             emitter="presence", correlation=f"sim:{conn}", origin=Origin.EXTERNAL,
         )

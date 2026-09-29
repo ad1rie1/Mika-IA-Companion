@@ -10,7 +10,7 @@ donnés.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -111,7 +111,8 @@ class Kernel:
         registry = Registry([RUNTIME, *deps.faculties], arbitration=deps.arbitration)
         self.mind = Mind(registry, deps.store, deps.clock, deps.ids, code=deps.code,
                          snapshot_every=deps.snapshot_every)
-        ports = {"store": ReadOnlyStore(deps.store), "frame": self._head_frame, **dict(deps.ports)}
+        ports = {"store": ReadOnlyStore(deps.store), "frame": self._head_frame,
+                 "capabilities": self.mind.registry.capabilities.get, **dict(deps.ports)}
         self.ports = ports
         self.runner = EpisodeRunner(
             self.mind, deps.gateway, policies=deps.policies, persona=deps.persona,
@@ -140,7 +141,10 @@ class Kernel:
         return self.mind.frame()
 
     # ── cycle de vie ──
-    async def start(self) -> BootReport:
+    async def start(self, configure: Callable[[Kernel], Awaitable[Any]] | None = None) -> BootReport:
+        """Démarre. ``configure`` (la persona, les paramètres) est journalisé
+        **avant** que les voies, la reprise et les processus ne tournent : aucun
+        processus ne voit jamais un fuseau ou un tempérament par défaut."""
         report = await self.mind.boot(append_boot=False)
         await ensure_t0(self.mind)
         failures = self.registry.check_invariants(self.mind.root)
@@ -152,6 +156,8 @@ class Kernel:
                 await opener()  # index, caches : prêts avant la première perception
         await self.mind.append([BOOT.draft(code=self.deps.code)], emitter="kernel", origin=Origin.KERNEL,
                                correlation="boot")
+        if configure is not None:
+            await configure(self)
         self.lanes.start()
         await self.recover()
         self._tasks = [
@@ -331,8 +337,10 @@ class Kernel:
         if policy is None or policy.role is None:
             return False  # DECISION : l'événement kernel.selected est l'action
         target = None if row.target in ("none", "any") else row.target
+        subject = row.args.get("subject")
         queued = self.lanes.submit(EpisodeRequest(
             kind=row.kind, target=target, selected=row, reason=",".join(p[1] for p in row.parts),
             trigger=f"selected:{frame.seq}", priority=policy.priority, basis=frame.root,
+            subject=str(subject) if subject else None,
         ))
         return queued is not None

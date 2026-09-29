@@ -25,6 +25,7 @@ from mika.adapters.web import protocol
 from mika.adapters.web.accounts import Accounts
 from mika.adapters.web.app import WebConfig, create_app
 from mika.adapters.web.hub import Hub
+from mika.adapters.workshop import BwrapWorkshop
 from mika.app import composition
 from mika.app.delivery import Router
 from mika.app.mindport import KernelPort
@@ -97,7 +98,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     router = Router(hub)
     vectors = SqliteVectorIndex(store, embedder or SentenceEmbedder())
     kernel = Kernel(composition.deps(store=store, clock=clock, ids=RandomIdGen(), gateway=gateway,
-                                     ports={"delivery": router, "vectors": vectors}, **deps))
+                                     ports={"delivery": router, "vectors": vectors,
+                                            "workshop": BwrapWorkshop(data / "ateliers")}, **deps))
     port = KernelPort(kernel)
     hub.port = port
     live = Live(kernel, hub, port, Accounts(store), Settings(store, SecretBox.for_data(data)), gateway, router,
@@ -105,8 +107,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
 
     @contextlib.asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
-        await kernel.start()
-        await composition.configure(kernel, load(persona))
+        doc = load(persona)
+        await kernel.start(configure=lambda k: composition.configure(k, doc))
         await live.settings.open()
         await live.accounts.open()
         problems = await live.reload_llm()

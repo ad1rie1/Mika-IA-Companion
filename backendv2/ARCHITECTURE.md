@@ -45,19 +45,19 @@ Règles vérifiées à chaque test (`lint-imports`) : une couche n'importe que l
 
 Deux fichiers SQLite : `mind.db` (journal, contenus, dédoublonnage, instantanés, file de sortie, projections T0, comptes, réglages — sa vie, qu'on sauvegarde) et `views.db` (projections différées — jetable). T0 dans la transaction d'ajout ; T1 différées avec point de contrôle transactionnel ; T2 préparées dans un **processus** séparé ; un événement empoisonné est mis en quarantaine ; une nouvelle version se construit à côté puis bascule. Une tranche dont la version change est reconstruite par **clôture de lecture** depuis la genèse.
 
-## Les facultés (M1–M4)
+## Les facultés (M1–M5)
 
 | Faculté | Tient | Fournit |
 |---|---|---|
 | `presence` (volatile) | les connexions vivantes | `PRESENT`, `SINCE(poignée)` |
 | `identity` | poignées, confiance du transport, revendications, preuves, démentis, liaisons (ADR 0012) | `PERSON`, `IDENTITY`, `DISCLOSURE(poignée, canal, public)`, `HANDLES`, `REACHABLE`, `IS_OWNER` ; interprète des messages ; section « qui tu as en face » ; l'audience d'un épisode ; outils `identity_whoami_with`, `identity_doubt`, `identity_forget_binding` |
 | `transcript` | le fil (T0 `thread`, id d'un message = son `seq`), les résumés des fils longs | `LAST_FROM`, `LAST_TO`, `HEAD` ; l'historique du prompt (le fil privé de la personne, ou celui du salon) |
-| `memory` | souvenirs, croyances, promesses (T0 `memory_items`), échanges (T0 `memory_chunks`), à qui elle a répété quoi (T0 `memory_told`) ; consolidation, indexation | `CHECKPOINT`, `PROMISES_TO` ; rappel filtré par la divulgation (un sujet délicat rend confidentiel) ; outils `memory_search`, `memory_promise_done` (ADR 0010) |
+| `memory` | souvenirs, croyances, promesses (T0 `memory_items`), échanges (T0 `memory_chunks`), à qui elle a répété quoi (T0 `memory_told`) ; consolidation, indexation ; la nuit : souvenirs de réflexion, fusion des doublons du jour | `CHECKPOINT`, `PROMISES_TO` ; rappel filtré par la divulgation (un sujet délicat rend confidentiel) ; outils `memory_search`, `memory_promise_done` (ADR 0010) |
 | `body` | le rythme circadien (chronotype), le sommeil à deux processus (ADR 0016) | `RHYTHM`, `PHASE`, `ENERGY`, `SLEEP`, `AWAKE_SINCE` ; veto en dormant, inertie du réveil, fatigue ; sections « ton rythme », « état cognitif » |
 | `needs` | besoins de compagnie, de s'exprimer, d'apprendre ; le vide ressenti | `NEEDS` ; preuves vers quiconque est là ; section « tes envies » |
-| `attention` | pensées (échange marquant, croyance révisée, manque), attentes (réponse, retour) | `THOUGHTS`, `IGNORED` ; preuve « une inquiétude qui insiste » ; section « ce qui te trotte dans la tête » |
+| `attention` | pensées (échange marquant, croyance révisée, manque), attentes (réponse, retour), digestion nocturne | `THOUGHTS`, `IGNORED` ; preuve « une inquiétude qui insiste » ; section « ce qui te trotte dans la tête » |
 | `affect` | humeur générale, posture par personne, ancres qui guérissent, balise récente ; receveur des évaluations | `MOOD`, `STANCE`, `WARMTH`, `REGARD`, `HOSTILITY` (la rancune), `FACE` ; sections humeur et posture ; preuve « débordement » ; ce que vit une relation déborde selon la proximité |
-| `self` | la persona (un document), le tempérament, l'estime, le récit de soi | `PERSONA`, `ESTEEM` ; le fournisseur de persona des voix ; sections « qui tu es devenue » (stable), « comment tu te sens avec toi-même » |
+| `self` | la persona (un document), le tempérament, l'estime, le récit de soi, le journal, les rêves (ADR 0019) | `PERSONA`, `ESTEEM`, `YESTERDAY`, `DREAM_RESIDUE` ; le fournisseur de persona des voix ; sections « qui tu es devenue » (stable), « comment tu te sens avec toi-même », « ton fil d'hier » (masqué), « ce que tu as rêvé cette nuit » |
 | `expression` | la balise `[EMOTION:nom:intensité]`, le style, le murmure | analyse des réponses ; livraison (file de sortie → port `delivery`) ; prélude « murmure » |
 | `social` | contacts par personne (jours, messages, relances sans réponse), profils, proximité déclarée (ADR 0013, 0018) | `CLOSENESS` (vécue), `CONTACT` (rythme propre, silence), `MISSED`, `SENSITIVE`, `GREETED` ; preuves saluer, envie de discuter, reprendre contact, chercher du réconfort ; retenue (rancune, jamais deux messages sans réponse) ; sections « ce que tu sais de cette personne », « ce que tu perçois de son état » ; relecture des profils |
 | `agency` | le budget d'initiatives | plafond quotidien, période réfractaire à gigue enregistrée, allongée par les initiatives ignorées ; la consigne d'une initiative |
@@ -71,7 +71,7 @@ L'affect est exact à tout instant : oscillateurs en forme close, repos constant
 - **Vecteurs** (`adapters/vectors/`) : un cache (SQLite + numpy), plongement sentence-transformers local ou par hachage (simulateur) ; reconstructible à l'octet.
 - **Modèles** (`adapters/llm/`) : Claude, OpenAI-compatible, Ollama / Ollama Cloud ; passerelle rechargeable à chaud ; clés chiffrées (Fernet) dans `settings`.
 - **Inspecteur** (`/inspecteur/`, opérateurs) : vue d'ensemble, chronologie, chaîne d'un épisode, décisions de l'arbitre, état, modèles.
-- **Simulateur** (`sim/`) : le vrai noyau sur temps virtuel, des interlocuteurs, un modèle factice « persona » (qui répète tout secret qu'on lui montre), des pannes (magasin scellé), des mesures, un rapport. Voie rapide : S01, S03, S13 réduit, S15 (mémoire), S02 (troll), S04 (confidentialité), S05 (amie absente), S12 (imposteur), S06 (journée vide), S07 (semaine type). On valide par cibles d'intention (ADR 0007), et on vérifie qu'un test n'est pas vide en cassant exprès ce qu'il garde.
+- **Simulateur** (`sim/`) : le vrai noyau sur temps virtuel, des interlocuteurs, un modèle factice « persona » (qui répète tout secret qu'on lui montre), des pannes (magasin scellé), des mesures, un rapport. Voie rapide : S01, S03, S13 réduit, S15 (mémoire), S02 (troll), S04 (confidentialité), S05 (amie absente), S12 (imposteur), S06 (journée vide), S07 (semaine type), S08 (la nuit). On valide par cibles d'intention (ADR 0007), et on vérifie qu'un test n'est pas vide en cassant exprès ce qu'il garde.
 
 ## Ajouter une faculté
 

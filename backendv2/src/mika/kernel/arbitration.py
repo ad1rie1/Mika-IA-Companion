@@ -54,12 +54,15 @@ class Modulation:
 
 @dataclass(frozen=True, slots=True)
 class RowView:
-    """Ce qu'un modulateur voit : la ligne cumulée, avant décalages."""
+    """Ce qu'un modulateur voit : la ligne cumulée, avant décalages — et sa
+    raison la plus forte prise seule, hors soutiens « ANY » (ce qui réveille
+    quelqu'un est une raison forte, pas une somme d'envies)."""
 
     kind: str
     target: str
     evidence: float
     reasons: tuple[str, ...]
+    strongest: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,7 +125,8 @@ def pool(
             ps = ps + any_parts.get(kind, [])
         cands = extra[(kind, target)]
         evidence = sum(p[2] for p in ps)
-        view = RowView(kind, target, evidence, tuple(sorted({p[1] for p in ps})))
+        strongest = max((c.evidence for c in cands), default=0.0)
+        view = RowView(kind, target, evidence, tuple(sorted({p[1] for p in ps})), strongest)
         shift = 0.0
         vetoes: list[tuple[str, str]] = []
         for source, m in modulate(view):

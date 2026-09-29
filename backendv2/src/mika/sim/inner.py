@@ -93,6 +93,8 @@ async def s06(driver: Driver, rng: RngTree, res: Result) -> None:
     empty = [m for m in afternoon if m.felt in (A.Emotion.BORED, A.Emotion.LONELY, A.Emotion.MELANCHOLIC)
              and m.felt_intensity >= 0.1]
     night = [t for t in times if _local(t).hour < 7 or _asleep_at(spans, t)]
+    explored = [e for e in events if e.type.name == "goals.opened" and e.data.authority == "self"
+                and 8 <= _local(e.at).hour < 22]
     res.metrics.update({"initiatives": len(said), "gaps_min": [round(g) for g in gaps],
                         "sleep": [(_local(a).strftime("%H:%M"), _local(b).strftime("%H:%M")) for a, b in spans],
                         "empty_afternoon": round(len(empty) / max(1, len(afternoon)), 2)})
@@ -110,6 +112,9 @@ async def s06(driver: Driver, rng: RngTree, res: Result) -> None:
                          "une journée vide n'est pas un drame"),
         expect.control("elle a dormi", any((b - a) >= 6 * HOUR for a, b in spans),
                        "la nuit, elle dort au moins six heures", f"{res.metrics['sleep']}"),
+        expect.control("une activité pour elle-même", bool(explored),
+                       "une journée vide, elle finit par s'occuper de ce qui l'intéresse",
+                       f"{[e.data.title.text for e in explored]}"),
     ]
 
 

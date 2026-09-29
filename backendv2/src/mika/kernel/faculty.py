@@ -50,6 +50,14 @@ class EffectClass(enum.StrEnum):
     EXTERNAL = "external"
 
 
+class ToolResult(BaseModel):
+    """Ce qu'un outil rend au modèle. ``ok=False`` : refusé ou raté — ce
+    n'est pas du travail fait (un pas qui dit « fini » ne s'en prévaut pas)."""
+
+    ok: bool = True
+    content: str = ""
+
+
 # ── Spécifications de contributions ───────────────────────────────────────
 
 
@@ -187,6 +195,20 @@ class PreludeSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class CapabilitySpec:
+    """Un effet externe qu'une faculté sait exécuter (lancer une commande avec
+    le réseau, envoyer un message…). Il ne part jamais d'un outil : un outil
+    le *propose* (``effect.proposed``) ; le runtime l'exécute après commit —
+    tout de suite si la politique ne demande pas d'accord, après
+    ``effect.resolved`` sinon. ``fn(args, context, ports) -> (ok, résultat)``."""
+
+    owner: str
+    name: str
+    description: str
+    fn: Callable[..., Any]
+
+
+@dataclass(frozen=True, slots=True)
 class InterpreterSpec:
     """Ce qu'une faculté tire d'un événement externe au moment où il arrive
     (un message qui dit « moi c'est Alice »). Synchrone, sans appel de
@@ -231,6 +253,7 @@ class Faculty(Generic[S, Pm]):
     preludes: list[PreludeSpec] = field(default_factory=list)
     interpreters: list[InterpreterSpec] = field(default_factory=list)
     feelings: list[FeelSpec] = field(default_factory=list)
+    capabilities: list[CapabilitySpec] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self.namespaces:
@@ -422,6 +445,17 @@ class Faculty(Generic[S, Pm]):
             instance = obj() if isinstance(obj, type) else obj
             self.projectors.append(ProjectorSpec(self.name, name, version, tier, names, instance))
             return obj
+
+        return deco
+
+    def capability(self, name: str, *, description: str):
+        """Un effet externe exécutable (voir ``CapabilitySpec``) ; le nom est
+        préfixé par la faculté (``goals.networked``)."""
+        full = name if "." in name else f"{self.name}.{name}"
+
+        def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
+            self.capabilities.append(CapabilitySpec(self.name, full, description, fn))
+            return fn
 
         return deco
 

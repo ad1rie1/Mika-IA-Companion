@@ -27,6 +27,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict
 
 from mika.contracts import attention as attention_c
+from mika.contracts import goals as goals_c
 from mika.contracts import memory as memory_c
 from mika.contracts import self_ as c
 from mika.faculties.self.records import Dream, Journal
@@ -50,6 +51,8 @@ class SelfParams(BaseModel):
     esteem_max: float = 0.95
     ignored_knock: float = -0.03
     heard_again_knock: float = 0.04
+    achieved_knock: float = 0.05
+    stuck_knock: float = -0.04
     doubt_below: float = 0.35
     assured_above: float = 0.7
     narrative_every_us: int = DAY
@@ -113,6 +116,17 @@ def _heard(s: SelfState, e, cx) -> SelfState:
         return s
     p = params(cx.params)
     return _knock(s, p.heard_again_knock, e.at, p)
+
+
+@SELF.reducer(goals_c.GOAL_CLOSED)
+def _goal_closed(s: SelfState, e, cx) -> SelfState:
+    """Mener quelque chose à bout redonne confiance ; bloquer en retire un peu.
+    Un rappel dit n'y change rien ; renoncer non plus (ce n'est pas un échec)."""
+    d = e.data
+    if d.kind == goals_c.REMINDER or d.status not in (goals_c.ACHIEVED, goals_c.STUCK):
+        return s
+    p = params(cx.params)
+    return _knock(s, p.achieved_knock if d.status == goals_c.ACHIEVED else p.stuck_knock, e.at, p)
 
 
 @SELF.fact(c.ESTEEM)

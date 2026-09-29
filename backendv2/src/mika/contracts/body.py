@@ -24,6 +24,13 @@ ASLEEP = "asleep"
 TIRED = "tired"
 #: Veto : elle vient de se réveiller.
 WAKING = "waking"
+#: Veto : tirée du sommeil en pleine nuit, elle répond (ou dit l'urgent) et se
+#: rendort — elle ne prend pas d'initiative ordinaire.
+WOKEN_AT_NIGHT = "woken_at_night"
+#: La barre de réveil (log-odds) : une raison qui la passe *à elle seule* la
+#: réveille (un rappel urgent à l'heure dite) ; une somme d'envies, jamais.
+#: Une politique, pas un trait : elle ne se calibre pas.
+WAKE_BAR = 15.0
 
 
 class SleepPhase(enum.StrEnum):

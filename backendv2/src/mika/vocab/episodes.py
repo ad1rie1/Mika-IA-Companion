@@ -25,6 +25,23 @@ class Kind(enum.StrEnum):
 #: Les épisodes où elle s'adresse à quelqu'un, dans le fil de conversation.
 CONVERSATIONAL = frozenset({Kind.REPLY, Kind.INITIATIVE})
 
+#: La cible d'un épisode qui ne s'adresse à personne mais porte sur un but
+#: (un pas de travail) : ``goal:12``. Personne ne l'écoute.
+GOAL_PREFIX = "goal:"
+
+
+def goal_target(goal: int) -> str:
+    return f"{GOAL_PREFIX}{goal}"
+
+
+def goal_of(target: str | None) -> int | None:
+    if not target or not target.startswith(GOAL_PREFIX):
+        return None
+    try:
+        return int(target[len(GOAL_PREFIX):])
+    except ValueError:
+        return None
+
 
 class Role(enum.StrEnum):
     # voix

@@ -3,11 +3,15 @@ effets en attente d'approbation. Sert à la reprise après un arrêt brutal."""
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from typing import Any
 
 from mika.contracts import runtime as rt
 from mika.kernel.faculty import Faculty
 from mika.kernel.state import FrozenDict
+from mika.runtime.boundary import Failed, acall
 
 REPLY = "REPLY"
 MAX_REPLY_ATTEMPTS = 2
@@ -17,6 +21,7 @@ MAX_REPLY_ATTEMPTS = 2
 UNSETTLED = frozenset({"interrupted", "cancelled", "superseded", "preempted"})
 #: Celles qui appellent une reprise immédiate (le processus tourne encore).
 RETRY_NOW = frozenset({"superseded", "preempted"})
+RESULT_MAX = 4000
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +44,9 @@ class PendingEffect:
     capability: str
     owner: str
     at: int
+    args_json: str = "{}"
+    context: str = ""
+    summary_ref: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,7 +100,9 @@ def _ended(s: RuntimeState, e, cx) -> RuntimeState:
 def _proposed(s: RuntimeState, e, cx) -> RuntimeState:
     if not e.data.approval:
         return s
-    return replace(s, effects=s.effects.set(e.seq, PendingEffect(e.data.capability, e.data.owner, e.at)))
+    d = e.data
+    return replace(s, effects=s.effects.set(e.seq, PendingEffect(d.capability, d.owner, e.at, d.args_json, d.context,
+                                                                 d.summary.ref or "")))
 
 
 @RUNTIME.reducer(rt.EFFECT_RESOLVED)
@@ -103,3 +113,46 @@ def _resolved(s: RuntimeState, e, cx) -> RuntimeState:
 @RUNTIME.fact(rt.AWAITING)
 def _awaiting(s: RuntimeState, cx) -> tuple[int, ...]:
     return tuple(s.pending.keys())
+
+
+@RUNTIME.fact(rt.PENDING_EFFECTS)
+def _pending_effects(s: RuntimeState, cx) -> tuple[rt.PendingEffectView, ...]:
+    return tuple(rt.PendingEffectView(seq, p.capability, p.owner, p.context, p.summary_ref, p.at)
+                 for seq, p in sorted(s.effects.items()))
+
+
+# ── Effets externes : exécutés après commit, jamais depuis un outil ───────
+
+
+async def _execute(proposal: int, capability: str, args_json: str, context: str,
+                   ports: Mapping[str, Any]) -> list[Any]:
+    lookup = ports.get("capabilities")
+    spec = lookup(capability) if lookup is not None else None
+    if spec is None:
+        return [rt.EFFECT_EXECUTED.draft(proposal=proposal, ok=False, result=f"capacité inconnue : {capability}")]
+    try:
+        args = json.loads(args_json or "{}")
+    except ValueError:
+        return [rt.EFFECT_EXECUTED.draft(proposal=proposal, ok=False, result="arguments illisibles")]
+    out = await acall(spec.fn, args if isinstance(args, dict) else {}, context, ports, label=f"capacité {capability}")
+    if isinstance(out, Failed):
+        return [rt.EFFECT_EXECUTED.draft(proposal=proposal, ok=False, result=f"échec : {out.error!r}"[:RESULT_MAX])]
+    ok, result = out
+    return [rt.EFFECT_EXECUTED.draft(proposal=proposal, ok=bool(ok), result=str(result)[:RESULT_MAX])]
+
+
+@RUNTIME.effect(rt.EFFECT_PROPOSED)
+async def _auto(ev: Any, ports: Mapping[str, Any]) -> list[Any] | None:
+    """Une proposition sans accord requis part tout de suite."""
+    d = ev.data
+    if d.approval:
+        return None
+    return await _execute(ev.seq, d.capability, d.args_json, d.context, ports)
+
+
+@RUNTIME.effect(rt.EFFECT_RESOLVED)
+async def _approved(ev: Any, ports: Mapping[str, Any]) -> list[Any] | None:
+    d = ev.data
+    if not d.approved:
+        return None
+    return await _execute(d.proposal, d.capability, d.args_json, d.context, ports)

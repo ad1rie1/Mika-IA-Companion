@@ -4,6 +4,10 @@ Une ligne de la file est écrite dans la transaction même de l'événement ;
 l'exécuteur la traite ensuite, au moins une fois — le gestionnaire est
 idempotent par identifiant d'événement. Après un arrêt brutal, les lignes
 restées en attente sont reprises.
+
+Un gestionnaire peut rendre des brouillons (ce que l'effet a produit :
+``effect.executed``) : ils sont journalisés avant que la ligne soit close,
+dédoublonnés par ligne — une reprise ne les écrit pas deux fois.
 """
 
 from __future__ import annotations
@@ -13,7 +17,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
-from mika.kernel.events import Content, Event
+from mika.kernel.events import Content, Draft, Event, Origin
 from mika.kernel.state import Root
 from mika.runtime.boundary import Failed, acall
 
@@ -68,6 +72,11 @@ class EffectExecutor:
                 status = "failed" if row.attempts + 1 >= self.max_attempts else "pending"
                 await self.mind.store.mark_outbox(row.key, status, repr(out.error)[:500])
                 continue
+            drafts = [d for d in (out if isinstance(out, (list, tuple)) else ()) if isinstance(d, Draft)]
+            if drafts:
+                keyed = [replace(d, dedupe_key=d.dedupe_key or f"effet:{row.key}:{i}") for i, d in enumerate(drafts)]
+                await self.mind.append(keyed, emitter=specs[0].owner, correlation=f"effet:{row.seq}",
+                                       origin=Origin.KERNEL)
             await self.mind.store.mark_outbox(row.key, "done")
             self.executed += 1
             done += 1

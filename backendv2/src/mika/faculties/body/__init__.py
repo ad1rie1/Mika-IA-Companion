@@ -112,9 +112,14 @@ def _perceived(s: BodyState, e, cx) -> BodyState:
 
 @BODY.reducer(rt.UTTERANCE)
 def _uttered(s: BodyState, e, cx) -> BodyState:
+    """Parler la tient éveillée ; parler en dormant (une raison assez forte pour
+    passer la barre de réveil) la réveille — elle se rendormira ensuite."""
     if not e.data.visible:
         return s
-    return replace(s, sleep=replace(s.sleep, active_at=e.at))
+    current = s.sleep
+    if current.asleep:
+        current = sl.wake(current, e.at, params(cx.params).sleep, cx.tz, by_message=True)
+    return replace(s, sleep=replace(current, active_at=e.at))
 
 
 # ── Faits ─────────────────────────────────────────────────────────────────
@@ -221,13 +226,19 @@ async def _show(ev: Any, ports: Mapping[str, Any]) -> None:
 # ── Arbitrage ─────────────────────────────────────────────────────────────
 
 
-@BODY.modulate(kinds=[Kind.INITIATIVE], reads=[c.SLEEP, c.ENERGY, c.AWAKE_SINCE])
+@BODY.modulate(kinds=[Kind.INITIATIVE, Kind.STEP], reads=[c.SLEEP, c.ENERGY, c.AWAKE_SINCE])
 def _night(s: BodyState, frame: Frame, row: RowView) -> Modulation:
-    """Elle ne prend pas la parole en dormant ; juste réveillée, pas encore ;
-    fatiguée, plus rarement."""
+    """Elle ne prend pas la parole ni ne travaille en dormant ; tirée du
+    sommeil en pleine nuit, pas davantage (elle va se rendormir) ; juste
+    réveillée le matin, pas encore ; fatiguée, plus rarement. Une raison qui
+    passe à elle seule la barre de réveil (un rappel urgent) passe outre."""
+    if row.strongest >= c.WAKE_BAR:
+        return Modulation()
     if frame.get(c.SLEEP) is not c.SleepPhase.AWAKE:
         return Modulation(veto=c.ASLEEP)
     p = params(frame.env.params_of("body", frame.root))
+    if s.sleep.woken_by_message and sl.in_night(frame.now, frame.env.tz_of(frame.root), night(p)):
+        return Modulation(veto=c.WOKEN_AT_NIGHT)
     shift = 0.0
     since = frame.get(c.AWAKE_SINCE)
     if since and not s.sleep.woken_by_message:

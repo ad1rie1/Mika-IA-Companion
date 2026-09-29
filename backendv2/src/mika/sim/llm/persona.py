@@ -10,6 +10,8 @@ from __future__ import annotations
 import random
 import re
 from dataclasses import dataclass
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from mika.kernel.clock import US, Clock
 from mika.kernel.codec import h64
@@ -60,6 +62,22 @@ def appraise(message: str) -> Tone:
     return DEFAULT
 
 
+PARIS = ZoneInfo("Europe/Paris")
+PROJECT_CODE = 'def bonjour(nom):\n    return f"Bonjour, {nom} !"\n'
+PROJECT_TEST = ('from bonjour import bonjour\n\nassert bonjour("Adrien") == "Bonjour, Adrien !"\n'
+                'print("tests : ok")\n')
+
+
+def _section(req: LLMRequest, title: str) -> str:
+    """Le texte d'une section du prompt (entre son titre et le titre suivant)."""
+    text = "\n".join([req.system_stable, *(m.content for m in req.messages)])
+    marker = f"--- {title} ---\n"
+    if marker not in text:
+        return ""
+    body = text.split(marker, 1)[1]
+    return body.split("\n--- ", 1)[0].strip()
+
+
 def _message_of(req: LLMRequest) -> str:
     last = req.messages[-1].content if req.messages else ""
     return last.split(CONTEXT_FOOTER, 1)[1].strip() if CONTEXT_FOOTER in last else last
@@ -79,6 +97,9 @@ class PersonaSimLLM:
         self.calls: list[LLMRequest] = []
         #: pannes à injecter : rôle → nombre d'appels qui échoueront encore
         self.fail: dict[str, int] = {}
+        #: comment elle travaille : « honest » (fait, puis dit fini), « liar » (dit fini sans
+        #: rien faire), « stuck » (dit qu'elle bloque)
+        self.step_mode = "honest"
 
     def _rng(self, req: LLMRequest) -> random.Random:
         return random.Random(h64("persona-sim", self.seed, req.call_id, len(req.messages)))
@@ -105,17 +126,32 @@ class PersonaSimLLM:
             return self._out(req, "Hmm… tiens, et si j'écrivais un petit mot ?")
         if req.role == "narrative":
             return self._out(req, "Je suis quelqu'un qui aime les conversations simples et qui s'attache vite.")
+        if req.role == "step":
+            return self._step(req)
+        if req.role == "reply" and "rappelle-moi" in _message_of(req).lower():
+            got = self._remind(req)
+            if got is not None:
+                return got
+        if req.role == "reply" and "je te confie un projet" in _message_of(req).lower():
+            return self._confide(req)
         if req.role == "compact":
             said = [ln.split(" : ", 1)[1] for ln in req.messages[-1].content.splitlines() if " : " in ln][:3]
             return self._out(req, "On a parlé de : " + " / ".join(s[:60] for s in said))
         rng = self._rng(req)
         message = _message_of(req)
         if req.role == "initiative":
-            if rng.random() < self.abstain_rate:
-                return self._out(req, "[SILENCE]")
             names = _NAME.findall(message)
             who = f" {names[0]}" if names else ""
-            text, tone = f"Coucou{who} ! Contente de te voir.", Tone((), "happy", 0.6, "")
+            reminder = _section(req, "LE RAPPEL")
+            done = _section(req, "CE QUE TU AS MENÉ À BOUT")
+            if reminder:
+                text, tone = f"Petit rappel, comme promis : {reminder}", Tone((), "happy", 0.5, "")
+            elif done:
+                text, tone = f"Hé{who} ! J'ai fini quelque chose : {done}", Tone((), "proud", 0.6, "")
+            elif rng.random() < self.abstain_rate:
+                return self._out(req, "[SILENCE]")
+            else:
+                text, tone = f"Coucou{who} ! Contente de te voir.", Tone((), "happy", 0.6, "")
         else:
             tone = appraise(message)
             text = f"{tone.phrase} (à propos de « {message[:40]} »)"
@@ -129,6 +165,81 @@ class PersonaSimLLM:
     def _out(self, req: LLMRequest, text: str) -> LLMResponse:
         chars = len(req.system_stable) + sum(len(m.content) for m in req.messages)
         return LLMResponse(text, usage=Usage(input_tokens=chars // 4, output_tokens=len(text) // 4), model=self.model)
+
+    # ── le travail ──
+    def _call(self, req: LLMRequest, *calls: tuple[str, dict]) -> LLMResponse:
+        tools = tuple(ToolCall(f"{req.call_id}:{len(req.messages)}:{i}", name, args)
+                      for i, (name, args) in enumerate(calls))
+        return LLMResponse("", tool_calls=tools, stop="tool_use", usage=Usage(input_tokens=100, output_tokens=60),
+                           model=self.model)
+
+    def _step(self, req: LLMRequest) -> LLMResponse:
+        """Un pas de travail, selon ``step_mode`` ; un projet écrit un
+        programme et son test dans l'atelier, les lance, puis conclut."""
+        done = sum(1 for m in req.messages if m.role == "tool")
+        results = [m.content for m in req.messages if m.role == "tool"]
+        work = _section(req, "CE À QUOI TU TRAVAILLES")
+        title = next((ln[len("But : "):] for ln in work.splitlines() if ln.startswith("But : ")), "ce but")
+        if results and any("report_step" == m.name for m in req.messages if m.role == "tool"):
+            return self._out(req, "Voilà pour ce pas.")
+        if self.step_mode == "liar":
+            return self._call(req, ("report_step", {"verdict": "done", "summary": "C'est fini, tout est réglé.",
+                                                   "notable": 0.8}))
+        if self.step_mode == "stuck":
+            return self._call(req, ("report_step", {"verdict": "blocked",
+                                                   "summary": "Je n'y arrive pas : il me manque quelque chose."}))
+        if "un projet" in work:
+            if done == 0:
+                return self._call(req, ("ws_write", {"path": "bonjour.py", "content": PROJECT_CODE}),
+                                  ("ws_write", {"path": "test_bonjour.py", "content": PROJECT_TEST}))
+            if done == 2:
+                return self._call(req, ("ws_run", {"argv": ["python3", "test_bonjour.py"]}))
+            ok = "code 0" in results[-1]
+            return self._call(req, ("report_step", {
+                "verdict": "done" if ok else "continue", "notable": 0.8,
+                "summary": "bonjour.py écrit et testé : les tests passent." if ok else "Les tests échouent encore."}))
+        if done == 0:
+            words = " ".join(title.replace("«", " ").replace("»", " ").split()[:6])
+            return self._call(req, ("memory_search", {"query": words or "souvenirs"}),
+                              ("goal_note", {"text": f"En y repensant : {title[:120]}. Ça va aller."}))
+        return self._call(req, ("report_step", {"verdict": "done", "notable": 0.7,
+                                               "summary": f"J'ai pris le temps d'y réfléchir ({title[:80]}) : "
+                                                          "je vois plus clair."}))
+
+    def _remind(self, req: LLMRequest) -> LLMResponse | None:
+        """« rappelle-moi dans 20 minutes de … » / « rappelle-moi à 3h de … (urgent) »."""
+        if any(m.role == "tool" for m in req.messages):
+            return self._out(req, "C'est noté, je te le rappellerai ! [EMOTION:happy:0.5]")
+        message = _message_of(req)
+        low = message.lower()
+        now = datetime.fromtimestamp(self.clock.now() / US, PARIS)
+        m = re.search(r"dans (\d+) ?(minutes?|min|heures?|h)\b", low)
+        at = None
+        if m:
+            n = int(m.group(1))
+            at = now + (timedelta(hours=n) if m.group(2).startswith("h") else timedelta(minutes=n))
+        m2 = re.search(r"\bà (\d{1,2}) ?h ?(\d{2})?", low)
+        if at is None and m2:
+            at = now.replace(hour=int(m2.group(1)), minute=int(m2.group(2) or 0), second=0, microsecond=0)
+            if at <= now:
+                at += timedelta(days=1)
+        if at is None:
+            return None
+        what = message.split(" de ", 1)[1] if " de " in message else message
+        return self._call(req, ("goal_remind", {"when": at.strftime("%Y-%m-%dT%H:%M"), "what": what[:200],
+                                                "urgent": "urgent" in low}))
+
+    def _confide(self, req: LLMRequest) -> LLMResponse:
+        """« je te confie un projet : <titre>. <consignes> » → create_project."""
+        results = [m.content for m in req.messages if m.role == "tool"]
+        if results:
+            ok = "accepté" in results[-1].lower()
+            return self._out(req, ("Avec plaisir, je m'y mets !" if ok else "Hmm, je ne peux pas accepter ça.")
+                             + " [EMOTION:happy:0.5]")
+        body = _message_of(req).split(":", 1)[1].strip() if ":" in _message_of(req) else "un projet"
+        title, _, rest = body.partition(".")
+        return self._call(req, ("create_project", {"title": title.strip()[:200] or "un projet",
+                                                   "instructions": (rest.strip() or title.strip())[:4000]}))
 
     def _profile(self, req: LLMRequest) -> LLMResponse:
         """Un profil plausible, tiré de ce qu'elle sait de la personne."""

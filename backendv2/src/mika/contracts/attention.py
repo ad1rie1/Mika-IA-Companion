@@ -19,6 +19,8 @@ from mika.kernel.facts import FactKey
 OWNER = "attention"
 
 EXCHANGE, REVISION, MISSING = "exchange", "revision", "missing"
+#: un but sur lequel elle bloque (« Je bloque sur… »)
+BLOCKED = "blocked"
 REPLY, RETURN = "reply", "return"
 #: Raison de preuve d'initiative : une pensée qui insiste, vers la personne concernée.
 THOUGHT = "thought"

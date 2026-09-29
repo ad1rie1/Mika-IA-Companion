@@ -76,3 +76,26 @@ async def test_replay_equals_live_and_snapshot_plus_tail(tmp_db):
     assert report.snapshot_seq == 0 and report.replayed > 40
     assert digest({k: v for k, v in fresh.root.slices.items()}) == live
     await fresh.close()
+
+
+async def test_a_write_cancelled_in_flight_is_still_published(tmp_db):
+    """Avec le fil d'écriture (serveur), annuler l'appelant pendant qu'il attend
+    la transaction ne doit pas perdre la racine : la transaction va au bout,
+    elle est publiée, et l'ajout suivant prend le ``seq`` d'après (la file de
+    sortie mourait sur « UNIQUE constraint failed: events.seq »)."""
+    import asyncio
+
+    mind = make_mind(tmp_db, [COUNTER], threaded=True)
+    await mind.boot()
+    task = asyncio.ensure_future(mind.append([BUMPED.draft(by=1)], emitter="counter", correlation="t"))
+    for _ in range(50):  # jusqu'à ce que l'écriture soit partie vers le fil
+        await asyncio.sleep(0)
+        if mind._lock.locked():
+            break
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    after = await mind.append([BUMPED.draft(by=2)], emitter="counter", correlation="t")
+    assert mind.root.slices["counter"].n == 3 and after.seqs == (3,)  # 1 + 2 : les deux sont là
+    assert [r[0] for r in mind.store.query_mind("SELECT seq FROM events ORDER BY seq")] == [1, 2, 3]
+    await mind.close()

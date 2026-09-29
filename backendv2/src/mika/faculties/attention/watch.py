@@ -13,6 +13,7 @@ from typing import Any
 
 from mika.contracts import attention as c
 from mika.contracts import body as body_c
+from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import presence as presence_c
@@ -53,7 +54,7 @@ def met(state: AttentionState, frame: Frame) -> list[str]:
 
 
 @ATTENTION.process("attention.watch", wake_on=[rt.PERCEPTION_RECEIVED, rt.UTTERANCE, rt.EPISODE_STARTED,
-                                               memory_c.BELIEVED, *c.ALL, *body_c.ALL],
+                                               memory_c.BELIEVED, goals_c.GOAL_CLOSED, *c.ALL, *body_c.ALL],
                    lane="background", catch_up=CatchUp.ONCE, max_quantum_s=1800, priority=30)
 class Watch:
     def __init__(self) -> None:
@@ -105,6 +106,12 @@ class Watch:
 
     def _thought(self, q: Pending, frame: Frame, store: Any) -> Draft[Any]:
         mark = f"pensée:{q.origin}:{q.source}"
+        if q.origin == c.BLOCKED:
+            title = store.content([q.ref]).get(q.ref) if store is not None and q.ref else None
+            text = f"Je bloque sur : {_clip(title, 200)}" if title else "Je bloque sur quelque chose."
+            return c.THOUGHT_BORN.draft(text=Content.of(text, level=q.sensitivity), emotion=q.emotion,
+                                        intensity=q.intensity, origin=q.origin, about=q.about,
+                                        sensitivity=q.sensitivity, source=q.source, dedupe_key=mark)
         if q.origin == c.REVISION:
             texts = {}
             if store is not None:

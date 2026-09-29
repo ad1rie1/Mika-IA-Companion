@@ -14,10 +14,10 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
 from mika.kernel.events import Draft, Origin
-from mika.kernel.faculty import ToolSpec
+from mika.kernel.faculty import ToolResult, ToolSpec
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
 from mika.ports.llm import LLMGateway, LLMRequest, LLMResponse, Message, ToolDecl
@@ -34,11 +34,6 @@ MAX_TURNS_MARKER = "[trop d'appels d'outils : j'arrête là]"
 RAW_ARGS_KEY = "_raw"
 
 
-class ToolResult(BaseModel):
-    ok: bool = True
-    content: str = ""
-
-
 @dataclass(slots=True)
 class ToolContext:
     """Ce qu'un gestionnaire d'outil reçoit."""
@@ -50,6 +45,9 @@ class ToolContext:
     frame: Frame
     guard: Guard | None = None
     ports: Mapping[str, Any] = field(default_factory=dict)
+    #: les appels d'outils déjà faits dans cet épisode (nom, réussi) : ce
+    #: qu'elle a réellement fait, pour qui doit en juger (« fini » exige une preuve)
+    calls: tuple[tuple[str, bool], ...] = ()
     _emitted: int = 0
 
     @property
@@ -140,6 +138,8 @@ async def run_tool_loop(
                 continue
             counts[call.name] = counts.get(call.name, 0) + 1
             ctx = make_context(spec, call.id)
+            if isinstance(ctx, ToolContext):
+                ctx.calls = tuple(result.calls)
             out = await acall(spec.handler, args, ctx, label=f"outil {call.name}")
             if isinstance(out, Failed):
                 result.calls.append((call.name, False))

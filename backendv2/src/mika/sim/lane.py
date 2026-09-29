@@ -101,6 +101,8 @@ def day_of(driver: Driver, events: list[Any]) -> list[str]:
         if e.type.name == rt.PERCEPTION_RECEIVED.name:
             where = f" [{e.data.room}]" if e.data.room else ""
             lines.append(f"{t}  {driver.names.get(e.data.handle, e.data.handle)}{where} : {e.data.text.text}")
+        elif e.type.name == rt.UTTERANCE.name and e.data.kind == "STEP":
+            lines.append(f"{t}  · (pour elle-même, en travaillant) {e.data.text.text}")
         elif e.type.name == rt.UTTERANCE.name:
             to = driver.names.get(e.data.target or "", e.data.target or "tout le monde")
             where = f" [{e.data.room}]" if e.data.room else ""
@@ -108,6 +110,15 @@ def day_of(driver: Driver, events: list[Any]) -> list[str]:
         elif e.type.name == rt.EPISODE_ENDED.name and e.data.outcome not in ("done",):
             lines.append(f"{t}  · {e.data.kind.lower()} {e.data.outcome}"
                          + (f" ({e.data.detail[:60]})" if e.data.detail else ""))
+        elif e.type.name == "goals.opened":
+            lines.append(f"{t}  · but ouvert ({e.data.kind}, {e.data.source}) : {e.data.title.text}")
+        elif e.type.name == "goals.step_reported":
+            lines.append(f"{t}  · pas du but #{e.data.goal} : {e.data.verdict}"
+                         + (" (sans preuve)" if e.data.verdict == "done" and not e.data.proven else "")
+                         + f" — {(e.data.summary.text or '')[:80]}")
+        elif e.type.name == "goals.closed":
+            lines.append(f"{t}  · but #{e.data.goal} clos : {e.data.status}"
+                         + (f" ({e.data.reason[:60]})" if e.data.reason else ""))
         elif e.type.name.startswith("identity."):
             lines.append(f"{t}  · identité : {e.type.name.split('.', 1)[1]} {e.data.handle}")
         elif e.type.name == "kernel.boot":

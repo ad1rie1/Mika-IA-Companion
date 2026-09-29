@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from mika.kernel.events import Content, Payload, VoiceProvenance, event_type
 from mika.kernel.facts import FactKey
 
@@ -39,6 +41,9 @@ class EpisodeStarted(Payload):
     trigger: str = ""
     reason: str = ""
     reply_to: int | None = None
+    #: ce sur quoi porte l'épisode quand ce n'est pas sa cible (``goal:12`` pour
+    #: un rappel adressé à quelqu'un) : son propriétaire le reconnaît
+    subject: str | None = None
 
 
 class ToolOutcome(Payload):
@@ -97,6 +102,11 @@ class EffectResolved(Payload):
     approved: bool
     note: str = ""
     by: str = ""
+    #: recopiés de la proposition : l'exécuteur n'a pas à relire le journal
+    capability: str = ""
+    owner: str = ""
+    args_json: str = "{}"
+    context: str = ""
 
 
 class EffectExecuted(Payload):
@@ -125,3 +135,19 @@ ALL = (
 
 #: Les messages (``seq``) qui attendent encore leur réponse.
 AWAITING = FactKey("runtime.awaiting", type=tuple, doc="perceptions sans réponse encore réglée")
+
+
+@dataclass(frozen=True, slots=True)
+class PendingEffectView:
+    """Un effet externe qui attend l'accord d'un opérateur."""
+
+    proposal: int
+    capability: str
+    owner: str
+    context: str
+    summary_ref: str
+    at: int
+
+
+#: Les effets proposés qui attendent un accord, du plus ancien au plus récent.
+PENDING_EFFECTS = FactKey("runtime.pending_effects", type=tuple)

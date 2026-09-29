@@ -290,3 +290,17 @@ def describe_fr(certainty: float, trust: ChannelTrust, name: str = "") -> str:
     if level == "corroborated":
         return f"Tu penses vraiment que c'est {who} : ce qui a été dit recoupe ce que tu sais{where}."
     return f"Tu reconnais {who} : tu as décidé de le croire et tu as relié ce contact à ta mémoire{where}."
+
+
+def hearable(about: tuple[str, ...], sensitivity: int, interlocutor: str | None, level: int, witness_level: int,
+             own_file: bool) -> bool:
+    """Ce qu'on peut dire devant une audience : ce qui ne concerne personne
+    passe ; ce qui ne concerne que l'interlocuteur, s'il est anodin ou si sa
+    fiche est ouverte ; ce qui concerne d'autres, jusqu'au niveau de
+    l'audience (le niveau « témoin » quand l'interlocuteur en est aussi)."""
+    if not about:
+        return True
+    others = [a for a in about if a != interlocutor]
+    if not others:
+        return sensitivity <= Sensitivity.ANODYNE or own_file
+    return sensitivity <= (witness_level if interlocutor in about else level)

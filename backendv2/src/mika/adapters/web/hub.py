@@ -105,6 +105,14 @@ class Hub:
             await self._send(targets, protocol.inner_state_update(frame, d.target, self.panel(d.target)))
         return True
 
+    async def refresh_panels(self) -> int:
+        """Un état intérieur frais pour chaque connexion (avec son panneau)."""
+        frame = self.port.frame()
+        sent = 0
+        for handle in sorted({c.handle for c in self.conns.values()}):
+            sent += await self._send(self.of(handle), protocol.inner_state_update(frame, handle, self.panel(handle)))
+        return sent
+
     def panel(self, handle: str) -> dict[str, Any] | None:
         getter = getattr(self.port, "person_panel", None)
         if getter is None:

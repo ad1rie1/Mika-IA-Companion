@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict
 
 from mika.contracts import attention as c
 from mika.contracts import expression as expression_c
+from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
@@ -48,8 +49,9 @@ class AttentionParams(BaseModel):
     birth_factor: float = 0.7
     exchange_spacing_us: int = 30 * MINUTE
     exchange_cap: int = 3
-    # une croyance révisée, un manque
+    # une croyance révisée, un manque, un but bloqué
     revision_intensity: float = 0.3
+    blocked_intensity: float = 0.35
     missing_intensity: float = 0.3
     missing_check_us: int = 30 * MINUTE
     # y repenser
@@ -95,6 +97,9 @@ class Pending:
     at: int
     public: bool = False
     extra: int | None = None  # la croyance remplacée
+    ref: str = ""  # un texte déjà écrit (le titre d'un but bloqué)
+    about: tuple[str, ...] = ()
+    sensitivity: int = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,7 +172,8 @@ def _uttered(s: AttentionState, e, cx) -> AttentionState:
     if d.kind == Kind.INITIATIVE:
         reasons = s.openings.get(e.correlation, "").split(",")
         s = replace(s, openings=s.openings.delete(e.correlation))
-        if social_c.GREETING not in reasons:
+        # saluer, rappeler : ce n'est pas prendre la parole pour qu'on lui réponde
+        if social_c.GREETING not in reasons and goals_c.REMIND not in reasons:
             window = p.reply_window_message_us if d.channel == "telegram" else p.reply_window_us
             s = _expect(s, c.REPLY, person, e.at, e.at + window)
     declared = Declared.decode(d.annotation(expression_c.EMOTION_ANNOTATION))
@@ -198,6 +204,24 @@ def _revised(s: AttentionState, e, cx) -> AttentionState:
     p = params(cx.params)
     return replace(s, pending=(*s.pending, Pending(e.seq, c.REVISION, None, Emotion.CONFUSED.value,
                                                    p.revision_intensity, e.at, extra=e.data.replaces)))
+
+
+@ATTENTION.reducer(goals_c.GOAL_CLOSED)
+def _goal_closed(s: AttentionState, e, cx) -> AttentionState:
+    """Ce qu'elle a mené à bout apaise la pensée d'où c'était venu (elle
+    l'oublie parce qu'elle l'a fait, pas parce que le temps a passé). Bloquer
+    n'apaise rien : l'ancienne pensée reste ce qu'elle est, et le blocage en
+    devient une autre."""
+    d = e.data
+    p = params(cx.params)
+    source = int(d.source.split(":", 1)[1]) if d.source.startswith("thought:") and d.source[8:].isdigit() else None
+    if source is not None and source in s.thoughts and d.status == goals_c.ACHIEVED:
+        s = replace(s, thoughts=s.thoughts.delete(source))
+    if d.status != goals_c.STUCK or d.kind == goals_c.REMINDER:
+        return s
+    pending = Pending(e.seq, c.BLOCKED, d.owner, Emotion.FRUSTRATED.value, p.blocked_intensity, e.at,
+                      ref=d.title.ref or "", about=tuple(d.about), sensitivity=d.sensitivity)
+    return replace(s, pending=(*s.pending, pending))
 
 
 @ATTENTION.reducer(rt.EPISODE_STARTED, reads=[identity_c.PERSON])

@@ -5,20 +5,26 @@ from __future__ import annotations
 from typing import Any
 
 from mika.contracts import attention as attention_c
+from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import presence as presence_c
+from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.contracts.entry import Admission, HistoryRow
 from mika.contracts.runtime import PerceptionReceived
 from mika.faculties import transcript
 from mika.faculties.attention import prompt as attention_prompt
+from mika.faculties.goals import work as goals_work
 from mika.faculties.identity import describe
 from mika.faculties.self import night
+from mika.kernel.clock import local
 from mika.kernel.events import Origin
 from mika.kernel.frame import Audience, Frame
+from mika.kernel.guards import Guard, Superseded
 from mika.runtime.bootstrap import Kernel, ReadOnlyStore
+from mika.vocab.episodes import goal_of
 
 
 def _row(r: dict) -> HistoryRow:
@@ -89,6 +95,52 @@ class KernelPort:
                                      "created_at": ""}
         return out
 
+    async def resolve_effect(self, proposal: int, approved: bool, *, by: str, note: str = "") -> str:
+        frame = self.kernel.mind.frame()
+        pending = frame.state("runtime").effects.get(proposal)
+        if pending is None:
+            return "unknown"
+        draft = rt.EFFECT_RESOLVED.draft(
+            proposal=proposal, approved=approved, note=note[:500], by=by, capability=pending.capability,
+            owner=pending.owner, args_json=pending.args_json, context=pending.context,
+            dedupe_key=f"décision:{proposal}")
+
+        def still_pending(view: Any) -> bool:
+            return any(e.proposal == proposal for e in view.get(rt.PENDING_EFFECTS))
+
+        try:
+            await self.kernel.mind.append([draft], emitter="runtime", correlation=f"décision:{proposal}",
+                                          origin=Origin.EXTERNAL, guard=Guard("en attente", predicate=still_pending))
+        except Superseded:
+            return "unknown"  # une autre décision est passée avant
+        return "approved" if approved else "rejected"
+
+    def _work(self, frame: Any) -> dict[str, Any]:
+        """Ses projets et ce qui attend un accord — pour une propriétaire."""
+        live = [g for g in frame.get(goals_c.LIVE) if g.kind == goals_c.PROJECT]
+        pending = frame.get(rt.PENDING_EFFECTS)
+        refs = [g.title_ref for g in live] + [e.summary_ref for e in pending]
+        texts = self._store.content([r for r in refs if r])
+        goals = frame.state("goals").goals
+        tz = frame.env.tz_of(frame.root)
+        projects = []
+        for g in live:
+            nxt = goals_work.next_step_at(goals[g.id], frame.state("goals"), frame) if g.id in goals else None
+            projects.append({
+                "id": g.id, "title": texts.get(g.title_ref, ""), "status": "paused" if g.status == goals_c.WAITING
+                else "active", "priority": "normal", "origin": "user" if g.authority == goals_c.USER else "self",
+                "emotion_policy": "off", "schedule_rule": g.schedule or "manual",
+                "next_run_at": local(nxt, tz).isoformat() if nxt else None, "tasks_total": g.max_steps,
+                "tasks_done": g.steps, "tasks_blocked": 0})
+        actions = []
+        for e in pending:
+            gid = goal_of(e.context)
+            title = texts.get(goals[gid].title_ref, "") if gid in goals else ""
+            actions.append({"id": e.proposal, "project_id": gid or 0, "project_title": title or e.owner,
+                            "proposal": texts.get(e.summary_ref, ""), "payload_kind": e.capability,
+                            "created_at": local(e.at, tz).isoformat()})
+        return {"projects": projects, "pending_project_actions": actions}
+
     def person_panel(self, handle: str) -> dict[str, Any] | None:
         frame = self.kernel.mind.frame()
         view = frame.get(identity_c.IDENTITY(handle))
@@ -102,6 +154,8 @@ class KernelPort:
         }}
         disclosure = frame.get(identity_c.DISCLOSURE((handle, view.channel or "web", False)))
         out.update(self._inner_life(frame, handle, disclosure))
+        if frame.get(identity_c.IS_OWNER(frame.get(identity_c.PERSON(handle)))):
+            out.update(self._work(frame))
         if not disclosure.own_file:
             return out  # sa fiche est fermée : rien de ce qu'elle sait de la personne
         person = frame.get(identity_c.PERSON(handle))

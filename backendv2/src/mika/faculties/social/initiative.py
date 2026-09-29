@@ -19,6 +19,7 @@ quelqu'un qui manque, chercher du réconfort — et la retenue.
 from __future__ import annotations
 
 from mika.contracts import affect as affect_c
+from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
 from mika.contracts import presence as presence_c
 from mika.contracts import social as c
@@ -185,8 +186,8 @@ def _restraint(s: SocialState, frame: Frame, row: RowView) -> Modulation:
     person = frame.get(identity_c.PERSON(row.target))
     if frame.get(affect_c.HOSTILITY(person)) >= p.grudge:
         return Modulation(veto=c.GRUDGE)
-    if c.GREETING in row.reasons:
-        return Modulation()
+    if c.GREETING in row.reasons or goals_c.REMIND in row.reasons:
+        return Modulation()  # un rappel promis se dit, même à quelqu'un qui n'a pas répondu
     unanswered = s.contacts[person].unanswered if person in s.contacts else 0
     if unanswered and row.target not in frame.get(presence_c.PRESENT):
         return Modulation(veto=c.UNANSWERED)

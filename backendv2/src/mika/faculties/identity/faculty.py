@@ -317,6 +317,14 @@ def _is_owner(s: IdentityState, cx, person: str) -> bool:
     return False
 
 
+@IDENTITY.fact(c.OWNERS)
+def _owners(s: IdentityState, cx) -> tuple[str, ...]:
+    declared = set(_params(cx.params).owners)
+    out = {_root(s, k) for k, h in s.handles.items() if k in declared or (h.authenticated and h.operator)}
+    out |= {k for k in declared if k not in s.handles}
+    return tuple(sorted(out))
+
+
 @IDENTITY.fact(c.DISCLOSURE, reads=[affect_c.WARMTH, social_c.CLOSENESS])
 def _disclosure(s: IdentityState, cx, arg: tuple[Any, ...]) -> Disclosure:
     try:
