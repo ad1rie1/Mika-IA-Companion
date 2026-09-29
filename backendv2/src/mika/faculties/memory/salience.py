@@ -89,8 +89,8 @@ class Verdict:
 def admissible(about: tuple[str, ...], sensitivity: int, interlocutor: str | None, audience: Audience) -> Verdict:
     others = tuple(sorted(a for a in about if a != interlocutor))
     concerned = interlocutor is not None and interlocutor in about
-    if not about:
-        return Verdict(True)
+    if not about:  # personne d'identifié : anodin, ou ce que l'audience peut entendre
+        return Verdict(sensitivity <= max(Sensitivity.ANODYNE, audience.level))
     if not others:  # seulement l'interlocuteur
         ok = sensitivity <= Sensitivity.ANODYNE or audience.private_ok
         return Verdict(ok)

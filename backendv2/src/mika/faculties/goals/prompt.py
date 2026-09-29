@@ -186,7 +186,10 @@ def _live_section(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> Sec
         elif g.kind == c.PROJECT:
             lines.append(f"- un projet pour {_who(frame, g.address or g.owner)} : {title} ({_progress(g) or 'en cours'})")
         else:
-            waiting = " — tu attends avant d'y revenir" if g.status == c.WAITING else ""
+            waiting = ""
+            if g.status == c.WAITING:
+                waiting = (f" — tu attends la réponse de {_who(frame, g.wait_for)}" if g.wait_for
+                           else " — tu attends avant d'y revenir")
             lines.append(f"- tu explores : {title} ({_progress(g) or 'en cours'}){waiting}")
         if any(a != person for a in g.about):  # ce qui ne concerne que l'interlocuteur ne compte pas ici
             level = max(level, g.sensitivity)

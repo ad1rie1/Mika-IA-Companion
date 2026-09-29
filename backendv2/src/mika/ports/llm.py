@@ -21,6 +21,14 @@ class ToolCall:
 
 
 @dataclass(frozen=True, slots=True)
+class Image:
+    """Une image jointe à un message utilisateur (base64)."""
+
+    mime: str
+    data: str
+
+
+@dataclass(frozen=True, slots=True)
 class Message:
     role: str  # "user" | "assistant" | "tool"
     content: str = ""
@@ -28,6 +36,8 @@ class Message:
     tool_call_id: str | None = None
     name: str | None = None
     is_error: bool = False
+    #: des images (message utilisateur seulement : décrire une photo, ce que voit la caméra)
+    images: tuple[Image, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

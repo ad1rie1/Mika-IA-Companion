@@ -48,7 +48,10 @@ def ollama_messages(req: LLMRequest) -> list[dict[str, Any]]:
         out.append({"role": "system", "content": system})
     for m in req.messages:
         if m.role == "user":
-            out.append({"role": "user", "content": m.content})
+            user: dict[str, Any] = {"role": "user", "content": m.content}
+            if m.images:
+                user["images"] = [i.data for i in m.images]
+            out.append(user)
         elif m.role == "assistant":
             msg: dict[str, Any] = {"role": "assistant", "content": m.content}
             if m.tool_calls:

@@ -123,11 +123,14 @@ PEOPLE = ["user_1", "user_2", "user_3", "name:julie"]
 
 
 def oracle(about, sensitivity, me, level, witness_level, private_ok) -> bool:
-    """La politique, dite autrement : sa vie se raconte ; ce qui ne concerne que
-    toi, si c'est anodin ou si ta fiche est ouverte ; ce qui concerne d'autres,
-    jusqu'au niveau de l'audience — « témoin » si tu y figures aussi."""
+    """La politique, dite autrement : sa vie se raconte — mais un contenu
+    sensible sans personne identifiée concerne quelqu'un qu'on n'a pas su
+    nommer (l'expéditrice d'un mail) : jusqu'au niveau de l'audience ; ce qui
+    ne concerne que toi, si c'est anodin ou si ta fiche est ouverte ; ce qui
+    concerne d'autres, jusqu'au niveau de l'audience — « témoin » si tu y
+    figures aussi."""
     if not about:
-        return True
+        return sensitivity <= max(1, level)
     if set(about) == {me}:
         return sensitivity <= 1 or private_ok
     return sensitivity <= (witness_level if me in about else level)

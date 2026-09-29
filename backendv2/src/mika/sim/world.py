@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from mika.adapters.forge import ForgeHost
 from mika.adapters.llm.gateway import Gateway
 from mika.adapters.store_sqlite import SqliteStore
 from mika.adapters.vectors import HashEmbedder, SqliteVectorIndex
@@ -28,6 +29,7 @@ from mika.ports.llm import LLMBackend
 from mika.runtime.bootstrap import Kernel, KernelDeps
 from mika.runtime.effects import with_content
 from mika.sim.clock import SimClock
+from mika.sim.outside import FakeFeeds, FakeMail
 from mika.vocab.episodes import FALLBACKS
 
 
@@ -108,6 +110,9 @@ class Driver:
     #: les poignées d'opératrices (ses propriétaires, connectées avec leur compte)
     operators: set[str] = field(default_factory=set)
     transport: Transport | None = None
+    #: le monde extérieur (il survit aux redémarrages du noyau)
+    mail: FakeMail = field(default_factory=FakeMail)
+    feeds: FakeFeeds = field(default_factory=FakeFeeds)
 
     def __post_init__(self) -> None:
         # une messagerie (Telegram) reçoit même hors ligne : on y écrit à quelqu'un d'absent
@@ -122,7 +127,8 @@ class Driver:
                           fallbacks={str(k): str(v) for k, v in FALLBACKS.items()})
         store = SqliteStore(self.root / "mind.db", self.root / "views.db", threaded=False)
         ports = {"delivery": self.transport, "vectors": SqliteVectorIndex(store, HashEmbedder()),
-                 "workshop": BwrapWorkshop(self.root / "ateliers")}
+                 "workshop": BwrapWorkshop(self.root / "ateliers"), "mail": self.mail, "feeds": self.feeds,
+                 "forge": ForgeHost(self.root / "forge")}
         deps = self.composition.deps(store=store, clock=self.clock, ids=SeededIdGen(f"{self.seed}:{self.boots}"),
                                      gateway=gateway, ports=ports, seed=f"{self.seed}:{self.boots}")
         self.kernel = Kernel(deps)

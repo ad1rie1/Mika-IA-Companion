@@ -60,6 +60,11 @@ class MindPort(Protocol):
         attente seulement pour une propriétaire)."""
         ...
 
+    async def sense(self, device: str, text: str, *, pertinence: float = 0.5, emotion: str = "",
+                    sensitivity: int = 1) -> int | None:
+        """Un appareil lui signale quelque chose ; rend le ``seq`` (``None`` : refusé)."""
+        ...
+
     async def resolve_effect(self, proposal: int, approved: bool, *, by: str, note: str = "") -> str:
         """Approuver ou refuser un effet externe proposé : ``"approved"``,
         ``"rejected"``, ``"unknown"`` (rien en attente sous ce numéro)."""

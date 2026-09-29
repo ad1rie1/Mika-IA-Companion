@@ -23,15 +23,18 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from mika.contracts.entry import MindPort
-from mika.contracts.runtime import PerceptionReceived
+from mika.contracts.runtime import AttachmentMeta, PerceptionReceived
 from mika.kernel.events import Content
 from mika.ports.delivery import Delivery
+from mika.ports.preprocess import Perceived, Preprocessor, Upload, render
 from mika.vocab.affect import strip_prosody
 
 CHANNEL = "telegram"
 HANDLE_PREFIX = "tg_"
 ROOM_PREFIX = "tg_chat_"
 MAX_TEXT = 2000
+MAX_FILE = 5_000_000
+MAX_FILES = 3
 TELEGRAM_LIMIT = 4096
 REFUSAL_SPACING_S = 600.0
 SENT_MEMORY = 2048
@@ -44,6 +47,19 @@ OVERLOADED = "Je suis débordée, réessaie un peu plus tard."
 
 class Bot(Protocol):
     async def send_message(self, chat_id: int, text: str) -> None: ...
+
+    async def download(self, file_id: str) -> bytes: ...
+
+
+@dataclass(frozen=True, slots=True)
+class Media:
+    """Un fichier joint, par sa référence : il n'est téléchargé qu'une fois
+    le message admis (liste blanche, limites)."""
+
+    file_id: str
+    name: str
+    mime: str
+    size: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +74,7 @@ class Inbound:
     text: str
     mentions_me: bool = False
     reply_to_me: bool = False
+    media: tuple[Media, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +115,7 @@ class TelegramChannel:
     bot: Bot
     config: TelegramConfig = field(default_factory=TelegramConfig)
     monotonic: Callable[[], float] = time.monotonic
+    preprocess: Preprocessor | None = None
     _limits: dict[str, _Window] = field(default_factory=dict)
     _overheard: dict[int, _Window] = field(default_factory=dict)
     _told: dict[tuple[int, str], float] = field(default_factory=dict)
@@ -119,8 +137,34 @@ class TelegramChannel:
         self._told[(chat_id, what)] = now
         await self.bot.send_message(chat_id, text)
 
+    async def _files(self, m: Inbound) -> tuple[str, tuple[AttachmentMeta, ...]]:
+        """Ce qu'elle perçoit des fichiers joints : téléchargés maintenant (le
+        message est admis), bornés, lus par le même prétraitement que le web."""
+        uploads: list[Upload] = []
+        notes: list[Perceived] = []
+        for f in m.media[:MAX_FILES]:
+            kind = Upload(f.name, f.mime, b"").kind
+            if f.size > MAX_FILE:
+                notes.append(Perceived(f.name, kind, "trop gros pour moi (5 Mo au plus)", False, "too_large"))
+                continue
+            try:
+                data = await self.bot.download(f.file_id)
+            except (OSError, RuntimeError, ValueError) as exc:
+                notes.append(Perceived(f.name, kind, "je n'ai pas réussi à le récupérer", False, type(exc).__name__))
+                continue
+            if len(data) > MAX_FILE:
+                notes.append(Perceived(f.name, kind, "trop gros pour moi (5 Mo au plus)", False, "too_large"))
+                continue
+            uploads.append(Upload(f.name, f.mime, data))
+        if uploads and self.preprocess is not None:
+            notes += await self.preprocess.perceive(uploads)
+        elif uploads:
+            notes += [Perceived(u.name, u.kind, "reçu, mais je ne peux pas encore le lire", False) for u in uploads]
+        meta = tuple(AttachmentMeta(name=p.name, kind=p.kind, extracted=p.extracted, error=p.error) for p in notes)
+        return render(notes), meta
+
     async def receive(self, m: Inbound) -> str:
-        if m.chat_type == "channel" or not m.text.strip():
+        if m.chat_type == "channel" or (not m.text.strip() and not m.media):
             return "ignored"
         if self.config.allowed_chats and m.chat_id not in self.config.allowed_chats:
             await self._say_once(m.chat_id, "refused", REFUSED)
@@ -141,9 +185,16 @@ class TelegramChannel:
             window = self._overheard.setdefault(m.chat_id, _Window(self.config.overheard_per_minute, 60.0))
             if not window.allow(now):
                 return "ignored"  # le bavardage d'un groupe très actif ne s'écrit pas en entier
+        text, attachments = m.text[:MAX_TEXT], ()
+        if addressed and m.media:  # le bavardage d'un groupe n'est pas téléchargé
+            seen, attachments = await self._files(m)
+            text = "\n".join(x for x in (text, seen) if x)
+        if not text.strip():
+            return "ignored"
         p = PerceptionReceived(
-            handle=handle, channel=CHANNEL, text=Content.of(m.text[:MAX_TEXT]), room=None if private else room_of(m.chat_id),
+            handle=handle, channel=CHANNEL, text=Content.of(text), room=None if private else room_of(m.chat_id),
             public=not private, reply_ref=str(m.chat_id), display_name=m.name, addressed=addressed,
+            attachments=attachments,
         )
         got = await self.port.perceive(p, dedupe_key=f"tg:{m.update_id}")
         if got.status == "overloaded":

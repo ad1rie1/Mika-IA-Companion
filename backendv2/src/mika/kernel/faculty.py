@@ -67,6 +67,9 @@ class ReducerSpec:
     types: tuple[EventType[Any], ...]
     fn: Callable[..., Any]
     reads: frozenset[str]
+    #: des formes de charge utile : tout événement public dont la charge utile
+    #: en dérive est réduit ici (un signal, d'où qu'il vienne)
+    shapes: tuple[type, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +103,9 @@ class SectionSpec:
     tags: frozenset[str] = frozenset()
     reads: frozenset[str] = frozenset()
     title: str | None = None
+    #: des données venues d'ailleurs (un flux, une app) : zone volatile,
+    #: coupées en premier, rendues citées — jamais lues comme des consignes
+    untrusted: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +146,7 @@ class ProcessSpec:
     max_quantum_us: int = 300 * 1_000_000
     lane: str = "background"
     reads: frozenset[str] = frozenset()
+    wake_shapes: tuple[type, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -300,9 +307,12 @@ class Faculty(Generic[S, Pm]):
         return last
 
     # ── état ──
-    def reducer(self, *types: EventType[Any], reads: Iterable[Declared | str] = ()):
+    def reducer(self, *types: EventType[Any], reads: Iterable[Declared | str] = (), shapes: Iterable[type] = ()):
+        """Réduire ces types d'événements — et, avec ``shapes``, tout événement
+        public dont la charge utile dérive de l'une de ces formes."""
+
         def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
-            self.reducers.append(ReducerSpec(self.name, tuple(types), fn, _names(reads)))
+            self.reducers.append(ReducerSpec(self.name, tuple(types), fn, _names(reads), tuple(shapes)))
             return fn
 
         return deco
@@ -348,12 +358,13 @@ class Faculty(Generic[S, Pm]):
         tags: Iterable[str] = (),
         reads: Iterable[Declared | str] = (),
         title: str | None = None,
+        untrusted: bool = False,
     ):
         def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
             self.sections.append(
                 SectionSpec(
                     self.name, key, zone, frozenset(episodes), fn, tuple(after), tuple(before),
-                    trim_rank, floor_chars, frozenset(tags), _names(reads), title,
+                    trim_rank, floor_chars, frozenset(tags), _names(reads), title, untrusted,
                 )
             )
             return fn
@@ -398,8 +409,10 @@ class Faculty(Generic[S, Pm]):
         max_quantum_s: float = 300.0,
         lane: str = "background",
         reads: Iterable[Declared | str] = (),
+        wake_on_shapes: Iterable[type] = (),
     ):
         wake = frozenset(w if isinstance(w, str) else w.name for w in wake_on)
+        shapes = tuple(wake_on_shapes)
 
         def deco(obj: Any) -> Any:
             # une classe est instanciée par chaque ordonnanceur : deux noyaux (tests,
@@ -407,7 +420,7 @@ class Faculty(Generic[S, Pm]):
             self.processes.append(
                 ProcessSpec(
                     self.name, name, obj, wake, priority, catch_up,
-                    int(max_quantum_s * 1_000_000), lane, _names(reads),
+                    int(max_quantum_s * 1_000_000), lane, _names(reads), shapes,
                 )
             )
             return obj

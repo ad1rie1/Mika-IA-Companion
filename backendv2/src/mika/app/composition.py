@@ -35,15 +35,20 @@ from mika.kernel.faculty import Faculty
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.guards import Guard
 from mika.kernel.registry import ArbitrationPolicy
+from mika.plugins.camera import CAMERA
+from mika.plugins.email import EMAIL
+from mika.plugins.forge import FORGE
+from mika.plugins.rss import RSS
+from mika.plugins.sensors import SENSORS
 from mika.runtime.bootstrap import Kernel, KernelDeps
 from mika.sim.world import Composition
 from mika.vocab.episodes import VOICE_ROLES, Kind, Role
 
 
 def faculties() -> list[Faculty[Any, Any]]:
-    """Les facultés de Mika (M6)."""
+    """Les facultés de Mika, puis ses plugins (M7)."""
     return [PRESENCE, IDENTITY, TRANSCRIPT, MEMORY, BODY, AFFECT, NEEDS, ATTENTION, SELF, EXPRESSION, SOCIAL,
-            AGENCY, GOALS]
+            AGENCY, GOALS, EMAIL, RSS, CAMERA, FORGE, SENSORS]
 
 
 def _reply_guard(frame: Frame, target: str | None, audience: Audience | None) -> Guard | None:
@@ -58,15 +63,17 @@ def policies() -> dict[str, EpisodePolicy]:
     return {
         Kind.REPLY: EpisodePolicy(kind=Kind.REPLY, role=Role.REPLY, priority=0, lane="conversation",
                                   guard=_reply_guard, max_tokens=1024, deadline_s=180.0,
-                                  tool_bundles=frozenset({"memory", "identity", "goals"})),
+                                  tool_bundles=frozenset({"memory", "identity", "goals", "email", "rss", "camera",
+                                                          "forge", "forge_apps"})),
         Kind.INITIATIVE: EpisodePolicy(kind=Kind.INITIATIVE, role=Role.INITIATIVE, priority=1, lane="conversation",
                                        brief=initiative_brief, max_tokens=600, deadline_s=180.0,
-                                       tool_bundles=frozenset({"memory", "identity"})),
+                                       tool_bundles=frozenset({"memory", "identity", "rss", "forge_apps"})),
         # un pas de travail : sa voix (compacte), pour elle seule — ni fil, ni livraison ; le verdict fait l'affect
         Kind.STEP: EpisodePolicy(kind=Kind.STEP, role=Role.STEP, priority=2, lane="background",
                                  persona_depth="compact", visible=False, delivered=False, brief=step_brief,
                                  max_tool_turns=12, max_tokens=2048, deadline_s=300.0,
-                                 tool_bundles=frozenset({"goals", "memory", "workshop"})),
+                                 tool_bundles=frozenset({"goals", "memory", "workshop", "email", "rss",
+                                                         "camera", "forge", "forge_apps"})),
         # une pensée à voix haute : sa voix brève, pas dans le fil, à l'écran seulement
         Kind.MURMUR: EpisodePolicy(kind=Kind.MURMUR, role=Role.MURMUR, priority=1, lane="conversation",
                                    persona_depth="compact", visible=False, max_tokens=80, deadline_s=60.0),

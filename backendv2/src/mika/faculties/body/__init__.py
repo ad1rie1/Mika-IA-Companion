@@ -182,10 +182,22 @@ class Rest:
         last = max(state.sleep.since, state.sleep.active_at)
         return last if last else now
 
+    def __init__(self) -> None:
+        self._memo: tuple[Any, int | None] | None = None
+
     def next_due(self, state: BodyState, frame: Frame, last_run: int | None) -> int | None:
+        """Le prochain croisement : une recherche coûteuse, dont le résultat ne
+        dépend que de l'état du sommeil, de son point de départ et des
+        paramètres — mémorisé tant qu'ils ne changent pas."""
         p = params(frame.env.params_of("body", frame.root))
-        return sl.next_transition(state.sleep, self._from(state, frame.now), p.sleep, frame.env.tz_of(frame.root),
-                                  p.shift_minutes, night(p))
+        start = self._from(state, frame.now)
+        tz = frame.env.tz_of(frame.root)
+        key = (state.sleep, start, p, str(tz))
+        if self._memo is not None and self._memo[0] == key:
+            return self._memo[1]
+        due = sl.next_transition(state.sleep, start, p.sleep, tz, p.shift_minutes, night(p))
+        self._memo = (key, due)
+        return due
 
     async def run(self, ctx: Any) -> None:
         frame: Frame = ctx.frame

@@ -15,7 +15,12 @@ from typing import Any
 
 from starlette.applications import Starlette
 
+from mika.adapters.camera import CameraBuffer
+from mika.adapters.feeds import HttpFeeds
+from mika.adapters.forge import ForgeHost
 from mika.adapters.llm.config import LiveGateway, build_gateway
+from mika.adapters.mail import ImapSmtpMail
+from mika.adapters.preprocess import LocalPreprocessor, whisper
 from mika.adapters.store_sqlite import SqliteStore
 from mika.adapters.system import RandomIdGen, RealClock
 from mika.adapters.telegram import TelegramChannel, TelegramConfig, handle_of
@@ -52,6 +57,7 @@ class Live:
     #: une passerelle fournie de l'extérieur (tests, simulateur) n'est pas rechargée
     fixed: bool = False
     telegram: Any = None
+    preprocess: Any = None
 
     async def start_telegram(self) -> None:
         """Le robot Telegram, s'il est configuré (``mika telegram token …``)."""
@@ -60,7 +66,7 @@ class Live:
         if not cfg["token"]:
             return
         config = TelegramConfig(allowed_chats=frozenset(cfg["allowed_chats"]))
-        poller = Poller(cfg["token"], lambda bot: TelegramChannel(self.port, bot, config))
+        poller = Poller(cfg["token"], lambda bot: TelegramChannel(self.port, bot, config, preprocess=self.preprocess))
         await poller.start()
         self.telegram = poller
         self.router.telegram = poller.channel
@@ -97,13 +103,16 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     hub = Hub(port=None)  # type: ignore[arg-type] — relié au port juste après
     router = Router(hub)
     vectors = SqliteVectorIndex(store, embedder or SentenceEmbedder())
+    camera = CameraBuffer(clock.now)
+    settings = Settings(store, SecretBox.for_data(data))
+    world = {"mail": ImapSmtpMail(settings.email, data / "mail.db"),
+             "feeds": HttpFeeds(settings.feeds, data / "feeds.db"),
+             "workshop": BwrapWorkshop(data / "ateliers"), "camera": camera, "forge": ForgeHost(data / "forge")}
     kernel = Kernel(composition.deps(store=store, clock=clock, ids=RandomIdGen(), gateway=gateway,
-                                     ports={"delivery": router, "vectors": vectors,
-                                            "workshop": BwrapWorkshop(data / "ateliers")}, **deps))
+                                     ports={"delivery": router, "vectors": vectors, **world}, **deps))
     port = KernelPort(kernel)
     hub.port = port
-    live = Live(kernel, hub, port, Accounts(store), Settings(store, SecretBox.for_data(data)), gateway, router,
-                fixed)
+    live = Live(kernel, hub, port, Accounts(store), settings, gateway, router, fixed)
 
     @contextlib.asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
@@ -130,7 +139,10 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
 
     inspector = routes(InspectorDeps(kernel, live.accounts, live.settings, live.reload_llm, gateway.traces),
                        cookie_secure=(web.cookie_secure if web else False))
-    return create_app(port, live.accounts, hub, web, lifespan=lifespan, extra_routes=inspector), live
+    preprocess = LocalPreprocessor(gateway, transcribe=whisper(settings.stt))
+    live.preprocess = preprocess
+    return create_app(port, live.accounts, hub, web, lifespan=lifespan, extra_routes=inspector,
+                      preprocess=preprocess, camera=camera, sensor_token=settings.sensors_token), live
 
 
 def serve(*, host: str = "127.0.0.1", port: int = 8001, data: Path = Path("data/v2")) -> None:

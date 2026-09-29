@@ -61,6 +61,8 @@ class GoalsParams(BaseModel):
     # ouvrir de soi-même
     live_self_max: int = 2
     seed_spacing_us: int = 2 * HOUR
+    #: après un blocage, elle met plus longtemps à entreprendre autre chose
+    discouraged_us: int = 6 * HOUR
     seed_thought_from: float = 0.35
     seed_thought_age_us: int = 30 * MINUTE
     seed_curiosity_from: float = 0.7
@@ -117,6 +119,8 @@ class Goal:
     evidence: int = 0
     last_step_at: int = 0
     waiting_until: int = 0
+    waiting_since: int = 0
+    wait_for: str | None = None
     summary_ref: str = ""
     notes: tuple[str, ...] = ()  # références des notes de son carnet
     effects: tuple[str, ...] = ()  # ce que sont devenus ses effets externes (courtes lignes)
@@ -145,7 +149,8 @@ class GoalsState:
     running: FrozenDict[str, Run] = field(default_factory=FrozenDict)
     #: les pas de la dernière heure (plafond horaire)
     steps_at: tuple[int, ...] = ()
-    #: source → fermeture : on ne rouvre pas sous 24 h ce qu'on vient de clore
+    #: sujet → fermeture : on ne rouvre pas sous 24 h ce qu'on vient de clore
+    #: (une inquiétude redite est une autre pensée, mais le même sujet)
     closed_sources: FrozenDict[str, int] = field(default_factory=FrozenDict)
     #: centre d'intérêt → dernière exploration
     explored: FrozenDict[str, int] = field(default_factory=FrozenDict)
@@ -153,6 +158,8 @@ class GoalsState:
     proposals: FrozenDict[int, int] = field(default_factory=FrozenDict)
     #: la dernière fois qu'elle a entrepris quelque chose d'elle-même
     self_opened_at: int = 0
+    #: la dernière fois qu'elle a bloqué sur ce qu'elle avait entrepris
+    self_stuck_at: int = 0
 
 
 GOALS = Faculty("goals", state=GoalsState, init=lambda p: GoalsState(), params=GoalsParams, derive=derive)
@@ -169,8 +176,33 @@ class Noted(Payload):
 NOTED = GOALS.event("noted", Noted, content=("text",))
 
 
+class Awaited(Payload):
+    """La personne qu'elle attendait a écrit : le but reprend."""
+
+    goal: int
+    person: str
+
+
+AWAITED = GOALS.event("awaited", Awaited)
+
+
 def params(p: GoalsParams | None) -> GoalsParams:
     return p if p is not None else GoalsParams()
+
+
+def subject_key(source: str, about: tuple[str, ...]) -> str:
+    """Ce sur quoi porte un but, pour ne pas le rouvrir : la personne dont
+    parle la pensée d'où il vient, sinon sa source."""
+    if source.startswith("thought:") and about:
+        return f"about:{about[0]}"
+    return source
+
+
+def ready_to_undertake(s: GoalsState, p: GoalsParams) -> int:
+    """À partir de quand elle peut entreprendre à nouveau quelque chose d'elle-même :
+    pas deux choses dans la même heure, et plus lentement après un échec."""
+    return max(s.self_opened_at + p.seed_spacing_us if s.self_opened_at else 0,
+               s.self_stuck_at + p.discouraged_us if s.self_stuck_at else 0)
 
 
 def desire(g: Goal, now: int, p: GoalsParams) -> float:
@@ -306,12 +338,20 @@ def _reported(s: GoalsState, e, cx) -> GoalsState:
                 evidence=g.evidence + len(d.tools))
     if d.verdict == c.WAIT:
         wait = max(p.wait_min_us, min(p.wait_max_us, d.wait_s * 1_000_000))
-        g = replace(g, status=c.WAITING, waiting_until=e.at + wait)
+        g = replace(g, status=c.WAITING, waiting_until=e.at + wait, waiting_since=e.at, wait_for=d.wait_for)
     elif d.verdict == c.DONE and not d.proven:
         g = replace(g, unproven=g.unproven + 1)
     elif g.status == c.WAITING:
         g = replace(g, status=c.ACTIVE)
     return _set(s, g)
+
+
+@GOALS.reducer(AWAITED)
+def _awaited(s: GoalsState, e, cx) -> GoalsState:
+    g = s.goals.get(e.data.goal)
+    if g is None or g.status != c.WAITING:
+        return s
+    return _set(s, replace(g, status=c.ACTIVE, waiting_until=0, wait_for=None))
 
 
 @GOALS.reducer(NOTED)
@@ -332,7 +372,9 @@ def _closed(s: GoalsState, e, cx) -> GoalsState:
                 result_ref=d.result.ref or "" if d.result is not None else "")
     s = _set(s, g)
     if g.source:
-        s = replace(s, closed_sources=s.closed_sources.set(g.source, e.at))
+        s = replace(s, closed_sources=s.closed_sources.set(subject_key(g.source, g.about), e.at))
+    if d.status == c.STUCK and g.authority == c.SELF:
+        s = replace(s, self_stuck_at=e.at)
     return _prune(s, e.at)
 
 
@@ -392,6 +434,12 @@ def _status(s: GoalsState, cx, goal: int) -> str:
 
 
 # ── Ce que ses événements font ressentir ──────────────────────────────────
+
+
+@GOALS.appraisal(AWAITED)
+def _awaited_felt(e, cx) -> Appraisal:
+    """Enfin : ce qu'elle attendait est arrivé."""
+    return Appraisal(Emotion.RELIEVED, 0.2, reason="attente comblée")
 
 
 @GOALS.appraisal(c.GOAL_CLOSED)

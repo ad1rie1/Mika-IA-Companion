@@ -34,13 +34,13 @@ SHOWN = 3
 
 
 def admissible(t: c.ThoughtReading, interlocutor: str | None, aud: Audience | None) -> bool:
-    """Les règles de la mémoire : ce qui ne concerne personne passe ; ce qui ne
-    concerne que l'interlocuteur, s'il est anodin ou si sa fiche est ouverte ;
+    """Les règles de la mémoire : ce qui ne concerne personne passe s'il est
+    anodin (ou si l'audience peut l'entendre) ; ce qui ne concerne que l'interlocuteur, s'il est anodin ou si sa fiche est ouverte ;
     ce qui concerne d'autres, jusqu'au niveau de l'audience."""
-    if not t.about:
-        return True
     if aud is None:
-        return False
+        return not t.about and t.sensitivity <= Sensitivity.ANODYNE
+    if not t.about:  # personne d'identifié (un mail, un signal) : anodin, ou ce que l'audience peut entendre
+        return t.sensitivity <= max(Sensitivity.ANODYNE, aud.level)
     others = [a for a in t.about if a != interlocutor]
     if not others:
         return t.sensitivity <= Sensitivity.ANODYNE or aud.private_ok

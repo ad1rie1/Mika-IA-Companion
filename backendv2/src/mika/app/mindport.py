@@ -11,6 +11,7 @@ from mika.contracts import memory as memory_c
 from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
+from mika.contracts import sensors as sensors_c
 from mika.contracts import social as social_c
 from mika.contracts.entry import Admission, HistoryRow
 from mika.contracts.runtime import PerceptionReceived
@@ -20,10 +21,11 @@ from mika.faculties.goals import work as goals_work
 from mika.faculties.identity import describe
 from mika.faculties.self import night
 from mika.kernel.clock import local
-from mika.kernel.events import Origin
+from mika.kernel.events import Content, Origin
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.guards import Guard, Superseded
 from mika.runtime.bootstrap import Kernel, ReadOnlyStore
+from mika.vocab.affect import emotion_of
 from mika.vocab.episodes import goal_of
 
 
@@ -95,6 +97,18 @@ class KernelPort:
                                      "created_at": ""}
         return out
 
+    async def sense(self, device: str, text: str, *, pertinence: float = 0.5, emotion: str = "",
+                    sensitivity: int = 1) -> int | None:
+        emotion = emotion if emotion_of(emotion) is not None else ""
+        level = max(0, min(3, int(sensitivity)))
+        draft = sensors_c.SENSED.draft(
+            source=f"appareil:{device}", kind="signal", summary=Content.of(text[:400], level=level),
+            pertinence=max(0.0, min(1.0, float(pertinence))), emotion=emotion, intensity=0.2 if emotion else 0.0,
+            sensitivity=level, device=device)
+        commit = await self.kernel.mind.append([draft], emitter="sensors", correlation=f"appareil:{device}",
+                                               origin=Origin.EXTERNAL)
+        return commit.seqs[-1] if commit.seqs else None
+
     async def resolve_effect(self, proposal: int, approved: bool, *, by: str, note: str = "") -> str:
         frame = self.kernel.mind.frame()
         pending = frame.state("runtime").effects.get(proposal)
@@ -109,10 +123,13 @@ class KernelPort:
             return any(e.proposal == proposal for e in view.get(rt.PENDING_EFFECTS))
 
         try:
-            await self.kernel.mind.append([draft], emitter="runtime", correlation=f"décision:{proposal}",
-                                          origin=Origin.EXTERNAL, guard=Guard("en attente", predicate=still_pending))
+            commit = await self.kernel.mind.append(
+                [draft], emitter="runtime", correlation=f"décision:{proposal}", origin=Origin.EXTERNAL,
+                guard=Guard("en attente", predicate=still_pending))
         except Superseded:
             return "unknown"  # une autre décision est passée avant
+        if commit.deduped:
+            return "unknown"  # la même décision, déjà prise (une par proposition)
         return "approved" if approved else "rejected"
 
     def _work(self, frame: Any) -> dict[str, Any]:

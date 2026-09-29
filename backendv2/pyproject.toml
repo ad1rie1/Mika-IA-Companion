@@ -93,7 +93,7 @@ layers = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "Les facultés ne se connaissent pas"
+name = "Les facultés et les plugins ne se connaissent pas"
 type = "independence"
 modules = [
     "mika.faculties.body",
@@ -109,6 +109,11 @@ modules = [
     "mika.faculties.self",
     "mika.faculties.expression",
     "mika.faculties.agency",
+    "mika.plugins.email",
+    "mika.plugins.rss",
+    "mika.plugins.camera",
+    "mika.plugins.forge",
+    "mika.plugins.sensors",
 ]
 
 [[tool.importlinter.contracts]]

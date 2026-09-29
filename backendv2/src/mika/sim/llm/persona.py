@@ -63,6 +63,7 @@ def appraise(message: str) -> Tone:
 
 
 PARIS = ZoneInfo("Europe/Paris")
+_QUOTED = re.compile(r"« ([^»]+) »")
 PROJECT_CODE = 'def bonjour(nom):\n    return f"Bonjour, {nom} !"\n'
 PROJECT_TEST = ('from bonjour import bonjour\n\nassert bonjour("Adrien") == "Bonjour, Adrien !"\n'
                 'print("tests : ok")\n')
@@ -98,7 +99,8 @@ class PersonaSimLLM:
         #: pannes à injecter : rôle → nombre d'appels qui échoueront encore
         self.fail: dict[str, int] = {}
         #: comment elle travaille : « honest » (fait, puis dit fini), « liar » (dit fini sans
-        #: rien faire), « stuck » (dit qu'elle bloque)
+        #: rien faire), « stuck » (dit qu'elle bloque), « waits » (attend d'abord la réponse
+        #: de la personne concernée, puis travaille)
         self.step_mode = "honest"
 
     def _rng(self, req: LLMRequest) -> random.Random:
@@ -185,6 +187,10 @@ class PersonaSimLLM:
         if self.step_mode == "liar":
             return self._call(req, ("report_step", {"verdict": "done", "summary": "C'est fini, tout est réglé.",
                                                    "notable": 0.8}))
+        if self.step_mode == "waits" and "J'attends sa réponse" not in work:
+            return self._call(req, ("report_step", {"verdict": "wait", "until_they_answer": True,
+                                                   "wait_minutes": 1440,
+                                                   "summary": "J'attends sa réponse avant d'aller plus loin."}))
         if self.step_mode == "stuck":
             return self._call(req, ("report_step", {"verdict": "blocked",
                                                    "summary": "Je n'y arrive pas : il me manque quelque chose."}))
@@ -198,6 +204,9 @@ class PersonaSimLLM:
             return self._call(req, ("report_step", {
                 "verdict": "done" if ok else "continue", "notable": 0.8,
                 "summary": "bonjour.py écrit et testé : les tests passent." if ok else "Les tests échouent encore."}))
+        offered = {t.name for t in req.tools}
+        if title.startswith("En savoir plus") and "rss_read" in offered:
+            return self._read_up(req, title, results)
         if done == 0:
             words = " ".join(title.replace("«", " ").replace("»", " ").split()[:6])
             return self._call(req, ("memory_search", {"query": words or "souvenirs"}),
@@ -205,6 +214,23 @@ class PersonaSimLLM:
         return self._call(req, ("report_step", {"verdict": "done", "notable": 0.7,
                                                "summary": f"J'ai pris le temps d'y réfléchir ({title[:80]}) : "
                                                           "je vois plus clair."}))
+
+    def _read_up(self, req: LLMRequest, title: str, results: list[str]) -> LLMResponse:
+        """En savoir plus sur un titre de ses flux : le retrouver, le lire, noter."""
+        quoted = _QUOTED.search(title)
+        wanted = quoted.group(1) if quoted else title
+        if not results:
+            return self._call(req, ("rss_list", {"limit": 20}))
+        if len(results) == 1:
+            found = re.search(r"\[([^\]]+)\] « " + re.escape(wanted[:40]), results[0])
+            if found:
+                return self._call(req, ("rss_read", {"entry": found.group(1)}))
+            return self._call(req, ("report_step", {"verdict": "blocked", "summary": "Je ne retrouve pas l'article."}))
+        if len(results) == 2:
+            gist = " ".join(results[-1].split("\n> ", 1)[-1].split()[:20])
+            return self._call(req, ("goal_note", {"text": f"Lu : {gist}"}))
+        return self._call(req, ("report_step", {"verdict": "done", "notable": 0.7,
+                                               "summary": f"J'ai lu l'article sur « {wanted[:80]} » : passionnant."}))
 
     def _remind(self, req: LLMRequest) -> LLMResponse | None:
         """« rappelle-moi dans 20 minutes de … » / « rappelle-moi à 3h de … (urgent) »."""

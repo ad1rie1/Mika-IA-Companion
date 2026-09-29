@@ -112,7 +112,7 @@ class Kernel:
         self.mind = Mind(registry, deps.store, deps.clock, deps.ids, code=deps.code,
                          snapshot_every=deps.snapshot_every)
         ports = {"store": ReadOnlyStore(deps.store), "frame": self._head_frame,
-                 "capabilities": self.mind.registry.capabilities.get, **dict(deps.ports)}
+                 "capabilities": self.mind.registry.capabilities.get, "llm": deps.gateway, **dict(deps.ports)}
         self.ports = ports
         self.runner = EpisodeRunner(
             self.mind, deps.gateway, policies=deps.policies, persona=deps.persona,
@@ -168,6 +168,13 @@ class Kernel:
         self.started = True
         return report
 
+    def _shutdown_ports(self) -> None:
+        """Les ports qui tiennent des processus (la Forge) les arrêtent."""
+        for port in self.deps.ports.values():
+            hook = getattr(port, "shutdown", None)
+            if hook is not None:
+                call(hook, label="arrêt d'un port")
+
     async def stop(self) -> None:
         self.started = False
         for t in list(self._retries):
@@ -181,6 +188,7 @@ class Kernel:
             t.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
+        self._shutdown_ports()
         await self.mind.close()
         self.started = False
 
@@ -201,6 +209,7 @@ class Kernel:
         unseal = getattr(self.mind.store, "unseal", None)
         if unseal is not None:
             unseal()
+        self._shutdown_ports()
         await self.mind.close()
         self.started = False
 

@@ -12,7 +12,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from mika.adapters.telegram import Inbound, TelegramChannel, TelegramConfig
+from mika.adapters.preprocess import LocalPreprocessor
+from mika.adapters.telegram import Inbound, Media, TelegramChannel, TelegramConfig
 from mika.adapters.telegram.channel import REFUSED, TOO_FAST
 from mika.adapters.telegram.ptb import inbound_from_update
 from mika.app.delivery import Router
@@ -20,6 +21,7 @@ from mika.app.mindport import KernelPort
 from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
 from mika.ports.llm import LLMResponse
+from mika.runtime.effects import with_content
 from mika.sim.clock import run_virtual
 from tests.fixtures.mika import Deliveries, boot, build
 
@@ -27,9 +29,15 @@ from tests.fixtures.mika import Deliveries, boot, build
 class FakeBot:
     def __init__(self) -> None:
         self.sent: list[tuple[int, str]] = []
+        self.files: dict[str, bytes] = {}
+        self.downloaded: list[str] = []
 
     async def send_message(self, chat_id: int, text: str) -> None:
         self.sent.append((chat_id, text))
+
+    async def download(self, file_id: str) -> bytes:
+        self.downloaded.append(file_id)
+        return self.files[file_id]
 
 
 def respond(req):
@@ -43,7 +51,8 @@ def setup(tmp_path, config=None):
     kernel, clock, llm, _ = build(tmp_path, respond, ports={"delivery": router})
     bot = FakeBot()
     t = [0.0]
-    channel = TelegramChannel(KernelPort(kernel), bot, config or TelegramConfig(), monotonic=lambda: t[0])
+    channel = TelegramChannel(KernelPort(kernel), bot, config or TelegramConfig(), monotonic=lambda: t[0],
+                              preprocess=LocalPreprocessor(None))
     router.telegram = channel
     return kernel, clock, bot, channel, t
 
@@ -152,3 +161,41 @@ def test_inbound_from_a_real_update_shape():
         from_user=SimpleNamespace(id=9, is_bot=True, first_name="X", last_name="", username=""),
         reply_to_message=None))
     assert inbound_from_update(robot, me, "MikaBot") is None
+
+
+def test_attachments_are_fetched_only_once_admitted_and_read_at_the_edge(tmp_path):
+    async def scenario(kernel, bot, channel, t):
+        bot.files = {"doc1": "Liste : café, pain".encode(), "doc2": b"x", "big": b"y"}
+        note = Media("doc1", "courses.txt", "text/plain", 20)
+        await channel.receive(msg(1, "regarde", media=(note,)))  # privé : lu
+        await channel.receive(msg(2, "", chat=-5, kind="group", media=(Media("doc2", "a.txt", "text/plain", 1),)))
+        await channel.receive(msg(3, "tiens", media=(Media("big", "film.mp4", "video/mp4", 50_000_000),)))
+        await kernel.lanes.join()
+        texts = [with_content(kernel.mind, kernel.mind.decode(e)).data for e in perceptions(kernel)]
+        return texts, list(bot.downloaded)
+
+    texts, downloaded = run(tmp_path, scenario)
+    assert downloaded == ["doc1"]  # le bavardage d'un groupe et un fichier trop gros ne sont pas téléchargés
+    first = texts[0]
+    assert "regarde" in first.text.text and "café, pain" in first.text.text and first.attachments[0].extracted
+    assert "trop gros" in texts[-1].text.text and not texts[-1].attachments[0].extracted
+
+
+def test_a_refused_chat_downloads_nothing(tmp_path):
+    async def scenario(kernel, bot, channel, t):
+        bot.files = {"p": b"\xff\xd8"}
+        status = await channel.receive(msg(1, "", chat=42, media=(Media("p", "photo.jpg", "image/jpeg", 2),)))
+        return status, list(bot.downloaded)
+
+    status, downloaded = run(tmp_path, scenario, TelegramConfig(allowed_chats=frozenset({1})))
+    assert status == "refused" and downloaded == []
+
+
+def test_media_from_a_real_update_shape():
+    update = SimpleNamespace(update_id=9, message=SimpleNamespace(
+        text=None, caption="mon chat", chat=SimpleNamespace(id=1, type="private"),
+        from_user=SimpleNamespace(id=7, is_bot=False, first_name="Bob", last_name="", username=""),
+        reply_to_message=None, voice=None, audio=None, document=None,
+        photo=[SimpleNamespace(file_id="small", file_size=10), SimpleNamespace(file_id="large", file_size=900)]))
+    got = inbound_from_update(update, 555, "MikaBot")
+    assert got is not None and got.text == "mon chat" and got.media == (Media("large", "photo.jpg", "image/jpeg", 900),)

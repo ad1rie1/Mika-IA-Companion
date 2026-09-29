@@ -19,8 +19,8 @@ from mika.contracts import goals as c
 from mika.contracts import identity as identity_c
 from mika.contracts import presence as presence_c
 from mika.contracts import social as social_c
-from mika.faculties.goals import schedule
 from mika.faculties.goals.faculty import GOALS, Goal, GoalsState, desire, live, params, status
+from mika.kernel import schedule
 from mika.kernel.arbitration import Candidate, Modulation, RowView
 from mika.kernel.clock import HOUR
 from mika.kernel.frame import Frame

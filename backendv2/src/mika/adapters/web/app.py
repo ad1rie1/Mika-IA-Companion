@@ -11,6 +11,8 @@ l'authentification est exigée (c'est ce que le client sait lire).
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import json
 import logging
 import secrets
@@ -35,6 +37,7 @@ from mika.contracts.entry import MindPort
 from mika.contracts.presence import Connected
 from mika.contracts.runtime import AttachmentMeta, PerceptionReceived
 from mika.kernel.events import Content
+from mika.ports.preprocess import Perceived, Preprocessor, Upload, render
 from mika.vocab.people import clean_display_name, client_claim_allowed
 
 log = logging.getLogger("mika.web")
@@ -83,7 +86,9 @@ def _whoami(account: Account | None, cfg: WebConfig, accounts: Accounts) -> dict
 
 
 def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | None = None,
-               lifespan: Any = None, extra_routes: Sequence[Any] = ()) -> Starlette:
+               lifespan: Any = None, extra_routes: Sequence[Any] = (),
+               preprocess: Preprocessor | None = None, camera: Any = None,
+               sensor_token: Any = None) -> Starlette:
     cfg = cfg or WebConfig()
     throttle = LoginThrottle(cfg.login_failures, cfg.login_window_s)
 
@@ -185,6 +190,43 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         await hub.refresh_panels()  # chacun voit la file d'approbation à jour
         return JSONResponse({"ok": True, "status": status})
 
+    sensed: dict[str, deque[float]] = defaultdict(deque)
+
+    async def perceptions(request: Request) -> Response:
+        """Un appareil signale quelque chose : ``{"device", "text", "pertinence", "emotion", "sensitivity"}``.
+        Un opérateur connecté (avec CSRF), ou un jeton porteur (``mika sensors token``)."""
+        token = sensor_token() if sensor_token is not None else ""
+        given = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+        by_token = bool(token) and bool(given) and secrets.compare_digest(token, given)
+        if not by_token:
+            if not csrf_ok(request):
+                return csrf_refused()
+            account = account_of(request)
+            if account is None:
+                return JSONResponse({"error": "Authentification requise."}, status_code=401)
+            if not account.operator:
+                return JSONResponse({"error": "Réservé aux opérateurs."}, status_code=403)
+        data = await body(request)
+        device = clean_display_name(str(data.get("device") or "appareil"), max_chars=40) or "appareil"
+        text = str(data.get("text") or "").strip()
+        if not text or len(text) > 400:
+            return JSONResponse({"error": "Un texte, 400 caractères au plus."}, status_code=400)
+        window = sensed[device]
+        now = time.monotonic()
+        while window and now - window[0] >= 60:
+            window.popleft()
+        if len(window) >= 30:
+            return JSONResponse({"error": "Trop de signaux."}, status_code=429, headers={"Retry-After": "60"})
+        window.append(now)
+        try:
+            pertinence = float(data.get("pertinence", 0.5))
+            sensitivity = int(data.get("sensitivity", 1))
+        except (TypeError, ValueError):
+            return JSONResponse({"error": "pertinence (0–1) et sensitivity (0–3) sont des nombres."}, status_code=400)
+        seq = await port.sense(device, text, pertinence=pertinence, emotion=str(data.get("emotion") or ""),
+                               sensitivity=sensitivity)
+        return JSONResponse({"ok": seq is not None, "seq": seq}, status_code=202)
+
     async def ws(websocket: WebSocket) -> None:
         origin = websocket.headers.get("origin")
         if not origin or origin not in cfg.origins:
@@ -195,30 +237,62 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         if account is None and cfg.auth_required:
             await websocket.close(code=WS_UNAUTHORIZED)
             return
-        session = _Session(websocket, port, hub, account)
+        session = _Session(websocket, port, hub, account, preprocess)
         await session.run()
 
+    async def camera_ws(websocket: WebSocket) -> None:
+        """Un appareil envoie ses images : ``{"type": "frame", "mime": "image/jpeg", "data": base64}``.
+        Réservé aux opérateurs ; une origine annoncée doit être connue (un appareil natif n'en a pas)."""
+        origin = websocket.headers.get("origin")
+        account = accounts.session(websocket.cookies.get(SESSION_COOKIE))
+        if camera is None or (origin and origin not in cfg.origins):
+            await websocket.close(code=1008)
+            return
+        await websocket.accept()
+        if account is None or not account.operator:
+            await websocket.close(code=WS_UNAUTHORIZED)
+            return
+        device = clean_display_name(websocket.query_params.get("device") or "camera", max_chars=40) or "camera"
+        try:
+            while True:
+                frame = await websocket.receive_json()
+                if not isinstance(frame, dict) or frame.get("type") != "frame":
+                    continue
+                try:
+                    data = base64.b64decode(str(frame.get("data") or "").split(",")[-1], validate=True)
+                except (ValueError, binascii.Error):
+                    continue
+                ok = camera.put(device, str(frame.get("mime") or "image/jpeg")[:40], data)
+                await websocket.send_json({"type": "ack", "ok": ok})
+        except (WebSocketDisconnect, ValueError):
+            return
+
     routes = [
+        WebSocketRoute("/ws/camera", camera_ws),
         Route("/auth/whoami", whoami, methods=["GET"]),
         Route("/auth/login", login, methods=["POST"]),
         Route("/auth/bootstrap", bootstrap, methods=["POST"]),
         Route("/auth/logout", logout, methods=["GET", "POST"]),
         Route("/health", health, methods=["GET"]),
         Route("/api/projects/pending/{action_id:int}/{decision:str}", pending_decision, methods=["POST"]),
+        Route("/api/perceptions", perceptions, methods=["POST"]),
         WebSocketRoute("/ws", ws),
         *extra_routes,
     ]
     middleware = [Middleware(CORSMiddleware, allow_origins=list(cfg.origins), allow_credentials=True,
-                             allow_methods=["GET", "POST"], allow_headers=["content-type", "x-csrftoken"])]
+                             allow_methods=["GET", "POST"], allow_headers=["content-type", "x-csrftoken",
+                                                                           "authorization"])]
     return Starlette(routes=routes, middleware=middleware, lifespan=lifespan)
 
 
 class _Session:
     """Une connexion WebSocket : sa poignée, ses limites, son dialogue."""
 
-    def __init__(self, websocket: WebSocket, port: MindPort, hub: Hub, account: Account | None) -> None:
+    def __init__(self, websocket: WebSocket, port: MindPort, hub: Hub, account: Account | None,
+                 preprocess: Preprocessor | None = None) -> None:
         self.ws = websocket
         self.port = port
+        self.preprocess = preprocess
         self.hub = hub
         self.account = account
         self._lock = asyncio.Lock()
@@ -325,12 +399,13 @@ class _Session:
         if not text and not kept:
             await self.send(protocol.ack(cid, "attachments_rejected" if rejected else "empty", rejected))
             return
-        notes = [f"[{a.name} : fichier reçu, que tu ne peux pas encore lire]" for a in kept]
-        body = " ".join([text, *notes]).strip()
+        seen = await self._perceive(kept)
+        body = "\n".join(x for x in [text, render(seen)] if x).strip()
         perception = PerceptionReceived(
             handle=c.handle, channel="web", text=Content.of(body), authenticated=c.authenticated,
             client_msg_id=cid or None, display_name=c.display_name,
-            attachments=tuple(AttachmentMeta(name=a.name, kind=a.kind, mime=a.mime) for a in kept),
+            attachments=tuple(AttachmentMeta(name=a.name, kind=a.kind, mime=a.mime, extracted=p.extracted,
+                                             error=p.error) for a, p in zip(kept, seen, strict=True)),
         )
         admission = await self.port.perceive(perception, dedupe_key=f"{c.handle}:{cid}" if cid else None)
         await self.send(protocol.ack(cid, admission.status, rejected))
@@ -338,6 +413,14 @@ class _Session:
             task = asyncio.ensure_future(self._watch(admission, cid or None))
             self._watchers.add(task)
             task.add_done_callback(self._watchers.discard)
+
+    async def _perceive(self, kept: list[Any]) -> list[Perceived]:
+        """Ce qu'elle perçoit des pièces jointes, au bord (avant d'entrer dans sa vie)."""
+        if not kept:
+            return []
+        if self.preprocess is None:
+            return [Perceived(a.name, a.kind, "reçu, mais je ne peux pas encore le lire", False) for a in kept]
+        return await self.preprocess.perceive([Upload(a.name, a.mime, a.data) for a in kept])
 
     async def _watch(self, admission: Any, cid: str | None) -> None:
         """Si la réponse échoue, la personne l'apprend (sinon elle attend pour rien)."""

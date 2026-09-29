@@ -20,7 +20,7 @@ from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
-from mika.faculties.attention.faculty import ATTENTION, AttentionState, Pending, params
+from mika.faculties.attention.faculty import ATTENTION, AttentionState, Heard, Pending, habituation, params
 from mika.kernel.clock import local_date_of_night
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp
@@ -55,13 +55,14 @@ def met(state: AttentionState, frame: Frame) -> list[str]:
 
 @ATTENTION.process("attention.watch", wake_on=[rt.PERCEPTION_RECEIVED, rt.UTTERANCE, rt.EPISODE_STARTED,
                                                memory_c.BELIEVED, goals_c.GOAL_CLOSED, *c.ALL, *body_c.ALL],
+                   wake_on_shapes=[c.Signal],
                    lane="background", catch_up=CatchUp.ONCE, max_quantum_s=1800, priority=30)
 class Watch:
     def __init__(self) -> None:
         self.missing_at = 0
 
     def next_due(self, state: AttentionState, frame: Frame, last_run: int | None) -> int | None:
-        if state.pending or met(state, frame):
+        if state.pending or state.signals or met(state, frame):
             return frame.now
         p = params(frame.env.params_of("attention", frame.root))
         times = [x.deadline for x in state.expectations.values() if x.deadline is not None]
@@ -80,6 +81,7 @@ class Watch:
         drafts: list[Draft[Any]] = []
         for q in state.pending[:6]:
             drafts.append(self._thought(q, frame, store))
+        drafts += self._signals(state, frame, store, p)
         met_keys = set(met(state, frame))
         for person, since in sorted(state.late.items()):
             if f"late:{person}" in met_keys:
@@ -136,6 +138,29 @@ class Watch:
         return c.THOUGHT_BORN.draft(text=Content.of(text, level=sens), emotion=q.emotion, intensity=q.intensity,
                                     origin=q.origin, about=(q.person,) if q.person else (), sensitivity=sens,
                                     source=q.source, dedupe_key=mark)
+
+    def _signals(self, state: AttentionState, frame: Frame, store: Any, p: Any) -> list[Draft[Any]]:
+        """Remarquer ce que les sources signalent : l'émotion dosée par source,
+        l'habituation ; ce qui est assez pertinent devient une pensée."""
+        out: list[Draft[Any]] = []
+        extra: list[Heard] = []
+        batch = state.signals[:10]
+        texts = store.content([x.summary_ref for x in batch if x.summary_ref]) if store is not None else {}
+        for x in batch:
+            weight, room = habituation(state, x.source, x.kind, frame.now, p, tuple(extra))
+            intensity = round(min(x.intensity * weight, room), 4) if x.emotion else 0.0
+            out.append(c.NOTICED.draft(signal=x.seq, source=x.source, kind=x.kind, weight=round(weight, 4),
+                                       emotion=x.emotion, intensity=intensity, dedupe_key=f"remarqué:{x.seq}"))
+            extra.append(Heard(frame.now, x.source, x.kind, intensity))
+            text = texts.get(x.summary_ref)
+            if text and x.pertinence * weight >= p.signal_thought_from:
+                level = x.sensitivity
+                out.append(c.THOUGHT_BORN.draft(
+                    text=Content.of(_clip(text, 240), level=level), emotion=x.emotion or Emotion.CURIOUS.value,
+                    intensity=round(min(p.signal_thought_max, x.pertinence * weight * p.signal_thought_factor), 3),
+                    origin=c.SIGNAL, about=x.about, sensitivity=level, source=x.seq, bundle=x.bundle,
+                    dedupe_key=f"pensée:signal:{x.seq}"))
+        return out
 
     def _missing(self, state: AttentionState, frame: Frame, p: Any) -> list[Draft[Any]]:
         """Une amie qui manque et qu'elle ne peut pas joindre : une pensée

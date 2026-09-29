@@ -6,7 +6,12 @@
   devient une exploration (« y voir plus clair ») ;
 - une curiosité qui la tient, en journée, lui fait explorer un de ses centres
   d'intérêt (pas le même avant trois jours).
-Ce qu'elle vient de clore ne se rouvre pas avant un jour.
+Ce qu'elle vient de clore ne se rouvre pas avant un jour (le même sujet :
+une inquiétude redite par la même personne n'est pas une nouvelle affaire) ;
+après un blocage, elle met six heures à entreprendre autre chose.
+
+**Reprendre** : une attente nominative (« j'attends la réponse d'Adrien »)
+se lève dès qu'Adrien écrit — enfin — sans attendre l'échéance.
 
 **Clore** : un rappel dit (abouti) ou qui n'a pas pu l'être (échec) ; un but
 à bout de pas, ou qui n'a rien conclu trois pas de suite (bloqué) ; une
@@ -24,20 +29,33 @@ from typing import Any
 from mika.contracts import attention as attention_c
 from mika.contracts import body as body_c
 from mika.contracts import goals as c
+from mika.contracts import identity as identity_c
 from mika.contracts import needs as needs_c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
-from mika.faculties.goals.faculty import GOALS, Goal, GoalsState, desire, live, params
+from mika.contracts import transcript as transcript_c
+from mika.faculties.goals.faculty import (
+    AWAITED,
+    GOALS,
+    Goal,
+    GoalsState,
+    desire,
+    live,
+    params,
+    ready_to_undertake,
+    subject_key,
+)
 from mika.faculties.goals.tools import closing
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
 
-SEEDING_ORIGINS = frozenset({attention_c.EXCHANGE, attention_c.REVISION})
-#: une inquiétude, une peine, un doute donnent envie d'y voir clair ; une insulte, non
+SEEDING_ORIGINS = frozenset({attention_c.EXCHANGE, attention_c.REVISION, attention_c.SIGNAL})
+#: une inquiétude, une peine, un doute, une frustration (quelque chose qui ne marche pas) donnent envie
+#: d'y voir clair ; une insulte (la colère, le dégoût), non
 SEEDING_EMOTIONS = frozenset({"sad", "anxious", "scared", "confused", "lonely", "melancholic", "thinking",
-                              "surprised", "curious", "nostalgic"})
+                              "surprised", "curious", "nostalgic", "frustrated"})
 EXPLORE_BUNDLES = ("goals", "memory")
 
 
@@ -51,7 +69,8 @@ def _recently_closed(s: GoalsState, source: str, now: int, p: Any) -> bool:
 
 
 def _live_sources(s: GoalsState, now: int) -> set[str]:
-    return {g.source for g in s.goals.values() if live(g, now) and g.source}
+    live_goals = [g for g in s.goals.values() if live(g, now) and g.source]
+    return {g.source for g in live_goals} | {subject_key(g.source, g.about) for g in live_goals}
 
 
 def _live_self(s: GoalsState, now: int) -> int:
@@ -72,7 +91,8 @@ class Seed:
         busy = _live_sources(s, frame.now)
         return [t for t in frame.get(attention_c.THOUGHTS)
                 if t.origin in SEEDING_ORIGINS and t.emotion in SEEDING_EMOTIONS and t.intensity >= p.seed_thought_from
-                and f"thought:{t.id}" not in busy and not _recently_closed(s, f"thought:{t.id}", frame.now, p)]
+                and not {f"thought:{t.id}", subject_key(f"thought:{t.id}", t.about)} & busy
+                and not _recently_closed(s, subject_key(f"thought:{t.id}", t.about), frame.now, p)]
 
     def _interest(self, s: GoalsState, frame: Frame, p: Any) -> str | None:
         if frame.get(needs_c.NEEDS).curiosity < p.seed_curiosity_from or not _daytime(frame, p):
@@ -96,7 +116,7 @@ class Seed:
             times.append(frame.now)
         if not times:
             return None
-        return max(frame.now, min(times), s.self_opened_at + p.seed_spacing_us if s.self_opened_at else 0)
+        return max(frame.now, min(times), ready_to_undertake(s, p))
 
     async def run(self, ctx: Any) -> None:
         frame: Frame = ctx.frame
@@ -104,8 +124,8 @@ class Seed:
         p = params(frame.env.params_of("goals", frame.root))
         if frame.get(body_c.SLEEP) is not body_c.SleepPhase.AWAKE or _live_self(s, frame.now) >= p.live_self_max:
             return
-        if s.self_opened_at and frame.now - s.self_opened_at < p.seed_spacing_us:
-            return  # une chose à la fois : pas deux entreprises dans la même heure
+        if frame.now < ready_to_undertake(s, p):
+            return  # une chose à la fois, et plus lentement après un échec
         store = ctx.ports.get("store")
         for t in self._thoughts(s, frame, p):
             if frame.now - t.born_at < p.seed_thought_age_us:
@@ -114,10 +134,11 @@ class Seed:
             if not text:
                 continue
             source = f"thought:{t.id}"
+            title = f"En savoir plus — {text}" if t.origin == attention_c.SIGNAL else f"Y voir plus clair — {text}"
+            bundles = tuple(sorted({*EXPLORE_BUNDLES, t.bundle} - {""}))
             await ctx.emit(c.GOAL_OPENED.draft(
-                kind=c.EXPLORATION, authority=c.SELF, title=Content.of(f"Y voir plus clair — {text}",
-                                                                       level=t.sensitivity),
-                owner=t.about[0] if t.about else None, about=t.about, bundles=EXPLORE_BUNDLES,
+                kind=c.EXPLORATION, authority=c.SELF, title=Content.of(title, level=t.sensitivity),
+                owner=t.about[0] if t.about else None, about=t.about, bundles=bundles,
                 max_steps=p.exploration_steps, source=source, sensitivity=t.sensitivity,
                 desire=round(min(1.0, 0.4 + t.intensity), 4), dedupe_key=f"but:{source}"))
             return
@@ -136,6 +157,18 @@ def short(interest: str) -> str:
     """Un centre d'intérêt en quelques mots (la persona les rédige en phrases)."""
     head = re.split(r" \(| — | - |, ", interest.strip(), maxsplit=1)[0].strip()
     return head[:80] or interest[:80]
+
+
+def answered(s: GoalsState, frame: Frame) -> list[Goal]:
+    """Les buts en attente nominative dont la personne a écrit depuis."""
+    out = []
+    for g in sorted(s.goals.values(), key=lambda g: g.id):
+        if g.status != c.WAITING or not g.wait_for or g.waiting_until <= frame.now:
+            continue
+        handles = frame.get(identity_c.HANDLES(g.wait_for)) or (g.wait_for,)
+        if max(frame.get(transcript_c.LAST_FROM(h)) for h in handles) > g.waiting_since:
+            out.append(g)
+    return out
 
 
 def closures(s: GoalsState, frame: Frame) -> list[tuple[Goal, str, str]]:
@@ -174,11 +207,12 @@ def _worn_out_at(g: Goal, p: Any) -> int | None:
     return g.desire_at + math.ceil(p.desire_half_life_us * math.log2(g.desire / p.abandon_below))
 
 
-@GOALS.process("goals.tend", wake_on=[*c.ALL, rt.EPISODE_STARTED, rt.EPISODE_ENDED, rt.UTTERANCE],
-               lane="background", catch_up=CatchUp.ONCE, max_quantum_s=3600, priority=40)
+@GOALS.process("goals.tend", wake_on=[*c.ALL, rt.EPISODE_STARTED, rt.EPISODE_ENDED, rt.UTTERANCE,
+                                      rt.PERCEPTION_RECEIVED], lane="background", catch_up=CatchUp.ONCE,
+               max_quantum_s=3600, priority=40)
 class Tend:
     def next_due(self, s: GoalsState, frame: Frame, last_run: int | None) -> int | None:
-        if closures(s, frame):
+        if closures(s, frame) or answered(s, frame):
             return frame.now
         p = params(frame.env.params_of("goals", frame.root))
         times = []
@@ -194,7 +228,12 @@ class Tend:
 
     async def run(self, ctx: Any) -> None:
         frame: Frame = ctx.frame
-        todo = closures(ctx.state, frame)
+        released = [AWAITED.draft(goal=g.id, person=g.wait_for or "", dedupe_key=f"attente:{g.id}:{g.waiting_since}")
+                    for g in answered(ctx.state, frame)]
+        if released:
+            await ctx.emit(*released)
+            frame = ctx.frame
+        todo = closures(ctx.frame.state("goals"), frame)
         if not todo:
             return
         drafts = [closing(ctx, g, status, reason=reason) for g, status, reason in todo]

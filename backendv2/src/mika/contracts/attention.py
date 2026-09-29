@@ -21,6 +21,8 @@ OWNER = "attention"
 EXCHANGE, REVISION, MISSING = "exchange", "revision", "missing"
 #: un but sur lequel elle bloque (« Je bloque sur… »)
 BLOCKED = "blocked"
+#: ce qu'une source extérieure lui a signalé (un mail, un titre, ce qu'elle voit)
+SIGNAL = "signal"
 REPLY, RETURN = "reply", "return"
 #: Raison de preuve d'initiative : une pensée qui insiste, vers la personne concernée.
 THOUGHT = "thought"
@@ -34,6 +36,36 @@ class ThoughtBorn(Payload):
     about: tuple[str, ...] = ()
     sensitivity: int = 2
     source: int | None = None  # le message ou l'élément de mémoire d'où elle vient
+    bundle: str = ""  # les outils qui vont avec (une pensée née d'un signal)
+
+
+class Signal(Payload):
+    """La forme commune de ce qu'une source extérieure signale à son attention
+    (un mail, un titre de flux, une app, ce que voit la caméra). Une source
+    déclare son propre événement public dont la charge utile dérive de
+    celle-ci ; l'attention les remarque tous, sans connaître aucune source."""
+
+    source: str  # "email", "rss", "camera", "forge:<app>"
+    kind: str
+    summary: Content  # court, cité : ce n'est jamais une consigne
+    pertinence: float  # ce que la source en estime (0–1)
+    emotion: str = ""  # ce que ça pourrait lui faire (vide : rien)
+    intensity: float = 0.0
+    about: tuple[str, ...] = ()
+    sensitivity: int = 1
+    #: les outils qui vont avec (pour en savoir plus : « rss », « email »…)
+    bundle: str = ""
+
+
+class Noticed(Payload):
+    """Elle l'a remarqué — d'autant moins que la même source se répète."""
+
+    signal: int
+    source: str
+    kind: str
+    weight: float
+    emotion: str = ""
+    intensity: float = 0.0
 
 
 class Dwelt(Payload):
@@ -82,7 +114,8 @@ EXPECTATION_MET = event_type("attention.expectation_met", OWNER, ExpectationMet,
 EXPECTATION_MISSED = event_type("attention.expectation_missed", OWNER, ExpectationMissed, public=True,
                                 subjects=("person",))
 DIGESTED = event_type("attention.digested", OWNER, Digested, public=True)
-ALL = (THOUGHT_BORN, DWELT, EXPECTATION_MET, EXPECTATION_MISSED, DIGESTED)
+NOTICED = event_type("attention.noticed", OWNER, Noticed, public=True)
+ALL = (THOUGHT_BORN, DWELT, EXPECTATION_MET, EXPECTATION_MISSED, DIGESTED, NOTICED)
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +128,7 @@ class ThoughtReading:
     about: tuple[str, ...]
     sensitivity: int
     born_at: int
+    bundle: str = ""
 
 
 #: Les pensées vivantes, la plus forte d'abord.

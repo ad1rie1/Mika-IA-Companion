@@ -62,6 +62,14 @@ class ProcessContext:
         self.frame = self.mind.frame()
         return self.frame
 
+    async def ask(self, request: Any) -> Any:
+        """Un appel de modèle dont la panne est une absence (``None``) : un tri
+        raté n'empêche pas de remarquer un mail."""
+        if self.llm is None:
+            return None
+        got = await acall(self.llm.call, request, label=f"modèle ({getattr(request, 'role', '?')})")
+        return None if isinstance(got, Failed) else got
+
 
 class Scheduler:
     def __init__(

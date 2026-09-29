@@ -10,15 +10,22 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
+import sqlite3
 from pathlib import Path
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
 
 from mika.adapters.llm.config import BackendSpec, LLMConfig
+from mika.adapters.mail import MailConfig
 
 LLM_KEY = "llm"
 TELEGRAM_KEY = "telegram"
+EMAIL_KEY = "email"
+FEEDS_KEY = "feeds"
+STT_KEY = "stt"
+SENSORS_KEY = "sensors"
 
 
 class SecretBox:
@@ -59,7 +66,10 @@ class Settings:
             "CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL)"))
 
     def _get(self, key: str) -> Any:
-        rows = self.store.query_mind("SELECT value FROM settings WHERE key=?", (key,))
+        try:
+            rows = self.store.query_mind("SELECT value FROM settings WHERE key=?", (key,))
+        except sqlite3.OperationalError:  # la table n'existe pas encore (avant ``open``)
+            return None
         return json.loads(rows[0][0]) if rows else None
 
     async def _put(self, key: str, value: Any) -> None:
@@ -108,3 +118,48 @@ class Settings:
         if owners is not None:
             data["owners"] = sorted({int(o) for o in owners})
         await self._put(TELEGRAM_KEY, data)
+
+    # ── Courrier, flux, transcription ──
+    def email(self) -> MailConfig:
+        data = dict(self._get(EMAIL_KEY) or {})
+        data["password"] = self.box.open(data.pop("password_sealed", ""))
+        try:
+            return MailConfig.model_validate(data)
+        except ValueError:
+            return MailConfig()
+
+    async def save_email(self, **fields: Any) -> MailConfig:
+        current = self.email().model_dump()
+        current.update({k: v for k, v in fields.items() if v is not None})
+        cfg = MailConfig.model_validate(current)
+        data = cfg.model_dump()
+        data["password_sealed"] = self.box.seal(data.pop("password"))
+        await self._put(EMAIL_KEY, data)
+        return cfg
+
+    def feeds(self) -> list[str]:
+        return [str(u) for u in (self._get(FEEDS_KEY) or [])]
+
+    async def save_feeds(self, urls: list[str]) -> list[str]:
+        clean = sorted({u.strip() for u in urls if u.strip().startswith(("http://", "https://"))})
+        await self._put(FEEDS_KEY, clean)
+        return clean
+
+    def stt(self) -> dict[str, str]:
+        data = dict(self._get(STT_KEY) or {})
+        return {"base_url": data.get("base_url", ""), "model": data.get("model", "whisper-1"),
+                "api_key": self.box.open(data.get("api_key_sealed", ""))}
+
+    async def save_stt(self, base_url: str, api_key: str, model: str = "whisper-1") -> None:
+        await self._put(STT_KEY, {"base_url": base_url.strip(), "model": model,
+                                  "api_key_sealed": self.box.seal(api_key.strip())})
+
+    # ── Appareils (``POST /api/perceptions``) ──
+    def sensors_token(self) -> str:
+        return self.box.open(dict(self._get(SENSORS_KEY) or {}).get("token_sealed", ""))
+
+    async def new_sensors_token(self) -> str:
+        """Un jeton neuf (l'ancien ne vaut plus) ; montré une fois."""
+        token = secrets.token_urlsafe(32)
+        await self._put(SENSORS_KEY, {"token_sealed": self.box.seal(token)})
+        return token

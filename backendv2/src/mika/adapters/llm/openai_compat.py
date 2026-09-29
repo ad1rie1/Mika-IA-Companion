@@ -158,7 +158,11 @@ def chat_messages(req: LLMRequest) -> list[dict[str, Any]]:
     if system:
         out.append({"role": "system", "content": system})
     for m in req.messages:
-        if m.role == "user":
+        if m.role == "user" and m.images:
+            parts: list[dict[str, Any]] = [{"type": "text", "text": m.content}]
+            parts += [{"type": "image_url", "image_url": {"url": f"data:{i.mime};base64,{i.data}"}} for i in m.images]
+            out.append({"role": "user", "content": parts})
+        elif m.role == "user":
             out.append({"role": "user", "content": m.content})
         elif m.role == "assistant":
             msg: dict[str, Any] = {"role": "assistant", "content": m.content}

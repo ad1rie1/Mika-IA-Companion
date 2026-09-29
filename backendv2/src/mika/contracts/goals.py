@@ -88,6 +88,9 @@ class StepReported(Payload):
     #: ce qu'elle en pense (0–1) : un résultat ordinaire se garde pour soi
     notable: float = 0.5
     wait_s: int = 0
+    #: une attente nominative : la personne dont elle attend la réponse (elle
+    #: reprend dès que cette personne écrit, ou à l'échéance)
+    wait_for: str | None = None
     #: « fini » avec une preuve (un outil qui a produit quelque chose dans ce but)
     proven: bool = False
     #: ce qu'elle a réellement fait pendant ce pas (outils réussis)

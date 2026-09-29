@@ -137,7 +137,8 @@ class ClaudeBackend:
             if m.role == "assistant":
                 blocks = self._assistant_blocks(m)
             elif m.role == "user":
-                blocks = _text_blocks(m.content)
+                blocks = [{"type": "image", "source": {"type": "base64", "media_type": i.mime, "data": i.data}}
+                          for i in m.images] + _text_blocks(m.content)
             else:
                 log.warning("rôle de message inconnu ignoré : %r", m.role)
                 continue

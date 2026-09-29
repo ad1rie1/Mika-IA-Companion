@@ -33,6 +33,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import social as social_c
 from mika.kernel.codec import digest
 from mika.kernel.registry import Registry
+from mika.plugins.forge import SWITCHED
 from mika.runtime.mind import Mind
 from mika.runtime.state import RUNTIME
 from mika.sim.catalog import run_lane
@@ -165,6 +166,35 @@ async def telegram_command(data: Path, args: argparse.Namespace) -> dict[str, ob
     return await _with_settings(data, run)
 
 
+async def world_command(data: Path, args: argparse.Namespace) -> dict[str, object]:
+    """Le courrier, les flux, la transcription : ce qu'elle perçoit du monde."""
+
+    async def run(settings: Settings, store) -> dict[str, object]:  # type: ignore[no-untyped-def]
+        if args.cmd == "mail":
+            if args.mail_cmd == "set":
+                await settings.save_email(address=args.address, imap_host=args.imap_host, imap_port=args.imap_port,
+                                          imap_ssl=None if args.imap_ssl is None else args.imap_ssl == "oui",
+                                          user=args.user, password=args.password, smtp_host=args.smtp_host,
+                                          smtp_port=args.smtp_port, smtp_security=args.smtp_security,
+                                          since_days=args.since_days)
+            cfg = settings.email().model_dump()
+            cfg["password"] = "…" if cfg["password"] else ""
+            return cfg
+        if args.cmd == "rss":
+            feeds = settings.feeds()
+            if args.rss_cmd == "add":
+                feeds = await settings.save_feeds([*feeds, *args.urls])
+            elif args.rss_cmd == "remove":
+                feeds = await settings.save_feeds([f for f in feeds if f not in args.urls])
+            return {"feeds": feeds}
+        if args.stt_cmd == "set":
+            await settings.save_stt(args.base_url, args.api_key, args.model)
+        cfg = settings.stt()
+        return {"base_url": cfg["base_url"], "model": cfg["model"], "api_key": "…" if cfg["api_key"] else ""}
+
+    return await _with_settings(data, run)
+
+
 async def operator_event(data: Path, draft, emitter: str) -> dict[str, object]:  # type: ignore[no-untyped-def]
     from mika.kernel.events import Origin  # noqa: PLC0415
 
@@ -242,6 +272,41 @@ def main(argv: list[str] | None = None) -> int:
     sc = ssub.add_parser("closeness")
     sc.add_argument("person")
     sc.add_argument("level", choices=["stranger", "acquaintance", "friend", "close", "auto"])
+    ml = sub.add_parser("mail", help="la boîte aux lettres de Mika (IMAP pour lire, SMTP pour envoyer)")
+    msub = ml.add_subparsers(dest="mail_cmd", required=True)
+    msub.add_parser("show")
+    ms = msub.add_parser("set")
+    ms.add_argument("--address")
+    ms.add_argument("--imap-host")
+    ms.add_argument("--imap-port", type=int)
+    ms.add_argument("--imap-ssl", choices=["oui", "non"])
+    ms.add_argument("--user")
+    ms.add_argument("--password")
+    ms.add_argument("--smtp-host")
+    ms.add_argument("--smtp-port", type=int)
+    ms.add_argument("--smtp-security", choices=["ssl", "starttls", "none"])
+    ms.add_argument("--since-days", type=int)
+    rs = sub.add_parser("rss", help="les flux qu'elle suit")
+    rsub = rs.add_subparsers(dest="rss_cmd", required=True)
+    rsub.add_parser("list")
+    for name in ("add", "remove"):
+        r = rsub.add_parser(name)
+        r.add_argument("urls", nargs="+")
+    st = sub.add_parser("stt", help="la transcription des messages vocaux (/audio/transcriptions)")
+    stsub = st.add_subparsers(dest="stt_cmd", required=True)
+    stsub.add_parser("show")
+    sts = stsub.add_parser("set")
+    sts.add_argument("base_url")
+    sts.add_argument("api_key")
+    sts.add_argument("--model", default="whisper-1")
+    se = sub.add_parser("sensors", help="le jeton des appareils (POST /api/perceptions)")
+    sesub = se.add_subparsers(dest="sensors_cmd", required=True)
+    sesub.add_parser("token", help="un jeton neuf (l'ancien ne vaut plus), montré une fois")
+    fo = sub.add_parser("forge", help="ce qu'un opérateur décide des apps de Mika (serveur arrêté)")
+    fsub = fo.add_subparsers(dest="forge_cmd", required=True)
+    for name in ("promote", "demote"):
+        f = fsub.add_parser(name, help="offrir (ou retirer) ses outils en conversation")
+        f.add_argument("app")
     args = p.parse_args(argv)
 
     if args.cmd == "replay":
@@ -287,6 +352,20 @@ def main(argv: list[str] | None = None) -> int:
         person = args.person if args.id_cmd == "link" else None
         draft = identity_c.LINKED.draft(handle=args.handle, person=person, by="operator")
         print(json.dumps(asyncio.run(operator_event(args.data, draft, "identity")), ensure_ascii=False))
+        return 0
+    if args.cmd == "sensors":
+        async def token(settings: Settings, store) -> dict[str, object]:  # type: ignore[no-untyped-def]
+            return {"token": await settings.new_sensors_token(),
+                    "usage": "Authorization: Bearer <jeton> sur POST /api/perceptions"}
+
+        print(json.dumps(asyncio.run(_with_settings(args.data, token)), ensure_ascii=False, indent=2))
+        return 0
+    if args.cmd in ("mail", "rss", "stt"):
+        print(json.dumps(asyncio.run(world_command(args.data, args)), ensure_ascii=False, indent=2))
+        return 0
+    if args.cmd == "forge":
+        draft = SWITCHED.draft(app=args.app, state=f"{args.forge_cmd}d", reason="opérateur")
+        print(json.dumps(asyncio.run(operator_event(args.data, draft, "forge")), ensure_ascii=False))
         return 0
     if args.cmd == "social":
         level = "" if args.level == "auto" else args.level

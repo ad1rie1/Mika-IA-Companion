@@ -24,12 +24,13 @@ import subprocess
 import pytest
 
 from mika.adapters.workshop import BwrapWorkshop
+from mika.app.mindport import KernelPort
 from mika.contracts import attention as attention_c
 from mika.contracts import body as body_c
 from mika.contracts import goals as goals_c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
-from mika.faculties.goals import schedule
+from mika.kernel import schedule
 from mika.kernel.clock import DAY, HOUR, MINUTE, US, local
 from mika.kernel.codec import digest
 from mika.kernel.events import Content, Origin
@@ -275,22 +276,95 @@ def test_a_confided_project_is_written_and_tested_in_its_workshop(tmp_path):
 # ── Le sommeil, le rejeu, l'agenda ────────────────────────────────────────
 
 
-def test_she_does_not_work_while_asleep_and_replay_gives_the_same_state(tmp_path):
+def _explore(title, desire=1.0):
+    return goals_c.GOAL_OPENED.draft(
+        kind=goals_c.EXPLORATION, authority=goals_c.SELF, title=Content.of(title, level=0), bundles=("goals",),
+        max_steps=8, source="genese", sensitivity=0, desire=desire)
+
+
+def test_she_does_not_work_while_asleep_and_resumes_in_the_morning(tmp_path):
+    async def scenario(kernel, llm):
+        await kernel.mind.append([_explore("Explorer : les jeux rétro")], emitter="goals", correlation="genese",
+                                 origin=Origin.GENESIS)
+        await until(kernel, at_paris(2026, 9, 29, 12, 0))
+
+    r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 21, 30), mode="liar")
+    spans = _asleep(r.events)
+    steps = [e.at for e in r.of(rt.EPISODE_STARTED) if e.data.kind == "STEP"]
+    assert spans and steps
+    assert not [local(t, PARIS).strftime("%H:%M") for t in steps if any(a <= t < b for a, b in spans)]
+    assert any(t < spans[0][0] for t in steps) and any(t >= spans[0][1] for t in steps)  # le soir, puis le matin
+
+
+def test_a_nominative_wait_lifts_as_soon_as_the_person_writes(tmp_path):
+    async def scenario(kernel, llm):
+        await connect(kernel, "user_1", "Adrien", operator=True)
+        await (await kernel.perceive(said("user_1", "j'ai peur, je stresse pour mon oral de demain"))).reply
+        await asyncio.sleep(2 * HOUR / US)
+        waiting = [g.status for g in kernel.mind.frame().get(goals_c.LIVE)]
+        await (await kernel.perceive(said("user_1", "au fait, c'est à 10h demain"))).reply
+        await asyncio.sleep(HOUR / US)
+        return waiting
+
+    r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 14, 0), mode="waits")
+    assert r.result == [goals_c.WAITING]  # elle attend sa réponse (un jour au plus)…
+    waits = [x for x in r.of(goals_c.STEP_REPORTED) if x.data.verdict == "wait"]
+    assert waits and waits[0].data.wait_for == "user_1"
+    lifted = [e for e in r.events if e.type.name == "goals.awaited"]
+    answer = [e.at for e in r.of(rt.PERCEPTION_RECEIVED) if "10h" in (e.data.text.text or "")]
+    assert lifted and lifted[0].at >= answer[0] and lifted[0].at - answer[0] < 10 * MINUTE  # …et reprend aussitôt
+    assert [c.data.status for c in r.of(goals_c.GOAL_CLOSED)] == [goals_c.ACHIEVED]
+
+
+def test_after_a_failure_a_new_worry_waits_before_becoming_a_goal(tmp_path):
+    async def scenario(kernel, llm):
+        opened = await kernel.mind.append([goals_c.GOAL_OPENED.draft(
+            kind=goals_c.EXPLORATION, authority=goals_c.SELF, title=Content.of("Explorer : les échecs", level=0),
+            bundles=("goals",), max_steps=2, source="genese", sensitivity=0, desire=1.0)],
+            emitter="goals", correlation="genese", origin=Origin.GENESIS)
+        assert await when(kernel, closed_now)
+        await connect(kernel, "user_1", "Adrien")
+        await (await kernel.perceive(said("user_1", "j'ai peur, je stresse pour mon oral"))).reply
+        await asyncio.sleep(10 * HOUR / US)
+        return opened.seqs[-1]
+
+    r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 9, 0), mode="liar")
+    blocked = [c.at for c in r.of(goals_c.GOAL_CLOSED) if c.data.status == goals_c.STUCK]
+    later = [o.at for o in r.of(goals_c.GOAL_OPENED) if o.data.authority == goals_c.SELF and o.seq != r.result]
+    assert blocked and later and later[0] - blocked[0] >= 4 * HOUR  # découragée, elle ne se relance pas aussitôt
+
+
+def test_replay_gives_the_same_state(tmp_path):
     async def scenario(kernel, llm):
         await connect(kernel, "user_1", "Adrien")
-        await (await kernel.perceive(said("user_1", "j'ai peur de ne pas dormir cette nuit, je stresse"))).reply
-        await until(kernel, at_paris(2026, 9, 29, 10, 0))
+        await (await kernel.perceive(said("user_1", "j'ai peur, je stresse pour demain"))).reply
+        await asyncio.sleep(4 * HOUR / US)
         owners = ["goals", "attention", "self", "affect", "needs"]
         live = digest({o: kernel.mind.root.slices[o] for o in owners})
         await kernel.mind.rebuild(owners)
         return live, digest({o: kernel.mind.root.slices[o] for o in owners})
 
-    r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 22, 50))
+    r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 14, 0))
     live, rebuilt = r.result
-    assert live == rebuilt
-    spans = _asleep(r.events)
-    steps = [e.at for e in r.of(rt.EPISODE_STARTED) if e.data.kind == "STEP"]
-    assert steps and not [t for t in steps if any(a <= t < b for a, b in spans)]
+    assert r.of(goals_c.GOAL_CLOSED) and live == rebuilt
+
+
+def test_two_decisions_on_one_action_only_one_counts(tmp_path):
+    async def scenario(kernel, llm):
+        port = KernelPort(kernel)
+        opened = await kernel.mind.append([_explore("Explorer : un projet")], emitter="goals", correlation="g",
+                                          origin=Origin.GENESIS)
+        proposed = await kernel.mind.append([rt.EFFECT_PROPOSED.draft(
+            capability="goals.networked", owner="goals", args_json="{}", summary=Content.of("réseau"),
+            approval=True, context=f"goal:{opened.seqs[-1]}")], emitter="runtime", correlation="g", origin=Origin.TOOL)
+        n = proposed.seqs[-1]
+        both = await asyncio.gather(port.resolve_effect(n, True, by="user_1"),
+                                    port.resolve_effect(n, False, by="user_9", note="non"))
+        return both
+
+    r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 14, 0))
+    assert sorted(r.result) == ["approved", "unknown"]
+    assert len(r.of(rt.EFFECT_RESOLVED)) == 1
 
 
 def test_schedule_rules():

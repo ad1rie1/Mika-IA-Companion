@@ -295,11 +295,13 @@ def describe_fr(certainty: float, trust: ChannelTrust, name: str = "") -> str:
 def hearable(about: tuple[str, ...], sensitivity: int, interlocutor: str | None, level: int, witness_level: int,
              own_file: bool) -> bool:
     """Ce qu'on peut dire devant une audience : ce qui ne concerne personne
-    passe ; ce qui ne concerne que l'interlocuteur, s'il est anodin ou si sa
-    fiche est ouverte ; ce qui concerne d'autres, jusqu'au niveau de
-    l'audience (le niveau « témoin » quand l'interlocuteur en est aussi)."""
+    d'identifié passe s'il est anodin ou si l'audience peut l'entendre (un
+    mail reçu n'est pas à tout le monde) ; ce qui ne concerne que
+    l'interlocuteur, s'il est anodin ou si sa fiche est ouverte ; ce qui
+    concerne d'autres, jusqu'au niveau de l'audience (le niveau « témoin »
+    quand l'interlocuteur en est aussi)."""
     if not about:
-        return True
+        return sensitivity <= max(Sensitivity.ANODYNE, level)
     others = [a for a in about if a != interlocutor]
     if not others:
         return sensitivity <= Sensitivity.ANODYNE or own_file

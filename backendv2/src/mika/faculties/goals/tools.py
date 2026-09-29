@@ -16,8 +16,8 @@ from pydantic import BaseModel, Field
 
 from mika.contracts import goals as c
 from mika.contracts import identity as identity_c
-from mika.faculties.goals import schedule
 from mika.faculties.goals.faculty import GOALS, NOTED, Goal, GoalsState, live, params
+from mika.kernel import schedule
 from mika.kernel.clock import MINUTE, instant, local
 from mika.kernel.events import Content
 from mika.kernel.frame import Frame
@@ -60,6 +60,8 @@ class ReportArgs(BaseModel):
     notable: float = Field(default=0.5, ge=0.0, le=1.0,
                            description="à quel point ce résultat compte pour toi (0 : ordinaire, 1 : à raconter)")
     wait_minutes: int = Field(default=0, ge=0, le=1440)
+    until_they_answer: bool = Field(default=False, description="avec « wait » : tu attends la réponse de la "
+                                                               "personne concernée — tu reprendras dès qu'elle écrit")
 
 
 @GOALS.tool(REPORT, description="Conclure ce pas de travail par un verdict. « done » n'est cru que si tu as "
@@ -74,7 +76,8 @@ async def report_step(args: ReportArgs, ctx: Any) -> str:
     summary = Content.of(args.summary.strip(), level=g.sensitivity)
     drafts: list[Any] = [c.STEP_REPORTED.draft(
         goal=g.id, kind=g.kind, verdict=args.verdict, summary=summary, notable=args.notable,
-        wait_s=args.wait_minutes * 60, proven=proven, tools=worked)]
+        wait_s=args.wait_minutes * 60, proven=proven, tools=worked,
+        wait_for=g.owner if args.verdict == c.WAIT and args.until_they_answer and g.owner else None)]
     atelier = ctx.ports.get("workshop")
     if atelier is not None and "workshop" in g.bundles and atelier.exists(g.id):
         await atelier.commit(g.id, args.summary)  # un commit par pas qui a changé quelque chose
@@ -91,6 +94,8 @@ async def report_step(args: ReportArgs, ctx: Any) -> str:
     if args.verdict == c.BLOCKED:
         return "C'est noté : tu bloques là-dessus."
     if args.verdict == c.WAIT:
+        if args.until_they_answer and g.owner:
+            return "D'accord : tu reprendras dès que la personne concernée t'aura répondu (ou à l'échéance)."
         return f"D'accord : tu y reviendras dans {max(10, args.wait_minutes)} minutes au plus tôt."
     return "C'est noté : tu reprendras plus tard."
 

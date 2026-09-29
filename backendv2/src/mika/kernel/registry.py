@@ -12,7 +12,7 @@ import heapq
 import json
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -21,7 +21,7 @@ from pydantic import BaseModel, TypeAdapter
 
 from mika.kernel.builtin import KERNEL, KernelParams, KernelState
 from mika.kernel.codec import canonical_json
-from mika.kernel.events import EventRegistry
+from mika.kernel.events import EventRegistry, EventType
 from mika.kernel.facts import FactSpec, UnknownFact
 from mika.kernel.faculty import (
     AppraisalSpec,
@@ -41,6 +41,7 @@ from mika.kernel.faculty import (
     ReducerSpec,
     SectionSpec,
     ToolSpec,
+    Zone,
 )
 from mika.kernel.state import FrozenDict, Root
 
@@ -115,6 +116,10 @@ class Registry:
                     if t.owner != f.name and not t.public:
                         problems.append(f"{f.name} réduit l'événement privé {t.name} de {t.owner}")
                     self.reducers_by_type[t.name].append(spec)
+                for t in self.of_shapes(spec.shapes):
+                    if t.owner == f.name or t.public:
+                        if spec not in self.reducers_by_type[t.name]:
+                            self.reducers_by_type[t.name].append(spec)
         for name in self.reducers_by_type:
             self.reducers_by_type[name].sort(key=lambda s: s.owner)
 
@@ -156,6 +161,9 @@ class Registry:
             for r in spec.reads:
                 if r not in self.providers:
                     problems.append(f"section {k} : lit un fait inconnu {r}")
+        for k, spec in keys.items():
+            if spec.untrusted and spec.zone is not Zone.VOLATILE:
+                problems.append(f"section {k} : des données venues d'ailleurs vont en zone volatile")
         order = _topo(edges)
         if order is None:
             problems.append("cycle dans l'ordre des sections")
@@ -186,6 +194,8 @@ class Registry:
         for s in (s for f in facs for s in f.processes):
             if s.name in self.processes:
                 problems.append(f"processus déclaré deux fois : {s.name}")
+            if s.wake_shapes:
+                s = replace(s, wake_on=s.wake_on | {t.name for t in self.of_shapes(s.wake_shapes) if t.public})
             self.processes[s.name] = s
             for w in s.wake_on:
                 if w not in self.events:
@@ -277,6 +287,13 @@ class Registry:
         return canonical_json(params)
 
     # ── reconstruction ──
+    def of_shapes(self, shapes: Iterable[type]) -> list[EventType[Any]]:
+        """Les types d'événements connus dont la charge utile dérive de ces formes."""
+        shapes = tuple(shapes)
+        if not shapes:
+            return []
+        return [t for t in self.events.all() if issubclass(t.payload, shapes)]
+
     def read_closure(self, owners: Iterable[str]) -> set[str]:
         """Les propriétaires à rejouer pour reconstruire ``owners`` : eux, et
         ceux dont leurs réducteurs lisent des faits (transitivement)."""

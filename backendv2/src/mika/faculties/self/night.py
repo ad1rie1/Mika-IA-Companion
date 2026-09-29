@@ -43,6 +43,7 @@ from mika.kernel.frame import Audience, Frame
 from mika.kernel.prompt import SectionBody
 from mika.ports.llm import LLMRequest, Message
 from mika.vocab import affect as A
+from mika.vocab import privacy
 from mika.vocab.affect import Appraisal
 from mika.vocab.episodes import CONVERSATIONAL, Tag
 from mika.vocab.privacy import Sensitivity
@@ -337,16 +338,10 @@ def _about(raw: str | None) -> list[str]:
 
 
 def hearable(about: tuple[str, ...], sensitivity: int, interlocutor: str | None, aud: Audience | None) -> bool:
-    """Les règles de la mémoire (ce qui concerne d'autres, jusqu'au niveau de l'audience)."""
-    if not about:
-        return True
+    """Les règles de la mémoire (``vocab.privacy.hearable``)."""
     if aud is None:
-        return False
-    others = [a for a in about if a != interlocutor]
-    if not others:
-        return sensitivity <= Sensitivity.ANODYNE or aud.private_ok
-    limit = aud.witness_level if interlocutor in about else aud.level
-    return sensitivity <= limit
+        return not about and sensitivity <= Sensitivity.ANODYNE
+    return privacy.hearable(about, sensitivity, interlocutor, aud.level, aud.witness_level, aud.private_ok)
 
 
 def mask(text: str, names: Mapping[str, str]) -> str:

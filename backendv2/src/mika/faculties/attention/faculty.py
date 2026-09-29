@@ -67,6 +67,17 @@ class AttentionParams(BaseModel):
     digest_min_age_us: int = 2 * HOUR
     digest_factor: float = 1 / 3
     reflective_from: float = 0.25
+    # ce que signalent les sources extérieures : l'habituation (la même source,
+    # la même sorte, à répétition, se remarque de moins en moins) et le dosage
+    # (une source ne fait pas plus qu'une petite émotion en dix minutes)
+    habituation_window_us: int = 10 * MINUTE
+    habituation_factor: float = 0.85
+    habituation_floor: float = 0.4
+    dose_cap: float = 0.6
+    signal_thought_from: float = 0.6
+    signal_thought_factor: float = 0.7
+    signal_thought_max: float = 0.6
+    signals_kept: int = 32
     # une pensée qui insiste pousse à en reparler (log-odds)
     thought_from: float = 0.4
     thought_evidence: float = 4.0
@@ -83,6 +94,34 @@ class Thought:
     origin: str
     about: tuple[str, ...] = ()
     sensitivity: int = 2
+    bundle: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class SignalHeard:
+    """Un signal qui attend d'être remarqué."""
+
+    seq: int
+    source: str
+    kind: str
+    summary_ref: str
+    pertinence: float
+    emotion: str
+    intensity: float
+    about: tuple[str, ...]
+    sensitivity: int
+    bundle: str
+    at: int
+
+
+@dataclass(frozen=True, slots=True)
+class Heard:
+    """Un signal remarqué récemment (habituation, dosage)."""
+
+    at: int
+    source: str
+    kind: str
+    intensity: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +161,8 @@ class AttentionState:
     late: FrozenDict[str, int] = field(default_factory=FrozenDict)
     dwelt_at: int = 0
     digested_night: str = ""
+    signals: tuple[SignalHeard, ...] = ()
+    heard: tuple[Heard, ...] = ()
 
 
 ATTENTION = Faculty("attention", state=AttentionState, init=lambda p: AttentionState(), params=AttentionParams)
@@ -245,12 +286,41 @@ def _born(s: AttentionState, e, cx) -> AttentionState:
     d = e.data
     p = params(cx.params)
     thought = Thought(e.seq, d.text.ref or "", d.emotion, d.intensity, e.at, e.at, d.origin, tuple(d.about),
-                      d.sensitivity)
+                      d.sensitivity, d.bundle)
     s = replace(s, thoughts=_alive(replace(s, thoughts=s.thoughts.set(e.seq, thought)), e.at, p),
                 pending=tuple(q for q in s.pending if q.source != d.source or q.origin != d.origin))
     if d.origin == c.MISSING and d.about:
         s = _expect(s, c.RETURN, d.about[0], e.at, None)
     return s
+
+
+@ATTENTION.reducer(shapes=[c.Signal])
+def _signaled(s: AttentionState, e, cx) -> AttentionState:
+    """Une source extérieure lui signale quelque chose : elle le remarquera
+    (la veille dose l'émotion et l'habituation)."""
+    d = e.data
+    p = params(cx.params)
+    heard = SignalHeard(e.seq, d.source, d.kind, d.summary.ref or "", d.pertinence, d.emotion, d.intensity,
+                        tuple(d.about), d.sensitivity, d.bundle, e.at)
+    return replace(s, signals=(*s.signals, heard)[-p.signals_kept:])
+
+
+@ATTENTION.reducer(c.NOTICED)
+def _noticed(s: AttentionState, e, cx) -> AttentionState:
+    d = e.data
+    p = params(cx.params)
+    heard = tuple(h for h in s.heard if e.at - h.at < p.habituation_window_us)
+    return replace(s, signals=tuple(x for x in s.signals if x.seq != d.signal),
+                   heard=(*heard, Heard(e.at, d.source, d.kind, d.intensity))[-64:])
+
+
+def habituation(s: AttentionState, source: str, kind: str, now: int, p: AttentionParams,
+                extra: tuple[Heard, ...] = ()) -> tuple[float, float]:
+    """(poids, émotion encore permise) pour un signal de cette source, maintenant."""
+    recent = [h for h in (*s.heard, *extra) if now - h.at < p.habituation_window_us]
+    n = sum(1 for h in recent if h.source == source and h.kind == kind)
+    used = sum(h.intensity for h in recent if h.source == source)
+    return max(p.habituation_floor, p.habituation_factor ** n), max(0.0, p.dose_cap - used)
 
 
 @ATTENTION.reducer(c.DIGESTED)
@@ -296,7 +366,7 @@ def _missed(s: AttentionState, e, cx) -> AttentionState:
 
 def readings(s: AttentionState, now: int, p: AttentionParams) -> tuple[c.ThoughtReading, ...]:
     out = [c.ThoughtReading(t.id, t.text_ref, t.emotion, round(current(t, now, p), 4), t.origin, t.about,
-                            t.sensitivity, t.born_at)
+                            t.sensitivity, t.born_at, t.bundle)
            for t in s.thoughts.values() if current(t, now, p) >= p.fade_below]
     return tuple(sorted(out, key=lambda r: (-r.intensity, r.id)))
 
@@ -323,6 +393,15 @@ def _birth_felt(e, cx) -> Appraisal:
     p = params(cx.params)
     return Appraisal(_emotion(e.data.emotion), e.data.intensity * p.birth_appraisal_factor, reason=e.data.origin,
                      relational=e.data.origin == c.EXCHANGE)
+
+
+@ATTENTION.appraisal(c.NOTICED)
+def _noticed_felt(e, cx) -> Appraisal | None:
+    """Ce qu'elle remarque la touche un peu — déjà dosé, habitué."""
+    d = e.data
+    if not d.emotion or d.intensity <= 0:
+        return None
+    return Appraisal(_emotion(d.emotion), d.intensity, reason=d.source)
 
 
 @ATTENTION.appraisal(c.DWELT)
