@@ -14,11 +14,16 @@ fonctions attendues, taille) est une politesse, pas la défense.
 
 Le processus d'une app reste chaud entre deux appels ; une nouvelle version
 le remplace ; il est relancé s'il meurt.
+
+**Seules les fonctions déclarées s'appellent** : les fixes (``tick``,
+``context``, ``view``, ``action``, ``on_event``) quand elles existent, et
+celles que le manifeste déclare (``view_<vue>``, ``action_<vue>_<action>``,
+``tool_<nom>``). Une vue rendue pour la console est gardée un instant
+(``cache_s``) ; tout autre appel à l'app l'oublie.
 """
 
 from __future__ import annotations
 
-import ast
 import asyncio
 import ipaddress
 import json
@@ -40,26 +45,22 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
-import yaml
 
-from mika.kernel import schedule
-from mika.ports.forge import AppInfo, AppTool, CallResult, ForgeRefused
+from mika.adapters.forge.manifest import HANDLERS, coherence, lint, read_manifest, signatures
+from mika.ports.forge import AppInfo, AppTool, CallResult, ForgeRefused, config_form, ui_dump, view_specs
+
+__all__ = ["ForgeHost", "Limits", "lint", "read_manifest", "real_http_get"]
 
 WORKER = Path(__file__).with_name("worker.py")
 NAME = re.compile(r"^[a-z][a-z0-9_]{1,30}$")
-TOOL = re.compile(r"^[a-z][a-z0-9_]{1,30}$")
-HANDLERS = ("tick", "context", "view", "action", "on_event")
-EVENT = re.compile(r"^[a-z_]+\.[a-z_*]+$")
-FORBIDDEN_IMPORTS = frozenset({"subprocess", "socket", "ctypes", "multiprocessing", "threading", "asyncio", "signal",
-                               "pty", "fcntl", "resource", "mmap", "importlib", "sys"})
-MAX_SOURCE = 200_000
-MAX_MANIFEST = 16_000
 MAX_LINE = 1_000_000
 MAX_RESULT = 64_000
 MAX_LOGS = 500
 KV_MAX_KEYS = 1000
 KV_MAX_VALUE = 16_000
 HTTP_MAX = 1_000_000
+#: les vues rendues gardées un instant (même app, version, fonction, paramètres, réglages)
+CACHE_MAX = 64
 _SYSTEM_DIRS = ("/usr", "/bin", "/sbin", "/lib", "/lib64")
 
 
@@ -72,76 +73,22 @@ class Limits:
     load_timeout_s: float = 5.0
 
 
-def lint(code: str) -> tuple[list[str], set[str]]:
-    """(problèmes, fonctions trouvées). La défense est le bac à sable ; ceci
-    refuse l'inutile et l'illisible, en français, pour qu'elle corrige."""
-    problems: list[str] = []
-    if len(code.encode()) > MAX_SOURCE:
-        problems.append(f"le code dépasse {MAX_SOURCE // 1000} Ko")
-    try:
-        tree = ast.parse(code)
-    except SyntaxError as exc:
-        return [f"erreur de syntaxe ligne {exc.lineno} : {exc.msg}"], set()
-    for node in ast.walk(tree):
-        names: list[str] = []
-        if isinstance(node, ast.Import):
-            names = [a.name.split(".")[0] for a in node.names]
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            names = [node.module.split(".")[0]]
-        for n in names:
-            if n in FORBIDDEN_IMPORTS:
-                problems.append(f"« import {n} » n'a pas de sens ici : l'app n'a ni réseau, ni processus, ni "
-                                "système à piloter — passe par api.*")
-    functions = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
-    if not functions & {*HANDLERS} and not any(f.startswith("tool_") for f in functions):
-        problems.append("aucune fonction attendue : tick(api), context(api), view(api), action(api, nom, args) "
-                        "ou tool_<nom>(api, args)")
-    return problems, functions
-
-
-def read_manifest(text: str) -> tuple[dict[str, Any], list[str]]:
-    problems: list[str] = []
-    if len(text.encode()) > MAX_MANIFEST:
-        return {}, [f"le manifeste dépasse {MAX_MANIFEST // 1000} Ko"]
-    try:
-        data = yaml.safe_load(text) or {}
-    except yaml.YAMLError as exc:
-        return {}, [f"manifeste illisible : {exc}"[:300]]
-    if not isinstance(data, dict):
-        return {}, ["le manifeste doit être un dictionnaire (titre, description, schedule…)"]
-    out: dict[str, Any] = {"title": str(data.get("title") or "")[:80], "description": str(data.get("description") or "")[:500],
-                           "context": bool(data.get("context", False))}
-    if not out["title"]:
-        problems.append("il manque « title »")
-    rule = str(data.get("schedule") or "manual").strip()
-    try:
-        schedule.parse(rule)
-    except ValueError as exc:
-        problems.append(str(exc))
-    out["schedule"] = rule
-    domains = data.get("allowed_domains") or []
-    if not isinstance(domains, list) or not all(isinstance(d, str) and re.match(r"^[a-z0-9.-]+$", d) for d in domains):
-        problems.append("« allowed_domains » : une liste de noms d'hôtes")
-        domains = []
-    out["allowed_domains"] = [d.lower() for d in domains][:10]
-    config = data.get("config") or {}
-    if not isinstance(config, dict) or not all(isinstance(v, str | int | float | bool) for v in config.values()):
-        problems.append("« config » : des valeurs simples (texte, nombre, vrai/faux)")
-        config = {}
-    out["config"] = {str(k)[:40]: v for k, v in list(config.items())[:30]}
-    tools = []
-    for t in data.get("tools") or []:
-        if not isinstance(t, dict) or not TOOL.match(str(t.get("name") or "")):
-            problems.append("« tools » : des entrées {name, description}, name en minuscules")
+def surface(manifest: Mapping[str, Any], functions: Mapping[str, int] | set[str], title: str
+            ) -> tuple[list[dict[str, Any]], list[str], list[str]]:
+    """(vues déclarées dont les fonctions existent, outils, fonctions appelables).
+    Une ancienne ``view(api)`` sans vues déclarées devient la vue « principale »."""
+    views = []
+    for v in manifest.get("views", []):
+        if v["function"] not in functions:
             continue
-        tools.append({"name": str(t["name"]), "description": str(t.get("description") or "")[:300]})
-    out["tools"] = tools[:8]
-    events = data.get("events") or []
-    if not isinstance(events, list) or not all(isinstance(e, str) and EVENT.match(e) for e in events):
-        problems.append("« events » : une liste de types (« rss.noticed », « body.* »)")
-        events = []
-    out["events"] = [str(e) for e in events][:10]
-    return out, problems
+        views.append({**v, "actions": [a for a in v["actions"] if a["function"] in functions]})
+    if not views and "view" in functions:
+        views = [{"key": "principale", "label": title or "Vue principale", "description": "", "order": 100,
+                  "params": [], "actions": [], "function": "view"}]
+    tools = [t["name"] for t in manifest.get("tools", []) if f"tool_{t['name']}" in functions]
+    callable_ = {h for h in HANDLERS if h in functions} | {v["function"] for v in views} \
+        | {a["function"] for v in views for a in v["actions"]} | {f"tool_{t}" for t in tools}
+    return views, tools, sorted(callable_)
 
 
 @dataclass(slots=True)
@@ -205,6 +152,11 @@ class ForgeHost:
             "CREATE TABLE IF NOT EXISTS kv(app TEXT, key TEXT, value TEXT, PRIMARY KEY(app, key));"
             "CREATE TABLE IF NOT EXISTS logs(id INTEGER PRIMARY KEY, app TEXT, at REAL, line TEXT);")
         self._dblock = threading.Lock()
+        #: ``info`` relu seulement quand ses fichiers changent (la console le demande à chaque page)
+        self._infos: dict[str, tuple[tuple[Any, ...], AppInfo | None]] = {}
+        #: les vues rendues : clé → (instant, résultat)
+        self._cache: dict[tuple[Any, ...], tuple[float, CallResult]] = {}
+        self._cachelock = threading.Lock()
 
     # ── les apps ──
     def _dir(self, app: str) -> Path:
@@ -227,25 +179,51 @@ class ForgeHost:
                     out.append(info)
         return out
 
+    def _stamp(self, d: Path) -> tuple[Any, ...]:
+        out: list[Any] = []
+        for name in ("manifest.yaml", "main.py", "version.json"):
+            try:
+                st = (d / name).stat()
+                out.append((st.st_mtime_ns, st.st_size))
+            except OSError:
+                out.append(None)
+        return tuple(out)
+
     def info(self, app: str) -> AppInfo | None:
         try:
             d = self._dir(app)
         except ForgeRefused:
             return None
-        if not (d / "main.py").exists():
+        stamp = self._stamp(d)
+        cached = self._infos.get(app)
+        if cached is not None and cached[0] == stamp:
+            return cached[1]
+        info = self._read_info(app, d) if stamp[1] is not None else None
+        self._infos[app] = (stamp, info)
+        return info
+
+    def _read_info(self, app: str, d: Path) -> AppInfo | None:
+        try:
+            text = (d / "manifest.yaml").read_text(encoding="utf-8") if (d / "manifest.yaml").exists() else ""
+            code = (d / "main.py").read_text(encoding="utf-8")
+        except OSError:
             return None
-        manifest, problems = read_manifest((d / "manifest.yaml").read_text(encoding="utf-8")
-                                           if (d / "manifest.yaml").exists() else "")
-        _, functions = lint((d / "main.py").read_text(encoding="utf-8"))
+        manifest, problems = read_manifest(text)
+        _, functions = signatures(code)
+        title = manifest.get("title") or app
+        views, tools, callable_ = surface(manifest, functions, title)
+        config = manifest.get("config_fields", [])
         return AppInfo(
-            name=app, title=manifest.get("title") or app, description=manifest.get("description", ""),
+            name=app, title=title, description=manifest.get("description", ""),
             version=self._version(app), schedule=manifest.get("schedule", "manual"),
             context=bool(manifest.get("context")) and "context" in functions,
             tools=tuple(AppTool(t["name"], t["description"]) for t in manifest.get("tools", [])
-                        if f"tool_{t['name']}" in functions),
+                        if t["name"] in tools),
             handlers=tuple(sorted(functions)), error="; ".join(problems),
             events=tuple(manifest.get("events", [])) if "on_event" in functions else (),
-            config=tuple(manifest.get("config", {}).items()))
+            config=tuple(manifest.get("config", {}).items()),
+            views=view_specs(views), config_fields=config_form(config),
+            ui=ui_dump(views, config, tools, callable_), callable=tuple(callable_))
 
     def source(self, app: str) -> tuple[str, str] | None:
         d = self._dir(app)
@@ -257,15 +235,10 @@ class ForgeHost:
     async def write(self, app: str, manifest: str, code: str) -> tuple[int, list[str]]:
         d = self._dir(app)
         data, problems = read_manifest(manifest)
-        code_problems, functions = lint(code)
+        code_problems, functions = signatures(code)
         problems += code_problems
-        for t in data.get("tools", []):
-            if f"tool_{t['name']}" not in functions:
-                problems.append(f"l'outil « {t['name']} » est déclaré sans fonction tool_{t['name']}(api, args)")
-        if data.get("context") and "context" not in functions:
-            problems.append("« context: true » sans fonction context(api)")
-        if data.get("events") and "on_event" not in functions:
-            problems.append("« events » sans fonction on_event(api, événement)")
+        if not code_problems:
+            problems += coherence(data, functions)
         if problems:
             raise ForgeRefused(" ; ".join(problems))
         version = self._version(app) + 1
@@ -280,6 +253,7 @@ class ForgeHost:
         (d / "main.py").write_text(code, encoding="utf-8")
         (d / "version.json").write_text(json.dumps({"version": version}))
         self._stop(app)  # la version suivante repart d'un processus neuf
+        self._forget(app)
         return version, []
 
     async def rollback(self, app: str) -> int:
@@ -302,6 +276,7 @@ class ForgeHost:
         trash.mkdir(exist_ok=True)
         target = trash / f"{app}-{self._version(app)}-{int(time.time())}"
         shutil.move(str(d), str(target))
+        self._forget(app)
         return str(target)
 
     async def reset_storage(self, app: str) -> int:
@@ -309,7 +284,29 @@ class ForgeHost:
         with self._dblock:
             n = self._db.execute("DELETE FROM kv WHERE app=?", (app,)).rowcount
             self._db.commit()
+        self._drop_cache(app)
         return n
+
+    async def reload(self, app: str) -> None:
+        """Arrête son processus chaud (après l'appel en cours) : l'appel suivant
+        repart du disque, et rien de ce qui était gardé ne resservira."""
+        self._dir(app)
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._reload_sync, app)
+
+    def _reload_sync(self, app: str) -> None:
+        with self._lock(app):
+            self._stop(app)
+        self._forget(app)
+
+    def _forget(self, app: str) -> None:
+        self._infos.pop(app, None)
+        self._drop_cache(app)
+
+    def _drop_cache(self, app: str) -> None:
+        with self._cachelock:
+            for key in [k for k in self._cache if k[0] == app]:
+                del self._cache[key]
 
     def logs(self, app: str, n: int = 20) -> list[str]:
         with self._dblock:
@@ -318,9 +315,10 @@ class ForgeHost:
 
     # ── l'exécution ──
     async def call(self, app: str, method: str, args: dict[str, Any] | None = None, *,
-                   timeout_s: float = 5.0) -> CallResult:
+                   timeout_s: float = 5.0, max_result: int = MAX_RESULT, cache_s: float = 0.0) -> CallResult:
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self._call_sync, app, method, dict(args or {}), timeout_s)
+        return await loop.run_in_executor(None, self._call_sync, app, method, dict(args or {}), timeout_s,
+                                          max_result, cache_s)
 
     def _lock(self, app: str) -> threading.Lock:
         return self._locks.setdefault(app, threading.Lock())
@@ -419,7 +417,8 @@ class ForgeHost:
         except (BrokenPipeError, OSError):
             return False
 
-    def _call_sync(self, app: str, method: str, args: dict[str, Any], timeout_s: float) -> CallResult:
+    def _call_sync(self, app: str, method: str, args: dict[str, Any], timeout_s: float,
+                   max_result: int = MAX_RESULT, cache_s: float = 0.0) -> CallResult:
         started = time.monotonic()
         call = _Call()
 
@@ -434,6 +433,35 @@ class ForgeHost:
             return done(False, error="cette app n'existe pas")
         if info.error:
             return done(False, error=f"manifeste : {info.error}")
+        if method not in info.callable:
+            known = ", ".join(info.callable) or "aucune"
+            return done(False, error=f"« {method[:60]} » n'est pas une fonction déclarée de cette app "
+                                     f"(appelables : {known})")
+        key = self._cache_key(app, info, method, args) if cache_s > 0 else None
+        if key is not None:
+            with self._cachelock:
+                hit = self._cache.get(key)
+            if hit is not None and time.monotonic() - hit[0] <= cache_s:
+                return hit[1]
+        if not method.startswith("view"):
+            self._drop_cache(app)  # ce qu'elle fait peut changer ce qu'elle montre
+        result = self._run(app, info, method, args, timeout_s, max_result, call, done)
+        if key is not None and result.ok:
+            with self._cachelock:
+                if len(self._cache) >= CACHE_MAX:
+                    del self._cache[min(self._cache, key=lambda k: self._cache[k][0])]
+                self._cache[key] = (time.monotonic(), result)
+        return result
+
+    def _cache_key(self, app: str, info: AppInfo, method: str, args: Mapping[str, Any]) -> tuple[Any, ...] | None:
+        try:
+            config = json.dumps(dict(self._config(app) if self._config else {}), sort_keys=True, default=str)
+            return (app, info.version, method, json.dumps(args, sort_keys=True, default=str), config)
+        except (TypeError, ValueError):
+            return None
+
+    def _run(self, app: str, info: AppInfo, method: str, args: dict[str, Any], timeout_s: float, max_result: int,
+             call: _Call, done: Callable[..., CallResult]) -> CallResult:
         with self._lock(app):
             w = self._workers.get(app)
             if w is None or w.version != info.version or w.proc.poll() is not None:
@@ -465,8 +493,11 @@ class ForgeHost:
                     self._log(app, f"{method} : {msg['error']}")
                     return done(False, error=str(msg["error"]))
                 value = msg.get("result")
-                if len(json.dumps(value, ensure_ascii=False, default=str)) > MAX_RESULT:
-                    return done(False, error="résultat trop gros")
+                size = len(json.dumps(value, ensure_ascii=False, default=str))
+                if size > max_result:
+                    self._log(app, f"{method} : résultat trop gros ({size // 1000} Ko)")
+                    return done(False, error=f"résultat trop gros ({size // 1000} Ko ; au plus "
+                                             f"{max_result // 1000} Ko)")
                 return done(True, value)
 
     # ── les services de l'hôte ──
@@ -517,8 +548,10 @@ class ForgeHost:
                                         (app, f"{p.get('prefix') or ''}%")).fetchall()
             return [r[0] for r in rows]
         if name == "config":
-            manifest, _ = read_manifest(self.source(app)[0] if self.source(app) else "")
-            values = {**manifest.get("config", {}), **dict((self._config(app) if self._config else {}) or {})}
+            info = self.info(app)
+            defaults = {**dict(info.config), **{f.path: f.default for f in info.config_fields
+                                                if f.default is not None}} if info is not None else {}
+            values = {**defaults, **dict((self._config(app) if self._config else {}) or {})}
             return values.get(str(p.get("key")), p.get("default"))
         if name == "emit":
             if len(call.emits) >= 5:

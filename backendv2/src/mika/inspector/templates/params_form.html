@@ -1,0 +1,20 @@
+{% from "_blocks.html" import field %}
+{% for m in panel_messages %}<div class="flash {{ m[0] }}" role="status">{{ m[1] }}</div>{% endfor %}
+<details class="advanced card"{{ ' open' if open }}>
+  <summary>Modifier (avancé) — surcharges de {{ owner }}</summary>
+  <p class="muted">Une valeur égale à celle du tempérament retire la surcharge. Chaque enregistrement est borné,
+  journalisé avec ton nom, et rejoué tel quel.{% if overridden %} Surchargés aujourd'hui : {{ overridden|join(", ") }}.{% endif %}</p>
+  <form method="post" action="{{ action }}" class="form">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_faculte" value="{{ owner }}">
+    {% for e in general %}<div class="flash danger">{{ e }}</div>{% endfor %}
+    <div class="form-grid">{% for f in fields %}{{ field(f) }}{% endfor %}</div>
+    <div class="form-actions"><button class="btn">Enregistrer les surcharges</button></div>
+  </form>
+  {% if overridden %}
+  <form method="post" action="{{ action }}" class="inline" data-confirm="Retirer toutes les surcharges de {{ owner }} ?">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_faculte" value="{{ owner }}">
+    <input type="hidden" name="_reinitialiser" value="1">
+    <button class="btn quiet danger">Tout remettre au tempérament</button>
+  </form>
+  {% endif %}
+</details>

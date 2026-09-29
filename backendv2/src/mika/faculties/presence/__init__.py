@@ -9,7 +9,20 @@ from mika.contracts import identity as identity_c
 from mika.contracts import presence as c
 from mika.kernel.faculty import Faculty
 from mika.kernel.frame import Frame
-from mika.kernel.inspect import Block, Fields, InspectContext, Note, Ref, Table
+from mika.kernel.inspect import (
+    Badge,
+    Block,
+    InspectContext,
+    Ref,
+    Row,
+    Stat,
+    Stats,
+    Table,
+    Text,
+    Vital,
+    When,
+    paginate,
+)
 from mika.kernel.state import FrozenDict
 from mika.vocab.privacy import ChannelTrust
 
@@ -68,39 +81,56 @@ def _since(s: PresenceState, cx, handle: str) -> int | None:
 
 # ── Inspection ────────────────────────────────────────────────────────────
 
-#: Au plus tant de connexions listées.
-MAX_LINKS = 200
+#: Au plus tant de connexions par page ; tant de noms dans l'aide d'un vital.
+PAGE = 50
+VITAL_NAMES = 6
 
 
-def _audience(link: Link, trust: ChannelTrust) -> str:
+def _audience(link: Link, trust: ChannelTrust) -> Badge:
     """Comme l'audience d'un épisode : un salon, ou un canal qui ne prouve
     rien, est public."""
     if link.room:
-        return f"publique (salon « {link.room} »)"
+        return Badge(f"publique (salon « {link.room} »)", "warn")
     if link.public:
-        return "publique (groupe)"
+        return Badge("publique (groupe)", "warn")
     if trust is ChannelTrust.PUBLIC:
-        return "publique (rien ne prouve qui écrit)"
-    return "privée"
+        return Badge("publique (rien ne prouve qui écrit)", "warn")
+    return Badge("privée", "ok")
 
 
-@PRESENCE.inspect("presents", title="Présents")
+def _who(frame: Frame, handle: str) -> tuple[str, Ref]:
+    """Le nom affiché, et le lien vers la fiche de la personne derrière la poignée."""
+    view = frame.get(identity_c.IDENTITY(handle))
+    person = frame.get(identity_c.PERSON(handle))
+    name = frame.get(identity_c.IDENTITY(person)).name if person != handle else view.name
+    return view.name or name or "", Ref.subject("person", person, name or view.name or person)
+
+
+@PRESENCE.inspect("presents", title="Présents", section="personnes", order=30,
+                  description="Les connexions vivantes en ce moment ; une ligne mène à la fiche de la personne.")
 def _inspect(s: PresenceState, frame: Frame, ctx: InspectContext) -> list[Block]:
     links = sorted(s.links.items(), key=lambda kv: (-s.since.get(kv[1].handle, 0), kv[0]))
+    page, pager = paginate(links, ctx.pager(size=PAGE))
     rows = []
-    for connection, link in links[:MAX_LINKS]:
+    for connection, link in page:
         view = frame.get(identity_c.IDENTITY(link.handle))
+        name, person = _who(frame, link.handle)
         since = s.since.get(link.handle)
-        rows.append((Ref("view", "identity/personne", link.handle, (("handle", link.handle),)), view.name or "—",
-                     link.channel or "—", connection, ctx.when(since) if since else "—",
-                     _audience(link, view.trust),
-                     Ref("view", "transcript/fil", "son fil", (("handle", link.handle),))))
-    blocks: list[Block] = [
-        Fields((("connexions vivantes", len(s.links)), ("poignées présentes", len(_handles(s))))),
-        Table(("poignée", "nom", "canal", "connexion", "présente depuis", "audience", ""), tuple(rows),
-              empty="personne n'est connecté"),
+        rows.append(Row((person, Ref.subject("handle", link.handle, link.handle), name or "—",
+                         link.channel or "—", Text(connection, "mono"), When(since) if since else "—",
+                         _audience(link, view.trust)), href=person))
+    return [
+        Stats((Stat("connexions vivantes", len(s.links)), Stat("poignées présentes", len(_handles(s))))),
+        Table(("personne", "poignée", "nom", "canal", "connexion", "présente depuis", "audience"), tuple(rows),
+              pager=pager, empty="personne n'est connecté"),
     ]
-    if len(links) > MAX_LINKS:
-        blocks.append(Note(f"Seules les {MAX_LINKS} connexions les plus récentes sont listées (sur {len(links)}).",
-                           tone="mut"))
-    return blocks
+
+
+@PRESENCE.vital("presents", label="Présents", order=40)
+def _present_vital(s: PresenceState, frame: Frame) -> Vital:
+    handles = sorted(_handles(s), key=lambda h: (-s.since.get(h, 0), h))
+    names = [_who(frame, h)[0] or h for h in handles]
+    hint = ", ".join(names[:VITAL_NAMES]) + (f" et {len(names) - VITAL_NAMES} autre(s)"
+                                            if len(names) > VITAL_NAMES else "")
+    return Vital(str(len(handles)), tone="info" if handles else "", hint=hint or "personne n'est connecté",
+                 href=Ref.view("presence", "presents", "Présents"))

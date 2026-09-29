@@ -1,7 +1,9 @@
 """Le pipeline d'épisode, fixe.
 
 ``admission → baux → départ gardé → enrichissements ∥ → composition → appel
-(boucle d'outils) → analyse → commit gardé → règlement``. Pendant tout
+(boucle d'outils) → analyse → commit gardé → règlement``. Chaque épisode
+composé laisse une trace (``runtime/traces.py``) : ce qui a été envoyé au
+modèle, la composition, les outils et leurs résultats. Pendant tout
 l'épisode, le Mind revérifie sa garde à chaque ajout d'autrui : si ce qu'il a
 lu change (la personne a écrit entre-temps, un démenti d'identité est tombé…),
 l'épisode est annulé et se règle en ``superseded`` — il n'est jamais livré en
@@ -19,16 +21,18 @@ from typing import TYPE_CHECKING, Any
 from mika.contracts.runtime import EPISODE_ENDED, EPISODE_STARTED, UTTERANCE, ToolOutcome
 from mika.kernel.arbitration import Row
 from mika.kernel.builtin import LEASE, LEASE_ACQUIRED, LEASE_RELEASED
+from mika.kernel.codec import to_plain
 from mika.kernel.episode import EpisodePolicy, Outcome
 from mika.kernel.events import Content, Origin, VoiceProvenance
 from mika.kernel.facts import FactView
 from mika.kernel.frame import CLOSED, Audience, EpisodeRef, Frame
 from mika.kernel.guards import Guard, Superseded, combine, floor
-from mika.kernel.prompt import Budget, Composer, SectionBody
+from mika.kernel.prompt import Budget, Composer, ComposeTrace, SectionBody
 from mika.kernel.state import FrozenDict
 from mika.ports.llm import PREEMPTED, LLMGateway, LLMRequest, Message, PersonaRender
 from mika.runtime.boundary import Failed, acall, call
-from mika.runtime.tools import ToolContext, declare, run_tool_loop
+from mika.runtime.tools import LoopResult, ToolContext, declare, run_tool_loop
+from mika.runtime.traces import STABLE_KEY, EpisodeTraces
 
 if TYPE_CHECKING:
     from mika.runtime.mind import Mind
@@ -93,9 +97,11 @@ class EpisodeRunner:
         budget: Budget | None = None,
         lease_margin_s: float = 30.0,
         ports: Mapping[str, Any] | None = None,
+        traces: EpisodeTraces | None = None,
     ) -> None:
         self.mind = mind
         self.ports = dict(ports or {})
+        self.traces = traces
         self.gateway = gateway
         self.policies = dict(policies)
         self.persona = persona
@@ -160,6 +166,9 @@ class EpisodeRunner:
         held: list[str] = []
         superseded = _Supersession()
         me = asyncio.current_task()
+        #: la trace de l'épisode, remplie au fil des phases (vide tant qu'il n'est pas composé)
+        seen: dict[str, Any] = {}
+        loop_result = LoopResult(text="")
 
         def on_supersede(failure: Superseded) -> None:
             superseded.failure = failure
@@ -197,6 +206,8 @@ class EpisodeRunner:
                     message=message, budget=self.budget, thread_key=req.target or req.kind,
                 )
                 report.trace = trace
+                seen.update(_composition(req, audience, policy.role, message, trace, enrich),
+                            at=mind.clock.now())
                 if policy.role is None:
                     await self._end(eid, req, Outcome.DONE)
                     return report
@@ -216,6 +227,9 @@ class EpisodeRunner:
                           "audience_level": audience.level},
                 )
 
+                seen.update(_request(llm_req))
+                self._record(eid, req, seen, loop_result, report, settled=False)
+
                 def make_ctx(spec: Any, call_id: str) -> ToolContext:
                     return ToolContext(mind, spec, call_id, eid, Frame(mind.root, mind.clock.now(),
                                        mind.registry, audience, episode), guard=None, ports=self.ports)
@@ -223,7 +237,8 @@ class EpisodeRunner:
                 assert self.gateway is not None, "pas de passerelle LLM"
                 gateway = self.gateway
                 loop = await acall(
-                    lambda: run_tool_loop(gateway, llm_req, tools, make_ctx, max_turns=policy.max_tool_turns),
+                    lambda: run_tool_loop(gateway, llm_req, tools, make_ctx, max_turns=policy.max_tool_turns,
+                                          clock=mind.clock.now, result=loop_result),
                     label=f"appel du modèle ({policy.role})",
                 )
                 if isinstance(loop, Failed):
@@ -277,7 +292,25 @@ class EpisodeRunner:
                                       Superseded("baux", f"ressource occupée : {busy.resource}"))
         finally:
             mind.untrack(eid)
+            if seen:
+                self._record(eid, req, seen, loop_result, report, settled=True)
             await self._release(eid, held)
+
+    def _record(self, eid: str, req: EpisodeRequest, seen: Mapping[str, Any], loop: LoopResult,
+                report: EpisodeReport, *, settled: bool) -> None:
+        """La trace de l'épisode : à la composition (ce qui part au modèle, gardé
+        même si l'appel ne revient jamais), puis au règlement (outils, appels,
+        issue). Une trace ne retient jamais un épisode : l'écriture part en tâche."""
+        if self.traces is None:
+            return
+        data = dict(seen)
+        at = int(data.pop("at", self.mind.clock.now()))
+        data.update(_results(loop))
+        if settled:
+            data.update(outcome=report.outcome.value, detail=report.detail, utterance_seq=report.utterance_seq)
+        else:
+            data.update(outcome="running")
+        call(self.traces.record, eid, at, req.kind, req.target, data, label="trace d'épisode")
 
     # ── étapes ──
     async def _acquire(self, eid: str, resources: Sequence[str], policy: EpisodePolicy, req: EpisodeRequest) -> list[str]:
@@ -403,6 +436,56 @@ class EpisodeRunner:
         report.outcome = outcome
         report.detail = str(failure) if failure else detail
         return report
+
+
+def _composition(req: EpisodeRequest, audience: Audience, role: str | None, message: str, trace: ComposeTrace,
+                 enrich: Mapping[str, Any]) -> dict[str, Any]:
+    """Ce qui a décidé du prompt : le déclencheur, l'audience, la composition."""
+    return {
+        "trigger": req.trigger, "reason": req.reason, "reply_to": req.reply_to, "subject": req.subject,
+        "channel": req.channel or audience.channel, "room": req.room or audience.room,
+        "audience": {"level": audience.level, "witness_level": audience.witness_level},
+        "role": role, "message": message, "enrichments": sorted(enrich),
+        "compose": to_plain(trace),
+    }
+
+
+def _request(llm_req: LLMRequest) -> dict[str, Any]:
+    """Exactement ce qui part au modèle au premier tour."""
+    persona = llm_req.persona
+    return {
+        STABLE_KEY: llm_req.system_stable,
+        "system_volatile": llm_req.system_volatile,
+        "messages": [{"role": m.role, "content": m.content} for m in llm_req.messages],
+        "tools": [d.name for d in llm_req.tools],
+        "persona": {"hash": persona.hash, "depth": persona.depth} if persona is not None else None,
+        "call_id": llm_req.call_id, "max_tokens": llm_req.max_tokens, "lane": llm_req.lane,
+        "priority": llm_req.priority,
+    }
+
+
+def _results(loop: LoopResult) -> dict[str, Any]:
+    """Ce que la boucle a fait : les appels de modèle, les outils avec leurs
+    arguments et résultats (déjà bornés), le texte final s'il y en a un."""
+    return {
+        "llm_calls": loop.call_ids,
+        "responses": [
+            {"call_id": cid, "model": r.model, "stop": r.stop, "text": r.text,
+             "tool_calls": [{"id": c.id, "name": c.name} for c in r.tool_calls],
+             "usage": {"input": r.usage.input_tokens, "output": r.usage.output_tokens,
+                       "cache_read": r.usage.cache_read, "cache_write": r.usage.cache_write}}
+            for cid, r in loop.exchanges
+        ],
+        "tool_calls": [
+            {"call_id": t.call_id, "name": t.name, "args": t.args_json, "ok": t.ok, "result": t.result,
+             "duration_us": t.duration_us, "executed": t.executed}
+            for t in loop.records
+        ],
+        # le texte final quand la boucle est allée au bout — même s'il n'a pas
+        # été livré (supplanté, préempté) : ce qu'elle allait dire
+        "reply": loop.text if loop.responses and loop.stop != "running" else None,
+        "stop": loop.stop if loop.responses else None,
+    }
 
 
 def _describe(error: BaseException) -> str:

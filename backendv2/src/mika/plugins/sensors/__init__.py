@@ -4,12 +4,29 @@ l'événement (l'attention, qui reçoit tous les signaux, fait le reste)."""
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from mika.contracts import sensors as c
 from mika.kernel.events import Content
 from mika.kernel.faculty import Faculty
 from mika.kernel.frame import Frame
-from mika.kernel.inspect import Block, InspectContext, Note, Ref, Table
+from mika.kernel.inspect import (
+    Block,
+    Column,
+    InspectContext,
+    Meter,
+    Note,
+    Pager,
+    Param,
+    Ref,
+    Row,
+    Stat,
+    Stats,
+    Table,
+    Text,
+    When,
+)
+from mika.vocab.affect import emotion_cell
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +39,10 @@ SENSORS.declare(*c.ALL)
 
 
 # ── Inspection ────────────────────────────────────────────────────────────
+#
+# Lecture seule, au journal : qui lui parle, et ce qu'ils lui ont dit. Le nom
+# d'un appareil et ce qu'il signale viennent d'ailleurs : du texte, jamais la
+# clé d'un lien.
 
 SHOWN = 50
 DEVICES_SHOWN = 20
@@ -32,20 +53,36 @@ def _said(summary: Content) -> str:
     return summary.text if summary.text is not None else "(oublié)"
 
 
-@SENSORS.inspect("appareils", title="Appareils")
+def _signal(e: Any) -> Row:
+    d = e.data
+    pertinence = float(d.pertinence or 0.0)
+    return Row((When(e.at), Text(str(d.device or "—")), Text(_said(d.summary), clamp=300),
+                Meter(pertinence, f"{pertinence:.2f}"), emotion_cell(d.emotion, d.intensity or None),
+                Ref("event", str(e.seq), f"#{e.seq}")))
+
+
+@SENSORS.inspect("appareils", title="Appareils", section="sens", order=40,
+                 description="Ce que lui signalent des appareils (une sonnette, une domotique, un script).",
+                 params=[Param("appareil", "Appareil", placeholder="nom exact d'un appareil")])
 def _inspect(s: SensorsState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    sensed = ctx.events([c.SENSED], SHOWN)
-    if not sensed:
+    devices = ctx.tally(c.SENSED, "device")
+    if not devices:
         return [Note("Aucun appareil ne lui a encore rien signalé : ils écrivent par POST /api/perceptions.",
-                     tone="mut")]
-    devices = ctx.tally(c.SENSED, "device")[:DEVICES_SHOWN]
-    return [
-        Table(("appareil", "signaux", "le dernier"),
-              tuple((str(device or "—"), count, ctx.when(last)) for device, count, last in devices),
-              title="Les appareils qui lui parlent"),
-        Table(("quand", "appareil", "ce qu'il signale", "pertinence", "émotion", "journal"),
-              tuple((ctx.when(e.at), str(e.data.device or "—"), _said(e.data.summary),
-                     f"{float(e.data.pertinence or 0.0):.2f}", str(e.data.emotion or "—"),
-                     Ref("event", str(e.seq), f"#{e.seq}")) for e in sensed),
-              title=f"Ce qu'ils lui ont signalé (les {SHOWN} plus récents)"),
-    ]
+                     tone="muted")]
+    device = ctx.value("appareil") or ""
+    before = ctx.int_param("avant", 0) or None
+    sensed = ctx.events([c.SENSED], SHOWN, where=("device", device) if device else None, before=before)
+    more = f" (les {DEVICES_SHOWN} plus récents sur {len(devices)})" if len(devices) > DEVICES_SHOWN else ""
+    tiles = Stats(tuple(
+        Stat(str(name or "—"), count, sub=f"le dernier : {ctx.when(last)}",
+             href=Ref.view("sensors", "appareils", str(name), appareil=str(name)[:200]) if name else None,
+             tone="info" if device and str(name) == device else "")
+        for name, count, last in devices[:DEVICES_SHOWN]), title="Les appareils qui lui parlent" + more)
+    older = (("avant", str(sensed[-1].seq)),) if len(sensed) == SHOWN else ()
+    title = "Ce qu'ils lui ont signalé" if not device else f"Ce que « {device} » lui a signalé"
+    return [tiles, Table(
+        (Column("quand", "fit"), "appareil", "ce qu'il signale", Column("pertinence", "fit"),
+         Column("émotion", "fit"), Column("journal", "fit")),
+        tuple(_signal(e) for e in sensed), title=title + (" — plus anciens" if before else ""),
+        empty="rien de cet appareil" if device else "rien pour l'instant",
+        pager=Pager(size=SHOWN, older=older) if older else None)]

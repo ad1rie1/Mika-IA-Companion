@@ -1,0 +1,15 @@
+{% extends "base.html" %}{% block body %}<div class="legacy">
+<h2>Fournisseurs</h2><div class="scroll"><table><tr><th>nom</th><th>type</th><th>modèle</th><th>clé</th><th>hôte / URL</th><th>créneaux</th><th></th></tr>
+{% for name, b in backends %}<tr><td>{{ name }}</td><td>{{ b.kind }}</td><td>{{ b.model }}</td><td>{{ '••••' if b.api_key else '—' }}</td><td>{{ b.host or b.base_url or '—' }}</td><td>{{ b.slots or 'défaut' }}</td>
+<td><form method="post" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="remove"><input type="hidden" name="name" value="{{ name }}"><button class="quiet">Retirer</button></form></td></tr>
+{% else %}<tr><td colspan="7" class="mut">aucun fournisseur : elle ne peut pas parler</td></tr>{% endfor %}</table></div>
+<form method="post" class="card"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="backend">
+<b>Déclarer ou modifier</b><div class="grid">
+<input name="name" placeholder="nom (ex. claude)" required><select name="kind">{% for k in kinds %}<option>{{ k }}</option>{% endfor %}</select>
+<input name="model" placeholder="modèle" required><input name="api_key" type="password" placeholder="clé (vide : inchangée)" autocomplete="off">
+<input name="host" placeholder="hôte Ollama / URL de base"><input name="slots" type="number" min="0" value="0" title="créneaux (0 : défaut)"></div><p><button>Enregistrer</button></p></form>
+<h2>Rôles</h2><p class="mut">Les rôles « voix » ({{ voice|join(', ') }}) reçoivent sa persona ; les autres sont des utilitaires.</p>
+<form method="post" class="card"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="routes">
+<div class="grid">{% for role in roles %}<label>{{ role }} <select name="route_{{ role }}"><option value="">—</option>{% for name, b in backends %}<option value="{{ name }}" {{ 'selected' if routes.get(role) == name else '' }}>{{ name }}</option>{% endfor %}</select></label>{% endfor %}</div>
+<p>Contexte : <input name="context" type="number" min="2000" value="{{ context }}"> jetons</p><p><button>Enregistrer</button></p></form>
+</div>{% endblock %}

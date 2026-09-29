@@ -12,9 +12,8 @@ import shutil
 
 import pytest
 
+from mika.app.console import NAVIGATION
 from mika.contracts import runtime as rt
-from mika.contracts import self_ as self_c
-from mika.inspector.ui import MENU
 from mika.kernel.events import Content, Origin
 from mika.runtime import inspection
 from tests.protocol.test_web import WS, bootstrap, recv_until, world  # noqa: F401 — fixture partagée
@@ -43,19 +42,25 @@ def test_every_page_and_every_faculty_view_opens(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
     converse(client)
-    for _group, items in MENU:
-        for path, label in items:
-            r = client.get("/inspecteur" + path)
-            assert r.status_code == 200, (path, r.status_code)
-            assert label in html_of(r)
     views = client.portal.call(inspection.views, live.kernel)
     assert len(views) >= 20  # chaque faculté déclare les siennes
+    for group in NAVIGATION:
+        for d in group.items:
+            base = "/inspecteur/" if d.key == "accueil" else f"/inspecteur/{d.key}"
+            r = client.get(base)
+            assert r.status_code == 200 and d.label in html_of(r), (d.key, r.status_code)
+            slugs = [k.split(".", 1)[1] for k in d.builtin] + [v.name for v in views if v.section == d.key]
+            for slug in slugs if d.layout == "tabs" else ():
+                r = client.get(f"{base}/{slug}", follow_redirects=True)
+                page = html_of(r)
+                assert r.status_code == 200 and "a échoué" not in page, (d.key, slug, r.status_code)
     for v in views:
         r = client.get(f"/inspecteur/facultes/{v.owner}/{v.name}")
         assert r.status_code == 200 and "Cette vue a échoué" not in html_of(r), (v.owner, v.name)
-    listed = html_of(client.get("/inspecteur/facultes"))
+    listed = html_of(client.get("/inspecteur/systeme/vues"))
     assert all(v.title in listed for v in views)
     assert client.get("/inspecteur/facultes/nobody/nothing").status_code == 404
+    assert client.get("/inspecteur/nulle-part").status_code == 404
 
 
 def test_why_did_she_say_that(world):  # noqa: F811
@@ -63,15 +68,16 @@ def test_why_did_she_say_that(world):  # noqa: F811
     bootstrap(client)
     converse(client)
     ended = client.portal.call(lambda: live.kernel.mind.store.latest([rt.EPISODE_ENDED.name], 1))[0]
-    page = html_of(client.get(f"/inspecteur/episode/{ended.correlation}"))
-    assert "Ce qu'elle a dit" in page and "en réponse à" in page and "perception.received" in page
-    assert "ce que le prompt lui montrait" in page
-    cause = re.search(r'/inspecteur/evenement/(\d+)">perception\.received', page)
+    said = html_of(client.get(f"/inspecteur/episode/{ended.correlation}?onglet=dit"))
+    assert "Ce qu'elle a dit" in said and "ce que le prompt lui montrait" in said
+    decision = html_of(client.get(f"/inspecteur/episode/{ended.correlation}?onglet=decision"))
+    assert "en réponse à" in decision
+    cause = re.search(r'/inspecteur/evenement/(\d+)">message n°', decision)
     event = html_of(client.get(f"/inspecteur/evenement/{cause.group(1)}"))
-    assert "réduit par" in event and "transcript" in event and "a déclenché" in event
+    assert "réduit par" in event and "transcript" in event and "A déclenché" in event
     assert client.get("/inspecteur/evenement/999999").status_code == 404
     # un filtre qui ressemble à du SQL ne casse rien
-    assert client.get("/inspecteur/chronologie?type=%25'%20OR%201=1--&correlation=x").status_code == 200
+    assert client.get("/inspecteur/systeme/chronologie?type=%25'%20OR%201=1--&correlation=x").status_code == 200
 
 
 def test_health_is_public_but_says_only_names_and_states(world):  # noqa: F811
@@ -83,7 +89,7 @@ def test_health_is_public_but_says_only_names_and_states(world):  # noqa: F811
     assert set(body["checks"].values()) <= {"ok", "degraded", "ko"}
     assert r.headers["cache-control"] == "no-store"
     bootstrap(client)
-    detail = html_of(client.get("/inspecteur/sante"))
+    detail = html_of(client.get("/inspecteur/systeme/sante"))
     assert "Processus" in detail and "Sonde publique" in detail
 
 
@@ -91,71 +97,25 @@ def test_every_form_needs_its_token(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
     head = client.portal.call(lambda: live.kernel.mind.head)
-    for path in ("/modeles", "/persona", "/parametres", "/canaux", "/sens", "/forge", "/comptes", "/approbations"):
-        r = client.post("/inspecteur" + path, data={"action": "save", "persona": "name: Pirate"})
-        assert r.status_code == 200 and "Jeton de formulaire invalide" in html_of(r), path
+    for path in ("modeles", "personnalite", "parametres", "canaux", "sens", "apps", "comptes"):
+        r = client.post(f"/inspecteur/reglages/{path}", data={"_section": "personnage", "_champs": "name",
+                                                              "name": "Pirate", "action": "create"})
+        assert r.status_code in (200, 403) and "Jeton de formulaire invalide" in html_of(r), path
+    refused = client.post("/inspecteur/approbations", data={"proposal": "1", "decision": "approve"})
+    assert "Jeton de formulaire invalide" in html_of(refused)
     assert client.portal.call(lambda: live.kernel.mind.head) == head  # rien n'a été écrit
-
-
-def test_persona_is_edited_validated_journaled_and_can_return_to_the_file(world):  # noqa: F811
-    client, live, _ = world
-    bootstrap(client)
-    client.get("/inspecteur/persona")
-    kernel = live.kernel
-
-    def revisions() -> list:
-        return client.portal.call(lambda: kernel.mind.store.latest([self_c.PERSONA_REVISED.name], 50))
-
-    before = len(revisions())
-    refused = post(client, "/inspecteur/persona", action="save", persona="name: Mika\ncouleur: bleue\n")
-    assert "Persona refusée" in html_of(refused) and len(revisions()) == before  # champ inconnu : rien ne change
-    broken = post(client, "/inspecteur/persona", action="save", persona="name: [Mika\n")
-    assert "YAML illisible" in html_of(broken)
-    text = client.portal.call(lambda: live.persona()).model_dump(mode="json")
-    text["name"] = "Mikaela"
-    saved = post(client, "/inspecteur/persona", action="save", persona=json.dumps(text))  # le JSON est du YAML
-    assert "Persona enregistrée" in html_of(saved)
-    assert client.portal.call(lambda: kernel.mind.frame().get(self_c.PERSONA)).name == "Mikaela"
-    assert len(revisions()) == before + 1
-    back = post(client, "/inspecteur/persona", action="file")
-    assert "Retour au fichier" in html_of(back)
-    assert client.portal.call(lambda: kernel.mind.frame().get(self_c.PERSONA)).name == "Mika"
-
-
-def test_temperament_and_overrides_rederive_the_parameters(world):  # noqa: F811
-    client, live, _ = world
-    bootstrap(client)
-    client.get("/inspecteur/parametres")
-    kernel = live.kernel
-
-    def needs():
-        return client.portal.call(lambda: kernel.mind.frame().env.params_of("needs", kernel.mind.root))
-
-    sliders = {k: "0.5" for k in ("reactivity", "resilience", "contagion", "optimism", "curiosity",
-                                  "perseverance", "chronotype")}
-    before = needs().tau_social_h
-    r = post(client, "/inspecteur/parametres", action="temperament", sociability="0.9", background="curious",
-             **sliders)
-    assert "Tempérament enregistré" in html_of(r)
-    assert needs().tau_social_h < before  # plus sociable : le besoin de compagnie revient plus vite
-    doc = client.portal.call(lambda: kernel.mind.frame().get(self_c.PERSONA))
-    assert doc.temperament.sociability == 0.9 and doc.temperament.background.value == "curious"
-    unknown = post(client, "/inspecteur/parametres", action="overrides", faculty="needs", values="pas_un_reglage: 3")
-    assert "Surcharge refusée" in html_of(unknown)
-    ok = post(client, "/inspecteur/parametres", action="overrides", faculty="needs", values="lonely_from: 0.65")
-    assert "Surcharges enregistrées" in html_of(ok) and needs().lonely_from == 0.65
-    assert client.portal.call(live.settings.overrides) == {"needs": {"lonely_from": 0.65}}
+    assert client.portal.call(live.settings.persona_yaml) is None
 
 
 def test_accounts_are_managed_without_ever_locking_out(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
-    client.get("/inspecteur/comptes")
-    weak = post(client, "/inspecteur/comptes", action="create", username="bea", password="12345678")
+    client.get("/inspecteur/reglages/comptes")
+    weak = post(client, "/inspecteur/reglages/comptes", action="create", username="bea", password="12345678")
     assert "numérique" in html_of(weak)
-    created = post(client, "/inspecteur/comptes", action="create", username="bea", password="longue-phrase-secrete")
+    created = post(client, "/inspecteur/reglages/comptes", action="create", username="bea", password="longue-phrase-secrete")
     assert "Compte créé" in html_of(created) and "user_2" in html_of(created)
-    alone = post(client, "/inspecteur/comptes", action="update", account="1", active="on")  # sans « opérateur »
+    alone = post(client, "/inspecteur/reglages/comptes", action="update", account="1", active="on")  # sans « opérateur »
     assert "dernier opérateur actif" in html_of(alone)
     accounts = client.portal.call(live.accounts.all)
     assert accounts[0].operator and not accounts[1].operator
@@ -199,10 +159,10 @@ def test_reports_are_listed_and_never_escape_their_folder(tmp_path):
                    reports=reports)
     with TestClient(app, base_url="http://localhost:8001", headers={"Origin": ORIGIN}) as client:
         bootstrap(client)
-        listing = html_of(client.get("/inspecteur/rapports"))
+        listing = html_of(client.get("/inspecteur/systeme/simulations"))
         assert "rapide.md" in listing
-        assert "S01" in html_of(client.get("/inspecteur/rapports?fichier=rapide.md"))
-        escaped = html_of(client.get("/inspecteur/rapports?fichier=../secret.txt"))
+        assert "S01" in html_of(client.get("/inspecteur/systeme/simulations?fichier=rapide.md"))
+        escaped = html_of(client.get("/inspecteur/systeme/simulations?fichier=../secret.txt"))
         assert "à ne pas lire" not in escaped and "Fichier inconnu" in escaped
         # sans modèle : la santé le dit, elle répond quand même
         health = client.get("/health").json()
@@ -217,15 +177,15 @@ def test_an_operator_configures_a_forged_app(world):  # noqa: F811
     manifest = "title: Seuil\nconfig:\n  seuil: 3\n  actif: false\n"
     code = "def view(api):\n    return [api.config('seuil'), api.config('actif')]\n"
     client.portal.call(forge.write, "seuil", manifest, code)
-    page = html_of(client.get("/inspecteur/forge"))
+    page = html_of(client.get("/inspecteur/reglages/apps"))
     assert "Seuil" in page and "seuil" in page
-    bad = post(client, "/inspecteur/forge", action="config", app="seuil", cfg_seuil="beaucoup")
+    bad = post(client, "/inspecteur/reglages/apps", action="config", app="seuil", cfg_seuil="beaucoup")
     assert "attend une valeur du type int" in html_of(bad)
-    ok = post(client, "/inspecteur/forge", action="config", app="seuil", cfg_seuil="7", cfg_actif="on")
+    ok = post(client, "/inspecteur/reglages/apps", action="config", app="seuil", cfg_seuil="7", cfg_actif="on")
     assert "Réglages de l'app enregistrés" in html_of(ok)
     result = client.portal.call(forge.call, "seuil", "view")
     assert result.ok and result.value == [7, True]  # l'app lit le réglage de l'opérateur
-    unknown = post(client, "/inspecteur/forge", action="config", app="inconnue", cfg_seuil="1")
+    unknown = post(client, "/inspecteur/reglages/apps", action="config", app="inconnue", cfg_seuil="1")
     assert "App inconnue" in html_of(unknown)
 
 

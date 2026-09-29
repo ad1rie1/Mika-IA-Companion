@@ -23,6 +23,8 @@ from mika.vocab.privacy import ChannelTrust, Disclosure
 OWNER = "identity"
 
 SHARED_MEMORY = "shared_memory"
+#: un opérateur se porte garant d'une revendication (compte une fois)
+VOUCHED = "vouched"
 DENIED = "denied"
 CONTRADICTED = "contradicted"
 REVOKED = "revoked"
@@ -49,7 +51,7 @@ class Evidence(Payload):
     name: str = ""  # le nom refusé (démenti)
     item: int | None = None  # le souvenir recoupé
     message: int | None = None
-    by: str = "kernel"  # kernel | tool | operator
+    by: str = "kernel"  # kernel | tool | operator (l'opérateur lui-même est nommé par l'audit)
     note: str = ""
 
 

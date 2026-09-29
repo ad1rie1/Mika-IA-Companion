@@ -17,29 +17,55 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from mika.contracts import attention as attention_c
 from mika.contracts import body as body_c
 from mika.contracts import email as c
 from mika.contracts import identity as identity_c
 from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
 from mika.kernel.arbitration import Candidate
-from mika.kernel.clock import HOUR, MINUTE
+from mika.kernel.clock import HOUR, MINUTE, instant
 from mika.kernel.events import Content, Payload
 from mika.kernel.faculty import CatchUp, Faculty, ToolResult, Zone
 from mika.kernel.frame import Frame
 from mika.kernel.guards import floor
-from mika.kernel.inspect import Block, Fields, InspectContext, Note, Prose, Ref, Table
+from mika.kernel.inspect import (
+    Badge,
+    Block,
+    Column,
+    Disclosure,
+    Fields,
+    Found,
+    Head,
+    InspectContext,
+    Meter,
+    Note,
+    Param,
+    Prose,
+    Ref,
+    Row,
+    Stat,
+    Stats,
+    Table,
+    Text,
+    When,
+    paginate,
+)
 from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
 from mika.ports.llm import LLMRequest, Message
+from mika.vocab.affect import emotion_cell
 from mika.vocab.episodes import CONVERSATIONAL, Kind
 from mika.vocab.people import is_identifiable
 from mika.vocab.privacy import Sensitivity
@@ -374,11 +400,29 @@ async def send(args: Mapping[str, Any], context: str, ports: Mapping[str, Any]) 
 
 
 # ── Inspection ────────────────────────────────────────────────────────────
+#
+# Le courrier (section « sens ») et la fiche d'un mail (``mail``, clé =
+# l'identifiant du message). Tout est lu : le cache de la boîte (jamais un
+# relevé), ce qu'elle en a remarqué, le journal. Un mail est un texte venu
+# d'ailleurs : il ne s'affiche qu'en texte (cellules, ``Prose``), jamais en
+# balisage ni dans la clé d'un lien.
 
-SHOWN = 50
-PREVIEW = 300
-#: au-delà, un identifiant ne tient plus dans un paramètre de l'inspecteur
+#: la console ne relit pas plus que ceci du cache de la boîte (filtres, pages, recherche)
+CACHE_SHOWN = 500
+PAGE = 25
+NOTICED_SHOWN = 50
+#: le texte d'un mail montré à l'opérateur, au plus ; replié au-delà de ``FOLD``
+BODY_SHOWN = 20_000
+FOLD = 600
+#: au-delà, un identifiant ne tient plus dans une adresse de la console : une empreinte le remplace
 ID_MAX = 200
+DIGEST = "#"
+#: les mails remarqués « aujourd'hui » : jamais plus relus que ceci
+TODAY_MAX = 500
+BATCH = 250
+STATES = (("non_lus", "non lus"), ("remarques", "remarqués"))
+NO_MAIL = "Aucun mail demandé : choisis-en un dans le courrier."
+UNKNOWN = "Ce mail n'est ni dans la boîte ni dans ce qu'elle a remarqué."
 
 
 def _clip(text: str, n: int = 120) -> str:
@@ -386,98 +430,293 @@ def _clip(text: str, n: int = 120) -> str:
     return text if len(text) <= n else text[: n - 1] + "…"
 
 
-def _status(m: Seen) -> str:
-    return ("lu" if m.read else "non lu") + (", signalé à sa propriétaire" if m.mentioned else "")
+def _fold(text: str) -> str:
+    return "".join(ch for ch in unicodedata.normalize("NFKD", str(text).lower()) if not unicodedata.combining(ch))
 
 
-def _mail_ref(message_id: str, text: str) -> Ref | str:
-    """Un lien vers le détail : l'identifiant va dans les paramètres, jamais dans la clé."""
-    if not message_id or len(message_id) > ID_MAX:
-        return text
-    return Ref("view", "email/mail", text, params=(("id", message_id),))
+def mail_key(message_id: str) -> str:
+    """La clé d'un mail dans la console : son identifiant s'il tient dans une
+    adresse (borné, imprimable, sans « / »), sinon une empreinte stable."""
+    if 0 < len(message_id) <= ID_MAX and message_id.isprintable() and "/" not in message_id \
+            and not message_id.startswith(DIGEST):
+        return message_id
+    return DIGEST + hashlib.sha256(message_id.encode("utf-8", "replace")).hexdigest()[:24]
+
+
+def _resolve(s: EmailState, port: Any, key: str) -> str | None:
+    """L'identifiant du mail derrière une clé de la console, s'il est connu."""
+    key = key.strip()
+    if not key or len(key) > 4 * ID_MAX:
+        return None
+    if key in s.mails or (port is not None and port.cached_one(key) is not None):
+        return key
+    if key.startswith(DIGEST):
+        known = [*s.mails, *(m.message_id for m in (port.cached(CACHE_SHOWN) if port is not None else ()))]
+        return next((mid for mid in known if mail_key(mid) == key), None)
+    return None
+
+
+def _important(seen: Seen, p: EmailParams) -> bool:
+    return seen.importance >= p.mention_from
+
+
+def _state(seen: Seen | None, p: EmailParams) -> Badge:
+    if seen is None:
+        return Badge("pas remarqué", "muted")
+    if seen.read:
+        return Badge("lu", "ok")
+    text = "important, non lu" if _important(seen, p) else "non lu"
+    return Badge(text + (", signalé" if seen.mentioned else ""), "warn" if _important(seen, p) else "info")
+
+
+def _pertinence(seen: Seen | None) -> Meter | None:
+    return Meter(seen.importance, f"{seen.importance:.2f}") if seen is not None else None
+
+
+def _day_start(frame: Frame) -> int:
+    """Minuit, aujourd'hui, à son heure à elle."""
+    tz = frame.env.tz_of(frame.root)
+    today = frame.local().date()
+    return instant(datetime(today.year, today.month, today.day, tzinfo=tz))
+
+
+def _since(ctx: InspectContext, event_type: Any, since: int, cap: int) -> list[Any]:
+    """Les événements de ce type depuis cet instant (du plus récent au plus ancien), bornés."""
+    out: list[Any] = []
+    before = None
+    while len(out) < cap:
+        want = min(BATCH, cap - len(out))
+        batch = ctx.events([event_type], want, before=before)
+        for e in batch:
+            if e.at < since:
+                return out
+            out.append(e)
+        if len(batch) < want:
+            break
+        before = batch[-1].seq
+    return out
+
+
+def _fresh_important(s: EmailState, frame: Frame) -> tuple[int, str]:
+    """Le badge du courrier : les mails importants arrivés récemment qu'elle n'a pas encore lus."""
+    p = params(frame.env.params_of("email", frame.root))
+    n = sum(1 for m in frame.get(c.UNREAD) if m.importance >= p.mention_from and frame.now - m.at <= p.mention_within_us)
+    return n, "mail(s) important(s) pas encore lu(s)"
 
 
 def _box_note(port: Any, p: EmailParams) -> Note:
     if port is None:
-        return Note("Courrier non configuré : aucune boîte aux lettres n'est branchée.", tone="mut")
+        return Note("Courrier non configuré : aucune boîte aux lettres n'est branchée.", tone="muted")
     if not port.configured():
         return Note("Boîte aux lettres non configurée : renseigne le serveur et le compte dans les réglages "
-                    "du courrier.", tone="mut")
+                    "du courrier.", tone="muted")
     return Note(f"Boîte aux lettres configurée : relevée toutes les {p.poll_every_us // MINUTE} min quand elle "
                 "est éveillée.", tone="ok")
 
 
-@EMAIL.inspect("courrier", title="Courrier")
+def _stats(s: EmailState, frame: Frame, ctx: InspectContext, p: EmailParams, cached: list[Any] | None) -> Stats:
+    unread = frame.get(c.UNREAD)
+    important = sum(1 for m in unread if m.importance >= p.mention_from)
+    today = _since(ctx, c.NOTICED, _day_start(frame), TODAY_MAX)
+    last = max((m.at for m in s.mails.values()), default=0)
+    items = [
+        Stat("non lus", len(unread), sub=f"dont {important} important(s)" if unread else "remarqués, pas encore lus",
+             tone="warn" if important else ""),
+        Stat("remarqués aujourd'hui", f"{len(today)}+" if len(today) >= TODAY_MAX else len(today)),
+        Stat("dernier mail remarqué", When(last) if last else "jamais",
+             sub=f"relève toutes les {p.poll_every_us // MINUTE} min, éveillée"),
+    ]
+    if cached is not None:
+        items.append(Stat("dans la boîte", f"{len(cached)}+" if len(cached) >= CACHE_SHOWN else len(cached),
+                          sub="gardés par le relevé"))
+    return Stats(tuple(items))
+
+
+def _inbox(s: EmailState, ctx: InspectContext, p: EmailParams, cached: list[Any]) -> Table:
+    state, query = ctx.value("etat") or "", _fold(ctx.value("q") or "")
+    kept = []
+    for m in cached:
+        seen = s.mails.get(m.message_id)
+        if (state == "non_lus" and seen is not None and seen.read) or (state == "remarques" and seen is None):
+            continue
+        if query and query not in _fold(f"{m.subject} {m.sender}"):
+            continue
+        kept.append((m, seen))
+    page, pager = paginate(kept, ctx.pager(size=PAGE))
+    rows = tuple(Row((Text(_clip(m.subject) or "(sans objet)"), Text(_clip(m.sender, 80)),
+                      When(m.date) if m.date else None, _state(seen, p), _pertinence(seen)),
+                     href=Ref.subject("mail", mail_key(m.message_id), _clip(m.subject) or "(sans objet)"))
+                 for m, seen in page)
+    return Table(("objet", "de", Column("reçu", "fit"), Column("état", "fit"), Column("pertinence", "fit")), rows,
+                 title="Dans la boîte", pager=pager,
+                 empty="aucun mail ne correspond à ces filtres" if state or query else "la boîte est vide",
+                 caption=f"Seuls les {CACHE_SHOWN} mails les plus récents du cache sont relus ici."
+                 if len(cached) >= CACHE_SHOWN else "")
+
+
+def _noticed(s: EmailState, ctx: InspectContext, p: EmailParams) -> Table:
+    noticed = sorted(s.mails.items(), key=lambda kv: -kv[1].seq)[:NOTICED_SHOWN]
+    texts = ctx.store.content([m.summary_ref for _, m in noticed if m.summary_ref])
+    rows = tuple(Row((Text(_clip(_name(m.sender), 60)), When(m.at), Text(texts.get(m.summary_ref, "—"), clamp=200),
+                      _pertinence(m), "oui" if m.needs_reply else "non", _state(m, p),
+                      Ref("event", str(m.seq), f"#{m.seq}")),
+                     href=Ref.subject("mail", mail_key(k), _clip(_name(m.sender), 60), tab="remarque"))
+                 for k, m in noticed)
+    return Table(("de", Column("remarqué", "fit"), "ce qu'elle en a retenu", Column("pertinence", "fit"),
+                  Column("réponse attendue", "fit"), Column("état", "fit"), Column("journal", "fit")), rows,
+                 title="Ce qu'elle a remarqué", empty="elle n'a encore remarqué aucun mail",
+                 caption=f"Elle garde les {KEEP} derniers mails remarqués ; ici, les {NOTICED_SHOWN} plus récents."
+                 if len(s.mails) > NOTICED_SHOWN else "")
+
+
+@EMAIL.inspect("courrier", title="Courrier", section="sens", order=10, badge=_fresh_important,
+               description="Sa boîte aux lettres : ce qui est arrivé, ce qu'elle en a remarqué.",
+               params=[Param("etat", "État", kind="select", choices=STATES),
+                       Param("q", "Recherche", placeholder="objet ou expéditeur")])
 def _inspect(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("mail")
     p = params(frame.env.params_of("email", frame.root))
-    unread = frame.get(c.UNREAD)
-    blocks: list[Block] = [_box_note(port, p), Fields((
-        ("mails remarqués (gardés)", len(s.mails)),
-        ("non lus", len(unread)),
-        ("non lus importants", sum(1 for m in unread if m.importance >= p.mention_from)),
-        ("signalés à sa propriétaire", sum(1 for m in s.mails.values() if m.mentioned)),
+    cached = port.cached(CACHE_SHOWN) if port is not None else None
+    blocks: list[Block] = [_box_note(port, p), _stats(s, frame, ctx, p, cached)]
+    if cached is not None:
+        blocks.append(_inbox(s, ctx, p, cached))
+    blocks.append(_noticed(s, ctx, p))
+    blocks.append(Disclosure("Comment elle relève", (Fields((
+        ("cadence", f"toutes les {p.poll_every_us // MINUTE} min, quand elle est éveillée"),
         ("à chaque relevé", f"{p.per_poll} mails au plus, dont {p.triage_per_poll} triés par le modèle"),
+        ("important à partir de", f"{p.mention_from:.2f} de pertinence"),
+        ("le dire à sa propriétaire", f"dans les {p.mention_within_us // HOUR} h, si elle est là"),
         ("un envoi attend un accord", "oui" if p.send_needs_approval else "non"),
-    ), title="Ce qu'elle en sait")]
-    if port is not None:
-        out = []
-        for m in port.cached(SHOWN):
-            seen = s.mails.get(m.message_id)
-            out.append((_clip(m.sender, 80), _mail_ref(m.message_id, _clip(m.subject) or "(sans objet)"),
-                        ctx.when(m.date) if m.date else "—",
-                        f"remarqué, {_status(seen)}" if seen else "pas remarqué",
-                        f"{seen.importance:.2f}" if seen else "—"))
-        blocks.append(Table(("de", "objet", "reçu", "état", "pertinence"), tuple(out),
-                            title=f"Dans la boîte (les {SHOWN} plus récents)", empty="la boîte est vide"))
-    noticed = sorted(s.mails.items(), key=lambda kv: -kv[1].seq)[:SHOWN]
-    texts = ctx.store.content([m.summary_ref for _, m in noticed if m.summary_ref])
-    blocks.append(Table(
-        ("remarqué le", "de", "ce qu'elle en a retenu", "importance", "réponse attendue", "état", "journal"),
-        tuple((ctx.when(m.at), _mail_ref(k, _clip(_name(m.sender), 60)), texts.get(m.summary_ref, "—"),
-               f"{m.importance:.2f}", "oui" if m.needs_reply else "non", _status(m),
-               Ref("event", str(m.seq), f"#{m.seq}")) for k, m in noticed),
-        title="Ce qu'elle a remarqué", empty="elle n'a encore remarqué aucun mail"))
+    )),)))
     return blocks
 
 
-@EMAIL.inspect("mail", title="Mail", params=[("id", "identifiant du mail")])
-def _inspect_mail(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    back = Fields((("retour", Ref("view", "email/courrier", "tout le courrier")),))
-    mail_id = ctx.param("id")
-    if not mail_id:
-        return [back, Note("Aucun mail demandé : choisis-en un dans le courrier.", tone="mut")]
+# ── La fiche d'un mail ──
+
+
+def _badges(seen: Seen | None, p: EmailParams) -> tuple[Badge, ...]:
+    if seen is None:
+        return (Badge("pas remarqué", "muted"),)
+    out = [Badge("remarqué", "info"), Badge("lu", "ok") if seen.read else
+           Badge("non lu", "warn" if _important(seen, p) else "info")]
+    if seen.mentioned:
+        out.append(Badge("signalé à sa propriétaire", "info"))
+    if seen.needs_reply:
+        out.append(Badge("réponse attendue", "warn"))
+    out.append(Badge(f"pertinence {seen.importance:.2f}", "warn" if _important(seen, p) else ""))
+    return tuple(out)
+
+
+@EMAIL.subject("mail", label="Mail", plural="Mails", icon="✉")
+def _head(s: EmailState, frame: Frame, ctx: InspectContext, key: str) -> Head | None:
     port = ctx.ports.get("mail")
-    seen = s.mails.get(mail_id)
+    mail_id = _resolve(s, port, key)
+    if mail_id is None:
+        return None
     m = port.cached_one(mail_id) if port is not None else None
-    if m is None and seen is None:
-        return [back, Note("Ce mail n'est ni dans la boîte ni dans ce qu'elle a remarqué.", tone="mut")]
-    blocks: list[Block] = [back]
-    if port is None:
-        blocks.append(Note("Courrier non configuré : le texte du mail n'est pas disponible.", tone="mut"))
+    seen = s.mails.get(mail_id)
+    p = params(frame.env.params_of("email", frame.root))
     if m is not None:
-        blocks.append(Fields((
-            ("de", _clip(m.sender, 200)), ("adresse", m.address or "—"), ("à", _clip(m.to, 200) or "—"),
-            ("objet", _clip(m.subject, 300) or "(sans objet)"), ("reçu", ctx.when(m.date) if m.date else "—"),
-            ("envoi de masse", "oui" if m.bulk else "non"), ("en réponse à", _clip(m.in_reply_to, 200) or "—"),
-            ("identifiant", _clip(m.message_id, 200)),
-        ), title="Le mail"))
-        if m.body.strip():
-            preview = m.body[:PREVIEW] + (" …" if len(m.body) > PREVIEW else "")
-            blocks.append(Prose(preview, title=f"Début du message ({min(PREVIEW, len(m.body))} caractères "
-                                               f"sur {len(m.body)})"))
-        else:
-            blocks.append(Note("Le message n'a pas de texte lisible.", tone="mut"))
-    elif port is not None:
-        blocks.append(Note("Ce mail n'est plus dans la boîte (seulement dans ce qu'elle en a remarqué).", tone="mut"))
-    if seen is not None:
-        text = ctx.store.content([seen.summary_ref]).get(seen.summary_ref, "—") if seen.summary_ref else "—"
-        blocks.append(Fields((
-            ("remarqué le", ctx.when(seen.at)), ("importance", f"{seen.importance:.2f}"),
-            ("réponse attendue", "oui" if seen.needs_reply else "non"), ("état", _status(seen)),
-            ("ce qu'elle en a retenu", text), ("journal", Ref("event", str(seen.seq), f"#{seen.seq}")),
-        ), title="Ce qu'elle en a remarqué"))
+        title, sender = _clip(m.subject, 200) or "(sans objet)", m.sender
+    elif seen is not None:
+        title, sender = f"Un mail de {_clip(_name(seen.sender), 80)}", seen.sender
     else:
-        blocks.append(Note("Elle ne l'a pas (ou plus) remarqué.", tone="mut"))
+        return None
+    facts: list[tuple[str, Any]] = [("reçu", ctx.when(m.date) if m is not None and m.date else "—")]
+    if seen is not None:
+        facts.append(("remarqué", ctx.when(seen.at)))
+    if m is None:
+        facts.append(("dans la boîte", "plus maintenant" if port is not None else "courrier non configuré"))
+    return Head(key=mail_key(mail_id), title=title, subtitle=_clip(sender, 200), badges=_badges(seen, p),
+                facts=tuple(facts))
+
+
+@EMAIL.search("mail")
+def _search(s: EmailState, frame: Frame, ctx: InspectContext, text: str, limit: int) -> list[Found]:
+    port = ctx.ports.get("mail")
+    query = _fold(text)
+    out: list[Found] = []
+    shown: set[str] = set()
+    for m in port.cached(CACHE_SHOWN) if port is not None else ():
+        if query and query not in _fold(f"{m.subject} {m.sender}"):
+            continue
+        shown.add(m.message_id)
+        out.append(Found(mail_key(m.message_id), _clip(m.subject) or "(sans objet)",
+                         _clip(m.sender, 80) + (f" · reçu {ctx.when(m.date)}" if m.date else "")))
+        if len(out) >= limit:
+            return out
+    for k, m in sorted(s.mails.items(), key=lambda kv: -kv[1].seq):
+        if k in shown or (query and query not in _fold(m.sender)):
+            continue
+        out.append(Found(mail_key(k), f"Un mail de {_clip(_name(m.sender), 80)}", f"remarqué {ctx.when(m.at)}"))
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _asked(s: EmailState, ctx: InspectContext, port: Any) -> tuple[str | None, Note | None]:
+    """Le mail de la fiche (ou d'un ancien lien ``?id=``), ou ce qu'il faut en dire."""
+    key = ctx.subject or ctx.param("id")
+    if not key:
+        return None, Note(NO_MAIL, tone="muted")
+    mail_id = _resolve(s, port, key)
+    return (mail_id, None) if mail_id is not None else (None, Note(UNKNOWN, tone="muted"))
+
+
+@EMAIL.inspect("message", title="Message", subject="mail", subject_param="id", order=10)
+def _tab_message(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    port = ctx.ports.get("mail")
+    mail_id, note = _asked(s, ctx, port)
+    if mail_id is None:
+        return [note or Note(UNKNOWN, tone="muted")]
+    if port is None:
+        return [Note("Courrier non configuré : le texte du mail n'est pas disponible (seulement ce qu'elle en a "
+                     "remarqué).", tone="muted")]
+    m = port.cached_one(mail_id)
+    if m is None:
+        return [Note("Ce mail n'est plus dans la boîte : seul ce qu'elle en a remarqué reste.", tone="muted")]
+    blocks: list[Block] = [Fields((
+        ("de", Text(_clip(m.sender, 300))), ("adresse", Text(m.address or "—", kind="mono")),
+        ("à", Text(_clip(m.to, 300) or "—")), ("objet", Text(_clip(m.subject, 500) or "(sans objet)")),
+        ("reçu", When(m.date, relative=False) if m.date else None),
+        ("envoi de masse", "oui" if m.bulk else "non"),
+        ("en réponse à", Text(_clip(m.in_reply_to, 300) or "—", kind="mono")),
+        ("identifiant", Text(_clip(m.message_id, 300), kind="mono")),
+    ), title="En-têtes", columns=2)]
+    if m.body.strip():
+        body = m.body[:BODY_SHOWN]
+        cut = f", coupé à {BODY_SHOWN} caractères" if len(m.body) > BODY_SHOWN else ""
+        blocks.append(Prose(body, title=f"Le message ({len(m.body)} caractères{cut})", clamp=FOLD))
+    else:
+        blocks.append(Note("Le message n'a pas de texte lisible.", tone="muted"))
+    blocks.append(Note("Un mail est une donnée venue d'ailleurs : elle ne lui obéit jamais.", tone="info"))
     return blocks
 
+
+@EMAIL.inspect("remarque", title="Ce qu'elle en a remarqué", subject="mail", order=20)
+def _tab_noticed(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    port = ctx.ports.get("mail")
+    mail_id, note = _asked(s, ctx, port)
+    if mail_id is None:
+        return [note or Note(UNKNOWN, tone="muted")]
+    seen = s.mails.get(mail_id)
+    if seen is None:
+        return [Note("Elle ne l'a pas (ou plus) remarqué : il est dans la boîte, sans plus.", tone="muted")]
+    p = params(frame.env.params_of("email", frame.root))
+    text = ctx.store.content([seen.summary_ref]).get(seen.summary_ref, "") if seen.summary_ref else ""
+    signal = next(iter(ctx.events([c.NOTICED], 1, where=("mail", mail_id))), None)
+    felt = next(iter(ctx.events([attention_c.NOTICED], 1, where=("signal", seen.seq))), None)
+    pairs: list[tuple[str, Any]] = [
+        ("remarqué", When(seen.at)), ("pertinence estimée", _pertinence(seen)),
+        ("important", "oui" if _important(seen, p) else "non"),
+        ("réponse attendue", "oui" if seen.needs_reply else "non"), ("état", _state(seen, p)),
+    ]
+    if signal is not None:
+        pairs.append(("ce que ça pourrait lui faire", emotion_cell(signal.data.emotion, signal.data.intensity or None)))
+    if felt is not None:
+        pairs.append(("ce que son attention en a gardé", Meter(felt.data.weight, f"{felt.data.weight:.2f}")))
+    pairs.append(("au journal", Ref("event", str(seen.seq), f"l'événement n° {seen.seq}")))
+    blocks: list[Block] = [Fields(tuple(pairs), title="Ce qu'elle en a remarqué", columns=2)]
+    blocks.append(Prose(text, title="Ce qu'elle en a retenu") if text else
+                  Note("Ce qu'elle en avait retenu a été oublié.", tone="muted"))
+    return blocks

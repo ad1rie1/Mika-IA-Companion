@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -34,13 +34,13 @@ from mika.adapters.web.accounts import Accounts
 from mika.adapters.web.app import WebConfig, create_app
 from mika.adapters.web.hub import Hub
 from mika.adapters.workshop import BwrapWorkshop
-from mika.app import composition
+from mika.app import composition, reglages
+from mika.app.console import NAVIGATION
 from mika.app.delivery import Router
 from mika.app.mindport import KernelPort
 from mika.app.paths import PERSONA
 from mika.app.settings import SecretBox, Settings
 from mika.contracts.self_ import PersonaDoc
-from mika.faculties.identity import IdentityParams
 from mika.faculties.self import load
 from mika.inspector.app import routes
 from mika.inspector.ui import InspectorDeps
@@ -50,6 +50,52 @@ from mika.plugins.forge import SWITCHED
 from mika.runtime.bootstrap import Kernel
 
 log = logging.getLogger("mika.server")
+
+
+class ForgeSettingsStore:
+    """Le port ``forge_settings`` : ce qu'un opérateur règle pour une app forgée,
+    rangé par ``Settings``. Un secret y est **scellé** (``SecretBox``) et rendu en
+    clair à l'app seulement (``values`` sert ``api.config``) ; une liste y est
+    rangée en lignes. Ce qui n'est plus déclaré par l'app n'est plus rendu."""
+
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.host: ForgeHost | None = None
+
+    def _fields(self, app: str) -> dict[str, Any]:
+        info = self.host.info(app) if self.host is not None else None
+        return {f.path: f for f in info.config_fields} if info is not None else {}
+
+    def values(self, app: str) -> dict[str, Any]:
+        fields = self._fields(app)
+        out: dict[str, Any] = {}
+        for key, value in self.settings.forge_config(app).items():
+            f = fields.get(key)
+            if f is None:
+                continue
+            if f.kind == "secret":
+                out[key] = self.settings.box.open(str(value)) if value else ""
+            elif f.kind == "lines" and isinstance(value, str):
+                out[key] = [line for line in value.split("\n") if line]
+            else:
+                out[key] = value
+        return out
+
+    async def save(self, app: str, values: Mapping[str, Any]) -> None:
+        fields = self._fields(app)
+        clean: dict[str, Any] = {}
+        for key, value in values.items():
+            f = fields.get(key)
+            if f is None or value is None:
+                continue
+            if f.kind == "secret":
+                if value:
+                    clean[key] = self.settings.box.seal(str(value))
+            elif f.kind == "lines":
+                clean[key] = "\n".join(str(v) for v in value) if isinstance(value, list | tuple) else str(value)
+            else:
+                clean[key] = value
+        await self.settings.save_forge_config(app, clean)
 
 
 @dataclass(slots=True)
@@ -83,10 +129,16 @@ class Live:
                 log.warning("persona de l'inspecteur illisible, le fichier fait foi : %s", exc)
         return load(self.persona_file)
 
+    def inputs(self) -> dict[str, dict[str, Any]]:
+        """Ce que les réglages d'exploitation fournissent aux paramètres des facultés
+        (jamais des surcharges : une reconfiguration ne les efface pas)."""
+        owners = self.settings.telegram()["owners"]
+        return {"identity": {"owners": tuple(handle_of(o) for o in owners)}} if owners else {}
+
     async def reconfigure(self) -> list[str]:
         """Rejournalise la persona et les paramètres qui en dérivent (sans redémarrer)."""
         try:
-            await composition.configure(self.kernel, self.persona(), self.settings.overrides())
+            await composition.configure(self.kernel, self.persona(), self.settings.overrides(), self.inputs())
         except (ValueError, TypeError) as exc:
             return [str(exc)]
         return []
@@ -99,7 +151,8 @@ class Live:
     async def start_telegram(self) -> None:
         """Le robot Telegram, s'il est configuré (``mika telegram token …``)."""
         cfg = self.settings.telegram()
-        await self.kernel.set_params("identity", IdentityParams(owners=tuple(handle_of(o) for o in cfg["owners"])))
+        for problem in await self.reconfigure():  # les propriétaires sont une entrée de l'identité
+            log.warning("Telegram : %s", problem)
         if not cfg["token"]:
             return
         config = TelegramConfig(allowed_chats=frozenset(cfg["allowed_chats"]))
@@ -143,10 +196,12 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     vectors = SqliteVectorIndex(store, embedder or SentenceEmbedder())
     camera = CameraBuffer(clock.now)
     settings = Settings(store, SecretBox.for_data(data))
+    forge_settings = ForgeSettingsStore(settings)
+    forge = forge_settings.host = ForgeHost(data / "forge", config=forge_settings.values)
     world = {"mail": ImapSmtpMail(settings.email, data / "mail.db"),
              "feeds": HttpFeeds(settings.feeds, data / "feeds.db"),
              "workshop": BwrapWorkshop(data / "ateliers"), "camera": camera,
-             "forge": ForgeHost(data / "forge", config=settings.forge_config)}
+             "forge": forge, "forge_settings": forge_settings}
     kernel = Kernel(composition.deps(store=store, clock=clock, ids=RandomIdGen(), gateway=gateway,
                                      ports={"delivery": router, "vectors": vectors, **world}, **deps))
     port = KernelPort(kernel)
@@ -156,7 +211,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
 
     @contextlib.asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
-        await kernel.start(configure=lambda k: composition.configure(k, live.persona(), settings.overrides()))
+        await kernel.start(configure=lambda k: composition.configure(k, live.persona(), settings.overrides(),
+                                                                     live.inputs()))
         await live.settings.open()
         await live.accounts.open()
         await live.calls.open()
@@ -185,7 +241,9 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     inspector = routes(InspectorDeps(kernel, live.accounts, live.settings, live.reload_llm, gateway.traces,
                                      port=port, calls=live.calls, reconfigure=live.reconfigure,
                                      restart_telegram=restart_telegram, after_decision=hub.refresh_panels,
-                                     reports=reports, forge_switch=live.switch_app),
+                                     reports=reports, forge_switch=live.switch_app, navigation=NAVIGATION,
+                                     sections=reglages.sections(live), settings_tabs=reglages.TABS,
+                                     parameters=reglages.parameters(live)),
                        cookie_secure=(web.cookie_secure if web else False))
     preprocess = LocalPreprocessor(gateway, transcribe=whisper(settings.stt))
     live.preprocess = preprocess

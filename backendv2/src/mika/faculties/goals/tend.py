@@ -16,7 +16,8 @@ se lève dès qu'Adrien écrit — enfin — sans attendre l'échéance.
 **Clore** : un rappel dit (abouti) ou qui n'a pas pu l'être (échec) ; un but
 à bout de pas, ou qui n'a rien conclu trois pas de suite (bloqué) ; une
 exploration dont l'envie s'est usée (abandonnée) ; un but dont le modèle ne
-répond plus (échec, sans reproche).
+répond plus (échec, sans reproche). Un but suspendu par un opérateur est
+figé : ni reprise d'attente, ni clôture, avant qu'il ne le reprenne.
 """
 
 from __future__ import annotations
@@ -36,6 +37,8 @@ from mika.contracts import self_ as self_c
 from mika.contracts import transcript as transcript_c
 from mika.faculties.goals.faculty import (
     AWAITED,
+    GOAL_PAUSED,
+    GOAL_RESUMED,
     GOALS,
     Goal,
     GoalsState,
@@ -44,6 +47,7 @@ from mika.faculties.goals.faculty import (
     params,
     ready_to_undertake,
     subject_key,
+    workable,
 )
 from mika.faculties.goals.tools import closing
 from mika.kernel.events import Content
@@ -163,7 +167,7 @@ def answered(s: GoalsState, frame: Frame) -> list[Goal]:
     """Les buts en attente nominative dont la personne a écrit depuis."""
     out = []
     for g in sorted(s.goals.values(), key=lambda g: g.id):
-        if g.status != c.WAITING or not g.wait_for or g.waiting_until <= frame.now:
+        if g.status != c.WAITING or g.paused_at or not g.wait_for or g.waiting_until <= frame.now:
             continue
         handles = frame.get(identity_c.HANDLES(g.wait_for)) or (g.wait_for,)
         if max(frame.get(transcript_c.LAST_FROM(h)) for h in handles) > g.waiting_since:
@@ -172,12 +176,13 @@ def answered(s: GoalsState, frame: Frame) -> list[Goal]:
 
 
 def closures(s: GoalsState, frame: Frame) -> list[tuple[Goal, str, str]]:
-    """Ce qui doit se clore maintenant : (but, statut, raison)."""
+    """Ce qui doit se clore maintenant : (but, statut, raison). Un but suspendu
+    est figé : rien ne le clôt (ni l'heure passée, ni l'envie) avant sa reprise."""
     p = params(frame.env.params_of("goals", frame.root))
     now = frame.now
     out: list[tuple[Goal, str, str]] = []
     for g in sorted(s.goals.values(), key=lambda g: g.id):
-        if not live(g, now):
+        if not workable(g, now):
             continue
         if g.kind == c.REMINDER:
             if g.delivered:
@@ -207,9 +212,9 @@ def _worn_out_at(g: Goal, p: Any) -> int | None:
     return g.desire_at + math.ceil(p.desire_half_life_us * math.log2(g.desire / p.abandon_below))
 
 
-@GOALS.process("goals.tend", wake_on=[*c.ALL, rt.EPISODE_STARTED, rt.EPISODE_ENDED, rt.UTTERANCE,
-                                      rt.PERCEPTION_RECEIVED], lane="background", catch_up=CatchUp.ONCE,
-               max_quantum_s=3600, priority=40)
+@GOALS.process("goals.tend", wake_on=[*c.ALL, GOAL_PAUSED, GOAL_RESUMED, rt.EPISODE_STARTED, rt.EPISODE_ENDED,
+                                      rt.UTTERANCE, rt.PERCEPTION_RECEIVED], lane="background",
+               catch_up=CatchUp.ONCE, max_quantum_s=3600, priority=40)
 class Tend:
     def next_due(self, s: GoalsState, frame: Frame, last_run: int | None) -> int | None:
         if closures(s, frame) or answered(s, frame):
@@ -217,7 +222,7 @@ class Tend:
         p = params(frame.env.params_of("goals", frame.root))
         times = []
         for g in s.goals.values():
-            if not live(g, frame.now):
+            if not workable(g, frame.now):
                 continue
             worn = _worn_out_at(g, p)
             if worn is not None:

@@ -1,8 +1,0 @@
-{% extends "base.html" %}{% block body %}
-{% if not folder %}<p class="mut">Aucun dossier de rapports configuré (<code>mika serve --reports DOSSIER</code>).</p>{% else %}
-<p class="mut">Rapports de <code>mika sim run --report</code> dans <code>{{ folder }}</code>.</p>
-<div class="scroll"><table><tr><th>fichier</th><th>modifié</th></tr>
-{% for name, when in files %}<tr><td><a href="?fichier={{ name|urlencode }}">{{ name }}</a></td><td class="mut">{{ when }}</td></tr>
-{% else %}<tr><td colspan="2" class="mut">aucun rapport</td></tr>{% endfor %}</table></div>
-{% if chosen %}<h2>{{ chosen }}</h2><div class="card"><pre>{{ text }}</pre></div>{% endif %}
-{% endif %}{% endblock %}

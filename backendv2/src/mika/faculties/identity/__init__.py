@@ -16,7 +16,7 @@
 Dans le doute, tout se ferme.
 """
 
-from mika.faculties.identity import inspect, reading, tools  # noqa: F401 — contributions
+from mika.faculties.identity import actions, inspect, reading, tools  # noqa: F401 — contributions
 from mika.faculties.identity.faculty import (
     IDENTITY,
     Claim,

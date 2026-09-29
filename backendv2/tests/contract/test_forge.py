@@ -165,3 +165,183 @@ def test_the_lint_explains_in_french():
     problems, functions = lint("import socket\ndef nothing():\n    pass\n")
     assert any("import socket" in p for p in problems) and any("aucune fonction attendue" in p for p in problems)
     assert functions == {"nothing"}
+
+
+# ── Manifeste v2 : vues, actions, réglages typés ──────────────────────────
+
+V2 = """\
+title: Météo
+config:
+  - {key: ville, type: str, label: Ville, group: Lieu, default: Paris}
+  - {key: cle_api, type: secret, label: Clé d'API}
+  - {key: n, type: int, min: 1, max: 20, default: 5}
+  - {key: villes, type: lines, default: [Paris, Lyon]}
+  - {key: unite, type: select, choices: [celsius, {value: fahrenheit, label: Fahrenheit}], default: celsius}
+views:
+  - key: jour
+    label: Aujourd'hui
+    params: [{key: ville, label: Ville, kind: search}, {key: n, kind: int, default: 3}]
+    actions:
+      - {key: rafraichir, label: Rafraîchir, fields: [{key: ville, type: text, required: true, max_length: 40}]}
+"""
+V2_CODE = '''\
+def view_jour(api, params):
+    return {"version": 2, "blocks": [{"type": "note", "text": "il fait beau à " + (params.get("ville") or "?")}]}
+
+def action_jour_rafraichir(api, data):
+    return {"ok": True, "message": "rafraîchi : " + data["ville"]}
+
+def view_cachee(api, params):
+    return {"version": 2, "blocks": []}
+
+def action_jour_secret(api, data):
+    return {"ok": True, "message": "jamais"}
+
+def tool_cache(api, args):
+    return "jamais"
+'''
+
+
+def refused(h, manifest, code=V2_CODE, app="meteo") -> str:
+    with pytest.raises(ForgeRefused) as info:
+        write(h, code, manifest=manifest, app=app)
+    return str(info.value)
+
+
+def test_a_v2_manifest_declares_typed_settings_views_and_actions(tmp_path):
+    h = host(tmp_path, bwrap="")
+    write(h, V2_CODE, manifest=V2, app="meteo")
+    info = h.info("meteo")
+    assert info.error == ""
+    fields = {f.path: f for f in info.config_fields}
+    assert [f.kind for f in info.config_fields] == ["text", "secret", "int", "lines", "select"]
+    assert fields["ville"].group == "Lieu" and fields["ville"].default == "Paris"
+    assert fields["cle_api"].secret and fields["cle_api"].default is None
+    assert (fields["n"].lo, fields["n"].hi, fields["n"].default) == (1.0, 20.0, 5)
+    assert fields["villes"].default == ["Paris", "Lyon"]
+    assert fields["unite"].choices == (("celsius", "celsius"), ("fahrenheit", "Fahrenheit"))
+    assert dict(info.config) == {"ville": "Paris", "n": 5, "unite": "celsius"}  # la forme simple : ni secret, ni liste
+    [view] = info.views
+    assert (view.key, view.label, view.function) == ("jour", "Aujourd'hui", "view_jour")
+    assert [(p.key, p.kind, p.default) for p in view.params] == [("ville", "search", ""), ("n", "int", "3")]
+    [action] = view.actions
+    assert action.function == "action_jour_rafraichir" and action.fields[0].required
+    assert action.rules[0].max_length == 40
+    # seules les fonctions déclarées (et les fixes présentes) s'appellent
+    assert set(info.callable) == {"view_jour", "action_jour_rafraichir"}
+
+
+@pytest.mark.parametrize(("manifest", "expected"), [
+    (V2.replace("type: int, min: 1", "type: entier, min: 1"),
+     "config[2] (« n ») : type inconnu « entier » (au choix : str, text, int, float, bool, secret, select, lines)"),
+    (V2.replace("label: Clé d'API}", "label: Clé d'API, default: sk-123}"),
+     "config[1] (« cle_api ») : un secret n'a jamais de valeur par défaut"),
+    (V2.replace("default: 5}", "default: 50}"), "config[2] (« n ») : « default » est hors de [min, max]"),
+    (V2.replace("choices: [celsius, {value: fahrenheit, label: Fahrenheit}], ", ""),
+     "config[4] (« unite ») : « choices » est requis"),
+    (V2.replace("{key: n, kind: int, default: 3}", "{key: page, kind: int}"),
+     "views[0] (« jour »).params[1] (« page ») : « page » est réservé à la console"),
+    (V2.replace("type: text, required: true", "type: couleur, required: true"),
+     "views[0] (« jour »).actions[0] (« rafraichir »).fields[0] (« ville ») : type inconnu « couleur »"),
+    (V2.replace("{key: ville, type: text, required: true", "{key: app, type: text, required: true"),
+     "« app » est réservé au formulaire"),
+    (V2.replace("label: Aujourd'hui", "label: Aujourd'hui\n    couleur: bleue"),
+     "views[0] (« jour ») : option(s) inconnue(s) : couleur"),
+])
+def test_an_invalid_v2_manifest_is_refused_in_french_naming_the_field(tmp_path, manifest, expected):
+    assert expected in refused(host(tmp_path, bwrap=""), manifest)
+
+
+def test_each_declared_view_and_action_needs_its_function_with_its_signature(tmp_path):
+    h = host(tmp_path, bwrap="")
+    missing = refused(h, V2, V2_CODE.replace("def view_jour(api, params):", "def vue_du_jour(api, params):"))
+    assert "la vue « jour » est déclarée sans fonction view_jour(api, params)" in missing
+    arity = refused(h, V2, V2_CODE.replace("def action_jour_rafraichir(api, data):", "def action_jour_rafraichir(api):"))
+    assert "action_jour_rafraichir doit accepter 2 arguments : action_jour_rafraichir(api, data)" in arity
+    twins = V2.replace("    actions:\n", "    actions:\n      - {key: b_c}\n") \
+        .replace("  - key: jour", "  - key: a\n    actions: [{key: b_c}]\n  - key: a_b\n    actions: [{key: c}]\n"
+                 "  - key: jour")
+    assert "donneraient la même fonction action_a_b_c" in refused(h, twins)
+    assert h.info("meteo") is None  # rien n'a été écrit
+
+
+def test_an_old_manifest_still_loads(tmp_path):
+    h = host(tmp_path, bwrap="")
+    write(h, "def view(api):\n    return [api.config('seuil')]\n\ndef tick(api):\n    return 1\n",
+          manifest="title: Ancienne\nconfig: {seuil: 3, actif: false, ratio: 0.5, nom: Mika}\n", app="ancienne")
+    info = h.info("ancienne")
+    assert info.error == "" and dict(info.config) == {"seuil": 3, "actif": False, "ratio": 0.5, "nom": "Mika"}
+    assert [(f.path, f.kind, f.default) for f in info.config_fields] == [
+        ("seuil", "int", 3), ("actif", "bool", False), ("ratio", "float", 0.5), ("nom", "text", "Mika")]
+    [view] = info.views  # une view(api) seule devient la vue « principale »
+    assert (view.key, view.function, view.label) == ("principale", "view", "Ancienne")
+    assert set(info.callable) == {"view", "tick"}
+
+
+def test_secret_settings_never_appear_in_the_app_info(tmp_path):
+    h = host(tmp_path, bwrap="", config=lambda app: {"cle_api": "sk-TRES-SECRET"})
+    write(h, V2_CODE, manifest=V2, app="meteo")
+    assert "sk-TRES-SECRET" not in repr(h.info("meteo")) and "sk-TRES-SECRET" not in repr(h.apps())
+
+
+@needs_bwrap
+def test_only_declared_functions_can_be_called(tmp_path):
+    h = host(tmp_path)
+    write(h, V2_CODE, manifest=V2, app="meteo")
+    ok = go(h.call("meteo", "view_jour", {"ville": "Lyon", "page": 1}))
+    assert ok.ok and ok.value["blocks"][0]["text"] == "il fait beau à Lyon"
+    act = go(h.call("meteo", "action_jour_rafraichir", {"ville": "Lyon"}))
+    assert act.ok and act.value == {"ok": True, "message": "rafraîchi : Lyon"}
+    for undeclared in ("view_cachee", "action_jour_secret", "tool_cache", "tick", "__import__"):
+        r = go(h.call("meteo", undeclared))
+        assert not r.ok and "n'est pas une fonction déclarée" in r.error, undeclared
+    h.shutdown()
+
+
+FRAGILE = """\
+title: Fragile
+views:
+  - {key: lente, label: Lente}
+  - {key: grosse, label: Grosse}
+  - {key: invalide, label: Invalide}
+  - {key: vivante, label: Vivante}
+"""
+FRAGILE_CODE = '''\
+def view_lente(api, params):
+    while True:
+        pass
+
+def view_grosse(api, params):
+    return {"version": 2, "blocks": [{"type": "prose", "text": "x" * 9000}] * 40}
+
+def view_invalide(api, params):
+    return {"version": 2, "blocks": [{"type": "table", "columns": ["a"], "rows": [["x", "y"]]}]}
+
+def view_vivante(api, params):
+    return {"version": 2, "blocks": [{"type": "note", "text": "vivante"}]}
+'''
+
+
+@needs_bwrap
+def test_a_slow_huge_or_invalid_view_becomes_a_note_and_the_app_lives_on(tmp_path):
+    from mika.kernel.inspect import Note
+    from mika.plugins.forge.views import render, view_params
+
+    h = host(tmp_path)
+    write(h, FRAGILE_CODE, manifest=FRAGILE, app="fragile")
+    info = h.info("fragile")
+
+    async def show(key):
+        spec = next(v for v in info.views if v.key == key)
+        return await render(h, "fragile", info, spec, view_params(spec, {})[0], cache_s=0)
+
+    async def all_of_them():
+        return {k: await show(k) for k in ("lente", "grosse", "invalide", "vivante")}
+
+    got = go(all_of_them())
+    [slow], [huge], [bad], [alive] = got["lente"], got["grosse"], got["invalide"], got["vivante"]
+    assert isinstance(slow, Note) and "plus de 3 s" in slow.text and "Rien n'est compté" in slow.text
+    assert isinstance(huge, Note) and "trop de données" in huge.text and "256 Ko" in huge.text
+    assert bad.title == "Vue invalide" and "blocks[0].rows[0] : 2 cellules pour 1 colonnes" in bad.text
+    assert alive == Note("vivante")  # l'app repart après avoir été tuée
+    h.shutdown()

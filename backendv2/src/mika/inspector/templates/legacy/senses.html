@@ -1,0 +1,16 @@
+{% extends "base.html" %}{% block body %}<div class="legacy">
+<h2>Courrier</h2><form method="post" class="card"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="mail">
+<div class="grid"><input name="address" value="{{ mail.address }}" placeholder="adresse"><input name="user" value="{{ mail.user }}" placeholder="utilisateur IMAP">
+<input name="password" type="password" autocomplete="off" placeholder="{{ 'mot de passe — vide : inchangé' if has_password else 'mot de passe' }}">
+<input name="imap_host" value="{{ mail.imap_host }}" placeholder="serveur IMAP"><input name="imap_port" type="number" value="{{ mail.imap_port }}">
+<input name="smtp_host" value="{{ mail.smtp_host }}" placeholder="serveur SMTP"><input name="smtp_port" type="number" value="{{ mail.smtp_port }}">
+<select name="smtp_security">{% for s in ('starttls', 'ssl', 'none') %}<option {{ 'selected' if mail.smtp_security == s else '' }}>{{ s }}</option>{% endfor %}</select></div>
+<p class="mut">Envoyer un mail passe toujours par ton approbation.</p><p><button>Enregistrer</button></p></form>
+<h2>Flux</h2><form method="post" class="card"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="feeds">
+<textarea name="feeds" placeholder="une adresse par ligne">{{ feeds }}</textarea><p><button>Enregistrer</button></p></form>
+<h2>Transcription des messages vocaux</h2><form method="post" class="card"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="stt">
+<div class="grid"><input name="base_url" value="{{ stt_url }}" placeholder="URL (…/v1)"><input name="model" value="{{ stt_model }}"><input name="api_key" type="password" autocomplete="off" placeholder="{{ 'clé — vide : inchangée' if stt_key else 'clé' }}"></div><p><button>Enregistrer</button></p></form>
+<h2>Appareils</h2><form method="post" class="card"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="sensors">
+<p>{{ 'Un jeton est en service.' if sensors else 'Aucun jeton : seuls les opérateurs connectés peuvent signaler.' }} Les appareils signalent par <code>POST /api/perceptions</code> avec <code>Authorization: Bearer …</code>.</p>
+{% if new_token %}<p><code>{{ new_token }}</code></p>{% endif %}<p><button>Nouveau jeton</button></p></form>
+</div>{% endblock %}

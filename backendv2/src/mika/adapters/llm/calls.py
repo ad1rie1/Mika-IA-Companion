@@ -2,7 +2,8 @@
 ont coûté par jour et par rôle, et les derniers en détail. Rétention bornée.
 
 La passerelle garde en mémoire les derniers appels ; ce registre survit aux
-redémarrages, pour qu'on voie ce que coûte une semaine.
+redémarrages, pour qu'on voie ce que coûte une semaine — et, par la
+corrélation, quels appels a faits un épisode (« pourquoi a-t-elle dit ça ? »).
 """
 
 from __future__ import annotations
@@ -21,8 +22,10 @@ TABLE = "llm_calls"
 KEEP_DAYS = 30
 _PRUNE_EVERY = 500
 _COLUMNS = ("at", "role", "backend", "model", "lane", "priority", "latency_us", "wait_us", "input_tokens",
-            "output_tokens", "cache_read", "cache_write", "cost_usd", "outcome", "call_id")
-_TEXT = frozenset({"role", "backend", "model", "lane", "outcome", "call_id"})
+            "output_tokens", "cache_read", "cache_write", "cost_usd", "outcome", "call_id", "correlation")
+_TEXT = frozenset({"role", "backend", "model", "lane", "outcome", "call_id", "correlation"})
+#: colonnes ajoutées après la création de la table : ajoutées en place si absentes
+_ADDED = ("correlation",)
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,7 +62,13 @@ class CallLog:
 
         def create(sql: Any) -> None:
             sql.execute(f"CREATE TABLE IF NOT EXISTS {TABLE}(id INTEGER PRIMARY KEY, {cols})")
+            present = {row[1] for row in sql.query(f"PRAGMA table_info({TABLE})")}
+            for column in _ADDED:
+                if column not in present:  # un registre d'avant la colonne : complété, pas recréé
+                    sql.execute(f"ALTER TABLE {TABLE} ADD COLUMN {column} TEXT")
             sql.execute(f"CREATE INDEX IF NOT EXISTS {TABLE}_at ON {TABLE}(at)")
+            sql.execute(f"CREATE INDEX IF NOT EXISTS {TABLE}_correlation ON {TABLE}(correlation)")
+            sql.execute(f"CREATE INDEX IF NOT EXISTS {TABLE}_call_id ON {TABLE}(call_id)")
 
         await self.store.run_views(create)
         self._ready = True
@@ -95,7 +104,11 @@ class CallLog:
 
     async def flush(self) -> None:
         while self._pending:
-            await asyncio.gather(*list(self._pending), return_exceptions=True)
+            batch = list(self._pending)
+            await asyncio.gather(*batch, return_exceptions=True)
+            # attendre des tâches déjà finies ne rend pas la main à la boucle : leurs
+            # rappels (qui les retirent) n'ont pas encore tourné — on les retire ici
+            self._pending.difference_update(batch)
 
     async def prune(self, now: int) -> int:
         def run(sql: Any) -> int:
@@ -109,7 +122,28 @@ class CallLog:
         where, args = ("WHERE role=?", (role,)) if role else ("", ())
         rows = self.store.query_views(f"SELECT {', '.join(_COLUMNS)} FROM {TABLE} {where} ORDER BY at DESC LIMIT ?",
                                       (*args, max(1, min(limit, 1000))))
-        return [LLMTrace(**dict(zip(_COLUMNS, r, strict=True))) for r in rows]
+        return [_trace(r) for r in rows]
+
+    def for_correlation(self, correlation: str, *, limit: int = 200) -> list[LLMTrace]:
+        """Les appels d'un épisode (ou d'un passage de processus), dans l'ordre où
+        ils ont eu lieu."""
+        if not self._ready or not correlation:
+            return []
+        rows = self.store.query_views(
+            f"SELECT {', '.join(_COLUMNS)} FROM {TABLE} WHERE correlation=? ORDER BY at, id LIMIT ?",
+            (correlation, max(1, min(limit, 1000))))
+        return [_trace(r) for r in rows]
+
+    def by_call_id(self, call_id: str) -> LLMTrace | None:
+        """L'appel qui porte cet identifiant — le dernier s'il y en a plusieurs :
+        une boucle d'outils le réutilise d'un tour à l'autre, et le dernier tour
+        est celui qui a écrit le texte (``VoiceProvenance.call_id``)."""
+        if not self._ready or not call_id:
+            return None
+        rows = self.store.query_views(
+            f"SELECT {', '.join(_COLUMNS)} FROM {TABLE} WHERE call_id=? ORDER BY at DESC, id DESC LIMIT 1",
+            (call_id,))
+        return _trace(rows[0]) if rows else None
 
     def usage(self, since: int, *, by: str = "role", day_of: Any = None) -> list[Usage]:
         """Agrégats depuis ``since``, par ``role``, ``backend`` ou jour (``by="day"``,
@@ -133,3 +167,9 @@ class CallLog:
             a[7] += lat
         return [Usage(k, int(a[0]), int(a[1]), int(a[2]), int(a[3]), int(a[4]), int(a[5]), float(a[6]),
                       a[7] / a[0] / 1e6 if a[0] else 0.0) for k, a in sorted(acc.items())]
+
+
+def _trace(row: tuple[Any, ...]) -> LLMTrace:
+    fields = dict(zip(_COLUMNS, row, strict=True))
+    fields["correlation"] = fields["correlation"] or ""  # les lignes d'avant la colonne
+    return LLMTrace(**fields)

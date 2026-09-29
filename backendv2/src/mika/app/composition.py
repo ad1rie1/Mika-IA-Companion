@@ -7,6 +7,7 @@ Ajouter une faculté = ajouter son paquet et l'inscrire ici. Tout le reste
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from typing import Any
 
@@ -28,7 +29,6 @@ from mika.faculties.presence import PRESENCE
 from mika.faculties.self import SELF, load, persona_for
 from mika.faculties.social import SOCIAL
 from mika.faculties.transcript import TRANSCRIPT
-from mika.kernel.builtin import KernelParams
 from mika.kernel.episode import EpisodePolicy
 from mika.kernel.events import Origin
 from mika.kernel.faculty import Faculty
@@ -40,9 +40,12 @@ from mika.plugins.email import EMAIL
 from mika.plugins.forge import FORGE
 from mika.plugins.rss import RSS
 from mika.plugins.sensors import SENSORS
+from mika.runtime import params
 from mika.runtime.bootstrap import Kernel, KernelDeps
 from mika.sim.world import Composition
 from mika.vocab.episodes import VOICE_ROLES, Kind, Role
+
+log = logging.getLogger("mika.composition")
 
 
 def faculties() -> list[Faculty[Any, Any]]:
@@ -110,22 +113,29 @@ def deps(**kw: Any) -> KernelDeps:
     return KernelDeps(**base)
 
 
-async def configure(kernel: Kernel, doc: self_c.PersonaDoc, overrides: Mapping[str, Mapping[str, Any]] | None = None) -> bool:
-    """Journalise la persona si elle a changé, puis les paramètres qui en
-    dérivent (fuseau, et ceux de chaque faculté depuis le tempérament).
-    Rend ``True`` si quelque chose a été ajouté."""
+async def configure(kernel: Kernel, doc: self_c.PersonaDoc, overrides: Mapping[str, Mapping[str, Any]] | None = None,
+                    inputs: Mapping[str, Mapping[str, Any]] | None = None) -> bool:
+    """Journalise la persona si elle a changé, puis les paramètres (fuseau, et
+    ceux de chaque faculté : défaut ← tempérament ← réglages ← surcharges,
+    ``runtime/params.py``). Une surcharge refusée est ignorée et signalée, jamais
+    fatale. Rend ``True`` si quelque chose a été ajouté."""
     changed = False
     state = kernel.mind.root.slices["self"]
     if state.revisions == 0 or state.persona != doc:
         await kernel.mind.append([self_c.PERSONA_REVISED.draft(persona=doc)], emitter="self",
                                  correlation="persona", origin=Origin.GENESIS)
         changed = True
-    changed |= await kernel.set_params("kernel", KernelParams(tz=doc.timezone))
-    for f in kernel.registry.faculties.values():
-        if f.derive is None:
-            continue
-        params = f.derive(doc.temperament, (overrides or {}).get(f.name))
-        changed |= await kernel.set_params(f.name, params)
+    # le fuseau de sa persona est un réglage du noyau (jamais une surcharge qu'un plan effacerait)
+    given = {k: dict(v) for k, v in (inputs or {}).items()}
+    given["kernel"] = {**given.get("kernel", {}), "tz": doc.timezone}
+    inputs = given
+    faculties = list(kernel.registry.faculties.values())
+    planned = params.plan(faculties, doc.temperament, overrides, inputs)
+    for owner, p in planned.items():
+        if p.refused:
+            log.warning("surcharges de %s ignorées : %s", owner, dict(p.refused))
+    for owner, value in params.to_journal(kernel, planned, overrides, inputs):
+        changed |= await kernel.set_params(owner, value)
     return changed
 
 

@@ -78,6 +78,10 @@ class Row:
     guards: tuple[Guard, ...] = ()
     args: FrozenDict[str, Any] = field(default_factory=FrozenDict)
     deadline: int | None = None
+    threshold: float = 0.0
+    aging: float = 0.0
+    #: décalage par propriétaire de modulateur (triés) ; leur somme est ``shift``
+    shifts: tuple[tuple[str, float], ...] = ()
 
     @property
     def key(self) -> str:
@@ -91,6 +95,8 @@ class Row:
         return RowRecord(
             kind=self.kind, target=self.target, parts=self.parts, shift=round(self.shift, 6),
             vetoes=self.vetoes, score=round(self.score, 6), hazard=self.hazard,
+            threshold=round(self.threshold, 6), aging=round(self.aging, 6),
+            shifts=tuple((owner, round(v, 6)) for owner, v in self.shifts),
         )
 
 
@@ -128,9 +134,12 @@ def pool(
         strongest = max((c.evidence for c in cands), default=0.0)
         view = RowView(kind, target, evidence, tuple(sorted({p[1] for p in ps})), strongest)
         shift = 0.0
+        by_owner: dict[str, float] = {}
         vetoes: list[tuple[str, str]] = []
         for source, m in modulate(view):
             shift += m.shift
+            if m.shift:
+                by_owner[source] = by_owner.get(source, 0.0) + m.shift
             if m.veto:
                 vetoes.append((source, m.veto))
         key = f"{kind}:{target}"
@@ -147,7 +156,8 @@ def pool(
         deadlines = [c.deadline for c in cands if c.deadline is not None]
         rows.append(
             Row(kind, target, tuple(sorted(ps)), shift, tuple(sorted(vetoes)), score, hazard,
-                resources, guards, FrozenDict(args), min(deadlines) if deadlines else None)
+                resources, guards, FrozenDict(args), min(deadlines) if deadlines else None,
+                threshold=threshold, aging=aging, shifts=tuple(sorted(by_owner.items())))
         )
     rows.sort(key=lambda r: (-r.hazard, r.key))
     return rows

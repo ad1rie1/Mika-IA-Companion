@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 from mika.kernel.events import EventType, Payload, Upcaster
 from mika.kernel.facts import Declared, FactSpec
+from mika.kernel.inspect import Param
 
 S = TypeVar("S")
 Pm = TypeVar("Pm")
@@ -182,14 +183,103 @@ class EffectSpec:
 
 @dataclass(frozen=True, slots=True)
 class InspectSpec:
-    """Une vue d'inspection (voir ``kernel/inspect.py``) : ``fn(frame, ctx)``."""
+    """Une vue de la console (voir ``kernel/inspect.py``) : ``fn(tranche, frame, ctx)``.
+
+    Elle se range dans une destination (``section``, déclarée par la
+    composition) ou devient un onglet de la fiche d'un objet (``subject``)."""
 
     owner: str
     name: str
     fn: Callable[..., Any]
     title: str = ""
-    #: les filtres qu'elle accepte : (nom, libellé)
+    #: les filtres qu'elle accepte : (nom, libellé) — la forme typée est ``typed``
     params: tuple[tuple[str, str], ...] = ()
+    typed: tuple[Param, ...] = ()
+    section: str = ""
+    order: int = 100
+    #: un onglet de la fiche de ce type d'objet (``person``, ``goal``…)
+    subject: str = ""
+    #: l'ancien paramètre qui portait la clé de l'objet (``?handle=``) : redirection
+    subject_param: str = ""
+    #: ce qui demande une action : ``fn(tranche, frame) -> int | (int, texte)``
+    badge: Callable[..., Any] | None = None
+    description: str = ""
+    #: hors de la navigation (joignable par lien seulement)
+    hidden: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SubjectSpec:
+    """Un type d'objet qui a sa fiche : ``head(tranche, frame, ctx, clé) -> Head | None``,
+    et une recherche facultative ``search(tranche, frame, ctx, texte, limite)``."""
+
+    owner: str
+    kind: str
+    label: str
+    plural: str
+    head: Callable[..., Any]
+    search: Callable[..., Any] | None = None
+    #: la fiche offre « oublier » (l'objet est un sujet de contenus)
+    forgettable: bool = False
+    icon: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ActionSpec:
+    """Une action d'opérateur (voir ``kernel/operate.py``) :
+    ``fn(tranche, frame, args, ctx) -> Done``. Clé : ``<propriétaire>.<nom>``."""
+
+    owner: str
+    name: str
+    title: str
+    args: type[BaseModel]
+    fn: Callable[..., Any]
+    #: les types d'événements qu'elle peut émettre (les siens seulement)
+    emits: frozenset[str]
+    subject: str = ""
+    section: str = ""
+    description: str = ""
+    confirm: str = ""
+    danger: bool = False
+    #: irréversible : il faut retaper la clé de l'objet
+    retype: bool = False
+    #: offerte seulement si ``available(tranche, frame, clé)``
+    available: Callable[..., bool] | None = None
+    order: int = 100
+    #: des champs connus seulement à l'exécution (les actions d'une app forgée) :
+    #: ``fields(tranche, frame, clé, valeurs_fixes) -> Sequence[FormField]`` ; l'action
+    #: reçoit alors un dictionnaire (champs lus + valeurs fixes), pas un modèle
+    fields: Callable[..., Any] | None = None
+
+    @property
+    def key(self) -> str:
+        return f"{self.owner}.{self.name}"
+
+
+@dataclass(frozen=True, slots=True)
+class VitalSpec:
+    """Une valeur de la barre de vitaux : ``fn(tranche, frame) -> Vital | None``."""
+
+    owner: str
+    key: str
+    label: str
+    fn: Callable[..., Any]
+    order: int = 100
+
+
+@dataclass(frozen=True, slots=True)
+class SeriesSpec:
+    """Une mesure échantillonnée pour les courbes : ``fn(tranche, frame) -> float | None``.
+    Clé : ``<propriétaire>.<nom>``."""
+
+    owner: str
+    key: str
+    label: str
+    fn: Callable[..., Any]
+    unit: str = ""
+    lo: float | None = None
+    hi: float | None = None
+    every_us: int = 600_000_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,6 +356,10 @@ class Faculty(Generic[S, Pm]):
     interpreters: list[InterpreterSpec] = field(default_factory=list)
     feelings: list[FeelSpec] = field(default_factory=list)
     capabilities: list[CapabilitySpec] = field(default_factory=list)
+    subjects: list[SubjectSpec] = field(default_factory=list)
+    actions: list[ActionSpec] = field(default_factory=list)
+    vitals: list[VitalSpec] = field(default_factory=list)
+    series_specs: list[SeriesSpec] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self.namespaces:
@@ -484,13 +578,75 @@ class Faculty(Generic[S, Pm]):
 
         return deco
 
-    # ── exploitation ──
-    def inspect(self, name: str, *, title: str = "", params: Iterable[tuple[str, str]] = ()):
-        """Une vue pour l'inspecteur : ``fn(frame, ctx) -> Sequence[Block]``,
-        en lecture seule."""
+    # ── exploitation (la console) ──
+    def inspect(self, name: str, *, title: str = "", params: Iterable[tuple[str, str] | Param] = (),
+                section: str = "", order: int = 100, subject: str = "", subject_param: str = "",
+                badge: Callable[..., Any] | None = None, description: str = "", hidden: bool = False):
+        """Une vue de la console : ``fn(tranche, frame, ctx) -> Sequence[Block]``,
+        en lecture seule. ``params`` : des ``Param`` typés (ou d'anciennes paires
+        (nom, libellé), lues comme des recherches)."""
+        typed = tuple(p if isinstance(p, Param) else Param(p[0], p[1]) for p in params)
 
         def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
-            self.inspectors.append(InspectSpec(self.name, name, fn, title or name, tuple(params)))
+            self.inspectors.append(InspectSpec(
+                self.name, name, fn, title or name, tuple((p.name, p.label) for p in typed), typed, section,
+                order, subject, subject_param, badge, description, hidden))
+            return fn
+
+        return deco
+
+    def subject(self, kind: str, *, label: str, plural: str, forgettable: bool = False, icon: str = ""):
+        """Un type d'objet qui a sa fiche ; la fonction décorée rend son en-tête."""
+
+        def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
+            self.subjects.append(SubjectSpec(self.name, kind, label, plural, fn, None, forgettable, icon))
+            return fn
+
+        return deco
+
+    def search(self, kind: str):
+        """La recherche des objets d'un type que cette faculté déclare."""
+
+        def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
+            for i, spec in enumerate(self.subjects):
+                if spec.kind == kind:
+                    self.subjects[i] = SubjectSpec(spec.owner, spec.kind, spec.label, spec.plural, spec.head, fn,
+                                                   spec.forgettable, spec.icon)
+                    return fn
+            raise ValueError(f"{self.name} : recherche pour un type non déclaré ici : {kind}")
+
+        return deco
+
+    def action(self, name: str, *, title: str, args: type[BaseModel], emits: Iterable[EventType[Any] | str],
+               subject: str = "", section: str = "", description: str = "", confirm: str = "", danger: bool = False,
+               retype: bool = False, available: Callable[..., bool] | None = None, order: int = 100,
+               fields: Callable[..., Any] | None = None):
+        """Une action d'opérateur (voir ``kernel/operate.py``)."""
+
+        def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
+            self.actions.append(ActionSpec(
+                self.name, name, title, args, fn, frozenset(e if isinstance(e, str) else e.name for e in emits),
+                subject, section, description, confirm, danger, retype, available, order, fields))
+            return fn
+
+        return deco
+
+    def vital(self, key: str, *, label: str, order: int = 100):
+        """Une valeur de la barre de vitaux : ``fn(tranche, frame) -> Vital | None``."""
+
+        def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
+            self.vitals.append(VitalSpec(self.name, f"{self.name}.{key}", label, fn, order))
+            return fn
+
+        return deco
+
+    def series(self, key: str, *, label: str, unit: str = "", lo: float | None = None, hi: float | None = None,
+               every_s: float = 600):
+        """Une mesure échantillonnée (``fn(tranche, frame) -> float | None``) pour les courbes."""
+
+        def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
+            self.series_specs.append(SeriesSpec(self.name, f"{self.name}.{key}", label, fn, unit, lo, hi,
+                                                int(every_s * 1_000_000)))
             return fn
 
         return deco

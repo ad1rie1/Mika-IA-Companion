@@ -17,6 +17,10 @@ attendre. « Fini » n'est cru qu'avec une **preuve** — un outil qui a
 réellement produit quelque chose pendant ce but. Un but se clôt abouti,
 bloqué, abandonné (l'envie s'est usée), en échec (un rappel qui n'a pas pu
 être dit) ou annulé.
+
+Un opérateur peut **suspendre** un but vivant (``paused``) : il ne fait plus
+de pas, son rappel ne se dit pas, son envie ne s'use pas, jusqu'à ce qu'il
+le reprenne.
 """
 
 from __future__ import annotations
@@ -38,7 +42,8 @@ CONTINUE, DONE, BLOCKED, WAIT = "continue", "done", "blocked", "wait"
 VERDICTS = (CONTINUE, DONE, BLOCKED, WAIT)
 
 # statuts : vivants, puis clos
-ACTIVE, WAITING = "active", "waiting"
+ACTIVE, WAITING, PAUSED = "active", "waiting", "paused"
+LIVE_STATUSES = (ACTIVE, WAITING, PAUSED)
 ACHIEVED, STUCK, ABANDONED, FAILED, CANCELLED = "done", "blocked", "abandoned", "failed", "cancelled"
 CLOSED_STATUSES = (ACHIEVED, STUCK, ABANDONED, FAILED, CANCELLED)
 

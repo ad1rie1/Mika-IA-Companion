@@ -1,7 +1,0 @@
-{% extends "base.html" %}{% block body %}
-<form class="card row"><input name="type" value="{{ kind }}" placeholder="type (ex. episode.)"><input name="correlation" value="{{ corr }}" placeholder="corrélation"><button>Filtrer</button></form>
-<div class="scroll"><table><tr><th>seq</th><th>quand</th><th>type</th><th class="hide-sm">corrélation</th><th>données</th></tr>
-{% for e in events %}<tr><td><a href="{{ PREFIX }}/evenement/{{ e.seq }}">{{ e.seq }}</a></td><td class="mut">{{ e.when }}</td><td>{{ e.type }}</td><td class="hide-sm"><a href="{{ PREFIX }}/episode/{{ e.corr|urlencode }}">{{ e.corr[:22] }}</a></td><td><pre>{{ e.data }}</pre></td></tr>
-{% else %}<tr><td colspan="5" class="mut">rien ne correspond</td></tr>{% endfor %}</table></div>
-{% if older %}<p><a href="?before={{ older }}&type={{ kind|urlencode }}&correlation={{ corr|urlencode }}">Plus ancien →</a></p>{% endif %}
-{% endblock %}

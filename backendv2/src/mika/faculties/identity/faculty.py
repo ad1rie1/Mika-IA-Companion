@@ -154,6 +154,17 @@ def _apply(h: Handle, e: Any) -> Handle:
             return replace(h, person=claim.target, certainty=certainty, via="corroborated", name=claim.name,
                            claim=None)
         return replace(h, claim=claim)
+    if d.kind == c.VOUCHED:
+        # un opérateur se porte garant de la revendication : une preuve de plus,
+        # pesée comme les autres (seule, elle ne franchit pas la barre en public)
+        claim = h.claim
+        if claim is None or claim.target is None or claim.target == h.person or c.VOUCHED in claim.used:
+            return h
+        certainty = privacy.apply_evidence(claim.certainty, c.VOUCHED, h.trust)
+        claim = replace(claim, certainty=certainty, used=(*claim.used, c.VOUCHED))
+        if certainty >= bar:
+            return replace(h, person=claim.target, certainty=certainty, via="vouched", name=claim.name, claim=None)
+        return replace(h, claim=claim)
     if d.kind == c.DENIED:
         if h.person and same_name(d.name, h.name):
             certainty = privacy.apply_evidence(h.certainty, c.DENIED, h.trust)

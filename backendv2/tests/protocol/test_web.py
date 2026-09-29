@@ -32,6 +32,11 @@ class Echo:
     def __init__(self) -> None:
         self.calls = []
 
+    @property
+    def replies(self) -> list:
+        """Les appels d'une réponse (la vie de nuit, qui suit l'horloge réelle, n'en fait pas partie)."""
+        return [c for c in self.calls if c.role == "reply"]
+
     async def complete(self, req):
         self.calls.append(req)
         return LLMResponse(f"J'ai bien lu [SIGH] : {req.messages[-1].content[-40:]} [EMOTION:happy:0.6]")
@@ -189,7 +194,7 @@ def test_ws_conversation_round_trip(world):
         assert [m["id"] for m in catch["messages"]] == [speech["user_message_id"], speech["message_id"]]
         assert catch["messages"][1]["text"] == speech["text"].replace(" [SIGH]", "")  # sans prosodie
         assert catch["last_id"] == speech["message_id"]
-    assert len(backend.calls) == 1
+    assert len(backend.replies) == 1
 
 
 def test_resent_message_is_not_answered_twice(world):
@@ -205,7 +210,7 @@ def test_resent_message_is_not_answered_twice(world):
         assert ack["status"] == "accepted"
         ws.send_json({"type": "ping", "t": 1})
         assert recv_until(ws, "pong")[-1]["t"] == 1
-    assert len(backend.calls) == 1
+    assert len(backend.replies) == 1
 
 
 @pytest.mark.parametrize("frame, status", [
@@ -225,7 +230,7 @@ def test_chat_refusals_are_said_out_loud(world, frame, status):
         assert ack["status"] == status
         if status == "attachments_rejected":
             assert ack["rejected_attachments"] == [{"name": "gros.bin", "reason": "too_large"}]
-    assert backend.calls == []
+    assert backend.replies == []
 
 
 def test_chat_rate_limit(world):

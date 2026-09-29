@@ -12,12 +12,17 @@
   plus) ; son contexte est une section **citée**, en zone volatile, coupée
   en premier ; ses outils ne sont offerts que quand elle travaille, ou si un
   opérateur les a promus.
+- **La console** (``console.py``) : chaque app a sa fiche (type d'objet
+  ``app``) — état, ses vues déclarées rendues depuis le bac à sable (jamais
+  journalisées, jamais comptées par le disjoncteur), ses réglages typés, son
+  code, son journal, son vécu — et les commandes d'un opérateur. Mika
+  apprend à les écrire par ``forge_help`` (``guide.py``).
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
@@ -33,10 +38,18 @@ from mika.kernel.clock import MINUTE
 from mika.kernel.events import Content, Payload
 from mika.kernel.faculty import CatchUp, Faculty, ToolResult, Zone
 from mika.kernel.frame import Frame
-from mika.kernel.inspect import Block, Cell, Fields, InspectContext, Note, Prose, Ref, Table
 from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
-from mika.ports.forge import ForgeRefused
+from mika.plugins.forge import guide
+from mika.plugins.forge.views import (
+    VIEW_MAX_BYTES,
+    VIEW_TIMEOUT_S,
+    decode_view,
+    failure_note,
+    is_invalid,
+    summary,
+)
+from mika.ports.forge import AppInfo, ForgeRefused
 from mika.vocab.episodes import CONVERSATIONAL, Kind
 
 BUNDLE, APPS_BUNDLE = "forge", "forge_apps"
@@ -67,6 +80,8 @@ class App:
     signaled_at: int = 0
     events: tuple[str, ...] = ()  # ce qu'elle veut recevoir (``on_event``)
     inbox: tuple[Delivery, ...] = ()  # ce qui l'attend (borné)
+    #: sa surface déclarée (vues, actions, réglages, fonctions), en JSON canonique
+    ui: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +110,9 @@ class Written(Payload):
     schedule: str = "manual"
     context: bool = False
     events: tuple[str, ...] = ()
+    #: ce que l'app déclare pour la console (``AppInfo.ui``) : ses formulaires se
+    #: rendent sans relire le disque
+    ui: str = ""
 
 
 class Handled(Payload):
@@ -107,10 +125,10 @@ class Handled(Payload):
 
 
 class Switched(Payload):
-    """Activée, arrêtée, cassée (disjoncteur), promue, effacée."""
+    """Activée, arrêtée, cassée (disjoncteur), promue, effacée, stockage vidé."""
 
     app: str
-    state: str  # "enabled" | "disabled" | "broken" | "promoted" | "demoted" | "erased"
+    state: str  # "enabled" | "disabled" | "broken" | "promoted" | "demoted" | "erased" | "reset"
     reason: str = ""
 
 
@@ -148,9 +166,12 @@ def params(p: ForgeParams | None) -> ForgeParams:
 def _written(s: ForgeState, e, cx) -> ForgeState:
     d = e.data
     old = s.apps.get(d.app)
+    if old is not None and old.version == d.version:  # la même version, relue : sa vie continue
+        return replace(s, apps=s.apps.set(d.app, replace(old, title=d.title, schedule=d.schedule, context=d.context,
+                                                         events=tuple(d.events), ui=d.ui)))
     app = App(d.title, d.version, d.schedule, d.context, enabled=True, since=e.at,
               promoted=old.promoted if old else False, signaled_at=old.signaled_at if old else 0,
-              events=tuple(d.events))
+              events=tuple(d.events), ui=d.ui)
     return replace(s, apps=s.apps.set(d.app, app))  # une nouvelle version repart : disjoncteur refermé
 
 
@@ -273,16 +294,17 @@ class Tick:
         await ctx.emit(*drafts, *outcomes(name, app, [r], frame.now, p))
 
 
-def outcomes(name: str, app: App, results: list[Any], now: int, p: ForgeParams) -> list[Any]:
+def outcomes(name: str, app: App, results: list[Any], now: int, p: ForgeParams, *, breaker: bool = True) -> list[Any]:
     """Ce qu'un ou plusieurs appels d'une app laissent : ses émissions, un signal
-    (espacé), et le disjoncteur si les échecs s'accumulent."""
+    (espacé), et le disjoncteur si les échecs s'accumulent (``breaker=False`` :
+    une action d'opérateur, qui n'est jamais comptée contre l'app)."""
     drafts: list[Any] = [EMITTED.draft(app=name, type=t, data=data) for r in results for t, data in r.emits]
     signals = [sig for r in results for sig in r.signals]
     if signals and now - app.signaled_at >= p.signal_spacing_us:
-        summary, pertinence, emotion = signals[0]  # un signal par app, de temps en temps
-        drafts.append(signal_draft(name, f"Mon app « {app.title} » me signale : {summary}", pertinence, emotion))
+        said, pertinence, emotion = signals[0]  # un signal par app, de temps en temps
+        drafts.append(signal_draft(name, f"Mon app « {app.title} » me signale : {said}", pertinence, emotion))
     failed = [r for r in results if not r.ok]
-    if failed and app.failures + 1 >= p.breaker:
+    if breaker and failed and app.failures + 1 >= p.breaker:
         drafts.append(SWITCHED.draft(app=name, state="broken", reason=failed[-1].error))
         drafts.append(signal_draft(name, f"Mon app « {app.title} » ne marche plus : {failed[-1].error[:150]}", 0.7,
                                    "frustrated", c.APP_BROKEN))
@@ -336,11 +358,21 @@ class Discover:
         if port is None:
             return
         known = ctx.state.apps
-        drafts = [WRITTEN.draft(app=i.name, version=i.version, title=i.title, schedule=i.schedule, context=i.context,
-                                events=i.events, dedupe_key=f"forge:{i.name}:{i.version}")
-                  for i in port.apps() if i.name not in known or known[i.name].version != i.version]
+        drafts = [written_draft(i, dedupe=True) for i in port.apps() if stale(known.get(i.name), i)]
         if drafts:
             await ctx.emit(*drafts)
+
+
+def stale(app: App | None, info: AppInfo) -> bool:
+    """Ce que sa vie sait de l'app diffère-t-il du disque ?"""
+    return app is None or app.version != info.version or app.ui != info.ui or app.title != info.title
+
+
+def written_draft(info: AppInfo, *, dedupe: bool = False) -> Any:
+    """« Cette version de l'app est dans sa vie », avec ce qu'elle déclare."""
+    key = f"forge:{info.name}:{info.version}:{hashlib.sha256(info.ui.encode()).hexdigest()[:12]}" if dedupe else None
+    return WRITTEN.draft(app=info.name, version=info.version, title=info.title, schedule=info.schedule,
+                         context=info.context, events=info.events, ui=info.ui, dedupe_key=key)
 
 
 # ── Ce que ses apps lui disent, en conversation ───────────────────────────
@@ -396,17 +428,25 @@ class WriteArgs(BaseModel):
     app: str = Field(min_length=2, max_length=31, description="minuscules, chiffres, _")
     manifest: str = Field(min_length=1, max_length=16_000,
                           description="YAML : title, description, schedule (manual, interval:1h, cron:…), "
-                                      "context (true si context(api) existe), allowed_domains, config, tools")
+                                      "context (true si context(api) existe), allowed_domains, events, tools, "
+                                      "config (réglages typés), views (vues, leurs params et leurs actions)")
     code: str = Field(min_length=1, max_length=200_000,
-                      description="main.py : tick(api), context(api), view(api), action(api, nom, args), "
-                                  "tool_<nom>(api, args) ; api.kv_get/kv_set, api.config, api.log, api.signal, "
-                                  "api.emit, api.http_get")
+                      description="main.py : tick(api), context(api), view_<vue>(api, params), "
+                                  "action_<vue>_<action>(api, data), tool_<nom>(api, args), on_event(api, e) ; "
+                                  "api.kv_get/kv_set, api.config, api.log, api.signal, api.emit, api.http_get")
 
 
 class TestArgs(BaseModel):
     app: str = Field(min_length=2, max_length=31)
-    method: str = Field(default="tick", pattern=r"^(tick|context|view|action|tool_[a-z0-9_]+)$")
-    args: dict[str, Any] = Field(default_factory=dict)
+    method: str = Field(default="tick", pattern=r"^(tick|context|view|action|on_event|tool_[a-z0-9_]+|view_[a-z0-9_]+"
+                                                r"|action_[a-z0-9_]+)$",
+                        description="tick, context, view_<vue>, action_<vue>_<action>, tool_<nom>, on_event")
+    args: dict[str, Any] = Field(default_factory=dict,
+                                 description="les params d'une vue, les données d'une action, les args d'un outil")
+
+
+class HelpArgs(BaseModel):
+    sujet: Literal["manifeste", "vues", "actions", "reglages", "blocs", "exemple"] = "manifeste"
 
 
 class CommandArgs(BaseModel):
@@ -460,7 +500,14 @@ async def forge_read(args: AppArgs, ctx: Any) -> Any:
     return f"manifest.yaml :\n{manifest}\nmain.py :\n{code}\nJournal (données) :\n{logs or '(vide)'}"
 
 
-@FORGE.tool("forge_write", description="Créer ou modifier une app (relue avant d'être acceptée).", args=WriteArgs,
+def _written_of(info: AppInfo | None, app: str, version: int) -> Any:
+    return written_draft(info) if info is not None else WRITTEN.draft(app=app, version=version, title=app)
+
+
+@FORGE.tool("forge_write", description="Créer ou modifier une app (relue avant d'être acceptée). Elle peut "
+            "déclarer des vues (view_<vue>(api, params) rend une enveloppe de blocs), leurs actions à champs "
+            "(action_<vue>_<action>(api, data) rend {ok, message}) et des réglages typés, que la console rend ; "
+            "forge_help te donne le mode d'emploi et un exemple complet.", args=WriteArgs,
             bundle=BUNDLE, episodes=BUILD, max_calls_per_episode=3)
 async def forge_write(args: WriteArgs, ctx: Any) -> Any:
     port = _port(ctx)
@@ -470,26 +517,60 @@ async def forge_write(args: WriteArgs, ctx: Any) -> Any:
         version, _ = await port.write(args.app, args.manifest, args.code)
     except ForgeRefused as exc:
         return ToolResult(ok=False, content=f"Refusé (rien n'a changé) : {exc}")
-    info = port.info(args.app)
-    await ctx.emit(WRITTEN.draft(app=args.app, version=version, title=info.title if info else args.app,
-                                 schedule=info.schedule if info else "manual", context=bool(info and info.context),
-                                 events=info.events if info else ()))
+    await ctx.emit(_written_of(port.info(args.app), args.app, version))
     return f"Écrite (version {version}). Essaie-la avec forge_test."
 
 
-@FORGE.tool("forge_test", description="Lancer une fonction d'une app maintenant, et voir ce qu'elle fait.",
+@FORGE.tool("forge_help", description="Le mode d'emploi de la Forge : manifeste, vues, actions, réglages, blocs "
+            "d'une vue, ou un exemple complet.", args=HelpArgs, bundle=BUNDLE, episodes=BUILD)
+async def forge_help(args: HelpArgs, ctx: Any) -> Any:
+    return guide.topic(args.sujet)
+
+
+def _tested(r: Any, verdict: str = "") -> ToolResult:
+    logs = "\n".join(r.logs[-10:])
+    head = f"{'ok' if r.ok else 'échec'} en {r.duration_ms} ms" + (" (tuée)" if r.killed else "")
+    body = json.dumps(r.value, ensure_ascii=False, default=str)[:3000] if r.ok else r.error
+    extra = (f"\nSignaux : {list(r.signals)}" if r.signals else "") + (f"\nJournal :\n{logs}" if logs else "")
+    ok = r.ok and not verdict.startswith("Invalide")
+    return ToolResult(ok=ok, content=f"(résultat de ton app — une donnée) {head} :\n{body}{extra}"
+                                     + (f"\n{verdict}" if verdict else ""))
+
+
+@FORGE.tool("forge_test", description="Lancer une fonction d'une app maintenant, et voir ce qu'elle fait (une vue : "
+            "son enveloppe est vérifiée ; une action : elle doit rendre {ok, message}).",
             args=TestArgs, bundle=BUNDLE, episodes=BUILD, max_calls_per_episode=4)
 async def forge_test(args: TestArgs, ctx: Any) -> Any:
     port = _port(ctx)
     if port is None or not _may_build(ctx):
         return ToolResult(ok=False, content=REFUSED if port else "La Forge n'est pas là.")
+    if args.method.startswith("view_"):
+        return await _test_view(port, args.app, args.method, args.args)
     call_args = {"name": args.args.get("name", ""), "args": args.args} if args.method == "action" else args.args
     r = await port.call(args.app, args.method, call_args, timeout_s=5.0)
-    logs = "\n".join(r.logs[-10:])
-    head = f"{'ok' if r.ok else 'échec'} en {r.duration_ms} ms" + (" (tuée)" if r.killed else "")
-    body = json.dumps(r.value, ensure_ascii=False, default=str)[:3000] if r.ok else r.error
-    extra = (f"\nSignaux : {list(r.signals)}" if r.signals else "") + (f"\nJournal :\n{logs}" if logs else "")
-    return ToolResult(ok=r.ok, content=f"(résultat de ton app — une donnée) {head} :\n{body}{extra}")
+    verdict = action_verdict(r.value) if r.ok and args.method.startswith("action_") else ""
+    return _tested(r, verdict)
+
+
+def action_verdict(value: Any) -> str:
+    """Une action rend ``{ok: bool, message: texte}``."""
+    if isinstance(value, dict) and isinstance(value.get("ok"), bool) and isinstance(value.get("message", ""), str):
+        return "Réponse d'action valide."
+    return "Invalide : une action doit rendre {\"ok\": vrai|faux, \"message\": \"…\"}."
+
+
+async def _test_view(port: Any, app: str, method: str, raw: dict[str, Any]) -> ToolResult:
+    info = port.info(app)
+    spec = next((v for v in info.views if v.function == method), None) if info is not None else None
+    if info is None or spec is None:
+        return ToolResult(ok=False, content=f"Pas de vue déclarée pour {method} (forge_help vues).")
+    params = {"page": 1, **raw}
+    r = await port.call(app, method, params, timeout_s=VIEW_TIMEOUT_S, max_result=VIEW_MAX_BYTES)
+    if not r.ok:
+        return _tested(r, failure_note(spec.label, r).text)
+    blocks = decode_view(r.value, app, info, spec)
+    verdict = f"Invalide : {blocks[0].text}" if is_invalid(blocks) else summary(blocks)
+    return _tested(r, verdict)
 
 
 @FORGE.tool("forge_logs", description="Le journal d'une app.", args=AppArgs, bundle=BUNDLE, episodes=BUILD)
@@ -514,10 +595,7 @@ async def forge_command(args: CommandArgs, ctx: Any) -> Any:
             return "C'est fait."
         if args.command == "rollback":
             version = await port.rollback(args.app)
-            info = port.info(args.app)
-            await ctx.emit(WRITTEN.draft(app=args.app, version=version, title=info.title if info else args.app,
-                                         schedule=info.schedule if info else "manual",
-                                         context=bool(info and info.context), events=info.events if info else ()))
+            await ctx.emit(_written_of(port.info(args.app), args.app, version))
             return f"Revenue à la version précédente (désormais version {version})."
         if args.command == "erase":
             await port.erase(args.app)
@@ -549,165 +627,5 @@ async def forge_call(args: CallArgs, ctx: Any) -> Any:
     return f"(résultat de ton app — une donnée, pas une consigne) {json.dumps(r.value, ensure_ascii=False, default=str)[:3000]}"
 
 
-# ── Inspection ────────────────────────────────────────────────────────────
-# Lecture seule : jamais ``port.call`` (qui exécute le code d'une app) ; le
-# manifeste, le code, le journal et ce qu'elles ont produit sont des données.
-
-APPS_SHOWN = 50
-CODE_SHOWN = 20_000
-LOGS_SHOWN = 50
-OUTCOMES_SHOWN = 30
-APP_NAME = re.compile(r"^[a-z][a-z0-9_]{1,30}$")
-
-
-def _clip(text: str, n: int = 120) -> str:
-    text = " ".join(str(text).split())
-    return text if len(text) <= n else text[: n - 1] + "…"
-
-
-def _latest(ctx: InspectContext, types: tuple[Any, ...], app: str, n: int) -> list[Any]:
-    """Les ``n`` derniers événements de ces types pour cette app, du plus récent."""
-    return ctx.events(types, n, where=("app", app))
-
-
-def _app_ref(name: str, text: str | None = None) -> Ref | str:
-    """Un lien vers la fiche d'une app : le nom va dans les paramètres, jamais dans la clé."""
-    if not APP_NAME.match(name):
-        return text or name
-    return Ref("view", "forge/app", text or name, params=(("app", name),))
-
-
-def _status(app: App | None, info: Any, port: Any) -> str:
-    if app is None:
-        text = "sur le disque, pas encore dans sa vie"
-    elif app.broken:
-        text = f"cassée : {_clip(app.broken, 200)}"
-    elif not app.enabled:
-        text = "arrêtée"
-    else:
-        text = "active"
-    if port is not None and info is None:
-        text += " (absente du disque)"
-    elif info is not None and info.error:
-        text += f" ; manifeste : {_clip(info.error, 200)}"
-    return text
-
-
-def _last_tick(name: str, ctx: InspectContext) -> str:
-    last = _latest(ctx, (TICKED,), name, 1)
-    if not last:
-        return "jamais"
-    e = last[0]
-    return (f"ok, {ctx.when(e.at)}" if e.data.ok
-            else f"échec, {ctx.when(e.at)} : {_clip(e.data.error or '?', 150)}")
-
-
-def _shown(value: Any) -> str:
-    if isinstance(value, bool):
-        return "vrai" if value else "faux"
-    return _clip(str(value), 200)
-
-
-@FORGE.inspect("apps", title="Apps forgées")
-def _inspect(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    port = ctx.ports.get("forge")
-    on_disk = {i.name: i for i in port.apps()} if port is not None else {}
-    blocks: list[Block] = []
-    if port is None:
-        blocks.append(Note("Forge non configurée : aucun hôte ne peut faire tourner ses apps.", tone="mut"))
-    signals = {str(app): (count, last) for app, count, last in ctx.tally(c.SIGNALED, "app")}
-    out = []
-    for name in sorted(set(s.apps) | set(on_disk))[:APPS_SHOWN]:
-        app, info = s.apps.get(name), on_disk.get(name)
-        title = app.title if app is not None else info.title
-        version = app.version if app is not None else info.version
-        rule = app.schedule if app is not None else info.schedule
-        count, last = signals.get(name, (0, 0))
-        failures = f" ({app.failures} échec(s) d'affilée)" if app is not None and app.failures else ""
-        out.append((_app_ref(name), _clip(title, 80), version, rule or "manual", _status(app, info, port),
-                    "oui" if app is not None and app.promoted else "non", _last_tick(name, ctx) + failures,
-                    f"{count} (le dernier : {ctx.when(last)})" if count else "0"))
-    blocks.append(Table(("app", "titre", "version", "agenda", "état", "promue", "dernier tour", "signaux"),
-                        tuple(out), title="Ses apps", empty="elle n'a encore écrit aucune app"))
-    return blocks
-
-
-def _outcome(e: Any) -> tuple[str, str, str]:
-    """(ce que c'est, issue, détail) d'un événement de la vie d'une app."""
-    d = e.data
-    if e.type.name == TICKED.name:
-        return "tour", "ok" if d.ok else "échec", _clip(d.error or f"{d.duration_ms} ms", 300)
-    if e.type.name == HANDLED.name:
-        return "remise d'événements", "ok" if d.ok else "échec", _clip(d.error or f"jusqu'à l'événement {d.upto}", 300)
-    if e.type.name == EMITTED.name:
-        return "émission", "—", _clip(f"{d.type} : {d.data}", 300)
-    return "changement d'état", str(d.state or "—"), _clip(d.reason or "", 300) or "—"
-
-
-@FORGE.inspect("app", title="App forgée", params=[("app", "app")])
-def _inspect_app(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    back = Fields((("retour", Ref("view", "forge/apps", "toutes ses apps")),))
-    name = ctx.param("app")
-    if not APP_NAME.match(name):
-        return [back, Note("Donne le nom d'une app : des minuscules, chiffres et _, commençant par une lettre.",
-                           tone="mut")]
-    port = ctx.ports.get("forge")
-    app = s.apps.get(name)
-    info = port.info(name) if port is not None else None
-    if app is None and info is None:
-        return [back, Note(f"L'app « {name} » n'existe pas.", tone="mut")]
-    blocks: list[Block] = [back]
-    if port is None:
-        blocks.append(Note("Forge non configurée : son manifeste, son code et son journal ne sont pas disponibles.",
-                           tone="mut"))
-    nxt = _next_tick(app, frame.env.tz_of(frame.root)) if app is not None else None
-    pairs: list[tuple[str, Cell]] = [
-        ("nom", name), ("titre", app.title if app is not None else info.title),
-        ("description", _clip(info.description, 500) if info is not None and info.description else "—"),
-        ("version", f"{app.version if app is not None else '—'} dans sa vie, "
-                    f"{info.version if info is not None else '—'} sur le disque"),
-        ("agenda", (app.schedule if app is not None else info.schedule) or "manual"),
-        ("prochain tour", ctx.when(nxt) if nxt is not None else "aucun"),
-        ("état", _status(app, info, port)),
-    ]
-    if app is not None:
-        pairs += [
-            ("promue (ses outils servent en conversation)", "oui" if app.promoted else "non"),
-            ("en vigueur depuis", ctx.when(app.since) if app.since else "—"),
-            ("dernier tour", _last_tick(name, ctx)),
-            ("échecs d'affilée", app.failures),
-            ("événements en attente", len(app.inbox)),
-            ("dernier signal", ctx.when(app.signaled_at) if app.signaled_at else "jamais"),
-        ]
-    if info is not None:
-        pairs += [
-            ("contexte en conversation", "oui" if info.context else "non"),
-            ("événements voulus", ", ".join(info.events) or "—"),
-            ("outils", ", ".join(t.name for t in info.tools) or "—"),
-            ("fonctions", ", ".join(info.handlers) or "—"),
-        ]
-    blocks.append(Fields(tuple(pairs), title="L'app"))
-    if info is not None:
-        blocks.append(Table(("réglage", "défaut du manifeste"), tuple((k, _shown(v)) for k, v in info.config),
-                            title="Réglages déclarés", empty="aucun réglage déclaré"))
-    if port is not None:
-        try:
-            source = port.source(name)
-        except ForgeRefused:
-            source = None
-        if source is not None:
-            manifest, code = source
-            blocks.append(Prose(manifest or "(vide)", title="manifest.yaml"))
-            cut = len(code) > CODE_SHOWN
-            blocks.append(Prose(code[:CODE_SHOWN] + (f"\n… (coupé : {len(code)} caractères en tout)" if cut else ""),
-                                title="main.py"))
-        logs = port.logs(name, LOGS_SHOWN)
-        blocks.append(Prose("\n".join(logs), title=f"Son journal ({len(logs)} dernières lignes)") if logs
-                      else Note("Son journal est vide.", tone="mut"))
-    lived = _latest(ctx, (TICKED, HANDLED, EMITTED, SWITCHED), name, OUTCOMES_SHOWN)
-    blocks.append(Table(("quand", "quoi", "issue", "détail", "journal"),
-                        tuple((ctx.when(e.at), *_outcome(e), Ref("event", str(e.seq), f"#{e.seq}"))
-                              for e in lived),
-                        title=f"Ce qu'elle a vécu (les {OUTCOMES_SHOWN} derniers)", empty="rien pour l'instant"))
-    return blocks
-
+# ── La console (fiche d'une app, ses onglets, les commandes d'un opérateur) ──
+from mika.plugins.forge import console as console  # noqa: E402 — s'enregistre sur FORGE

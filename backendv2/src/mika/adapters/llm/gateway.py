@@ -51,6 +51,18 @@ class LLMTrace:
     cache_read: int = 0
     cache_write: int = 0
     cost_usd: float = 0.0
+    #: l'épisode (ou le passage d'un processus) qui a fait l'appel : de quoi
+    #: retrouver ses appels après un redémarrage
+    correlation: str = ""
+
+
+def correlation_of(req: LLMRequest) -> str:
+    """L'épisode d'un appel : ``meta["episode"]`` s'il est dit, sinon ce qui
+    précède ``#`` dans l'identifiant d'appel (``<passage>#<n>``)."""
+    episode = req.meta.get("episode") if req.meta else None
+    if episode:
+        return str(episode)
+    return req.call_id.split("#", 1)[0]
 
 
 class PrioritySlots:
@@ -193,6 +205,7 @@ class Gateway:
             priority=req.priority, latency_us=now - t0, wait_us=t0 - t_wait,
             input_tokens=usage.input_tokens, output_tokens=usage.output_tokens, outcome=outcome,
             call_id=req.call_id, cache_read=usage.cache_read, cache_write=usage.cache_write, cost_usd=cost,
+            correlation=correlation_of(req),
         )
         self.traces.append(tr)
         if self._on_trace is not None:

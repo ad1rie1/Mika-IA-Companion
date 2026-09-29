@@ -1,28 +1,33 @@
-"""L'inspecteur : voir ce qu'elle vit, et pourquoi.
+"""La console : voir ce qu'elle vit, et pourquoi ; décider de ce qui sort.
 
-Des vues génériques sur le journal et l'état — rien n'y est propre à une
-faculté : chacune déclare ses vues (``@f.inspect``) et y apparaît seule.
-Réservé aux opérateurs (session du frontend ou formulaire de connexion ici),
-formulaires protégés par jeton CSRF à double soumission.
-
-- vivre : vue d'ensemble, chronologie, décisions, facultés, approbations ;
-- comprendre : état et faits, graphe des contributions, épisodes et
-  événements (« pourquoi a-t-elle dit ça ? ») ;
-- exploiter : santé, appels de modèle (coûts, cache), simulations ;
-- régler : modèles et clés, persona, tempérament et surcharges, canaux, sens,
-  apps forgées, comptes.
+Rien ici n'est propre à une faculté : chacune déclare ses vues (``@f.inspect``,
+rangées par ``section``), ses fiches d'objets, ses actions ; la composition
+(``app/console.py``) décide de la carte. Réservé aux opérateurs, formulaires
+protégés par jeton, politique de sécurité stricte (ni script ni style en
+ligne).
 """
 
 from __future__ import annotations
 
-from starlette.routing import Route
+from starlette.routing import BaseRoute, Mount
+from starlette.staticfiles import StaticFiles
 
-from mika.inspector import journal, mind, operations, settings
-from mika.inspector.ui import UI, InspectorDeps
+from mika.inspector import catalog, settings
+from mika.inspector.pages import TABS
+from mika.inspector.pages.routes import Pages
+from mika.inspector.pages.settings_form import SettingsForms
+from mika.inspector.ui import PREFIX, STATIC, UI, InspectorDeps
 
 __all__ = ["InspectorDeps", "routes"]
 
 
-def routes(deps: InspectorDeps, *, cookie_secure: bool = False) -> list[Route]:
-    ui = UI(deps, cookie_secure=cookie_secure)
-    return [*journal.routes(ui), *mind.routes(ui), *operations.routes(ui), *settings.routes(ui)]
+def routes(deps: InspectorDeps, *, cookie_secure: bool = False) -> list[BaseRoute]:
+    forms = SettingsForms(deps.sections, deps.settings_tabs) if deps.settings_tabs else None
+    builtins = {**TABS.items, **(forms.builtins() if forms else {})}
+    catalog.check(deps.navigation, deps.kernel.registry, builtins)
+    ui = UI(deps, builtins, cookie_secure=cookie_secure)
+    ui.settings_forms = forms
+    pages = Pages(ui)
+    # les pages encore à part (apps forgées, comptes) passent avant l'enregistrement générique
+    return [Mount(PREFIX + "/static", StaticFiles(directory=STATIC), name="console-static"),
+            *settings.routes(ui), *pages.routes(), *pages.catchall()]

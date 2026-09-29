@@ -1,0 +1,137 @@
+{# Le rendu de tous les blocs : vues des facultés, onglets de la console, vues des apps forgées. #}
+{% macro cell(c) -%}
+{%- if c.t == "link" -%}<a href="{{ c.href }}"{% if c.external %} class="ext" rel="noopener noreferrer nofollow" target="_blank"{% endif %}>{{ c.text }}</a>
+{%- elif c.t == "badge" -%}<span class="badge {{ c.tone }}">{{ c.text }}</span>
+{%- elif c.t == "meter" -%}<span class="meter {{ c.tone }}"><meter min="0" max="1" value="{{ '%.3f'|format(c.ratio) }}">{{ c.text }}</meter><span class="num">{{ c.text }}</span></span>
+{%- elif c.t == "swatch" -%}<span class="swatch sw-{{ c.key }}">{{ c.text }}{% if c.weight %} <span class="w">{{ c.weight }}</span>{% endif %}</span>
+{%- elif c.t == "when" -%}<span class="when" title="{{ c.exact }}">{{ c.text }}</span>
+{%- else -%}
+  {%- set cls = ("mono" if c.kind == "mono" else "num" if c.kind == "num" else "cell-muted" if c.kind == "muted" else "") ~ (" t-" ~ c.tone if c.tone else "") -%}
+  {%- if c.clamp -%}<details class="more"><summary><span class="{{ cls }}">{{ c.short }}…</span> lire la suite</summary><span class="{{ cls }} prose">{{ c.text }}</span></details>
+  {%- elif cls or c.hint -%}<span class="{{ cls }}"{% if c.hint %} title="{{ c.hint }}"{% endif %}>{{ c.text }}</span>
+  {%- else -%}{{ c.text }}{%- endif -%}
+{%- endif -%}
+{%- endmacro %}
+
+{% macro pager(p) -%}
+{% if p %}
+<nav class="pager" aria-label="Pages">
+{% if p.cursor %}<a href="{{ p.older }}">Plus anciens →</a>
+{% else %}
+  <span class="info">{% if p.total %}{{ p.first }}–{{ p.last }} sur {{ p.total }}{% else %}aucun{% endif %}</span>
+  {% if p.prev %}<a href="{{ p.prev }}" rel="prev">←</a>{% endif %}
+  {% for l in p.links %}{% if l.gap %}<span class="muted">…</span>{% elif l.current %}<span class="cur" aria-current="page">{{ l.n }}</span>{% else %}<a href="{{ l.href }}">{{ l.n }}</a>{% endif %}{% endfor %}
+  {% if p.next %}<a href="{{ p.next }}" rel="next">→</a>{% endif %}
+{% endif %}
+</nav>
+{% endif %}
+{%- endmacro %}
+
+{% macro action_form(a, compact=False) -%}
+{% if not a %}<div class="note warn">Action non déclarée ici.</div>
+{% else %}
+<form method="post" action="{{ a.url }}" class="form action-card{{ ' card' if not compact }}"{% if a.confirm %} data-confirm="{{ a.confirm }}"{% endif %}>
+  <input type="hidden" name="csrf" value="{{ a.csrf }}"><input type="hidden" name="_op" value="{{ a.nonce }}">
+  <input type="hidden" name="_retour" value="{{ a.back }}"><input type="hidden" name="_sujet" value="{{ a.subject }}">
+  {% for k, v in a.fixed or [] %}<input type="hidden" name="_fixes" value="{{ k }}"><input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+  {% if a.title and not compact %}<h3>{{ a.title }}</h3>{% endif %}
+  {% if a.description %}<p class="muted">{{ a.description }}</p>{% endif %}
+  {% for f in a.fields %}{{ field(f) }}{% endfor %}
+  {% if a.retype %}<div class="field{{ ' has-error' if a.errors.get('_confirmer') }}"><label for="{{ a.id }}-confirmer">Retape « {{ a.subject }} » pour confirmer</label><input id="{{ a.id }}-confirmer" name="_confirmer" autocomplete="off" required>{% if a.errors.get('_confirmer') %}<span class="error">{{ a.errors['_confirmer'] }}</span>{% endif %}</div>{% endif %}
+  {% if a.confirm %}<noscript><label class="check"><input type="checkbox" name="_je_confirme" required> je confirme : {{ a.confirm }}</label></noscript>{% endif %}
+  <div><button class="btn{{ ' danger' if a.danger }}{{ ' small' if compact }}">{{ a.button or a.title }}</button></div>
+</form>
+{% endif %}
+{%- endmacro %}
+
+{% macro field(f) -%}
+<div class="field{{ ' has-error' if f.error }}"{% if f.only %} data-only="{{ f.only }}"{% endif %}>
+  {% if not f.nochamp %}<input type="hidden" name="_champs" value="{{ f.path }}">{% endif %}
+  {% if f.kind == "bool" %}
+    <label class="check"><input type="checkbox" name="{{ f.path }}" id="{{ f.id }}"{{ ' checked' if f.value }}{{ ' disabled' if f.readonly }}> {{ f.label }}</label>
+  {% else %}
+    <label for="{{ f.id }}">{{ f.label }}{% if f.unit %} <span class="muted">({{ f.unit }})</span>{% endif %}</label>
+    {% if f.kind == "select" %}
+      <select name="{{ f.path }}" id="{{ f.id }}"{{ ' disabled' if f.readonly }}>
+        {% if not f.required %}<option value="">—</option>{% endif %}
+        {% for v, l in f.choices %}<option value="{{ v }}"{{ ' selected' if v == f.value }}>{{ l }}</option>{% endfor %}
+      </select>
+    {% elif f.kind in ("textarea", "lines", "yaml") %}
+      <textarea name="{{ f.path }}" id="{{ f.id }}" rows="{{ f.rows or 5 }}"{{ ' readonly' if f.readonly }}>{{ f.value }}</textarea>
+    {% elif f.kind == "secret" %}
+      <input type="password" name="{{ f.path }}" id="{{ f.id }}" autocomplete="new-password" placeholder="{{ 'défini — vide : inchangé' if f.has_value else 'non défini' }}"{{ ' readonly' if f.readonly }}>
+    {% elif f.kind == "slider" %}
+      <span class="slider"><input type="range" name="{{ f.path }}" id="{{ f.id }}" min="{{ f.lo }}" max="{{ f.hi }}" step="{{ f.step or 0.05 }}" value="{{ f.value }}" data-out="{{ f.id }}-out"><output id="{{ f.id }}-out" class="num">{{ f.value }}</output></span>
+    {% else %}
+      <input name="{{ f.path }}" id="{{ f.id }}" value="{{ f.value }}"{% if f.kind in ("int", "float") %} inputmode="decimal"{% endif %}{% if f.placeholder %} placeholder="{{ f.placeholder }}"{% endif %}{{ ' readonly' if f.readonly }}{{ ' required' if f.required and not f.readonly }}>
+    {% endif %}
+  {% endif %}
+  {% if f.kind == "secret" and f.has_value and not f.readonly %}<label class="check small"><input type="checkbox" name="_effacer" value="{{ f.path }}"> effacer</label>{% endif %}
+  {% if f.load_button %}<button class="btn quiet small" name="_charger" value="{{ f.path }}">Enregistrer et charger la liste</button>{% endif %}
+  {% if f.help %}<span class="help">{{ f.help }}</span>{% endif %}
+  {% if f.error %}<span class="error">{{ f.error }}</span>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro render(items, forms={}) -%}
+{% for b in items %}{{ one(b, forms) }}{% endfor %}
+{%- endmacro %}
+
+{% macro one(b, forms={}) -%}
+{% if b.t == "table" %}
+  <div class="table-block">
+  {% if b.title %}<h3 class="block-title">{{ b.title }}</h3>{% endif %}
+  <div class="table-wrap"><table class="tbl">
+    <thead><tr>{% for c in b.columns %}<th{% if c.align %} class="{{ c.align }}"{% endif %}{% if c.hint %} title="{{ c.hint }}"{% endif %}>{{ c.label }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for r in b.rows %}
+      <tr{% if r.tone %} class="t-{{ r.tone }}"{% endif %}>
+        {% for c in r.cells %}<td{% if b.columns[loop.index0] and b.columns[loop.index0].align %} class="{{ b.columns[loop.index0].align }}"{% endif %}>{% if loop.first and r.href %}<a href="{{ r.href }}">{{ cell(c) }}</a>{% else %}{{ cell(c) }}{% endif %}</td>{% endfor %}
+      </tr>
+      {% if r.detail %}<tr class="detail"><td colspan="{{ b.columns|length }}"><details class="row-detail"><summary>Voir les détails</summary><div class="stack">{{ render(r.detail, forms) }}</div></details></td></tr>{% endif %}
+    {% else %}
+      <tr><td class="empty" colspan="{{ b.columns|length or 1 }}">{{ b.empty }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% if b.caption %}<p class="caption">{{ b.caption }}</p>{% endif %}
+  {{ pager(b.pager) }}
+  </div>
+{% elif b.t == "fields" %}
+  <div class="card">{% if b.title %}<h3>{{ b.title }}</h3>{% endif %}
+  <dl class="fields{{ ' c2' if b.columns > 1 }}">{% for p in b.pairs %}<dt{% if p.hint %} title="{{ p.hint }}"{% endif %}>{{ p.label }}</dt><dd>{{ cell(p.value) }}</dd>{% endfor %}</dl></div>
+{% elif b.t == "note" %}
+  <div class="note {{ b.tone }}" role="{{ 'alert' if b.tone == 'danger' else 'note' }}">{% if b.title %}<b>{{ b.title }}</b>{% endif %}{{ b.text }}</div>
+{% elif b.t == "prose" %}
+  <div class="card">{% if b.title %}<h3>{{ b.title }}</h3>{% endif %}
+  {% if b.clamp %}<details class="more"><summary><span class="prose">{{ b.short }}…</span> lire la suite</summary><div class="prose">{{ b.text }}</div></details>{% else %}<div class="prose">{{ b.text }}</div>{% endif %}</div>
+{% elif b.t == "code" %}
+  <div class="card">{% if b.title %}<h3>{{ b.title }}</h3>{% endif %}<pre class="code">{{ b.text }}</pre></div>
+{% elif b.t == "stats" %}
+  <div>{% if b.title %}<h3 class="block-title">{{ b.title }}</h3>{% endif %}
+  <div class="stats">{% for s in b["items"] %}
+    {% if s.href %}<a class="stat {{ s.tone }}" href="{{ s.href }}">{% else %}<div class="stat {{ s.tone }}">{% endif %}
+      <span class="label">{{ s.label }}</span><span class="value">{{ cell(s.value) }}</span>
+      {% if s.sub %}<span class="sub">{{ s.sub }}</span>{% endif %}{% if s.trend %}<span class="trend">{{ s.trend }}</span>{% endif %}
+    {% if s.href %}</a>{% else %}</div>{% endif %}
+  {% endfor %}</div></div>
+{% elif b.t == "timeline" %}
+  <div class="card">{% if b.title %}<h3>{{ b.title }}</h3>{% endif %}
+  {% if b.entries %}<ol class="timeline">{% for e in b.entries %}<li class="{{ e.tone }}"><div class="meta"><span title="{{ e.at }}">{{ e.rel }}</span>{% if e.meta %} · {{ e.meta }}{% endif %}</div>
+    <div>{% if e.href %}<a href="{{ e.href }}">{{ e.title }}</a>{% else %}<b>{{ e.title }}</b>{% endif %}</div>{% if e.text %}<div class="prose">{{ e.text }}</div>{% endif %}</li>{% endfor %}</ol>
+  {% else %}<p class="muted">{{ b.empty }}</p>{% endif %}</div>
+{% elif b.t == "chart" %}
+  <div class="card chart-box">{% if b.title %}<h3>{{ b.title }}</h3>{% endif %}
+  {% if b.has %}{{ b.svg }}
+    {% if b.table %}<details class="more"><summary>voir les valeurs</summary><div class="table-wrap"><table class="tbl"><thead><tr><th>quand</th>{% for c in b.table.columns %}<th class="num">{{ c }}</th>{% endfor %}</tr></thead><tbody>{% for r in b.table.rows %}<tr><td>{{ r.at }}</td>{% for v in r["values"] %}<td class="num">{{ v }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div></details>{% endif %}
+  {% else %}<p class="muted">{{ b.empty }}</p>{% endif %}</div>
+{% elif b.t == "grid" %}
+  <div class="grid c{{ b.columns }}">{% for x in b["items"] %}<div class="stack">{{ one(x, forms) }}</div>{% endfor %}</div>
+{% elif b.t == "section" %}
+  <section class="section-block stack"><div><h2>{{ b.title }}</h2>{% if b.description %}<p>{{ b.description }}</p>{% endif %}</div>{{ render(b["items"], forms) }}</section>
+{% elif b.t == "disclosure" %}
+  <details class="card"{{ ' open' if b.open }}><summary><b>{{ b.title }}</b></summary><div class="stack">{{ render(b["items"], forms) }}</div></details>
+{% elif b.t == "action" %}
+  {{ action_form(forms.get(b.slot), b.compact) }}
+{% endif %}
+{%- endmacro %}

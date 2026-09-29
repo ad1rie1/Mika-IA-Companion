@@ -118,6 +118,9 @@ class ComposeTrace:
     chars: int
     history_turns: int
     provenance: tuple[str, ...] = ()
+    #: caractères rendus par section incluse (même ordre que ``included``) :
+    #: ce que chaque faculté a pesé dans le prompt, après coupes
+    sizes: tuple[tuple[str, int], ...] = ()
 
 
 @dataclass(slots=True)
@@ -186,7 +189,8 @@ class Composer:
 
         # Historique : coupe avec hystérésis, repérée par identifiant de message
         # (la fenêtre du fil glisse ; un index ne serait pas stable).
-        turns: list[ChatTurn] = [t for b in history for t in b.turns]
+        all_turns: list[ChatTurn] = [t for b in history for t in b.turns]
+        turns = all_turns
         hist_budget = int((limit - len(stable_text)) * budget.history_share)
         first_id = self._history_cut.get(thread_key, 0)
         cut = next((i for i, t in enumerate(turns) if t.id >= first_id), len(turns))
@@ -230,6 +234,13 @@ class Composer:
         prompt = ChatPrompt(stable_text, volatile_text, tuple(turns), message)
         provenance = tuple(p for b in kept for p in b.body.provenance)
         included = tuple(b.spec.key for b in stable + history + volatile)
+        sizes: list[tuple[str, int]] = [(b.spec.key, len(self.render_block(b.spec, b.body, b.text))) for b in stable]
+        offset = 0
+        for b in history:  # les tours gardés de chaque bloc d'historique (la coupe est globale)
+            n = len(b.turns)
+            sizes.append((b.spec.key, _turn_chars(all_turns[max(cut, offset):offset + n])))
+            offset += n
+        sizes += [(b.spec.key, len(self.render_block(b.spec, b.body, b.text))) for b in volatile]
         trace = ComposeTrace(
             included=included,
             dropped=tuple(dropped),
@@ -238,6 +249,7 @@ class Composer:
             chars=prompt.chars(),
             history_turns=len(turns),
             provenance=provenance,
+            sizes=tuple(sizes),
         )
         return prompt, trace
 

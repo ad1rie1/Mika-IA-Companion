@@ -26,10 +26,11 @@ from email import policy
 from email.message import EmailMessage
 from email.parser import BytesParser
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict
 
+from mika.kernel.forms import Knob
 from mika.ports.mail import Mail
 
 BODY_MAX = 20_000
@@ -38,18 +39,22 @@ BODY_MAX = 20_000
 class MailConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    address: str = ""
-    imap_host: str = ""
-    imap_port: int = 993
-    imap_ssl: bool = True
-    user: str = ""
-    password: str = ""
-    smtp_host: str = ""
-    smtp_port: int = 587
+    address: Annotated[str, Knob(label="Adresse", help="L'adresse de Mika (expéditrice de ses mails).",
+                                 advanced=False, order=10)] = ""
+    imap_host: Annotated[str, Knob(label="Serveur IMAP", group="Lire", advanced=False, order=20)] = ""
+    imap_port: Annotated[int, Knob(label="Port IMAP", group="Lire", lo=1, hi=65_535, order=21)] = 993
+    imap_ssl: Annotated[bool, Knob(label="IMAP chiffré (SSL)", group="Lire", order=22)] = True
+    user: Annotated[str, Knob(label="Utilisateur", group="Lire", advanced=False, order=23)] = ""
+    password: Annotated[str, Knob(label="Mot de passe", group="Lire", secret=True, advanced=False, order=24)] = ""
+    folder: Annotated[str, Knob(label="Dossier relevé", group="Lire", order=25)] = "INBOX"
+    since_days: Annotated[int, Knob(label="Fenêtre de relève (jours)", group="Lire", lo=1, hi=60,
+                                    order=26)] = 2
+    smtp_host: Annotated[str, Knob(label="Serveur SMTP", group="Envoyer", advanced=False, order=30)] = ""
+    smtp_port: Annotated[int, Knob(label="Port SMTP", group="Envoyer", lo=1, hi=65_535, order=31)] = 587
     #: « ssl » (port 465), « starttls » (587), « none » (tests)
-    smtp_security: str = "starttls"
-    since_days: int = 2
-    folder: str = "INBOX"
+    smtp_security: Annotated[str, Knob(label="Sécurité SMTP", group="Envoyer", order=32,
+                                       choices=(("starttls", "STARTTLS (587)"), ("ssl", "SSL (465)"),
+                                                ("none", "aucune (tests)")))] = "starttls"
 
     @property
     def ready(self) -> bool:

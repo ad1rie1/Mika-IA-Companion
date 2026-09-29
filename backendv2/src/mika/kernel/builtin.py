@@ -64,6 +64,11 @@ class ParamsChanged(Payload):
 
 
 class RowRecord(Payload):
+    """Une ligne de la table d'arbitrage : ``score = Σ parts + shift + aging − threshold``.
+
+    Les champs ajoutés après coup ont un défaut : un journal plus ancien se
+    relit tel quel (ses lignes y valent 0)."""
+
     kind: str
     target: str
     parts: tuple[tuple[str, str, float], ...]
@@ -71,12 +76,27 @@ class RowRecord(Payload):
     vetoes: tuple[tuple[str, str], ...]
     score: float
     hazard: float
+    #: le seuil du type d'épisode, soustrait au score
+    threshold: float = 0.0
+    #: ce qu'a ajouté l'attente de la ligne (vieillissement)
+    aging: float = 0.0
+    #: le décalage de chaque modulateur (par propriétaire) ; leur somme est ``shift``
+    shifts: tuple[tuple[str, float], ...] = ()
 
 
 class Selected(Payload):
+    """Une occurrence acceptée : les premières lignes de la table (et toujours
+    celle qui a été choisie), la borne d'amincissement et l'intensité totale."""
+
     rows: tuple[RowRecord, ...]
     fired: tuple[str, ...]
     draw: float
+    #: le nombre de lignes de la table entière (``rows`` n'en garde que le haut)
+    candidates: int = 0
+    #: la borne de l'amincissement (occurrence acceptée si ``draw · bound < total``)
+    bound: float = 0.0
+    #: l'intensité totale Σλ au moment du tirage
+    total: float = 0.0
 
 
 KERNEL = Faculty(

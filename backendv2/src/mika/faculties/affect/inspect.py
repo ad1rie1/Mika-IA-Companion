@@ -1,11 +1,15 @@
-"""Ce que l'affect montre à un opérateur : l'humeur, les postures.
+"""Ce que l'affect montre à un opérateur : l'humeur, les postures, sa courbe,
+et sur la fiche d'une personne, ce qu'elle ressent envers elle.
 
 Lecture seule : les lectures sont celles des faits (mêmes fonctions, même
-instant), les balises déclarées viennent du fil de conversation.
+instant), les balises déclarées viennent du fil de conversation, les courbes
+des séries mesurées toutes les dix minutes (``affect.valence``,
+``affect.eveil``).
 """
 
 from __future__ import annotations
 
+from mika.contracts import affect as c
 from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
 from mika.contracts import transcript as transcript_c
@@ -20,14 +24,49 @@ from mika.faculties.affect import (
     stance_reading,
 )
 from mika.faculties.affect import physics as ph
+from mika.faculties.affect.params import AffectParams
+from mika.kernel.clock import DAY
 from mika.kernel.frame import Frame
-from mika.kernel.inspect import Block, Fields, InspectContext, Note, Table
+from mika.kernel.inspect import (
+    Block,
+    Cell,
+    Chart,
+    Column,
+    Disclosure,
+    Entry,
+    Fields,
+    InspectContext,
+    Meter,
+    Note,
+    Param,
+    Ref,
+    Row,
+    Series,
+    Stat,
+    Stats,
+    Swatch,
+    Table,
+    Text,
+    Timeline,
+    Vital,
+    When,
+    paginate,
+)
 from mika.vocab import affect as A
+from mika.vocab.episodes import Kind
+from mika.vocab.people import is_identifiable
 
-#: au plus tant de postures (les plus récemment touchées d'abord)
-STANCES_SHOWN = 100
-#: les dernières balises déclarées
+#: les postures par page (les plus récemment touchées d'abord)
+STANCES_PAGE = 50
+#: les dernières balises déclarées (vue générale) ; envers une personne
 DECLARED_SHOWN = 10
+DECLARED_TOWARD_SHOWN = 20
+EXCERPT = 160
+
+#: la période des courbes
+PERIODS = (("24h", "24 h"), ("7j", "7 jours"))
+_SPANS = {"24h": DAY, "7j": 7 * DAY}
+PERIOD = Param("periode", "Période", kind="select", choices=PERIODS, default="24h")
 
 
 def _vec(v: A.Vec3 | None) -> str:
@@ -40,85 +79,281 @@ def _feeling(emotion: A.Emotion, intensity: float) -> str:
     return f"{A.FR[emotion]} ({intensity:.0%})"
 
 
-def _who(frame: Frame, key: str) -> str:
+def _swatch(emotion: A.Emotion, intensity: float | None = None) -> Swatch:
+    return Swatch(A.FR[emotion], "emotion", emotion.value, intensity)
+
+
+def _declared_cell(name: object, intensity: object) -> Cell:
+    """Une balise lue dans le fil : sa pastille, ou le nom brut s'il n'est pas l'une des 29."""
+    emotion = A.emotion_of(str(name))
+    if emotion is None:
+        return Text(str(name), kind="muted")
+    return _swatch(emotion, float(intensity or 0.0))
+
+
+def _name(frame: Frame, key: str) -> str:
     """Le nom qu'elle connaît à cette personne, et sa clé."""
-    if not key:
-        return "personne en particulier"
     name = frame.get(identity_c.IDENTITY(key)).name
     return f"« {name} » ({key})" if name else key
+
+
+def _who_text(frame: Frame, handle: str) -> str:
+    return _name(frame, frame.get(identity_c.PERSON(handle))) if handle else "personne en particulier"
+
+
+def _who(frame: Frame, handle: str, tab: str = "") -> Cell:
+    """La personne derrière une poignée, en lien vers sa fiche (si c'est une personne)."""
+    person = frame.get(identity_c.PERSON(handle)) if handle else ""
+    if not is_identifiable(person):
+        return Text(_who_text(frame, handle), kind="muted")
+    return Ref.subject("person", person, _name(frame, person), tab)
 
 
 def _clockwork(frame: Frame) -> ph.Clockwork:
     return ph.Clockwork(frame.env.tz_of(frame.root), frame.get(body_c.RHYTHM))
 
 
-def _declared_rows(frame: Frame, ctx: InspectContext) -> tuple[tuple[str, str, str, str], ...]:
-    """Ses dernières balises, lues dans le fil (ce qu'elle a vraiment écrit)."""
+def _p(frame: Frame) -> AffectParams:
+    return _params(frame.env.params_of("affect", frame.root))
+
+
+def _at_rest(m: c.MoodReading, p: AffectParams) -> bool:
+    return A.distance(m.position, m.home) < p.rest_tolerance
+
+
+def _span(ctx: InspectContext) -> int:
+    return _SPANS.get(str(ctx.value(PERIOD.name) or ""), DAY)
+
+
+# ── La barre de vitaux, les séries ────────────────────────────────────────
+
+
+@AFFECT.vital("humeur", label="Humeur", order=10)
+def _mood_vital(s: AffectState, frame: Frame) -> Vital:
+    p = _p(frame)
+    m = frame.get(c.MOOD)
+    href = Ref.view("affect", "humeur", "Humeur")
+    if _at_rest(m, p):
+        return Vital("au repos", hint=f"son fond : {A.FR[p.background]}", href=href)
+    return Vital(_feeling(m.felt, m.felt_intensity), ratio=m.felt_intensity, swatch=_swatch(m.felt, m.felt_intensity),
+                 tone="warn" if m.overflow > p.overflow_floor else "", hint=prose.mood(m, p), href=href)
+
+
+def _unit(value: float) -> float:
+    return max(-1.0, min(1.0, value))
+
+
+@AFFECT.series("valence", label="Valence", lo=-1.0, hi=1.0)
+def _valence(s: AffectState, frame: Frame) -> float:
+    """Le plaisir de son humeur générale (sa position, repos compris)."""
+    return _unit(frame.get(c.MOOD).position[0])
+
+
+@AFFECT.series("eveil", label="Éveil", lo=-1.0, hi=1.0)
+def _arousal(s: AffectState, frame: Frame) -> float:
+    return _unit(frame.get(c.MOOD).position[1])
+
+
+# ── Humeur ────────────────────────────────────────────────────────────────
+
+
+def _declared_rows(frame: Frame, ctx: InspectContext, handles: tuple[str, ...] | None = None,
+                   limit: int = DECLARED_SHOWN) -> list[tuple[int, str, str, float, str, str | None]]:
+    """Ses dernières balises, lues dans le fil (ce qu'elle a vraiment écrit) :
+    (instant, poignée, émotion, intensité, sorte, texte) ; ``handles`` : envers
+    ces poignées seulement."""
     if ctx.store is None:
-        return ()
+        return []
+    where, args = "", ()
+    if handles is not None:
+        if not handles:
+            return []
+        where = f" AND person IN ({','.join('?' * len(handles))})"
+        args = tuple(handles)
     rows = ctx.store.query_mind(
-        f"SELECT at, person, emotion, emotion_intensity, kind FROM {transcript_c.THREAD_TABLE} "
-        "WHERE role='assistant' AND emotion IS NOT NULL ORDER BY id DESC LIMIT ?", (DECLARED_SHOWN,))
-    out = []
-    for at, person, name, intensity, kind in rows:
-        emotion = A.emotion_of(str(name))
-        label = A.FR[emotion] if emotion is not None else str(name)
-        out.append((ctx.when(int(at)), _who(frame, str(person or "")), f"{label} ({float(intensity or 0):.0%})",
-                    "en répondant" if kind == "REPLY" else "d'elle-même"))
-    return tuple(out)
+        f"SELECT at, person, emotion, emotion_intensity, kind, text FROM {transcript_c.THREAD_TABLE} "
+        f"WHERE role='assistant' AND emotion IS NOT NULL{where} ORDER BY id DESC LIMIT ?", (*args, limit))
+    return [(int(at), str(person or ""), str(name), float(intensity or 0.0), str(kind or ""), text)
+            for at, person, name, intensity, kind, text in rows]
 
 
-@AFFECT.inspect("humeur", title="Humeur")
+def _how(kind: str) -> str:
+    return "en répondant" if kind == Kind.REPLY else "d'elle-même"
+
+
+def _excerpt(text: object) -> str:
+    if text is None:
+        return "(oublié)"
+    value = str(text)
+    return value if len(value) <= EXCERPT else value[:EXCERPT - 1] + "…"
+
+
+@AFFECT.inspect("humeur", title="Humeur", section="vie", order=10, params=[PERIOD],
+                description="Son humeur générale : ce qu'elle ressent, sa courbe, ses dernières balises.")
 def _mood_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    p = _params(frame.env.params_of("affect", frame.root))
+    p = _p(frame)
     m = mood_reading(s, frame.now, p, _clockwork(frame))
-    at_rest = A.distance(m.position, m.home) < p.rest_tolerance
+    rest = _at_rest(m, p)
     declared = _declared_rows(frame, ctx)
+    span = _span(ctx)
+    since = frame.now - span
+    points = tuple(ctx.series("affect.valence", since, frame.now))
+    last: Cell = "aucune"
+    last_sub = "elle n'a encore rien déclaré"
+    if declared:
+        at, handle, name, intensity, _kind, _text = declared[0]
+        last = _declared_cell(name, intensity)
+        last_sub = f"{ctx.when(at)}, {_who_text(frame, handle)}"
     return [
-        Fields((
-            ("ressentie (écart au repos)", "au repos" if at_rest else _feeling(m.felt, m.felt_intensity)),
-            ("débordement", f"{m.overflow:.0%} (pousse à parler au-delà de {p.overflow_floor:.0%})"),
+        Stats((
+            Stat("ressentie", "au repos" if rest else _swatch(m.felt, m.felt_intensity), sub="l'écart à son repos"),
+            Stat("débordement", Meter(m.overflow, f"{m.overflow:.0%}",
+                                      tone="warn" if m.overflow > p.overflow_floor else ""),
+                 sub=f"pousse à parler au-delà de {p.overflow_floor:.0%}",
+                 tone="warn" if m.overflow > p.overflow_floor else ""),
+            Stat("son fond", _swatch(p.background), sub="ce vers quoi elle revient"),
+            Stat("dernière balise", last, sub=last_sub),
+        ), title="Humeur générale"),
+        Note(prose.mood(m, p)),
+        Chart((Series("Valence", points, slot=1),), kind="line", title="Valence de son humeur", y=(-1.0, 1.0),
+              zero=0.0, since=since, until=frame.now,
+              empty="pas encore de mesure (une toutes les dix minutes) : la courbe se remplira"),
+        Table(
+            (Column("quand", "fit"), "à qui", "émotion déclarée", "comment"),
+            tuple(Row((When(at), _who(frame, handle), _declared_cell(name, intensity), _how(kind)),
+                      detail=(Note(_excerpt(text), title="ce qu'elle a dit"),))
+                  for at, handle, name, intensity, kind, text in declared),
+            title="Dernières balises", empty="elle n'a encore rien déclaré"),
+        Disclosure("Détails", (Fields((
+            ("ressentie (écart au repos)", "au repos" if rest else _feeling(m.felt, m.felt_intensity)),
             ("lecture absolue (le visage)", _feeling(m.label, m.intensity)),
             ("position", _vec(m.position)),
             ("repos à cette heure", _vec(m.home)),
-            ("son fond", A.FR[p.background]),
             ("dernière mise à jour", ctx.when(s.mood.at) if s.mood is not None else "jamais (au repos depuis toujours)"),
-            ("dernière balise déclarée", f"{declared[0][2]} — {declared[0][0]}, {declared[0][1]}" if declared
-             else "aucune"),
-        ), title="Humeur générale"),
-        Note(prose.mood(m, p)),
-        Table(("quand", "à qui", "émotion déclarée", "comment"), declared, title="Dernières balises",
-              empty="elle n'a encore rien déclaré"),
+        )),)),
     ]
 
 
-@AFFECT.inspect("postures", title="Postures")
+# ── Postures ──────────────────────────────────────────────────────────────
+
+
+def _warmth_cell(value: float) -> Meter:
+    """La chaleur installée, signée : la jauge dit l'ampleur, le ton le sens."""
+    return Meter(abs(value), f"{value:+.2f}", tone="ok" if value > 0.05 else "danger" if value < -0.05 else "")
+
+
+def _hostility_cell(value: float) -> Meter:
+    return Meter(value, f"{value:.2f}", tone="danger" if value >= 0.3 else "warn" if value > 0.05 else "")
+
+
+def _anchor_cell(r: c.StanceReading, common: A.Vec3) -> Cell:
+    if r.anchor is None:
+        return Text("aucune", kind="muted")
+    label, intensity = A.felt(r.anchor, common)
+    return _swatch(label, intensity)
+
+
+def _stance_row(s: AffectState, frame: Frame, ctx: InspectContext, person: str, p: AffectParams,
+                cw: ph.Clockwork, common: A.Vec3) -> Row:
+    stored = s.stances[person]
+    r = stance_reading(s, person, frame.now, p, cw)
+    last = A.Declared.decode(stored.declared)
+    who = (Ref.subject("person", person, _name(frame, person), "affect") if is_identifiable(person)
+           else Text(_name(frame, person), kind="muted"))
+    detail = (
+        Note(prose.stance(r, common, p) or "rien de particulier envers cette personne", title="ce qu'elle se dit"),
+        Fields((
+            ("ancrée", "oui (plusieurs tours concordants)" if r.anchored else "non"),
+            ("ancre", _vec(r.anchor)),
+            ("position", _vec(r.position)),
+            ("son repos envers elle", _vec(r.home)),
+            ("dernier mouvement", ctx.when(stored.osc.at) if stored.osc.at else "—"),
+        )),
+    )
+    return Row((
+        who,
+        Text("au repos", kind="muted") if r.at_rest else _swatch(r.felt, r.felt_intensity),
+        _warmth_cell(regard(s, person, frame.now, p, cw)),
+        _hostility_cell(hostility(s, person, frame.now, p, cw)),
+        _anchor_cell(r, common),
+        _swatch(last.emotion, last.intensity) if last else Text("—", kind="muted"),
+        When(stored.declared_at) if stored.declared_at else Text("—", kind="muted"),
+    ), href=who if isinstance(who, Ref) else None, detail=detail)
+
+
+POSTURE_COLUMNS = (Column("personne"), Column("ressentie envers elle"),
+                   Column("chaleur (−1…1)", hint="ce que ses échanges ont installé : > 0 chaleureux, < 0 froid"),
+                   Column("hostilité", hint="un écart déplaisant et dominant : la rancune"),
+                   Column("ancre", hint="ce qui s'est installé"), Column("dernière balise"),
+                   Column("quand", "fit"))
+
+
+@AFFECT.inspect("postures", title="Postures", section="vie", order=20,
+                description="Ce qu'elle ressent envers chacun, et ce que leurs échanges ont installé.")
 def _stances_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    p = _params(frame.env.params_of("affect", frame.root))
+    p = _p(frame)
     cw = _clockwork(frame)
-    now = frame.now
-    common = ph.common_home(now, p, cw)
+    common = ph.common_home(frame.now, p, cw)
     ordered = sorted(s.stances.items(), key=lambda kv: (-max(kv[1].declared_at, kv[1].osc.at), kv[0]))
-    rows = []
-    for person, stored in ordered[:STANCES_SHOWN]:
-        r = stance_reading(s, person, now, p, cw)
-        felt = "au repos" if r.at_rest else _feeling(r.felt, r.felt_intensity)
-        if r.anchor is None:
-            anchor = "aucune"
-        else:
-            label, intensity = A.felt(r.anchor, common)
-            anchor = f"{_feeling(label, intensity)} — {_vec(r.anchor)}"
+    page, pager = paginate(ordered, ctx.pager(size=STANCES_PAGE, total=len(ordered)))
+    return [Table(POSTURE_COLUMNS, tuple(_stance_row(s, frame, ctx, person, p, cw, common) for person, _ in page),
+                  title="Postures envers chacun", pager=pager,
+                  empty="aucune posture : personne ne l'a encore touchée")]
+
+
+# ── Sur la fiche d'une personne ───────────────────────────────────────────
+
+
+#: le type d'objet « personne », déclaré par l'identité
+PERSON_KIND = "person"
+
+
+@AFFECT.inspect("affect", title="Affect", subject=PERSON_KIND, order=60,
+                description="Ce qu'elle ressent envers cette personne, sur toutes ses poignées.")
+def _person_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    person = ctx.subject
+    if not person:
+        return [Note("Cette vue se lit sur la fiche d'une personne.", tone="muted")]
+    p = _p(frame)
+    cw = _clockwork(frame)
+    common = ph.common_home(frame.now, p, cw)
+    handles = tuple(sorted({person, *frame.get(identity_c.HANDLES(person))}))
+    # la posture vit sous la clé de la personne ; une poignée liée après coup a pu en garder une à son nom
+    keys = [person, *(h for h in handles if h != person and h in s.stances)]
+    blocks: list[Block] = []
+    for key in keys:
+        if key not in s.stances:
+            blocks.append(Note("Aucune posture envers cette personne : ses échanges ne l'ont pas encore touchée.",
+                               tone="muted"))
+            continue
+        stored = s.stances[key]
+        r = stance_reading(s, key, frame.now, p, cw)
         last = A.Declared.decode(stored.declared)
-        declared = f"{_feeling(last.emotion, last.intensity)}, {ctx.when(stored.declared_at)}" if last else "—"
-        rows.append((
-            _who(frame, person), felt, f"{regard(s, person, now, p, cw):+.2f}",
-            f"{hostility(s, person, now, p, cw):.2f}", anchor, "oui" if r.anchored else "non", declared,
-            prose.stance(r, common, p) or "—",
-        ))
-    blocks: list[Block] = [Table(
-        ("personne", "ressentie envers elle", "chaleur (−1…1)", "hostilité", "ancre (ce qui s'est installé)",
-         "ancrée", "dernière balise", "ce qu'elle se dit"),
-        tuple(rows), title="Postures envers chacun", empty="aucune posture : personne ne l'a encore touchée")]
-    if len(ordered) > STANCES_SHOWN:
-        blocks.append(Note(f"{len(ordered) - STANCES_SHOWN} postures plus anciennes ne sont pas affichées.", tone="mut"))
+        warmth = regard(s, key, frame.now, p, cw)
+        blocks += [
+            Stats((
+                Stat("ressentie", "au repos" if r.at_rest else _swatch(r.felt, r.felt_intensity),
+                     sub="envers elle, à l'instant"),
+                Stat("chaleur", _warmth_cell(warmth), sub="ce que leurs échanges ont installé (−1…1)"),
+                Stat("hostilité", _hostility_cell(hostility(s, key, frame.now, p, cw)), sub="la rancune (0…1)"),
+                Stat("ancre", _anchor_cell(r, common),
+                     sub="bien ancrée" if r.anchored else "pas encore ancrée" if r.anchor is not None else ""),
+                Stat("dernière balise", _swatch(last.emotion, last.intensity) if last else "—",
+                     sub=ctx.when(stored.declared_at) if stored.declared_at else ""),
+            ), title="Envers elle" if key == person else f"Envers la poignée {key} (avant d'être reliée)"),
+            Note(prose.stance(r, common, p) or "Rien de particulier envers cette personne."),
+        ]
+    tags = _declared_rows(frame, ctx, handles, DECLARED_TOWARD_SHOWN)
+    blocks.append(Timeline(tuple(_tag_entry(*row) for row in tags), title="Ses dernières balises envers elle",
+                           empty="elle ne lui a encore rien déclaré"))
     return blocks
+
+
+def _tag_entry(at: int, handle: str, name: str, intensity: float, kind: str, text: str | None) -> Entry:
+    """Une balise envers quelqu'un : l'émotion, ce qu'elle a dit, sur quelle poignée."""
+    emotion = A.emotion_of(name)
+    if emotion is None:
+        return Entry(at, name, _excerpt(text), meta=f"{_how(kind)} · {handle}")
+    v = A.valence(emotion)
+    return Entry(at, _feeling(emotion, intensity), _excerpt(text), tone="ok" if v >= 0.3 else "warn" if v <= -0.3 else "",
+                 meta=f"{_how(kind)} · {handle}")

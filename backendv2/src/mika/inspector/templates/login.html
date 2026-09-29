@@ -1,6 +1,14 @@
-{% extends "base.html" %}{% block body %}
-<form method="post" class="card"><input type="hidden" name="csrf" value="{{ csrf }}">
-<p><input name="username" placeholder="identifiant" autocomplete="username"></p>
-<p><input name="password" type="password" placeholder="mot de passe" autocomplete="current-password"></p>
-{% if error %}<p class="ko">{{ error }}</p>{% endif %}<button>Se connecter</button></form>
-{% endblock %}
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark"><title>{{ title }} · Mika</title>
+<link rel="stylesheet" href="{{ PREFIX }}/static/console.css?v={{ ASSET_VERSION }}">
+<script src="{{ PREFIX }}/static/console.js?v={{ ASSET_VERSION }}"></script></head>
+<body><main class="login card">
+<div class="brand"><span class="brand-mark">M</span><span><span class="brand-name">Mika</span><br><span class="brand-sub">console des opérateurs</span></span></div>
+<form method="post" class="form">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<div class="field"><label for="u">Identifiant</label><input id="u" name="username" autocomplete="username" required></div>
+<div class="field"><label for="p">Mot de passe</label><input id="p" name="password" type="password" autocomplete="current-password" required></div>
+{% if error %}<div class="flash danger">{{ error }}</div>{% endif %}
+<div><button class="btn">Se connecter</button></div>
+</form></main></body></html>

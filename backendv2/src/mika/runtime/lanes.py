@@ -10,11 +10,14 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+from collections import deque
 from collections.abc import Mapping
 from typing import Any
 
 from mika.runtime.boundary import Failed, acall
 from mika.runtime.pipeline import EpisodeReport, EpisodeRequest, EpisodeRunner
+
+REPORTS_KEPT = 256
 
 
 class Lanes:
@@ -33,7 +36,9 @@ class Lanes:
         }
         self._counter = itertools.count()
         self._workers: list[asyncio.Task[None]] = []
-        self.reports: list[EpisodeReport] = []
+        #: les derniers comptes rendus d'épisode (bornés : le détail durable est
+        #: dans le journal et les traces d'épisode)
+        self.reports: deque[EpisodeReport] = deque(maxlen=REPORTS_KEPT)
 
     def lane_of(self, kind: str) -> str:
         policy = self.runner.policies[kind]

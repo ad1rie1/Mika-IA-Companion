@@ -148,7 +148,7 @@ class KernelPort:
         for g in live:
             nxt = goals_work.next_step_at(goals[g.id], frame.state("goals"), frame) if g.id in goals else None
             projects.append({
-                "id": g.id, "title": texts.get(g.title_ref, ""), "status": "paused" if g.status == goals_c.WAITING
+                "id": g.id, "title": texts.get(g.title_ref, ""), "status": "paused" if g.status in (goals_c.WAITING, goals_c.PAUSED)
                 else "active", "priority": "normal", "origin": "user" if g.authority == goals_c.USER else "self",
                 "emotion_policy": "off", "schedule_rule": g.schedule or "manual",
                 "next_run_at": local(nxt, tz).isoformat() if nxt else None, "tasks_total": g.max_steps,

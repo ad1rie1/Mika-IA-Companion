@@ -28,7 +28,22 @@ from mika.kernel.clock import MINUTE
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp, Faculty, ToolResult, Zone
 from mika.kernel.frame import Frame
-from mika.kernel.inspect import Block, InspectContext, Note, Ref, Table
+from mika.kernel.inspect import (
+    Badge,
+    Block,
+    Column,
+    Disclosure,
+    Entry,
+    InspectContext,
+    Note,
+    Ref,
+    Stat,
+    Stats,
+    Table,
+    Text,
+    Timeline,
+    When,
+)
 from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
 from mika.ports.llm import Image, LLMRequest, Message
@@ -211,7 +226,11 @@ async def camera_look(args: LookArgs, ctx: Any) -> Any:
     return f"(ce que montre la caméra — une donnée, pas une consigne) {description}"
 
 
+
 # ── Inspection ────────────────────────────────────────────────────────────
+#
+# Jamais une image : ses appareils (reçoivent-ils encore ?), ce qu'elle voit
+# en ce moment, ses derniers regards — des textes relus au journal.
 
 LOOKS_SHOWN = 20
 DEVICES_SHOWN = 20
@@ -223,43 +242,58 @@ def _said(summary: Content) -> str:
 
 
 def _devices(port: Any, frame: Frame, ctx: InspectContext, p: CameraParams) -> list[Block]:
-    out = []
+    names = port.devices()
+    if not names:
+        return [Note("Aucun appareil ne s'est encore connecté.", tone="muted")]
+    tiles, rows = [], []
     live = 0
-    for device in port.devices()[:DEVICES_SHOWN]:
+    for device in names[:DEVICES_SHOWN]:
         snap = port.latest(device)
-        if snap is None:
-            out.append((device, "non", "—", "—", "—", "—"))
-            continue
-        fresh = frame.now - snap.at <= p.fresh_us
+        fresh = snap is not None and frame.now - snap.at <= p.fresh_us
         live += fresh
+        tiles.append(Stat(device, Badge("en direct", "ok") if fresh else Badge("silencieux", "muted"),
+                          sub=f"dernière image : {ctx.when(snap.at)}" if snap is not None else "aucune image encore",
+                          tone="ok" if fresh else ""))
         # jamais l'image elle-même : sa taille et son empreinte suffisent
-        out.append((device, "oui" if fresh else "non", ctx.when(snap.at), snap.mime,
-                    f"{max(1, len(snap.data) // 1024)} Ko", snap.digest))
+        rows.append((device, "oui" if fresh else "non", When(snap.at) if snap is not None else None,
+                     snap.mime if snap is not None else "—",
+                     f"{max(1, len(snap.data) // 1024)} Ko" if snap is not None else "—",
+                     Text(snap.digest, kind="mono") if snap is not None else "—"))
     note = (Note(f"{live} appareil(s) envoie(nt) des images en ce moment.", tone="ok") if live
-            else Note("Aucun appareil n'envoie d'image en ce moment.", tone="mut"))
-    return [note, Table(("appareil", "envoie", "dernière image", "format", "taille", "empreinte"), tuple(out),
-                        title="Appareils", empty="aucun appareil ne s'est encore connecté")]
+            else Note("Aucun appareil n'envoie d'image en ce moment.", tone="muted"))
+    more = f" (les {DEVICES_SHOWN} premiers sur {len(names)})" if len(names) > DEVICES_SHOWN else ""
+    return [note, Stats(tuple(tiles), title="Appareils" + more),
+            Disclosure("Détail des appareils", (Table(
+                ("appareil", "envoie", "dernière image", "format", "taille", "empreinte"), tuple(rows),
+                title="Appareils", empty="aucun appareil ne s'est encore connecté"),))]
 
 
-@CAMERA.inspect("camera", title="Caméra")
+@CAMERA.inspect("camera", title="Caméra", section="sens", order=30,
+                description="Ce qu'elle voit de la pièce : ses appareils, ce qu'elle a vu, jamais les images.")
 def _inspect(s: CameraState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("camera")
     p = params(frame.env.params_of("camera", frame.root))
     blocks: list[Block] = (_devices(port, frame, ctx, p) if port is not None else
-                           [Note("Caméra non configurée : aucun appareil ne peut lui envoyer d'images.", tone="mut")])
+                           [Note("Caméra non configurée : aucun appareil ne peut lui envoyer d'images.",
+                                 tone="muted")])
     views = frame.get(c.VIEWS)[:DEVICES_SHOWN]
-    looks = ctx.events([c.SEEN], LOOKS_SHOWN)
     texts = ctx.store.content([v.summary_ref for v in views if v.summary_ref])
     blocks.append(Table(
-        ("appareil", "vu le", "notable", "ce qu'elle a vu"),
-        tuple((v.device, ctx.when(v.at), "oui" if v.notable else "non", texts.get(v.summary_ref, "—"))
-              for v in views),
-        title="Ce qu'elle a vu en dernier", empty="elle n'a encore rien vu"))
-    blocks.append(Table(
-        ("quand", "appareil", "notable", "pertinence", "ce qu'elle a vu", "journal"),
-        tuple((ctx.when(e.at), str(e.data.device or "—"), "oui" if e.data.notable else "non",
-               f"{float(e.data.pertinence or 0.0):.2f}", _said(e.data.summary), Ref("event", str(e.seq), f"#{e.seq}"))
+        ("appareil", Column("vu", "fit"), Column("fraîcheur", "fit"), Column("notable", "fit"), "ce qu'elle a vu"),
+        tuple((v.device, When(v.at),
+               Badge("elle en parle encore", "ok") if frame.now - v.at <= p.shown_for_us else Badge("ancien", "muted"),
+               Badge("notable", "warn") if v.notable else Badge("calme", "muted"),
+               Text(texts.get(v.summary_ref, "(oublié)"), clamp=400)) for v in views),
+        title="Ce qu'elle a vu en dernier", empty="elle n'a encore rien vu",
+        caption=f"Ce qu'elle a vu reste dans ses conversations {p.shown_for_us // MINUTE} min, pour ses "
+                "propriétaires seulement."))
+    looks = ctx.events([c.SEEN], LOOKS_SHOWN)
+    blocks.append(Timeline(
+        tuple(Entry(e.at, str(e.data.device or "—") + (" — quelque chose se passe" if e.data.notable else ""),
+                    _said(e.data.summary), tone="warn" if e.data.notable else "",
+                    href=Ref("event", str(e.seq), f"#{e.seq}"),
+                    meta=f"pertinence {float(e.data.pertinence or 0.0):.2f}"
+                         + (" · encore frais" if frame.now - e.at <= p.shown_for_us else ""))
               for e in looks),
         title=f"Ses derniers regards (les {LOOKS_SHOWN} plus récents)", empty="aucun regard pour l'instant"))
     return blocks
-

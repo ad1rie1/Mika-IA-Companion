@@ -45,7 +45,9 @@ from mika.runtime.pipeline import (
 )
 from mika.runtime.projections import ProjectionWorker, ensure_t0
 from mika.runtime.scheduler import Scheduler
+from mika.runtime.series import Sampler, SeriesStore, sampler_spec
 from mika.runtime.state import MAX_REPLY_ATTEMPTS, RETRY_NOW, RUNTIME
+from mika.runtime.traces import EpisodeTraces
 
 
 @dataclass(slots=True)
@@ -111,20 +113,27 @@ class Kernel:
         registry = Registry([RUNTIME, *deps.faculties], arbitration=deps.arbitration)
         self.mind = Mind(registry, deps.store, deps.clock, deps.ids, code=deps.code,
                          snapshot_every=deps.snapshot_every)
+        #: ce que chaque épisode a eu sous les yeux (``views.db``, jetable)
+        self.traces = EpisodeTraces(deps.store)
         ports = {"store": ReadOnlyStore(deps.store), "frame": self._head_frame,
-                 "capabilities": self.mind.registry.capabilities.get, "llm": deps.gateway, **dict(deps.ports)}
+                 "capabilities": self.mind.registry.capabilities.get, "llm": deps.gateway, **dict(deps.ports),
+                 "traces": self.traces}
         self.ports = ports
         self.runner = EpisodeRunner(
             self.mind, deps.gateway, policies=deps.policies, persona=deps.persona,
             audience_of=deps.audience_of, parsers=deps.parsers, budget=deps.budget, ports=ports,
+            traces=self.traces,
         )
         self.lanes = Lanes(self.runner, capacities=deps.lanes, max_pending=deps.max_pending)
         self.arbiter = Arbiter(lambda: self.mind.registry, self._submit_selected, seed=deps.seed)
         self.mind.subscribe(self.arbiter.invalidate)
         self.mind.subscribe(self._retry_replies)
         self._retries: set[asyncio.Task[None]] = set()
+        #: les mesures des courbes de la console (``@f.series``), dans ``views.db``
+        self.series = SeriesStore(deps.store)
+        self.sampler = Sampler(self.series, list(registry.series.values()))
         self.scheduler = Scheduler(
-            self.mind, extra=[arbiter_spec(self.arbiter, quantum_s=deps.arbiter_quantum_s)],
+            self.mind, extra=[arbiter_spec(self.arbiter, quantum_s=deps.arbiter_quantum_s), sampler_spec(self.sampler)],
             lanes=deps.process_lanes, llm=deps.gateway, ports=ports,
         )
         self.effects = EffectExecutor(self.mind, ports)
@@ -162,6 +171,9 @@ class Kernel:
             opener = getattr(port, "open", None)
             if opener is not None:
                 await opener()  # index, caches : prêts avant la première perception
+        await self.traces.open()
+        await self.series.open()
+        await self.traces.prune(self.mind.clock.now())
         await self.mind.append([BOOT.draft(code=self.deps.code)], emitter="kernel", origin=Origin.KERNEL,
                                correlation="boot")
         if configure is not None:
@@ -199,6 +211,7 @@ class Kernel:
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
         self._shutdown_ports()
+        await self.traces.flush()  # les épisodes annulés ci-dessus ont écrit leur règlement
         await self.mind.close()
         self.started = False
         self.phase = "stopped"
@@ -272,9 +285,12 @@ class Kernel:
             )
 
     async def forget(self, subject: str) -> dict[str, int]:
-        """L'oubli d'un sujet : contenus et projections (le Mind), puis tout
-        port qui garde une trace dérivée (index de vecteurs…)."""
-        out = {"contents": await self.mind.forget(subject)}
+        """L'oubli d'un sujet : les traces d'épisode (toutes : un prompt mêle
+        les personnes), contenus et projections (le Mind), puis tout port qui
+        garde une trace dérivée (index de vecteurs…). Les traces d'abord : le
+        Mind finit par compacter les deux bases, ce qui efface aussi leurs pages."""
+        traces = await self.traces.forget(subject)
+        out = {"contents": await self.mind.forget(subject), "traces": traces}
         for name, port in sorted(self.deps.ports.items()):
             hook = getattr(port, "forget", None)
             if hook is not None:

@@ -1,0 +1,118 @@
+{% from "_blocks.html" import field, render %}
+{% macro groups(list) -%}
+{% for g in list %}
+<fieldset class="group">
+  {% if g.title %}<legend>{{ g.title }}</legend>{% endif %}
+  {% for f in g.fields %}
+    {% if f.kind == "mapping" %}
+    <div class="field mapping{{ ' has-error' if f.error }}">
+      <input type="hidden" name="_champs" value="{{ f.path }}">
+      <span class="label">{{ f.label }}</span>
+      {% if f.help %}<span class="help">{{ f.help }}</span>{% endif %}
+      <div class="mapping-rows">{% for r in f.rows %}{{ field(r) }}{% endfor %}</div>
+      {% if f.error %}<span class="error">{{ f.error }}</span>{% endif %}
+    </div>
+    {% else %}{{ field(f) }}{% endif %}
+  {% endfor %}
+</fieldset>
+{% endfor %}
+{%- endmacro %}
+{% macro fields_block(form) -%}
+{{ groups(form.groups) }}
+{% if form.advanced %}
+<details class="advanced"{{ ' open' if form.open }}>
+  <summary>Avancé</summary>
+  {{ groups(form.advanced) }}
+</details>
+{% endif %}
+{%- endmacro %}
+<div class="settings stack">
+{% for s in sections %}
+<section class="card settings-section" id="section-{{ s.key }}">
+  <header class="settings-head">
+    <h2>{{ s.label }}</h2>
+    {% if s.description %}<p class="muted">{{ s.description }}</p>{% endif %}
+    {% if s.facts %}<div class="head-facts">{% for k, v in s.facts %}<span><span class="k">{{ k }}</span>{{ v }}</span>{% endfor %}</div>{% endif %}
+  </header>
+  {% for m in s.messages %}<div class="flash {{ m[0] }}" role="status">{{ m[1] }}</div>{% endfor %}
+
+  {% for r in s.records %}
+  <div class="records">
+    <h3>{{ r.label }}</h3>
+    {% if r.help %}<p class="muted">{{ r.help }}</p>{% endif %}
+    <div class="table-wrap"><table class="tbl">
+      <thead><tr>{% if r.keyed %}<th>nom</th>{% endif %}{% for c in r.columns %}<th>{{ c }}</th>{% endfor %}<th></th></tr></thead>
+      <tbody>
+      {% for row in r.rows %}
+        <tr>{% if r.keyed %}<td class="mono">{{ row.key }}</td>{% endif %}{% for c in row.cells %}<td>{{ c }}</td>{% endfor %}
+          <td class="row-actions"><a class="btn quiet small" href="{{ row.edit }}">modifier</a>
+            <form method="post" action="{{ action }}" class="inline" data-confirm="Retirer « {{ row.key }} » ?">
+              <input type="hidden" name="csrf" value="{{ s.csrf }}"><input type="hidden" name="_section" value="{{ s.key }}">
+              <input type="hidden" name="_supprimer" value="{{ r.path }}"><input type="hidden" name="_cle" value="{{ row.key }}">
+              <button class="btn quiet small danger">retirer</button>
+            </form></td></tr>
+      {% else %}
+        <tr><td colspan="{{ r.columns|length + 2 }}" class="muted">Aucune entrée.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    <p><a class="btn small" href="{{ r.add }}">Ajouter</a></p>
+  </div>
+  {% endfor %}
+
+  {% if s.record %}{% set rec = s.record %}
+  <form method="post" action="{{ action }}" class="form card record-form" id="enregistrement">
+    <h3>{{ 'Ajouter à' if rec.new else 'Modifier' }} · {{ rec.label }}{% if not rec.new and rec.keyed %} · <span class="mono">{{ rec.key }}</span>{% endif %}</h3>
+    <input type="hidden" name="csrf" value="{{ s.csrf }}"><input type="hidden" name="_section" value="{{ s.key }}">
+    <input type="hidden" name="_enregistrement" value="{{ rec.path }}"><input type="hidden" name="_ancienne" value="{{ rec.key }}">
+    {% for e in rec.general %}<div class="flash danger">{{ e }}</div>{% endfor %}
+    {% if rec.keyed %}
+    <div class="field{{ ' has-error' if rec.name_error }}"><label for="rec-{{ s.key }}-nom">Nom</label>
+      <input id="rec-{{ s.key }}-nom" name="_cle" value="{{ rec.name }}" required maxlength="60" autocomplete="off">
+      <span class="help">Le nom sous lequel les autres réglages le désignent.</span>
+      {% if rec.name_error %}<span class="error">{{ rec.name_error }}</span>{% endif %}</div>
+    {% endif %}
+    {{ fields_block(rec) }}
+    <div class="form-actions"><button class="btn">Enregistrer</button> <a class="btn quiet" href="{{ rec.cancel }}">Annuler</a></div>
+  </form>
+  {% endif %}
+
+  {% if s.form %}
+  <form method="post" action="{{ action }}" class="form">
+    <input type="hidden" name="csrf" value="{{ s.csrf }}"><input type="hidden" name="_section" value="{{ s.key }}">
+    {% for e in s.form.general %}<div class="flash danger">{{ e }}</div>{% endfor %}
+    {{ fields_block(s.form) }}
+    <div class="form-actions"><button class="btn">Enregistrer</button></div>
+  </form>
+  {% endif %}
+
+  {% if s.commands %}
+  <div class="commands">
+  {% for c in s.commands %}
+    <form method="post" action="{{ action }}" class="inline"{% if c.confirm %} data-confirm="{{ c.confirm }}"{% endif %}>
+      <input type="hidden" name="csrf" value="{{ s.csrf }}"><input type="hidden" name="_section" value="{{ s.key }}">
+      <input type="hidden" name="_commande" value="{{ c.key }}">
+      <button class="btn{{ ' danger' if c.danger else ' quiet' }}">{{ c.title }}</button>
+    </form>
+  {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if s.blocks %}<div class="stack">{{ render(s.blocks, {}) }}</div>{% endif %}
+
+  {% if s.yaml %}
+  <details class="advanced">
+    <summary>Importer / exporter en YAML</summary>
+    <form method="post" action="{{ action }}" class="form">
+      <input type="hidden" name="csrf" value="{{ s.csrf }}"><input type="hidden" name="_section" value="{{ s.key }}">
+      <input type="hidden" name="_yaml" value="1">
+      <div class="field"><label for="yaml-{{ s.key }}">Le document entier (sans secret)</label>
+        <textarea id="yaml-{{ s.key }}" name="_texte" rows="18" class="mono" spellcheck="false">{{ s.yaml.text }}</textarea>
+        <span class="help">Copie-le pour le garder ; colle un document pour tout remplacer d'un coup.</span></div>
+      <div class="form-actions"><button class="btn quiet">Importer ce document</button></div>
+    </form>
+  </details>
+  {% endif %}
+</section>
+{% endfor %}
+</div>

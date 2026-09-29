@@ -14,20 +14,43 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
+from datetime import date, datetime, timedelta
 from typing import Any
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from mika.contracts import body as body_c
 from mika.contracts import rss as c
 from mika.contracts import self_ as self_c
-from mika.kernel.clock import HOUR, MINUTE
+from mika.kernel.clock import HOUR, MINUTE, instant
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp, Faculty, ToolResult, Zone
 from mika.kernel.frame import Frame
-from mika.kernel.inspect import Block, Fields, InspectContext, Note, Ref, Table
+from mika.kernel.inspect import (
+    Badge,
+    Block,
+    Chart,
+    Column,
+    Disclosure,
+    Fields,
+    InspectContext,
+    Meter,
+    Note,
+    Param,
+    Ref,
+    Row,
+    Series,
+    Stat,
+    Stats,
+    Table,
+    Text,
+    When,
+    paginate,
+)
 from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
 from mika.vocab.episodes import CONVERSATIONAL, Kind
@@ -208,8 +231,21 @@ async def rss_read(args: ReadArgs, ctx: Any) -> Any:
 
 
 # ── Inspection ────────────────────────────────────────────────────────────
+#
+# Lecture seule : le cache du lecteur de flux (jamais un relevé), ce qu'elle a
+# remarqué, le journal. Un titre est un texte venu d'ailleurs : il ne
+# s'affiche qu'en texte ; seul le lien d'un article (http(s)) devient un lien,
+# revérifié par la console.
 
-SHOWN = 50
+#: la console ne relit pas plus que ceci du cache des flux (filtres, pages)
+CACHE_SHOWN = 500
+PAGE = 25
+NOTICED_SHOWN = 50
+FEEDS_SHOWN = 50
+#: le graphe : tant de jours, et jamais plus de titres relus que ceci
+DAYS = 14
+CHART_MAX = 1_000
+BATCH = 250
 
 
 def _clip(text: str, n: int = 120) -> str:
@@ -217,44 +253,145 @@ def _clip(text: str, n: int = 120) -> str:
     return text if len(text) <= n else text[: n - 1] + "…"
 
 
+def _web(link: str) -> bool:
+    """Un lien d'article montrable : http(s), un hôte, sans identifiants ni caractères de contrôle."""
+    if not link or len(link) > 2_000 or not link.isprintable() or "\\" in link:
+        return False
+    parts = urlsplit(link)
+    return parts.scheme in ("http", "https") and bool(parts.hostname) and not parts.username and not parts.password
+
+
+def _matches(wanted: str, feed: str) -> bool:
+    return not wanted or fold(wanted) in fold(feed)
+
+
 def _feeds_note(port: Any, p: RssParams) -> Note:
     if port is None:
-        return Note("Flux non configurés : aucun lecteur de flux n'est branché.", tone="mut")
+        return Note("Flux non configurés : aucun lecteur de flux n'est branché.", tone="muted")
     if not port.configured():
-        return Note("Aucun flux n'est suivi : ajoute des adresses dans les réglages des flux.", tone="mut")
+        return Note("Aucun flux n'est suivi : ajoute des adresses dans les réglages des flux.", tone="muted")
     return Note(f"Relevés toutes les {p.poll_every_us // MINUTE} min quand elle est éveillée ; elle ne remarque "
                 f"que ce qui touche ses centres d'intérêt ({p.noticed_per_poll} titres au plus par relevé, "
                 f"à partir d'une pertinence de {p.notice_from:.2f}).", tone="ok")
 
 
-@RSS.inspect("flux", title="Flux")
+def _days(frame: Frame) -> list[tuple[date, int]]:
+    """Les ``DAYS`` derniers jours (le plus ancien d'abord) et leur minuit, à son heure à elle."""
+    tz = frame.env.tz_of(frame.root)
+    today = frame.local().date()
+    out = []
+    for back in range(DAYS - 1, -1, -1):
+        d = today - timedelta(days=back)
+        out.append((d, instant(datetime(d.year, d.month, d.day, tzinfo=tz))))
+    return out
+
+
+def _since(ctx: InspectContext, since: int, cap: int) -> tuple[list[Any], bool]:
+    """Les titres remarqués depuis cet instant (du plus récent au plus ancien), bornés ;
+    et si la borne a coupé."""
+    out: list[Any] = []
+    before = None
+    while True:
+        want = min(BATCH, cap - len(out))
+        if want <= 0:
+            return out, True
+        batch = ctx.events([c.NOTICED], want, before=before)
+        for e in batch:
+            if e.at < since:
+                return out, False
+            out.append(e)
+        if len(batch) < want:
+            return out, False
+        before = batch[-1].seq
+
+
+def _chart(frame: Frame, days: list[tuple[date, int]], noticed: list[Any], cut: bool, feed: str) -> Chart:
+    per_day = Counter(frame.local(e.at).date() for e in noticed)
+    points = tuple((at, float(per_day.get(d, 0))) for d, at in days) if noticed else ()
+    title = f"Titres remarqués par jour ({DAYS} jours)" + (f" — flux « {_clip(feed, 60)} »" if feed else "")
+    if cut:
+        title += f" — seuls les {CHART_MAX} derniers sont comptés"
+    return Chart((Series("titres remarqués", points, slot=1),), kind="bars", title=title,
+                 empty=f"aucun titre remarqué ces {DAYS} derniers jours")
+
+
+def _followed(port: Any, cached: list[Any], s: RssState) -> Table:
+    by_feed = Counter(e.feed for e in cached)
+    noticed = Counter(v.feed for v in s.noticed.values())
+    rows = []
+    for title, url in port.followed()[:FEEDS_SHOWN]:
+        name = _clip(title, 80)
+        rows.append((Ref.view("rss", "flux", name, flux=title[:200]) if title else Text("(titre inconnu)", kind="muted"),
+                     Text(url or "—", kind="mono"), by_feed.get(title, 0), noticed.get(title, 0)))
+    return Table(("flux", "adresse", Column("relevés", "num"), Column("remarqués", "num")), tuple(rows),
+                 title="Flux suivis", empty="aucun flux suivi",
+                 caption="Cliquer un flux filtre la page sur lui. Les jetons des adresses ne sont jamais montrés.")
+
+
+def _entries(s: RssState, ctx: InspectContext, cached: list[Any], words: frozenset[str]) -> Table:
+    feed, query = ctx.value("flux") or "", fold(ctx.value("q") or "")
+    kept = [e for e in cached if _matches(feed, e.feed) and (not query or query in fold(e.title))]
+    page, pager = paginate(kept, ctx.pager(size=PAGE))
+    rows = []
+    for e in page:
+        seen = s.noticed.get(e.id)
+        title = _clip(e.title) or "(sans titre)"
+        score = seen.pertinence if seen else pertinence(e.title, e.summary, words)
+        rows.append(Row((
+            Ref.url(e.link, title) if _web(e.link) else Text(title), Text(_clip(e.feed, 60)),
+            When(e.published) if e.published else None,
+            Badge("remarqué", "ok") if seen else Badge("laissé passer", "muted"),
+            Meter(score, f"{score:.2f}") if seen else Meter(score, f"{score:.2f} (estimée)", tone="muted"),
+        ), tone="" if seen else "muted"))
+    return Table(("titre", "flux", Column("paru", "fit"), Column("remarqué", "fit"), Column("pertinence", "fit")),
+                 tuple(rows), title="Derniers articles relevés", pager=pager,
+                 empty="aucun article ne correspond à ces filtres" if feed or query else "rien de relevé pour l'instant",
+                 caption=f"Seuls les {CACHE_SHOWN} articles les plus récents du cache sont relus ici."
+                 if len(cached) >= CACHE_SHOWN else "")
+
+
+def _noticed(s: RssState, ctx: InspectContext, feed: str) -> Table:
+    noticed = sorted((v for v in s.noticed.values() if _matches(feed, v.feed)), key=lambda v: -v.seq)[:NOTICED_SHOWN]
+    texts = ctx.store.content([v.summary_ref for v in noticed if v.summary_ref])
+    return Table(
+        (Column("remarqué", "fit"), "flux", "ce qu'elle a remarqué", Column("pertinence", "fit"),
+         Column("journal", "fit")),
+        tuple((When(v.at), Text(_clip(v.feed, 60)), Text(texts.get(v.summary_ref, "(oublié)"), clamp=300),
+               Meter(v.pertinence, f"{v.pertinence:.2f}"), Ref("event", str(v.seq), f"#{v.seq}")) for v in noticed),
+        title="Ce qu'elle a remarqué", empty="elle n'a encore remarqué aucun titre" if not feed else
+        "rien de remarqué dans ce flux")
+
+
+@RSS.inspect("flux", title="Flux", section="sens", order=20,
+             description="Ses flux : ce qui paraît, ce qui la touche, ce qu'elle laisse passer.",
+             params=[Param("flux", "Flux", placeholder="titre d'un flux"),
+                     Param("q", "Recherche", placeholder="dans les titres")])
 def _inspect(s: RssState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("feeds")
     p = params(frame.env.params_of("rss", frame.root))
     words = keywords(frame.get(self_c.PERSONA).interests)
-    blocks: list[Block] = [_feeds_note(port, p), Fields((
-        ("titres remarqués (gardés)", len(s.noticed)),
-        ("les mots qui la touchent", _clip(", ".join(sorted(words)), 600) or "—"),
-    ), title="Ce qui la touche")]
+    feed = ctx.value("flux") or ""
+    days = _days(frame)
+    window, cut = _since(ctx, days[0][1], CHART_MAX)
+    window = [e for e in window if _matches(feed, e.data.feed)]
+    today = days[-1][1]
+    cached = port.cached(CACHE_SHOWN) if port is not None else []
+    followed = len(port.followed()) if port is not None else 0
+    last = max((v.at for v in s.noticed.values() if _matches(feed, v.feed)), default=0)
+    passed = sum(1 for e in cached if e.id not in s.noticed and _matches(feed, e.feed))
+    stats = Stats((
+        Stat("flux suivis", followed if port is not None else "—"),
+        Stat("laissés passer", f"{passed}+" if len(cached) >= CACHE_SHOWN else passed,
+             sub="relevés sans la toucher (elle ne marque pas ses lectures)"),
+        Stat("remarqués aujourd'hui", sum(1 for e in window if e.at >= today)),
+        Stat("dernier titre remarqué", When(last) if last else "jamais"),
+    ))
+    blocks: list[Block] = [_feeds_note(port, p), stats, _chart(frame, days, window, cut, feed)]
     if port is not None:
-        blocks.append(Table(("flux", "adresse"),
-                            tuple((_clip(title) or "—", url or "—") for title, url in port.followed()[:SHOWN]),
-                            title="Flux suivis", empty="aucun flux suivi"))
-        out = []
-        for e in port.cached(SHOWN):
-            seen = s.noticed.get(e.id)
-            score = f"{seen.pertinence:.2f}" if seen else f"{pertinence(e.title, e.summary, words):.2f} (estimée)"
-            out.append((_clip(e.feed, 60), _clip(e.title), ctx.when(e.published) if e.published else "—",
-                        f"oui, {ctx.when(seen.at)}" if seen else "non", score))
-        blocks.append(Table(("flux", "titre", "paru", "remarqué", "pertinence"), tuple(out),
-                            title=f"Derniers articles relevés (les {SHOWN} plus récents)",
-                            empty="rien de relevé pour l'instant"))
-    noticed = sorted(s.noticed.values(), key=lambda v: -v.seq)[:SHOWN]
-    texts = ctx.store.content([v.summary_ref for v in noticed if v.summary_ref])
-    blocks.append(Table(
-        ("remarqué le", "flux", "ce qu'elle a remarqué", "pertinence", "journal"),
-        tuple((ctx.when(v.at), _clip(v.feed, 60), texts.get(v.summary_ref, "—"), f"{v.pertinence:.2f}",
-               Ref("event", str(v.seq), f"#{v.seq}")) for v in noticed),
-        title="Ce qu'elle a remarqué", empty="elle n'a encore remarqué aucun titre"))
+        blocks += [_followed(port, cached, s), _entries(s, ctx, cached, words)]
+    blocks.append(_noticed(s, ctx, feed))
+    blocks.append(Disclosure("Ce qui la touche", (Fields((
+        ("titres remarqués (gardés)", len(s.noticed)),
+        ("les mots qui la touchent", Text(_clip(", ".join(sorted(words)), 600) or "—")),
+    )),)))
     return blocks
-

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% from "_blocks.html" import render, action_form, cell %}
+{% block content %}
+{% if crumbs %}<nav class="crumbs" aria-label="Fil d'Ariane">{% for c in crumbs %}{% if c[1] %}<a href="{{ c[1] }}">{{ c[0] }}</a>{% else %}<span>{{ c[0] }}</span>{% endif %}{% if not loop.last %}<span aria-hidden="true">›</span>{% endif %}{% endfor %}</nav>{% endif %}
+<div class="page-head">
+  <div>
+    <h1>{{ heading or title }}</h1>
+    {% if subtitle %}<p>{{ subtitle }}</p>{% endif %}
+    {% if head_badges %}<div class="badges">{% for b in head_badges %}<span class="badge {{ b.tone }}">{{ b.text }}</span>{% endfor %}</div>{% endif %}
+    {% if facts %}<div class="head-facts">{% for f in facts %}<span><span class="k">{{ f.label }}</span>{% if f.cell %}{{ cell(f.cell) }}{% else %}{{ f.value }}{% endif %}</span>{% endfor %}</div>{% endif %}
+  </div>
+  {% if head_actions %}<div class="head-actions">{% for a in head_actions %}<details class="card"><summary class="btn quiet small{{ ' danger' if a.danger }}">{{ a.title }}</summary>{{ action_form(a, True) }}</details>{% endfor %}</div>{% endif %}
+</div>
+{% for m in messages or [] %}<div class="flash {{ m[0] }}" role="status">{{ m[1] }}</div>{% endfor %}
+{% if tabs %}<nav class="tabs" aria-label="Onglets">{% for t in tabs %}<a class="tab{{ ' on' if t.on }}" href="{{ t.href }}"{% if t.on %} aria-current="page"{% endif %}>{{ t.title }}{% if t.badge %}<span class="count">{{ t.badge }}</span>{% endif %}</a>{% endfor %}</nav>{% endif %}
+{% if filters %}
+<form class="filters" method="get">
+  {% for k, v in keep %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+  {% for f in filters %}
+  <label>{{ f.label }}
+    {% if f.kind == "select" %}<select name="{{ f.name }}"><option value="">Tous</option>{% for v, l in f.choices %}<option value="{{ v }}"{{ ' selected' if v == f.value }}>{{ l }}</option>{% endfor %}</select>
+    {% elif f.kind == "bool" %}<select name="{{ f.name }}"><option value="">—</option><option value="oui"{{ ' selected' if f.value == 'oui' }}>oui</option><option value="non"{{ ' selected' if f.value == 'non' }}>non</option></select>
+    {% else %}<input name="{{ f.name }}" value="{{ f.value }}"{% if f.kind == "int" %} inputmode="numeric"{% endif %} placeholder="{{ f.placeholder or f.label }}">{% endif %}
+  </label>
+  {% endfor %}
+  <button class="btn quiet small">Filtrer</button>
+  {% if filtered %}<a class="reset" href="{{ reset }}">réinitialiser</a>{% endif %}
+</form>
+{% endif %}
+{% if panel and not panel_after %}{% include panel %}{% endif %}
+<div class="stack">
+{{ render(blocks or [], forms or {}) }}
+{% if panel and panel_after %}{% include panel %}{% endif %}
+{% if not blocks and not panel %}<div class="empty-state"><b>Rien à montrer ici pour l'instant.</b>{{ empty or "Cette page se remplira quand elle aura vécu un peu." }}</div>{% endif %}
+</div>
+{% endblock %}

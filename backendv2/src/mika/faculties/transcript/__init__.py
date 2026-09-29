@@ -29,12 +29,30 @@ from mika.contracts import transcript as c
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp, Faculty, Tier, Zone
 from mika.kernel.frame import Frame
-from mika.kernel.inspect import Block, Cell, Fields, InspectContext, Note, Ref, Table
+from mika.kernel.inspect import (
+    Badge,
+    Block,
+    Cell,
+    Column,
+    Disclosure,
+    InspectContext,
+    Note,
+    Pager,
+    Param,
+    Ref,
+    Row,
+    Stat,
+    Stats,
+    Table,
+    Text,
+    When,
+    paginate,
+)
 from mika.kernel.prompt import ChatTurn, SectionBody
 from mika.kernel.state import FrozenDict
 from mika.ports.llm import LLMRequest, Message
 from mika.ports.store import Sql
-from mika.vocab.affect import Declared, strip_prosody
+from mika.vocab.affect import Declared, emotion_cell, strip_prosody
 from mika.vocab.episodes import CONVERSATIONAL, Kind
 from mika.vocab.people import is_internal
 
@@ -326,10 +344,14 @@ def _history(s: TranscriptState, frame: Frame, enrich: Mapping[str, Any]) -> Sec
 
 # ── Inspection ────────────────────────────────────────────────────────────
 
-#: Au plus tant de lignes par tableau ; un texte coupé à tant de caractères.
-INSPECT_ROWS = 100
+#: Tant de messages par page (curseur « avant ») ; un texte replié au-delà de
+#: tant de caractères, et jamais plus que tant envoyés à la console.
+PAGE = 50
 INSPECT_CHARS = 300
+TEXT_CAP = 4000
+MAX_SUMMARIES = 100
 FORGOTTEN = "(oublié)"
+ROLES = (("user", "la personne"), ("assistant", "elle"))
 
 
 def _clip(text: str | None, limit: int = INSPECT_CHARS) -> str:
@@ -341,72 +363,210 @@ def _like(q: str) -> str:
     return "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
 
-def _who(person: str) -> Cell:
-    if not person or is_internal(person):
-        return "personne"
-    return Ref("view", "identity/personne", person, (("handle", person),))
-
-
 def _internal(r: Mapping[str, Any]) -> bool:
     """Adressé à personne (ou venu de sa propre tuyauterie) : pas un échange."""
     return not r["person"] or is_internal(r["person"])
 
 
-@TRANSCRIPT.inspect("fil", title="Fil", params=[("handle", "poignée"), ("q", "recherche")])
-def _inspect(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Block]:
+def _who(frame: Frame, handle: str) -> Cell:
+    """La personne derrière une poignée, en lien vers sa fiche."""
+    if not handle or is_internal(handle):
+        return Text("personne", "muted")
+    person = frame.get(identity_c.PERSON(handle))
+    name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(handle)).name
+    return Ref.subject("person", person, f"{name} ({handle})" if name else handle)
+
+
+def _page(store: Any, clauses: Sequence[str], args: Sequence[Any], before: int | None,
+          size: int = PAGE) -> tuple[list[dict[str, Any]], Pager | None]:
+    """Une page du fil, du plus récent au plus ancien, et le curseur de la suivante."""
+    where, params = list(clauses), list(args)
+    if before:
+        where.append("id<?")
+        params.append(before)
+    clause = f"WHERE {' AND '.join(where)} " if where else ""
+    found = store.query_mind(f"SELECT {','.join(_COLUMNS)} FROM {c.THREAD_TABLE} {clause}ORDER BY id DESC LIMIT ?",
+                             (*params, size + 1))
+    rows = [dict(zip(_COLUMNS, r, strict=True)) for r in found[:size]]
+    more = len(found) > size and rows
+    return rows, Pager(older=(("avant", str(rows[-1]["id"])),)) if more else None
+
+
+def _episodes(ctx: InspectContext, rows: Sequence[Mapping[str, Any]]) -> dict[int, str]:
+    """L'épisode de chaque réponse (sa corrélation) — et, par elle, celui de la
+    question qu'elle règle."""
+    out: dict[int, str] = {}
+    for r in rows:
+        if r["role"] != "assistant":
+            continue
+        found = ctx.events((rt.UTTERANCE,), 1, before=int(r["id"]) + 1)
+        if found and found[0].seq == r["id"]:
+            out[int(r["id"])] = found[0].correlation
+            if r["reply_to"] is not None:
+                out.setdefault(int(r["reply_to"]), found[0].correlation)
+    return out
+
+
+MESSAGE_COLUMNS = (Column("n°", "fit"), Column("quand", "fit"), "qui parle", "avec", "où", "texte", "émotion",
+                   "réponse", "épisode")
+
+
+def _messages(frame: Frame, ctx: InspectContext, rows: Sequence[Mapping[str, Any]]) -> tuple[Row, ...]:
+    pending = {int(x) for x in frame.get(rt.AWAITING)}
+    episodes = _episodes(ctx, rows)
+    out = []
+    for r in rows:
+        mine = r["role"] == "assistant"
+        corr = episodes.get(int(r["id"]))
+        out.append(Row((
+            Ref("event", str(r["id"]), str(r["id"])), When(r["at"]),
+            Badge("elle", "info") if mine else Badge("la personne"), _who(frame, r["person"]),
+            f"salon « {r['room']} »" if r["room"] else "en privé",
+            Text(_clip(r["text"], TEXT_CAP), clamp=INSPECT_CHARS),
+            emotion_cell(r["emotion"], r["emotion_intensity"]) if mine and r["emotion"] else "",
+            Badge("en attente", "warn") if r["id"] in pending else "",
+            Ref("episode", corr, "épisode") if corr else "—",
+        ), tone="muted" if _internal(r) else ""))
+    return tuple(out)
+
+
+def _summaries(store: Any, s: TranscriptState, frame: Frame, handles: Sequence[str] | None) -> Block | None:
+    folded = [(p, v) for p, v in sorted(s.summaries.items()) if handles is None or p in handles][:MAX_SUMMARIES]
+    if not folded:
+        return None
+    texts = store.content([ref for _p, (_upto, ref) in folded if ref])
+    rows = tuple((_who(frame, p), Ref("event", str(upto), str(upto)),
+                  Text(_clip(texts[ref], TEXT_CAP), clamp=INSPECT_CHARS) if texts.get(ref) else FORGOTTEN)
+                 for p, (upto, ref) in folded)
+    return Disclosure("Débuts de fil repliés en résumé", (
+        Table(("avec", "replié jusqu'au message", "résumé"), rows, empty="aucun fil replié"),))
+
+
+def _no_store() -> list[Block]:
+    return [Note("Le magasin n'est pas disponible : le fil ne peut pas être relu.", tone="muted")]
+
+
+HANDLE = Param("handle", "poignée", placeholder="tg_42, user_7…")
+QUERY = Param("q", "texte", placeholder="un mot…")
+ROLE = Param("role", "qui parle", kind="select", choices=ROLES)
+
+
+@TRANSCRIPT.inspect("messages", title="Messages", section="fil", order=10, params=[HANDLE, QUERY, ROLE],
+                    description="Tout ce qui a été dit, du plus récent au plus ancien.")
+def _all_messages(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Block]:
     store = ctx.store
     if store is None:
-        return [Note("Le magasin n'est pas disponible : le fil ne peut pas être relu.", tone="mut")]
-    handle, q = ctx.param("handle"), ctx.param("q")
-    where, args = [], []
+        return _no_store()
+    handle, q, role = str(ctx.value("handle") or ""), str(ctx.value("q") or ""), str(ctx.value("role") or "")
+    clauses, args = [], []
     if handle:
-        where.append("person=?")
+        clauses.append("person=?")
         args.append(handle)
     if q:
-        where.append("text LIKE ? ESCAPE '\\'")
+        clauses.append("text LIKE ? ESCAPE '\\'")
         args.append(_like(q))
-    clause = f"WHERE {' AND '.join(where)} " if where else ""
-    rows = [dict(zip(_COLUMNS, r, strict=True)) for r in store.query_mind(
-        f"SELECT {','.join(_COLUMNS)} FROM {c.THREAD_TABLE} {clause}ORDER BY id DESC LIMIT ?",
-        (*args, INSPECT_ROWS))]
+    if role:
+        clauses.append("role=?")
+        args.append(role)
+    before = ctx.int_param("avant", 0) or None
+    rows, pager = _page(store, clauses, args, before)
     known = handle in s.last_from or handle in s.last_to or handle in s.summaries
-    if handle and not rows and not known:
-        return [Note(f"Aucun message avec « {handle} ».", tone="mut")]
-    awaiting = sorted(int(x) for x in frame.get(rt.AWAITING))
-    pending, recent_awaiting = set(awaiting), awaiting[-INSPECT_ROWS:]
-    messages = tuple(
-        (Ref("event", str(r["id"]), str(r["id"])), ctx.when(r["at"]),
-         "elle" if r["role"] == "assistant" else "la personne", _who(r["person"]),
-         f"salon « {r['room']} »" if r["room"] else "en privé", _clip(r["text"]),
-         "oui" if _internal(r) else "non", "en attente" if r["id"] in pending else "")
-        for r in rows)
-    waiting = {int(r[0]): r for r in store.query_mind(
-        f"SELECT id, at, person, text FROM {c.THREAD_TABLE} WHERE id IN ({','.join('?' * len(recent_awaiting))})",
-        tuple(recent_awaiting))} if recent_awaiting else {}
-    questions = []
-    for seq in recent_awaiting:
-        found = waiting.get(seq)
-        if found is None:
-            if not handle:
-                questions.append((Ref("event", str(seq), str(seq)), "—", "—", FORGOTTEN))
-            continue
-        if handle and found[2] != handle:
-            continue
-        questions.append((Ref("event", str(seq), str(seq)), ctx.when(found[1]), _who(found[2]), _clip(found[3])))
-    folded = [(p, v) for p, v in sorted(s.summaries.items()) if not handle or p == handle][:INSPECT_ROWS]
-    texts = store.content([ref for _p, (_upto, ref) in folded if ref])
-    summaries = tuple((_who(p), Ref("event", str(upto), str(upto)), _clip(texts.get(ref)) if texts.get(ref)
-                       else FORGOTTEN) for p, (upto, ref) in folded)
+    if handle and not rows and not known and not before:
+        return [Note(f"Aucun message avec « {handle} ».", tone="muted")]
+    awaiting = frame.get(rt.AWAITING)
     scope = f" avec « {handle} »" if handle else ""
-    found_q = f" contenant « {q} »" if q else ""
-    return [
-        Fields((("dernier message du fil", s.head or "—"), ("questions sans réponse", len(awaiting)),
-                ("fils repliés en résumé", len(s.summaries)))),
-        Table(("n°", "quand", "qui parle", "avec", "où", "texte", "interne", "réponse"), messages,
-              title=f"Messages{scope}{found_q} (les {INSPECT_ROWS} plus récents)",
-              empty="aucun message" + (" ne correspond" if q else "")),
-        Table(("n°", "quand", "de", "texte"), tuple(reversed(questions)), title="Questions sans réponse",
-              empty="aucune question en attente"),
-        Table(("personne", "replié jusqu'au message", "résumé"), summaries, title="Débuts de fil repliés",
-              empty="aucun fil replié"),
+    found = f" contenant « {q} »" if q else ""
+    blocks: list[Block] = [
+        Stats((Stat("dernier message du fil", s.head or "—"),
+               Stat("questions sans réponse", len(awaiting), tone="warn" if awaiting else "",
+                    href=Ref.view("transcript", "questions", "questions")),
+               Stat("fils repliés en résumé", len(s.summaries)))),
+        Table(MESSAGE_COLUMNS, _messages(frame, ctx, rows), title=f"Messages{scope}{found}", pager=pager,
+              filters=("handle", "q", "role"),
+              empty="aucun message ne correspond" if handle or q or role else "aucun message"),
     ]
+    folded = _summaries(store, s, frame, [handle] if handle else None)
+    if folded is not None:
+        blocks.append(folded)
+    return blocks
+
+
+def _awaiting(s: TranscriptState, frame: Frame) -> int:
+    return len(frame.get(rt.AWAITING))
+
+
+@TRANSCRIPT.inspect("questions", title="Questions sans réponse", section="fil", order=20, badge=_awaiting,
+                    description="Ce qu'on lui a demandé et à quoi elle n'a pas encore répondu.")
+def _questions(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    store = ctx.store
+    if store is None:
+        return _no_store()
+    waiting = sorted((int(x) for x in frame.get(rt.AWAITING)), reverse=True)
+    page, pager = paginate(waiting, ctx.pager(size=PAGE))
+    marks = ",".join("?" * len(page))
+    found = {int(r[0]): r for r in store.query_mind(
+        f"SELECT id, at, person, text FROM {c.THREAD_TABLE} WHERE id IN ({marks})", tuple(page))} if page else {}
+    rows = []
+    for seq in page:
+        r = found.get(seq)
+        link = Ref("event", str(seq), str(seq))
+        if r is None:
+            rows.append(Row((link, "—", Text("—", "muted"), Text(FORGOTTEN, "muted")), href=link))
+            continue
+        rows.append(Row((link, When(r[1]), _who(frame, r[2]), Text(_clip(r[3], TEXT_CAP), clamp=INSPECT_CHARS)),
+                        href=link))
+    return [Table((Column("n°", "fit"), Column("reçue", "fit"), "de", "texte"), tuple(rows), pager=pager,
+                  empty="aucune question en attente")]
+
+
+def _stats(store: Any, handles: Sequence[str]) -> Stats:
+    marks = ",".join("?" * len(handles))
+    total, received = store.query_mind(
+        f"SELECT COUNT(*), COALESCE(SUM(role='user'), 0) FROM {c.THREAD_TABLE} WHERE person IN ({marks})",
+        tuple(handles))[0]
+    return Stats((Stat("messages", int(total)), Stat("reçus", int(received)),
+                  Stat("envoyés", int(total) - int(received))))
+
+
+@TRANSCRIPT.inspect("echanges", title="Échanges", subject="person", order=40,
+                    description="Ce qu'ils se sont dit, toutes ses poignées confondues, du plus récent au plus ancien.")
+def _exchanges(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    person = ctx.subject
+    if not person:
+        return [Note("Ouvre la fiche d'une personne : Personnes, puis la personne.", tone="muted")]
+    if person.startswith("name:"):
+        return [Note("Connue seulement de nom : elle ne lui a jamais écrit.", tone="muted")]
+    store = ctx.store
+    if store is None:
+        return _no_store()
+    handles = sorted({person, *frame.get(identity_c.HANDLES(person))})
+    marks = ",".join("?" * len(handles))
+    rows, pager = _page(store, [f"person IN ({marks})"], handles, ctx.int_param("avant", 0) or None)
+    blocks: list[Block] = [_stats(store, handles),
+                           Table(MESSAGE_COLUMNS, _messages(frame, ctx, rows), pager=pager,
+                                 empty="aucun échange pour l'instant")]
+    folded = _summaries(store, s, frame, handles)
+    if folded is not None:
+        blocks.append(folded)
+    return blocks
+
+
+@TRANSCRIPT.inspect("fil", title="Fil", subject="handle", subject_param="handle", order=50,
+                    description="Les messages de cette poignée seulement.")
+def _handle_thread(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    handle = ctx.subject or ctx.param("handle")
+    if not handle:
+        return [Note("Ouvre la fiche d'une poignée : Identités, puis la poignée.", tone="muted")]
+    store = ctx.store
+    if store is None:
+        return _no_store()
+    before = ctx.int_param("avant", 0) or None
+    rows, pager = _page(store, ["person=?"], [handle], before)
+    if not rows and not before and not (handle in s.last_from or handle in s.last_to):
+        return [Note(f"Aucun message avec « {handle} ».", tone="muted")]
+    blocks: list[Block] = [_stats(store, [handle]),
+                           Table(MESSAGE_COLUMNS, _messages(frame, ctx, rows), pager=pager, empty="aucun message")]
+    folded = _summaries(store, s, frame, [handle])
+    if folded is not None:
+        blocks.append(folded)
+    return blocks

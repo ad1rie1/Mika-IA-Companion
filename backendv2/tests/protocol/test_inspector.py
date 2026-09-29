@@ -20,32 +20,35 @@ def test_an_operator_follows_a_reply_from_message_to_episode(world):  # noqa: F8
         ws.send_json({"type": "chat", "message": "raconte-moi ta journée", "client_msg_id": "i1"})
         recv_until(ws, "speech")
     home = client.get("/inspecteur/")
-    assert home.status_code == 200 and "Journal" in home.text and "REPLY" in home.text
-    timeline = client.get("/inspecteur/chronologie?type=episode.")
+    assert home.status_code == 200 and "Journal" in home.text and "réponse" in home.text
+    timeline = client.get("/inspecteur/systeme/chronologie?type=episode.")
     assert "episode.utterance" in timeline.text
     ended = client.portal.call(lambda: list(live.kernel.mind.store.read(types={"episode.ended"})))
     chain = client.get(f"/inspecteur/episode/{ended[-1].correlation}")
     assert "episode.started" in chain.text and "episode.utterance" in chain.text
     assert client.get("/inspecteur/decisions").status_code == 200
-    state = client.get("/inspecteur/etat")
+    state = client.get("/inspecteur/systeme/etat")
     assert "affect" in state.text and "identity" in state.text
 
 
 def test_model_settings_form_needs_its_token_and_never_shows_a_key(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
-    client.get("/inspecteur/modeles")
-    refused = client.post("/inspecteur/modeles", data={"action": "backend", "name": "claude", "kind": "claude",
-                                                       "model": "claude-sonnet-5", "api_key": "sk-secret-123"})
-    assert "Jeton de formulaire invalide" in refused.text
+    client.get("/inspecteur/reglages/modeles")
+    record = {"_section": "modeles", "_enregistrement": "backends", "_ancienne": "", "_cle": "claude",
+              "_champs": ["kind", "model", "api_key"], "kind": "claude", "model": "claude-sonnet-5",
+              "api_key": "sk-secret-123"}
+    refused = client.post("/inspecteur/reglages/modeles", data=record)
+    assert refused.status_code == 403 and "Jeton de formulaire invalide" in refused.text
     token = client.cookies.get("csrftoken")
-    saved = client.post("/inspecteur/modeles", data={"csrf": token, "action": "backend", "name": "claude",
-                                                     "kind": "claude", "model": "claude-sonnet-5",
-                                                     "api_key": "sk-secret-123"})
-    assert saved.status_code == 200 and "sk-secret-123" not in saved.text and "••••" in saved.text
-    routed = client.post("/inspecteur/modeles", data={"csrf": token, "action": "routes", "route_reply": "claude",
-                                                      "context": "32000"})
-    assert routed.status_code == 200
+    saved = client.post("/inspecteur/reglages/modeles", data={"csrf": token, **record})
+    assert saved.status_code == 200 and "sk-secret-123" not in saved.text and "« claude » enregistré" in saved.text
+    edit = client.get("/inspecteur/reglages/modeles?section=modeles&enregistrement=backends&cle=claude")
+    assert "sk-secret-123" not in edit.text and "défini — vide : inchangé" in edit.text
+    routed = client.post("/inspecteur/reglages/modeles", data={
+        "csrf": token, "_section": "modeles", "_champs": ["routes", "context_tokens"], "routes.reply": "claude",
+        "context_tokens": "32000"})
+    assert routed.status_code == 200 and "Modèles : enregistré" in routed.text
     cfg = client.portal.call(live.settings.llm)  # lu dans la boucle de l'application
     assert cfg.routes == {"reply": "claude"} and cfg.context_tokens == 32000
     assert cfg.backends["claude"].api_key == "sk-secret-123"  # déchiffrée à la lecture, jamais affichée

@@ -16,10 +16,10 @@ from pydantic import BaseModel, Field
 
 from mika.contracts import goals as c
 from mika.contracts import identity as identity_c
-from mika.faculties.goals.faculty import GOALS, NOTED, Goal, GoalsState, live, params
+from mika.faculties.goals.faculty import GOALS, NOTED, Goal, GoalsState, params, workable
 from mika.kernel import schedule
 from mika.kernel.clock import MINUTE, instant, local
-from mika.kernel.events import Content
+from mika.kernel.events import Content, Draft
 from mika.kernel.frame import Frame
 from mika.vocab.episodes import Kind, goal_of
 from mika.vocab.privacy import Sensitivity
@@ -35,7 +35,7 @@ def _goal(ctx: Any) -> Goal | None:
     gid = goal_of(ep.target) if ep is not None else None
     s: GoalsState = ctx.frame.state("goals")
     g = s.goals.get(gid) if gid is not None else None
-    return g if g is not None and live(g, ctx.frame.now) else None
+    return g if g is not None and workable(g, ctx.frame.now) else None
 
 
 def title_of(ctx: Any, g: Goal) -> Content:
@@ -184,6 +184,17 @@ class ProjectArgs(BaseModel):
     approval: bool = Field(default=True, description="ce qui sort de la machine attend un accord")
 
 
+def project_opened(*, title: str, details: str, owner: str | None, address: str | None, rule: str,
+                   approval: bool, max_steps: int, source: str, level: int, due: int | None = None) -> Draft[Any]:
+    """L'ouverture d'un projet confié (par sa propriétaire en conversation, ou
+    par un opérateur depuis la console) : un cadre, un atelier, des pas."""
+    return c.GOAL_OPENED.draft(
+        kind=c.PROJECT, authority=c.USER, title=Content.of(title.strip(), level=level),
+        details=Content.of(details.strip(), level=level) if details.strip() else None, owner=owner,
+        address=address, about=(owner,) if owner else (), due=due, bundles=PROJECT_BUNDLES, max_steps=max_steps,
+        schedule=rule.strip(), approval=approval, source=source, sensitivity=level)
+
+
 @GOALS.tool("create_project", description="Accepter un projet que ta propriétaire te confie : il aura son "
             "atelier (un dossier, des programmes isolés) et tu y avanceras par pas.",
             args=ProjectArgs, bundle="goals", episodes=[Kind.REPLY], max_calls_per_episode=1)
@@ -198,11 +209,9 @@ async def create_project(args: ProjectArgs, ctx: Any) -> str:
     except ValueError as exc:
         return f"Règle d'agenda refusée : {exc}"
     p = params(ctx.frame.env.params_of("goals", ctx.frame.root))
-    level = int(Sensitivity.PERSONAL)
-    commit = await ctx.emit(c.GOAL_OPENED.draft(
-        kind=c.PROJECT, authority=c.USER, title=Content.of(args.title.strip(), level=level),
-        details=Content.of(args.instructions.strip(), level=level), owner=person, address=handle, about=(person,),
-        bundles=PROJECT_BUNDLES, max_steps=args.max_steps or p.project_steps, schedule=args.schedule.strip(),
-        approval=args.approval, source="tool", sensitivity=level))
+    commit = await ctx.emit(project_opened(
+        title=args.title, details=args.instructions, owner=person, address=handle, rule=args.schedule,
+        approval=args.approval, max_steps=args.max_steps or p.project_steps, source="tool",
+        level=int(Sensitivity.PERSONAL)))
     number = f" (n° {commit.seqs[-1]})" if commit.seqs else ""
     return f"Projet accepté{number} : tu y travailleras dans ton atelier."

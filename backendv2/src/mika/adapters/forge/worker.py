@@ -5,6 +5,11 @@ Protocole, une ligne JSON par message : l'hôte envoie ``{"call": méthode,
 "args": {...}}`` ; l'app peut demander un service (``{"host": nom,
 "params": {...}}``, réponse ``{"result": …}`` ou ``{"error": …}``) ; elle
 conclut par ``{"result": …}`` ou ``{"error": …}``. ``print`` va au journal.
+
+``tick(api)``, ``context(api)``, ``view(api)`` ; ``view_<vue>(api, params)``,
+``action_<vue>_<action>(api, data)``, ``tool_<nom>(api, args)``,
+``on_event(api, événement)`` ; l'ancienne ``action(api, nom, args)``. L'hôte
+ne demande que les fonctions déclarées.
 """
 
 import json
@@ -105,9 +110,9 @@ def main():
             continue
         args = request.get("args") or {}
         try:
-            if method == "action":
+            if method == "action":  # l'ancienne forme : action(api, nom, args)
                 value = fn(api, str(args.get("name") or ""), args.get("args") or {})
-            elif method.startswith("tool_") or method == "on_event":
+            elif method.startswith(("tool_", "view_", "action_")) or method == "on_event":
                 value = fn(api, args)
             else:
                 value = fn(api)

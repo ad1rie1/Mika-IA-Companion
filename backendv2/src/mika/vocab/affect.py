@@ -22,6 +22,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
+from mika.kernel.inspect import Swatch
+
 Vec3 = tuple[float, float, float]
 ORIGIN: Vec3 = (0.0, 0.0, 0.0)
 
@@ -444,3 +446,12 @@ class Appraisal:
     #: né d'une relation (une pensée sur ce que quelqu'un a dit) : suit la
     #: contagion du tempérament, comme ce que vit une relation
     relational: bool = False
+
+
+def emotion_cell(emotion: Emotion | str | None, intensity: float | None = None) -> Swatch | str:
+    """Une émotion pour la console : sa pastille de couleur, son nom en français,
+    son intensité (« — » si elle est inconnue)."""
+    e = emotion if isinstance(emotion, Emotion) else emotion_of(emotion)
+    if e is None:
+        return "—"
+    return Swatch(FR[e], "emotion", e.value, intensity)

@@ -1,11 +1,17 @@
-"""Les vues d'inspection de l'affect, du corps, de l'initiative et des buts.
+"""Les vues d'inspection de l'affect, du corps, des besoins, de l'initiative
+et des buts ; leurs vitaux et leurs séries.
 
 Ce qu'un opérateur doit pouvoir lire, par ses intentions :
 
 - sur un noyau neuf, chaque vue se rend sans erreur et dit qu'il n'y a rien ;
+  une courbe sans mesure le dit, lisiblement ; les vitaux disent « au repos »,
+  une énergie en pourcentage, « éveillée », une envie ;
+- chaque série mesure un nombre dans ses bornes ; une courbe montre ce que
+  l'échantillonneur a mesuré, sur la période choisie ;
 - après un échange en colère, la posture envers cette personne se lit en
-  colère (hostilité, chaleur négative) ; après un échange chaleureux, elle se
-  réchauffe ;
+  colère (hostilité, chaleur négative), l'humeur de la barre de vitaux aussi,
+  et la valence baisse ; après un échange chaleureux, elle se réchauffe ;
+- sur la fiche d'une personne, l'onglet d'affect ne parle que d'elle ;
 - la nuit, le rythme dit qu'elle dort, quand elle se réveillera, et que ses
   initiatives ordinaires sont retenues ;
 - une initiative restée sans réponse se lit comme telle, puis comme répondue ;
@@ -19,52 +25,115 @@ from __future__ import annotations
 import asyncio
 
 from mika.contracts import goals as goals_c
-from mika.kernel.clock import HOUR, MINUTE, US, local
-from mika.kernel.inspect import Block, Fields, Note, Prose, Ref, Table
+from mika.inspector import render
+from mika.kernel.clock import DAY, HOUR, MINUTE, US, local
+from mika.kernel.inspect import (
+    Badge,
+    Block,
+    Chart,
+    Disclosure,
+    Fields,
+    Grid,
+    Meter,
+    Note,
+    Prose,
+    Ref,
+    Row,
+    Section,
+    Stats,
+    Swatch,
+    Table,
+    Text,
+    Timeline,
+    When,
+)
 from mika.ports.llm import LLMResponse
 from mika.runtime.effects import with_content
-from mika.runtime.inspection import find, run_view
+from mika.runtime.inspection import Inspection, find, run_view
 from mika.sim.clock import SimClock, run_virtual
 from mika.sim.llm.persona import PersonaSimLLM
 from tests.fixtures.mika import PARIS, at_paris, befriend, boot, build, connect, said
 
 VIEWS = {("affect", "humeur"): "Humeur", ("affect", "postures"): "Postures", ("body", "rythme"): "Rythme",
-         ("agency", "initiatives"): "Initiatives", ("goals", "buts"): "Buts", ("goals", "but"): "But"}
+         ("needs", "needs"): "Besoins", ("agency", "initiatives"): "Initiatives", ("goals", "vivants"): "Vivants",
+         ("goals", "clos"): "Clos", ("goals", "resume"): "Résumé"}
+SERIES = {"affect.valence": (-1.0, 1.0), "affect.eveil": (-1.0, 1.0), "body.energie": (0.0, 1.0),
+          "body.pression": (0.0, 1.0), "needs.social": (0.0, 1.0), "needs.expression": (0.0, 1.0),
+          "needs.curiosite": (0.0, 1.0)}
+#: les émotions de la famille de la colère (ce qu'un échange en colère installe)
+ANGER = {"angry", "frustrated", "disgusted"}
 
 
 def when(t: int) -> str:
     return local(t, PARIS).strftime("%d/%m %H:%M")
 
 
-def show(kernel, owner: str, name: str, **params: str) -> list[Block]:
+def show(kernel, owner: str, name: str, *, subject: str = "", inspection: Inspection | None = None,
+         **params: str) -> list[Block]:
     spec = find(kernel, owner, name)
     assert spec is not None, f"vue absente : {owner}/{name}"
-    blocks = run_view(kernel, spec, params, when=when)
-    failed = [b.text for b in blocks if isinstance(b, Note) and b.text.startswith("Cette vue a échoué")]
+    if inspection is not None:
+        blocks = inspection.run(spec, params, when=when, subject=subject)
+    else:
+        blocks = run_view(kernel, spec, params, when=when, subject=subject)
+    failed = [b.text for b in walk(blocks) if isinstance(b, Note) and b.text.startswith("Cette vue a échoué")]
     assert not failed, failed
     return blocks
 
 
+def walk(blocks) -> list:
+    """Tous les blocs, y compris ceux imbriqués (sections, grilles, détails de lignes)."""
+    out = []
+    for b in blocks:
+        out.append(b)
+        if isinstance(b, (Section, Disclosure, Grid)):
+            out += walk(b.items)
+        elif isinstance(b, Table):
+            out += walk([x for r in b.rows if isinstance(r, Row) for x in r.detail])
+    return out
+
+
 def _cell(v) -> str:
-    return v.text if isinstance(v, Ref) else "" if v is None else str(v)
+    if isinstance(v, (Ref, Swatch, Text, Badge)):
+        return v.text
+    if isinstance(v, Meter):
+        return v.text or f"{v.ratio:.0%}"
+    if isinstance(v, When):
+        return when(v.at)
+    return "" if v is None else str(v)
+
+
+def _cells(row) -> tuple:
+    return row.cells if isinstance(row, Row) else tuple(row)
 
 
 def flat(blocks: list[Block]) -> str:
     out = []
-    for b in blocks:
+    for b in walk(blocks):
         if isinstance(b, Table):
-            out += [b.title, *b.columns, *(_cell(v) for row in b.rows for v in row)]
+            out += [b.title, *(c if isinstance(c, str) else c.label for c in b.columns),
+                    *(_cell(v) for row in b.rows for v in _cells(row))]
             if not b.rows:
                 out.append(b.empty)
         elif isinstance(b, Fields):
             out += [b.title, *(f"{k} : {_cell(v)}" for k, v in b.pairs)]
+        elif isinstance(b, Stats):
+            out += [b.title, *(f"{s.label} : {_cell(s.value)} ({s.sub})" for s in b.items)]
+        elif isinstance(b, Timeline):
+            out += [b.title, *(f"{e.title} · {e.text} · {e.meta}" for e in b.entries)]
+            if not b.entries:
+                out.append(b.empty)
+        elif isinstance(b, Chart):
+            out.append(b.title)
+            if not any(s.points for s in b.series):
+                out.append(b.empty)
         elif isinstance(b, (Note, Prose)):
             out.append(b.text)
     return "\n".join(out)
 
 
 def field(blocks: list[Block], name: str):
-    for b in blocks:
+    for b in walk(blocks):
         if isinstance(b, Fields):
             for k, v in b.pairs:
                 if k == name:
@@ -72,13 +141,31 @@ def field(blocks: list[Block], name: str):
     raise KeyError(name)
 
 
+def stat(blocks: list[Block], label: str, title: str | None = None):
+    for b in walk(blocks):
+        if isinstance(b, Stats) and (title is None or b.title == title):
+            for s in b.items:
+                if s.label == label:
+                    return s
+    raise KeyError(label)
+
+
 def table(blocks: list[Block], title: str) -> Table:
-    return next(b for b in blocks if isinstance(b, Table) and b.title == title)
+    return next(b for b in walk(blocks) if isinstance(b, Table) and b.title == title)
+
+
+def timeline(blocks: list[Block], title: str) -> Timeline:
+    return next(b for b in walk(blocks) if isinstance(b, Timeline) and b.title == title)
+
+
+def chart(blocks: list[Block]) -> Chart:
+    return next(b for b in walk(blocks) if isinstance(b, Chart))
 
 
 def column(t: Table, name: str) -> list:
-    i = t.columns.index(name)
-    return [row[i] for row in t.rows]
+    labels = [c if isinstance(c, str) else c.label for c in t.columns]
+    i = labels.index(name)
+    return [_cells(row)[i] for row in t.rows]
 
 
 class Script:
@@ -111,6 +198,16 @@ def live(tmp_path, scenario, *, start=at_paris(2026, 9, 28, 14, 0)):
     return run_virtual(clock, main)
 
 
+def vitals(kernel) -> dict:
+    return {spec.key: v for spec, v in Inspection(kernel).vitals()}
+
+
+def measure(kernel) -> dict[str, float]:
+    frame = kernel.mind.frame()
+    return {key: kernel.registry.series[key].fn(frame.state(kernel.registry.series[key].owner), frame)
+            for key in SERIES}
+
+
 # ── Un noyau neuf ─────────────────────────────────────────────────────────
 
 
@@ -118,33 +215,100 @@ def test_every_view_reads_a_fresh_kernel(tmp_path):
     async def scenario(kernel, script):
         titles = {(o, n): find(kernel, o, n).title for o, n in VIEWS}
         return titles, {key: show(kernel, *key) for key in VIEWS}, {
-            "inconnu": show(kernel, "goals", "but", goal="999"),
-            "illisible": show(kernel, "goals", "but", goal="douze"),
-            "statut": show(kernel, "goals", "buts", status="bidule"),
-            "vivants": show(kernel, "goals", "buts", status="vivants"),
+            "inconnu": show(kernel, "goals", "resume", subject="999"),
+            "illisible": show(kernel, "goals", "resume", subject="douze"),
+            "sorte": show(kernel, "goals", "vivants", sorte="bidule"),
+            "vivants": show(kernel, "goals", "vivants", sorte="projet"),
+            "periode": show(kernel, "affect", "humeur", periode="un siècle"),
         }
 
     titles, fresh, odd = live(tmp_path, scenario)
     assert titles == VIEWS
     mood = fresh[("affect", "humeur")]
-    assert field(mood, "ressentie (écart au repos)") == "au repos"
-    assert field(mood, "dernière balise déclarée") == "aucune"
+    assert stat(mood, "ressentie").value == "au repos"
+    assert stat(mood, "dernière balise").value == "aucune"
+    assert _cell(stat(mood, "son fond").value)  # une émotion nommée, en couleur
+    assert isinstance(stat(mood, "débordement").value, Meter)
     assert "comme d'habitude" in flat(mood)
+    assert "elle n'a encore rien déclaré" in flat(mood)
     assert "personne ne l'a encore touchée" in flat(fresh[("affect", "postures")])
     body = fresh[("body", "rythme")]
-    assert field(body, "sommeil") == "éveillée" and field(body, "phase du jour") == "après-midi"
+    assert stat(body, "sommeil").value == "éveillée" and field(body, "phase du jour") == "après-midi"
     assert str(field(body, "prochaine transition")).startswith("s'endormir — ")
+    assert isinstance(stat(body, "prochaine transition").value, When)
     assert field(body, "initiatives et travail ordinaires") == "libres"
+    assert _cell(stat(body, "énergie").value).endswith(" %")
+    assert "aucune transition encore" in flat(body)
+    needs = fresh[("needs", "needs")]
+    assert column(table(needs, "Ses besoins"), "besoin") == ["compagnie", "s'exprimer", "apprendre"]
+    assert all(isinstance(m, Meter) and 0 <= m.ratio <= 1 for m in column(table(needs, "Ses besoins"), "tension"))
     agency = fresh[("agency", "initiatives")]
-    assert field(agency, "aujourd'hui") == "0 / 5" and field(agency, "ignorées d'affilée") == "0"
+    assert _cell(stat(agency, "aujourd'hui").value) == "0 / 5" and stat(agency, "ignorées d'affilée").value == 0
     assert "elle n'a encore rien dit d'elle-même" in flat(agency)
-    assert "aucun but" in flat(fresh[("goals", "buts")]) and field(fresh[("goals", "buts")], "vivants") == 0
-    assert [b.tone for b in fresh[("goals", "but")]] == ["mut"]  # sans numéro : une consigne, pas une erreur
+    # sans échantillonneur, chaque courbe dit qu'elle n'a pas encore de mesure — lisiblement
+    for key in (("affect", "humeur"), ("body", "rythme"), ("needs", "needs")):
+        c = chart(fresh[key])
+        assert not any(s.points for s in c.series) and "pas encore de mesure" in c.empty
+    assert chart(mood).y == (-1.0, 1.0) and chart(mood).zero == 0.0
+    shown = render.block(chart(mood), render.Env(when=when, now=0), {})  # la page dit l'absence, sans graphe vide
+    assert shown["has"] is False and shown["svg"] == "" and "pas encore de mesure" in shown["empty"]
+    assert [s.label for s in chart(needs).series] == ["compagnie", "s'exprimer", "apprendre"]
+    assert chart(needs).y == (0.0, 1.0) and chart(body).y == (0.0, 1.0)
+    assert "aucun but en cours" in flat(fresh[("goals", "vivants")])
+    assert field(fresh[("goals", "vivants")], "vivants") == 0 and "aucun but clos" in flat(fresh[("goals", "clos")])
+    assert [b.tone for b in fresh[("goals", "resume")]] == ["muted"]  # hors d'une fiche : une consigne, pas une erreur
     # des paramètres invalides donnent une note, jamais une exception
-    assert "Aucun but n°999" in flat(odd["inconnu"]) and odd["inconnu"][0].tone == "ko"
-    assert "n'est pas un numéro" in flat(odd["illisible"])
-    assert "Statut inconnu" in flat(odd["statut"]) and "aucun but" in flat(odd["statut"])
-    assert "aucun but avec ce statut" in flat(odd["vivants"])
+    assert "Aucun but « 999 »" in flat(odd["inconnu"]) and odd["inconnu"][0].tone == "warn"
+    assert "Aucun but « douze »" in flat(odd["illisible"])
+    assert "« bidule » inconnu" in flat(odd["sorte"]) and "aucun but en cours" in flat(odd["sorte"])
+    assert "aucun but avec ces filtres" in flat(odd["vivants"])
+    assert "Période" in odd["periode"][0].text and odd["periode"][0].tone == "warn"
+    assert chart(odd["periode"]).until - chart(odd["periode"]).since == DAY  # retombe sur 24 h
+
+
+def test_the_vitals_and_series_of_a_fresh_kernel(tmp_path):
+    async def scenario(kernel, script):
+        return vitals(kernel), measure(kernel), {k: s.label for k, s in kernel.registry.series.items()}
+
+    got, measured, labels = live(tmp_path, scenario)
+    assert set(labels) >= set(SERIES)
+    assert got["affect.humeur"].text == "au repos" and got["affect.humeur"].swatch is None
+    energy = got["body.energie"]
+    assert energy.text.endswith(" %") and 0.0 <= energy.ratio <= 1.0
+    assert energy.text == f"{round(energy.ratio * 100)} %" and energy.tone == ""  # un après-midi : pas fatiguée
+    assert got["body.sommeil"].text == "éveillée"
+    envie = got["needs.envie"]
+    assert envie.text in ("compagnie", "s'exprimer", "apprendre") and 0.0 <= envie.ratio <= 1.0
+    for key, (lo, hi) in SERIES.items():
+        assert isinstance(measured[key], float), key
+        assert lo <= measured[key] <= hi, (key, measured[key])
+    assert labels["affect.valence"] == "Valence" and labels["affect.eveil"] == "Éveil"
+    assert labels["body.pression"] == "Pression de sommeil" and labels["needs.curiosite"] == "Apprendre"
+
+
+def test_a_chart_shows_what_the_sampler_measured_over_the_chosen_period(tmp_path):
+    asked: list[tuple[str, int, int]] = []
+
+    def sampler(key, since, until, points):
+        asked.append((key, since, until))
+        return [(since + HOUR, 0.25), (until - HOUR, -0.5)]
+
+    async def scenario(kernel, script):
+        inspection = Inspection(kernel, sampler=sampler)
+        now = kernel.mind.clock.now()
+        return now, show(kernel, "affect", "humeur", inspection=inspection), \
+            show(kernel, "affect", "humeur", inspection=inspection, periode="7 jours"), \
+            show(kernel, "needs", "needs", inspection=inspection), show(kernel, "body", "rythme", inspection=inspection)
+
+    now, day, week, needs, body = live(tmp_path, scenario)
+    assert [v for _, v in chart(day).series[0].points] == [0.25, -0.5]
+    drawn = render.block(chart(day), render.Env(when=when, now=now), {})
+    assert drawn["has"] and "<svg" in drawn["svg"] and len(drawn["table"]["rows"]) == 2
+    assert chart(day).until == now and chart(day).since == now - DAY
+    assert chart(week).since == now - 7 * DAY  # le libellé tapé à la main est compris
+    assert {k for k, _, _ in asked} == {"affect.valence", "needs.social", "needs.expression", "needs.curiosite",
+                                        "body.energie", "body.pression"}
+    assert all(s.points for s in chart(needs).series) and len(chart(body).series) == 2
 
 
 # ── L'affect : une colère, puis de la chaleur ─────────────────────────────
@@ -157,34 +321,81 @@ async def turn(kernel, script, handle, emotion, intensity, text="…"):
 
 
 def _row(t: Table, who: str) -> dict:
-    row = next(r for r in t.rows if who in _cell(r[0]))
-    return dict(zip(t.columns, row, strict=True))
+    row = next(r for r in t.rows if who in _cell(_cells(r)[0]))
+    labels = [c if isinstance(c, str) else c.label for c in t.columns]
+    return dict(zip(labels, _cells(row), strict=True)) | {"_row": row}
 
 
 def test_the_stance_toward_someone_reads_anger_then_warmth(tmp_path):
     async def scenario(kernel, script):
+        fresh = measure(kernel)
         await befriend(kernel, "user_1", "friend")
         await connect(kernel, "user_1", "Alice")
         for _ in range(6):
             await turn(kernel, script, "user_1", "angry", 0.8, "tu m'énerves")
-        angry = show(kernel, "affect", "postures"), show(kernel, "affect", "humeur")
+        angry = show(kernel, "affect", "postures"), show(kernel, "affect", "humeur"), vitals(kernel), measure(kernel)
         await asyncio.sleep(2 * HOUR / US)
         for _ in range(10):
             await turn(kernel, script, "user_1", "love", 0.8, "pardon, je t'adore")
-        return angry, (show(kernel, "affect", "postures"), show(kernel, "affect", "humeur"))
+        return fresh, angry, (show(kernel, "affect", "postures"), show(kernel, "affect", "humeur"), measure(kernel))
 
-    (angry, angry_mood), (warm, warm_mood) = live(tmp_path, scenario)
+    fresh, (angry, angry_mood, angry_vitals, angry_measure), (warm, warm_mood, warm_measure) = live(tmp_path, scenario)
     a = _row(table(angry, "Postures envers chacun"), "Alice")
     w = _row(table(warm, "Postures envers chacun"), "Alice")
-    assert "en colère" in a["ressentie envers elle"] and "en colère" in a["dernière balise"]
-    assert float(a["hostilité"]) > 0.05 and float(a["chaleur (−1…1)"]) < 0
-    assert "en colère" in a["ce qu'elle se dit"]
-    assert "en colère" not in w["ressentie envers elle"] and "amoureuse" in w["dernière balise"]
-    assert float(w["chaleur (−1…1)"]) > float(a["chaleur (−1…1)"])
-    assert float(w["hostilité"]) < float(a["hostilité"])
-    assert "en colère" in field(angry_mood, "dernière balise déclarée")
-    assert "« Alice »" in field(warm_mood, "dernière balise déclarée")
-    assert "amoureuse" in column(table(warm_mood, "Dernières balises"), "émotion déclarée")[0]
+    assert a["ressentie envers elle"].key in ANGER and a["dernière balise"].key == "angry"
+    assert isinstance(a["hostilité"], Meter) and float(a["hostilité"].text) > 0.05
+    assert float(a["chaleur (−1…1)"].text) < 0 and a["chaleur (−1…1)"].tone == "danger"
+    # la ligne mène à la fiche de la personne, et son détail dit ce qu'elle se dit
+    assert a["_row"].href == Ref.subject("person", "user_1", a["personne"].text, "affect")
+    assert "en colère" in flat([a["_row"].detail[0]])
+    assert isinstance(a["quand"], When)
+    assert w["ressentie envers elle"].key not in ANGER and w["dernière balise"].key == "love"
+    assert float(w["chaleur (−1…1)"].text) > float(a["chaleur (−1…1)"].text)
+    assert float(w["hostilité"].text) < float(a["hostilité"].text)
+    # l'humeur générale : la vue et la barre de vitaux se lisent en colère, la valence a baissé
+    assert stat(angry_mood, "dernière balise").value.key == "angry"
+    assert stat(angry_mood, "ressentie").value.key in ANGER
+    mood_vital = angry_vitals["affect.humeur"]
+    assert mood_vital.swatch is not None and mood_vital.swatch.key in ANGER
+    assert mood_vital.swatch.palette == "emotion" and 0.0 < mood_vital.ratio <= 1.0
+    assert angry_measure["affect.valence"] < fresh["affect.valence"]
+    assert warm_measure["affect.valence"] > angry_measure["affect.valence"]
+    assert "« Alice »" in stat(warm_mood, "dernière balise").sub
+    declared = table(warm_mood, "Dernières balises")
+    assert column(declared, "émotion déclarée")[0].key == "love"
+    assert isinstance(column(declared, "à qui")[0], Ref) and column(declared, "à qui")[0].key == "person/user_1"
+
+
+# ── Sur la fiche d'une personne ───────────────────────────────────────────
+
+
+def test_the_person_tab_speaks_only_of_that_person(tmp_path):
+    async def scenario(kernel, script):
+        await befriend(kernel, "user_1", "friend")
+        await befriend(kernel, "user_2", "friend")
+        await connect(kernel, "user_1", "Alice")
+        await connect(kernel, "user_2", "Bruno")
+        for _ in range(4):
+            await turn(kernel, script, "user_1", "angry", 0.8, "tu m'énerves")
+            await turn(kernel, script, "user_2", "love", 0.8, "je t'adore")
+        return {key: show(kernel, "affect", "affect", subject=key) for key in ("user_1", "user_2", "user_9", "")}
+
+    tabs = live(tmp_path, scenario)
+    alice, bruno, stranger, nobody = tabs["user_1"], tabs["user_2"], tabs["user_9"], tabs[""]
+    alice_tags = timeline(alice, "Ses dernières balises envers elle").entries
+    bruno_tags = timeline(bruno, "Ses dernières balises envers elle").entries
+    # chacun ne voit que ce qui lui a été déclaré (une salutation d'elle-même comprise)
+    assert all(e.meta.endswith("· user_1") for e in alice_tags)
+    assert all(e.meta.endswith("· user_2") for e in bruno_tags)
+    alice_replies = [e.title for e in alice_tags if e.meta.startswith("en répondant")]
+    bruno_replies = [e.title for e in bruno_tags if e.meta.startswith("en répondant")]
+    assert len(alice_replies) == 4 and all("en colère" in t for t in alice_replies)
+    assert len(bruno_replies) == 4 and all("amoureuse" in t for t in bruno_replies)
+    assert stat(alice, "ressentie").value.key in ANGER and stat(alice, "dernière balise").value.key == "angry"
+    assert float(stat(alice, "chaleur").value.text) < 0 < float(stat(bruno, "chaleur").value.text)
+    assert stat(bruno, "dernière balise").value.key == "love"
+    assert "Aucune posture" in flat(stranger) and "elle ne lui a encore rien déclaré" in flat(stranger)
+    assert nobody[0].text == "Cette vue se lit sur la fiche d'une personne."
 
 
 # ── Le corps : la nuit ────────────────────────────────────────────────────
@@ -193,16 +404,21 @@ def test_the_stance_toward_someone_reads_anger_then_warmth(tmp_path):
 def test_at_night_the_rhythm_says_she_sleeps_and_when_she_will_wake(tmp_path):
     async def scenario(kernel, script):
         await asyncio.sleep((at_paris(2026, 9, 29, 2, 0) - kernel.mind.clock.now()) / US)
-        return show(kernel, "body", "rythme")
+        return show(kernel, "body", "rythme"), vitals(kernel)
 
-    night = live(tmp_path, scenario, start=at_paris(2026, 9, 28, 21, 0))
-    assert field(night, "sommeil").startswith("sommeil")
+    night, got = live(tmp_path, scenario, start=at_paris(2026, 9, 28, 21, 0))
+    assert stat(night, "sommeil").value.startswith("sommeil")
     assert field(night, "phase du jour") == "nuit"
     assert str(field(night, "prochaine transition")).startswith("se réveiller — 29/09 0")
+    assert stat(night, "prochaine transition").sub == "se réveiller"
+    assert when(stat(night, "prochaine transition").value.at).startswith("29/09 0")
     assert field(night, "initiatives et travail ordinaires") == "retenues : elle dort"
-    assert column(table(night, "Dernières transitions"), "transition")[0] == "s'endort"
-    fell = column(table(night, "Dernières transitions"), "quand")[0]
+    transitions = timeline(night, "Dernières transitions").entries
+    assert transitions[0].title == "s'endort" and transitions[0].href.kind == "event"
+    fell = when(transitions[0].at)
     assert fell.startswith("28/09 2") or fell.startswith("29/09 0")  # vers 23 h
+    assert got["body.sommeil"].text.startswith("sommeil") and got["body.sommeil"].tone == "info"
+    assert got["body.energie"].tone == "warn"  # 2 h du matin : elle est fatiguée
 
 
 # ── L'initiative : sans réponse, puis répondue ────────────────────────────
@@ -215,8 +431,7 @@ def test_an_unanswered_initiative_reads_as_such_then_as_answered(tmp_path):
         await (await kernel.perceive(said("user_1", "coucou"))).reply
         for _ in range(60):  # elle finit par lui écrire d'elle-même
             await asyncio.sleep(10 * MINUTE / US)
-            spoken = table(show(kernel, "agency", "initiatives"), "Ce qu'elle a dit d'elle-même")
-            if spoken.rows:
+            if timeline(show(kernel, "agency", "initiatives"), "Ce qu'elle a dit d'elle-même").entries:
                 break
         await asyncio.sleep(30 * MINUTE / US)
         before = show(kernel, "agency", "initiatives")
@@ -224,10 +439,14 @@ def test_an_unanswered_initiative_reads_as_such_then_as_answered(tmp_path):
         return before, show(kernel, "agency", "initiatives")
 
     before, after = live(tmp_path, scenario, start=at_paris(2026, 9, 28, 9, 0))
-    spoken = table(before, "Ce qu'elle a dit d'elle-même")
-    assert spoken.rows and "« Alice »" in spoken.rows[0][1] and spoken.rows[0][3] == "pas encore"
-    assert field(before, "ignorées d'affilée") != "0"
-    assert table(after, "Ce qu'elle a dit d'elle-même").rows[0][3].startswith("oui, ")
+    spoken = timeline(before, "Ce qu'elle a dit d'elle-même").entries
+    assert spoken and "« Alice »" in spoken[0].title and spoken[0].meta == "sans réponse pour l'instant"
+    assert spoken[0].tone == "warn" and spoken[0].href.key == "person/user_1"
+    assert stat(before, "ignorées d'affilée").value != 0 and stat(before, "ignorées d'affilée").tone == "warn"
+    answered = timeline(after, "Ce qu'elle a dit d'elle-même").entries[0]
+    assert answered.meta.startswith("répondue — ") and answered.tone == "ok"
+    used = stat(after, "aujourd'hui").value
+    assert isinstance(used, Meter) and used.text.endswith(" / 5") and 0 < used.ratio <= 1
 
 
 # ── Les buts : une exploration, un pas ────────────────────────────────────
@@ -251,7 +470,7 @@ def test_an_exploration_and_its_step_read_in_the_list_and_the_detail(tmp_path):
             for _ in range(2 * 3600):  # à la seconde : le but ouvert, avant que son pas ne le close
                 goals = kernel.mind.frame().state("goals").goals
                 if any(g.status == goals_c.ACTIVE for g in goals.values()):
-                    opened = show(kernel, "goals", "buts", status="vivants")
+                    opened = show(kernel, "goals", "vivants")
                     break
                 await asyncio.sleep(1)
             for _ in range(6 * 60):
@@ -261,10 +480,16 @@ def test_an_exploration_and_its_step_read_in_the_list_and_the_detail(tmp_path):
             step = reported()[0]
             await kernel.lanes.join()
             gid = str(step.data.goal)
-            detail = show(kernel, "goals", "but", goal=gid)
-            after = {s: show(kernel, "goals", "buts", status=s) for s in ("vivants", "abouti", "done")}
+            detail = [*show(kernel, "goals", "resume", subject=gid), *show(kernel, "goals", "pas", subject=gid),
+                      *show(kernel, "goals", "episodes", subject=gid)]
+            after = {
+                "vivants": show(kernel, "goals", "vivants"),
+                "exploration": show(kernel, "goals", "clos", sorte="exploration"),
+                "rappel": show(kernel, "goals", "clos", sorte="rappel")}
             await kernel.forget("user_1")
-            return step, opened, detail, after, show(kernel, "goals", "but", goal=f"#{gid}")
+            forgotten = [*show(kernel, "goals", "resume", subject=f"#{gid}"),
+                         *show(kernel, "goals", "pas", subject=gid)]
+            return step, opened, detail, after, forgotten
         finally:
             await kernel.stop()
 
@@ -272,42 +497,43 @@ def test_an_exploration_and_its_step_read_in_the_list_and_the_detail(tmp_path):
     gid = step.data.goal
     # ouvert : dans la liste des buts vivants, avec son envie à l'instant
     assert opened is not None
-    goals = table(opened, "Buts")
-    row = dict(zip(goals.columns, goals.rows[0], strict=True))
+    goals = table(opened, "Buts vivants")
+    row = dict(zip([c.label for c in goals.columns], _cells(goals.rows[0]), strict=True))
     link = row["but"]
-    assert isinstance(link, Ref) and link.kind == "view" and link.key == "goals/but"
-    assert link.params == (("goal", str(gid)),)
+    assert isinstance(link, Ref) and link.kind == "subject" and link.key == f"goal/{gid}"  # la fiche du but
+    assert goals.rows[0].href == link
     assert "examen" in row["titre"] and row["autorité"] == "à elle" and row["sorte"] == "exploration"
-    assert row["statut"] == "en cours" and row["outils"] == "goals, memory"
-    assert 50 <= int(row["envie"].rstrip("%")) <= 100  # l'envie de départ, à peine usée
+    assert _cell(row["statut"]) == "en cours"
+    assert isinstance(row["envie"], Meter) and 0.5 <= row["envie"].ratio <= 1  # l'envie de départ, à peine usée
     assert field(opened, "vivants") == 1
     # le détail : ses champs, ses pas, ses épisodes
     assert field(detail, "sorte") == "exploration" and "examen" in field(detail, "titre")
-    assert field(detail, "personne concernée") == "« Adrien » (user_1)"
-    opening = field(detail, "ouvert le")
+    assert _cell(field(detail, "personne concernée")) == "« Adrien » (user_1)"
+    opening = field(detail, "ouvert")
     assert isinstance(opening, Ref) and opening.kind == "event" and opening.key == str(gid)
     steps = table(detail, "Ses pas")
-    first = dict(zip(steps.columns, steps.rows[-1], strict=True))
+    first = dict(zip([c.label for c in steps.columns], _cells(steps.rows[-1]), strict=True))
     verdict = {"continue": "continuer", "done": "fini", "blocked": "bloquée", "wait": "attendre"}[step.data.verdict]
-    assert first["verdict"].startswith(verdict)
-    assert first["résumé"] == step.data.summary.text
+    assert _cell(first["verdict"]).startswith(verdict)
+    assert _cell(first["résumé"]) == step.data.summary.text
     assert set(step.data.tools) == set(first["outils utilisés"].split(", ")) and "memory_search" in step.data.tools
     assert first[""] == Ref("episode", step.correlation, "épisode")
     episodes = table(detail, "Ses épisodes")
     assert "pas de travail" in column(episodes, "épisode")
     assert step.correlation in [r.key for r in column(episodes, "")]
     assert all(isinstance(r, Ref) and r.kind == "episode" for r in column(episodes, ""))
-    assert field(detail, "statut") == "abouti"
-    # les filtres : par code ou par libellé
-    assert not table(after["vivants"], "Buts").rows
-    assert [r[0] for r in table(after["abouti"], "Buts").rows] == [r[0] for r in table(after["done"], "Buts").rows]
-    assert len(table(after["abouti"], "Buts").rows) == 1
+    assert _cell(field(detail, "statut")) == "abouti"
+    # les filtres : par sorte (code ou libellé)
+    assert not table(after["vivants"], "Buts vivants").rows
+    closed = table(after["exploration"], "Buts clos")
+    assert len(closed.rows) == 1 and _cell(column(closed, "issue")[0]) == "abouti"
+    assert not table(after["rappel"], "Buts clos").rows
     # oublié : ce qui la concernait se lit « (oublié) », la vue tient
     assert field(forgotten, "titre") == "(oublié)" and field(forgotten, "résultat") == "(oublié)"
     assert field(detail, "titre") != "(oublié)"
     # le résumé du pas pouvait citer ses mots : l'oubli l'atteint aussi
     summaries = column(table(forgotten, "Ses pas"), "résumé")
-    assert summaries and all(s == "(oublié)" for s in summaries)
+    assert summaries and all(_cell(s) == "(oublié)" for s in summaries)
     assert "examen" not in flat(forgotten)
 
 
@@ -318,7 +544,7 @@ def test_the_views_never_run_an_episode(tmp_path):
         head = kernel.mind.head
         for key in VIEWS:
             show(kernel, *key)
-        show(kernel, "goals", "but", goal="1")
+        show(kernel, "goals", "resume", subject="1")
         return head, kernel.mind.head
 
     head, after = live(tmp_path, scenario)

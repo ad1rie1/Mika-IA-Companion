@@ -1,8 +1,8 @@
 """Ce que les buts mettent dans le prompt.
 
 - **Pendant un pas** : ce à quoi elle travaille — le but, son cadre (un
-  projet confié), où elle en est, son carnet, ce que sont devenues ses
-  demandes, l'atelier.
+  projet confié), les consignes reçues depuis (la plus récente prime), où
+  elle en est, son carnet, ce que sont devenues ses demandes, l'atelier.
 - **Un rappel, un récit** : le texte du rappel, ou ce qu'elle a mené à bout —
   selon le lien avec qui l'écoute (tout, l'essentiel, ou le titre).
 - **En conversation** : ce qu'elle a en train (« tu fais quoi en ce
@@ -17,7 +17,7 @@ from typing import Any
 
 from mika.contracts import goals as c
 from mika.contracts import identity as identity_c
-from mika.faculties.goals.faculty import GOALS, Goal, GoalsState, live
+from mika.faculties.goals.faculty import GOALS, Goal, GoalsState, live, status
 from mika.faculties.goals.work import FULL, MENTION
 from mika.kernel.clock import DAY, local
 from mika.kernel.faculty import Zone
@@ -27,6 +27,8 @@ from mika.vocab.episodes import CONVERSATIONAL, Kind, goal_of
 from mika.vocab.privacy import hearable
 
 SHOWN = 4
+#: les dernières consignes d'un opérateur montrées pendant un pas
+INSTRUCTIONS_SHOWN = 3
 
 
 def _subject(frame: Frame) -> int | None:
@@ -37,7 +39,7 @@ def _subject(frame: Frame) -> int | None:
 
 
 def _refs(g: Goal) -> list[str]:
-    return [r for r in (g.title_ref, g.details_ref, g.summary_ref, g.result_ref, *g.notes) if r]
+    return [r for r in (g.title_ref, g.details_ref, g.summary_ref, g.result_ref, *g.notes, *g.instructions) if r]
 
 
 def _recent(s: GoalsState, now: int) -> list[Goal]:
@@ -102,6 +104,12 @@ def _step(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody
     lines = [f"Sorte : {kind}.", f"But : {texts.get(g.title_ref, '(titre oublié)')}"]
     if g.details_ref and texts.get(g.details_ref):
         lines.append(f"Cadre (confié, tu ne le changes pas) : {texts[g.details_ref]}")
+    if g.kind == c.PROJECT and g.due is not None:
+        lines.append(f"À rendre pour le {local(g.due, frame.env.tz_of(frame.root)):%d/%m à %H:%M}.")
+    instructions = [texts[r] for r in g.instructions if texts.get(r)]
+    if instructions:
+        lines.append("Consignes reçues depuis (à suivre ; la plus récente prime) :\n"
+                     + "\n".join(f"- {i}" for i in instructions[-INSTRUCTIONS_SHOWN:]))
     progress = _progress(g)
     if g.summary_ref and texts.get(g.summary_ref):
         lines.append(f"Où tu en es{f' ({progress})' if progress else ''} : {texts[g.summary_ref]}")
@@ -180,6 +188,8 @@ def _live_section(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> Sec
             continue
         if g.status == c.ACHIEVED:
             lines.append(f"- tu as mené à bout : {title}")
+        elif status(g, frame.now) == c.PAUSED:
+            lines.append(f"- mis en pause pour l'instant : {title}")
         elif g.kind == c.REMINDER:
             when = f"{local(g.due, tz):%d/%m à %H:%M}" if g.due else "bientôt"
             lines.append(f"- un rappel promis à {_who(frame, g.address)} pour le {when} : {title}")

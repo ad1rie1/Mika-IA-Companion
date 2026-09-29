@@ -23,13 +23,16 @@ dependencies = [
 [project.optional-dependencies]
 llm = ["anthropic>=0.40", "openai>=1.40", "ollama>=0.4", "google-genai>=1.0"]
 memory = ["numpy>=1.26", "sentence-transformers>=3.0"]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "hypothesis>=6.100", "import-linter>=2.0", "ruff>=0.6", "time-machine>=2.14"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "hypothesis>=6.100", "import-linter>=2.0", "ruff>=0.6", "time-machine>=2.14", "jsonschema>=4.20"]
 
 [project.scripts]
 mika = "mika.app.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"mika.inspector" = ["templates/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -133,3 +136,9 @@ name = "Le runtime ne nomme aucune faculté"
 type = "forbidden"
 source_modules = ["mika.runtime"]
 forbidden_modules = ["mika.faculties", "mika.plugins", "mika.adapters"]
+
+[[tool.importlinter.contracts]]
+name = "L'inspecteur ne nomme aucune faculté"
+type = "forbidden"
+source_modules = ["mika.inspector"]
+forbidden_modules = ["mika.faculties", "mika.plugins", "mika.sim"]

@@ -3,9 +3,10 @@ rappel à l'heure, raconter ce qu'elle a mené à bout.
 
 - **Un pas** (``STEP``, cible ``goal:<id>``) : l'envie d'une exploration le
   porte (elle s'use) ; un projet confié, son agenda. Un pas à la fois par but
-  (bail de l'atelier), espacés, au plus quatre dans l'heure.
+  (bail de l'atelier), espacés, au plus quatre dans l'heure. Aucun pour un but
+  suspendu (et un pas en cours est supplanté : sa garde voit « en pause »).
 - **Un rappel** se dit à l'heure : l'ordinaire reste sous la barre de réveil
-  (il attend qu'elle se réveille), l'urgent la passe.
+  (il attend qu'elle se réveille), l'urgent la passe ; suspendu, il se tait.
 - **Raconter** : à qui, et combien, dépend du lien — jamais d'un appel au
   modèle. La personne que ça concerne si elle est amie ou proche, sinon sa
   propriétaire ; à la propriétaire tout, à une proche l'essentiel, à une amie
@@ -111,7 +112,7 @@ def _remind(s: GoalsState, frame: Frame) -> list[Candidate]:
     p = params(frame.env.params_of("goals", frame.root))
     out = []
     for g in sorted(s.goals.values(), key=lambda g: g.id):
-        if g.kind != c.REMINDER or g.status != c.ACTIVE or g.delivered or not g.address:
+        if g.kind != c.REMINDER or status(g, frame.now) != c.ACTIVE or g.delivered or not g.address:
             continue
         if g.due is None or g.due > frame.now or g.retry_at > frame.now or g.attempts >= p.remind_attempts:
             continue

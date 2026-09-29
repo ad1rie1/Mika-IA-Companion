@@ -1,6 +1,0 @@
-{% extends "base.html" %}{% from "blocks.html" import render %}{% block body %}
-{% if not spec %}<p class="mut">Cette vue n'existe pas.</p>{% else %}
-{% if siblings|length > 1 %}<p class="row">{% for v in siblings %}{% if v.name == spec.name %}<b>{{ v.title }}</b>{% else %}<a href="{{ PREFIX }}/facultes/{{ v.owner|urlencode }}/{{ v.name|urlencode }}">{{ v.title }}</a>{% endif %}{% endfor %}</p>{% endif %}
-{% if spec.params %}<form class="card row">{% for pname, label in spec.params %}<input name="{{ pname }}" value="{{ values.get(pname, '') }}" placeholder="{{ label }}">{% endfor %}<button>Filtrer</button></form>{% endif %}
-{{ render(blocks) }}
-{% endif %}{% endblock %}

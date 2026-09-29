@@ -1,0 +1,6 @@
+{% extends "base.html" %}{% block body %}<div class="legacy">
+<p class="mut">La persona est un document, pas des réglages. Source actuelle : <b>{{ source }}</b>. L'enregistrer journalise une révision ; les paramètres qui dérivent du tempérament sont recalculés.</p>
+<form method="post" class="card"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="save">
+<textarea name="persona" spellcheck="false">{{ text }}</textarea><p class="row"><button>Enregistrer</button></p></form>
+<form method="post" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="file"><button class="quiet">Revenir au fichier</button></form>
+</div>{% endblock %}

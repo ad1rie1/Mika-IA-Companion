@@ -1,0 +1,12 @@
+{% extends "base.html" %}{% block body %}<div class="legacy">
+<h2>Tempérament</h2><p class="mut">Le seul étage « caractère » : chaque faculté en dérive ses paramètres. À 0,5, « comme la plupart des gens ». La politique (divulgation, budgets, plafonds) n'est pas ici.</p>
+<form method="post" class="card"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="temperament">
+{% for key, label, hint, value in sliders %}<label class="slider"><span>{{ label }}<br><span class="mut">{{ hint }}</span></span><input type="range" name="{{ key }}" min="0" max="1" step="0.05" value="{{ value }}" data-out="out-{{ key }}"><output id="out-{{ key }}">{{ value }}</output></label>{% endfor %}
+<label class="slider"><span>Humeur de fond<br><span class="mut">vers laquelle son repos penche</span></span><select name="background">{% for value, label in emotions %}<option value="{{ value }}" {{ 'selected' if value == background else '' }}>{{ label }}</option>{% endfor %}</select><span></span></label>
+<p><button>Enregistrer</button></p></form>
+<h2>Surcharges avancées</h2><p class="mut">Pour le diagnostic : une table YAML « nom: valeur » par faculté, validée contre ses paramètres (une clé inconnue est refusée). Vide : aucune surcharge.</p>
+{% for f in faculties %}<details class="card"><summary><b>{{ f.name }}</b>{% if f.override %} <span class="pill">surchargée</span>{% endif %}</summary>
+<div class="grid"><div><div class="mut">En vigueur</div><pre>{{ f.now }}</pre></div>
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="overrides"><input type="hidden" name="faculty" value="{{ f.name }}">
+<div class="mut">Surcharge</div><textarea name="values" spellcheck="false">{{ f.override }}</textarea><p><button>Enregistrer</button></p></form></div></details>{% endfor %}
+</div>{% endblock %}

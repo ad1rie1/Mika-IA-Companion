@@ -10,6 +10,10 @@
   projet confié ne s'use pas — c'est un engagement.
 - **Un rappel** qui n'a pas pu être dit est retenté, espacé (5 min × n), au
   plus trois fois.
+- **Suspendu** par un opérateur (``goals.paused``), un but est figé : aucun
+  pas, aucun rappel, aucune clôture, et son envie ne s'use pas ; repris
+  (``goals.resumed``), il repart d'où il en était. Une **consigne**
+  (``goals.amended``) s'ajoute au but et se lit au pas suivant.
 """
 
 from __future__ import annotations
@@ -31,6 +35,7 @@ from mika.vocab.temperament import Temperament
 
 KEEP_CLOSED = 32
 NOTES_KEPT = 5
+INSTRUCTIONS_KEPT = 5
 
 
 class GoalsParams(BaseModel):
@@ -124,6 +129,10 @@ class Goal:
     summary_ref: str = ""
     notes: tuple[str, ...] = ()  # références des notes de son carnet
     effects: tuple[str, ...] = ()  # ce que sont devenus ses effets externes (courtes lignes)
+    #: suspendu par un opérateur depuis cet instant (0 : il ne l'est pas)
+    paused_at: int = 0
+    #: références des consignes d'un opérateur, les plus récentes en dernier
+    instructions: tuple[str, ...] = ()
     # les rappels
     delivered: bool = False
     attempts: int = 0
@@ -189,6 +198,42 @@ class Awaited(Payload):
 AWAITED = GOALS.event("awaited", Awaited)
 
 
+class Paused(Payload):
+    """Un opérateur suspend ce but : ni pas, ni rappel, ni usure, jusqu'à reprise."""
+
+    goal: int
+    #: la poignée de l'opérateur
+    by: str = ""
+    owner: str | None = None
+    about: tuple[str, ...] = ()
+
+
+class Resumed(Payload):
+    """Un opérateur reprend un but suspendu : il repart d'où il en était."""
+
+    goal: int
+    by: str = ""
+    owner: str | None = None
+    about: tuple[str, ...] = ()
+
+
+class Amended(Payload):
+    """Une consigne d'un opérateur, ajoutée au but (elle la lit au pas suivant)."""
+
+    goal: int
+    instruction: Content
+    by: str = ""
+    #: recopiés du but : la consigne peut citer ces personnes (l'oubli l'atteint)
+    owner: str | None = None
+    about: tuple[str, ...] = ()
+
+
+GOAL_PAUSED = GOALS.event("paused", Paused, subjects=("owner", "about"))
+GOAL_RESUMED = GOALS.event("resumed", Resumed, subjects=("owner", "about"))
+#: les mots de l'opérateur : ses consignes s'oublient avec lui, et avec les personnes du but
+GOAL_AMENDED = GOALS.event("amended", Amended, content=("instruction",), subjects=("owner", "about", "by"))
+
+
 def params(p: GoalsParams | None) -> GoalsParams:
     return p if p is not None else GoalsParams()
 
@@ -209,20 +254,39 @@ def ready_to_undertake(s: GoalsState, p: GoalsParams) -> int:
 
 
 def desire(g: Goal, now: int, p: GoalsParams) -> float:
+    """L'envie à l'instant ; suspendue, elle ne s'use pas (figée à la pause)."""
     if g.kind != c.EXPLORATION:
         return 1.0
-    return g.desire * 0.5 ** (max(0, now - g.desire_at) / p.desire_half_life_us)
+    until = min(now, g.paused_at) if g.paused_at else now
+    return g.desire * 0.5 ** (max(0, until - g.desire_at) / p.desire_half_life_us)
 
 
 def status(g: Goal, now: int) -> str:
-    """Le statut à l'instant : une attente échue redevient active."""
+    """Le statut à l'instant : une attente échue redevient active ; un but
+    suspendu (et pas clos) est « en pause »."""
+    if g.status in c.CLOSED_STATUSES:
+        return g.status
+    if g.paused_at:
+        return c.PAUSED
     if g.status == c.WAITING and g.waiting_until <= now:
         return c.ACTIVE
     return g.status
 
 
 def live(g: Goal, now: int) -> bool:
+    """Vivant : actif, en attente, ou suspendu (pas clos)."""
+    return status(g, now) in c.LIVE_STATUSES
+
+
+def workable(g: Goal, now: int) -> bool:
+    """Vivant et pas suspendu : on peut y travailler, le rappeler, le clore."""
     return status(g, now) in (c.ACTIVE, c.WAITING)
+
+
+def goal_at(s: GoalsState, key: str | int | None) -> Goal | None:
+    """Le but d'une clé de fiche (``12``, ``"12"`` ou ``"#12"``), ou rien."""
+    raw = str(key if key is not None else "").strip().lstrip("#")
+    return s.goals.get(int(raw)) if raw.isdigit() else None
 
 
 def _set(s: GoalsState, g: Goal) -> GoalsState:
@@ -365,13 +429,38 @@ def _noted(s: GoalsState, e, cx) -> GoalsState:
     return _set(s, replace(g, notes=(*g.notes, e.data.text.ref)[-NOTES_KEPT:]))
 
 
+@GOALS.reducer(GOAL_PAUSED)
+def _paused(s: GoalsState, e, cx) -> GoalsState:
+    g = s.goals.get(e.data.goal)
+    if g is None or g.status in c.CLOSED_STATUSES or g.paused_at:
+        return s
+    return _set(s, replace(g, paused_at=e.at))
+
+
+@GOALS.reducer(GOAL_RESUMED)
+def _resumed(s: GoalsState, e, cx) -> GoalsState:
+    g = s.goals.get(e.data.goal)
+    if g is None or g.status in c.CLOSED_STATUSES or not g.paused_at:
+        return s
+    # l'envie repart d'où elle était : la pause ne compte pas dans son usure
+    return _set(s, replace(g, paused_at=0, desire_at=g.desire_at + max(0, e.at - g.paused_at)))
+
+
+@GOALS.reducer(GOAL_AMENDED)
+def _amended(s: GoalsState, e, cx) -> GoalsState:
+    g = s.goals.get(e.data.goal)
+    if g is None or g.status in c.CLOSED_STATUSES or not e.data.instruction.ref:
+        return s
+    return _set(s, replace(g, instructions=(*g.instructions, e.data.instruction.ref)[-INSTRUCTIONS_KEPT:]))
+
+
 @GOALS.reducer(c.GOAL_CLOSED)
 def _closed(s: GoalsState, e, cx) -> GoalsState:
     d = e.data
     g = s.goals.get(d.goal)
     if g is None or g.status in c.CLOSED_STATUSES:
         return s
-    g = replace(g, status=d.status, closed_at=e.at, notable=d.notable,
+    g = replace(g, status=d.status, closed_at=e.at, notable=d.notable, paused_at=0,
                 result_ref=d.result.ref or "" if d.result is not None else "")
     s = _set(s, g)
     if g.source:

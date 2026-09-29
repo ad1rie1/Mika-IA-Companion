@@ -11,6 +11,7 @@ choisie proportionnellement à son intensité — si ses ressources sont libres,
 from __future__ import annotations
 
 import random
+from collections import deque
 from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -42,6 +43,10 @@ Submit = Callable[[Row, Frame], Awaitable[Any]]
 #: Au plus tard, l'intensité est réévaluée à ce rythme (une preuve qui monte
 #: avec le temps seul — un silence qui s'allonge — est vue dans ce délai).
 REEVALUATE_US = 300 * 1_000_000
+#: la dernière table vivante gardée en mémoire (les lignes les plus intenses)
+LAST_ROWS_KEPT = 256
+#: les derniers déclenchements et anomalies gardés en mémoire
+RECENT_KEPT = 512
 
 
 class Arbiter:
@@ -57,9 +62,13 @@ class Arbiter:
         self.draws = 0
         self.first_seen: dict[str, int] = {}
         self.attempts = 0
+        #: la dernière table calculée, entière jusqu'à ``LAST_ROWS_KEPT`` lignes
+        #: (triées par intensité décroissante), et quand
         self.last_rows: list[Row] = []
-        self.anomalies: list[str] = []
-        self.fired: list[tuple[int, str]] = []
+        self.last_at: int | None = None
+        self.last_seq: int | None = None
+        self.anomalies: deque[str] = deque(maxlen=RECENT_KEPT)
+        self.fired: deque[tuple[int, str]] = deque(maxlen=RECENT_KEPT)
         #: lignes déjà choisies dont l'épisode n'est pas terminé : on ne les
         #: choisit pas deux fois pendant qu'elles attendent leur tour
         self.queued: set[str] = set()
@@ -109,7 +118,8 @@ class Arbiter:
             self.first_seen.setdefault(k, now)
         ages = {k: (now - t) / 1_000_000 for k, t in self.first_seen.items()}
         rows = [r for r in pool(proposals, reg.arbitration, modulate, ages) if r.key not in self.queued]
-        self.last_rows = rows
+        self.last_rows = rows[:LAST_ROWS_KEPT]
+        self.last_at, self.last_seq = now, frame.seq
         return rows
 
     def _rng(self, frame: Frame, salt: str) -> random.Random:
@@ -141,19 +151,32 @@ class Arbiter:
         reg = self._registry_of()
         rows = self.rows(frame)
         total = sum(r.hazard for r in rows)
-        row, draw = thin(rows, max(bound, total), self._rng(frame, "amincissement"))
+        bound = max(bound, total)
+        row, draw = thin(rows, bound, self._rng(frame, "amincissement"))
         if row is None:
             return
         for res in sorted(row.resources):
             if frame.get(LEASE(res)) is not None:
                 return  # ressource occupée : l'occurrence est perdue, pas reportée
         await ctx.emit(
-            SELECTED.draft(rows=tuple(r.record() for r in rows[: reg.arbitration.top_k]), fired=(row.key,), draw=draw),
+            SELECTED.draft(rows=tuple(r.record() for r in shown(rows, row, reg.arbitration.top_k)),
+                           fired=(row.key,), draw=draw, candidates=len(rows), bound=bound, total=total),
             emitter="kernel",
         )
         self.fired.append((ctx.now, row.key))
         if await self._submit(row, frame):
             self.queued.add(row.key)
+
+
+def shown(rows: Sequence[Row], fired: Row, top_k: int) -> list[Row]:
+    """Les lignes journalisées d'une sélection : le haut de la table, et
+    toujours la ligne choisie — une ligne tirée loin derrière les premières
+    (l'amincissement choisit au prorata de l'intensité, pas le maximum) doit
+    pouvoir s'expliquer."""
+    top = list(rows[: max(0, top_k)])
+    if all(r.key != fired.key for r in top):
+        top.append(fired)
+    return top
 
 
 def arbiter_spec(arbiter: Arbiter, *, quantum_s: float = 600.0) -> ProcessSpec:

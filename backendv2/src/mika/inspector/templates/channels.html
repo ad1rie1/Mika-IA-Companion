@@ -1,9 +1,0 @@
-{% extends "base.html" %}{% block body %}
-<h2>Telegram</h2>
-<form method="post" class="card"><input type="hidden" name="csrf" value="{{ csrf }}">
-<dl><dt>jeton du robot</dt><dd><input name="token" type="password" autocomplete="off" placeholder="{{ 'configuré — vide : inchangé' if configured else 'non configuré' }}"></dd>
-<dt>conversations écoutées</dt><dd><input name="allowed" value="{{ allowed }}" placeholder="identifiants de chat (vide : tout le monde)"></dd>
-<dt>propriétaires</dt><dd><input name="owners" value="{{ owners }}" placeholder="identifiants d'utilisateur Telegram"></dd></dl>
-<p><button>Enregistrer et redémarrer le robot</button></p></form>
-<p class="mut">Le frontend web se règle dans <a href="{{ PREFIX }}/comptes">Comptes</a> (qui peut se connecter).</p>
-{% endblock %}

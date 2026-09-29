@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 from mika.kernel.clock import US, Clock
 from mika.kernel.codec import h64
 from mika.kernel.prompt import CONTEXT_FOOTER
+from mika.plugins.forge.guide import EXAMPLE_CODE, EXAMPLE_MANIFEST
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall, Usage
 from mika.sim.llm.scripted import LognormalLatency
 
@@ -28,6 +29,8 @@ PERSONAL_WORDS = ("malade", "mort", "boulot", "travail", "argent", "santé", "sa
                   "frère", "frere", "mariage", "marie", "rupture", "enceinte", "hôpital", "hopital", "déprim")
 IMPORTANT_WORDS = ("mort", "mariage", "marie", "enceinte", "hôpital", "hopital", "rupture", "accident")
 PROMISE_WORDS = ("je te promets", "promis", "je te rappelle", "je t'envoie", "je te dirai", "je te le rappellerai")
+#: « écris-toi une app … » : elle lit le mode d'emploi de la Forge, écrit l'app de l'exemple, teste sa vue
+FORGE_ASK = "écris-toi une app"
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +87,16 @@ def _message_of(req: LLMRequest) -> str:
     return last.split(CONTEXT_FOOTER, 1)[1].strip() if CONTEXT_FOOTER in last else last
 
 
+def _asked(req: LLMRequest) -> tuple[str, list[str]]:
+    """Le dernier message de la personne, et les résultats d'outils qui l'ont suivi."""
+    users = [i for i, m in enumerate(req.messages) if m.role == "user"]
+    if not users:
+        return "", []
+    text = req.messages[users[-1]].content
+    text = text.split(CONTEXT_FOOTER, 1)[1].strip() if CONTEXT_FOOTER in text else text
+    return text, [m.content for m in req.messages[users[-1] + 1:] if m.role == "tool"]
+
+
 class PersonaSimLLM:
     name = "persona-sim"
 
@@ -130,6 +143,8 @@ class PersonaSimLLM:
             return self._out(req, "Je suis quelqu'un qui aime les conversations simples et qui s'attache vite.")
         if req.role == "step":
             return self._step(req)
+        if req.role == "reply" and FORGE_ASK in _asked(req)[0].lower():
+            return self._forge(req)
         if req.role == "reply" and "rappelle-moi" in _message_of(req).lower():
             got = self._remind(req)
             if got is not None:
@@ -231,6 +246,26 @@ class PersonaSimLLM:
             return self._call(req, ("goal_note", {"text": f"Lu : {gist}"}))
         return self._call(req, ("report_step", {"verdict": "done", "notable": 0.7,
                                                "summary": f"J'ai lu l'article sur « {wanted[:80]} » : passionnant."}))
+
+    def _forge(self, req: LLMRequest) -> LLMResponse:
+        """« écris-toi une app … » (sa propriétaire le lui demande) : lire le mode
+        d'emploi, écrire l'app de l'exemple (une vue, deux actions), tester sa vue."""
+        _, results = _asked(req)
+        if not {"forge_help", "forge_write", "forge_test"} <= {t.name for t in req.tools}:
+            return self._out(req, "Je ne peux pas écrire d'app d'ici. [EMOTION:sad:0.3]")
+        if not results:
+            return self._call(req, ("forge_help", {"sujet": "exemple"}))
+        if len(results) == 1:
+            return self._call(req, ("forge_write", {"app": "meteo", "manifest": EXAMPLE_MANIFEST,
+                                                    "code": EXAMPLE_CODE}))
+        if len(results) == 2:
+            if "Écrite" not in results[-1]:
+                return self._out(req, "Mon app est refusée, je la reprendrai. [EMOTION:frustrated:0.4]")
+            return self._call(req, ("forge_test", {"app": "meteo", "method": "view_releves",
+                                                   "args": {"ville": "Paris"}}))
+        ok = "enveloppe valide" in results[-1]
+        return self._out(req, ("Voilà : mon carnet météo a sa vue et ses actions !" if ok
+                               else "Hmm, sa vue ne passe pas encore.") + " [EMOTION:proud:0.6]")
 
     def _remind(self, req: LLMRequest) -> LLMResponse | None:
         """« rappelle-moi dans 20 minutes de … » / « rappelle-moi à 3h de … (urgent) »."""

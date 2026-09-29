@@ -11,14 +11,20 @@ concernent et leur sensibilité, et ne se montrent qu'à qui peut les entendre.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from mika.kernel.events import Content, Payload, VoiceProvenance, event_type
 from mika.kernel.facts import FactKey
+from mika.kernel.forms import Knob
 from mika.vocab.temperament import Temperament
 
 OWNER = "self"
+
+
+def _lines(label: str, help: str, order: int) -> Knob:
+    return Knob(label=label, help=help + " Une phrase par ligne.", group="Caractère", advanced=False, order=order)
 
 
 class PersonaDoc(BaseModel):
@@ -26,19 +32,24 @@ class PersonaDoc(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    name: str = "Mika"
-    description: str = ""
-    language: str = "français"
-    tone: str = ""
-    traits: tuple[str, ...] = ()
-    quirks: tuple[str, ...] = ()
-    vulnerabilities: tuple[str, ...] = ()
-    values: tuple[str, ...] = ()
-    interests: tuple[str, ...] = ()
-    speech: tuple[str, ...] = ()
-    greetings: tuple[str, ...] = ()
-    timezone: str = "Europe/Paris"
-    temperament: Temperament = Field(default_factory=Temperament)
+    name: Annotated[str, Knob(label="Nom", group="Identité", advanced=False, order=10)] = "Mika"
+    description: Annotated[str, Knob(label="Description", help="Qui elle est, en quelques phrases.",
+                                     group="Identité", widget="textarea", advanced=False, order=20)] = ""
+    language: Annotated[str, Knob(label="Langue", group="Identité", advanced=False, order=30)] = "français"
+    tone: Annotated[str, Knob(label="Ton", help="Comment elle parle, en général.", group="Identité",
+                              widget="textarea", advanced=False, order=40)] = ""
+    traits: Annotated[tuple[str, ...], _lines("Traits", "Ce qui la définit.", 50)] = ()
+    quirks: Annotated[tuple[str, ...], _lines("Manies", "Ses petites habitudes.", 60)] = ()
+    vulnerabilities: Annotated[tuple[str, ...], _lines("Fragilités", "Ce qui la touche.", 70)] = ()
+    values: Annotated[tuple[str, ...], _lines("Valeurs", "Ce à quoi elle tient.", 80)] = ()
+    interests: Annotated[tuple[str, ...], _lines("Centres d'intérêt", "Ce qui la passionne.", 90)] = ()
+    speech: Annotated[tuple[str, ...], _lines("Façons de parler", "Ses tournures.", 100)] = ()
+    greetings: Annotated[tuple[str, ...], _lines("Salutations", "Comment elle dit bonjour.", 110)] = ()
+    timezone: Annotated[str, Knob(label="Fuseau horaire", help="Celui qu'elle vit (nom IANA : Europe/Paris, "
+                                                              "America/Montreal…).", group="Identité",
+                                  advanced=False, order=35)] = "Europe/Paris"
+    temperament: Annotated[Temperament, Knob(label="Tempérament", advanced=False, order=200)] = \
+        Field(default_factory=Temperament)
 
 
 class PersonaRevised(Payload):

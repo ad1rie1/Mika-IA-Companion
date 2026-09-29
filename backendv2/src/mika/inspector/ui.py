@@ -1,17 +1,17 @@
-"""Ce que partagent toutes les pages de l'inspecteur : l'accès (opérateurs
-seulement), le jeton CSRF à double soumission, le rendu (Jinja2, échappement
-automatique) et le menu."""
+"""Ce que partagent toutes les pages de la console : l'accès (opérateurs
+seulement), le jeton CSRF à double soumission, les en-têtes de sécurité, le
+rendu (Jinja2, échappement automatique), la navigation et ses badges, les
+vitaux."""
 
 from __future__ import annotations
 
 import json
 import secrets
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlencode
 from zoneinfo import ZoneInfo
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -19,15 +19,30 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 
 from mika.adapters.web.accounts import Account, Accounts
+from mika.contracts import runtime as rt
+from mika.inspector import render
+from mika.inspector.catalog import Builtin, Destination, NavGroup, SettingsSection, SettingsTab
 from mika.kernel.clock import US
-from mika.kernel.inspect import Fields, Note, Prose, Ref, Table
+from mika.kernel.inspect import Vital
+from mika.runtime import health
 from mika.runtime.bootstrap import Kernel
 from mika.runtime.effects import with_content
+from mika.runtime.inspection import Inspection
 
-PREFIX = "/inspecteur"
+PREFIX = render.PREFIX
 CSRF_COOKIE = "csrftoken"
 SESSION_COOKIE = "sessionid"
 TEMPLATES = Path(__file__).parent / "templates"
+STATIC = Path(__file__).parent / "static"
+ASSET_VERSION = "1"
+
+SECURITY_HEADERS = {
+    "Content-Security-Policy": "default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:; "
+                               "connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "same-origin",
+    "Cache-Control": "no-store",
+}
 
 
 @dataclass(slots=True)
@@ -40,7 +55,7 @@ class InspectorDeps:
     reload: Callable[[], Awaitable[list[str]]]
     #: les derniers appels de modèle (en mémoire)
     traces: Sequence[Any]
-    tz: ZoneInfo = field(default_factory=lambda: ZoneInfo("Europe/Paris"))
+    tz: ZoneInfo | None = None
     #: le port d'entrée (décider d'un effet, santé)
     port: Any = None
     #: le registre durable des appels de modèle (``adapters/llm/calls.py``)
@@ -55,73 +70,162 @@ class InspectorDeps:
     reports: Path | None = None
     #: une décision d'opérateur sur une app forgée : ``(app, état)``
     forge_switch: Callable[[str, str], Awaitable[None]] | None = None
+    #: la carte de la console (``app/console.py``)
+    navigation: Sequence[NavGroup] = field(default_factory=tuple)
+    #: les séries mesurées : ``sampler(clé, depuis, jusqu'à, points)``
+    sampler: Callable[..., list[tuple[int, float]]] | None = None
+    #: les sections de réglages (``app/reglages.py``) et leurs onglets
+    sections: Sequence[SettingsSection] = field(default_factory=tuple)
+    settings_tabs: Sequence[SettingsTab] = field(default_factory=tuple)
+    #: les paramètres internes des facultés (``runtime/params.Parameters``)
+    parameters: Any = None
 
-
-MENU: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
-    ("Vivre", (("/", "Vue d'ensemble"), ("/chronologie", "Chronologie"), ("/decisions", "Décisions"),
-               ("/facultes", "Facultés"), ("/approbations", "Approbations"))),
-    ("Comprendre", (("/etat", "État et faits"), ("/contributions", "Contributions"))),
-    ("Exploiter", (("/sante", "Santé"), ("/appels", "Appels de modèle"), ("/rapports", "Simulations"))),
-    ("Régler", (("/modeles", "Modèles"), ("/persona", "Persona"), ("/parametres", "Paramètres"),
-                ("/canaux", "Canaux"), ("/sens", "Sens"), ("/forge", "Apps forgées"), ("/comptes", "Comptes"))),
-)
 
 env = Environment(loader=FileSystemLoader(TEMPLATES), autoescape=select_autoescape(default=True),
                   trim_blocks=True, lstrip_blocks=True)
-
-
-def href(ref: Ref) -> str:
-    """L'adresse d'un lien de vue (les clés viennent du code des facultés,
-    jamais d'un texte extérieur ; elles sont quand même encodées)."""
-    if ref.kind == "episode":
-        return f"{PREFIX}/episode/{quote(ref.key, safe='')}"
-    if ref.kind == "event":
-        return f"{PREFIX}/evenement/{quote(ref.key, safe='')}"
-    owner, _, name = ref.key.partition("/")
-    query = ("?" + urlencode(ref.params)) if ref.params else ""
-    return f"{PREFIX}/facultes/{quote(owner, safe='')}/{quote(name, safe='')}{query}"
-
-
-def block_kind(block: Any) -> str:
-    return {Table: "table", Fields: "fields", Note: "note", Prose: "prose"}.get(type(block), "note")
-
-
-def cell(value: Any) -> dict[str, Any]:
-    """Une cellule prête pour le gabarit : texte, ou lien."""
-    if isinstance(value, Ref):
-        return {"text": value.text, "href": href(value)}
-    if value is None:
-        return {"text": "—"}
-    if isinstance(value, bool):
-        return {"text": "oui" if value else "non"}
-    if isinstance(value, float):
-        return {"text": f"{value:.3g}"}
-    return {"text": str(value)}
-
-
-env.globals.update(block_kind=block_kind, cell=cell, PREFIX=PREFIX)
+env.globals.update(PREFIX=PREFIX, ASSET_VERSION=ASSET_VERSION)
 
 
 class UI:
-    def __init__(self, deps: InspectorDeps, *, cookie_secure: bool = False) -> None:
+    def __init__(self, deps: InspectorDeps, builtins: Mapping[str, Builtin], *, cookie_secure: bool = False) -> None:
         self.deps = deps
         self.kernel = deps.kernel
         self.cookie_secure = cookie_secure
+        self.builtins = builtins
+        #: le moteur des réglages déclarés (``pages/settings_form.py``), posé par ``app.routes``
+        self.settings_forms: Any = None
+        sampler = deps.sampler or getattr(getattr(deps.kernel, "series", None), "read", None)
+        self.inspection = Inspection(deps.kernel, sampler=sampler)
+        self.sampler = sampler
+        self._tz: tuple[int, ZoneInfo] | None = None
+        #: les messages d'après une action, lus une fois (clé : le jeton du formulaire)
+        self._flash: dict[str, tuple[str, str]] = {}
 
-    # ── rendu ──
+    def flash(self, key: str, tone: str, text: str) -> None:
+        self._flash[key] = (tone, text)
+        while len(self._flash) > 200:
+            self._flash.pop(next(iter(self._flash)))
+
+    def pop_flash(self, key: str) -> tuple[str, str] | None:
+        return self._flash.pop(key, None) if key else None
+
+    # ── temps ──
+    @property
+    def tz(self) -> ZoneInfo:
+        """Le fuseau de sa persona (celui qu'elle vit), sinon celui des dépendances."""
+        if self.deps.tz is not None:
+            return self.deps.tz
+        head = self.kernel.mind.head
+        if self._tz is None or self._tz[0] != head:
+            frame = self.kernel.mind.frame()
+            self._tz = (head, frame.env.tz_of(frame.root))
+        return self._tz[1]
+
     def when(self, t: int) -> str:
         if not t:
             return "—"
-        return datetime.fromtimestamp(t / US, self.deps.tz).strftime("%d/%m %H:%M:%S")
+        return datetime.fromtimestamp(t / US, self.tz).strftime("%d/%m %H:%M")
 
-    def page(self, request: Request, name: str, title: str, *, status: int = 200, **ctx: Any) -> Response:
-        token = request.cookies.get(CSRF_COOKIE) or secrets.token_urlsafe(32)
-        here = request.url.path.removeprefix(PREFIX) or "/"
-        html = env.get_template(name).render(title=title, menu=MENU, here=here, csrf=token, **ctx)
+    def when_long(self, t: int) -> str:
+        if not t:
+            return "—"
+        return datetime.fromtimestamp(t / US, self.tz).strftime("%d/%m/%Y %H:%M:%S")
+
+    def now(self) -> int:
+        return self.kernel.mind.clock.now()
+
+    def stamp(self, t: int, span: int) -> str:
+        """Une graduation : l'heure sur un jour, la date au-delà."""
+        fmt = "%H:%M" if span <= 2 * 86_400 * US else "%d/%m"
+        return datetime.fromtimestamp(t / US, self.tz).strftime(fmt)
+
+    def env(self) -> render.Env:
+        return render.Env(when=self.when_long, now=self.now(), stamp=self.stamp)
+
+    # ── navigation ──
+    def destination_badge(self, d: Destination) -> int:
+        total = 0
+        for v in self.inspection.in_section(d.key):
+            b = self.inspection.badge(v)
+            total += b[0] if b else 0
+        for key in d.builtin:
+            b = self.builtins.get(key)
+            if b is not None and b.badge is not None:
+                total += int(b.badge(self) or 0)
+        return total
+
+    def nav(self, active: str) -> list[dict[str, Any]]:
+        groups = []
+        for g in self.deps.navigation:
+            items = []
+            for d in g.items:
+                url = f"{PREFIX}/" if d.key == "accueil" else f"{PREFIX}/{d.key}"
+                items.append({"key": d.key, "label": d.label, "icon": d.icon, "href": url, "on": d.key == active,
+                              "badge": self.destination_badge(d)})
+            groups.append({"label": g.label, "items": items})
+        return groups
+
+    def vitals(self) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        report = health.report(self.kernel)
+        states = {"ok": ("ok", "en forme"), "degraded": ("warn", "répond moins bien"), "ko": ("danger", "en panne")}
+        dot, text = states.get(report.status, ("muted", report.status))
+        out.append({"label": "Santé", "text": text, "dot": dot, "href": f"{PREFIX}/systeme/sante"})
+        for spec, v in self.inspection.vitals():
+            out.append(self._vital(spec.label, v))
+        pending = len(self.kernel.mind.frame().get(rt.PENDING_EFFECTS))
+        if pending:
+            out.append({"label": "À approuver", "text": str(pending), "dot": "warn",
+                        "href": f"{PREFIX}/approbations"})
+        waiting = sum(self.kernel.lanes.pending(lane) for lane in self.kernel.lanes.capacities)
+        if waiting:
+            out.append({"label": "En file", "text": str(waiting), "dot": "info",
+                        "href": f"{PREFIX}/decisions/episodes"})
+        gateway = self.kernel.deps.gateway
+        if not getattr(gateway, "configured", gateway is not None):
+            out.append({"label": "Modèles", "text": "aucun", "dot": "danger", "href": f"{PREFIX}/reglages/modeles"})
+        out.append({"label": "Heure", "text": datetime.fromtimestamp(self.now() / US, self.tz).strftime("%H:%M"),
+                    "optional": True})
+        return out
+
+    @staticmethod
+    def _vital(label: str, v: Vital) -> dict[str, Any]:
+        return {"label": label, "text": v.text, "dot": render.tone(v.tone) if v.tone else "",
+                "hint": v.hint, "href": render.href(v.href) if v.href else "",
+                "swatch": v.swatch.key if v.swatch else "",
+                "ratio": None if v.ratio is None else f"{min(1.0, max(0.0, v.ratio)):.0%}"}
+
+    # ── rendu ──
+    def csrf(self, request: Request) -> str:
+        """Le jeton de formulaire de cette requête (le cookie, ou un nouveau posé par la réponse)."""
+        token = request.cookies.get(CSRF_COOKIE) or getattr(request.state, "csrf", "")
+        if not token:
+            token = secrets.token_urlsafe(32)
+            request.state.csrf = token
+        return token
+
+    def page(self, request: Request, name: str, title: str, *, status: int = 200, active: str = "",
+             **ctx: Any) -> Response:
+        token = self.csrf(request)
+        account = self.operator(request)
+        html = env.get_template(name).render(
+            title=title, csrf=token, nav=self.nav(active), vitals=self.vitals(),
+            who=account.display_name if account else "", **ctx)
         response = HTMLResponse(html, status_code=status)
         if not request.cookies.get(CSRF_COOKIE):
             response.set_cookie(CSRF_COOKIE, token, httponly=False, samesite="lax", secure=self.cookie_secure)
-        return response
+        return secure(response)
+
+    def fragment(self, name: str, **ctx: Any) -> Response:
+        return secure(HTMLResponse(env.get_template(name).render(**ctx)))
+
+    def bare(self, request: Request, name: str, title: str, *, status: int = 200, **ctx: Any) -> Response:
+        """Une page sans le cadre (connexion)."""
+        token = request.cookies.get(CSRF_COOKIE) or secrets.token_urlsafe(32)
+        response = HTMLResponse(env.get_template(name).render(title=title, csrf=token, **ctx), status_code=status)
+        if not request.cookies.get(CSRF_COOKIE):
+            response.set_cookie(CSRF_COOKIE, token, httponly=False, samesite="lax", secure=self.cookie_secure)
+        return secure(response)
 
     # ── accès ──
     def operator(self, request: Request) -> Account | None:
@@ -130,12 +234,8 @@ class UI:
 
     async def form(self, request: Request) -> dict[str, str] | None:
         """Le formulaire, si son jeton correspond au cookie ; sinon ``None``."""
-        data = await request.form()
-        token = str(data.get("csrf") or "")
-        cookie = request.cookies.get(CSRF_COOKIE, "")
-        if not cookie or not secrets.compare_digest(token, cookie):
-            return None
-        return {k: str(v) for k, v in data.multi_items()}
+        got = await self.form_lists(request)
+        return None if got is None else got[0]
 
     async def form_lists(self, request: Request) -> tuple[dict[str, str], dict[str, list[str]]] | None:
         """Comme ``form``, avec les champs répétés (cases à cocher)."""
@@ -152,7 +252,9 @@ class UI:
     def guarded(self, fn: Callable[[Request], Awaitable[Response]]) -> Callable[[Request], Awaitable[Response]]:
         async def wrapper(request: Request) -> Response:
             if self.operator(request) is None:
-                return RedirectResponse(PREFIX + "/connexion", status_code=303)
+                if request.url.path.startswith(PREFIX + "/_"):
+                    return secure(Response(status_code=401))
+                return secure(RedirectResponse(PREFIX + "/connexion", status_code=303))
             return await fn(request)
 
         return wrapper
@@ -164,3 +266,9 @@ class UI:
     @staticmethod
     def show(e: Any, limit: int = 4000) -> str:
         return json.dumps(json.loads(e.data.model_dump_json()), ensure_ascii=False, indent=1)[:limit]
+
+
+def secure(response: Response) -> Response:
+    for k, v in SECURITY_HEADERS.items():
+        response.headers.setdefault(k, v)
+    return response

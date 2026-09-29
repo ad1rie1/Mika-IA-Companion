@@ -117,6 +117,19 @@ class EffectExecuted(Payload):
     result: str = ""
 
 
+class Operated(Payload):
+    """Une action d'opérateur passée par la console (l'audit) : laquelle, par qui,
+    sur quel objet, ce qu'elle a écrit. Aucun contenu : l'oubli n'a rien à y chercher."""
+
+    action: str
+    by: str
+    subject_kind: str = ""
+    subject: str = ""
+    seqs: tuple[int, ...] = ()
+    #: ``done`` | ``refused`` | ``superseded`` | ``failed``
+    outcome: str = "done"
+
+
 PERCEPTION_RECEIVED = event_type(
     "perception.received", OWNER, PerceptionReceived, public=True, content=("text",), subjects=("handle",)
 )
@@ -131,9 +144,10 @@ EFFECT_PROPOSED = event_type("effect.proposed", OWNER, EffectProposed, public=Tr
 EFFECT_RESOLVED = event_type("effect.resolved", OWNER, EffectResolved, public=True)
 EFFECT_EXECUTED = event_type("effect.executed", OWNER, EffectExecuted, public=True)
 
+OPERATED = event_type("runtime.operated", OWNER, Operated, public=True)
 ALL = (
     PERCEPTION_RECEIVED, EPISODE_STARTED, UTTERANCE, EPISODE_ENDED, PROCESS_FAILED,
-    EFFECT_PROPOSED, EFFECT_RESOLVED, EFFECT_EXECUTED,
+    EFFECT_PROPOSED, EFFECT_RESOLVED, EFFECT_EXECUTED, OPERATED,
 )
 
 #: Les messages (``seq``) qui attendent encore leur réponse.

@@ -1,18 +1,38 @@
 """Ce que le corps montre à un opérateur : le sommeil, le rythme, l'énergie.
 
 Lecture seule : les mêmes fonctions que les faits et le processus de sommeil,
-au même instant ; les dernières transitions viennent du journal.
+au même instant ; les dernières transitions viennent du journal ; les courbes
+de l'énergie et de la pression de sommeil sont mesurées toutes les dix
+minutes (``body.energie``, ``body.pression``).
 """
 
 from __future__ import annotations
 
 from mika.contracts import body as c
-from mika.faculties.body import BODY, FOG, BodyState, energy, gate, night, params, rhythm
+from mika.faculties.body import BODY, FOG, BodyParams, BodyState, energy, gate, night, params, rhythm
 from mika.faculties.body import sleep as sl
+from mika.kernel.clock import DAY
 from mika.kernel.frame import Frame
-from mika.kernel.inspect import Block, Fields, InspectContext, Note, Table
+from mika.kernel.inspect import (
+    Block,
+    Chart,
+    Entry,
+    Fields,
+    InspectContext,
+    Meter,
+    Note,
+    Ref,
+    Series,
+    Stat,
+    Stats,
+    Table,
+    Text,
+    Timeline,
+    Vital,
+    When,
+)
 from mika.vocab import circadian
-from mika.vocab.affect import FR
+from mika.vocab.affect import emotion_cell
 
 TRANSITIONS_SHOWN = 12
 
@@ -33,6 +53,14 @@ def _hm(minutes: int) -> str:
     return f"{minutes // 60 % 24:02d}:{minutes % 60:02d}"
 
 
+def _percent(value: float) -> str:
+    return f"{round(value * 100)} %"
+
+
+def _p(frame: Frame) -> BodyParams:
+    return params(frame.env.params_of("body", frame.root))
+
+
 def _gate_fr(s: BodyState, frame: Frame) -> str:
     m = gate(s, frame)
     if m.veto is not None:
@@ -42,49 +70,104 @@ def _gate_fr(s: BodyState, frame: Frame) -> str:
     return "libres"
 
 
-def _transitions(ctx: InspectContext) -> tuple[tuple[str, str, str], ...]:
+def _pressure(s: BodyState, frame: Frame) -> float:
+    return max(0.0, min(1.0, sl.pressure(s.sleep, frame.now, _p(frame).sleep, frame.env.tz_of(frame.root))))
+
+
+# ── La barre de vitaux, les séries ────────────────────────────────────────
+
+
+@BODY.vital("energie", label="Énergie", order=20)
+def _energy_vital(s: BodyState, frame: Frame) -> Vital:
+    p = _p(frame)
+    level = frame.get(c.ENERGY)
+    tired = level < p.tired_below
+    return Vital(_percent(level), tone="warn" if tired else "", ratio=level,
+                 hint=f"énergie {circadian.energy_word(level)}" + (" : elle est fatiguée" if tired else ""),
+                 href=Ref.view("body", "rythme", "Rythme"))
+
+
+@BODY.vital("sommeil", label="Sommeil", order=30)
+def _sleep_vital(s: BodyState, frame: Frame) -> Vital:
+    phase = frame.get(c.SLEEP)
+    since = s.sleep.since
+    hint = f"depuis {frame.local(since):%H:%M}" if since else ""
+    return Vital(SLEEP_FR[phase], tone="" if phase is c.SleepPhase.AWAKE else "info", hint=hint,
+                 href=Ref.view("body", "rythme", "Rythme"))
+
+
+@BODY.series("energie", label="Énergie", unit="%", lo=0.0, hi=1.0)
+def _energy_series(s: BodyState, frame: Frame) -> float:
+    return frame.get(c.ENERGY)
+
+
+@BODY.series("pression", label="Pression de sommeil", unit="%", lo=0.0, hi=1.0)
+def _pressure_series(s: BodyState, frame: Frame) -> float:
+    return _pressure(s, frame)
+
+
+# ── Rythme ────────────────────────────────────────────────────────────────
+
+
+def _transitions(ctx: InspectContext) -> tuple[Entry, ...]:
     out = []
     for e in ctx.events([c.FELL_ASLEEP, c.WOKE], TRANSITIONS_SHOWN):
-        what = "s'endort" if e.type.name == c.FELL_ASLEEP.name else "se réveille"
-        out.append((ctx.when(int(e.data.at)), what, f"{float(e.data.pressure):.0%}"))
+        asleep = e.type.name == c.FELL_ASLEEP.name
+        out.append(Entry(int(e.data.at), "s'endort" if asleep else "se réveille",
+                         f"pression de sommeil {_percent(float(e.data.pressure))}", tone="info" if asleep else "ok",
+                         href=Ref("event", str(e.seq), "l'événement")))
     return tuple(out)
 
 
-@BODY.inspect("rythme", title="Rythme")
+@BODY.inspect("rythme", title="Rythme", section="vie", order=40,
+              description="Son sommeil, son énergie, sa pression de sommeil et son rythme circadien.")
 def _rhythm_view(s: BodyState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    p = params(frame.env.params_of("body", frame.root))
+    p = _p(frame)
     tz = frame.env.tz_of(frame.root)
     now = frame.now
     profile = rhythm(p)
     level = energy(s, now, p, tz)
     sleep = s.sleep
+    pressure = _pressure(s, frame)
     upper, lower = sl.thresholds(now, p.sleep, tz, p.shift_minutes)
     nxt = sl.next_transition(sleep, now, p.sleep, tz, p.shift_minutes, night(p))
     what = "se réveiller" if sleep.asleep else "s'endormir"
     start, end = night(p)
     fog = next((text for limit, text in FOG if level < limit), "")
+    tired = level < p.tired_below
+    phase = circadian.phase_of(frame.local(), profile)
+    since = now - DAY
     return [
+        Stats((
+            Stat("sommeil", SLEEP_FR[sl.phase(sleep, now, p.sleep)],
+                 sub=f"phase du jour : {circadian.PHASE_FR[phase]}"),
+            Stat("énergie", Meter(level, _percent(level), tone="warn" if tired else ""),
+                 sub=circadian.energy_word(level) + (" — fatiguée" if tired else ""), tone="warn" if tired else ""),
+            Stat("pression de sommeil", Meter(pressure, _percent(pressure)),
+                 sub=f"s'endormir au-dessus de {_percent(upper)}, se réveiller sous {_percent(lower)}"),
+            Stat("prochaine transition", When(nxt) if nxt is not None else Text("pas dans les 48 h", kind="muted"),
+                 sub=what),
+        ), title="Son corps"),
+        Note(circadian.describe(frame.local(), profile, level) + (f" {fog}" if fog else "")),
+        Chart((Series("Énergie", tuple(ctx.series("body.energie", since, now)), slot=1),
+               Series("Pression de sommeil", tuple(ctx.series("body.pression", since, now)), slot=2)),
+              kind="line", title="Énergie et pression de sommeil (24 h)", unit="%", y=(0.0, 1.0), since=since,
+              until=now, empty="pas encore de mesure (une toutes les dix minutes) : la courbe se remplira"),
         Fields((
             ("sommeil", SLEEP_FR[sl.phase(sleep, now, p.sleep)]),
             ("depuis", ctx.when(sleep.since) if sleep.since else "aucune transition observée"),
             ("réveillée par un message", "oui" if sleep.woken_by_message and not sleep.asleep else "non"),
-            ("phase du jour", circadian.PHASE_FR[circadian.phase_of(frame.local(), profile)]),
-            ("énergie", f"{level:.0%} ({circadian.energy_word(level)})"),
-            ("pression de sommeil", f"{sl.pressure(sleep, now, p.sleep, tz):.0%}"),
-            ("seuils à cette heure", f"s'endormir au-dessus de {upper:.0%}, se réveiller sous {lower:.0%}"),
-            ("dernière interaction", ctx.when(sleep.active_at) if sleep.active_at else "—"),
+            ("phase du jour", circadian.PHASE_FR[phase]),
             ("prochaine transition", f"{what} — {ctx.when(nxt)}" if nxt is not None else f"{what} : pas dans les 48 h"),
+            ("dernière interaction", ctx.when(sleep.active_at) if sleep.active_at else "—"),
             ("sa nuit", f"de {_hm(start)} à {_hm(end)}"),
             ("chronotype", f"décalage de {p.shift_minutes:+d} min"),
             ("initiatives et travail ordinaires", _gate_fr(s, frame)),
             ("barre de réveil", f"{c.WAKE_BAR:.0f} (log-odds) : une raison qui la passe à elle seule "
                                 "(un rappel urgent) passe outre"),
-        ), title="Son corps"),
-        Note(circadian.describe(frame.local(), profile, level) + (f" {fog}" if fog else "")),
+        ), title="En détail", columns=2),
         Table(("phase", "début", "teinte"),
-              tuple((circadian.PHASE_FR[ph], _hm(m), FR[profile.tints[ph]]) for ph, m in profile.starts),
+              tuple((circadian.PHASE_FR[ph], _hm(m), emotion_cell(profile.tints[ph])) for ph, m in profile.starts),
               title="Son rythme"),
-        Table(("quand", "transition", "pression"), _transitions(ctx), title="Dernières transitions",
-              empty="aucune transition encore"),
+        Timeline(_transitions(ctx), title="Dernières transitions", empty="aucune transition encore"),
     ]
-

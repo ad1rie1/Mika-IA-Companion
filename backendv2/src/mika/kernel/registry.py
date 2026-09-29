@@ -24,6 +24,7 @@ from mika.kernel.codec import canonical_json
 from mika.kernel.events import EventRegistry, EventType
 from mika.kernel.facts import FactSpec, UnknownFact
 from mika.kernel.faculty import (
+    ActionSpec,
     AppraisalSpec,
     CapabilitySpec,
     EffectSpec,
@@ -40,7 +41,10 @@ from mika.kernel.faculty import (
     ProposerSpec,
     ReducerSpec,
     SectionSpec,
+    SeriesSpec,
+    SubjectSpec,
     ToolSpec,
+    VitalSpec,
     Zone,
 )
 from mika.kernel.state import FrozenDict, Root
@@ -225,6 +229,7 @@ class Registry:
             if not s.name.startswith(f"{s.owner}."):
                 problems.append(f"capacité {s.name} hors de l'espace de {s.owner}")
             self.capabilities[s.name] = s
+        self._check_console(facs, problems)
 
         for p in self.proposers:
             for reason, (lo, hi) in p.reasons.items():
@@ -292,6 +297,46 @@ class Registry:
         return canonical_json(params)
 
     # ── reconstruction ──
+    def _check_console(self, facs: Sequence[Faculty[Any, Any]], problems: list[str]) -> None:
+        """Ce que la console lit : types d'objets, onglets, actions, vitaux, séries."""
+        self.subjects: dict[str, SubjectSpec] = {}
+        for sub in (x for f in facs for x in f.subjects):
+            if sub.kind in self.subjects:
+                problems.append(f"type d'objet déclaré deux fois : {sub.kind} ({self.subjects[sub.kind].owner}, "
+                                f"{sub.owner})")
+            self.subjects[sub.kind] = sub
+        tabs: set[tuple[str, str]] = set()
+        for v in self.inspectors:
+            if v.subject:
+                if v.subject not in self.subjects:
+                    problems.append(f"vue {v.owner}/{v.name} : type d'objet inconnu {v.subject}")
+                if (v.subject, v.name) in tabs:
+                    problems.append(f"onglet déclaré deux fois sur la fiche {v.subject} : {v.name}")
+                tabs.add((v.subject, v.name))
+            if v.badge is not None and not (v.section or v.subject):
+                problems.append(f"vue {v.owner}/{v.name} : un badge sans place (ni section ni fiche)")
+        self.actions: dict[str, ActionSpec] = {}
+        for a in (x for f in facs for x in f.actions):
+            if a.key in self.actions:
+                problems.append(f"action déclarée deux fois : {a.key}")
+            self.actions[a.key] = a
+            for name in sorted(a.emits):
+                t = self.events.get(name) if name in self.events else None
+                if t is None:
+                    problems.append(f"action {a.key} : émet un événement inconnu {name}")
+                elif t.owner != a.owner:
+                    problems.append(f"action {a.key} : émet {name}, qui appartient à {t.owner}")
+            if a.subject and a.subject not in self.subjects:
+                problems.append(f"action {a.key} : type d'objet inconnu {a.subject}")
+        self.vitals: list[VitalSpec] = sorted((x for f in facs for x in f.vitals), key=lambda x: (x.order, x.key))
+        if len({x.key for x in self.vitals}) != len(self.vitals):
+            problems.append("vital déclaré deux fois")
+        self.series: dict[str, SeriesSpec] = {}
+        for sp in (x for f in facs for x in f.series_specs):
+            if sp.key in self.series:
+                problems.append(f"série déclarée deux fois : {sp.key}")
+            self.series[sp.key] = sp
+
     def of_shapes(self, shapes: Iterable[type]) -> list[EventType[Any]]:
         """Les types d'événements connus dont la charge utile dérive de ces formes."""
         shapes = tuple(shapes)
