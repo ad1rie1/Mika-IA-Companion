@@ -38,10 +38,11 @@ class SocialParams(BaseModel):
     acquaintance_messages: int = 20  # … ou longuement : dix minutes d'insultes ne font pas une connaissance
     friend_days: int = 3
     friend_messages: int = 15
-    friend_regard: float = -0.15  # ni rancune ni froid : la curiosité banale suffit
     close_days: int = 7
     close_messages: int = 50
+    #: proche : de la chaleur installée — ou une longue histoire (un chagrin partagé n'éloigne pas)
     close_regard: float = 0.1
+    close_long_days: int = 14
     # reprendre contact : un silence d'une fois et demie son rythme
     recontact_factor: float = 1.5
     recontact_evidence: float = 10.5
@@ -50,13 +51,19 @@ class SocialParams(BaseModel):
     distress_valence: float = -0.35
     distress_intensity: float = 0.5
     comfort_spacing_us: int = 6 * HOUR
+    # l'envie de discuter : une amie ou un proche joignable, plus silencieuse que d'habitude
+    chat_after_us: int = 4 * HOUR
+    chat_ratio: float = 1.0
+    chat_friend: float = 1.5
+    chat_close: float = 2.5
+    chat_warmth: float = 1.0
     # ses heures pour écrire d'elle-même à quelqu'un d'absent (heure locale, minutes)
     day_start_min: int = 10 * 60
     day_end_min: int = 20 * 60 + 30
     # initiatives restées sans réponse : chaque nouvelle vers la même personne attend plus
-    ignored_shift: float = -2.0
-    # une rancune (posture installée nettement négative) : pas d'initiative vers elle
-    grudge_regard: float = -0.2
+    ignored_shift: float = -1.0
+    # une rancune (hostilité installée) : ni amitié, ni initiative vers elle
+    grudge: float = 0.2
     # profils : relus quand assez de nouveau est su, au plus une fois par jour
     profile_min_items: int = 3
     profile_interval_us: int = DAY
@@ -172,26 +179,28 @@ def _declared(s: SocialState, e, cx) -> SocialState:
 # ── Lectures ──────────────────────────────────────────────────────────────
 
 
-def lived(ct: Contact | None, regard: float, p: SocialParams) -> str:
+def lived(ct: Contact | None, regard: float, p: SocialParams, hostility: float = 0.0) -> str:
     """Ce que leur histoire a fait d'elles : on devient amies en passant du
-    temps ensemble, et en s'y sentant bien — pas en le disant (ni parce qu'un
-    modèle l'a jugé)."""
+    temps ensemble, sans rancune — pas en le disant (ni parce qu'un modèle
+    l'a jugé) ; proches, avec de la chaleur ou une longue histoire."""
     if ct is None or not ct.days:
         return c.STRANGER
     days, n = len(ct.days), ct.inbound
-    if days >= p.close_days and n >= p.close_messages and regard >= p.close_regard:
+    friendly = hostility < p.grudge
+    if friendly and days >= p.close_days and n >= p.close_messages and \
+            (regard >= p.close_regard or days >= p.close_long_days):
         return c.CLOSE
-    if days >= p.friend_days and n >= p.friend_messages and regard >= p.friend_regard:
+    if friendly and days >= p.friend_days and n >= p.friend_messages:
         return c.FRIEND
     if days >= p.acquaintance_days or n >= p.acquaintance_messages:
         return c.ACQUAINTANCE
     return c.STRANGER
 
 
-def closeness(s: SocialState, person: str, regard: float, p: SocialParams) -> str:
+def closeness(s: SocialState, person: str, regard: float, p: SocialParams, hostility: float = 0.0) -> str:
     """Déclarée par un opérateur, sinon vécue."""
     declared = s.declared.get(person)
-    return declared if declared is not None else lived(s.contacts.get(person), regard, p)
+    return declared if declared is not None else lived(s.contacts.get(person), regard, p, hostility)
 
 
 def rhythm(ct: Contact, now_day: int, level: str, p: SocialParams) -> tuple[float, bool]:
@@ -220,9 +229,10 @@ def _greeted(s: SocialState, cx, person: str) -> int:
     return s.greeted.get(person, 0)
 
 
-@SOCIAL.fact(c.CLOSENESS, reads=[affect_c.REGARD])
+@SOCIAL.fact(c.CLOSENESS, reads=[affect_c.REGARD, affect_c.HOSTILITY])
 def _closeness(s: SocialState, cx, person: str) -> str:
-    return closeness(s, person, cx.facts.get(affect_c.REGARD(person)), params(cx.params))
+    return closeness(s, person, cx.facts.get(affect_c.REGARD(person)), params(cx.params),
+                     cx.facts.get(affect_c.HOSTILITY(person)))
 
 
 @SOCIAL.fact(c.CONTACT, reads=[c.CLOSENESS])
@@ -235,3 +245,18 @@ def _contact(s: SocialState, cx, person: str) -> c.ContactReading:
 def _sensitive(s: SocialState, cx, person: str) -> tuple[str, ...]:
     profile = s.profiles.get(person)
     return tuple(fold(t) for t in profile.sensitive) if profile else ()
+
+
+@SOCIAL.fact(c.MISSED, reads=[c.CONTACT, c.CLOSENESS])
+def _missed(s: SocialState, cx) -> tuple[tuple[str, float], ...]:
+    p = params(cx.params)
+    out = []
+    for person in s.contacts.keys():
+        if not is_identifiable(person) or person.startswith("name:"):
+            continue
+        if cx.facts.get(c.CLOSENESS(person)) not in (c.FRIEND, c.CLOSE):
+            continue
+        ratio = cx.facts.get(c.CONTACT(person)).silence_ratio
+        if ratio >= p.recontact_factor:
+            out.append((person, round(ratio, 3)))
+    return tuple(sorted(out, key=lambda x: (-x[1], x[0])))

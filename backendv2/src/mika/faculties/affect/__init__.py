@@ -82,6 +82,33 @@ def _declared(s: AffectState, e, cx) -> AffectState:
     return replace(s, stances=s.stances.set(key, stance))
 
 
+@AFFECT.feels(reads=[body_c.RHYTHM])
+def _feel(s: AffectState, appraisals: tuple[A.Appraisal, ...], e, cx) -> AffectState:
+    """Ce que les événements des autres lui font ressentir, déclaré par leur
+    propriétaire (une attente comblée, un vide, une pensée qui revient). Un
+    pas vers l'émotion pleine, proportionné à l'intensité — la résonance du
+    tempérament s'applique ; rien ne déborde d'une posture sur l'humeur ici."""
+    p = _params(cx.params)
+    cw = _clockwork(cx)
+    for a in appraisals:
+        if not isinstance(a, A.Appraisal):
+            continue
+        force = max(0.0, min(1.0, a.intensity * (p.relational_scale if a.relational else 1.0)))
+        target = A.to_pad(a.emotion, 1.0)
+        gain = min(0.9, ph.resonant_gain(target, p) * force)
+        if gain <= 0:
+            continue
+        if a.toward is None:
+            mood = ph.advance_mood(s.mood, e.at, p, cw)
+            s = replace(s, mood=replace(mood, position=ph.ratchet(mood.position, target, gain)))
+            continue
+        stance = s.stances.get(a.toward) or ph.new_stance(e.at, p, cw)
+        stance = ph.advance_stance(stance, e.at, p, cw)
+        osc = replace(stance.osc, position=ph.ratchet(stance.osc.position, A.to_pad(a.emotion, force), gain))
+        s = replace(s, stances=s.stances.set(a.toward, replace(stance, osc=osc)))
+    return s
+
+
 # ── Lectures ──────────────────────────────────────────────────────────────
 
 
@@ -131,6 +158,24 @@ def regard(s: AffectState, person: str, now: int, p: AffectParams, cw: ph.Clockw
     delta = anchor[0] - rest
     span = (1.0 - rest) if delta >= 0 else (1.0 + rest)
     return max(-1.0, min(1.0, delta / max(1e-6, span)))
+
+
+def hostility(s: AffectState, person: str, now: int, p: AffectParams, cw: ph.Clockwork) -> float:
+    stored = s.stances.get(person)
+    if stored is None or stored.anchor is None:
+        return 0.0
+    anchor = ph.heal(stored.anchor, stored.osc.at, now, p, cw)
+    if anchor is None:
+        return 0.0
+    rest = ph.common_home(now, p, cw)
+    displeasure = max(0.0, rest[0] - anchor[0]) / max(1e-6, 1.0 + rest[0])
+    dominance = max(0.0, min(1.0, (anchor[2] - rest[2]) / p.hostility_dominance))
+    return max(0.0, min(1.0, displeasure * dominance))
+
+
+@AFFECT.fact(c.HOSTILITY, reads=[body_c.RHYTHM])
+def _hostility(s: AffectState, cx, person: str) -> float:
+    return hostility(s, person, cx.now, _params(cx.params), _clockwork(cx))
 
 
 @AFFECT.fact(c.WARMTH, reads=[body_c.RHYTHM])

@@ -167,6 +167,8 @@ class TelegramChannel:
         return None
 
     async def deliver(self, d: Delivery) -> bool:
+        if d.kind != "speech":
+            return True  # un changement d'état ne s'écrit pas dans une messagerie
         chat = self.chat_for(d)
         if chat is None:
             return False

@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from mika.kernel.events import Content, Payload, event_type
-from mika.kernel.facts import FactFamily
+from mika.kernel.facts import FactFamily, FactKey
 
 OWNER = "social"
 
@@ -24,8 +24,12 @@ GREETING = "greeting"
 PRESENT_PERSON = "present"
 RECONTACT = "recontact"
 COMFORT = "comfort"
+#: Envie de discuter avec une amie, sans autre raison que l'envie.
+CHAT = "chat"
 #: Veto : on ne va pas vers quelqu'un qui a installé une rancune.
 GRUDGE = "grudge"
+#: Veto : on n'écrit pas deux fois de suite à quelqu'un d'absent qui n'a pas répondu.
+UNANSWERED = "unanswered"
 
 STRANGER, ACQUAINTANCE, FRIEND, CLOSE = "stranger", "acquaintance", "friend", "close"
 CLOSENESS_LEVELS = (STRANGER, ACQUAINTANCE, FRIEND, CLOSE)
@@ -77,3 +81,7 @@ CLOSENESS = FactFamily("social.closeness", arg=str, type=str)
 CONTACT = FactFamily("social.contact", arg=str, type=ContactReading, time_varying=True)
 #: Les sujets délicats avec cette personne (repliés), d'après son profil.
 SENSITIVE = FactFamily("social.sensitive", arg=str, type=tuple)
+
+#: Les amies et proches dont le silence dépasse une fois et demie leur rythme :
+#: ``(personne, silence ÷ rythme)``, du plus long au plus court.
+MISSED = FactKey("social.missed", type=tuple, time_varying=True)

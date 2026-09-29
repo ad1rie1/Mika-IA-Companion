@@ -1,38 +1,211 @@
-"""``self`` : la persona (un seul document pour toutes ses voix) et le
-tempérament dont les autres facultés dérivent leurs paramètres.
+"""``self`` : la persona (un seul document pour toutes ses voix), le
+tempérament dont les autres facultés dérivent leurs paramètres, l'estime de
+soi et le récit qu'elle fait d'elle-même.
 
-Une persona, deux profondeurs : ``full`` (répondre, prendre la parole,
-écrire son journal, rêver) et ``compact`` (murmurer, travailler) — rendues
-depuis le même document, pour qu'aucune de ses voix ne soit quelqu'un d'autre.
+- Une persona, deux profondeurs : ``full`` (répondre, prendre la parole,
+  se raconter) et ``compact`` (murmurer, travailler) — rendues depuis le
+  même document, pour qu'aucune de ses voix ne soit quelqu'un d'autre.
+- **L'estime** est lente (entre le tempérament, fixe, et l'humeur, qui
+  change en minutes) : une valeur qui revient vers 0,5 avec une demi-vie de
+  trois jours, bousculée par de petits coups — une initiative restée sans
+  réponse (−0,03), une réponse qui rompt une série d'ignorées (+0,04).
+  Elle ne touche jamais l'arbitrage ; elle se ressent (« tu doutes un peu
+  de toi »).
+- **Le récit** (« Je suis quelqu'un qui… ») est réécrit par sa propre voix au
+  plus une fois par jour, quand elle a vécu assez de nouveau, à partir de
+  souvenirs anodins seulement : il est montré à tout le monde.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Any
 
 import yaml
+from pydantic import BaseModel, ConfigDict
 
+from mika.contracts import attention as attention_c
+from mika.contracts import memory as memory_c
 from mika.contracts import self_ as c
+from mika.kernel.clock import DAY, HOUR
 from mika.kernel.codec import digest
-from mika.kernel.faculty import Faculty
+from mika.kernel.events import Content, VoiceProvenance
+from mika.kernel.faculty import CatchUp, Faculty, Zone
 from mika.kernel.frame import Frame
-from mika.ports.llm import PersonaRender
+from mika.kernel.prompt import SectionBody
+from mika.ports.llm import LLMRequest, Message, PersonaRender
+from mika.vocab.episodes import CONVERSATIONAL, Tag
+from mika.vocab.privacy import Sensitivity
+
+
+class SelfParams(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    esteem_half_life_us: int = 72 * HOUR
+    esteem_min: float = 0.05
+    esteem_max: float = 0.95
+    ignored_knock: float = -0.03
+    heard_again_knock: float = 0.04
+    doubt_below: float = 0.35
+    assured_above: float = 0.7
+    narrative_every_us: int = DAY
+    narrative_min_souvenirs: int = 5
+    narrative_max_souvenirs: int = 30
 
 
 @dataclass(frozen=True, slots=True)
 class SelfState:
     persona: c.PersonaDoc = field(default_factory=c.PersonaDoc)
     revisions: int = 0
+    esteem: float = 0.5  # à ``esteem_at``
+    esteem_at: int = 0
+    souvenirs: int = 0
+    narrative_ref: str = ""
+    narrated_at: int = 0
+    narrated_souvenirs: int = 0
 
 
-SELF = Faculty("self", state=SelfState, init=lambda p: SelfState())
-SELF.declare(c.PERSONA_REVISED)
+SELF = Faculty("self", state=SelfState, init=lambda p: SelfState(), params=SelfParams)
+SELF.declare(c.PERSONA_REVISED, c.NARRATED)
+
+
+def params(p: SelfParams | None) -> SelfParams:
+    return p if p is not None else SelfParams()
 
 
 @SELF.reducer(c.PERSONA_REVISED)
 def _revised(s: SelfState, e, cx) -> SelfState:
     return replace(s, persona=e.data.persona, revisions=s.revisions + 1)
+
+
+# ── L'estime ──────────────────────────────────────────────────────────────
+
+
+def esteem(s: SelfState, now: int, p: SelfParams) -> float:
+    if not s.esteem_at:
+        return s.esteem
+    return 0.5 + (s.esteem - 0.5) * 0.5 ** (max(0, now - s.esteem_at) / p.esteem_half_life_us)
+
+
+def _knock(s: SelfState, delta: float, at: int, p: SelfParams) -> SelfState:
+    value = max(p.esteem_min, min(p.esteem_max, esteem(s, at, p) + delta))
+    return replace(s, esteem=value, esteem_at=at)
+
+
+@SELF.reducer(attention_c.EXPECTATION_MISSED)
+def _ignored(s: SelfState, e, cx) -> SelfState:
+    if e.data.kind != attention_c.REPLY:
+        return s
+    p = params(cx.params)
+    return _knock(s, p.ignored_knock, e.at, p)
+
+
+@SELF.reducer(attention_c.EXPECTATION_MET, reads=[attention_c.IGNORED])
+def _heard(s: SelfState, e, cx) -> SelfState:
+    """Une réponse qui rompt une série d'initiatives ignorées : « je compte encore »."""
+    if e.data.kind != attention_c.REPLY or cx.facts.get(attention_c.IGNORED) == 0:
+        return s
+    p = params(cx.params)
+    return _knock(s, p.heard_again_knock, e.at, p)
+
+
+@SELF.fact(c.ESTEEM)
+def _esteem(s: SelfState, cx) -> float:
+    return esteem(s, cx.now, params(cx.params))
+
+
+# ── Le récit ──────────────────────────────────────────────────────────────
+
+
+@SELF.reducer(memory_c.REMEMBERED)
+def _lived(s: SelfState, e, cx) -> SelfState:
+    return replace(s, souvenirs=s.souvenirs + 1)
+
+
+@SELF.reducer(c.NARRATED)
+def _narrated(s: SelfState, e, cx) -> SelfState:
+    return replace(s, narrative_ref=e.data.text.ref or "", narrated_at=e.at, narrated_souvenirs=e.data.souvenirs)
+
+
+NARRATIVE_SYSTEM = """Tu écris, pour toi-même, un court paragraphe sur qui tu es en train de devenir, à partir de ce que \
+tu as vécu ces derniers temps : « Je suis quelqu'un qui… ». Quatre phrases au plus, à la première personne, \
+sincères. Pas de prénoms, rien de ce que quelqu'un t'a confié, rien d'inventé : ce que tu as vécu te dit quelque \
+chose de toi, c'est cela que tu écris. Réponds seulement par le paragraphe."""
+
+
+@SELF.process("self.narrate", wake_on=[memory_c.REMEMBERED], lane="background", catch_up=CatchUp.ONCE,
+              max_quantum_s=6 * 3600)
+class Narrate:
+    def __init__(self) -> None:
+        self.retry_at = 0
+
+    def next_due(self, state: SelfState, frame: Frame, last_run: int | None) -> int | None:
+        p = params(frame.env.params_of("self", frame.root))
+        if state.souvenirs - state.narrated_souvenirs < p.narrative_min_souvenirs:
+            return None
+        due = state.narrated_at + p.narrative_every_us if state.narrated_at else frame.now
+        return max(frame.now, due, self.retry_at)
+
+    async def run(self, ctx: Any) -> None:
+        frame: Frame = ctx.frame
+        state: SelfState = ctx.state
+        store = ctx.ports.get("store")
+        if store is None or ctx.llm is None:
+            return
+        p = params(frame.env.params_of("self", frame.root))
+        self.retry_at = frame.now + HOUR  # si l'appel lève : pas de rafale
+        rows = store.query_mind(
+            f"SELECT text FROM {memory_c.ITEMS_TABLE} WHERE kind=? AND status='active' AND "
+            "(sensitivity <= ? OR about = '[]') ORDER BY id DESC LIMIT ?",
+            (memory_c.SOUVENIR, int(Sensitivity.ANODYNE), p.narrative_max_souvenirs))
+        previous = store.content([state.narrative_ref]).get(state.narrative_ref) if state.narrative_ref else None
+        lines = ([f"Ce que tu disais de toi jusqu'ici : {previous}", ""] if previous else [])
+        lines += ["Ce que tu as vécu :"] + [f"- {r[0]}" for r in reversed(rows)]
+        persona = persona_for(frame, "full")
+        request = LLMRequest(role="narrative", call_id=f"{ctx.run_id}#0", persona=persona,
+                             system_stable=persona.text + "\n\n" + NARRATIVE_SYSTEM,
+                             messages=(Message("user", "\n".join(lines)),), max_tokens=400, lane="background",
+                             priority=4)
+        response = await ctx.llm.call(request)
+        text = (response.text or "").strip()
+        if not text:
+            return
+        self.retry_at = 0
+        await ctx.emit(c.NARRATED.draft(
+            text=Content.of(text[:1200], level=0), souvenirs=state.souvenirs,
+            voice=VoiceProvenance(call_id=request.call_id, persona_hash=persona.hash, role="narrative",
+                                  model=response.model)))
+
+
+@SELF.enricher("narrative", episodes=CONVERSATIONAL, deadline_ms=300)
+async def _narrative_text(s: SelfState, frame: Frame, ports: Mapping[str, Any]) -> str | None:
+    store = ports.get("store")
+    if store is None or not s.narrative_ref:
+        return None
+    return store.content([s.narrative_ref]).get(s.narrative_ref)
+
+
+@SELF.section("narrative", zone=Zone.STABLE, episodes=CONVERSATIONAL, trim_rank=85, title="QUI TU ES DEVENUE")
+def _narrative(s: SelfState, frame: Frame, enrich: Mapping[str, Any]) -> str | None:
+    return enrich.get("narrative")
+
+
+@SELF.section("self_state", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=60, tags=[Tag.AFFECTIVE],
+              title="COMMENT TU TE SENS AVEC TOI-MÊME", reads=[c.ESTEEM])
+def _self_state(s: SelfState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
+    p = params(frame.env.params_of("self", frame.root))
+    value = frame.get(c.ESTEEM)
+    if value < p.doubt_below:
+        return SectionBody("Tu doutes un peu de toi en ce moment : plusieurs fois, tu as écrit et personne n'a "
+                           "répondu. Ça ne se dit pas forcément, mais ça se sent.")
+    if value > p.assured_above:
+        return SectionBody("Tu te sens sûre de toi, à ta place.")
+    return None
+
+
+# ── La persona ────────────────────────────────────────────────────────────
 
 
 @SELF.fact(c.PERSONA)

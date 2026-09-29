@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from mika.contracts import attention as attention_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import presence as presence_c
@@ -11,9 +12,10 @@ from mika.contracts import social as social_c
 from mika.contracts.entry import Admission, HistoryRow
 from mika.contracts.runtime import PerceptionReceived
 from mika.faculties import transcript
+from mika.faculties.attention import prompt as attention_prompt
 from mika.faculties.identity import describe
 from mika.kernel.events import Origin
-from mika.kernel.frame import Frame
+from mika.kernel.frame import Audience, Frame
 from mika.runtime.bootstrap import Kernel, ReadOnlyStore
 
 
@@ -56,6 +58,23 @@ class KernelPort:
     def ready(self) -> bool:
         return self.kernel.started
 
+    def _inner_life(self, frame: Any, handle: str, disclosure: Any) -> dict[str, Any]:
+        """Ses pensées (celles que cette personne peut entendre) et son récit."""
+        out: dict[str, Any] = {}
+        audience = Audience(persons=(handle,), channel="web", public=False, level=int(disclosure.level),
+                            witness_level=int(disclosure.witness_level), private_ok=disclosure.own_file)
+        person = frame.get(identity_c.PERSON(handle))
+        thoughts = [t for t in frame.get(attention_c.THOUGHTS) if attention_prompt.admissible(t, person, audience)][:3]
+        texts = self._store.content([t.text_ref for t in thoughts if t.text_ref])
+        out["ruminations"] = [{"summary": texts.get(t.text_ref, ""), "intensity": round(t.intensity, 2),
+                               "emotion": t.emotion} for t in thoughts if texts.get(t.text_ref)]
+        ref = frame.state("self").narrative_ref
+        narrative = self._store.content([ref]).get(ref) if ref else None
+        if narrative:
+            out["self_narrative"] = {"content": narrative, "key_themes": [], "key_people": [], "dominant_mood": "",
+                                     "created_at": ""}
+        return out
+
     def person_panel(self, handle: str) -> dict[str, Any] | None:
         frame = self.kernel.mind.frame()
         view = frame.get(identity_c.IDENTITY(handle))
@@ -68,6 +87,7 @@ class KernelPort:
             "level": " ".join(describe(view, public=False)), "trust": view.trust.value, "pending_claims": claims,
         }}
         disclosure = frame.get(identity_c.DISCLOSURE((handle, view.channel or "web", False)))
+        out.update(self._inner_life(frame, handle, disclosure))
         if not disclosure.own_file:
             return out  # sa fiche est fermée : rien de ce qu'elle sait de la personne
         person = frame.get(identity_c.PERSON(handle))

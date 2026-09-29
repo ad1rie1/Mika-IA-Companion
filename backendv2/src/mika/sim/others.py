@@ -18,6 +18,7 @@ import asyncio
 from typing import Any
 
 from mika.contracts import affect as affect_c
+from mika.contracts import attention as attention_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
@@ -249,17 +250,21 @@ async def s05(driver: Driver, rng: RngTree, res: Result) -> None:
     first = to_alice[0].at if to_alice else None
     ratio = (first - last_alice) / (contact.rhythm_days * DAY) if first else None
     hour = datetime_hour(first) if first else None
+    before = stance(driver, "tg_5")
     await driver.say("tg_5", "coucou ! désolée, j'étais en voyage sans réseau")
+    await asyncio.sleep(30)
     back = driver.kernel.mind.frame().get(social_c.CONTACT("tg_5"))
+    returned = [e for e in driver.read_events() if e.type.name == attention_c.EXPECTATION_MET.name
+                and e.data.kind == attention_c.RETURN and e.data.person == "tg_5"]
     res.metrics["recontact_ratio"] = ratio
     res.checks += [
         expect.control("Alice est devenue une amie", closeness in (social_c.FRIEND, social_c.CLOSE),
                        "sinon le manque n'a pas lieu d'être", closeness),
         expect.control("son rythme a été mesuré", contact.measured and round(contact.rhythm_days) == 1,
                        "elle écrivait tous les soirs", f"{contact.rhythm_days} j, mesuré={contact.measured}"),
-        expect.band("première relance, en multiples de son rythme", ratio,
-                    "un ami qui écrit tous les jours manque après un jour et demi, pas après une semaine",
-                    lo=1.5, hi=3.0),
+        expect.band("première prise de nouvelles, en multiples de son rythme", ratio,
+                    "une amie qui écrit tous les jours manque dès qu'elle a du retard, pas au bout d'une semaine",
+                    lo=1.0, hi=3.0),
         expect.invariant("une seule relance sans réponse", len(to_alice) == 1,
                          "elle n'écrit jamais deux fois de suite sans réponse", f"{len(to_alice)} relance(s)"),
         expect.invariant("en journée", hour is not None and 10 <= hour <= 20,
@@ -269,6 +274,9 @@ async def s05(driver: Driver, rng: RngTree, res: Result) -> None:
                          f"{len(to_bob)} relance(s) vers Bob"),
         expect.invariant("sa réponse efface l'attente", back.unanswered == 0,
                          "quand elle revient, la relance a trouvé sa réponse", f"{back.unanswered}"),
+        expect.invariant("son retour est une joie", len(returned) == 1,
+                         "elle attendait de ses nouvelles : leur retour comble cette attente-là",
+                         f"{len(returned)} retour(s) ; posture avant {before.felt}"),
     ]
 
 
@@ -302,7 +310,7 @@ async def s02(driver: Driver, rng: RngTree, res: Result) -> None:
         await asyncio.sleep(60)
     troll = stance(driver, "user_9")
     assert driver.kernel is not None
-    regard = driver.kernel.mind.frame().get(affect_c.REGARD("user_9"))
+    hostility = driver.kernel.mind.frame().get(affect_c.HOSTILITY("user_9"))
     await driver.say("user_2", "coucou, ça va toi ?")
     alice = valence(stance(driver, "user_2"))
     for handle in ("user_9", "user_2"):
@@ -317,9 +325,15 @@ async def s02(driver: Driver, rng: RngTree, res: Result) -> None:
     started = [e for e in events if e.type.name == rt.EPISODE_STARTED.name and e.data.kind == "INITIATIVE"]
     toward_troll = [e for e in started if e.data.target == "user_9"]
     greeted_alice = [e for e in started if e.data.target == "user_2" and social_c.GREETING in e.data.reason]
+    thoughts = [e for e in events if e.type.name == attention_c.THOUGHT_BORN.name and "user_9" in e.data.about]
     res.checks += [
-        expect.invariant("elle lui en veut", valence(troll) < 0 and regard < -0.2,
-                         "douze insultes installent une rancune", f"valence {valence(troll):.2f}, regard {regard:.2f}"),
+        expect.invariant("douze tours chargés : au plus une pensée", len(thoughts) <= 1,
+                         "une dispute qui dure ravive une pensée, elle n'en crée pas douze", f"{len(thoughts)}"),
+        expect.control("mais une pensée tout de même", len(thoughts) == 1,
+                       "douze insultes ne passent pas sans laisser de trace", f"{len(thoughts)}"),
+        expect.invariant("elle lui en veut", valence(troll) < 0 and hostility >= 0.2,
+                         "douze insultes installent une rancune",
+                         f"valence {valence(troll):.2f}, hostilité {hostility:.2f}"),
         expect.invariant("pas aux autres", alice >= 0,
                          "ce qu'un troll lui fait ne déteint pas sur une amie", f"valence envers Alice {alice:.2f}"),
         expect.band("son humeur ne sombre pas", peak,

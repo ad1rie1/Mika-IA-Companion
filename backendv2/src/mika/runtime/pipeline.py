@@ -109,6 +109,7 @@ class EpisodeRunner:
         return self._tasks.get(correlation)
 
     async def run(self, req: EpisodeRequest) -> EpisodeReport:
+        await self._preludes(req)
         policy = self.policies[req.kind]
         mind = self.mind
         now = mind.clock.now()
@@ -119,6 +120,19 @@ class EpisodeRunner:
             return await self._run(req, policy, eid, frame0)
         finally:
             self._tasks.pop(eid, None)
+
+    async def _preludes(self, req: EpisodeRequest) -> None:
+        """Ce qui précède un épisode (un murmure avant de parler), mené jusqu'au
+        bout avant lui ; un prélude qui échoue n'empêche rien."""
+        for spec in self.mind.registry.preludes:
+            if req.kind not in spec.kinds:
+                continue
+            pre = call(spec.fn, self.mind.frame(), req, label=f"prélude {spec.owner}")
+            if isinstance(pre, Failed) or pre is None or pre.kind not in self.policies or pre.kind == req.kind:
+                continue
+            await acall(lambda pre=pre: self.run(EpisodeRequest(
+                kind=pre.kind, message=pre.message, reason=pre.reason, trigger=f"prélude:{req.trigger}",
+                priority=req.priority)), label=f"prélude {pre.kind}")
 
     async def _run(self, req: EpisodeRequest, policy: EpisodePolicy, eid: str, frame0: Frame) -> EpisodeReport:
         mind = self.mind

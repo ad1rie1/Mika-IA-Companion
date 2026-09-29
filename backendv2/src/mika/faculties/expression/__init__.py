@@ -14,11 +14,15 @@ from dataclasses import dataclass
 from typing import Any
 
 from mika.contracts import affect as affect_c
+from mika.contracts import agency as agency_c
 from mika.contracts import body as body_c
 from mika.contracts import expression as c
 from mika.contracts import identity as identity_c
+from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
+from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
+from mika.kernel.episode import Prelude
 from mika.kernel.faculty import Faculty, Zone
 from mika.kernel.frame import Frame
 from mika.ports.delivery import Delivery, EmotionView
@@ -94,6 +98,38 @@ def emotion_view(frame: Frame, target: str | None, declared: Declared | None) ->
             blend = ((name, round(declared.intensity, 2)), *blend)[:2]
         return EmotionView(name, round(declared.intensity, 2), blend, _state_dict(face), True)
     return EmotionView(face.emotion.value, face.intensity, blend, _state_dict(face), False)
+
+
+# ── Le murmure ────────────────────────────────────────────────────────────
+
+MURMUR_SPACING_US = 3600 * 1_000_000
+
+
+@EXPRESSION.prelude(kinds=[Kind.INITIATIVE])
+def murmur(frame: Frame, req: Any) -> Prelude | None:
+    """Avant de prendre la parole d'elle-même, elle se murmure parfois ce
+    qu'elle s'apprête à faire — seulement si quelqu'un peut l'entendre (un
+    écran ouvert), réveillée, pas pour une salutation, pas plus d'une fois par
+    heure. Une pensée n'a pas de destinataire : elle ne part jamais en message."""
+    reasons = str(getattr(req, "reason", "")).split(",")
+    if social_c.GREETING in reasons or not frame.get(presence_c.PRESENT):
+        return None
+    if frame.get(body_c.SLEEP) is not body_c.SleepPhase.AWAKE:
+        return None
+    if frame.now - frame.get(agency_c.AGENCY).murmured_at < MURMUR_SPACING_US:
+        return None
+    target = getattr(req, "target", None)
+    name = frame.get(identity_c.IDENTITY(target)).name if target else ""
+    who = f"écrire à « {name} »" if name else "dire quelque chose"
+    selected = getattr(req, "selected", None)
+    args = selected.args if selected is not None else {}
+    why = " ".join(str(v) for k, v in sorted(args.items()) if str(k).startswith("brief:") and v)
+    because = f" Ce qui t'y pousse : {why}" if why else ""
+    return Prelude(Kind.MURMUR, (
+        f"Tu t'apprêtes à {who}, de toi-même.{because} Avant, murmure-toi en une seule phrase très courte "
+        "(moins de quinze mots) ce qui te traverse, comme une pensée à voix haute — sans rien inventer d'autre. "
+        "Pas de balise, pas de guillemets."),
+        reason="murmure")
 
 
 @EXPRESSION.effect(rt.UTTERANCE)

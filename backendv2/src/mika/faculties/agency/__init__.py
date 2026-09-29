@@ -1,9 +1,15 @@
 """``agency`` : combien elle prend la parole d'elle-même.
 
-Un plafond quotidien (politique, pas caractère) et une période réfractaire
-après chaque initiative : parler d'elle-même rend la suivante moins probable
-pendant un moment, sans l'interdire. La salutation n'est pas concernée —
-saluer quelqu'un qui arrive n'est pas « prendre la parole ».
+- Un plafond quotidien (politique, pas caractère).
+- Une période réfractaire après chaque initiative : parler d'elle-même rend
+  la suivante moins probable pendant un moment, sans l'interdire. Sa durée
+  est tirée à l'acte (±15 %, enregistré : le rejeu retombe sur la même) —
+  un métronome se reconnaît.
+- **Être ignorée l'espace** : chaque initiative restée sans réponse (d'affilée)
+  allonge la période réfractaire (×2,5, jusqu'à six heures) et abaisse
+  l'envie de recommencer.
+- La salutation n'est pas concernée — saluer quelqu'un qui arrive n'est pas
+  « prendre la parole ».
 """
 
 from __future__ import annotations
@@ -14,6 +20,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 from mika.contracts import agency as c
+from mika.contracts import attention as attention_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.kernel.arbitration import Modulation, RowView
@@ -31,12 +38,19 @@ class AgencyParams(BaseModel):
     daily_cap: int = 5
     refractory_us: int = 30 * MINUTE
     refractory_shift: float = -3.0
+    jitter: float = 0.15
+    ignored_backoff: float = 2.5
+    max_refractory_us: int = 6 * 3600 * 1_000_000
+    ignored_shift: float = -1.0
 
 
 @dataclass(frozen=True, slots=True)
 class AgencyState:
     #: Instants des initiatives dites (hors salutations), les plus récentes.
     initiatives: tuple[int, ...] = field(default_factory=tuple)
+    #: la durée réfractaire tirée à la dernière initiative (avant l'allongement par les ignorées)
+    refractory_us: int = 0
+    murmured_at: int = 0
 
 
 AGENCY = Faculty("agency", state=AgencyState, init=lambda p: AgencyState(), params=AgencyParams)
@@ -49,25 +63,31 @@ def _params(p: AgencyParams | None) -> AgencyParams:
 @AGENCY.reducer(rt.EPISODE_STARTED)
 def _started(s: AgencyState, e, cx) -> AgencyState:
     d = e.data
+    if d.kind == Kind.MURMUR:
+        return replace(s, murmured_at=e.at)
     if d.kind != Kind.INITIATIVE or social_c.GREETING in d.reason.split(","):
         return s
+    p = _params(cx.params)
     kept = tuple(t for t in s.initiatives if e.at - t < DAY)
-    return replace(s, initiatives=(*kept, e.at)[-KEEP:])
+    jittered = round(p.refractory_us * (1.0 + p.jitter * (2.0 * cx.rng.random() - 1.0)))
+    return replace(s, initiatives=(*kept, e.at)[-KEEP:], refractory_us=jittered)
 
 
-def reading(s: AgencyState, now: int, p: AgencyParams, tz: Any) -> c.AgencyReading:
+def reading(s: AgencyState, now: int, p: AgencyParams, tz: Any, ignored: int = 0) -> c.AgencyReading:
     today = local(now, tz).date()
     count = sum(1 for t in s.initiatives if local(t, tz).date() == today)
     last = s.initiatives[-1] if s.initiatives else 0
-    return c.AgencyReading(count, last, last + p.refractory_us if last else 0)
+    base = s.refractory_us or p.refractory_us
+    length = min(p.max_refractory_us, round(base * p.ignored_backoff ** max(0, ignored)))
+    return c.AgencyReading(count, last, last + length if last else 0, s.murmured_at)
 
 
-@AGENCY.fact(c.AGENCY)
+@AGENCY.fact(c.AGENCY, reads=[attention_c.IGNORED])
 def _agency(s: AgencyState, cx) -> c.AgencyReading:
-    return reading(s, cx.now, _params(cx.params), cx.tz)
+    return reading(s, cx.now, _params(cx.params), cx.tz, cx.facts.get(attention_c.IGNORED))
 
 
-@AGENCY.modulate(kinds=[Kind.INITIATIVE], reads=[c.AGENCY])
+@AGENCY.modulate(kinds=[Kind.INITIATIVE], reads=[c.AGENCY, attention_c.IGNORED])
 def _budget(s: AgencyState, frame: Frame, row: RowView) -> Modulation:
     if social_c.GREETING in row.reasons:
         return Modulation()
@@ -75,10 +95,11 @@ def _budget(s: AgencyState, frame: Frame, row: RowView) -> Modulation:
     r = frame.get(c.AGENCY)
     if r.initiatives_today >= p.daily_cap:
         return Modulation(veto=c.DAILY_CAP)
+    shift = p.ignored_shift * min(3, frame.get(attention_c.IGNORED))
     if r.refractory_until > frame.now:
-        remaining = (r.refractory_until - frame.now) / p.refractory_us
-        return Modulation(shift=p.refractory_shift * remaining)
-    return Modulation()
+        span = max(1, r.refractory_until - r.last_initiative_at)
+        shift += p.refractory_shift * (r.refractory_until - frame.now) / span
+    return Modulation(shift=shift) if shift else Modulation()
 
 
 def brief(frame: Frame, req: Any) -> str:

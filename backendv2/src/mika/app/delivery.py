@@ -22,6 +22,8 @@ class Router:
                 or (d.target or "").startswith(HANDLE_PREFIX))
 
     async def deliver(self, d: Delivery) -> bool:
+        if d.kind == "state":
+            return bool(await self.web.deliver(d))  # un changement d'état se montre, ne s'écrit pas
         if self.is_telegram(d):
             if self.telegram is None:
                 return True  # pas de robot configuré : rien à faire (le fil garde la trace)

@@ -175,6 +175,9 @@ def test_ws_conversation_round_trip(world):
         assert inner["inner_state"]["sleep_phase"] == "awake" and inner["inner_state"]["person_scope"] is True
         state = inner["inner_state"]
         assert state["identity"]["known_as"] == "adrien" and isinstance(state["identity"]["pending_claims"], list)
+        assert set(state["drives"]) == {"social", "expression", "curiosity"}
+        assert all(0 <= d["tension"] <= 1 for d in state["drives"].values()) and 0 < state["estime"] < 1
+        assert isinstance(state["ruminations"], list)
         profile = state["person_profile"]  # connecté avec son compte : sa fiche est ouverte
         assert isinstance(profile["topics_of_interest"], list) and isinstance(profile["sensitive_topics"], list)
         assert profile["closeness"] in ("stranger", "acquaintance", "friend", "close")

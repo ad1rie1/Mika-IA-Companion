@@ -59,6 +59,7 @@ def physics_of(t: Temperament) -> dict[str, Any]:
         "mood": Osc(mass=g_mass, damping=2.0 * g_mass / g_tau, stiffness=g_mass * g_omega0 * g_omega0),
         "person_gain": min(0.75, max(0.1, intensity_base) * (0.5 + 0.5 * volatility)),
         "mood_gain": 0.0 if bleed <= 0 else min(0.5, 0.45 * bleed),
+        "relational_scale": min(1.0, 2.0 * max(0.0, t.contagion)),
         "background": t.background,
         "anchor_half_life_us": round(geometric(6.0, 1.5, t.resilience) * DAY),
     }
@@ -81,6 +82,10 @@ class AffectParams(BaseModel):
     mood_gain_slope: float = 1.6
     mood_gain_max_factor: float = 2.0
     mood_gain_cap: float = 0.5
+    #: l'écart de dominance qui fait d'un déplaisir une hostilité pleine
+    hostility_dominance: float = 0.25
+    #: ce qu'une évaluation née d'une relation garde (0 : elle cloisonne)
+    relational_scale: float = _DEFAULTS["relational_scale"]
     #: Ce que vit la relation déborde sur son humeur selon la proximité : un
     #: inconnu qui l'insulte la touche moins qu'une amie qui pleure.
     bleed_stranger: float = 0.5

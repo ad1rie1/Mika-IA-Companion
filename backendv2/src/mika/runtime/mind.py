@@ -207,10 +207,7 @@ class Mind:
         remplace leurs tranches dans ``root``."""
         closure = self.registry.read_closure(owners)
         shadow = self.registry.initial_root()
-        types = {
-            name for name, specs in self.registry.reducers_by_type.items()
-            if any(s.owner in closure for s in specs)
-        }
+        types = self.registry.replay_types(closure)
         for stored in self.store.read(after=0, types=types, upto=upto):
             shadow = self._apply(shadow, self.decode(stored), only=closure, live=False)
         slices = root.slices
@@ -232,8 +229,9 @@ class Mind:
         registry: Registry | None = None,
     ) -> Root:
         reg = registry or self.registry
-        specs = reg.reducers_by_type.get(event.type.name)
-        if not specs:
+        specs = reg.reducers_by_type.get(event.type.name) or []
+        appraisals = reg.appraisals.get(event.type.name) if reg.feel is not None else None
+        if not specs and not appraisals:
             return Root(event.seq, event.at, root.slices, root.changed, root.tainted)
         tz = reg.tz_of(root)
         slices, changed, tainted = root.slices, root.changed, root.tainted
@@ -268,6 +266,34 @@ class Mind:
             if result is not state:
                 slices = slices.set(owner, result)
                 changed = changed.set(owner, event.seq)
+        feel = reg.feel
+        if appraisals and feel is not None and (only is None or feel.owner in only) \
+                and (skip is None or feel.owner not in skip):
+            # ce que l'événement fait ressentir, déclaré par son propriétaire, reçu par un seul
+            felt: list[Any] = []
+            for spec in appraisals:
+                actx = ReduceContext(owner=spec.owner, event_id=event.id, now=event.at,
+                                     params=reg.params_of(spec.owner, root), tz=tz,
+                                     _facts_factory=facts_factory(spec.reads))
+                got = call(spec.fn, event, actx, label=f"évaluation {spec.owner} de {event.type.name}")
+                if isinstance(got, Failed):
+                    self.anomalies.append(f"évaluation {spec.owner}@{event.seq}: {got.error!r}")
+                    continue
+                if got is None:
+                    continue
+                felt.extend(got if isinstance(got, (list, tuple)) else [got])
+            if felt:
+                state = slices[feel.owner]
+                fctx = ReduceContext(owner=feel.owner, event_id=event.id, now=event.at,
+                                     params=reg.params_of(feel.owner, root), tz=tz,
+                                     _facts_factory=facts_factory(feel.reads))
+                result = call(feel.fn, state, tuple(felt), event, fctx, label=f"ressenti de {event.type.name}")
+                if isinstance(result, Failed):
+                    tainted = tainted.set(feel.owner, event.seq)
+                    self.anomalies.append(f"{feel.owner}@{event.seq}: {result.error!r}")
+                elif result is not state:
+                    slices = slices.set(feel.owner, result)
+                    changed = changed.set(feel.owner, event.seq)
         return Root(event.seq, event.at, slices, changed, tainted)
 
     # ── écriture ───────────────────────────────────────────────────────────

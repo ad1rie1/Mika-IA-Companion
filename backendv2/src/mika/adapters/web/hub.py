@@ -84,6 +84,10 @@ class Hub:
 
     # ── livraison (port) ──
     async def deliver(self, d: Delivery) -> bool:
+        if d.kind == "state":
+            # son état a changé (elle s'endort, s'éveille) : sans parole, pour tout le monde
+            await self._send(list(self.conns.values()), protocol.inner_state_update(self.port.frame(), None))
+            return True
         if d.target is None or is_internal(d.target):
             targets = list(self.conns.values())
         else:

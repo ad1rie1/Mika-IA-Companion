@@ -55,6 +55,10 @@ STANCE = FactFamily("affect.stance", arg=str, type=StanceReading, time_varying=T
 WARMTH = FactFamily("affect.warmth", arg=str, type=float, time_varying=True)
 #: Ce que cette personne a installé, signé, dans [-1, 1] : la part du chemin
 #: parcourue depuis le repos commun vers le plaisir maximal (> 0) ou minimal
-#: (< 0). Une rancune se lit ici.
+#: (< 0).
 REGARD = FactFamily("affect.regard", arg=str, type=float, time_varying=True)
+#: L'hostilité que cette personne a installée, dans [0, 1] : un écart au repos
+#: déplaisant **et** dominant (la colère, le dégoût, la frustration) — pas le
+#: chagrin partagé, qui est déplaisant mais sans rancune. La rancune se lit ici.
+HOSTILITY = FactFamily("affect.hostility", arg=str, type=float, time_varying=True)
 FACE = FactFamily("affect.face", arg=str, type=Face, time_varying=True)

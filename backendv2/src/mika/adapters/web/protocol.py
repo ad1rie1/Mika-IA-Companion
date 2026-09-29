@@ -23,6 +23,8 @@ from typing import Any
 from mika.contracts import affect as affect_c
 from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
+from mika.contracts import needs as needs_c
+from mika.contracts import self_ as self_c
 from mika.contracts.entry import HistoryRow
 from mika.kernel.frame import Frame
 from mika.ports.delivery import Delivery
@@ -219,6 +221,11 @@ def inner_state(frame: Frame, handle: str | None, panel: dict[str, Any] | None =
         "ruminations": [],
         "person_scope": bool(handle) and is_identifiable(handle),
     }
+    needs = frame.get(needs_c.NEEDS)
+    out["drives"] = {name: {"tension": round(value, 3), "last_satisfied": 0}
+                     for name, value in (("social", needs.social), ("expression", needs.expression),
+                                         ("curiosity", needs.curiosity))}
+    out["estime"] = round(frame.get(self_c.ESTEEM), 3)
     if handle and is_identifiable(handle):
         view = frame.get(identity_c.IDENTITY(handle))
         out["identity"] = {

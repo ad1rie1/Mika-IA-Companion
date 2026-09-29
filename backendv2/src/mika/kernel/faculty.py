@@ -70,6 +70,15 @@ class AppraisalSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class FeelSpec:
+    """Le seul receveur des évaluations : ``fn(état, évaluations, e, cx)``."""
+
+    owner: str
+    fn: Callable[..., Any]
+    reads: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
 class SectionSpec:
     owner: str
     key: str
@@ -221,6 +230,7 @@ class Faculty(Generic[S, Pm]):
     invariants: list[InvariantSpec] = field(default_factory=list)
     preludes: list[PreludeSpec] = field(default_factory=list)
     interpreters: list[InterpreterSpec] = field(default_factory=list)
+    feelings: list[FeelSpec] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self.namespaces:
@@ -282,8 +292,21 @@ class Faculty(Generic[S, Pm]):
         return deco
 
     def appraisal(self, type_: EventType[Any], *, reads: Iterable[Declared | str] = ()):
+        """Ce que ce type d'événement (qui m'appartient) fait ressentir :
+        ``fn(e, cx) -> évaluation | liste | None``, pur. Déclaré par le
+        propriétaire de l'événement ; le receveur (``feels``) les applique."""
+
         def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
             self.appraisals.append(AppraisalSpec(self.name, type_, fn, _names(reads)))
+            return fn
+
+        return deco
+
+    def feels(self, *, reads: Iterable[Declared | str] = ()):
+        """Recevoir toutes les évaluations (une seule faculté le fait : l'affect)."""
+
+        def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
+            self.feelings.append(FeelSpec(self.name, fn, _names(reads)))
             return fn
 
         return deco
@@ -425,6 +448,9 @@ class Faculty(Generic[S, Pm]):
         return deco
 
     def prelude(self, *, kinds: Iterable[str]):
+        """Avant un épisode de ces types : ``fn(frame, demande) -> Prelude | None``
+        (un épisode court qui le précède, comme un murmure avant de parler)."""
+
         def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
             self.preludes.append(PreludeSpec(self.name, frozenset(kinds), fn))
             return fn

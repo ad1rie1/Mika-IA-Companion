@@ -102,7 +102,8 @@ def _arrivals(s: SocialState, frame: Frame) -> list[Candidate]:
     return out
 
 
-@SOCIAL.propose(kinds=[Kind.INITIATIVE], reasons={c.RECONTACT: (0.0, 12.0), c.COMFORT: (0.0, 12.0)},
+@SOCIAL.propose(kinds=[Kind.INITIATIVE], reasons={c.RECONTACT: (0.0, 12.0), c.COMFORT: (0.0, 12.0),
+                                                  c.CHAT: (0.0, 3.5)},
                 reads=[c.CONTACT, c.CLOSENESS, identity_c.HANDLES, identity_c.REACHABLE, identity_c.IDENTITY,
                        presence_c.PRESENT, affect_c.MOOD, affect_c.WARMTH, transcript_c.LAST_FROM])
 def _reach_out(s: SocialState, frame: Frame) -> list[Candidate]:
@@ -140,6 +141,15 @@ def _reach_out(s: SocialState, frame: Frame) -> list[Candidate]:
         elif distressed and frame.now - reading.last_out >= p.comfort_spacing_us:
             warmth = frame.get(affect_c.WARMTH(person))
             comfort.append((_RANK[level] + warmth, person, address))
+        elif reading.silence_ratio >= p.chat_ratio and \
+                frame.now - max(reading.last_in, reading.last_out) >= p.chat_after_us:
+            # juste l'envie de discuter : peu de chose seule, assez quand le besoin de compagnie s'y ajoute
+            warmth = frame.get(affect_c.WARMTH(person))
+            evidence = (p.chat_close if level == c.CLOSE else p.chat_friend) + p.chat_warmth * warmth
+            brief = (f"Tu as envie de discuter un peu avec {who} : d'habitude vous vous parlez plus souvent. "
+                     "Un mot simple, sans reproche.")
+            out.append(Candidate(Kind.INITIATIVE, address, c.CHAT, evidence, resources=frozenset({floor(address)}),
+                                 guards=(_guard(frame, person),), args=FrozenDict({"brief:social": brief})))
     if comfort:
         _score, person, address = max(comfort)
         name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(address)).name
@@ -163,17 +173,21 @@ def _in_conversation(s: SocialState, frame: Frame, row: RowView) -> Modulation:
     return Modulation()
 
 
-@SOCIAL.modulate(kinds=[Kind.INITIATIVE], reads=[identity_c.PERSON, affect_c.REGARD, c.CONTACT])
+@SOCIAL.modulate(kinds=[Kind.INITIATIVE], reads=[identity_c.PERSON, affect_c.HOSTILITY, c.CONTACT, presence_c.PRESENT])
 def _restraint(s: SocialState, frame: Frame, row: RowView) -> Modulation:
-    """Rien vers quelqu'un qui a installé une rancune ; les initiatives
-    restées sans réponse espacent les suivantes."""
+    """Rien vers quelqu'un qui a installé une rancune ; jamais deux messages de
+    suite à quelqu'un d'absent qui n'a pas répondu (quelle qu'en soit la
+    raison) ; avec quelqu'un de présent, chaque initiative restée sans
+    réponse rend la suivante moins probable."""
     if row.target in ("any", "none") or not is_identifiable(row.target):
         return Modulation()
     p = params(frame.env.params_of("social", frame.root))
     person = frame.get(identity_c.PERSON(row.target))
-    if frame.get(affect_c.REGARD(person)) <= p.grudge_regard:
+    if frame.get(affect_c.HOSTILITY(person)) >= p.grudge:
         return Modulation(veto=c.GRUDGE)
     if c.GREETING in row.reasons:
         return Modulation()
     unanswered = s.contacts[person].unanswered if person in s.contacts else 0
+    if unanswered and row.target not in frame.get(presence_c.PRESENT):
+        return Modulation(veto=c.UNANSWERED)
     return Modulation(shift=p.ignored_shift * unanswered) if unanswered else Modulation()

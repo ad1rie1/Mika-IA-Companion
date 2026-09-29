@@ -428,3 +428,19 @@ def intensity_word(x: float) -> str:
     if x >= 0.3:
         return "légèrement"
     return "à peine"
+
+
+@dataclass(frozen=True, slots=True)
+class Appraisal:
+    """Ce qu'un événement lui fait ressentir, déclaré par le propriétaire de
+    l'événement (un but atteint : de la fierté ; une attente comblée : du
+    soulagement). ``toward`` : une personne (sa posture envers elle) ; sinon
+    elle-même (son humeur)."""
+
+    emotion: Emotion
+    intensity: float
+    toward: str | None = None
+    reason: str = ""
+    #: né d'une relation (une pensée sur ce que quelqu'un a dit) : suit la
+    #: contagion du tempérament, comme ce que vit une relation
+    relational: bool = False

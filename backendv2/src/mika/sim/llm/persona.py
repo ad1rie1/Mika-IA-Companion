@@ -90,6 +90,10 @@ class PersonaSimLLM:
             return self._extract(req)
         if req.role == "profile":
             return self._profile(req)
+        if req.role == "murmur":
+            return self._out(req, "Hmm… tiens, et si j'écrivais un petit mot ?")
+        if req.role == "narrative":
+            return self._out(req, "Je suis quelqu'un qui aime les conversations simples et qui s'attache vite.")
         if req.role == "compact":
             said = [ln.split(" : ", 1)[1] for ln in req.messages[-1].content.splitlines() if " : " in ln][:3]
             return self._out(req, "On a parlé de : " + " / ".join(s[:60] for s in said))

@@ -28,6 +28,7 @@ from mika.kernel.faculty import (
     EffectSpec,
     EnricherSpec,
     Faculty,
+    FeelSpec,
     InspectSpec,
     InterpreterSpec,
     InvariantSpec,
@@ -123,6 +124,13 @@ class Registry:
                 if spec.type.owner != f.name:
                     problems.append(f"{f.name} déclare l'évaluation d'un événement de {spec.type.owner}")
                 self.appraisals[spec.type.name].append(spec)
+                for r in spec.reads:
+                    if r not in self.providers:
+                        problems.append(f"{f.name} : une évaluation lit un fait inconnu {r}")
+        feels = [s for f in facs for s in f.feelings]
+        if len(feels) > 1:
+            problems.append("plusieurs receveurs d'évaluations : " + ", ".join(s.owner for s in feels))
+        self.feel: FeelSpec | None = feels[0] if feels else None
 
         # sections
         self.sections: list[SectionSpec] = []
@@ -274,6 +282,11 @@ class Registry:
             facts: set[str] = set()
             for spec in self.faculties[owner].reducers:
                 facts |= spec.reads
+            if self.feel is not None and self.feel.owner == owner:
+                facts |= self.feel.reads
+                for specs in self.appraisals.values():
+                    for a in specs:
+                        facts |= a.reads
             stack = list(facts)
             visited: set[str] = set()
             while stack:
@@ -287,6 +300,14 @@ class Registry:
                 stack.extend(prov.reads)
         seen.add("kernel")
         return seen
+
+    def replay_types(self, closure: set[str]) -> set[str]:
+        """Les types d'événements qui touchent ces propriétaires (réducteurs,
+        et évaluations quand le receveur en fait partie)."""
+        types = {name for name, specs in self.reducers_by_type.items() if any(s.owner in closure for s in specs)}
+        if self.feel is not None and self.feel.owner in closure:
+            types |= set(self.appraisals)
+        return types
 
     def check_invariants(self, root: Root) -> list[str]:
         failures = []

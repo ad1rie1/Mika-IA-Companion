@@ -50,6 +50,15 @@ Brief = Callable[[Frame, Any], str]
 
 
 @dataclass(frozen=True, slots=True)
+class Prelude:
+    """Un épisode sans destinataire qui en précède un autre (un murmure)."""
+
+    kind: str
+    message: str
+    reason: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class EpisodePolicy:
     kind: str
     role: str | None  # rôle LLM ; None = pas d'appel de modèle

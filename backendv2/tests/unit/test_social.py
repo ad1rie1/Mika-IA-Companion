@@ -34,24 +34,26 @@ def contact(days: int, messages: int) -> Contact:
     return Contact(days=tuple(range(1000, 1000 + days)), inbound=messages, first_in=1, last_in=1)
 
 
-# (jours, messages, regard, attendu, pourquoi)
+# (jours, messages, regard, hostilité, attendu, pourquoi)
 LIVED = [
-    (0, 0, 0.0, "stranger", "jamais parlé"),
-    (1, 12, -0.5, "stranger", "dix minutes d'insultes ne font pas une connaissance"),
-    (1, 25, 0.2, "acquaintance", "une longue première conversation"),
-    (2, 4, 0.0, "acquaintance", "se reparler un autre jour"),
-    (3, 15, 0.0, "friend", "trois jours, quinze messages : une amie"),
-    (3, 15, -0.1, "friend", "une curiosité banale, sans chaleur particulière, suffit"),
-    (3, 15, -0.3, "acquaintance", "une rancune ne fait jamais une amie"),
-    (30, 6, 0.4, "acquaintance", "un contact rare reste une connaissance"),
-    (7, 50, 0.3, "close", "une semaine de conversations chaleureuses"),
-    (7, 50, 0.0, "friend", "beaucoup d'échanges sans chaleur : amie, pas proche"),
+    (0, 0, 0.0, 0.0, "stranger", "jamais parlé"),
+    (1, 12, -0.5, 0.5, "stranger", "dix minutes d'insultes ne font pas une connaissance"),
+    (1, 25, 0.2, 0.0, "acquaintance", "une longue première conversation"),
+    (2, 4, 0.0, 0.0, "acquaintance", "se reparler un autre jour"),
+    (3, 15, 0.0, 0.0, "friend", "trois jours, quinze messages : une amie"),
+    (3, 15, -0.1, 0.0, "friend", "une curiosité banale, sans chaleur particulière, suffit"),
+    (3, 15, -0.4, 0.0, "friend", "un chagrin partagé n'éloigne pas"),
+    (3, 15, -0.3, 0.3, "acquaintance", "une rancune ne fait jamais une amie"),
+    (30, 6, 0.4, 0.0, "acquaintance", "un contact rare reste une connaissance"),
+    (7, 50, 0.3, 0.0, "close", "une semaine de conversations chaleureuses"),
+    (7, 50, 0.0, 0.0, "friend", "beaucoup d'échanges sans chaleur : amie, pas proche"),
+    (14, 100, -0.3, 0.0, "close", "une longue histoire, même dans une mauvaise passe"),
 ]
 
 
-@pytest.mark.parametrize("days,messages,regard,expected,why", LIVED)
-def test_closeness_is_lived(days, messages, regard, expected, why):
-    assert lived(contact(days, messages), regard, P) == expected, why
+@pytest.mark.parametrize("days,messages,regard,hostility,expected,why", LIVED)
+def test_closeness_is_lived(days, messages, regard, hostility, expected, why):
+    assert lived(contact(days, messages), regard, P, hostility) == expected, why
 
 
 def test_the_rhythm_of_a_relationship_is_its_own():
@@ -127,8 +129,9 @@ async def evening(kernel, handle, *, channel="telegram", per_day=4):
         await asyncio.sleep(60)
 
 
-async def daily(kernel, handle, days, *, channel="telegram", per_day=4):
+async def daily(kernel, handle, days, *, channel="telegram", per_day=4, start_hour=None):
     """Une relation qui vit : quelques messages chaque soir."""
+    del start_hour  # l'heure de départ est celle de la course
     for _ in range(days):
         await evening(kernel, handle, channel=channel, per_day=per_day)
         await asyncio.sleep(DAY / US - per_day * 60)
@@ -152,20 +155,20 @@ def test_she_misses_a_reachable_friend_but_not_an_acquaintance_nor_someone_unrea
         return [(e.data.target, e.data.reason) for e in started(kernel) if e.data.kind == "INITIATIVE"]
 
     fired = run(tmp_path, scenario)
-    recontacts = [t for t, reason in fired if social_c.RECONTACT in reason.split(",")]
-    assert recontacts == ["tg_1"], fired
+    outreach = {t for t, reason in fired if {social_c.RECONTACT, social_c.CHAT} & set(reason.split(","))}
+    assert outreach == {"tg_1"}, fired
 
 
-def test_a_friend_missed_at_night_is_written_to_in_the_morning(tmp_path):
+def test_she_never_writes_to_an_absent_friend_at_night(tmp_path):
     async def scenario(kernel, clock, script):
-        await daily(kernel, "tg_1", 5)
-        # le manque (1,5 × un jour) tombe vers 6 h du matin : elle attend 10 h
+        await daily(kernel, "tg_1", 5, start_hour=23)
         await asyncio.sleep(3 * DAY / US)
         return [(local(e.at, PARIS), e.data.reason) for e in started(kernel) if e.data.kind == "INITIATIVE"]
 
-    fired = run(tmp_path, scenario)
-    hours = [t.hour for t, reason in fired if social_c.RECONTACT in reason.split(",")]
-    assert hours and all(10 <= h <= 20 for h in hours), fired
+    fired = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 23, 0))
+    hours = [t.hour + t.minute / 60 for t, reason in fired
+             if {social_c.RECONTACT, social_c.CHAT} & set(reason.split(","))]
+    assert hours and all(10 <= h <= 20.5 for h in hours), fired  # elle écrit habituellement vers 23 h
 
 
 def test_in_distress_she_turns_to_the_friend_she_feels_good_with(tmp_path):
@@ -269,3 +272,31 @@ def test_contacts_follow_the_person_not_the_handle(tmp_path):
 
     alice, handle = run(tmp_path, scenario)
     assert alice.inbound == 2 and handle.inbound == 0
+
+
+def test_whatever_the_reason_no_second_message_to_an_absent_friend_who_has_not_answered(tmp_path):
+    """Le filet de sécurité : une raison qui ne connaîtrait pas la règle (une
+    pensée, un but) est arrêtée par la retenue elle-même."""
+    from mika.contracts import runtime as rt
+    from mika.faculties.social.initiative import _restraint
+    from mika.kernel.arbitration import RowView
+    from mika.kernel.events import VoiceProvenance
+
+    async def scenario(kernel, clock, script):
+        await befriend(kernel, "tg_1", "close")
+        p = await kernel.perceive(said("tg_1", "coucou", channel="telegram"))
+        await p.reply
+        await kernel.mind.append([rt.UTTERANCE.draft(
+            kind="INITIATIVE", text=Content.of("tu vas mieux ?"), target="tg_1", channel="telegram",
+            voice=VoiceProvenance(call_id="x", persona_hash="", role="initiative", model="m"))],
+            emitter="runtime", correlation="genese", origin=Origin.GENESIS)
+        frame = kernel.mind.frame()
+        absent = _restraint(frame.state("social"), frame, RowView("INITIATIVE", "tg_1", 5.0, ("thought",)))
+        await connect(kernel, "tg_1", "Alice")
+        frame = kernel.mind.frame()
+        present = _restraint(frame.state("social"), frame, RowView("INITIATIVE", "tg_1", 5.0, ("thought",)))
+        return absent, present
+
+    absent, present = run(tmp_path, scenario)
+    assert absent.veto == social_c.UNANSWERED
+    assert present.veto is None and present.shift < 0  # en sa présence : plus rare, pas interdit

@@ -16,11 +16,13 @@ from mika.contracts import self_ as self_c
 from mika.faculties.affect import AFFECT
 from mika.faculties.agency import AGENCY
 from mika.faculties.agency import brief as initiative_brief
+from mika.faculties.attention import ATTENTION
 from mika.faculties.body import BODY
 from mika.faculties.expression import EXPRESSION
 from mika.faculties.expression import parse as parse_reply
 from mika.faculties.identity import IDENTITY, audience_for
 from mika.faculties.memory import MEMORY
+from mika.faculties.needs import NEEDS
 from mika.faculties.presence import PRESENCE
 from mika.faculties.self import SELF, load, persona_for
 from mika.faculties.social import SOCIAL
@@ -38,8 +40,9 @@ from mika.vocab.episodes import VOICE_ROLES, Kind, Role
 
 
 def faculties() -> list[Faculty[Any, Any]]:
-    """Les facultés de Mika (M3)."""
-    return [PRESENCE, IDENTITY, TRANSCRIPT, MEMORY, BODY, AFFECT, SELF, EXPRESSION, SOCIAL, AGENCY]
+    """Les facultés de Mika (M4)."""
+    return [PRESENCE, IDENTITY, TRANSCRIPT, MEMORY, BODY, AFFECT, NEEDS, ATTENTION, SELF, EXPRESSION, SOCIAL,
+            AGENCY]
 
 
 def _reply_guard(frame: Frame, target: str | None, audience: Audience | None) -> Guard | None:
@@ -58,6 +61,9 @@ def policies() -> dict[str, EpisodePolicy]:
         Kind.INITIATIVE: EpisodePolicy(kind=Kind.INITIATIVE, role=Role.INITIATIVE, priority=1, lane="conversation",
                                        brief=initiative_brief, max_tokens=600, deadline_s=180.0,
                                        tool_bundles=frozenset({"memory", "identity"})),
+        # une pensée à voix haute : sa voix brève, pas dans le fil, à l'écran seulement
+        Kind.MURMUR: EpisodePolicy(kind=Kind.MURMUR, role=Role.MURMUR, priority=1, lane="conversation",
+                                   persona_depth="compact", visible=False, max_tokens=80, deadline_s=60.0),
     }
 
 

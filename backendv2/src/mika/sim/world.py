@@ -69,8 +69,12 @@ class Transport:
         self.repeats = 0
         self.failures = 0
         self.fail_next = False
+        self.states = 0
 
     async def deliver(self, d: Delivery) -> bool:
+        if d.kind == "state":
+            self.states += 1
+            return True
         if self.fail_next:
             self.fail_next = False
             self.failures += 1
