@@ -75,6 +75,11 @@ class Items:
                 if d.corroborated:
                     sql.execute(f"UPDATE {t} SET confidence=MIN(0.95, COALESCE(confidence, 0.5) + 0.1) WHERE id=?",
                                 (d.item,))
+            elif name == c.NIGHT_SORTED.name:
+                for keep, drop in d.merges:
+                    sql.execute(f"UPDATE {t} SET importance=MAX(importance, COALESCE((SELECT importance FROM {t} "
+                                "WHERE id=?), 0)), touched_at=? WHERE id=?", (drop, e.at, keep))
+                    sql.execute(f"UPDATE {t} SET status='merged' WHERE id=?", (drop,))
             elif name == rt.UTTERANCE.name:
                 ids = [int(p.split(":", 1)[1]) for p in d.provenance if p.startswith("memory:")]
                 if ids:

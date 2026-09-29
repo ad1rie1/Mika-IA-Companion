@@ -193,15 +193,18 @@ def test_a_charged_exchange_leaves_one_thought_that_eases_when_she_talks(tmp_pat
             await asyncio.sleep(60)
         await asyncio.sleep(5)
         born = kernel.mind.frame().get(attention_c.THOUGHTS)
+        await asyncio.sleep(40 * MINUTE / US)
+        before = kernel.mind.frame().get(attention_c.THOUGHTS)
         script.tag = "[EMOTION:happy:0.5]"
-        p = await kernel.perceive(said("user_1", "merci d'être là"))
+        p = await kernel.perceive(said("user_1", "merci d'être là, ça va un peu mieux"))
         await p.reply
         eased = kernel.mind.frame().get(attention_c.THOUGHTS)
-        return born, eased
+        return born, before, eased
 
-    born, eased = run(tmp_path, scenario, script=script)
+    born, before, eased = run(tmp_path, scenario, script=script)
     assert len(born) == 1 and born[0].about == ("user_1",) and born[0].emotion == "sad"
-    assert eased[0].intensity < born[0].intensity * 0.6
+    # y revenir plus tard avec elle soulage (l'échange même ne l'avait pas éteinte)
+    assert eased[0].intensity < before[0].intensity * 0.6
 
 
 def test_a_thought_about_alice_is_not_shown_to_bob(tmp_path):

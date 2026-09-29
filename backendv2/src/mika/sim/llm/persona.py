@@ -77,6 +77,8 @@ class PersonaSimLLM:
         self.abstain_rate = abstain_rate
         self.model = model
         self.calls: list[LLMRequest] = []
+        #: pannes à injecter : rôle → nombre d'appels qui échoueront encore
+        self.fail: dict[str, int] = {}
 
     def _rng(self, req: LLMRequest) -> random.Random:
         return random.Random(h64("persona-sim", self.seed, req.call_id, len(req.messages)))
@@ -86,8 +88,17 @@ class PersonaSimLLM:
         delay = self.latency(req) if callable(self.latency) else float(self.latency)
         if delay > 0:
             await self.clock.sleep_until(self.clock.now() + round(delay * US))
+        if self.fail.get(req.role, 0) > 0:
+            self.fail[req.role] -= 1
+            raise ConnectionError(f"panne simulée ({req.role})")
         if req.role == "extract":
             return self._extract(req)
+        if req.role == "journal":
+            text = req.messages[-1].content if req.messages else ""
+            who = "personne" if "Personne ne t'a parlé" in text else "des gens"
+            return self._out(req, f"Journée passée avec {who}. Je m'en souviendrai.")
+        if req.role == "dream":
+            return self._out(req, "Je marche dans une ville qui ressemble à un clavier ; les touches chantent.")
         if req.role == "profile":
             return self._profile(req)
         if req.role == "murmur":

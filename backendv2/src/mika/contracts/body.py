@@ -55,5 +55,7 @@ ENERGY = FactKey("body.energy", type=float, time_varying=True)
 SLEEP = FactKey("body.sleep", type=SleepPhase, time_varying=True)
 #: Depuis quand elle est éveillée (0 si elle dort).
 AWAKE_SINCE = FactKey("body.awake_since", type=int)
+#: Depuis quand elle dort (0 si elle est éveillée).
+ASLEEP_SINCE = FactKey("body.asleep_since", type=int)
 #: Ce qui a changé son sommeil pour la dernière fois (pour les gardes).
 EPOCH = FactKey("body.epoch", type=tuple)

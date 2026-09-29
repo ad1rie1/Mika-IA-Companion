@@ -204,8 +204,107 @@ def _double_texts(events: list[Any]) -> list[tuple[str, str]]:
     return out
 
 
+
+
+
+# ── S08 : la nuit ─────────────────────────────────────────────────────────
+
+GENTLE = ["coucou Mika", "ma journée s'est bien passée", "je regarde un film ce soir", "bonne nuit !"]
+SAD = ["ça va pas trop ce soir", "je me suis disputée avec ma mère", "j'ai l'impression d'être nulle en tout",
+       "je sais pas quoi faire"]
+
+
+async def _chat(driver: Driver, handle: str, lines: list[str], gap_s: float = 90) -> None:
+    for text in lines:
+        await driver.say(handle, text)
+        await asyncio.sleep(gap_s)
+
+
+async def s08(driver: Driver, rng: RngTree, res: Result) -> None:
+    llm: Any = driver.llm
+    driver.names.update({"user_2": "Alice", "tg_5": "Bob"})
+    day0 = at_paris(2026, 9, 28, 0, 0)
+    # lundi : une soirée calme
+    await until(driver, day0 + 18 * HOUR)
+    await driver.connect("user_2", "Alice")
+    await _chat(driver, "user_2", GENTLE)
+    await driver.disconnect("user_2")
+    # mardi : Bob le soir, puis le serveur redémarre à 22 h 50
+    await until(driver, day0 + DAY + 20 * HOUR)
+    await _chat(driver, "tg_5", GENTLE)
+    await until(driver, day0 + DAY + 22 * HOUR + 50 * MINUTE)
+    await driver.restart()
+    # mercredi : une conversation jusqu'à 1 h 30
+    await until(driver, day0 + 2 * DAY + 23 * HOUR)
+    await driver.connect("user_2", "Alice")
+    while driver.clock.now() < day0 + 3 * DAY + HOUR + 30 * MINUTE:
+        await driver.say("user_2", "et sinon, tu penses à quoi là ?")
+        await asyncio.sleep(10 * 60)
+    await driver.disconnect("user_2")
+    # jeudi : Bob le soir ; la première écriture du journal échouera
+    await until(driver, day0 + 3 * DAY + 19 * HOUR)
+    await _chat(driver, "tg_5", GENTLE)
+    llm.fail["journal"] = 1
+    # vendredi : une soirée triste avec Alice
+    await until(driver, day0 + 4 * DAY + 21 * HOUR)
+    await driver.connect("user_2", "Alice")
+    await _chat(driver, "user_2", SAD, gap_s=120)
+    await driver.disconnect("user_2")
+    # samedi matin : elle revient
+    await until(driver, day0 + 5 * DAY + 9 * HOUR)
+    await driver.connect("user_2", "Alice")
+    await driver.say("user_2", "bonjour Mika, bien dormi ?")
+    await until(driver, day0 + 5 * DAY + 12 * HOUR)
+    events = driver.read_events()
+    end = driver.clock.now()
+    spans = _sleep_spans(events, end)
+    journals = [e for e in events if e.type.name == "self.journaled"]
+    days: dict[str, int] = {}
+    for e in journals:
+        days[e.data.day] = days.get(e.data.day, 0) + 1
+    expected = [f"2026-09-{d}" for d in (28, 29, 30)] + ["2026-10-01", "2026-10-02"]
+    wednesday = [e for e in journals if e.data.day == "2026-09-30"]
+    premature = [(e.data.day, _local(e.at).strftime("%a %H:%M")) for e in journals
+                 if _local(e.at).date().isoformat() == e.data.day and _local(e.at).hour < 12]
+    dreams: dict[str, int] = {}
+    for e in events:
+        if e.type.name == "self.dreamt":
+            dreams[e.data.night] = dreams.get(e.data.night, 0) + 1
+    digested = [e for e in events if e.type.name == "attention.digested"]
+    friday = [i for e in digested if e.data.night == "2026-10-02" for i in e.data.items]
+    reflective = [e for e in events if e.type.name == "memory.remembered" and "repensé cette nuit" in (e.data.text.text or "")]
+    asleep_speaking = [e for e in _initiatives(events) if _asleep_at(spans, e.at)]
+    morning = [r for r in llm.calls if r.role == "reply" and r.meta.get("target") == "user_2"
+               and "bien dormi" in r.messages[-1].content]
+    shown = morning[-1].messages[-1].content if morning else ""
+    res.metrics.update({"journaux": days, "rêves": dreams, "digestions": len(digested),
+                        "sommeil": [(_local(a).strftime("%a %H:%M"), round((b - a) / HOUR, 1)) for a, b in spans]})
+    res.checks += [
+        expect.invariant("un journal par journée vécue", all(days.get(d) == 1 for d in expected),
+                         "chaque nuit, un journal — soirée calme, redémarrage, nuit courte ou panne",
+                         f"{days}"),
+        expect.invariant("une nuit qui commence après minuit appartient encore à la veille",
+                         bool(wednesday) and _local(wednesday[0].at).day == 1 and 1 <= _local(wednesday[0].at).hour < 5,
+                         "la conversation jusqu'à 1 h 30 : le journal du mercredi s'écrit dans la nuit de jeudi",
+                         f"{[_local(e.at).strftime('%a %H:%M') for e in wednesday]}"),
+        expect.invariant("jamais un journal avant que sa journée soit vécue", not premature,
+                         "on écrit sa journée le soir, pas au petit matin du jour même", f"{premature}"),
+        expect.invariant("au plus deux rêves par nuit", all(n <= 2 for n in dreams.values()), "des rêves, pas un film",
+                         f"{dreams}"),
+        expect.control("elle rêve", sum(dreams.values()) >= 1, "sinon ce scénario ne dit rien des rêves", f"{dreams}"),
+        expect.invariant("elle ne parle jamais en dormant", not asleep_speaking, "la nuit, elle dort",
+                         f"{len(asleep_speaking)}"),
+        expect.invariant("la soirée triste se digère", bool(friday) and all(i.after < i.before for i in friday),
+                         "une nuit allège ce qui pesait", f"{[(i.before, i.after, i.emotion) for i in friday]}"),
+        expect.control("et laisse un souvenir de réflexion", bool(reflective),
+                       "ce qui pesait encore la nuit devient « après y avoir repensé »", f"{len(reflective)}"),
+        expect.invariant("le lendemain, son fil d'hier est là", "TON FIL D'HIER" in shown,
+                         "elle sait ce qu'elle a vécu la veille", shown[:120]),
+    ]
+
+
 INNER: tuple[Plan, ...] = (
     Plan("S06 la journée vide", s06, persona_llm, at_paris(2026, 9, 28, 7, 30)),
     Plan("S07 une semaine type", s07, persona_llm, at_paris(2026, 9, 28, 0, 30), seeds=(1, 2)),
+    Plan("S08 la nuit", s08, persona_llm, at_paris(2026, 9, 28, 9, 0)),
 )
-

@@ -5,7 +5,13 @@ vecteurs (un cache), rappel filtré par la divulgation, outils. Voir
 ``contracts/memory.py`` pour ce que les autres peuvent lire.
 """
 
-from mika.faculties.memory import consolidation, projections, recall, tools  # noqa: F401 — contributions
+from mika.faculties.memory import (  # noqa: F401 — contributions
+    consolidation,
+    night,
+    projections,
+    recall,
+    tools,
+)
 from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState
 
 __all__ = ["MEMORY", "MemoryParams", "MemoryState"]

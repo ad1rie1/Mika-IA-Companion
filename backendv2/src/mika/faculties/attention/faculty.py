@@ -60,6 +60,11 @@ class AttentionParams(BaseModel):
     # attentes
     reply_window_us: int = 20 * MINUTE
     reply_window_message_us: int = HOUR
+    # la nuit : les pensées de la veille s'allègent (÷3) et se calment
+    digest_after_sleep_us: int = 3 * HOUR
+    digest_min_age_us: int = 2 * HOUR
+    digest_factor: float = 1 / 3
+    reflective_from: float = 0.25
     # une pensée qui insiste pousse à en reparler (log-odds)
     thought_from: float = 0.4
     thought_evidence: float = 4.0
@@ -111,6 +116,7 @@ class AttentionState:
     #: les personnes dont la réponse n'est pas venue à temps (depuis quand) : une réponse tardive compte encore
     late: FrozenDict[str, int] = field(default_factory=FrozenDict)
     dwelt_at: int = 0
+    digested_night: str = ""
 
 
 ATTENTION = Faculty("attention", state=AttentionState, init=lambda p: AttentionState(), params=AttentionParams)
@@ -152,10 +158,10 @@ def _uttered(s: AttentionState, e, cx) -> AttentionState:
         return s
     p = params(cx.params)
     person = cx.facts.get(identity_c.PERSON(d.target))
-    # en parler soulage : ce qui la concerne s'allège
+    # y revenir avec la personne soulage — pas l'échange même qui l'a fait naître ou raviver
     thoughts = s.thoughts
     for t in s.thoughts.values():
-        if person in t.about:
+        if person in t.about and e.at - t.touched_at >= p.exchange_spacing_us:
             thoughts = thoughts.set(t.id, replace(t, intensity=current(t, e.at, p) / 2, touched_at=e.at))
     s = replace(s, thoughts=thoughts)
     if d.kind == Kind.INITIATIVE:
@@ -221,6 +227,16 @@ def _born(s: AttentionState, e, cx) -> AttentionState:
     if d.origin == c.MISSING and d.about:
         s = _expect(s, c.RETURN, d.about[0], e.at, None)
     return s
+
+
+@ATTENTION.reducer(c.DIGESTED)
+def _digested(s: AttentionState, e, cx) -> AttentionState:
+    thoughts = s.thoughts
+    for item in e.data.items:
+        t = thoughts.get(item.thought)
+        if t is not None:
+            thoughts = thoughts.set(t.id, replace(t, intensity=item.after, touched_at=e.at, emotion=item.emotion))
+    return replace(s, thoughts=thoughts, digested_night=e.data.night)
 
 
 @ATTENTION.reducer(c.DWELT)
@@ -299,6 +315,15 @@ def _met_felt(e, cx) -> list[Appraisal]:
         return [Appraisal(Emotion.HAPPY, 0.4, reason="retour"),
                 Appraisal(Emotion.HAPPY, 0.4, toward=e.data.person, reason="retour")]
     return [Appraisal(Emotion.RELIEVED, 0.25, reason="réponse")]
+
+
+@ATTENTION.appraisal(c.DIGESTED)
+def _digest_felt(e, cx) -> Appraisal | None:
+    """Ce qui s'est calmé pendant la nuit : un peu de soulagement au réveil."""
+    calmed = [i for i in e.data.items if i.emotion != "" and i.after < i.before]
+    if not calmed:
+        return None
+    return Appraisal(Emotion.RELIEVED, min(0.3, 0.1 * len(calmed)), reason="digestion")
 
 
 @ATTENTION.appraisal(c.EXPECTATION_MISSED)

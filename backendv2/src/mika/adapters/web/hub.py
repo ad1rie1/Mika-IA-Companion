@@ -19,6 +19,7 @@ from typing import Any
 
 from mika.adapters.web import protocol
 from mika.contracts import affect as affect_c
+from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
 from mika.contracts.entry import MindPort
 from mika.ports.delivery import Delivery
@@ -51,6 +52,7 @@ class Hub:
         self.conns: dict[str, Conn] = {}
         self._counter = itertools.count(1)
         self._sent_face: dict[str, tuple[str, float, tuple[str, ...]]] = {}
+        self._sent_phase = "awake"
         self._sync_task: asyncio.Task[None] | None = None
         self.delivered: list[str] = []
 
@@ -135,6 +137,12 @@ class Hub:
         for handle in sorted({c.handle for c in self.conns.values()}):
             if await self.push_face(handle):
                 pushed += 1
+        # la phase de sommeil change sans événement (les cycles de la nuit) : le visage la suit
+        frame = self.port.frame()
+        phase = frame.get(body_c.SLEEP).value
+        if self.conns and phase != self._sent_phase:
+            self._sent_phase = phase
+            await self._send(list(self.conns.values()), protocol.inner_state_update(frame, None))
         return pushed
 
     async def run_sync(self, interval_s: float = SYNC_INTERVAL_S) -> None:

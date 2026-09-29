@@ -20,6 +20,7 @@ from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
 from mika.faculties.attention.faculty import ATTENTION, AttentionState, Pending, params
+from mika.kernel.clock import local_date_of_night
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
@@ -153,3 +154,49 @@ class Watch:
 
 def _about(row: tuple[Any, ...] | None) -> tuple[str, ...]:
     return tuple(json.loads(row[1] or "[]")) if row else ()
+
+
+# ── La nuit ───────────────────────────────────────────────────────────────
+
+#: Ce que devient une couleur après une nuit (les autres restent ce qu'elles sont).
+DRIFT = {
+    "frustrated": "relieved", "anxious": "relieved", "scared": "relieved", "angry": "thinking",
+    "disgusted": "thinking", "jealous": "thinking", "sad": "melancholic", "lonely": "melancholic",
+}
+
+
+@ATTENTION.process("attention.digest", wake_on=[*body_c.ALL], lane="night", catch_up=CatchUp.ONCE,
+                   max_quantum_s=3600)
+class Digest:
+    """Une fois par nuit, après trois heures de sommeil : les pensées de la
+    veille s'allègent des deux tiers ; leur couleur se calme."""
+
+    def _night(self, state: AttentionState, frame: Frame) -> str | None:
+        since = frame.get(body_c.ASLEEP_SINCE)
+        if not since:
+            return None
+        night = local_date_of_night(since, frame.env.tz_of(frame.root), 5).isoformat()
+        return None if night == state.digested_night else night
+
+    def next_due(self, state: AttentionState, frame: Frame, last_run: int | None) -> int | None:
+        if self._night(state, frame) is None:
+            return None
+        p = params(frame.env.params_of("attention", frame.root))
+        return max(frame.now, frame.get(body_c.ASLEEP_SINCE) + p.digest_after_sleep_us)
+
+    async def run(self, ctx: Any) -> None:
+        frame: Frame = ctx.frame
+        state: AttentionState = ctx.state
+        night = self._night(state, frame)
+        if night is None:
+            return
+        p = params(frame.env.params_of("attention", frame.root))
+        items = []
+        for t in frame.get(c.THOUGHTS):
+            if frame.now - t.born_at < p.digest_min_age_us:
+                continue  # trop récente pour être digérée cette nuit
+            items.append(c.DigestedThought(
+                thought=t.id, before=t.intensity, after=round(t.intensity * p.digest_factor, 4),
+                emotion=DRIFT.get(t.emotion, t.emotion), reflective=t.intensity >= p.reflective_from,
+                text_ref=t.text_ref, about=t.about, sensitivity=t.sensitivity))
+        await ctx.emit(c.DIGESTED.draft(night=night, items=tuple(items), dedupe_key=f"digestion:{night}"))

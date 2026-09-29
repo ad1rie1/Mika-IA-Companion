@@ -151,6 +151,11 @@ def _awake_since(s: BodyState, cx) -> int:
     return 0 if s.sleep.asleep else s.sleep.since
 
 
+@BODY.fact(c.ASLEEP_SINCE)
+def _asleep_since(s: BodyState, cx) -> int:
+    return s.sleep.since if s.sleep.asleep else 0
+
+
 @BODY.fact(c.EPOCH)
 def _epoch(s: BodyState, cx) -> tuple[Any, ...]:
     return (s.sleep.asleep, s.sleep.since, s.sleep.active_at)
@@ -165,17 +170,24 @@ class Rest:
     """Émet les transitions à l'instant exact du croisement ; après un arrêt,
     celles qu'elle a manquées, datées (une nuit ne se saute pas)."""
 
+    @staticmethod
+    def _from(state: BodyState, now: int) -> int:
+        """Rien n'a pu changer avant son dernier état connu : après un arrêt, on
+        rejoue la nuit depuis là (et non depuis le redémarrage)."""
+        last = max(state.sleep.since, state.sleep.active_at)
+        return last if last else now
+
     def next_due(self, state: BodyState, frame: Frame, last_run: int | None) -> int | None:
         p = params(frame.env.params_of("body", frame.root))
-        return sl.next_transition(state.sleep, frame.now, p.sleep, frame.env.tz_of(frame.root), p.shift_minutes,
-                                  night(p))
+        return sl.next_transition(state.sleep, self._from(state, frame.now), p.sleep, frame.env.tz_of(frame.root),
+                                  p.shift_minutes, night(p))
 
     async def run(self, ctx: Any) -> None:
         frame: Frame = ctx.frame
         p = params(frame.env.params_of("body", frame.root))
         tz = frame.env.tz_of(frame.root)
-        steps = sl.transitions(ctx.state.sleep, frame.now - 1, ctx.now, p.sleep, tz, p.shift_minutes,
-                               night=night(p))
+        steps = sl.transitions(ctx.state.sleep, self._from(ctx.state, frame.now), ctx.now, p.sleep, tz,
+                               p.shift_minutes, night=night(p))
         if not steps:
             return
         drafts = [(c.WOKE if kind == "woke" else c.FELL_ASLEEP).draft(at=at, pressure=round(after.pressure, 4))

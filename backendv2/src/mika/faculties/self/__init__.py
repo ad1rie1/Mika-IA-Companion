@@ -29,12 +29,14 @@ from pydantic import BaseModel, ConfigDict
 from mika.contracts import attention as attention_c
 from mika.contracts import memory as memory_c
 from mika.contracts import self_ as c
+from mika.faculties.self.records import Dream, Journal
 from mika.kernel.clock import DAY, HOUR
 from mika.kernel.codec import digest
 from mika.kernel.events import Content, VoiceProvenance
 from mika.kernel.faculty import CatchUp, Faculty, Zone
 from mika.kernel.frame import Frame
 from mika.kernel.prompt import SectionBody
+from mika.kernel.state import FrozenDict
 from mika.ports.llm import LLMRequest, Message, PersonaRender
 from mika.vocab.episodes import CONVERSATIONAL, Tag
 from mika.vocab.privacy import Sensitivity
@@ -65,10 +67,12 @@ class SelfState:
     narrative_ref: str = ""
     narrated_at: int = 0
     narrated_souvenirs: int = 0
+    journals: FrozenDict[str, Journal] = field(default_factory=FrozenDict)  # par journée vécue
+    dreams: tuple[Dream, ...] = ()  # les plus récents
 
 
 SELF = Faculty("self", state=SelfState, init=lambda p: SelfState(), params=SelfParams)
-SELF.declare(c.PERSONA_REVISED, c.NARRATED)
+SELF.declare(c.PERSONA_REVISED, c.NARRATED, c.JOURNALED, c.DREAMT)
 
 
 def params(p: SelfParams | None) -> SelfParams:
@@ -259,3 +263,6 @@ def persona_for(frame: Frame, depth: str) -> PersonaRender:
     doc: c.PersonaDoc = frame.get(c.PERSONA)
     text = render(doc, depth)
     return PersonaRender(text=text, hash=digest((depth, text)), depth=depth)
+
+
+from mika.faculties.self import night as _night  # noqa: E402,F401 — la nuit : journal, rêves

@@ -55,13 +55,32 @@ class ExpectationMissed(Payload):
     since: int
 
 
+class DigestedThought(Payload):
+    thought: int
+    before: float
+    after: float
+    emotion: str  # la couleur après la nuit (la frustration devient du soulagement…)
+    reflective: bool  # assez forte pour laisser un souvenir « après y avoir repensé »
+    text_ref: str = ""
+    about: tuple[str, ...] = ()
+    sensitivity: int = 2
+
+
+class Digested(Payload):
+    """La nuit, les pensées de la veille s'allègent et se calment."""
+
+    night: str
+    items: tuple[DigestedThought, ...] = ()
+
+
 THOUGHT_BORN = event_type("attention.thought_born", OWNER, ThoughtBorn, public=True, content=("text",),
                           subjects=("about",))
 DWELT = event_type("attention.dwelt", OWNER, Dwelt, public=True)
 EXPECTATION_MET = event_type("attention.expectation_met", OWNER, ExpectationMet, public=True, subjects=("person",))
 EXPECTATION_MISSED = event_type("attention.expectation_missed", OWNER, ExpectationMissed, public=True,
                                 subjects=("person",))
-ALL = (THOUGHT_BORN, DWELT, EXPECTATION_MET, EXPECTATION_MISSED)
+DIGESTED = event_type("attention.digested", OWNER, Digested, public=True)
+ALL = (THOUGHT_BORN, DWELT, EXPECTATION_MET, EXPECTATION_MISSED, DIGESTED)
 
 
 @dataclass(frozen=True, slots=True)

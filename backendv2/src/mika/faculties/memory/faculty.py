@@ -11,9 +11,10 @@ from dataclasses import dataclass, field, replace
 
 from pydantic import BaseModel, ConfigDict
 
+from mika.contracts import attention as attention_c
 from mika.contracts import memory as c
 from mika.contracts import runtime as rt
-from mika.kernel.clock import MINUTE
+from mika.kernel.clock import HOUR, MINUTE
 from mika.kernel.faculty import Faculty
 from mika.kernel.state import FrozenDict
 
@@ -45,6 +46,21 @@ class MemoryParams(BaseModel):
     person_boost: float = 1.25
     repetition_us: int = 30 * MINUTE
     repetition_penalty: float = 0.6
+    # la nuit
+    night_after_sleep_us: int = 3 * HOUR
+    night_merge_similarity: float = 0.9
+    night_max_merges: int = 20
+
+
+@dataclass(frozen=True, slots=True)
+class Reflection:
+    """Une pensée restée forte, digérée cette nuit : un souvenir à écrire."""
+
+    thought: int
+    text_ref: str
+    about: tuple[str, ...]
+    sensitivity: int
+    emotion: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +72,8 @@ class MemoryState:
     items: int = 0
     chunks: int = 0
     promises: FrozenDict[int, c.PendingPromise] = field(default_factory=FrozenDict)
+    reflections: tuple[Reflection, ...] = ()
+    sorted_night: str = ""
 
 
 MEMORY = Faculty("memory", state=MemoryState, init=lambda p: MemoryState(), params=MemoryParams)
@@ -86,7 +104,21 @@ def _consolidated(s: MemoryState, e, cx) -> MemoryState:
 
 @MEMORY.reducer(c.REMEMBERED, c.BELIEVED)
 def _retained(s: MemoryState, e, cx) -> MemoryState:
-    return replace(s, items=s.items + 1)
+    reflections = tuple(r for r in s.reflections if e.data.call_id != f"réflexion:{r.thought}")
+    return replace(s, items=s.items + 1, reflections=reflections)
+
+
+@MEMORY.reducer(attention_c.DIGESTED)
+def _digested(s: MemoryState, e, cx) -> MemoryState:
+    """Ce qui est resté fort toute la journée, repensé la nuit, devient un souvenir."""
+    new = tuple(Reflection(i.thought, i.text_ref, tuple(i.about), i.sensitivity, i.emotion)
+                for i in e.data.items if i.reflective and i.text_ref)
+    return replace(s, reflections=(*s.reflections, *new)[-20:]) if new else s
+
+
+@MEMORY.reducer(c.NIGHT_SORTED)
+def _sorted(s: MemoryState, e, cx) -> MemoryState:
+    return replace(s, sorted_night=e.data.night)
 
 
 @MEMORY.reducer(c.PROMISE_NOTICED)

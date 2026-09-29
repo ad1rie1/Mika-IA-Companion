@@ -8,12 +8,14 @@ from mika.contracts import attention as attention_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import presence as presence_c
+from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.contracts.entry import Admission, HistoryRow
 from mika.contracts.runtime import PerceptionReceived
 from mika.faculties import transcript
 from mika.faculties.attention import prompt as attention_prompt
 from mika.faculties.identity import describe
+from mika.faculties.self import night
 from mika.kernel.events import Origin
 from mika.kernel.frame import Audience, Frame
 from mika.runtime.bootstrap import Kernel, ReadOnlyStore
@@ -68,6 +70,18 @@ class KernelPort:
         texts = self._store.content([t.text_ref for t in thoughts if t.text_ref])
         out["ruminations"] = [{"summary": texts.get(t.text_ref, ""), "intensity": round(t.intensity, 2),
                                "emotion": t.emotion} for t in thoughts if texts.get(t.text_ref)]
+        yesterday, dream = frame.get(self_c.YESTERDAY), frame.get(self_c.DREAM_RESIDUE)
+        if yesterday is not None and night.hearable(yesterday.about, 2, person, audience):
+            text = self._store.content([yesterday.text_ref]).get(yesterday.text_ref)
+            if text:
+                out["today_journal"] = {"date": yesterday.day, "narrative": text, "dominant_emotion": yesterday.dominant,
+                                        "persons_interacted": []}
+        if dream is not None and night.hearable(dream.about, dream.sensitivity, person, audience):
+            text = self._store.content([dream.text_ref]).get(dream.text_ref)
+            if text:
+                out["last_dream"] = {"content": text, "dream_type": dream.kind, "vividness": dream.vividness,
+                                     "emotion": dream.emotion or "dreamy", "night_of": dream.night,
+                                     "recalled": dream.recalled}
         ref = frame.state("self").narrative_ref
         narrative = self._store.content([ref]).get(ref) if ref else None
         if narrative:

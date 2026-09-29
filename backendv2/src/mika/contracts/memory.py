@@ -94,6 +94,14 @@ class Consolidated(Payload):
     model: str = ""
 
 
+class NightSorted(Payload):
+    """La nuit, les souvenirs du jour presque identiques à un autre s'y fondent
+    (``(gardé, fondu)``) : l'importance du gardé devient la plus haute des deux."""
+
+    night: str
+    merges: tuple[tuple[int, int], ...] = ()
+
+
 REMEMBERED = event_type("memory.remembered", OWNER, Remembered, public=True, content=("text",), subjects=("about",))
 BELIEVED = event_type("memory.believed", OWNER, Believed, public=True, content=("text",), subjects=("about",))
 REINFORCED = event_type("memory.reinforced", OWNER, Reinforced, public=True)
@@ -101,7 +109,8 @@ PROMISE_NOTICED = event_type("memory.promise_noticed", OWNER, PromiseNoticed, pu
                              subjects=("to",))
 PROMISE_RESOLVED = event_type("memory.promise_resolved", OWNER, PromiseResolved, public=True)
 CONSOLIDATED = event_type("memory.consolidated", OWNER, Consolidated, public=True)
-ALL = (REMEMBERED, BELIEVED, REINFORCED, PROMISE_NOTICED, PROMISE_RESOLVED, CONSOLIDATED)
+NIGHT_SORTED = event_type("memory.night_sorted", OWNER, NightSorted, public=True)
+ALL = (REMEMBERED, BELIEVED, REINFORCED, PROMISE_NOTICED, PROMISE_RESOLVED, CONSOLIDATED, NIGHT_SORTED)
 
 
 @dataclass(frozen=True, slots=True)
