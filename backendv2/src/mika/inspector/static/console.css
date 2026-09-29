@@ -180,6 +180,7 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
 .vital { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); white-space: nowrap; }
 .vital b { color: var(--text); font-weight: 600; }
 .vital-label { color: var(--muted); }
+.vital-meter { width: 38px; height: 6px; vertical-align: middle; }
 .vital .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .vital .dot.ok { background: var(--ok); } .vital .dot.warn { background: var(--warn); }
 .vital .dot.danger { background: var(--danger); } .vital .dot.info { background: var(--info); }
@@ -338,7 +339,8 @@ input, select, textarea { font: inherit; color: var(--text); background: var(--s
   border-radius: 7px; padding: 6px 9px; max-width: 100%; }
 input:focus, select:focus, textarea:focus { border-color: var(--accent); outline: none;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
-textarea { width: 100%; min-height: 8rem; font: 12.5px/1.5 var(--mono); }
+textarea { width: 100%; min-height: 4.5rem; font: inherit; line-height: 1.5; }
+textarea.mono { font: 12.5px/1.5 var(--mono); }
 .btn, button.btn { display: inline-flex; align-items: center; gap: 6px; font: inherit; font-weight: 560; padding: 6px 13px;
   border-radius: 7px; border: 1px solid var(--accent); background: var(--accent); color: var(--on-accent); cursor: pointer; }
 .btn:hover { filter: brightness(1.05); text-decoration: none; }
@@ -367,7 +369,8 @@ details.advanced > summary { cursor: pointer; font-weight: 600; color: var(--tex
 .settings-section { display: grid; gap: 14px; }
 .settings-head h2 { margin: 0 0 4px; font-size: 17px; }
 .settings-head p { margin: 0; }
-.settings .group { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px 18px; }
+.settings .group { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px 18px;
+  align-items: start; }
 .settings .group > legend { grid-column: 1 / -1; }
 .settings .group .field:has(textarea), .settings .group .field.mapping, .settings .group .field:has(.slider) {
   grid-column: 1 / -1; }
@@ -379,7 +382,10 @@ details.advanced > summary { cursor: pointer; font-weight: 600; color: var(--tex
 form.inline { display: inline; }
 .commands { display: flex; gap: 8px; flex-wrap: wrap; }
 .record-form { border-color: var(--accent); }
-.form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px 18px; }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px 18px;
+  align-items: start; }
+.field { align-content: start; }
+.field > .btn, .field > .check { justify-self: start; }
 .form-grid .field:has(textarea), .form-grid .field:has(.slider) { grid-column: 1 / -1; }
 .check.small { font-size: 12.5px; color: var(--muted); }
 .inline-form { display: inline; }

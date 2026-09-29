@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -25,8 +25,9 @@ from mika.contracts import goals as goals_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.kernel.arbitration import Modulation, RowView
-from mika.kernel.clock import DAY, MINUTE, local
+from mika.kernel.clock import DAY, HOUR, MINUTE, local
 from mika.kernel.faculty import Faculty
+from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.vocab.episodes import Kind
 
@@ -36,13 +37,34 @@ KEEP = 32
 class AgencyParams(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    daily_cap: int = 5
-    refractory_us: int = 30 * MINUTE
-    refractory_shift: float = -3.0
-    jitter: float = 0.15
-    ignored_backoff: float = 2.5
-    max_refractory_us: int = 6 * 3600 * 1_000_000
-    ignored_shift: float = -1.0
+    daily_cap: Annotated[int, Knob(
+        label="Initiatives par jour", group="Plafond", lo=0, hi=50,
+        help="Au-delà, plus aucune initiative ordinaire ce jour-là (heure locale). Saluer quelqu'un qui arrive "
+             "et dire un rappel promis n'en font pas partie.")] = 5
+    refractory_us: Annotated[int, Knob(
+        label="Période réfractaire", group="Période réfractaire", lo=0, hi=6 * HOUR,
+        help="Après chaque initiative, la suivante est moins probable pendant cette durée (tirée à ± la gigue, "
+             "allongée par les initiatives ignorées) ; jamais interdite.")] = 30 * MINUTE
+    refractory_shift: Annotated[float, Knob(
+        label="Recul juste après une initiative", group="Période réfractaire", lo=-20, hi=0, step=0.5,
+        help="Recul (log-odds) juste après une initiative, qui s'efface linéairement jusqu'à la fin de la "
+             "période.")] = -3.0
+    jitter: Annotated[float, Knob(
+        label="Gigue de la période", group="Période réfractaire", lo=0, hi=0.5, step=0.01,
+        help="La durée est tirée à ± cette part à chaque initiative (enregistrée : le rejeu retombe sur la "
+             "même) — un métronome se reconnaît.")] = 0.15
+    ignored_backoff: Annotated[float, Knob(
+        label="Allongement par initiative ignorée", group="Initiatives ignorées", lo=1, hi=5, step=0.1,
+        help="Chaque initiative restée sans réponse d'affilée multiplie la période réfractaire par ce facteur "
+             "(jusqu'au maximum ci-dessous) : être ignorée l'espace.")] = 2.5
+    max_refractory_us: Annotated[int, Knob(
+        label="Période réfractaire maximale", group="Initiatives ignorées", lo=10 * MINUTE, hi=2 * DAY,
+        help="La période réfractaire, allongée par les initiatives ignorées, ne dépasse jamais cette "
+             "durée.")] = 6 * 3600 * 1_000_000
+    ignored_shift: Annotated[float, Knob(
+        label="Recul par initiative ignorée", group="Initiatives ignorées", lo=-10, hi=0, step=0.5,
+        help="Recul (log-odds) par initiative restée sans réponse d'affilée (trois au plus comptées), en plus "
+             "de la période réfractaire.")] = -1.0
 
 
 @dataclass(frozen=True, slots=True)

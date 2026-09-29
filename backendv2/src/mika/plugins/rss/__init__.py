@@ -18,7 +18,7 @@ from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -26,9 +26,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from mika.contracts import body as body_c
 from mika.contracts import rss as c
 from mika.contracts import self_ as self_c
-from mika.kernel.clock import HOUR, MINUTE, instant
+from mika.kernel.clock import DAY, HOUR, MINUTE, instant
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp, Faculty, ToolResult, Zone
+from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     Badge,
@@ -66,10 +67,22 @@ STOP = frozenset({"surtout", "mais", "sans", "avec", "pour", "dans", "tout", "to
 class RssParams(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    poll_every_us: int = 30 * MINUTE
-    per_poll: int = 30
-    noticed_per_poll: int = 3
-    notice_from: float = 0.3
+    poll_every_us: Annotated[int, Knob(
+        label="Relever toutes les", group="Relevé", lo=5 * MINUTE, hi=DAY,
+        help="Éveillée, elle relève ses flux à ce rythme (endormie, jamais). Sans flux configuré, elle revérifie "
+             "au plus toutes les heures.")] = 30 * MINUTE
+    per_poll: Annotated[int, Knob(
+        label="Articles lus par relevé", group="Relevé", lo=1, hi=200,
+        help="Au plus autant d'articles récents parcourus à chaque relevé (sans appel au modèle : la pertinence "
+             "se calcule sur les mots de ses centres d'intérêt).")] = 30
+    noticed_per_poll: Annotated[int, Knob(
+        label="Articles remarqués au plus", group="Relevé", lo=0, hi=20,
+        help="Parmi eux, au plus autant (les plus pertinents) deviennent des signaux qu'elle remarque et peuvent "
+             "lui trotter dans la tête.")] = 3
+    notice_from: Annotated[float, Knob(
+        label="Pertinence minimale", group="Relevé", lo=0.0, hi=1.0, step=0.05,
+        help="Un article sans aucun mot de ses centres d'intérêt vaut 0,1, avec un mot 0,6, puis 0,25 de plus par "
+             "mot : sous ce seuil, elle ne le remarque pas.")] = 0.3
 
 
 @dataclass(frozen=True, slots=True)

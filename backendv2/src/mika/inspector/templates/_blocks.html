@@ -57,7 +57,7 @@
         {% for v, l in f.choices %}<option value="{{ v }}"{{ ' selected' if v == f.value }}>{{ l }}</option>{% endfor %}
       </select>
     {% elif f.kind in ("textarea", "lines", "yaml") %}
-      <textarea name="{{ f.path }}" id="{{ f.id }}" rows="{{ f.rows or 5 }}"{{ ' readonly' if f.readonly }}>{{ f.value }}</textarea>
+      <textarea name="{{ f.path }}" id="{{ f.id }}" rows="{{ f.rows or 5 }}"{% if f.kind == "yaml" %} class="mono" spellcheck="false"{% endif %}{{ ' readonly' if f.readonly }}>{{ f.value }}</textarea>
     {% elif f.kind == "secret" %}
       <input type="password" name="{{ f.path }}" id="{{ f.id }}" autocomplete="new-password" placeholder="{{ 'défini — vide : inchangé' if f.has_value else 'non défini' }}"{{ ' readonly' if f.readonly }}>
     {% elif f.kind == "slider" %}

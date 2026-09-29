@@ -8,9 +8,6 @@ from __future__ import annotations
 import html
 import json
 import re
-import shutil
-
-import pytest
 
 from mika.app.console import NAVIGATION
 from mika.contracts import runtime as rt
@@ -97,7 +94,7 @@ def test_every_form_needs_its_token(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
     head = client.portal.call(lambda: live.kernel.mind.head)
-    for path in ("modeles", "personnalite", "parametres", "canaux", "sens", "apps", "comptes"):
+    for path in ("modeles", "personnalite", "parametres", "canaux", "sens", "comptes"):
         r = client.post(f"/inspecteur/reglages/{path}", data={"_section": "personnage", "_champs": "name",
                                                               "name": "Pirate", "action": "create"})
         assert r.status_code in (200, 403) and "Jeton de formulaire invalide" in html_of(r), path
@@ -169,24 +166,12 @@ def test_reports_are_listed_and_never_escape_their_folder(tmp_path):
         assert health["status"] == "degraded" and health["checks"]["llm"] == "degraded"
 
 
-@pytest.mark.skipif(shutil.which("bwrap") is None, reason="bubblewrap absent")
-def test_an_operator_configures_a_forged_app(world):  # noqa: F811
-    client, live, _ = world
+def test_the_old_forge_settings_address_leads_to_the_apps(world):  # noqa: F811
+    client, _, _ = world
     bootstrap(client)
-    forge = live.kernel.ports["forge"]
-    manifest = "title: Seuil\nconfig:\n  seuil: 3\n  actif: false\n"
-    code = "def view(api):\n    return [api.config('seuil'), api.config('actif')]\n"
-    client.portal.call(forge.write, "seuil", manifest, code)
-    page = html_of(client.get("/inspecteur/reglages/apps"))
-    assert "Seuil" in page and "seuil" in page
-    bad = post(client, "/inspecteur/reglages/apps", action="config", app="seuil", cfg_seuil="beaucoup")
-    assert "attend une valeur du type int" in html_of(bad)
-    ok = post(client, "/inspecteur/reglages/apps", action="config", app="seuil", cfg_seuil="7", cfg_actif="on")
-    assert "Réglages de l'app enregistrés" in html_of(ok)
-    result = client.portal.call(forge.call, "seuil", "view")
-    assert result.ok and result.value == [7, True]  # l'app lit le réglage de l'opérateur
-    unknown = post(client, "/inspecteur/reglages/apps", action="config", app="inconnue", cfg_seuil="1")
-    assert "App inconnue" in html_of(unknown)
+    r = client.get("/inspecteur/reglages/apps", follow_redirects=False)
+    assert r.status_code == 301 and r.headers["location"] == "/inspecteur/apps"
+    assert client.get("/inspecteur/forge", follow_redirects=False).headers["location"] == "/inspecteur/apps"
 
 
 def test_a_backup_taken_while_she_talks_is_consistent(world, tmp_path):  # noqa: F811

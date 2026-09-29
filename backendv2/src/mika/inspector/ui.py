@@ -68,8 +68,6 @@ class InspectorDeps:
     after_decision: Callable[[], Awaitable[Any]] | None = None
     #: les rapports de simulation (``mika sim run --report``)
     reports: Path | None = None
-    #: une décision d'opérateur sur une app forgée : ``(app, état)``
-    forge_switch: Callable[[str, str], Awaitable[None]] | None = None
     #: la carte de la console (``app/console.py``)
     navigation: Sequence[NavGroup] = field(default_factory=tuple)
     #: les séries mesurées : ``sampler(clé, depuis, jusqu'à, points)``
@@ -193,7 +191,7 @@ class UI:
         return {"label": label, "text": v.text, "dot": render.tone(v.tone) if v.tone else "",
                 "hint": v.hint, "href": render.href(v.href) if v.href else "",
                 "swatch": v.swatch.key if v.swatch else "",
-                "ratio": None if v.ratio is None else f"{min(1.0, max(0.0, v.ratio)):.0%}"}
+                "ratio": None if v.ratio is None else round(min(1.0, max(0.0, v.ratio)), 3)}
 
     # ── rendu ──
     def csrf(self, request: Request) -> str:

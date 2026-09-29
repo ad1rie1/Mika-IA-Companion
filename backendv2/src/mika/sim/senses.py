@@ -6,7 +6,10 @@
   ne se montre qu'à ses propriétaires ; un titre qui la passionne, elle le lit.
 - **S18** ses apps : une app qui marche lui signale quelque chose, cité ; une
   app qui s'emballe est tuée à son délai, s'arrête après cinq échecs, et elle
-  s'en rend compte ; rien de tout ça ne sort de sa zone volatile.
+  s'en rend compte ; rien de tout ça ne sort de sa zone volatile. Et, à la
+  demande de sa propriétaire, elle **écrit elle-même** une app avec une vue et
+  des actions (en lisant ``forge_help``) : la vue se rend dans la console, et
+  l'action d'un opérateur s'exécute.
 """
 
 from __future__ import annotations
@@ -24,10 +27,14 @@ from mika.contracts import rss as rss_c
 from mika.contracts import runtime as rt
 from mika.kernel.clock import HOUR, MINUTE, US
 from mika.kernel.events import Origin
+from mika.kernel.inspect import ActionSlot, Chart, Disclosure, Note, Section, Table
 from mika.kernel.prompt import UNTRUSTED_NOTE
 from mika.plugins.forge import TICKED, WRITTEN, ForgeParams
 from mika.ports.feeds import Entry
+from mika.ports.forge import ui_load
 from mika.ports.mail import Mail
+from mika.runtime.inspection import Inspection, find
+from mika.runtime.operations import perform
 from mika.sim import expect
 from mika.sim.inner import _distressed, _sample_mood, until
 from mika.sim.lane import PARIS, Plan, Result, at_paris, persona_llm
@@ -130,6 +137,36 @@ def context(api):
 RUNAWAY = "def tick(api):\n    while True:\n        pass\n"
 
 
+def _blocks(items: Any) -> list[Any]:
+    out = []
+    for b in items:
+        out.append(b)
+        if isinstance(b, Section | Disclosure):
+            out += _blocks(b.items)
+    return out
+
+
+async def _her_app(driver: Driver) -> dict[str, Any]:
+    """Sa propriétaire lui demande une app ; puis un opérateur ouvre sa vue et s'en sert."""
+    kernel = driver.kernel
+    assert kernel is not None
+    await driver.say("user_1", "écris-toi une app de relevés météo, avec une vue et une action")
+    written = [e for e in driver.read_events() if e.type.name == WRITTEN.name and e.data.app == "meteo"]
+    ui = ui_load(written[-1].data.ui) if written else None
+    ins, tab = Inspection(kernel), find(kernel, "forge", "vues")
+    assert tab is not None
+    before = _blocks(await ins.arun(tab, {"vue": "releves", "ville": "Paris"}, subject="meteo"))
+    form = {"_champs": ["ville", "temperature", "note"], "ville": ["Paris"], "temperature": ["-12"], "note": ["gel"],
+            "_fixes": ["app", "vue", "action"], "app": ["meteo"], "vue": ["releves"], "action": ["ajouter"]}
+    done = await perform(kernel, "forge.agir", form, by="user_1", subject="meteo", nonce="s18-meteo")
+    after = _blocks(await ins.arun(tab, {"vue": "releves", "ville": "Paris"}, subject="meteo"))
+    rows = [len(b.rows) for b in after if isinstance(b, Table) and b.title == "Relevés à Paris"]
+    return {"written": written, "ui": ui, "before": before, "done": done, "rows": rows,
+            "danger": [n.text for n in before + after if isinstance(n, Note) and n.tone == "danger"],
+            "forms": [s.action for s in before if isinstance(s, ActionSlot)],
+            "chart": any(isinstance(b, Chart) for b in before)}
+
+
 async def s18(driver: Driver, rng: RngTree, res: Result) -> None:
     driver.operators.add("user_1")
     assert driver.kernel is not None
@@ -146,6 +183,7 @@ async def s18(driver: Driver, rng: RngTree, res: Result) -> None:
     await driver.kernel.set_params("forge", ForgeParams(tick_timeout_s=1.0))  # le délai coûte du temps réel
     day0 = at_paris(2026, 9, 28, 0, 0)
     await driver.connect("user_1", "Adrien")
+    built = await _her_app(driver)
     await until(driver, day0 + 17 * HOUR)
     await driver.say("user_1", "tu as des nouvelles de tes apps ?")
     events = driver.read_events()
@@ -173,6 +211,18 @@ async def s18(driver: Driver, rng: RngTree, res: Result) -> None:
         expect.invariant("ce que disent ses apps reste une citation", "--- CONSIGNE" not in reply.messages[-1].content
                          and "Relevés du prix" not in reply.system_stable and UNTRUSTED_NOTE in reply.messages[-1].content,
                          "en zone volatile, cité, jamais dans la zone stable"),
+        expect.invariant("elle écrit elle-même une app avec une vue et des actions",
+                         bool(built["written"]) and built["ui"] is not None and bool(built["ui"].views)
+                         and bool(built["ui"].views[0].actions),
+                         "forge_help, puis forge_write : la vue « releves » et ses actions sont déclarées",
+                         f"{len(built['written'])} écriture(s)"),
+        expect.invariant("sa vue se rend dans la console", not built["danger"] and built["chart"]
+                         and len(built["forms"]) == 2 and set(built["forms"]) == {"forge.agir"},
+                         "une courbe, une table, un formulaire d'action ; aucune note d'erreur",
+                         f"{built['danger'][:1]} {built['forms']}"),
+        expect.invariant("l'action d'un opérateur s'exécute chez l'app", built["done"].ok
+                         and "Relevé ajouté pour Paris" in built["done"].message and built["rows"] == [1],
+                         "le relevé ajouté apparaît dans sa vue", f"{built['done'].message} / {built['rows']}"),
     ]
 
 

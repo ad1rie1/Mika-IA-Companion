@@ -22,12 +22,14 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, replace
 from datetime import timedelta
+from typing import Annotated
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict
 
 from mika.contracts import body as c
 from mika.kernel.clock import HOUR, MINUTE, US, local
+from mika.kernel.forms import Knob
 
 SECOND = US
 STEP = 5 * MINUTE
@@ -37,18 +39,43 @@ HORIZON = 48 * HOUR
 class SleepParams(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    tau_wake_h: float = 18.2
-    tau_sleep_h: float = 4.2
-    upper: float = 0.66
-    lower: float = 0.17
-    amplitude: float = 0.10
-    acrophase_h: float = 16.0
+    tau_wake_h: Annotated[float, Knob(
+        label="Montée de la pression (veille)", lo=2, hi=48,
+        help="Constante de temps de la montée de la pression de sommeil pendant la veille : plus courte, elle "
+             "s'endort plus tôt.")] = 18.2
+    tau_sleep_h: Annotated[float, Knob(
+        label="Descente de la pression (sommeil)", lo=0.5, hi=24,
+        help="Constante de temps de sa descente pendant le sommeil : plus courte, la nuit est plus courte.")] = 4.2
+    upper: Annotated[float, Knob(
+        label="Seuil d'endormissement", lo=0, hi=1, step=0.01,
+        help="Elle s'endort quand la pression dépasse ce seuil (modulé par le cosinus circadien). La pression "
+             "tend vers 1 sans l'atteindre : trop près de 1, elle ne s'endort plus.")] = 0.66
+    lower: Annotated[float, Knob(
+        label="Seuil de réveil", lo=0, hi=1, step=0.01,
+        help="Elle se réveille quand la pression retombe sous ce seuil (modulé par le cosinus circadien).")] = 0.17
+    amplitude: Annotated[float, Knob(
+        label="Amplitude circadienne des seuils", lo=0, hi=0.5, step=0.01,
+        help="De combien les deux seuils montent et descendent au fil de la journée.")] = 0.10
+    acrophase_h: Annotated[float, Knob(
+        label="Heure du pic des seuils", lo=0, hi=24,
+        help="L'heure locale (avant décalage du rythme) où les seuils culminent : c'est l'après-midi qu'il lui "
+             "est le plus dur de s'endormir.")] = 16.0
     #: pas d'endormissement moins d'un quart d'heure après la dernière interaction
-    settle_us: int = 15 * MINUTE
-    cycle_us: int = 90 * MINUTE
-    light_us: int = 15 * MINUTE
+    settle_us: Annotated[int, Knob(
+        label="Calme avant de s'endormir", lo=0, hi=2 * HOUR,
+        help="Pas d'endormissement moins de ce délai après la dernière interaction ; réveillée par un message "
+             "en pleine nuit, elle se rendort après ce calme.")] = 15 * MINUTE
+    cycle_us: Annotated[int, Knob(
+        label="Durée d'un cycle", lo=30 * MINUTE, hi=3 * HOUR,
+        help="Un cycle de sommeil : léger, profond (long en début de nuit), paradoxal.")] = 90 * MINUTE
+    light_us: Annotated[int, Knob(
+        label="Sommeil léger en début de cycle", lo=0, hi=HOUR,
+        help="La durée du sommeil léger au début de chaque cycle.")] = 15 * MINUTE
     #: fraction de pression au réveil d'une nuit normale (point de départ sans historique)
-    morning_pressure: float = 0.2
+    morning_pressure: Annotated[float, Knob(
+        label="Pression au réveil (sans historique)", lo=0, hi=1, step=0.01,
+        help="La pression supposée à 7 h, au réveil d'une nuit normale : point de départ tant qu'aucun "
+             "endormissement ni réveil n'a été observé.")] = 0.2
 
 
 @dataclass(frozen=True, slots=True)

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -26,48 +26,105 @@ from mika.contracts import memory as memory_c
 from mika.contracts import needs as c
 from mika.contracts import runtime as rt
 from mika.kernel.arbitration import Anyone, Candidate
-from mika.kernel.clock import HOUR, MINUTE
+from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.faculty import CatchUp, Faculty, Zone
+from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
 from mika.kernel.state import FrozenDict
 from mika.vocab.affect import Appraisal, Emotion
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
 from mika.vocab.people import is_identifiable
-from mika.vocab.temperament import Temperament
+from mika.vocab.temperament import Temperament, geometric, lerp
 
 
 class NeedsParams(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    tau_social_h: float = 4.0
-    tau_expression_h: float = 6.0
-    tau_curiosity_h: float = 8.0
+    tau_social_h: Annotated[float, Knob(
+        label="Horizon du besoin de compagnie", group="Horizons", lo=0.5, hi=24,
+        help="Constante de temps de la montée du besoin de compagnie vers son maximum : plus courte, elle a vite "
+             "envie de parler à quelqu'un. Dérivée de la sociabilité.")] = 4.0
+    tau_expression_h: Annotated[float, Knob(
+        label="Horizon du besoin de s'exprimer", group="Horizons", lo=0.5, hi=48,
+        help="Constante de temps de la montée du besoin de s'exprimer : plus courte, elle a vite des choses à "
+             "dire.")] = 6.0
+    tau_curiosity_h: Annotated[float, Knob(
+        label="Horizon de la curiosité", group="Horizons", lo=0.5, hi=48,
+        help="Constante de temps de la montée de l'envie d'apprendre : plus courte, elle a vite envie de "
+             "découvrir. Dérivée de la curiosité.")] = 8.0
     # ce que comble chaque chose (le niveau est multiplié par ce facteur)
-    received_social: float = 0.3
-    received_curiosity: float = 0.85
-    said_social: float = 0.7
-    reply_expression: float = 0.6
-    initiative_expression: float = 0.2
-    learned_curiosity: float = 0.8
-    explored_curiosity: float = 0.4
+    received_social: Annotated[float, Knob(
+        label="Message reçu → compagnie", group="Ce qui comble", lo=0, hi=1, step=0.05,
+        help="Un message qui lui est adressé multiplie son besoin de compagnie par ce facteur (0 : comblé d'un "
+             "coup ; 1 : rien).")] = 0.3
+    received_curiosity: Annotated[float, Knob(
+        label="Message reçu → curiosité", group="Ce qui comble", lo=0, hi=1, step=0.05,
+        help="Un message qui lui est adressé multiplie sa curiosité par ce facteur (0 : comblée d'un coup ; "
+             "1 : rien).")] = 0.85
+    said_social: Annotated[float, Knob(
+        label="Parler à quelqu'un → compagnie", group="Ce qui comble", lo=0, hi=1, step=0.05,
+        help="Chaque parole adressée à quelqu'un (réponse ou initiative) multiplie son besoin de compagnie par "
+             "ce facteur.")] = 0.7
+    reply_expression: Annotated[float, Knob(
+        label="Répondre → expression", group="Ce qui comble", lo=0, hi=1, step=0.05,
+        help="Une réponse multiplie son besoin de s'exprimer par ce facteur.")] = 0.6
+    initiative_expression: Annotated[float, Knob(
+        label="Prendre la parole → expression", group="Ce qui comble", lo=0, hi=1, step=0.05,
+        help="Une initiative (parler d'elle-même) multiplie son besoin de s'exprimer par ce facteur : bien plus "
+             "qu'une réponse.")] = 0.2
+    learned_curiosity: Annotated[float, Knob(
+        label="Apprendre → curiosité", group="Ce qui comble", lo=0, hi=1, step=0.05,
+        help="Une croyance nouvelle en mémoire, ou un pas d'exploration mené avec des outils, multiplie sa "
+             "curiosité par ce facteur.")] = 0.8
+    explored_curiosity: Annotated[float, Knob(
+        label="Exploration aboutie → curiosité", group="Ce qui comble", lo=0, hi=1, step=0.05,
+        help="Mener une exploration à bout (but atteint) multiplie sa curiosité par ce facteur.")] = 0.4
     # preuves d'initiative (log-odds) : de rien au seuil à tout à ``full``
-    social_floor: float = 0.35
-    social_evidence: float = 6.0
-    expression_floor: float = 0.3
-    expression_evidence: float = 3.0
-    full: float = 0.8
+    social_floor: Annotated[float, Knob(
+        label="Envie de compagnie à partir de", group="Envie de prendre la parole", lo=0, hi=1, step=0.05,
+        help="En dessous de ce niveau, le besoin de compagnie n'apporte aucune preuve d'initiative ; au-dessus, "
+             "elle croît jusqu'au niveau « plein ».")] = 0.35
+    social_evidence: Annotated[float, Knob(
+        label="Preuve de l'envie de compagnie", group="Envie de prendre la parole", lo=0, hi=6, step=0.1,
+        help="Preuve d'initiative (log-odds), vers quiconque est là, d'un besoin de compagnie plein. Plafonnée "
+             "à 6 par l'arbitrage : elle s'ajoute aux autres raisons.")] = 6.0
+    expression_floor: Annotated[float, Knob(
+        label="Envie de s'exprimer à partir de", group="Envie de prendre la parole", lo=0, hi=1, step=0.05,
+        help="Le même seuil pour le besoin de s'exprimer.")] = 0.3
+    expression_evidence: Annotated[float, Knob(
+        label="Preuve de l'envie de s'exprimer", group="Envie de prendre la parole", lo=0, hi=3, step=0.1,
+        help="Preuve d'initiative (log-odds) d'un besoin de s'exprimer plein. Plafonnée à 3 par "
+             "l'arbitrage.")] = 3.0
+    full: Annotated[float, Knob(
+        label="Niveau « plein »", group="Envie de prendre la parole", lo=0.05, hi=1, step=0.05,
+        help="Le niveau d'un besoin (compagnie, expression) à partir duquel sa preuve d'initiative est "
+             "maximale. À garder au-dessus des deux seuils.")] = 0.8
     # le vide ressenti
-    idle_before_empty_us: int = 2 * HOUR
-    empty_every_us: int = 10 * MINUTE
-    empty_intensity: float = 0.2
-    lonely_from: float = 0.8
+    idle_before_empty_us: Annotated[int, Knob(
+        label="Inactivité avant le vide", group="Le vide", lo=15 * MINUTE, hi=DAY,
+        help="Éveillée, sans message reçu ni parole dite depuis cette durée, elle ressent un vide : de l'ennui, "
+             "ou de la solitude.")] = 2 * HOUR
+    empty_every_us: Annotated[int, Knob(
+        label="Le vide se ressent toutes les", group="Le vide", lo=MINUTE, hi=6 * HOUR,
+        help="Tant que le vide dure, il se ressent à nouveau à cet intervalle : un état tenu, pas une dent de "
+             "scie.")] = 10 * MINUTE
+    empty_intensity: Annotated[float, Knob(
+        label="Intensité du vide", group="Le vide", lo=0, hi=1, step=0.05,
+        help="L'intensité de l'ennui ou de la solitude ressentis à chaque fois, sur son humeur générale.")] = 0.2
+    lonely_from: Annotated[float, Knob(
+        label="Solitude à partir de", group="Le vide", lo=0, hi=1, step=0.05,
+        help="Si son besoin de compagnie atteint ce niveau, le vide se ressent comme de la solitude plutôt que "
+             "de l'ennui.")] = 0.8
 
 
 def derive(t: Temperament, overrides: Any = None) -> NeedsParams:
     """La sociabilité raccourcit l'horizon du besoin de compagnie ; la
-    curiosité, celui d'apprendre."""
-    values = {"tau_social_h": 4.0 * (1.5 - t.sociability), "tau_curiosity_h": 8.0 * (1.5 - t.curiosity)}
+    curiosité, celui d'apprendre ; l'optimisme repousse le vide et l'adoucit
+    (au milieu : deux heures, 0,2 — les valeurs d'avant)."""
+    values = {"tau_social_h": 4.0 * (1.5 - t.sociability), "tau_curiosity_h": 8.0 * (1.5 - t.curiosity),
+              "idle_before_empty_us": round(geometric(1.0, 4.0, t.optimism) * HOUR),
+              "empty_intensity": round(lerp(0.3, 0.1, t.optimism), 3)}
     values.update(dict(overrides or {}))
     return NeedsParams(**values)
 

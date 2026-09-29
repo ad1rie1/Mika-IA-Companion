@@ -1,5 +1,6 @@
 """Réglages : les paramètres internes des facultés, le journal de
-configuration, et les pages encore à part (apps forgées, comptes).
+configuration, et la page encore à part des comptes. (Les réglages d'une app
+forgée vivent sur sa fiche.)
 
 Les autres onglets (modèles, personnalité, canaux, sens) sont des sections
 déclarées par la composition et rendues par ``settings_form.py``.
@@ -32,8 +33,7 @@ from mika.runtime import operations
 
 PARAMS_URL = f"{PREFIX}/reglages/parametres"
 TONES = {"défaut": "muted", "tempérament": "info", "réglage": "ok", "surcharge": "warn"}
-LEGACY = (("reglages.apps", "Apps forgées", "/inspecteur/reglages/apps"),
-          ("reglages.comptes", "Comptes", "/inspecteur/reglages/comptes"))
+LEGACY = (("reglages.comptes", "Comptes", "/inspecteur/reglages/comptes"),)
 
 
 def _register(key: str, title: str, href: str) -> None:
@@ -60,7 +60,8 @@ def _value(f: forms.FormField, value: Any) -> str:
         return ", ".join(str(v) for v in value) or "—"
     if f.kind in ("yaml", "records", "mapping"):
         return json.dumps(forms.plain(value), ensure_ascii=False, default=str)
-    text = forms.as_text(f, value)
+    text = f"{value:.4g}".replace(".", ",") if f.kind in ("float", "slider") and isinstance(value, float) \
+        else forms.as_text(f, value)
     label = next((lbl for v, lbl in f.choices if v == text), "")
     unit = f" {f.unit}" if f.unit and f.kind in ("int", "float", "slider") else ""
     return (f"{label} ({text})" if label and label != text else text) + unit
@@ -149,18 +150,16 @@ def _faculty(ui: Any, request: Request, ps: Any, owner: str, state: Mapping[str,
         if live is not None and live.get(f.path) != flat.get(f.path):
             detail.append(Note(f"En vigueur dans le journal : {_value(f, live.get(f.path))} (le plan n'est pas "
                                "encore journalisé).", "warn"))
-        if moved_by.get(f.path):
-            detail.append(Note("Piloté par : " + ", ".join(moved_by[f.path]) + ".", "info"))
         rows.append(Row((
             Text(f.label), Text(f.path, "mono"), Text(_value(f, flat.get(f.path)), clamp=200),
-            Badge(source, TONES.get(source, "")), Text(_bounds(f), "muted"),
-            Text(f.help or "—", "muted", clamp=160)), detail=tuple(detail)))
-    blocks: list[Any] = [Ref("local", PARAMS_URL, "← toutes les facultés")]
+            Badge(source, TONES.get(source, "")), Text(", ".join(moved_by.get(f.path, ())) or "—", "muted"),
+            Text(_bounds(f), "muted"), Text(f.help or "—", "muted", clamp=160)), detail=tuple(detail)))
+    blocks: list[Any] = []
     if p.refused:
         blocks.append(Note("Des surcharges enregistrées sont refusées et ignorées : " + "; ".join(
             f"{k} ({v})" for k, v in p.refused.items()), "danger"))
-    blocks.append(Table((Column("paramètre"), Column("chemin", "fit"), "valeur", "provenance", "bornes", "sens"),
-                        tuple(rows), title=f"Paramètres de {owner}"))
+    blocks.append(Table((Column("paramètre"), Column("chemin", "fit"), "valeur", "provenance", "piloté par",
+                         "bornes", "sens"), tuple(rows), title=f"Paramètres de {owner}"))
     errors: Mapping[str, str] = state.get("errors") or {}
     typed: Mapping[str, Any] = state.get("values") or {}
     given = {**flat, **typed}
@@ -180,7 +179,7 @@ def _faculty(ui: Any, request: Request, ps: Any, owner: str, state: Mapping[str,
         "action": PARAMS_URL, "overridden": sorted(overrides), "panel_after": True,
         "general": [m for k, m in errors.items() if not any(k == f.path or k.startswith(f.path + ".")
                                                             for f in fields)]})
-    return {"blocks": blocks, "panel": panel}
+    return {"blocks": blocks, "panel": panel, "crumbs": [("Paramètres internes", PARAMS_URL), (owner, "")]}
 
 
 def _err(path: str, errors: Mapping[str, str]) -> str:
@@ -229,7 +228,8 @@ async def journal(ui: Any, request: Request) -> list[Any]:
     rows = []
     for e in merged:
         if e.type.name == PARAMS_CHANGED.name:
-            rows.append(Row((When(e.at), Badge("paramètres", "info"), Text(e.data.owner, "mono"), "—",
+            rows.append(Row((When(e.at), Badge("paramètres", "info"),
+                             Ref("local", _faculty_url(e.data.owner), e.data.owner), "—",
                              Text(e.correlation or "—", "muted")), href=Ref("event", str(e.seq), "")))
         else:
             what = e.data.action.removeprefix("console.")

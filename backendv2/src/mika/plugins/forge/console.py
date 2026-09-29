@@ -380,7 +380,8 @@ def _choice_rows(name: str, spec: AppViewSpec, values: dict[str, Any]) -> list[R
     base = [(p.key, _param_text(p.kind, values.get(p.key))) for p in spec.params]
     for p in spec.params:
         current = _param_text(p.kind, values.get(p.key))
-        options = list(p.choices) if p.kind == "select" else [("oui", "oui"), ("", "non")] if p.kind == "bool" else []
+        options = list(p.choices) if p.kind == "select" else [("oui", "oui"), ("non", "non")] if p.kind == "bool" \
+            else []
         if not options:
             rows.append(Row((p.label, current or "—", Text("par les liens de la vue", kind="muted"))))
             continue
@@ -394,7 +395,7 @@ def _choice_rows(name: str, spec: AppViewSpec, values: dict[str, Any]) -> list[R
 
 def _param_text(kind: str, value: Any) -> str:
     if kind == "bool":
-        return "oui" if value else ""
+        return "oui" if value else "non"
     return "" if value is None else str(value)
 
 

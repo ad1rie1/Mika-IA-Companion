@@ -12,6 +12,7 @@
 - ``llm show|backend|route|remove|context`` : les modèles (clés chiffrées) ;
 - ``account <nom> <mot de passe> [--operator]`` : un compte ;
 - ``telegram show|token|allow|disallow|owner`` : le robot Telegram (jeton chiffré) ;
+- ``console apercu --out DOSSIER`` : chaque page de la console, exportée ;
 - ``identity link|unlink`` et ``social closeness`` : ce qu'un opérateur sait
   mieux qu'elle (serveur arrêté : une seule écriture à la fois dans ``mind.db``).
 """
@@ -315,6 +316,10 @@ def main(argv: list[str] | None = None) -> int:
     se = sub.add_parser("sensors", help="le jeton des appareils (POST /api/perceptions)")
     sesub = se.add_subparsers(dest="sensors_cmd", required=True)
     sesub.add_parser("token", help="un jeton neuf (l'ancien ne vaut plus), montré une fois")
+    co = sub.add_parser("console", help="la console d'exploitation")
+    csub = co.add_subparsers(dest="console_cmd", required=True)
+    cap = csub.add_parser("apercu", help="exporter chaque page (clair et sombre) d'une Mika neuve, sans serveur")
+    cap.add_argument("--out", type=Path, required=True)
     fo = sub.add_parser("forge", help="ce qu'un opérateur décide des apps de Mika (serveur arrêté)")
     fsub = fo.add_subparsers(dest="forge_cmd", required=True)
     for name in ("promote", "demote"):
@@ -347,6 +352,12 @@ def main(argv: list[str] | None = None) -> int:
         out = sim_selftest()
         print(json.dumps(out, ensure_ascii=False))
         return 0 if all(out.values()) else 1
+    if args.cmd == "console":
+        from mika.app.apercu import export  # noqa: PLC0415 — le client de test n'est chargé que pour l'aperçu
+
+        pages = export(args.out)
+        print(f"{len(pages)} pages exportées : {args.out / 'index.html'}")
+        return 0
     if args.cmd == "serve":
         serve(host=args.host, port=args.port, data=args.data, reports=args.reports)
         return 0

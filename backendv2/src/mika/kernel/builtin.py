@@ -8,19 +8,23 @@ l'événement*, rejeu compris.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict
 
 from mika.kernel.events import Payload
 from mika.kernel.facts import FactFamily, FactKey
 from mika.kernel.faculty import Faculty
+from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
 
 
 class KernelParams(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    tz: str = "UTC"
+    tz: Annotated[str, Knob(label="Fuseau horaire", help="Celui de sa persona (un réglage, jamais une surcharge) : "
+                                                         "ses heures, ses nuits, ses rappels se lisent dans ce "
+                                                         "fuseau.")] = "UTC"
 
 
 @dataclass(frozen=True, slots=True)

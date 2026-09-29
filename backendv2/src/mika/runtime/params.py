@@ -111,13 +111,14 @@ def planned(fac: Faculty[Any, Any], temperament: Temperament, overrides: Layer |
         log.warning("paramètres de %s : réglages refusés %s", fac.name, refused_inputs)
     value, refused = _apply(model, natural, overrides or {})
     flat_base, flat_derived = forms.flatten(base), forms.flatten(derived)
+    driven = {path for moved in influence(fac, temperament).values() for path, _lo, _hi in moved}
     sources = {}
     for path in forms.flatten(value):
         if _touches(path, overrides or {}) and not any(_related(path, r) for r in refused):
             sources[path] = OVERRIDE
         elif _touches(path, inputs or {}):
             sources[path] = SETTING
-        elif flat_derived.get(path) != flat_base.get(path):
+        elif path in driven or flat_derived.get(path) != flat_base.get(path):
             sources[path] = TEMPERAMENT
         else:
             sources[path] = DEFAULT

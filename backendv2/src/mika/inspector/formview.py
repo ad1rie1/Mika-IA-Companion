@@ -30,8 +30,14 @@ def field_view(f: forms.FormField, value: Any, *, error: str = "", prefix: str =
         "required": f.required and kind != "bool", "choices": list(f.choices), "lo": f.lo, "hi": f.hi,
         "step": f.step, "has_value": bool(value) if kind == "secret" else False,
         "only": "|".join(f"{path}={'|'.join(vals)}" for path, vals in f.only[:1]) if f.only else "",
-        "rows": 8 if kind in ("textarea", "yaml") else 4,
+        "rows": _rows(text, kind),
     }
+
+
+def _rows(text: str, kind: str) -> int:
+    """Une zone de texte à la taille de ce qu'elle contient (bornée)."""
+    lines = text.count("\n") + 1 + len(text) // 110
+    return max(3 if kind != "yaml" else 6, min(16, lines + 1))
 
 
 def action_view(spec: ActionSpec, *, csrf: str, back: str, subject: str = "", initial: Mapping[str, Any] | None = None,

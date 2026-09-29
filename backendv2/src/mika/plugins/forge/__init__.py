@@ -25,7 +25,7 @@ import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -34,9 +34,10 @@ from mika.contracts import body as body_c
 from mika.contracts import forge as c
 from mika.contracts import identity as identity_c
 from mika.kernel import schedule
-from mika.kernel.clock import MINUTE
+from mika.kernel.clock import DAY, MINUTE
 from mika.kernel.events import Content, Payload
 from mika.kernel.faculty import CatchUp, Faculty, ToolResult, Zone
+from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
@@ -48,6 +49,7 @@ from mika.plugins.forge.views import (
     failure_note,
     is_invalid,
     summary,
+    view_params,
 )
 from mika.ports.forge import AppInfo, ForgeRefused
 from mika.vocab.episodes import CONVERSATIONAL, Kind
@@ -58,11 +60,26 @@ BUNDLE, APPS_BUNDLE = "forge", "forge_apps"
 class ForgeParams(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    tick_timeout_s: float = 5.0
-    context_timeout_s: float = 1.5
-    breaker: int = 5
-    signal_spacing_us: int = 10 * MINUTE
-    context_chars: int = 500
+    tick_timeout_s: Annotated[float, Knob(
+        label="Délai d'un battement", group="Ses apps", lo=0.5, hi=30, step=0.5,
+        help="Le temps qu'une app a pour un battement ou un événement, dans son bac à sable ; au-delà, "
+             "l'appel est tué et compte comme un échec.")] = 5.0
+    context_timeout_s: Annotated[float, Knob(
+        label="Délai du contexte", group="Ses apps", lo=0.2, hi=10, step=0.1,
+        help="Le temps qu'une app a pour dire ce qu'elle apporte au prompt ; ce délai s'ajoute à la "
+             "composition d'une réponse, d'où sa brièveté.")] = 1.5
+    breaker: Annotated[int, Knob(
+        label="Échecs avant disjonction", group="Ses apps", lo=1, hi=50,
+        help="Autant d'échecs d'affilée (battements, événements) et l'app est mise hors service ; elle le "
+             "ressent et peut la réparer. Une action d'opérateur n'est jamais comptée.")] = 5
+    signal_spacing_us: Annotated[int, Knob(
+        label="Espacement des signaux", group="Ses apps", lo=MINUTE, hi=DAY,
+        help="Une app ne lui signale quelque chose (qu'elle remarque) qu'une fois par intervalle, pour "
+             "qu'une app bavarde ne l'occupe pas toute la journée.")] = 10 * MINUTE
+    context_chars: Annotated[int, Knob(
+        label="Contexte par app (caractères)", group="Ses apps", lo=50, hi=4000,
+        help="Ce qu'une app ajoute au prompt est coupé à cette longueur : chaque caractère est relu à "
+             "chaque réponse.")] = 500
 
 
 @dataclass(frozen=True, slots=True)
@@ -564,13 +581,14 @@ async def _test_view(port: Any, app: str, method: str, raw: dict[str, Any]) -> T
     spec = next((v for v in info.views if v.function == method), None) if info is not None else None
     if info is None or spec is None:
         return ToolResult(ok=False, content=f"Pas de vue déclarée pour {method} (forge_help vues).")
-    params = {"page": 1, **raw}
+    params, notes = view_params(spec, {k: str(v).lower() if isinstance(v, bool) else str(v) for k, v in raw.items()})
     r = await port.call(app, method, params, timeout_s=VIEW_TIMEOUT_S, max_result=VIEW_MAX_BYTES)
+    said = "".join(f"\n{n}" for n in notes)
     if not r.ok:
-        return _tested(r, failure_note(spec.label, r).text)
+        return _tested(r, failure_note(spec.label, r).text + said)
     blocks = decode_view(r.value, app, info, spec)
     verdict = f"Invalide : {blocks[0].text}" if is_invalid(blocks) else summary(blocks)
-    return _tested(r, verdict)
+    return _tested(r, verdict + said)
 
 
 @FORGE.tool("forge_logs", description="Le journal d'une app.", args=AppArgs, bundle=BUNDLE, episodes=BUILD)

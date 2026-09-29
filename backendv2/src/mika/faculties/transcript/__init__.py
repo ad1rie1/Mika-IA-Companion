@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -28,6 +28,7 @@ from mika.contracts import runtime as rt
 from mika.contracts import transcript as c
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp, Faculty, Tier, Zone
+from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     Badge,
@@ -63,11 +64,20 @@ THREAD_WINDOW = 60
 class TranscriptParams(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    window: int = THREAD_WINDOW
+    window: Annotated[int, Knob(
+        label="Messages relus pour l'historique", group="Fil", lo=5, hi=500,
+        help="Combien de messages du fil (après le dernier résumé) sont relus pour composer l'historique d'un "
+             "tour ; le budget du prompt en coupe ensuite le début s'il le faut.")] = THREAD_WINDOW
     #: au-delà de tant de messages depuis le dernier résumé, le début se replie…
-    compact_after: int = 120
+    compact_after: Annotated[int, Knob(
+        label="Résumer au-delà de (messages)", group="Résumé des longs fils", lo=20, hi=2000,
+        help="Quand le fil avec quelqu'un compte plus de messages que cela depuis son dernier résumé, son début "
+             "(déjà relu par la mémoire) se replie en un résumé : un appel au modèle.")] = 120
     #: … en gardant les derniers tels quels
-    keep: int = 60
+    keep: Annotated[int, Knob(
+        label="Messages gardés tels quels", group="Résumé des longs fils", lo=10, hi=1000,
+        help="Les derniers messages que le résumé laisse intacts ; un repli n'a lieu que s'il reste au moins dix "
+             "messages à replier au-delà.")] = 60
 
 
 @dataclass(frozen=True, slots=True)

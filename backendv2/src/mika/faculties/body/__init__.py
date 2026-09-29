@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -22,9 +22,10 @@ from mika.contracts import body as c
 from mika.contracts import runtime as rt
 from mika.faculties.body import sleep as sl
 from mika.kernel.arbitration import Modulation, RowView
-from mika.kernel.clock import MINUTE
+from mika.kernel.clock import HOUR, MINUTE
 from mika.kernel.clock import local as to_local
 from mika.kernel.faculty import CatchUp, Faculty, Zone
+from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
 from mika.ports.delivery import Delivery, EmotionView
@@ -38,19 +39,43 @@ class BodyParams(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     #: Décalage du rythme, en minutes (chronotype : ±2 h autour du profil type).
-    shift_minutes: int = 0
-    sleep: sl.SleepParams = sl.SleepParams()
+    shift_minutes: Annotated[int, Knob(
+        label="Décalage du rythme (minutes)", group="Rythme", lo=-360, hi=360,
+        help="Décale tout son rythme (phases de la journée, pic d'énergie, seuils de sommeil) ; positif : plus "
+             "tard. Dérivé du chronotype (±2 h autour du profil type).")] = 0
+    sleep: Annotated[sl.SleepParams, Knob(
+        label="Sommeil", group="Sommeil",
+        help="La pression de sommeil qui monte en veille et retombe la nuit, les seuils circadiens qu'elle "
+             "croise pour s'endormir et se réveiller, les cycles.")] = sl.SleepParams()
     #: ce que la pression de sommeil retire à l'énergie au-delà de ce seuil
-    pressure_drag_from: float = 0.55
-    pressure_drag: float = 0.8
+    pressure_drag_from: Annotated[float, Knob(
+        label="Fatigue : pression à partir de", group="Énergie", lo=0, hi=1, step=0.05,
+        help="Au-delà de ce niveau de pression de sommeil, son énergie baisse de (pression − seuil) × pente, "
+             "en plus de la courbe de la journée.")] = 0.55
+    pressure_drag: Annotated[float, Knob(
+        label="Fatigue : pente de la pression", group="Énergie", lo=0, hi=3, step=0.05,
+        help="Ce que chaque point de pression au-delà du seuil retire à son énergie.")] = 0.8
     #: fatigue : sous ce niveau d'énergie, prendre la parole d'elle-même se fait plus rare
-    tired_below: float = 0.35
-    tired_shift_per_unit: float = 10.0
+    tired_below: Annotated[float, Knob(
+        label="Fatiguée sous (énergie)", group="Fatigue", lo=0, hi=1, step=0.05,
+        help="Sous ce niveau d'énergie, ses initiatives et ses pas de travail reculent de (seuil − énergie) × "
+             "recul par unité.")] = 0.35
+    tired_shift_per_unit: Annotated[float, Knob(
+        label="Recul par unité de fatigue", group="Fatigue", lo=0, hi=50, step=0.5,
+        help="Recul (log-odds) par point d'énergie manquant sous le seuil : plus grand, fatiguée, elle ne prend "
+             "presque plus la parole d'elle-même.")] = 10.0
     #: au réveil (naturel), un moment d'inertie : elle émerge avant d'aller vers les autres —
     #: rien la première demi-heure, puis une retenue qui s'efface en une demi-heure
-    inertia_veto_us: int = 30 * 60 * 1_000_000
-    inertia_us: int = 30 * 60 * 1_000_000
-    inertia_shift: float = -6.0
+    inertia_veto_us: Annotated[int, Knob(
+        label="Au réveil : rien pendant", group="Réveil", lo=0, hi=3 * HOUR,
+        help="Après un réveil naturel, ni initiative ni pas de travail pendant cette durée — sauf une raison "
+             "assez forte pour passer la barre de réveil (un rappel urgent).")] = 30 * 60 * 1_000_000
+    inertia_us: Annotated[int, Knob(
+        label="Au réveil : retenue pendant", group="Réveil", lo=0, hi=3 * HOUR,
+        help="Ensuite, une retenue qui s'efface linéairement sur cette durée.")] = 30 * 60 * 1_000_000
+    inertia_shift: Annotated[float, Knob(
+        label="Au réveil : retenue initiale", group="Réveil", lo=-20, hi=0, step=0.5,
+        help="Le recul (log-odds) au début de cette retenue.")] = -6.0
 
 
 def derive(t: Temperament, overrides: Mapping[str, Any] | None = None) -> BodyParams:

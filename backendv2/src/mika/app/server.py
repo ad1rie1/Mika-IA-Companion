@@ -44,9 +44,7 @@ from mika.contracts.self_ import PersonaDoc
 from mika.faculties.self import load
 from mika.inspector.app import routes
 from mika.inspector.ui import InspectorDeps
-from mika.kernel.events import Origin
 from mika.kernel.prompt import Budget
-from mika.plugins.forge import SWITCHED
 from mika.runtime.bootstrap import Kernel
 
 log = logging.getLogger("mika.server")
@@ -132,8 +130,11 @@ class Live:
     def inputs(self) -> dict[str, dict[str, Any]]:
         """Ce que les réglages d'exploitation fournissent aux paramètres des facultés
         (jamais des surcharges : une reconfiguration ne les efface pas)."""
+        out: dict[str, dict[str, Any]] = {"kernel": {"tz": self.persona().timezone}}
         owners = self.settings.telegram()["owners"]
-        return {"identity": {"owners": tuple(handle_of(o) for o in owners)}} if owners else {}
+        if owners:
+            out["identity"] = {"owners": tuple(handle_of(o) for o in owners)}
+        return out
 
     async def reconfigure(self) -> list[str]:
         """Rejournalise la persona et les paramètres qui en dérivent (sans redémarrer)."""
@@ -142,11 +143,6 @@ class Live:
         except (ValueError, TypeError) as exc:
             return [str(exc)]
         return []
-
-    async def switch_app(self, app: str, state: str) -> None:
-        """Une décision d'opérateur sur une app forgée (``promoted``, ``demoted``…)."""
-        await self.kernel.mind.append([SWITCHED.draft(app=app, state=state)], emitter="forge",
-                                      correlation=f"opérateur:forge:{app}", origin=Origin.EXTERNAL)
 
     async def start_telegram(self) -> None:
         """Le robot Telegram, s'il est configuré (``mika telegram token …``)."""
@@ -241,7 +237,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     inspector = routes(InspectorDeps(kernel, live.accounts, live.settings, live.reload_llm, gateway.traces,
                                      port=port, calls=live.calls, reconfigure=live.reconfigure,
                                      restart_telegram=restart_telegram, after_decision=hub.refresh_panels,
-                                     reports=reports, forge_switch=live.switch_app, navigation=NAVIGATION,
+                                     reports=reports, navigation=NAVIGATION,
                                      sections=reglages.sections(live), settings_tabs=reglages.TABS,
                                      parameters=reglages.parameters(live)),
                        cookie_secure=(web.cookie_secure if web else False))

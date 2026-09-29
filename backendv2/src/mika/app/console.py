@@ -44,7 +44,7 @@ NAVIGATION: tuple[NavGroup, ...] = (
         Destination("reglages", "Réglages", "⚙", "Ce qu'un opérateur décide : modèles, personnalité, canaux, "
                     "sens, comptes.",
                     builtin=("reglages.modeles", "reglages.personnalite", "reglages.parametres",
-                             "reglages.canaux", "reglages.sens", "reglages.apps", "reglages.comptes",
+                             "reglages.canaux", "reglages.sens", "reglages.comptes",
                              "reglages.journal")),
         Destination("systeme", "Système", "▣", "Santé, processus, coûts, journal, anatomie.",
                     builtin=("systeme.sante", "systeme.appels", "systeme.chronologie", "systeme.etat",

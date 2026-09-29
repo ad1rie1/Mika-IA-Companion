@@ -58,7 +58,8 @@ class Clockwork:
 
 def common_home(t: int, p: AffectParams, cw: Clockwork) -> Vec3:
     phase = circadian.phase_at(t, cw.tz, cw.rhythm)
-    return A.add(A.to_pad(p.background, p.background_weight), circadian.tint(phase, cw.rhythm))
+    base = A.add(A.to_pad(p.background, p.background_weight), circadian.tint(phase, cw.rhythm))
+    return A.add(base, (p.rest_valence, 0.0, 0.0)) if p.rest_valence else base
 
 
 def person_home(anchor: Vec3 | None, base: Vec3, p: AffectParams) -> Vec3:

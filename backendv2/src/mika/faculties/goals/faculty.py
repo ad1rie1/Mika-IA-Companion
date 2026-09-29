@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -28,6 +28,7 @@ from mika.contracts import runtime as rt
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.events import Content, Payload
 from mika.kernel.faculty import Faculty
+from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
 from mika.vocab.affect import Appraisal, Emotion
 from mika.vocab.episodes import Kind, goal_of
@@ -42,44 +43,129 @@ class GoalsParams(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     # l'envie d'une exploration
-    desire_half_life_us: int = 6 * HOUR
-    abandon_below: float = 0.15
+    desire_half_life_us: Annotated[int, Knob(
+        label="Demi-vie de l'envie", group="L'envie d'une exploration", lo=HOUR, hi=3 * DAY,
+        help="L'envie d'une exploration perd la moitié de sa force en ce temps (pas pendant une pause) ; celle "
+             "d'un projet confié ne s'use pas. Le tempérament la dérive de la persévérance.")] = 6 * HOUR
+    abandon_below: Annotated[float, Knob(
+        label="Abandon sous", group="L'envie d'une exploration", lo=0.0, hi=0.9, step=0.01,
+        help="Quand l'envie d'une exploration passe sous ce seuil, elle y renonce (« l'envie s'est usée ») : "
+             "renoncer n'est pas un échec.")] = 0.15
     # les pas
-    step_spacing_us: int = 30 * MINUTE
-    project_spacing_us: int = 10 * MINUTE
-    steps_per_hour: int = 4
-    exploration_steps: int = 4
-    project_steps: int = 12
-    silent_before_blocked: int = 3
-    failures_before_failed: int = 5
-    wait_min_us: int = 10 * MINUTE
-    wait_max_us: int = DAY
+    step_spacing_us: Annotated[int, Knob(
+        label="Espacement des pas (exploration)", group="Les pas", lo=MINUTE, hi=DAY,
+        help="Entre deux pas d'une même exploration, au moins ce délai.")] = 30 * MINUTE
+    project_spacing_us: Annotated[int, Knob(
+        label="Espacement des pas (projet)", group="Les pas", lo=MINUTE, hi=DAY,
+        help="Entre deux pas d'un même projet confié, au moins ce délai (plus si son agenda le dit).")] = 10 * MINUTE
+    steps_per_hour: Annotated[int, Knob(
+        label="Pas par heure au plus", group="Les pas", lo=0, hi=30,
+        help="Tous buts confondus : chaque pas est une boucle d'outils du modèle, silencieuse, hors du budget "
+             "d'initiatives (0 : plus aucun travail).")] = 4
+    exploration_steps: Annotated[int, Knob(
+        label="Pas par exploration", group="Les pas", lo=1, hi=20,
+        help="Le budget de pas d'une exploration qu'elle ouvre d'elle-même ; à bout de pas sans conclure, elle "
+             "bloque. Le tempérament le dérive de la persévérance.")] = 4
+    project_steps: Annotated[int, Knob(
+        label="Pas par projet (par défaut)", group="Les pas", lo=1, hi=50,
+        help="Le budget de pas d'un projet confié quand sa création n'en précise pas.")] = 12
+    silent_before_blocked: Annotated[int, Knob(
+        label="Pas sans verdict avant blocage", group="Les pas", lo=1, hi=10,
+        help="Après autant de pas de suite où le modèle a travaillé sans rien conclure, le but est bloqué.")] = 3
+    failures_before_failed: Annotated[int, Knob(
+        label="Pannes avant échec", group="Les pas", lo=1, hi=20,
+        help="Un pas dont l'appel au modèle échoue (panne, délai) rend son crédit ; après autant de pannes "
+             "d'affilée, le but est clos en échec.")] = 5
+    wait_min_us: Annotated[int, Knob(
+        label="Attente minimale", group="Les pas", lo=MINUTE, hi=DAY,
+        help="Quand un pas conclut « attendre », le délai qu'il demande est ramené au moins à cette "
+             "durée.")] = 10 * MINUTE
+    wait_max_us: Annotated[int, Knob(
+        label="Attente maximale", group="Les pas", lo=HOUR, hi=30 * DAY,
+        help="…et au plus à celle-ci ; une réponse de la personne attendue la libère plus tôt.")] = DAY
     # preuves (log-odds) : de l'envie au pas ; un projet confié, constant quand il est dû
-    work_base: float = 4.0
-    work_per_desire: float = 8.0
-    project_evidence: float = 10.0
+    work_base: Annotated[float, Knob(
+        label="Preuve de base d'un pas", group="Preuves", lo=0.0, hi=12.0, step=0.5,
+        help="La preuve (log-odds) d'un pas d'exploration : cette base plus l'envie × le poids ci-dessous, "
+             "plafonnée à 12, face au seuil des pas (8).")] = 4.0
+    work_per_desire: Annotated[float, Knob(
+        label="Poids de l'envie", group="Preuves", lo=0.0, hi=12.0, step=0.5,
+        help="Ce que vaut une envie pleine (1) en preuve d'un pas ; par défaut, une envie à moitié usée amène "
+             "juste au seuil.")] = 8.0
+    project_evidence: Annotated[float, Knob(
+        label="Preuve d'un pas de projet", group="Preuves", lo=0.0, hi=12.0, step=0.5,
+        help="Constante quand le pas d'un projet confié est dû ; au-dessus du seuil des pas (8), il part "
+             "vite.")] = 10.0
     # rappels
-    remind_evidence: float = 12.0
-    remind_attempts: int = 3
-    remind_retry_us: int = 5 * MINUTE
-    remind_too_late_us: int = 12 * HOUR
+    remind_evidence: Annotated[float, Knob(
+        label="Preuve d'un rappel", group="Rappels", lo=0.0, hi=17.0, step=0.5,
+        help="Au-dessus du seuil d'initiative (9) pour être dit à l'heure, sous la barre de réveil (15) pour "
+             "attendre qu'elle se réveille ; un rappel urgent vaut 17.")] = 12.0
+    remind_attempts: Annotated[int, Knob(
+        label="Tentatives de rappel", group="Rappels", lo=1, hi=10,
+        help="Un rappel qui n'a pas pu être dit est retenté ; après autant de tentatives, il échoue.")] = 3
+    remind_retry_us: Annotated[int, Knob(
+        label="Espacement des tentatives", group="Rappels", lo=MINUTE, hi=2 * HOUR,
+        help="Une tentative ratée est retentée après ce délai multiplié par le nombre de tentatives déjà "
+             "faites.")] = 5 * MINUTE
+    remind_too_late_us: Annotated[int, Knob(
+        label="Trop tard pour rappeler", group="Rappels", lo=HOUR, hi=7 * DAY,
+        help="Passé ce délai après l'heure dite, un rappel non dit échoue (« trop tard pour le dire ») au lieu "
+             "de tomber à contretemps.")] = 12 * HOUR
     # ouvrir de soi-même
-    live_self_max: int = 2
-    seed_spacing_us: int = 2 * HOUR
+    live_self_max: Annotated[int, Knob(
+        label="Buts à elle en même temps", group="Entreprendre d'elle-même", lo=0, hi=10,
+        help="Au plus autant de buts qu'elle a ouverts d'elle-même en cours ensemble (0 : elle n'entreprend "
+             "plus rien seule).")] = 2
+    seed_spacing_us: Annotated[int, Knob(
+        label="Espacement des initiatives de travail", group="Entreprendre d'elle-même", lo=10 * MINUTE,
+        hi=2 * DAY, help="Elle n'entreprend pas deux choses d'elle-même dans ce délai.")] = 2 * HOUR
     #: après un blocage, elle met plus longtemps à entreprendre autre chose
-    discouraged_us: int = 6 * HOUR
-    seed_thought_from: float = 0.35
-    seed_thought_age_us: int = 30 * MINUTE
-    seed_curiosity_from: float = 0.7
-    seed_day_start_min: int = 9 * 60
-    seed_day_end_min: int = 21 * 60
-    no_reopen_us: int = DAY
-    interest_rest_us: int = 3 * DAY
+    discouraged_us: Annotated[int, Knob(
+        label="Découragement après un blocage", group="Entreprendre d'elle-même", lo=0, hi=7 * DAY,
+        help="Après avoir bloqué sur ce qu'elle avait entrepris, elle n'entreprend rien d'autre d'elle-même "
+             "avant ce délai.")] = 6 * HOUR
+    seed_thought_from: Annotated[float, Knob(
+        label="Pensée qui fait entreprendre", group="Entreprendre d'elle-même", lo=0.0, hi=1.0, step=0.05,
+        help="Une pensée (échange, croyance révisée, signal) qui la préoccupe ou l'intrigue, au moins aussi "
+             "intense, peut devenir une exploration « y voir plus clair ».")] = 0.35
+    seed_thought_age_us: Annotated[int, Knob(
+        label="Âge d'une pensée avant d'entreprendre", group="Entreprendre d'elle-même", lo=0, hi=DAY,
+        help="La pensée doit avoir tenu ce temps : ce qui passe vite ne vaut pas un chantier.")] = 30 * MINUTE
+    seed_curiosity_from: Annotated[float, Knob(
+        label="Curiosité qui fait explorer", group="Entreprendre d'elle-même", lo=0.0, hi=1.0, step=0.01,
+        help="Dès que son besoin de curiosité atteint ce seuil, en journée, elle ouvre l'exploration d'un de ses "
+             "centres d'intérêt. Le tempérament le dérive de la curiosité.")] = 0.7
+    seed_day_start_min: Annotated[int, Knob(
+        label="Début de la journée", group="Entreprendre d'elle-même", lo=0, hi=24 * 60,
+        help="L'heure locale (depuis minuit) à partir de laquelle elle peut explorer un centre d'intérêt.")] = 9 * 60
+    seed_day_end_min: Annotated[int, Knob(
+        label="Fin de la journée", group="Entreprendre d'elle-même", lo=0, hi=24 * 60,
+        help="L'heure locale (depuis minuit) après laquelle elle n'ouvre plus d'exploration d'un centre "
+             "d'intérêt.")] = 21 * 60
+    no_reopen_us: Annotated[int, Knob(
+        label="Ne pas rouvrir avant", group="Entreprendre d'elle-même", lo=HOUR, hi=30 * DAY,
+        help="Un sujet qu'elle vient de clore (la même pensée, la même personne) ne se rouvre pas avant ce "
+             "délai.")] = DAY
+    interest_rest_us: Annotated[int, Knob(
+        label="Repos d'un centre d'intérêt", group="Entreprendre d'elle-même", lo=HOUR, hi=90 * DAY,
+        help="Un centre d'intérêt exploré n'est pas réexploré avant ce délai ; elle va vers le moins récemment "
+             "exploré.")] = 3 * DAY
     # raconter ce qu'elle a mené à bout
-    share_notable_from: float = 0.4
-    share_within_us: int = 12 * HOUR
-    share_evidence: float = 10.0
-    share_attempts: int = 2
+    share_notable_from: Annotated[float, Knob(
+        label="Notable à partir de", group="Raconter", lo=0.0, hi=1.0, step=0.05,
+        help="Un but abouti que son dernier pas juge au moins aussi notable se raconte à quelqu'un ; à qui et "
+             "combien dépend du lien.")] = 0.4
+    share_within_us: Annotated[int, Knob(
+        label="Raconter dans les", group="Raconter", lo=HOUR, hi=7 * DAY,
+        help="Passé ce délai après l'aboutissement, elle ne le raconte plus.")] = 12 * HOUR
+    share_evidence: Annotated[float, Knob(
+        label="Envie de raconter", group="Raconter", lo=0.0, hi=10.0, step=0.5,
+        help="La preuve (log-odds) de l'initiative de le raconter, face au seuil d'initiative (9) ; "
+             "l'arbitrage la plafonne à 10.")] = 10.0
+    share_attempts: Annotated[int, Knob(
+        label="Tentatives de raconter", group="Raconter", lo=1, hi=10,
+        help="Après autant de tentatives qui n'ont pas abouti, elle n'essaie plus.")] = 2
 
 
 def derive(t: Temperament, overrides: Any = None) -> GoalsParams:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import statistics
 from dataclasses import dataclass, field, replace
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -14,9 +15,11 @@ from mika.contracts import runtime as rt
 from mika.contracts import social as c
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.faculty import Faculty
+from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
 from mika.vocab.episodes import Kind
 from mika.vocab.people import fold, is_identifiable
+from mika.vocab.temperament import Temperament, lerp
 
 KEEP_DAYS = 64
 
@@ -25,51 +28,147 @@ class SocialParams(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     # le rythme d'une relation : l'écart médian entre les jours où la personne écrit
-    rhythm_window_days: int = 90
-    rhythm_min_days: float = 1.0
-    rhythm_max_days: float = 30.0
-    rhythm_min_gaps: int = 2
-    fallback_close_days: float = 3.0
-    fallback_friend_days: float = 7.0
-    fallback_other_days: float = 14.0
+    rhythm_window_days: Annotated[int, Knob(
+        label="Fenêtre du rythme (jours)", group="Rythme d'une relation", lo=7, hi=365,
+        help="Seuls les jours de contact de cette fenêtre servent à mesurer l'écart habituel entre deux jours où "
+             "la personne écrit (64 jours de contact distincts au plus sont gardés).")] = 90
+    rhythm_min_days: Annotated[float, Knob(
+        label="Rythme mesuré minimal (jours)", group="Rythme d'une relation", lo=0.5, hi=14, step=0.5,
+        help="Le rythme mesuré n'est jamais plus court : une personne qui écrit tous les jours ne manque pas "
+             "au bout de quelques heures.")] = 1.0
+    rhythm_max_days: Annotated[float, Knob(
+        label="Rythme mesuré maximal (jours)", group="Rythme d'une relation", lo=7, hi=180, step=1,
+        help="Le rythme mesuré n'est jamais plus long : au-delà, même une relation espacée finit par lui "
+             "manquer.")] = 30.0
+    rhythm_min_gaps: Annotated[int, Knob(
+        label="Écarts pour mesurer un rythme", group="Rythme d'une relation", lo=1, hi=20,
+        help="Combien d'écarts entre jours de contact il faut dans la fenêtre pour mesurer un rythme ; en deçà, "
+             "le rythme supposé selon la proximité s'applique.")] = 2
+    fallback_close_days: Annotated[float, Knob(
+        label="Rythme supposé : proche (jours)", group="Rythme d'une relation", lo=0.5, hi=30, step=0.5,
+        help="L'écart habituel prêté à une personne proche tant que son rythme n'est pas mesurable.")] = 3.0
+    fallback_friend_days: Annotated[float, Knob(
+        label="Rythme supposé : amie (jours)", group="Rythme d'une relation", lo=1, hi=60, step=0.5,
+        help="L'écart habituel prêté à une amie tant que son rythme n'est pas mesurable.")] = 7.0
+    fallback_other_days: Annotated[float, Knob(
+        label="Rythme supposé : les autres (jours)", group="Rythme d'une relation", lo=1, hi=90, step=0.5,
+        help="Celui prêté à une connaissance ou une inconnue. Il ne change que la lecture (fiche, silence ÷ "
+             "rythme) : elle ne relance que ses amies et ses proches.")] = 14.0
     # la proximité naît de l'histoire vécue (jours distincts, messages reçus) et
     # de ce qu'elle a installé (le regard d'``affect`` : jamais amie d'une rancune)
-    acquaintance_days: int = 2  # s'être parlé deux jours différents…
-    acquaintance_messages: int = 20  # … ou longuement : dix minutes d'insultes ne font pas une connaissance
-    friend_days: int = 3
-    friend_messages: int = 15
-    close_days: int = 7
-    close_messages: int = 50
+    # s'être parlé deux jours différents…
+    acquaintance_days: Annotated[int, Knob(
+        label="Connaissance : jours de contact", group="Proximité vécue", lo=1, hi=30,
+        help="S'être parlé tant de jours différents fait d'une inconnue une connaissance (ou assez de messages, "
+             "ci-dessous).")] = 2
+    # … ou longuement : dix minutes d'insultes ne font pas une connaissance
+    acquaintance_messages: Annotated[int, Knob(
+        label="Connaissance : messages reçus", group="Proximité vécue", lo=1, hi=500,
+        help="… ou avoir reçu tant de messages d'elle, même en un seul jour.")] = 20
+    friend_days: Annotated[int, Knob(
+        label="Amie : jours de contact", group="Proximité vécue", lo=1, hi=60,
+        help="Jours de contact distincts pour devenir amie (avec assez de messages, et sans rancune).")] = 3
+    friend_messages: Annotated[int, Knob(
+        label="Amie : messages reçus", group="Proximité vécue", lo=1, hi=1000,
+        help="Messages reçus pour devenir amie (avec assez de jours de contact, et sans rancune).")] = 15
+    close_days: Annotated[int, Knob(
+        label="Proche : jours de contact", group="Proximité vécue", lo=1, hi=120,
+        help="Jours de contact distincts pour devenir proche (avec assez de messages, sans rancune, et de la "
+             "chaleur installée ou une longue histoire).")] = 7
+    close_messages: Annotated[int, Knob(
+        label="Proche : messages reçus", group="Proximité vécue", lo=1, hi=2000,
+        help="Messages reçus pour devenir proche.")] = 50
     #: proche : de la chaleur installée — ou une longue histoire (un chagrin partagé n'éloigne pas)
-    close_regard: float = 0.1
-    close_long_days: int = 14
+    close_regard: Annotated[float, Knob(
+        label="Proche : chaleur installée", group="Proximité vécue", lo=0, hi=1, step=0.01,
+        help="Le regard installé (affect : 0 au repos, 1 chaleur pleine) qu'il faut pour devenir proche — "
+             "sauf longue histoire (ci-dessous).")] = 0.1
+    close_long_days: Annotated[int, Knob(
+        label="Proche : longue histoire (jours)", group="Proximité vécue", lo=1, hi=365,
+        help="Au-delà de tant de jours de contact, on devient proche même sans chaleur installée : un chagrin "
+             "partagé n'éloigne pas.")] = 14
     # reprendre contact : un silence d'une fois et demie son rythme
-    recontact_factor: float = 1.5
-    recontact_evidence: float = 10.5
+    recontact_factor: Annotated[float, Knob(
+        label="Manque : silence ÷ rythme", group="Reprendre contact", lo=1, hi=10, step=0.1,
+        help="Une amie ou un proche lui manque quand son silence dépasse tant de fois son rythme habituel : elle "
+             "a envie de reprendre des nouvelles, et le manque nourrit ses pensées.")] = 1.5
+    recontact_evidence: Annotated[float, Knob(
+        label="Preuve d'une relance", group="Reprendre contact", lo=0, hi=12, step=0.5,
+        help="Preuve d'initiative (log-odds) d'un manque. Au-dessus du seuil d'initiative (9 par défaut), une "
+             "relance part seule ; plafonnée à 12 par l'arbitrage.")] = 10.5
     # chercher du réconfort : une humeur nettement sombre
-    comfort_evidence: float = 10.0
-    distress_valence: float = -0.35
-    distress_intensity: float = 0.5
-    comfort_spacing_us: int = 6 * HOUR
+    comfort_evidence: Annotated[float, Knob(
+        label="Preuve d'une recherche de réconfort", group="Réconfort", lo=0, hi=12, step=0.5,
+        help="Preuve d'initiative (log-odds) pour écrire, quand elle va mal, à la personne auprès de qui elle se "
+             "sent le mieux ; plafonnée à 12 par l'arbitrage.")] = 10.0
+    distress_valence: Annotated[float, Knob(
+        label="Détresse : valence au plus", group="Réconfort", lo=-1, hi=0, step=0.05,
+        help="Elle cherche du réconfort quand la valence de son humeur ressentie tombe à ce niveau ou "
+             "plus bas (et que l'intensité suit).")] = -0.35
+    distress_intensity: Annotated[float, Knob(
+        label="Détresse : intensité au moins", group="Réconfort", lo=0, hi=1, step=0.05,
+        help="L'intensité ressentie qu'il faut, avec la valence ci-dessus, pour parler de détresse.")] = 0.5
+    comfort_spacing_us: Annotated[int, Knob(
+        label="Espacement du réconfort", group="Réconfort", lo=30 * MINUTE, hi=3 * DAY,
+        help="Pas deux recherches de réconfort plus rapprochées, ni vers quelqu'un à qui elle a écrit "
+             "depuis moins longtemps : on va vers une personne, pas vers toutes à la suite.")] = 6 * HOUR
     # l'envie de discuter : une amie ou un proche joignable, plus silencieuse que d'habitude
-    chat_after_us: int = 4 * HOUR
-    chat_ratio: float = 1.0
-    chat_friend: float = 1.5
-    chat_close: float = 2.5
-    chat_warmth: float = 1.0
+    chat_after_us: Annotated[int, Knob(
+        label="Envie de discuter : silence minimal", group="Envie de discuter", lo=30 * MINUTE, hi=3 * DAY,
+        help="Il faut au moins ce silence (dans un sens comme dans l'autre) avec une amie ou un proche pour "
+             "avoir envie de lui écrire sans raison particulière.")] = 4 * HOUR
+    chat_ratio: Annotated[float, Knob(
+        label="Envie de discuter : silence ÷ rythme", group="Envie de discuter", lo=0, hi=10, step=0.1,
+        help="… et un silence d'au moins tant de fois son rythme habituel (au-delà du seuil de manque, c'est "
+             "une relance).")] = 1.0
+    chat_friend: Annotated[float, Knob(
+        label="Envie de discuter : preuve (amie)", group="Envie de discuter", lo=0, hi=3.5, step=0.1,
+        help="Preuve d'initiative (log-odds) de l'envie de discuter avec une amie : peu de chose seule, assez "
+             "quand le besoin de compagnie s'y ajoute. Plafonnée à 3,5 chaleur comprise.")] = 1.5
+    chat_close: Annotated[float, Knob(
+        label="Envie de discuter : preuve (proche)", group="Envie de discuter", lo=0, hi=3.5, step=0.1,
+        help="La même preuve envers un proche. Plafonnée à 3,5 chaleur comprise.")] = 2.5
+    chat_warmth: Annotated[float, Knob(
+        label="Envie de discuter : poids de la chaleur", group="Envie de discuter", lo=0, hi=3.5, step=0.1,
+        help="S'ajoute à la preuve, multiplié par la chaleur installée envers la personne (0 à 1).")] = 1.0
     # ses heures pour écrire d'elle-même à quelqu'un d'absent (heure locale, minutes)
-    day_start_min: int = 10 * 60
-    day_end_min: int = 20 * 60 + 30
+    day_start_min: Annotated[int, Knob(
+        label="Écrire d'elle-même : à partir de", group="Heures d'initiative", lo=0, hi=24 * 60,
+        help="Heure locale (10 h = 10:00) à partir de laquelle elle relance, cherche du réconfort ou écrit "
+             "pour discuter. Les salutations n'en dépendent pas.")] = 10 * 60
+    day_end_min: Annotated[int, Knob(
+        label="Écrire d'elle-même : jusqu'à", group="Heures d'initiative", lo=0, hi=24 * 60,
+        help="Heure locale après laquelle elle ne le fait plus. Doit suivre le début : la plage ne passe pas "
+             "minuit (sinon, jamais).")] = 20 * 60 + 30
     # initiatives restées sans réponse : chaque nouvelle vers la même personne attend plus
-    ignored_shift: float = -1.0
+    ignored_shift: Annotated[float, Knob(
+        label="Recul par initiative sans réponse", group="Retenue", lo=-10, hi=0, step=0.5,
+        help="Envers quelqu'un de présent, chaque initiative restée sans réponse rend la suivante moins probable "
+             "d'autant (log-odds) ; envers quelqu'un d'absent, c'est un veto.")] = -1.0
     # une rancune (hostilité installée) : ni amitié, ni initiative vers elle
-    grudge: float = 0.2
+    grudge: Annotated[float, Knob(
+        label="Seuil de rancune", group="Retenue", lo=0.05, hi=1, step=0.05,
+        help="À partir de cette hostilité installée (affect), ni amitié ni initiative vers la personne. Plus "
+             "bas : la moindre contrariété coupe les ponts.")] = 0.2
     # profils : relus quand assez de nouveau est su, au plus une fois par jour
-    profile_min_items: int = 3
-    profile_interval_us: int = DAY
-    profile_max_items: int = 30
-    profile_per_run: int = 2
-    profile_retry_us: int = 30 * MINUTE
+    profile_min_items: Annotated[int, Knob(
+        label="Fiche : éléments nouveaux", group="Fiches", lo=1, hi=50,
+        help="Sa fiche d'une personne n'est relue (appel au modèle) qu'après tant de souvenirs ou croyances "
+             "nouveaux la concernant.")] = 3
+    profile_interval_us: Annotated[int, Knob(
+        label="Fiche : intervalle minimal", group="Fiches", lo=HOUR, hi=30 * DAY,
+        help="Pas deux relectures de la même fiche plus rapprochées.")] = DAY
+    profile_max_items: Annotated[int, Knob(
+        label="Fiche : éléments relus", group="Fiches", lo=5, hi=200,
+        help="Combien de ses souvenirs et croyances sur la personne (les plus importants) le modèle relit.")] = 30
+    profile_per_run: Annotated[int, Knob(
+        label="Fiches par passage", group="Fiches", lo=1, hi=10,
+        help="Combien de fiches au plus une passe relit (les plus en retard d'abord) : les appels restent "
+             "rares.")] = 2
+    profile_retry_us: Annotated[int, Knob(
+        label="Fiche : délai entre passes", group="Fiches", lo=MINUTE, hi=DAY,
+        help="Délai avant la passe suivante quand d'autres fiches attendent ou qu'un appel a échoué : pas de "
+             "rafale d'appels au modèle.")] = 30 * MINUTE
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,7 +202,16 @@ class SocialState:
     comforted_at: int = 0  # la dernière fois qu'elle est allée chercher du réconfort
 
 
-SOCIAL = Faculty("social", state=SocialState, init=lambda p: SocialState(), params=SocialParams)
+def derive(t: Temperament, overrides: Any = None) -> SocialParams:
+    """L'optimisme recule le seuil de la détresse : une optimiste tient plus
+    longtemps avant d'aller chercher du réconfort (au milieu : −0,35, la valeur
+    d'avant). Les surcharges sont posées par ``runtime/params.py``."""
+    values: dict[str, Any] = {"distress_valence": round(lerp(-0.2, -0.5, t.optimism), 3)}
+    values.update(dict(overrides or {}))
+    return SocialParams(**values)
+
+
+SOCIAL = Faculty("social", state=SocialState, init=lambda p: SocialState(), params=SocialParams, derive=derive)
 SOCIAL.declare(*c.ALL)
 
 

@@ -22,7 +22,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict
@@ -36,6 +36,7 @@ from mika.kernel.clock import DAY, HOUR
 from mika.kernel.codec import digest
 from mika.kernel.events import Content, VoiceProvenance
 from mika.kernel.faculty import CatchUp, Faculty, Zone
+from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
@@ -47,18 +48,50 @@ from mika.vocab.privacy import Sensitivity
 class SelfParams(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    esteem_half_life_us: int = 72 * HOUR
-    esteem_min: float = 0.05
-    esteem_max: float = 0.95
-    ignored_knock: float = -0.03
-    heard_again_knock: float = 0.04
-    achieved_knock: float = 0.05
-    stuck_knock: float = -0.04
-    doubt_below: float = 0.35
-    assured_above: float = 0.7
-    narrative_every_us: int = DAY
-    narrative_min_souvenirs: int = 5
-    narrative_max_souvenirs: int = 30
+    # l'estime : elle revient vers 0,5, bousculée par de petits coups ; elle ne touche jamais l'arbitrage
+    esteem_half_life_us: Annotated[int, Knob(
+        label="Demi-vie de l'estime", group="L'estime", lo=6 * HOUR, hi=30 * DAY,
+        help="Son estime revient vers 0,5 en perdant la moitié de son écart en ce temps. Plus court : les coups "
+             "s'oublient dans la journée ; plus long : un doute s'installe.")] = 72 * HOUR
+    esteem_min: Annotated[float, Knob(
+        label="Estime plancher", group="L'estime", lo=0.0, hi=0.5, step=0.01,
+        help="Jamais sous ce plancher, quels que soient les coups : un échec n'est pas une dépression.")] = 0.05
+    esteem_max: Annotated[float, Knob(
+        label="Estime plafond", group="L'estime", lo=0.5, hi=1.0, step=0.01,
+        help="Jamais au-dessus de ce plafond, quels que soient les succès.")] = 0.95
+    ignored_knock: Annotated[float, Knob(
+        label="Initiative ignorée", group="L'estime", lo=-0.3, hi=0.0, step=0.01,
+        help="Ce que coûte à son estime une initiative restée sans réponse dans le délai attendu.")] = -0.03
+    heard_again_knock: Annotated[float, Knob(
+        label="Réponse après des ignorées", group="L'estime", lo=0.0, hi=0.3, step=0.01,
+        help="Ce que lui rend une réponse qui rompt une série d'initiatives ignorées (« je compte "
+             "encore »).")] = 0.04
+    achieved_knock: Annotated[float, Knob(
+        label="But mené à bout", group="L'estime", lo=0.0, hi=0.3, step=0.01,
+        help="Ce que lui rend un but qu'elle a mené à bout (un rappel dit ne compte pas).")] = 0.05
+    stuck_knock: Annotated[float, Knob(
+        label="But bloqué", group="L'estime", lo=-0.3, hi=0.0, step=0.01,
+        help="Ce que lui coûte un but sur lequel elle bloque ; renoncer par manque d'envie ne coûte rien.")] = -0.04
+    doubt_below: Annotated[float, Knob(
+        label="Elle doute sous", group="L'estime", lo=0.0, hi=0.5, step=0.01,
+        help="Sous ce seuil, son prompt lui dit qu'elle doute un peu d'elle-même (un ressenti, jamais un "
+             "nombre).")] = 0.35
+    assured_above: Annotated[float, Knob(
+        label="Sûre d'elle au-dessus de", group="L'estime", lo=0.5, hi=1.0, step=0.01,
+        help="Au-dessus de ce seuil, son prompt lui dit qu'elle se sent sûre d'elle, à sa place.")] = 0.7
+    # le récit : « Je suis quelqu'un qui… », réécrit par sa propre voix
+    narrative_every_us: Annotated[int, Knob(
+        label="Réécrire le récit au plus toutes les", group="Le récit", lo=HOUR, hi=30 * DAY,
+        help="Le paragraphe qu'elle écrit sur qui elle devient n'est pas réécrit plus souvent (un appel au "
+             "modèle à chaque fois).")] = DAY
+    narrative_min_souvenirs: Annotated[int, Knob(
+        label="Souvenirs neufs pour réécrire", group="Le récit", lo=1, hi=100,
+        help="Il faut avoir vécu au moins autant de nouveaux souvenirs depuis le dernier récit pour le "
+             "réécrire.")] = 5
+    narrative_max_souvenirs: Annotated[int, Knob(
+        label="Souvenirs relus pour le récit", group="Le récit", lo=5, hi=200,
+        help="Les souvenirs anodins les plus récents montrés à sa voix pour réécrire le récit (il est montré à "
+             "tout le monde). Plus : un appel plus long.")] = 30
 
 
 @dataclass(frozen=True, slots=True)

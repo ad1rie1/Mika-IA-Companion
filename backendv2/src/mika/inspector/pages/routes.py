@@ -26,8 +26,12 @@ from mika.runtime.operations import dynamic_fields, fixed_values, offered, perfo
 MOVED = {"chronologie": "systeme/chronologie", "etat": "systeme/etat", "contributions": "systeme/contributions",
          "sante": "systeme/sante", "appels": "systeme/appels", "rapports": "systeme/simulations",
          "facultes": "systeme/vues", "modeles": "reglages/modeles", "persona": "reglages/personnalite",
-         "parametres": "reglages/parametres", "canaux": "reglages/canaux", "forge": "reglages/apps",
+         "parametres": "reglages/parametres", "canaux": "reglages/canaux", "forge": "apps",
          "comptes": "reglages/comptes"}
+
+
+#: les anciens onglets qui ont pris leur propre place
+MOVED_TABS = {("reglages", "apps"): "apps"}
 
 
 def safe_back(target: str) -> str:
@@ -80,7 +84,8 @@ class Pages:
                 return {"response": got}
             if isinstance(got, dict):
                 return {"blocks": list(got.get("blocks") or []), "filters": tuple(got.get("filters") or ()),
-                        "panel": got.get("panel"), "messages": list(got.get("messages") or [])}
+                        "panel": got.get("panel"), "messages": list(got.get("messages") or []),
+                        "crumbs": list(got.get("crumbs") or [])}
             if isinstance(got, Panel):
                 return {"blocks": [], "panel": got}
             return {"blocks": list(got or [])}
@@ -142,6 +147,9 @@ class Pages:
         """Une destination et l'onglet demandé ; ``produced`` remplace le contenu de
         l'onglet (un formulaire refusé qu'on remontre, avec ``status``)."""
         key = key or request.path_params.get("key", "accueil")
+        moved_tab = MOVED_TABS.get((key, request.path_params.get("tab", "")))
+        if moved_tab and not tab:
+            return RedirectResponse(f"{PREFIX}/{moved_tab}", status_code=301)
         if key in MOVED and "tab" not in request.path_params and not tab:
             return RedirectResponse(f"{PREFIX}/{MOVED[key]}", status_code=301)
         d = self.dests.get(key)
@@ -174,7 +182,8 @@ class Pages:
                                 subtitle=d.description, tabs=tab_list, blocks=got["blocks"],
                                 head_actions=self.head_actions(request, section=d.key),
                                 filters=got.get("filters") or (), panel=got.get("panel"),
-                                messages=got.get("messages") or [], status=status)
+                                messages=got.get("messages") or [], crumbs=got.get("crumbs") or [],
+                                status=status)
 
     async def view(self, request: Request) -> Response:
         owner, name = request.path_params["owner"], request.path_params["name"]

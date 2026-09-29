@@ -4,7 +4,7 @@ réducteurs et ses faits (voir ``__init__`` pour la politique)."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -14,6 +14,7 @@ from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.kernel.faculty import Faculty
+from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
 from mika.vocab import privacy
 from mika.vocab.people import clean_display_name, is_identifiable, is_internal, same_name
@@ -28,7 +29,11 @@ class IdentityParams(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     #: Poignées de propriétaires sans compte opérateur (un Telegram, par exemple).
-    owners: tuple[str, ...] = ()
+    owners: Annotated[tuple[str, ...], Knob(
+        label="Propriétaires (poignées)", group="Propriétaires",
+        help="Une poignée par ligne (ex. tg_123456789) traitée comme l'opératrice sans compte : récit complet de "
+             "ses travaux, outils réservés (forge, caméra…). Fourni par les réglages Telegram (onglet « Canaux ») : "
+             "quand des propriétaires y sont déclarés, ce champ se lit ici sans se changer.")] = ()
 
 
 @dataclass(frozen=True, slots=True)

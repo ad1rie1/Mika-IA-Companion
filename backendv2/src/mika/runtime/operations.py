@@ -11,9 +11,11 @@ l'audit ``runtime.operated``. Rien ici ne nomme une faculté.
 from __future__ import annotations
 
 import inspect as pyinspect
+from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
+from weakref import WeakKeyDictionary
 
 from pydantic import ValidationError
 
@@ -103,6 +105,10 @@ async def perform(kernel: Kernel, key: str, form: Mapping[str, Sequence[str]], *
     args, errors = parse_args(spec, form, kernel, subject)
     if errors:
         return Outcome(False, "Le formulaire a des erreurs.", "danger", errors=errors)
+    if nonce and not _first_use(kernel, nonce):
+        # un double envoi : l'action a pu agir hors du journal (une app rechargée,
+        # une version précédente) — elle ne s'exécute pas deux fois
+        return Outcome(True, "Ce formulaire a déjà été envoyé : rien de plus n'a été fait.", "info", deduped=True)
 
     mind = kernel.mind
     frame = mind.frame()
@@ -141,6 +147,23 @@ async def perform(kernel: Kernel, key: str, form: Mapping[str, Sequence[str]], *
         return Outcome(True, "Déjà fait.", "info", seqs=seqs, deduped=True, go=done.go)
     await _audit(kernel, spec, by, subject, seqs, "done", correlation, nonce)
     return Outcome(True, done.message or "Fait.", done.tone, seqs=seqs, go=done.go, show=done.show)
+
+
+#: les jetons de formulaire déjà servis, par noyau (le journal garde les autres : leur audit)
+_USED: WeakKeyDictionary[Any, OrderedDict[str, None]] = WeakKeyDictionary()
+USED_KEPT = 4096
+
+
+def _first_use(kernel: Kernel, nonce: str) -> bool:
+    """Vrai la première fois qu'un jeton sert ; ensuite (même en cours d'exécution,
+    même après un redémarrage : l'audit porte le jeton) il ne sert plus."""
+    used = _USED.setdefault(kernel, OrderedDict())
+    if nonce in used or kernel.mind.store.find_dedupe(rt.OPERATED.name, f"op:{nonce}:audit") is not None:
+        return False
+    used[nonce] = None
+    while len(used) > USED_KEPT:
+        used.popitem(last=False)
+    return True
 
 
 async def _audit(kernel: Kernel, spec: ActionSpec, by: str, subject: str, seqs: tuple[int, ...], outcome: str,

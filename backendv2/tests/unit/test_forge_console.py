@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import html
 import json
 import shutil
 from pathlib import Path
@@ -49,13 +50,23 @@ from mika.kernel.inspect import (
     Stats,
     Table,
 )
-from mika.plugins.forge import EMITTED, SWITCHED, WRITTEN, HelpArgs, forge_help, written_draft
+from mika.plugins.forge import (
+    EMITTED,
+    SWITCHED,
+    WRITTEN,
+    HelpArgs,
+    _test_view,
+    action_verdict,
+    forge_help,
+    written_draft,
+)
 from mika.plugins.forge.guide import EXAMPLE_CODE, EXAMPLE_MANIFEST, TOPICS
 from mika.plugins.forge.views import decode_view, is_invalid
 from mika.runtime.inspection import Inspection, find
 from mika.runtime.operations import dynamic_fields, offered, perform
 from mika.sim.clock import run_virtual
 from tests.fixtures.mika import boot, build, reply
+from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
 needs_bwrap = pytest.mark.skipif(shutil.which("bwrap") is None, reason="bubblewrap absent")
 
@@ -63,7 +74,7 @@ needs_bwrap = pytest.mark.skipif(shutil.which("bwrap") is None, reason="bubblewr
 # ── Outils ────────────────────────────────────────────────────────────────
 
 
-def world(tmp_path: Path):
+def mind_with_forge(tmp_path: Path):
     """Un noyau, un hôte réel et le magasin de réglages du serveur (secrets scellés)."""
     store = ForgeSettingsStore(None)  # type: ignore[arg-type] — relié au magasin une fois le noyau bâti
     forge = ForgeHost(tmp_path / "forge", config=lambda app: store.values(app))
@@ -75,7 +86,7 @@ def world(tmp_path: Path):
 
 
 def run(tmp_path: Path, scenario):
-    kernel, clock, forge, store = world(tmp_path)
+    kernel, clock, forge, store = mind_with_forge(tmp_path)
 
     async def main():
         await boot(kernel)
@@ -119,7 +130,7 @@ def of(blocks, kind):
 
 def events(kernel, *types):
     names = {getattr(t, "name", t) for t in types}
-    return [kernel.mind.decode(s) for s in kernel.mind.store.read(types=names)]
+    return [kernel.mind.decode(s) for s in list(kernel.mind.store.read(types=names))]
 
 
 async def tab(kernel, name: str, app: str, **params: str):
@@ -494,7 +505,8 @@ def test_the_commands_switch_roll_back_reset_reload_and_erase_with_retyping(tmp_
     assert got["après"] == (None, False)
     states = [e.data.state for e in got["évts"] if e.type.name == SWITCHED.name]
     assert states == ["disabled", "promoted", "reset", "erased"]
-    assert [e.data.version for e in got["évts"] if e.type.name == WRITTEN.name] == [1, 2, 3]
+    versions = [e.data.version for e in got["évts"] if e.type.name == WRITTEN.name]
+    assert versions[-2:] == [2, 3] and set(versions) == {1, 2, 3}  # (la découverte au démarrage peut redire la 1)
     assert all(e.origin is Origin.EXTERNAL for e in got["évts"] if e.correlation.startswith("opérateur"))
 
 
@@ -516,7 +528,7 @@ def test_tester_shows_the_decoded_view_in_place(tmp_path):
                                 subject="meteo", nonce="t4")
         garbled = await perform(kernel, "forge.tester", form({"fonction": "view_releves", "args": "{pas du json"}),
                                 by="user_1", subject="meteo", nonce="t5")
-        return choices, vue, act, bad, unknown, garbled, kernel.mind.store.read(types={EMITTED.name})
+        return choices, vue, act, bad, unknown, garbled, list(kernel.mind.store.read(types={EMITTED.name}))
 
     choices, vue, act, bad, unknown, garbled, emitted = run(tmp_path, scenario)
     assert [v for v, _ in choices] == ["action_releves_ajouter", "action_releves_vider", "view_releves"]
@@ -528,6 +540,28 @@ def test_tester_shows_the_decoded_view_in_place(tmp_path):
     assert unknown.errors == {"fonction": "choix inconnu : « tick »"}
     assert "JSON illisible" in garbled.errors["args"]
     assert emitted == []  # tester ne journalise rien de ce que l'app fait
+
+
+@needs_bwrap
+def test_forge_test_decodes_a_view_and_names_the_faulty_path(tmp_path):
+    h = ForgeHost(tmp_path / "forge")
+
+    async def scenario():
+        await h.write("fragile", FRAGILE, FRAGILE_CODE)
+        await h.write("meteo", EXAMPLE_MANIFEST, EXAMPLE_CODE)
+        return (await _test_view(h, "fragile", "view_invalide", {}),
+                await _test_view(h, "meteo", "view_releves", {"ville": "Paris", "froid": True}),
+                await _test_view(h, "meteo", "view_nulle", {}))
+
+    try:
+        bad, good, missing = asyncio.run(scenario())
+    finally:
+        h.shutdown()
+    assert not bad.ok and "Invalide : blocks[1].rows[0] : 2 cellules pour 1 colonnes" in bad.content
+    assert good.ok and "enveloppe valide" in good.content and "formulaires : ajouter, vider" in good.content
+    assert not missing.ok and "Pas de vue déclarée pour view_nulle" in missing.content
+    assert action_verdict({"ok": True, "message": "Relevé ajouté."}) == "Réponse d'action valide."
+    assert action_verdict("d'accord").startswith("Invalide : une action doit rendre")
 
 
 # ── Le mode d'emploi ──────────────────────────────────────────────────────
@@ -584,3 +618,48 @@ def test_the_forge_help_example_is_valid_and_its_view_decodes_cleanly(tmp_path):
     for sujet in TOPICS:
         assert len(asyncio.run(forge_help(HelpArgs(sujet=sujet), None))) > 200
     assert "view_releves" in asyncio.run(forge_help(HelpArgs(sujet="exemple"), None))
+
+
+# ── Par la vraie console (HTML, jeton de formulaire, magasin du serveur) ──
+
+
+@needs_bwrap
+def test_the_app_fiche_renders_and_its_forms_post_through_the_console(world):  # noqa: F811
+    client, live, _ = world
+    bootstrap(client)
+    forge, kernel = live.kernel.ports["forge"], live.kernel
+    for app, manifest, code in (("meteo", EXAMPLE_MANIFEST, EXAMPLE_CODE), ("reglee", REGLAGES, REGLAGES_CODE)):
+        client.portal.call(forge.write, app, manifest, code)
+        draft = written_draft(forge.info(app))
+        client.portal.call(lambda d=draft: kernel.mind.append([d], emitter="forge", correlation="t",
+                                                               origin=Origin.GENESIS))
+    fiche = "/inspecteur/fiche/app/meteo?onglet=vues&vue=releves&ville=Paris"
+    page = client.get(fiche)
+    body = html.unescape(page.text)
+    assert page.status_code == 200 and "Température à Paris" in body and "Carnet météo" in body
+    assert 'action="/inspecteur/action/forge.agir"' in body and "Ajouter un relevé" in body
+    assert "Arrêter" in body and "Effacer" in body and "Tester" in body  # les commandes de la fiche
+    token = client.cookies.get("csrftoken")
+    add = {"csrf": token, "_op": "p1", "_retour": fiche, "_sujet": "meteo", "_fixes": ["app", "vue", "action"],
+           "app": "meteo", "vue": "releves", "action": "ajouter", "_champs": ["ville", "temperature", "note"],
+           "ville": "Paris", "temperature": "-3", "note": "brume"}
+    done = client.post("/inspecteur/action/forge.agir", data=add)
+    assert done.status_code == 200 and "Relevé ajouté pour Paris." in html.unescape(done.text)
+    assert "brume" in html.unescape(client.get(fiche).text)
+    bad = client.post("/inspecteur/action/forge.agir", data={**add, "_op": "p2", "temperature": "99"})
+    assert bad.status_code == 400 and "doit être entre -60 et 60" in html.unescape(bad.text)
+    for tab_name in ("etat", "reglages", "code", "journal", "vecu"):
+        r = client.get(f"/inspecteur/fiche/app/meteo?onglet={tab_name}")
+        assert r.status_code == 200 and "a échoué" not in html.unescape(r.text), tab_name
+    assert "/inspecteur/fiche/app/meteo" in html.unescape(client.get("/inspecteur/apps").text)
+    # régler : le secret part scellé au repos, l'app le lit, la console n'en dit que « défini »
+    settle = {"csrf": token, "_op": "p3", "_retour": "/inspecteur/fiche/app/reglee?onglet=reglages",
+              "_sujet": "reglee", "_champs": ["ville", "cle", "n"], "ville": "Lyon", "cle": SECRET, "n": "4"}
+    saved = client.post("/inspecteur/action/forge.regler", data=settle)
+    assert saved.status_code == 200 and "Réglages enregistrés" in html.unescape(saved.text)
+    stored = client.portal.call(live.settings.forge_config, "reglee")
+    assert stored["ville"] == "Lyon" and stored["n"] == 4 and SECRET not in json.dumps(stored)
+    read = client.portal.call(forge.call, "reglee", "view_lire", {"page": 1})
+    assert read.ok and f"('cle', '{SECRET}')" in read.value["blocks"][0]["text"]
+    settings_page = html.unescape(client.get("/inspecteur/fiche/app/reglee?onglet=reglages").text)
+    assert SECRET not in settings_page and "défini" in settings_page

@@ -17,16 +17,17 @@ import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from mika.contracts import body as body_c
 from mika.contracts import camera as c
 from mika.contracts import identity as identity_c
-from mika.kernel.clock import MINUTE
+from mika.kernel.clock import HOUR, MINUTE
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp, Faculty, ToolResult, Zone
+from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     Badge,
@@ -60,9 +61,18 @@ passe quelque chose qui mérite l'attention (quelqu'un arrive, part, fait un sig
 class CameraParams(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    look_every_us: int = 2 * MINUTE
-    fresh_us: int = 5 * MINUTE
-    shown_for_us: int = 10 * MINUTE
+    look_every_us: Annotated[int, Knob(
+        label="Regarder au plus toutes les", group="Regarder", lo=MINUTE, hi=2 * HOUR,
+        help="Éveillée, elle regarde à ce rythme ; une image inchangée n'est pas redécrite. Chaque regard est un "
+             "appel au modèle de vision : plus court, plus coûteux.")] = 2 * MINUTE
+    fresh_us: Annotated[int, Knob(
+        label="Image encore fraîche", group="Regarder", lo=MINUTE, hi=HOUR,
+        help="Une image plus vieille que ça (caméra figée ou déconnectée) n'est pas décrite, et l'appareil "
+             "passe pour silencieux.")] = 5 * MINUTE
+    shown_for_us: Annotated[int, Knob(
+        label="Montré en conversation pendant", group="Regarder", lo=MINUTE, hi=6 * HOUR,
+        help="Ce qu'elle a vu reste dans ses conversations avec ses propriétaires pendant ce temps, puis ne se "
+             "montre plus.")] = 10 * MINUTE
 
 
 @dataclass(frozen=True, slots=True)

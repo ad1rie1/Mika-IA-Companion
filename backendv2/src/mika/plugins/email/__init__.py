@@ -24,7 +24,7 @@ import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -35,9 +35,10 @@ from mika.contracts import identity as identity_c
 from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
 from mika.kernel.arbitration import Candidate
-from mika.kernel.clock import HOUR, MINUTE, instant
+from mika.kernel.clock import DAY, HOUR, MINUTE, instant
 from mika.kernel.events import Content, Payload
 from mika.kernel.faculty import CatchUp, Faculty, ToolResult, Zone
+from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.guards import floor
 from mika.kernel.inspect import (
@@ -77,14 +78,33 @@ BUNDLE = "email"
 class EmailParams(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    poll_every_us: int = 10 * MINUTE
-    per_poll: int = 10
-    triage_per_poll: int = 5
-    mention_from: float = 0.8
-    mention_evidence: float = 8.0
-    mention_within_us: int = 6 * HOUR
+    poll_every_us: Annotated[int, Knob(
+        label="Relever toutes les", group="Relevé", lo=MINUTE, hi=DAY,
+        help="Éveillée, elle relève sa boîte à ce rythme (endormie, elle lira au réveil). Sans boîte configurée, "
+             "elle revérifie au plus toutes les heures.")] = 10 * MINUTE
+    per_poll: Annotated[int, Knob(
+        label="Mails lus par relevé", group="Relevé", lo=1, hi=100,
+        help="Au plus autant de nouveaux mails pris à chaque relevé ; les autres attendent le suivant.")] = 10
+    triage_per_poll: Annotated[int, Knob(
+        label="Mails triés par le modèle", group="Relevé", lo=0, hi=50,
+        help="Parmi eux, au plus autant (hors envois en masse) sont triés par un appel au modèle (importance, "
+             "émotion, réponse attendue) ; les autres par une simple heuristique.")] = 5
+    mention_from: Annotated[float, Knob(
+        label="Important à partir de", group="Le dire", lo=0.0, hi=1.0, step=0.05,
+        help="Un mail non lu dont l'importance atteint ce seuil est « important » : elle peut en parler d'elle-même "
+             "à une propriétaire présente.")] = 0.8
+    mention_evidence: Annotated[float, Knob(
+        label="Envie de le dire", group="Le dire", lo=0.0, hi=8.0, step=0.5,
+        help="La preuve (log-odds) qu'un mail important apporte à une initiative envers une propriétaire présente, "
+             "face au seuil d'initiative (9) ; l'arbitrage la plafonne à 8.")] = 8.0
+    mention_within_us: Annotated[int, Knob(
+        label="Le dire dans les", group="Le dire", lo=10 * MINUTE, hi=2 * DAY,
+        help="Passé ce délai après son arrivée, un mail important ne se signale plus de lui-même.")] = 6 * HOUR
     #: ce qui sort de la machine attend un accord (une politique, pas un trait)
-    send_needs_approval: bool = True
+    send_needs_approval: Annotated[bool, Knob(
+        label="Un envoi attend un accord", group="Envoyer",
+        help="Une politique, pas un trait : cochée, un mail qu'elle écrit ne part qu'une fois approuvé par un "
+             "opérateur ; décochée, il va directement à la file de sortie.")] = True
 
 
 @dataclass(frozen=True, slots=True)

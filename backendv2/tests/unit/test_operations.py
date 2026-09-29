@@ -155,3 +155,41 @@ def test_a_changed_situation_supersedes(tmp_path):
         assert [e.data.outcome for e in audit] == ["superseded"]
     finally:
         BOARD.actions[:] = [a for a in BOARD.actions if a.name != "prudent"]
+
+
+def test_an_action_that_acts_outside_the_journal_runs_once_per_form(tmp_path):
+    """Une action peut agir hors du journal (recharger une app, revenir à une version
+    précédente) : un double envoi du même formulaire ne l'exécute pas deux fois —
+    ni pendant qu'elle tourne, ni après un redémarrage (l'audit garde le jeton)."""
+    effects: list[str] = []
+
+    @BOARD.action("rembobiner", title="Rembobiner", args=NoArgs, emits=[])
+    def _rewind(s, frame, args, ctx) -> Done:
+        effects.append(ctx.by)
+        return Done(message="Rembobiné.")
+
+    try:
+        kernel, clock, _ = build(tmp_path, [BOARD])
+
+        async def main():
+            await kernel.start()
+            first = await perform(kernel, "board.rembobiner", form(), by="user_1", nonce="r1")
+            again = await perform(kernel, "board.rembobiner", form(), by="user_1", nonce="r1")
+            other = await perform(kernel, "board.rembobiner", form(), by="user_1", nonce="r2")
+            await kernel.stop()
+            return first, again, other
+
+        first, again, other = run_virtual(clock, main)
+        assert first.ok and again.deduped and other.ok
+        assert effects == ["user_1", "user_1"]  # r1 une fois, r2 une fois
+        restarted, clock2, _ = build(tmp_path, [BOARD], seed=1, start=clock.now() + 60_000_000)
+
+        async def after_restart():
+            await restarted.start()
+            got = await perform(restarted, "board.rembobiner", form(), by="user_1", nonce="r1")
+            await restarted.stop()
+            return got
+
+        assert run_virtual(clock2, after_restart).deduped and len(effects) == 2
+    finally:
+        BOARD.actions[:] = [a for a in BOARD.actions if a.name != "rembobiner"]
