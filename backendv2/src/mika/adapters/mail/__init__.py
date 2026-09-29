@@ -166,10 +166,16 @@ class ImapSmtpMail:
                     in_reply_to=r[8], bulk=bool(r[9]))
 
     async def get(self, message_id: str) -> Mail | None:
+        return self.cached_one(message_id)
+
+    async def recent(self, limit: int) -> list[Mail]:
+        return self.cached(limit)
+
+    def cached_one(self, message_id: str) -> Mail | None:
         rows = self._db.execute("SELECT * FROM mails WHERE message_id=?", (message_id,)).fetchall()
         return self._row(rows[0]) if rows else None
 
-    async def recent(self, limit: int) -> list[Mail]:
+    def cached(self, limit: int) -> list[Mail]:
         rows = self._db.execute("SELECT * FROM mails ORDER BY date DESC, rowid DESC LIMIT ?", (limit,)).fetchall()
         return [self._row(r) for r in rows]
 

@@ -21,6 +21,7 @@ from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit, urlunsplit
 from xml.etree import ElementTree
 
 import httpx
@@ -110,6 +111,20 @@ def _key(feed_url: str, uid: str) -> str:
     return hashlib.sha256(f"{feed_url}\n{uid}".encode()).hexdigest()[:24]
 
 
+def shown(url: str) -> str:
+    """Une adresse montrable : ni identifiants, ni valeurs de paramètres (un flux
+    privé porte souvent son jeton dans l'adresse)."""
+    try:
+        parts = urlsplit(url.strip())
+    except ValueError:
+        return "(adresse illisible)"
+    host = parts.hostname or ""
+    if parts.port:
+        host = f"{host}:{parts.port}"
+    query = "&".join(f"{k}=…" for k, _ in parse_qsl(parts.query, keep_blank_values=True))
+    return urlunsplit((parts.scheme, host, parts.path, query, ""))[:300]
+
+
 class HttpFeeds:
     def __init__(self, feeds: Callable[[], Sequence[str]], cache: Path, *, client: httpx.AsyncClient | None = None,
                  timeout_s: float = 20.0) -> None:
@@ -173,9 +188,20 @@ class HttpFeeds:
         return Entry(*rows[0]) if rows else None
 
     async def recent(self, limit: int) -> list[Entry]:
+        return self.cached(limit)
+
+    def cached(self, limit: int) -> list[Entry]:
         rows = self._db.execute("SELECT id, feed, title, link, summary, published FROM entries "
                                 "ORDER BY published DESC, n DESC LIMIT ?", (limit,)).fetchall()
         return [Entry(*r) for r in rows]
+
+    def followed(self) -> list[tuple[str, str]]:
+        out = []
+        for url in list(self._feeds()):
+            row = self._db.execute("SELECT feed FROM entries WHERE feed_url=? LIMIT 1", (url,)).fetchone()
+            title = row[0] if row and row[0] != url else ""
+            out.append((title, shown(url)))
+        return out
 
     async def article(self, entry_id: str) -> str:
         e = await self.entry(entry_id)

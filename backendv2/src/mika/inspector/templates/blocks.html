@@ -1,0 +1,18 @@
+{% macro render(blocks) %}
+{% for b in blocks %}{% set k = block_kind(b) %}
+{% if k == "table" %}
+{% if b.title %}<h3>{{ b.title }}</h3>{% endif %}
+<div class="scroll"><table><tr>{% for c in b.columns %}<th>{{ c }}</th>{% endfor %}</tr>
+{% for r in b.rows %}<tr>{% for v in r %}{% set c = cell(v) %}<td>{% if c.href %}<a href="{{ c.href }}">{{ c.text }}</a>{% else %}{{ c.text }}{% endif %}</td>{% endfor %}</tr>
+{% else %}<tr><td colspan="{{ b.columns|length }}" class="mut">{{ b.empty }}</td></tr>{% endfor %}</table></div>
+{% elif k == "fields" %}
+{% if b.title %}<h3>{{ b.title }}</h3>{% endif %}
+<div class="card"><dl>{% for name, v in b.pairs %}{% set c = cell(v) %}<dt>{{ name }}</dt><dd>{% if c.href %}<a href="{{ c.href }}">{{ c.text }}</a>{% else %}{{ c.text }}{% endif %}</dd>{% endfor %}</dl></div>
+{% elif k == "prose" %}
+{% if b.title %}<h3>{{ b.title }}</h3>{% endif %}
+<div class="card"><pre>{{ b.text }}</pre></div>
+{% else %}
+<p class="{{ b.tone }}">{{ b.text }}</p>
+{% endif %}
+{% endfor %}
+{% endmacro %}

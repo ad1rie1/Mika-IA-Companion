@@ -246,6 +246,12 @@ def _night(s: BodyState, frame: Frame, row: RowView) -> Modulation:
     passe à elle seule la barre de réveil (un rappel urgent) passe outre."""
     if row.strongest >= c.WAKE_BAR:
         return Modulation()
+    return gate(s, frame)
+
+
+def gate(s: BodyState, frame: Frame) -> Modulation:
+    """Ce que son corps fait à une raison ordinaire à l'instant (sous la barre
+    de réveil) : le veto ou le décalage."""
     if frame.get(c.SLEEP) is not c.SleepPhase.AWAKE:
         return Modulation(veto=c.ASLEEP)
     p = params(frame.env.params_of("body", frame.root))
@@ -292,3 +298,8 @@ def _fog(s: BodyState, frame: Frame, enrich: Any) -> str | None:
         if e < limit:
             return text
     return None
+
+
+# ── Inspection ────────────────────────────────────────────────────────────
+
+from mika.faculties.body import inspect as _inspect  # noqa: E402,F401 — contributions : ses vues

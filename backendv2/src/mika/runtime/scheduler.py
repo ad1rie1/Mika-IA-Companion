@@ -104,6 +104,9 @@ class Scheduler:
             self._wake_types |= s.wake_on
         self.failures: dict[str, int] = {}
         self.runs: dict[str, int] = {}
+        #: échecs d'affilée (remis à zéro par un succès) et dernière erreur : la santé
+        self.consecutive: dict[str, int] = {}
+        self.last_error: dict[str, tuple[int, str]] = {}
         mind.subscribe(self._on_events)
 
     def _on_events(self, events: Sequence[Event[Any]], root: Root) -> None:
@@ -132,7 +135,7 @@ class Scheduler:
                 nd = call(self.instances[spec.name].next_due, state, frame, self._last_run.get(spec.name),
                           label=f"échéance de {spec.name}")
                 if isinstance(nd, Failed):
-                    self.failures[spec.name] = self.failures.get(spec.name, 0) + 1
+                    self._failed(spec.name, now, nd.error)
                     continue
                 if nd is not None and nd <= now:
                     due.append((nd, spec))
@@ -182,13 +185,26 @@ class Scheduler:
         ctx = ProcessContext(self.mind, spec, run_id, self.mind.frame(), missed, self.llm, self.ports)
         out = await acall(self.instances[spec.name].run, ctx, label=f"processus {spec.name}")
         self.runs[spec.name] = self.runs.get(spec.name, 0) + 1
-        if isinstance(out, Failed):
-            self.failures[spec.name] = self.failures.get(spec.name, 0) + 1
+        if not isinstance(out, Failed):
+            self.consecutive[spec.name] = 0
+        else:
+            self._failed(spec.name, self.mind.clock.now(), out.error)
             draft = PROCESS_FAILED.draft(process=spec.name, error=repr(out.error)[:500])
             await acall(
                 lambda: self.mind.append([draft], emitter="runtime", correlation=run_id, origin=Origin.KERNEL),
                 label="journal d'échec de processus",
             )
+
+    def _failed(self, name: str, at: int, error: BaseException) -> None:
+        self.failures[name] = self.failures.get(name, 0) + 1
+        self.consecutive[name] = self.consecutive.get(name, 0) + 1
+        self.last_error[name] = (at, repr(error)[:300])
+
+    def last_run(self, name: str) -> int | None:
+        return self._last_run.get(name)
+
+    def running(self) -> list[str]:
+        return sorted(self._running)
 
     async def drain(self) -> None:
         """Attend la fin des processus en cours (arrêt propre, tests)."""

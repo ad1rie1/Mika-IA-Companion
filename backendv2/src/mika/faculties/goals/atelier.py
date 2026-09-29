@@ -152,7 +152,8 @@ async def ws_network(args: NetworkArgs, ctx: Any) -> str:
     summary = f"{args.why.strip()} — commande : {' '.join(args.argv)}"
     await ctx.emit(rt.EFFECT_PROPOSED.draft(
         capability=NETWORKED, owner=GOALS.name, args_json=json.dumps({"goal": g.id, "argv": args.argv}),
-        summary=Content.of(summary[:600], level=0), approval=g.approval, context=f"goal:{g.id}"))
+        summary=Content.of(summary[:600], level=0), approval=g.approval, context=f"goal:{g.id}",
+        about=tuple(x for x in (g.owner, *g.about) if x)))
     if g.approval:
         return "Proposé : un opérateur doit l'approuver. Tu verras le résultat à un prochain pas."
     return "Lancé : tu verras le résultat à un prochain pas."

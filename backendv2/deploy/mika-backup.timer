@@ -1,0 +1,11 @@
+[Unit]
+Description=Mika v2 — sauvegarde quotidienne
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=10min
+# une sauvegarde manquée (machine éteinte) est rattrapée au démarrage
+Persistent=true
+
+[Install]
+WantedBy=timers.target

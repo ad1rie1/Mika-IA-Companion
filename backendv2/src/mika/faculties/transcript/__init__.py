@@ -29,12 +29,14 @@ from mika.contracts import transcript as c
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp, Faculty, Tier, Zone
 from mika.kernel.frame import Frame
+from mika.kernel.inspect import Block, Cell, Fields, InspectContext, Note, Ref, Table
 from mika.kernel.prompt import ChatTurn, SectionBody
 from mika.kernel.state import FrozenDict
 from mika.ports.llm import LLMRequest, Message
 from mika.ports.store import Sql
 from mika.vocab.affect import Declared, strip_prosody
 from mika.vocab.episodes import CONVERSATIONAL, Kind
+from mika.vocab.people import is_internal
 
 #: Messages relus au plus pour composer l'historique (le budget coupe ensuite).
 THREAD_WINDOW = 60
@@ -320,3 +322,91 @@ def _history(s: TranscriptState, frame: Frame, enrich: Mapping[str, Any]) -> Sec
     if not turns:
         return None
     return SectionBody(tuple(turns))
+
+
+# ── Inspection ────────────────────────────────────────────────────────────
+
+#: Au plus tant de lignes par tableau ; un texte coupé à tant de caractères.
+INSPECT_ROWS = 100
+INSPECT_CHARS = 300
+FORGOTTEN = "(oublié)"
+
+
+def _clip(text: str | None, limit: int = INSPECT_CHARS) -> str:
+    text = " ".join((text or "").split())
+    return text if len(text) <= limit else text[:limit].rstrip() + "…"
+
+
+def _like(q: str) -> str:
+    return "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
+def _who(person: str) -> Cell:
+    if not person or is_internal(person):
+        return "personne"
+    return Ref("view", "identity/personne", person, (("handle", person),))
+
+
+def _internal(r: Mapping[str, Any]) -> bool:
+    """Adressé à personne (ou venu de sa propre tuyauterie) : pas un échange."""
+    return not r["person"] or is_internal(r["person"])
+
+
+@TRANSCRIPT.inspect("fil", title="Fil", params=[("handle", "poignée"), ("q", "recherche")])
+def _inspect(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    store = ctx.store
+    if store is None:
+        return [Note("Le magasin n'est pas disponible : le fil ne peut pas être relu.", tone="mut")]
+    handle, q = ctx.param("handle"), ctx.param("q")
+    where, args = [], []
+    if handle:
+        where.append("person=?")
+        args.append(handle)
+    if q:
+        where.append("text LIKE ? ESCAPE '\\'")
+        args.append(_like(q))
+    clause = f"WHERE {' AND '.join(where)} " if where else ""
+    rows = [dict(zip(_COLUMNS, r, strict=True)) for r in store.query_mind(
+        f"SELECT {','.join(_COLUMNS)} FROM {c.THREAD_TABLE} {clause}ORDER BY id DESC LIMIT ?",
+        (*args, INSPECT_ROWS))]
+    known = handle in s.last_from or handle in s.last_to or handle in s.summaries
+    if handle and not rows and not known:
+        return [Note(f"Aucun message avec « {handle} ».", tone="mut")]
+    awaiting = sorted(int(x) for x in frame.get(rt.AWAITING))
+    pending, recent_awaiting = set(awaiting), awaiting[-INSPECT_ROWS:]
+    messages = tuple(
+        (Ref("event", str(r["id"]), str(r["id"])), ctx.when(r["at"]),
+         "elle" if r["role"] == "assistant" else "la personne", _who(r["person"]),
+         f"salon « {r['room']} »" if r["room"] else "en privé", _clip(r["text"]),
+         "oui" if _internal(r) else "non", "en attente" if r["id"] in pending else "")
+        for r in rows)
+    waiting = {int(r[0]): r for r in store.query_mind(
+        f"SELECT id, at, person, text FROM {c.THREAD_TABLE} WHERE id IN ({','.join('?' * len(recent_awaiting))})",
+        tuple(recent_awaiting))} if recent_awaiting else {}
+    questions = []
+    for seq in recent_awaiting:
+        found = waiting.get(seq)
+        if found is None:
+            if not handle:
+                questions.append((Ref("event", str(seq), str(seq)), "—", "—", FORGOTTEN))
+            continue
+        if handle and found[2] != handle:
+            continue
+        questions.append((Ref("event", str(seq), str(seq)), ctx.when(found[1]), _who(found[2]), _clip(found[3])))
+    folded = [(p, v) for p, v in sorted(s.summaries.items()) if not handle or p == handle][:INSPECT_ROWS]
+    texts = store.content([ref for _p, (_upto, ref) in folded if ref])
+    summaries = tuple((_who(p), Ref("event", str(upto), str(upto)), _clip(texts.get(ref)) if texts.get(ref)
+                       else FORGOTTEN) for p, (upto, ref) in folded)
+    scope = f" avec « {handle} »" if handle else ""
+    found_q = f" contenant « {q} »" if q else ""
+    return [
+        Fields((("dernier message du fil", s.head or "—"), ("questions sans réponse", len(awaiting)),
+                ("fils repliés en résumé", len(s.summaries)))),
+        Table(("n°", "quand", "qui parle", "avec", "où", "texte", "interne", "réponse"), messages,
+              title=f"Messages{scope}{found_q} (les {INSPECT_ROWS} plus récents)",
+              empty="aucun message" + (" ne correspond" if q else "")),
+        Table(("n°", "quand", "de", "texte"), tuple(reversed(questions)), title="Questions sans réponse",
+              empty="aucune question en attente"),
+        Table(("personne", "replié jusqu'au message", "résumé"), summaries, title="Débuts de fil repliés",
+              empty="aucun fil replié"),
+    ]

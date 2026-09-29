@@ -6,8 +6,8 @@
   (priorité 0) passe devant les appels de fond en attente et, sur un
   fournisseur à préemption (un modèle local à un créneau), interrompt l'appel
   de fond en cours — qui se règle en ``preempted`` et sera reproposé.
-- Chaque appel laisse une trace (rôle, fournisseur, modèle, jetons, latence,
-  issue).
+- Chaque appel laisse une trace (rôle, fournisseur, modèle, jetons, cache,
+  coût, latence, issue).
 """
 
 from __future__ import annotations
@@ -15,12 +15,17 @@ from __future__ import annotations
 import asyncio
 import heapq
 import itertools
+from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from mika.adapters.llm.pricing import price_usd
 from mika.kernel.clock import Clock
-from mika.ports.llm import PREEMPTED, LLMBackend, LLMRequest, LLMResponse, MissingPersona
+from mika.ports.llm import PREEMPTED, LLMBackend, LLMRequest, LLMResponse, MissingPersona, Usage
+
+#: les derniers appels gardés en mémoire
+TRACES_KEPT = 2000
 
 
 class UnconfiguredRole(LookupError):
@@ -43,6 +48,9 @@ class LLMTrace:
     output_tokens: int
     outcome: str
     call_id: str
+    cache_read: int = 0
+    cache_write: int = 0
+    cost_usd: float = 0.0
 
 
 class PrioritySlots:
@@ -118,6 +126,7 @@ class Gateway:
         slots: Mapping[str, int] | None = None,
         preempt: frozenset[str] = frozenset(),
         on_trace: Callable[[LLMTrace], None] | None = None,
+        pricing: Mapping[str, tuple[str, str]] | None = None,
     ) -> None:
         self.backends = dict(backends)
         self.routes = dict(routes)
@@ -126,8 +135,11 @@ class Gateway:
         self.fallbacks = dict(fallbacks or {})
         self._slots = {name: PrioritySlots((slots or {}).get(name, 4)) for name in self.backends}
         self.preempt = preempt
-        self.traces: list[LLMTrace] = []
+        #: les derniers appels (bornés : le détail durable va dans ``CallLog``)
+        self.traces: deque[LLMTrace] = deque(maxlen=TRACES_KEPT)
         self._on_trace = on_trace
+        #: fournisseur → (type, durée du cache) : de quoi chiffrer un appel
+        self.pricing = dict(pricing or {})
 
     def is_voice(self, role: str) -> bool:
         return role in self.voice_roles
@@ -171,11 +183,16 @@ class Gateway:
 
     def _trace(self, req: LLMRequest, backend: str, resp: LLMResponse | None, t_wait: int, t0: int, outcome: str) -> None:
         now = self.clock.now()
+        usage = resp.usage if resp else Usage()
+        cost = 0.0
+        if resp is not None and backend in self.pricing:
+            kind, ttl = self.pricing[backend]
+            cost = price_usd(resp.model, usage, provider=kind, cache_ttl=ttl)
         tr = LLMTrace(
             at=now, role=req.role, backend=backend, model=resp.model if resp else "", lane=req.lane,
             priority=req.priority, latency_us=now - t0, wait_us=t0 - t_wait,
-            input_tokens=resp.usage.input_tokens if resp else 0,
-            output_tokens=resp.usage.output_tokens if resp else 0, outcome=outcome, call_id=req.call_id,
+            input_tokens=usage.input_tokens, output_tokens=usage.output_tokens, outcome=outcome,
+            call_id=req.call_id, cache_read=usage.cache_read, cache_write=usage.cache_write, cost_usd=cost,
         )
         self.traces.append(tr)
         if self._on_trace is not None:

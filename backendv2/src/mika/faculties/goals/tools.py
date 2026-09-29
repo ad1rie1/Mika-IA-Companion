@@ -76,7 +76,7 @@ async def report_step(args: ReportArgs, ctx: Any) -> str:
     summary = Content.of(args.summary.strip(), level=g.sensitivity)
     drafts: list[Any] = [c.STEP_REPORTED.draft(
         goal=g.id, kind=g.kind, verdict=args.verdict, summary=summary, notable=args.notable,
-        wait_s=args.wait_minutes * 60, proven=proven, tools=worked,
+        wait_s=args.wait_minutes * 60, proven=proven, tools=worked, owner=g.owner, about=g.about,
         wait_for=g.owner if args.verdict == c.WAIT and args.until_they_answer and g.owner else None)]
     atelier = ctx.ports.get("workshop")
     if atelier is not None and "workshop" in g.bundles and atelier.exists(g.id):
@@ -110,7 +110,8 @@ async def goal_note(args: NoteArgs, ctx: Any) -> str:
     g = _goal(ctx)
     if g is None:
         return "Ce but n'est plus en cours."
-    await ctx.emit(NOTED.draft(goal=g.id, text=Content.of(args.text.strip(), level=g.sensitivity)))
+    await ctx.emit(NOTED.draft(goal=g.id, text=Content.of(args.text.strip(), level=g.sensitivity), owner=g.owner,
+                               about=g.about))
     return "Noté dans ton carnet."
 
 

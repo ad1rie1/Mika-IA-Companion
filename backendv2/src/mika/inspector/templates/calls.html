@@ -1,0 +1,12 @@
+{% extends "base.html" %}{% block body %}
+{% if not persisted %}<p class="mut">Registre durable absent : seuls les derniers appels en mémoire sont montrés.</p>{% endif %}
+{% macro usage_table(rows, label) %}<div class="scroll"><table><tr><th>{{ label }}</th><th>appels</th><th>échecs</th><th>entrée</th><th>sortie</th><th>cache lu</th><th>cache écrit</th><th>part du cache</th><th>coût</th><th>durée moy.</th></tr>
+{% for u in rows %}<tr><td>{{ u.key }}</td><td>{{ u.calls }}</td><td class="{{ 'ko' if u.failures else '' }}">{{ u.failures }}</td><td>{{ u.input_tokens }}</td><td>{{ u.output_tokens }}</td><td>{{ u.cache_read }}</td><td>{{ u.cache_write }}</td><td>{{ '%.0f'|format(u.cache_ratio * 100) }} %</td><td>{{ '%.3f'|format(u.cost_usd) }} $</td><td>{{ '%.1f'|format(u.latency_avg_s) }} s</td></tr>
+{% else %}<tr><td colspan="10" class="mut">aucun appel</td></tr>{% endfor %}</table></div>{% endmacro %}
+<h2>Par jour (14 jours)</h2>{{ usage_table(days, "jour") }}
+<h2>Par rôle (7 jours)</h2>{{ usage_table(roles, "rôle") }}
+<h2>Par fournisseur (7 jours)</h2>{{ usage_table(backends, "fournisseur") }}
+<h2>Derniers appels</h2><div class="scroll"><table><tr><th>quand</th><th>rôle</th><th>fournisseur</th><th>modèle</th><th>voie</th><th>attente</th><th>durée</th><th>jetons</th><th>coût</th><th>issue</th></tr>
+{% for when, t in recent %}<tr><td class="mut">{{ when }}</td><td>{{ t.role }}</td><td>{{ t.backend }}</td><td>{{ t.model }}</td><td>{{ t.lane }}</td><td>{{ '%.1f'|format(t.wait_us/1e6) }} s</td><td>{{ '%.1f'|format(t.latency_us/1e6) }} s</td><td>{{ t.input_tokens }} → {{ t.output_tokens }}</td><td>{{ '%.4f'|format(t.cost_usd) }} $</td><td class="{{ '' if t.outcome == 'ok' else 'ko' }}">{{ t.outcome }}</td></tr>
+{% else %}<tr><td colspan="10" class="mut">aucun appel</td></tr>{% endfor %}</table></div>
+{% endblock %}

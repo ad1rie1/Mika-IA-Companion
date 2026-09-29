@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% block body %}
+<p class="mut">Chaque faculté apporte des preuves (log-odds) ; elles se cumulent par type d'épisode et par cible, les modulations décalent ou mettent un veto, puis un tirage à taux λ·σ(score − seuil) décide. Seuils : {% for k, v in thresholds %}{{ k }} {{ v }}{% if not loop.last %}, {% endif %}{% endfor %}.</p>
+<h2>En ce moment</h2><div class="scroll"><table><tr><th>ligne</th><th>preuves</th><th>décalage</th><th>vetos</th><th>score</th><th>taux (/h)</th></tr>
+{% for r in rows %}<tr><td>{{ r.key }}</td><td><pre>{% for s, reason, v in r.parts %}{{ s }}·{{ reason }} {{ '%+.2f'|format(v) }}
+{% endfor %}</pre></td><td>{{ '%+.2f'|format(r.shift) }}</td><td>{{ r.vetoes or '' }}</td><td>{{ '%.2f'|format(r.score) }}</td><td>{{ '%.3f'|format(r.hazard * 3600) }}</td></tr>
+{% else %}<tr><td colspan="6" class="mut">aucune ligne (personne de présent, rien qui pousse à agir)</td></tr>{% endfor %}</table></div>
+<h2>Derniers choix</h2><div class="scroll"><table><tr><th>seq</th><th>quand</th><th>choisi</th><th>tirage</th></tr>
+{% for s in selections %}<tr><td><a href="{{ PREFIX }}/evenement/{{ s.seq }}">{{ s.seq }}</a></td><td class="mut">{{ s.when }}</td><td>{{ s.fired }}</td><td>{{ '%.3f'|format(s.draw) }}</td></tr>
+{% else %}<tr><td colspan="4" class="mut">aucune initiative encore</td></tr>{% endfor %}</table></div>
+{% if anomalies %}<h2>Anomalies</h2>{% for a in anomalies %}<p class="warn">{{ a }}</p>{% endfor %}{% endif %}
+{% endblock %}

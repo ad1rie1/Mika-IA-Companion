@@ -31,6 +31,15 @@ class FeedPort(Protocol):
 
     async def recent(self, limit: int) -> list[Entry]: ...
 
+    def cached(self, limit: int) -> list[Entry]:
+        """Les derniers articles déjà relevés, sans relever (lecture seule : l'inspecteur)."""
+        ...
+
+    def followed(self) -> list[tuple[str, str]]:
+        """Les flux suivis : (titre s'il est connu, adresse montrable — sans
+        identifiants ni valeurs de paramètres, qui peuvent porter un jeton)."""
+        ...
+
     async def article(self, entry_id: str) -> str:
         """Le texte d'un article relevé (borné) ; ``""`` s'il est illisible."""
         ...

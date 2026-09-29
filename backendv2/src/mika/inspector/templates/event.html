@@ -1,0 +1,13 @@
+{% extends "base.html" %}{% block body %}
+{% if not e %}<p class="mut">Aucun événement à ce numéro.</p>{% else %}
+<div class="card"><dl>
+<dt>quand</dt><dd>{{ when }}</dd><dt>propriétaire</dt><dd>{{ owner }} · {{ 'public' if public else 'privé' }}</dd>
+<dt>corrélation</dt><dd><a href="{{ PREFIX }}/episode/{{ e.correlation|urlencode }}">{{ e.correlation }}</a> · <a href="{{ PREFIX }}/chronologie?correlation={{ e.correlation|urlencode }}">dans la chronologie</a></dd>
+<dt>origine</dt><dd>{{ e.origin.value if e.origin.value is defined else e.origin }} · lu sur la tête {{ e.basis }}</dd>
+<dt>réduit par</dt><dd>{{ readers|join(', ') or '—' }}</dd>
+<dt>réveille</dt><dd>{{ processes|join(', ') or '—' }}</dd>
+<dt>projeté par</dt><dd>{{ projectors|join(', ') or '—' }}</dd>
+{% if answered %}<dt>a déclenché</dt><dd>{% for corr, kind, w in answered %}<a href="{{ PREFIX }}/episode/{{ corr|urlencode }}">{{ kind }} ({{ w }})</a>{% if not loop.last %} · {% endif %}{% endfor %}</dd>{% endif %}
+</dl></div>
+<h2>Données</h2><div class="card"><pre>{{ data }}</pre></div>
+{% endif %}{% endblock %}

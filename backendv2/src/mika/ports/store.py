@@ -95,6 +95,17 @@ class EventStore(Protocol):
 
     def get_events(self, seqs: Collection[int]) -> list[StoredEvent]: ...
 
+    def latest(self, types: Collection[str], limit: int, *, where: tuple[str, Any] | None = None,
+               before: int | None = None, correlations: Collection[str] | None = None) -> list[StoredEvent]:
+        """Les ``limit`` derniers événements de ces types, du plus récent au plus
+        ancien ; ``where=(champ, valeur)`` filtre sur un champ de premier niveau
+        de la charge utile, ``correlations`` sur l'épisode ou l'exécution."""
+        ...
+
+    def tally(self, type_name: str, field: str) -> list[tuple[Any, int, int]]:
+        """Par valeur d'un champ de premier niveau : (valeur, nombre, dernier instant)."""
+        ...
+
     def content(self, refs: Collection[str]) -> dict[str, str]: ...
 
     def latest_snapshot(self) -> SnapshotRow | None: ...

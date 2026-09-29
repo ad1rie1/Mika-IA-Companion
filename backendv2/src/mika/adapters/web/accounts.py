@@ -157,6 +157,41 @@ class Accounts:
     async def close_session(self, key: str) -> None:
         await self.store.run_mind(lambda sql: sql.execute("DELETE FROM sessions WHERE key=?", (key,)))
 
+    # ── administration (l'inspecteur) ──
+    def all(self) -> list[Account]:
+        rows = self.store.query_mind("SELECT id, username, full_name, operator, active FROM accounts ORDER BY id")
+        return [a for a in (self._account(r) for r in rows) if a is not None]
+
+    async def update(self, account_id: int, *, operator: bool | None = None, active: bool | None = None,
+                     password: str | None = None) -> str | None:
+        """Modifie un compte ; rend un refus en français, ou ``None``. Jamais de
+        verrouillage : on ne retire pas le dernier opérateur actif."""
+        target = next((a for a in self.all() if a.id == account_id), None)
+        if target is None:
+            return "Compte inconnu."
+        after_operator = target.operator if operator is None else operator
+        after_active = target.active if active is None else active
+        if target.operator and target.active and not (after_operator and after_active):
+            others = [a for a in self.all() if a.operator and a.active and a.id != account_id]
+            if not others:
+                return "C'est le dernier opérateur actif : on ne peut pas le retirer."
+        if password is not None:
+            problems = password_problems(password, target.username)
+            if problems:
+                return " ".join(problems)
+        hashed = hash_password(password) if password is not None else None
+
+        def write(sql: Any) -> None:
+            sql.execute("UPDATE accounts SET operator=?, active=? WHERE id=?",
+                        (int(after_operator), int(after_active), account_id))
+            if hashed is not None:
+                sql.execute("UPDATE accounts SET password=? WHERE id=?", (hashed, account_id))
+            if not after_active or hashed is not None:
+                sql.execute("DELETE FROM sessions WHERE account=?", (account_id,))
+
+        await self.store.run_mind(write)
+        return None
+
     def session(self, key: str | None) -> Account | None:
         if not key:
             return None

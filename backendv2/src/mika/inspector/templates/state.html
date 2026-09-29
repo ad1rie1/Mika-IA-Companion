@@ -1,0 +1,8 @@
+{% extends "base.html" %}{% block body %}
+{% if tainted %}<p class="ko">Tranches corrompues : {% for o, s in tainted.items() %}{{ o }} (seq {{ s }}) {% endfor %}— voir <a href="{{ PREFIX }}/sante">la santé</a>.</p>{% endif %}
+<h2>Faits</h2><p class="mut">Ce que chaque faculté publie pour les autres, lu maintenant.</p>
+<div class="scroll"><table><tr><th>fait</th><th>fourni par</th><th class="hide-sm">sens</th><th>valeur</th></tr>
+{% for name, owner, doc, value in facts %}<tr><td><code>{{ name }}</code></td><td>{{ owner }}</td><td class="hide-sm mut">{{ doc }}</td><td><pre>{{ value }}</pre></td></tr>{% endfor %}</table></div>
+<h2>Tranches</h2>
+{% for owner, text, changed in slices %}<details class="card"><summary><b>{{ owner }}</b> <span class="mut">modifiée au seq {{ changed }}</span></summary><pre>{{ text }}</pre></details>{% endfor %}
+{% endblock %}

@@ -54,6 +54,11 @@ class MindPort(Protocol):
 
     def ready(self) -> bool: ...
 
+    def health(self) -> dict[str, Any]:
+        """``{"status", "ready", "checks": {nom: état}}`` : des noms et des états,
+        jamais un contenu (la route est publique)."""
+        ...
+
     def person_panel(self, handle: str) -> dict[str, Any] | None:
         """Ce que le panneau montre de la personne (identité ; profil et
         promesses seulement si sa fiche est ouverte ; projets et actions en

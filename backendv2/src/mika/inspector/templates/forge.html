@@ -1,0 +1,14 @@
+{% extends "base.html" %}{% block body %}
+{% if not available %}<p class="mut">La Forge n'est pas branchée.</p>{% endif %}
+<p class="mut">Les petites apps qu'elle écrit elle-même, hors de son processus. Leurs outils ne servent en conversation que promus. Pour lire leur code et leur journal : <a href="{{ PREFIX }}/facultes">Facultés</a> → forge.</p>
+{% for a in apps %}<div class="card"><div class="row"><b>{{ a.info.title }}</b><span class="mut">{{ a.info.name }} · v{{ a.info.version }}{% if a.info.schedule %} · {{ a.info.schedule }}{% endif %}</span>
+{% if a.view %}{% if a.view.broken %}<span class="pill ko">cassée</span>{% elif a.view.enabled %}<span class="pill ok">active</span>{% else %}<span class="pill">arrêtée</span>{% endif %}{% if a.view.promoted %}<span class="pill">promue</span>{% endif %}{% endif %}</div>
+{% if a.view and a.view.broken %}<p class="ko">{{ a.view.broken }}</p>{% endif %}
+<form method="post" class="row"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="switch"><input type="hidden" name="app" value="{{ a.info.name }}">
+{% if a.view and (a.view.broken or not a.view.enabled) %}<button name="state" value="enabled">Relancer</button>{% else %}<button name="state" value="disabled" class="quiet">Arrêter</button>{% endif %}
+{% if a.view and a.view.promoted %}<button name="state" value="demoted" class="quiet">Retirer de la conversation</button>{% else %}<button name="state" value="promoted" class="quiet">Offrir ses outils en conversation</button>{% endif %}</form>
+{% if a.config %}<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="config"><input type="hidden" name="app" value="{{ a.info.name }}">
+<dl>{% for key, default, value, is_bool in a.config %}<dt>{{ key }}</dt><dd>{% if is_bool %}<input type="checkbox" name="cfg_{{ key }}" {{ 'checked' if (value if value != '' else default) else '' }}>{% else %}<input name="cfg_{{ key }}" value="{{ value }}" placeholder="{{ default }} (défaut du manifeste)">{% endif %}</dd>{% endfor %}</dl>
+<p><button>Enregistrer les réglages</button></p></form>{% endif %}
+</div>{% else %}<p class="mut">Elle n'a encore écrit aucune app.</p>{% endfor %}
+{% endblock %}

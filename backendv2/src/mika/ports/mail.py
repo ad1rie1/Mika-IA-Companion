@@ -36,6 +36,14 @@ class MailPort(Protocol):
 
     async def recent(self, limit: int) -> list[Mail]: ...
 
+    def cached(self, limit: int) -> list[Mail]:
+        """Les derniers mails déjà arrivés, sans relever (lecture seule : l'inspecteur)."""
+        ...
+
+    def cached_one(self, message_id: str) -> Mail | None:
+        """Un mail déjà arrivé, sans relever (lecture seule : l'inspecteur)."""
+        ...
+
     async def send(self, to: str, subject: str, body: str, in_reply_to: str = "") -> str:
         """Envoie ; rend l'identifiant du message envoyé. Lève si l'envoi échoue."""
         ...

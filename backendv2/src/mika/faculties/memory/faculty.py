@@ -74,9 +74,15 @@ class MemoryState:
     promises: FrozenDict[int, c.PendingPromise] = field(default_factory=FrozenDict)
     reflections: tuple[Reflection, ...] = ()
     sorted_night: str = ""
+    #: la dernière relecture journalisée (``seq``, instant), et les fenêtres
+    #: abandonnées après trop d'échecs (combien, la dernière) : pour l'inspecteur
+    consolidated_seq: int = 0
+    consolidated_at: int = 0
+    given_up: int = 0
+    given_up_seq: int = 0
 
 
-MEMORY = Faculty("memory", state=MemoryState, init=lambda p: MemoryState(), params=MemoryParams)
+MEMORY = Faculty("memory", state=MemoryState, init=lambda p: MemoryState(), params=MemoryParams, state_version=2)
 MEMORY.declare(*c.ALL)
 
 
@@ -99,7 +105,9 @@ def _uttered(s: MemoryState, e, cx) -> MemoryState:
 @MEMORY.reducer(c.CONSOLIDATED)
 def _consolidated(s: MemoryState, e, cx) -> MemoryState:
     upto = max(s.checkpoint, e.data.upto)
-    return replace(s, checkpoint=upto, pending=tuple(q for q in s.pending if q > upto))
+    s = replace(s, checkpoint=upto, pending=tuple(q for q in s.pending if q > upto), consolidated_seq=e.seq,
+                consolidated_at=e.at)
+    return replace(s, given_up=s.given_up + 1, given_up_seq=e.seq) if e.data.failed else s
 
 
 @MEMORY.reducer(c.REMEMBERED, c.BELIEVED)

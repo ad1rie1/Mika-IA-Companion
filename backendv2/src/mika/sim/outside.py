@@ -33,9 +33,15 @@ class FakeMail:
         return fresh
 
     async def get(self, message_id: str) -> Mail | None:
-        return next((m for m in self.inbox if m.message_id == message_id), None)
+        return self.cached_one(message_id)
 
     async def recent(self, limit: int) -> list[Mail]:
+        return self.cached(limit)
+
+    def cached_one(self, message_id: str) -> Mail | None:
+        return next((m for m in self.inbox if m.message_id == message_id), None)
+
+    def cached(self, limit: int) -> list[Mail]:
         return sorted(self.inbox, key=lambda m: -m.date)[:limit]
 
     async def send(self, to: str, subject: str, body: str, in_reply_to: str = "") -> str:
@@ -69,7 +75,13 @@ class FakeFeeds:
         return next((e for e in self.entries if e.id == entry_id), None)
 
     async def recent(self, limit: int) -> list[Entry]:
+        return self.cached(limit)
+
+    def cached(self, limit: int) -> list[Entry]:
         return sorted(self.entries, key=lambda e: -e.published)[:limit]
+
+    def followed(self) -> list[tuple[str, str]]:
+        return [(feed, "") for feed in sorted({e.feed for e in self.entries})]
 
     async def article(self, entry_id: str) -> str:
         self.read.append(entry_id)

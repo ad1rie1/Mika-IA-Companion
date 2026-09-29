@@ -171,9 +171,12 @@ class Noted(Payload):
 
     goal: int
     text: Content
+    #: recopiés du but : une note peut citer ces personnes (l'oubli l'atteint)
+    owner: str | None = None
+    about: tuple[str, ...] = ()
 
 
-NOTED = GOALS.event("noted", Noted, content=("text",))
+NOTED = GOALS.event("noted", Noted, content=("text",), subjects=("owner", "about"))
 
 
 class Awaited(Payload):

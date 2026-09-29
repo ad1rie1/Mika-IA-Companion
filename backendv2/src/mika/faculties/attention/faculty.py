@@ -122,6 +122,10 @@ class Heard:
     source: str
     kind: str
     intensity: float
+    #: pour l'inspecteur : le signal, ce que la source en estimait, le poids après habituation
+    signal: int = 0
+    pertinence: float = 0.0
+    weight: float = 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,7 +169,8 @@ class AttentionState:
     heard: tuple[Heard, ...] = ()
 
 
-ATTENTION = Faculty("attention", state=AttentionState, init=lambda p: AttentionState(), params=AttentionParams)
+ATTENTION = Faculty("attention", state=AttentionState, init=lambda p: AttentionState(), params=AttentionParams,
+                    state_version=2)
 ATTENTION.declare(*c.ALL)
 
 
@@ -310,8 +315,9 @@ def _noticed(s: AttentionState, e, cx) -> AttentionState:
     d = e.data
     p = params(cx.params)
     heard = tuple(h for h in s.heard if e.at - h.at < p.habituation_window_us)
+    pertinence = next((x.pertinence for x in s.signals if x.seq == d.signal), 0.0)
     return replace(s, signals=tuple(x for x in s.signals if x.seq != d.signal),
-                   heard=(*heard, Heard(e.at, d.source, d.kind, d.intensity))[-64:])
+                   heard=(*heard, Heard(e.at, d.source, d.kind, d.intensity, d.signal, pertinence, d.weight))[-64:])
 
 
 def habituation(s: AttentionState, source: str, kind: str, now: int, p: AttentionParams,

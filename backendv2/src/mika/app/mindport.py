@@ -24,6 +24,7 @@ from mika.kernel.clock import local
 from mika.kernel.events import Content, Origin
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.guards import Guard, Superseded
+from mika.runtime import health
 from mika.runtime.bootstrap import Kernel, ReadOnlyStore
 from mika.vocab.affect import emotion_of
 from mika.vocab.episodes import goal_of
@@ -67,6 +68,9 @@ class KernelPort:
 
     def ready(self) -> bool:
         return self.kernel.started
+
+    def health(self) -> dict[str, Any]:
+        return health.report(self.kernel).public()
 
     def _inner_life(self, frame: Any, handle: str, disclosure: Any) -> dict[str, Any]:
         """Ses pensées (celles que cette personne peut entendre) et son récit."""

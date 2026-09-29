@@ -1,0 +1,22 @@
+# Mika v2 — une sauvegarde (voir mika-backup.timer). Sans risque serveur en marche :
+# les bases sont copiées par l'API de sauvegarde de SQLite.
+[Unit]
+Description=Mika v2 — sauvegarde
+After=mika.service
+
+[Service]
+Type=oneshot
+User=mika
+Group=mika
+WorkingDirectory=/opt/mika/backendv2
+EnvironmentFile=-/etc/mika/mika.env
+ExecStart=/opt/mika/backendv2/.venv/bin/python -m mika --data /var/lib/mika backup /var/backups/mika --keep 14
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+# lire une base en WAL demande d'écrire son fichier -shm : les deux dossiers en écriture
+ReadWritePaths=/var/lib/mika /var/backups/mika
+PrivateTmp=yes
+UMask=0077

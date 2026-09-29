@@ -1,0 +1,12 @@
+{% extends "base.html" %}{% block body %}
+<p class="mut">Ce qu'elle voudrait faire hors de la machine et qui attend ton accord. Ce qui est montré ici est exactement ce qui sera exécuté.</p>
+{% for p in pending %}<div class="card"><div class="row"><b>{{ p.capability }}</b><span class="mut">proposé par {{ p.owner }} · {{ p.when }} · n° {{ p.proposal }}</span></div>
+{% if p.summary %}<p>{{ p.summary }}</p>{% endif %}{% if p.context %}<p class="mut">{{ p.context }}</p>{% endif %}
+<pre>{{ p.args }}</pre>
+<form method="post" class="row"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="proposal" value="{{ p.proposal }}">
+<input name="note" placeholder="note (facultative)"><button name="decision" value="approve">Approuver</button><button name="decision" value="reject" class="quiet">Refuser</button></form></div>
+{% else %}<p class="mut">Rien n'attend ton accord.</p>{% endfor %}
+<h2>Décisions et exécutions récentes</h2><div class="scroll"><table><tr><th>seq</th><th>quand</th><th>type</th><th>données</th></tr>
+{% for h in history %}<tr><td><a href="{{ PREFIX }}/evenement/{{ h.seq }}">{{ h.seq }}</a></td><td class="mut">{{ h.when }}</td><td>{{ h.type }}</td><td><pre>{{ h.data }}</pre></td></tr>
+{% else %}<tr><td colspan="4" class="mut">aucune</td></tr>{% endfor %}</table></div>
+{% endblock %}

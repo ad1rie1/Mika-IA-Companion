@@ -182,9 +182,14 @@ class EffectSpec:
 
 @dataclass(frozen=True, slots=True)
 class InspectSpec:
+    """Une vue d'inspection (voir ``kernel/inspect.py``) : ``fn(frame, ctx)``."""
+
     owner: str
     name: str
     fn: Callable[..., Any]
+    title: str = ""
+    #: les filtres qu'elle accepte : (nom, libellé)
+    params: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -480,9 +485,12 @@ class Faculty(Generic[S, Pm]):
         return deco
 
     # ── exploitation ──
-    def inspect(self, name: str):
+    def inspect(self, name: str, *, title: str = "", params: Iterable[tuple[str, str]] = ()):
+        """Une vue pour l'inspecteur : ``fn(frame, ctx) -> Sequence[Block]``,
+        en lecture seule."""
+
         def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
-            self.inspectors.append(InspectSpec(self.name, name, fn))
+            self.inspectors.append(InspectSpec(self.name, name, fn, title or name, tuple(params)))
             return fn
 
         return deco

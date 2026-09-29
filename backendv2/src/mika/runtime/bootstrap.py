@@ -131,10 +131,17 @@ class Kernel:
         self.projections = ProjectionWorker(self.mind)
         self._tasks: list[asyncio.Task[None]] = []
         self.started = False
+        #: ``stopped`` → ``starting`` → ``ready`` → ``stopping`` → ``stopped`` (la santé)
+        self.phase = "stopped"
 
     @property
     def registry(self) -> Registry:
         return self.mind.registry
+
+    def dead_loops(self) -> list[str]:
+        """Les boucles du noyau mortes en marche (ordonnanceur, file de sortie,
+        projections) : rien ne les relance, la santé doit le dire."""
+        return [t.get_name() for t in self._tasks if t.done()] if self.started else []
 
     def _head_frame(self) -> Frame:
         """Une vue en lecture sur la tête (effets, enrichisseurs)."""
@@ -145,6 +152,7 @@ class Kernel:
         """Démarre. ``configure`` (la persona, les paramètres) est journalisé
         **avant** que les voies, la reprise et les processus ne tournent : aucun
         processus ne voit jamais un fuseau ou un tempérament par défaut."""
+        self.phase = "starting"
         report = await self.mind.boot(append_boot=False)
         await ensure_t0(self.mind)
         failures = self.registry.check_invariants(self.mind.root)
@@ -166,6 +174,7 @@ class Kernel:
             asyncio.create_task(self.projections.run(), name="projections"),
         ]
         self.started = True
+        self.phase = "ready"
         return report
 
     def _shutdown_ports(self) -> None:
@@ -177,6 +186,7 @@ class Kernel:
 
     async def stop(self) -> None:
         self.started = False
+        self.phase = "stopping"
         for t in list(self._retries):
             t.cancel()
         self.scheduler.stop()
@@ -191,6 +201,7 @@ class Kernel:
         self._shutdown_ports()
         await self.mind.close()
         self.started = False
+        self.phase = "stopped"
 
     async def abort(self) -> None:
         """Arrêt brutal (simulation d'un ``kill -9`` : plus rien n'est écrit à
@@ -200,6 +211,7 @@ class Kernel:
         if seal is not None:
             seal()
         self.started = False
+        self.phase = "stopping"
         for t in [*self._tasks, *self._retries]:
             t.cancel()
         await self.scheduler.cancel_all()
@@ -212,6 +224,7 @@ class Kernel:
         self._shutdown_ports()
         await self.mind.close()
         self.started = False
+        self.phase = "stopped"
 
     # ── entrées ──
     async def perceive(self, data: PerceptionReceived, *, dedupe_key: str | None = None,

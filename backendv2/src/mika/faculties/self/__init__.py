@@ -18,6 +18,7 @@ soi et le récit qu'elle fait d'elle-même.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -68,13 +69,15 @@ class SelfState:
     esteem_at: int = 0
     souvenirs: int = 0
     narrative_ref: str = ""
+    #: les personnes que le récit peut nommer (reportées au récit suivant, qui le relit)
+    narrative_about: tuple[str, ...] = ()
     narrated_at: int = 0
     narrated_souvenirs: int = 0
     journals: FrozenDict[str, Journal] = field(default_factory=FrozenDict)  # par journée vécue
     dreams: tuple[Dream, ...] = ()  # les plus récents
 
 
-SELF = Faculty("self", state=SelfState, init=lambda p: SelfState(), params=SelfParams)
+SELF = Faculty("self", state=SelfState, init=lambda p: SelfState(), params=SelfParams, state_version=2)
 SELF.declare(c.PERSONA_REVISED, c.NARRATED, c.JOURNALED, c.DREAMT)
 
 
@@ -144,7 +147,8 @@ def _lived(s: SelfState, e, cx) -> SelfState:
 
 @SELF.reducer(c.NARRATED)
 def _narrated(s: SelfState, e, cx) -> SelfState:
-    return replace(s, narrative_ref=e.data.text.ref or "", narrated_at=e.at, narrated_souvenirs=e.data.souvenirs)
+    return replace(s, narrative_ref=e.data.text.ref or "", narrated_at=e.at, narrated_souvenirs=e.data.souvenirs,
+                   narrative_about=e.data.about)
 
 
 NARRATIVE_SYSTEM = """Tu écris, pour toi-même, un court paragraphe sur qui tu es en train de devenir, à partir de ce que \
@@ -175,7 +179,7 @@ class Narrate:
         p = params(frame.env.params_of("self", frame.root))
         self.retry_at = frame.now + HOUR  # si l'appel lève : pas de rafale
         rows = store.query_mind(
-            f"SELECT text FROM {memory_c.ITEMS_TABLE} WHERE kind=? AND status='active' AND "
+            f"SELECT text, about FROM {memory_c.ITEMS_TABLE} WHERE kind=? AND status='active' AND "
             "(sensitivity <= ? OR about = '[]') ORDER BY id DESC LIMIT ?",
             (memory_c.SOUVENIR, int(Sensitivity.ANODYNE), p.narrative_max_souvenirs))
         previous = store.content([state.narrative_ref]).get(state.narrative_ref) if state.narrative_ref else None
@@ -191,8 +195,10 @@ class Narrate:
         if not text:
             return
         self.retry_at = 0
+        about = sorted({person for r in rows for person in json.loads(r[1] or "[]")}
+                       | (set(state.narrative_about) if previous else set()))
         await ctx.emit(c.NARRATED.draft(
-            text=Content.of(text[:1200], level=0), souvenirs=state.souvenirs,
+            text=Content.of(text[:1200], level=0), souvenirs=state.souvenirs, about=tuple(about),
             voice=VoiceProvenance(call_id=request.call_id, persona_hash=persona.hash, role="narrative",
                                   model=response.model)))
 
@@ -279,4 +285,5 @@ def persona_for(frame: Frame, depth: str) -> PersonaRender:
     return PersonaRender(text=text, hash=digest((depth, text)), depth=depth)
 
 
+from mika.faculties.self import inspect as _inspect  # noqa: E402,F401 — contributions : l'inspecteur
 from mika.faculties.self import night as _night  # noqa: E402,F401 — la nuit : journal, rêves

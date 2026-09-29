@@ -9,12 +9,13 @@ client.
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Callable, Mapping
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from mika.adapters.llm.gateway import Gateway, LLMTrace, UnconfiguredRole
+from mika.adapters.llm.gateway import TRACES_KEPT, Gateway, LLMTrace, UnconfiguredRole
 from mika.kernel.clock import Clock
 from mika.ports.llm import LLMBackend, LLMRequest, LLMResponse, MissingPersona
 from mika.vocab.episodes import FALLBACKS, VOICE_ROLES
@@ -93,7 +94,7 @@ def build_gateway(cfg: LLMConfig, clock: Clock, *, on_trace: Callable[[LLMTrace]
     preempt = frozenset(name for name, spec in cfg.backends.items() if slots[name] == 1)
     return Gateway(backends, dict(cfg.routes), clock=clock, voice_roles=frozenset(str(r) for r in VOICE_ROLES),
                    fallbacks={str(k): str(v) for k, v in FALLBACKS.items()}, slots=slots, preempt=preempt,
-                   on_trace=on_trace)
+                   on_trace=on_trace, pricing={n: (s.kind, s.cache_ttl) for n, s in cfg.backends.items()})
 
 
 class LiveGateway:
@@ -102,7 +103,7 @@ class LiveGateway:
 
     def __init__(self, gateway: Gateway | None = None) -> None:
         self._inner = gateway
-        self.traces: list[LLMTrace] = []
+        self.traces: deque[LLMTrace] = deque(maxlen=TRACES_KEPT)
 
     def set(self, gateway: Gateway | None) -> None:
         self._inner = gateway

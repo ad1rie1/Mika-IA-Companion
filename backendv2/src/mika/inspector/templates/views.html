@@ -1,0 +1,5 @@
+{% extends "base.html" %}{% block body %}
+<p class="mut">Ce que chaque faculté montre d'elle. Rien ici n'est propre à une faculté : une faculté ajoutée y apparaît seule.</p>
+<div class="grid">{% for owner, views in groups %}<div class="card"><b>{{ owner }}</b>{% for v in views %}<div><a href="{{ PREFIX }}/facultes/{{ owner|urlencode }}/{{ v.name|urlencode }}">{{ v.title }}</a></div>{% endfor %}</div>
+{% else %}<p class="mut">Aucune faculté ne déclare de vue.</p>{% endfor %}</div>
+{% endblock %}

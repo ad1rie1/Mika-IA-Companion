@@ -26,6 +26,9 @@ EMAIL_KEY = "email"
 FEEDS_KEY = "feeds"
 STT_KEY = "stt"
 SENSORS_KEY = "sensors"
+PERSONA_KEY = "persona"
+OVERRIDES_KEY = "overrides"
+FORGE_CONFIG_KEY = "forge_config"
 
 
 class SecretBox:
@@ -60,10 +63,15 @@ class Settings:
     def __init__(self, store: Any, box: SecretBox) -> None:
         self.store = store
         self.box = box
+        #: lus depuis les fils de la Forge : tenus en mémoire (une connexion SQLite
+        #: appartient à son fil)
+        self._forge: dict[str, dict[str, Any]] = {}
 
     async def open(self) -> None:
         await self.store.run_mind(lambda sql: sql.execute(
             "CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL)"))
+        data = self._get(FORGE_CONFIG_KEY) or {}
+        self._forge = {str(k): dict(v) for k, v in data.items() if isinstance(v, dict)}
 
     def _get(self, key: str) -> Any:
         try:
@@ -163,3 +171,37 @@ class Settings:
         token = secrets.token_urlsafe(32)
         await self._put(SENSORS_KEY, {"token_sealed": self.box.seal(token)})
         return token
+
+    # ── Persona, surcharges avancées (l'inspecteur ; le fichier YAML reste le défaut) ──
+    def persona_yaml(self) -> str | None:
+        """La persona rédigée dans l'inspecteur, ou ``None`` (le fichier fait foi)."""
+        value = self._get(PERSONA_KEY)
+        return str(value) if value else None
+
+    async def save_persona(self, text: str | None) -> None:
+        await self._put(PERSONA_KEY, text or "")
+
+    def overrides(self) -> dict[str, dict[str, Any]]:
+        """Surcharges des paramètres dérivés, par faculté (diagnostic)."""
+        data = self._get(OVERRIDES_KEY) or {}
+        return {str(k): dict(v) for k, v in data.items() if isinstance(v, dict) and v}
+
+    async def save_overrides(self, overrides: dict[str, dict[str, Any]]) -> None:
+        await self._put(OVERRIDES_KEY, {k: v for k, v in overrides.items() if v})
+
+    # ── Réglages des apps forgées (valeurs simples, surchargent le manifeste) ──
+    def forge_config(self, app: str | None = None) -> dict[str, Any]:
+        """Sans base : appelable depuis n'importe quel fil (celui d'une app)."""
+        if app is None:
+            return {k: dict(v) for k, v in self._forge.items()}
+        return dict(self._forge.get(app, {}))
+
+    async def save_forge_config(self, app: str, values: dict[str, Any]) -> None:
+        clean = {str(k)[:40]: v for k, v in values.items() if isinstance(v, str | int | float | bool)}
+        data = self.forge_config()
+        if clean:
+            data[app] = clean
+        else:
+            data.pop(app, None)
+        await self._put(FORGE_CONFIG_KEY, data)
+        self._forge = data

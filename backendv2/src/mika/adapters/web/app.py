@@ -167,9 +167,11 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         return response
 
     async def health(request: Request) -> Response:
-        ready = port.ready()
-        return JSONResponse({"status": "ok" if ready else "starting", "ready": ready},
-                            status_code=200 if ready else 503)
+        """Une sonde : 200 quand elle peut répondre (même moins bien : ``degraded``),
+        503 en démarrage ou en arrêt."""
+        report = port.health()
+        return JSONResponse(report, status_code=200 if report["ready"] else 503,
+                            headers={"Cache-Control": "no-store"})
 
     async def pending_decision(request: Request) -> Response:
         if not csrf_ok(request):

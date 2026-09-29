@@ -51,6 +51,8 @@ class Narrated(Payload):
     text: Content
     voice: VoiceProvenance
     souvenirs: int = 0  # combien de souvenirs elle avait en l'écrivant
+    #: les personnes des souvenirs qu'elle a relus : le récit peut les nommer (l'oubli l'atteint)
+    about: tuple[str, ...] = ()
 
 
 class Journaled(Payload):
@@ -81,7 +83,8 @@ JOURNALED = event_type("self.journaled", OWNER, Journaled, public=True, content=
                        authored=True)
 DREAMT = event_type("self.dreamt", OWNER, Dreamt, public=True, content=("text",), subjects=("about",),
                     authored=True)
-NARRATED = event_type("self.narrated", OWNER, Narrated, public=True, content=("text",), authored=True)
+NARRATED = event_type("self.narrated", OWNER, Narrated, public=True, content=("text",), subjects=("about",),
+                      authored=True)
 
 PERSONA = FactKey("self.persona", type=PersonaDoc)
 #: L'estime de soi, dans [0,05 ; 0,95] : lente, revenant vers 0,5 (demi-vie de trois jours).

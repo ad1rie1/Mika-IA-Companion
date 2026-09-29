@@ -234,3 +234,8 @@ def _overflow(s: AffectState, frame: Frame) -> list[Candidate]:
     brief = f"Ton humeur déborde un peu ({A.FR[m.felt]}) : tu as envie d'en parler, ou juste de parler."
     return [Candidate(Kind.INITIATIVE, Anyone.ANY, c.MOOD_OVERFLOW, evidence,
                       args=FrozenDict({"brief:affect": brief}))]
+
+
+# ── Inspection ────────────────────────────────────────────────────────────
+
+from mika.faculties.affect import inspect as _inspect  # noqa: E402,F401 — contributions : ses vues

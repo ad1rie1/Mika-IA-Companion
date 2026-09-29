@@ -6,6 +6,9 @@
 - ``forget <sujet>`` : oubli (contenus et projections) ;
 - ``sim selftest`` : auto-test du simulateur ;
 - ``serve`` : le serveur ;
+- ``backup DEST`` / ``verify ARCHIVE`` / ``restore ARCHIVE`` : sauvegarde
+  (sans risque serveur en marche), vérification, restauration (serveur
+  arrêté ; l'ancien dossier est mis de côté) ;
 - ``llm show|backend|route|remove|context`` : les modèles (clés chiffrées) ;
 - ``account <nom> <mot de passe> [--operator]`` : un compte ;
 - ``telegram show|token|allow|disallow|owner`` : le robot Telegram (jeton chiffré) ;
@@ -26,6 +29,7 @@ from mika.adapters.llm.config import BackendSpec, LLMConfig
 from mika.adapters.store_sqlite import SqliteStore
 from mika.adapters.system import RandomIdGen, RealClock
 from mika.adapters.web.accounts import Accounts, password_problems
+from mika.app import backup
 from mika.app.composition import faculties, for_simulation
 from mika.app.server import serve
 from mika.app.settings import SecretBox, Settings
@@ -224,6 +228,15 @@ def main(argv: list[str] | None = None) -> int:
     sv = sub.add_parser("serve")
     sv.add_argument("--port", type=int, default=8001)
     sv.add_argument("--host", default="127.0.0.1")
+    sv.add_argument("--reports", type=Path, default=None, help="dossier des rapports de simulation (inspecteur)")
+    bk = sub.add_parser("backup", help="archiver ce qui ne se reconstruit pas (serveur en marche : sans risque)")
+    bk.add_argument("dest", type=Path, help="dossier des archives")
+    bk.add_argument("--keep", type=int, default=0, help="n'en garder que les N plus récentes (0 : toutes)")
+    vf = sub.add_parser("verify", help="vérifier une archive (sommes, rejeu, empreinte) sans rien restaurer")
+    vf.add_argument("archive", type=Path)
+    rt_ = sub.add_parser("restore", help="restaurer une archive dans --data (serveur arrêté)")
+    rt_.add_argument("archive", type=Path)
+    rt_.add_argument("--force", action="store_true", help="remplacer un dossier non vide (mis de côté, pas effacé)")
     lm = sub.add_parser("llm", help="fournisseurs de modèles et rôles")
     lsub = lm.add_subparsers(dest="llm_cmd", required=True)
     lsub.add_parser("show")
@@ -335,7 +348,22 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(out, ensure_ascii=False))
         return 0 if all(out.values()) else 1
     if args.cmd == "serve":
-        serve(host=args.host, port=args.port, data=args.data)
+        serve(host=args.host, port=args.port, data=args.data, reports=args.reports)
+        return 0
+    if args.cmd in ("backup", "verify", "restore"):
+        try:
+            if args.cmd == "backup":
+                done = backup.backup(args.data, args.dest, keep=args.keep)
+            elif args.cmd == "verify":
+                done = backup.verify(args.archive)
+            else:
+                done = backup.restore(args.archive, args.data, force=args.force)
+        except backup.BackupError as exc:
+            print(json.dumps({"ok": False, "erreur": str(exc)}, ensure_ascii=False))
+            return 1
+        print(json.dumps({"ok": True, "archive": str(done.archive), "tête": done.head, "empreinte": done.state,
+                          "fichiers": done.files, "octets": done.size, "remarques": list(done.warnings)},
+                         ensure_ascii=False))
         return 0
     if args.cmd == "llm":
         out = asyncio.run(llm_command(args.data, args))

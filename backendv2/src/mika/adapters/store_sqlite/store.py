@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import queue
+import re
 import sqlite3
 import threading
 from collections.abc import Callable, Collection, Iterator, Sequence
@@ -37,6 +38,7 @@ CREATE TABLE IF NOT EXISTS events(
     origin TEXT NOT NULL, data TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS events_type ON events(type, seq);
 CREATE INDEX IF NOT EXISTS events_corr ON events(correlation);
+CREATE INDEX IF NOT EXISTS events_cause ON events(causation);
 CREATE TABLE IF NOT EXISTS dedupe(type TEXT NOT NULL, key TEXT NOT NULL, seq INTEGER NOT NULL,
     PRIMARY KEY(type, key));
 CREATE TABLE IF NOT EXISTS content(ref TEXT PRIMARY KEY, seq INTEGER NOT NULL, level INTEGER NOT NULL,
@@ -402,6 +404,34 @@ class SqliteStore:
         ).fetchall()
         return [StoredEvent(*r) for r in rows]
 
+    def latest(self, types: Collection[str], limit: int, *, where: tuple[str, Any] | None = None,
+               before: int | None = None, correlations: Collection[str] | None = None) -> list[StoredEvent]:
+        types = list(types)
+        corrs = list(correlations)[:500] if correlations is not None else None
+        if not types or limit <= 0 or corrs == []:
+            return []
+        sql = (f"SELECT seq,id,type,v,at,causation,correlation,basis,origin,data FROM events "
+               f"WHERE type IN ({','.join('?' * len(types))})")
+        params: list[Any] = list(types)
+        if where is not None:
+            sql += " AND json_extract(data, ?) = ?"
+            params += [f"$.{_field(where[0])}", where[1]]
+        if before is not None:
+            sql += " AND seq < ?"
+            params.append(before)
+        if corrs is not None:
+            sql += f" AND correlation IN ({','.join('?' * len(corrs))})"
+            params += corrs
+        sql += " ORDER BY seq DESC LIMIT ?"
+        params.append(min(int(limit), 10_000))
+        return [StoredEvent(*r) for r in self._r().execute(sql, params).fetchall()]
+
+    def tally(self, type_name: str, field: str) -> list[tuple[Any, int, int]]:
+        rows = self._r().execute(
+            "SELECT json_extract(data, ?), COUNT(*), MAX(at) FROM events WHERE type=? GROUP BY 1 ORDER BY 3 DESC",
+            (f"$.{_field(field)}", type_name)).fetchall()
+        return [(r[0], int(r[1]), int(r[2])) for r in rows]
+
     def content(self, refs: Collection[str]) -> dict[str, str]:
         refs = list(refs)
         if not refs:
@@ -438,6 +468,13 @@ class SqliteStore:
 
     def query_mind(self, sql: str, params: Sequence[Any] = ()) -> list[tuple[Any, ...]]:
         return self._r().execute(sql, params).fetchall()
+
+
+def _field(name: str) -> str:
+    """Un nom de champ de charge utile (jamais un morceau de SQL ou de chemin JSON)."""
+    if not re.fullmatch(r"[a-z_][a-z0-9_]{0,40}", name):
+        raise ValueError(f"nom de champ invalide : {name!r}")
+    return name
 
 
 class StoreSealed(RuntimeError):

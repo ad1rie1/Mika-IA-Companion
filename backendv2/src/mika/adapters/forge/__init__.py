@@ -244,7 +244,8 @@ class ForgeHost:
             tools=tuple(AppTool(t["name"], t["description"]) for t in manifest.get("tools", [])
                         if f"tool_{t['name']}" in functions),
             handlers=tuple(sorted(functions)), error="; ".join(problems),
-            events=tuple(manifest.get("events", [])) if "on_event" in functions else ())
+            events=tuple(manifest.get("events", [])) if "on_event" in functions else (),
+            config=tuple(manifest.get("config", {}).items()))
 
     def source(self, app: str) -> tuple[str, str] | None:
         d = self._dir(app)

@@ -30,6 +30,7 @@ from mika.kernel.clock import HOUR, MINUTE
 from mika.kernel.faculty import CatchUp, Faculty, Zone
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
+from mika.kernel.inspect import Block, Fields, InspectContext, Table
 from mika.kernel.state import FrozenDict
 from mika.vocab.affect import Appraisal, Emotion
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
@@ -257,3 +258,23 @@ def describe(r: c.NeedsReading) -> list[str]:
 def _needs_section(s: NeedsState, frame: Frame, enrich: Any) -> str | None:
     lines = describe(frame.get(c.NEEDS))
     return "\n".join(lines) if lines else None
+
+
+# ── Inspection ────────────────────────────────────────────────────────────
+
+_NAMES = {c.SOCIAL: "compagnie", c.EXPRESSION: "s'exprimer", c.CURIOSITY: "apprendre"}
+
+
+@NEEDS.inspect("needs", title="Besoins")
+def _inspect(s: NeedsState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    p = params(frame.env.params_of("needs", frame.root))
+    r = frame.get(c.NEEDS)
+    values = {c.SOCIAL: r.social, c.EXPRESSION: r.expression, c.CURIOSITY: r.curiosity}
+    rows = tuple((_NAMES[k], f"{values[k]:.0%}", f"{_tau(k, p):.1f} h",
+                  ctx.when(s.levels[k].at) if k in s.levels and s.levels[k].at else "—") for k in c.KINDS)
+    return [
+        Table(("besoin", "tension", "horizon", "niveau relevé le"), rows),
+        Fields((("rien ne s'est passé depuis", ctx.when(s.idle_since) if s.idle_since else "—"),
+                ("dernier vide ressenti", ctx.when(s.felt_at) if s.felt_at else "—"),
+                ("ce qu'elle en dit", " ".join(describe(r)) or "rien de pressant"))),
+    ]

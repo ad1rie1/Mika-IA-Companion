@@ -95,6 +95,8 @@ class EffectProposed(Payload):
     summary: Content
     approval: bool = True
     context: str = ""
+    #: les personnes que le résumé peut citer (l'oubli l'atteint)
+    about: tuple[str, ...] = ()
 
 
 class EffectResolved(Payload):
@@ -124,7 +126,8 @@ UTTERANCE = event_type(
 )
 EPISODE_ENDED = event_type("episode.ended", OWNER, EpisodeEnded, public=True)
 PROCESS_FAILED = event_type("runtime.process_failed", OWNER, ProcessFailed, public=True)
-EFFECT_PROPOSED = event_type("effect.proposed", OWNER, EffectProposed, public=True, content=("summary",))
+EFFECT_PROPOSED = event_type("effect.proposed", OWNER, EffectProposed, public=True, content=("summary",),
+                             subjects=("about",))
 EFFECT_RESOLVED = event_type("effect.resolved", OWNER, EffectResolved, public=True)
 EFFECT_EXECUTED = event_type("effect.executed", OWNER, EffectExecuted, public=True)
 

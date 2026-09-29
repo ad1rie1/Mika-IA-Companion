@@ -189,6 +189,11 @@ class Registry:
         for name in self.interpreters:
             self.interpreters[name].sort(key=lambda s: s.owner)
         self.inspectors: list[InspectSpec] = [s for f in facs for s in f.inspectors]
+        seen_views: set[tuple[str, str]] = set()
+        for v in self.inspectors:
+            if (v.owner, v.name) in seen_views:
+                problems.append(f"vue d'inspection déclarée deux fois : {v.owner}/{v.name}")
+            seen_views.add((v.owner, v.name))
         self.invariants: list[InvariantSpec] = [s for f in facs for s in f.invariants]
         self.processes: dict[str, ProcessSpec] = {}
         for s in (s for f in facs for s in f.processes):

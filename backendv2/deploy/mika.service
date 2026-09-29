@@ -1,0 +1,41 @@
+# Mika v2 — le serveur (HTTP, WebSocket, inspecteur).
+# Installation et exploitation : deploy/README.md
+[Unit]
+Description=Mika v2
+Documentation=file:/opt/mika/backendv2/deploy/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mika
+Group=mika
+WorkingDirectory=/opt/mika/backendv2
+# MIKA_SECRET_KEY (facultatif), HF_HOME…
+EnvironmentFile=-/etc/mika/mika.env
+Environment=HF_HOME=/var/lib/mika/cache/huggingface
+ExecStart=/opt/mika/backendv2/.venv/bin/python -m mika --data /var/lib/mika serve --host 127.0.0.1 --port 8001
+Restart=on-failure
+RestartSec=5
+# SIGTERM : 20 s pour les connexions, puis le noyau s'arrête (voies, processus, journal fermé)
+KillSignal=SIGTERM
+TimeoutStopSec=60
+
+# Durcissement. Pas de RestrictNamespaces ni de PrivateUsers : bubblewrap (la
+# Forge, les ateliers) a besoin des espaces de noms utilisateur. Pas de
+# ProtectKernelTunables non plus : il masque une partie de /proc, et le noyau
+# refuse alors à bubblewrap de monter le /proc du bac à sable (vérifié).
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/mika
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictRealtime=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

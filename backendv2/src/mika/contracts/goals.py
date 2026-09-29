@@ -95,6 +95,9 @@ class StepReported(Payload):
     proven: bool = False
     #: ce qu'elle a réellement fait pendant ce pas (outils réussis)
     tools: tuple[str, ...] = ()
+    #: recopiés du but : le résumé peut citer ces personnes (l'oubli l'atteint)
+    owner: str | None = None
+    about: tuple[str, ...] = ()
 
 
 class GoalClosed(Payload):
@@ -115,7 +118,8 @@ class GoalClosed(Payload):
 
 GOAL_OPENED = event_type("goals.opened", OWNER, GoalOpened, public=True, content=("title", "details"),
                          subjects=("owner", "about"))
-STEP_REPORTED = event_type("goals.step_reported", OWNER, StepReported, public=True, content=("summary",))
+STEP_REPORTED = event_type("goals.step_reported", OWNER, StepReported, public=True, content=("summary",),
+                           subjects=("owner", "about"))
 GOAL_CLOSED = event_type("goals.closed", OWNER, GoalClosed, public=True, content=("title", "result"),
                          subjects=("owner", "about"))
 ALL = (GOAL_OPENED, STEP_REPORTED, GOAL_CLOSED)

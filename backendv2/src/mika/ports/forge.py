@@ -40,6 +40,8 @@ class AppInfo:
     error: str = ""
     #: les événements qu'elle veut recevoir (``on_event``)
     events: tuple[str, ...] = ()
+    #: les réglages que déclare son manifeste, avec leur valeur par défaut
+    config: tuple[tuple[str, str | int | float | bool], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
