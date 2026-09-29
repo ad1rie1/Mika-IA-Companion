@@ -53,4 +53,8 @@ MOOD = FactKey("affect.mood", type=MoodReading, time_varying=True)
 STANCE = FactFamily("affect.stance", arg=str, type=StanceReading, time_varying=True)
 #: Composante plaisir de l'ancre (guérie à l'instant), dans [0, 1].
 WARMTH = FactFamily("affect.warmth", arg=str, type=float, time_varying=True)
+#: Ce que cette personne a installé, signé, dans [-1, 1] : la part du chemin
+#: parcourue depuis le repos commun vers le plaisir maximal (> 0) ou minimal
+#: (< 0). Une rancune se lit ici.
+REGARD = FactFamily("affect.regard", arg=str, type=float, time_varying=True)
 FACE = FactFamily("affect.face", arg=str, type=Face, time_varying=True)

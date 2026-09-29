@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from pydantic import BaseModel
@@ -31,6 +31,7 @@ from mika.kernel.registry import ArbitrationPolicy, Registry
 from mika.ports.llm import LLMGateway
 from mika.ports.store import EventStore
 from mika.runtime.arbiter import Arbiter, arbiter_spec
+from mika.runtime.boundary import Failed, acall, call
 from mika.runtime.effects import EffectExecutor, with_content
 from mika.runtime.lanes import Lanes
 from mika.runtime.mind import BootReport, Commit, Mind
@@ -205,18 +206,42 @@ class Kernel:
         répondrait des heures plus tard à un message qu'on a dit refusé)."""
         if self.deps.reply_kind in self.runner.policies and self.lanes.full(self.deps.reply_kind):
             return Perceived(None, None, overloaded=True)
+        correlation = correlation or f"perception:{self.mind.ids.new(self.mind.clock.now())}"
         commit = await self.mind.append(
             [PERCEPTION_RECEIVED.draft(data, dedupe_key=dedupe_key)], emitter="runtime", origin=Origin.EXTERNAL,
-            correlation=correlation or f"perception:{self.mind.ids.new(self.mind.clock.now())}",
+            correlation=correlation,
         )
-        if commit.deduped or self.deps.reply_kind not in self.runner.policies:
+        if commit.deduped:
             return Perceived(commit, None)
         seq = commit.seqs[-1]
+        await self._interpret(seq, correlation)
+        if not data.addressed or self.deps.reply_kind not in self.runner.policies:
+            return Perceived(commit, None)
         fut = self.lanes.submit(EpisodeRequest(
             kind=self.deps.reply_kind, target=data.handle, trigger=f"perception:{seq}", reply_to=seq,
             message=data.text.text or "", priority=0, channel=data.channel, room=data.room,
         ))
         return Perceived(commit, fut, overloaded=fut is None)
+
+    async def _interpret(self, seq: int, correlation: str) -> None:
+        """Ce que chaque faculté tire du message, journalisé avant la réponse :
+        une réponse composée ensuite voit déjà « elle dit être Alice »."""
+        stored = self.mind.store.get_events([seq])
+        if not stored:
+            return
+        ev = with_content(self.mind, self.mind.decode(stored[0]))
+        for spec in self.registry.interpreters.get(ev.type.name, ()):
+            frame = self.mind.frame()
+            got = call(spec.fn, frame.state(spec.owner), frame, ev, self.ports, label=f"interprète {spec.owner}")
+            if isinstance(got, Failed) or not got:
+                continue
+            drafts = [replace(d, dedupe_key=d.dedupe_key or f"interp:{spec.owner}:{seq}:{i}")
+                      for i, d in enumerate(got)]
+            await acall(
+                lambda drafts=drafts, owner=spec.owner: self.mind.append(
+                    drafts, emitter=owner, correlation=correlation, origin=Origin.PROCESS),
+                label=f"interprétation {spec.owner}",
+            )
 
     async def forget(self, subject: str) -> dict[str, int]:
         """L'oubli d'un sujet : contenus et projections (le Mind), puis tout
@@ -262,6 +287,7 @@ class Kernel:
                 )
                 abandoned += 1
                 continue
+            await self._interpret(seq, f"reprise:{seq}")  # un arrêt entre le message et son interprétation
             if self.deps.reply_kind not in self.runner.policies:
                 continue
             ev = with_content(self.mind, self.mind.decode(self.mind.store.get_events([seq])[0]))

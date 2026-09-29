@@ -54,6 +54,8 @@ RUNTIME.declare(*rt.ALL)
 
 @RUNTIME.reducer(rt.PERCEPTION_RECEIVED)
 def _perceived(s: RuntimeState, e, cx) -> RuntimeState:
+    if not e.data.addressed:
+        return s  # entendu, pas adressé : personne n'attend de réponse
     return replace(s, pending=s.pending.set(e.seq, Pending(e.data.handle, e.at)))
 
 

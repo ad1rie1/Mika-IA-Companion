@@ -18,15 +18,19 @@ from starlette.applications import Starlette
 from mika.adapters.llm.config import LiveGateway, build_gateway
 from mika.adapters.store_sqlite import SqliteStore
 from mika.adapters.system import RandomIdGen, RealClock
+from mika.adapters.telegram import TelegramChannel, TelegramConfig, handle_of
+from mika.adapters.telegram.ptb import Poller
 from mika.adapters.vectors import SentenceEmbedder, SqliteVectorIndex
 from mika.adapters.web import protocol
 from mika.adapters.web.accounts import Accounts
 from mika.adapters.web.app import WebConfig, create_app
 from mika.adapters.web.hub import Hub
 from mika.app import composition
+from mika.app.delivery import Router
 from mika.app.mindport import KernelPort
 from mika.app.paths import PERSONA
 from mika.app.settings import SecretBox, Settings
+from mika.faculties.identity import IdentityParams
 from mika.faculties.self import load
 from mika.inspector.app import InspectorDeps, routes
 from mika.kernel.prompt import Budget
@@ -43,8 +47,29 @@ class Live:
     accounts: Accounts
     settings: Settings
     gateway: LiveGateway
+    router: Router
     #: une passerelle fournie de l'extérieur (tests, simulateur) n'est pas rechargée
     fixed: bool = False
+    telegram: Any = None
+
+    async def start_telegram(self) -> None:
+        """Le robot Telegram, s'il est configuré (``mika telegram token …``)."""
+        cfg = self.settings.telegram()
+        await self.kernel.set_params("identity", IdentityParams(owners=tuple(handle_of(o) for o in cfg["owners"])))
+        if not cfg["token"]:
+            return
+        config = TelegramConfig(allowed_chats=frozenset(cfg["allowed_chats"]))
+        poller = Poller(cfg["token"], lambda bot: TelegramChannel(self.port, bot, config))
+        await poller.start()
+        self.telegram = poller
+        self.router.telegram = poller.channel
+        log.info("Telegram : relève démarrée (%s)", "liste blanche" if config.allowed_chats else "ouvert à tous")
+
+    async def stop_telegram(self) -> None:
+        if self.telegram is not None:
+            self.router.telegram = None
+            await self.telegram.stop()
+            self.telegram = None
 
     async def reload_llm(self) -> list[str]:
         if self.fixed:
@@ -69,12 +94,14 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     fixed = gateway is not None
     gateway = gateway or LiveGateway()
     hub = Hub(port=None)  # type: ignore[arg-type] — relié au port juste après
+    router = Router(hub)
     vectors = SqliteVectorIndex(store, embedder or SentenceEmbedder())
     kernel = Kernel(composition.deps(store=store, clock=clock, ids=RandomIdGen(), gateway=gateway,
-                                     ports={"delivery": hub, "vectors": vectors}, **deps))
+                                     ports={"delivery": router, "vectors": vectors}, **deps))
     port = KernelPort(kernel)
     hub.port = port
-    live = Live(kernel, hub, port, Accounts(store), Settings(store, SecretBox.for_data(data)), gateway, fixed)
+    live = Live(kernel, hub, port, Accounts(store), Settings(store, SecretBox.for_data(data)), gateway, router,
+                fixed)
 
     @contextlib.asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
@@ -89,8 +116,13 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
             log.warning("configuration des modèles : %s", problem)
         hub.start()
         try:
+            await live.start_telegram()
+        except Exception as exc:  # noqa: BLE001 — un robot mal configuré n'empêche pas le reste de vivre
+            log.warning("Telegram : démarrage impossible (%r)", exc)
+        try:
             yield
         finally:
+            await live.stop_telegram()
             await hub.stop()
             await kernel.stop()
 

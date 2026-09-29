@@ -7,7 +7,10 @@
 - ``sim selftest`` : auto-test du simulateur ;
 - ``serve`` : le serveur ;
 - ``llm show|backend|route|remove|context`` : les modèles (clés chiffrées) ;
-- ``account <nom> <mot de passe> [--operator]`` : un compte.
+- ``account <nom> <mot de passe> [--operator]`` : un compte ;
+- ``telegram show|token|allow|disallow|owner`` : le robot Telegram (jeton chiffré) ;
+- ``identity link|unlink`` et ``social closeness`` : ce qu'un opérateur sait
+  mieux qu'elle (serveur arrêté : une seule écriture à la fois dans ``mind.db``).
 """
 
 from __future__ import annotations
@@ -26,12 +29,14 @@ from mika.adapters.web.accounts import Accounts, password_problems
 from mika.app.composition import faculties, for_simulation
 from mika.app.server import serve
 from mika.app.settings import SecretBox, Settings
+from mika.contracts import identity as identity_c
+from mika.contracts import social as social_c
 from mika.kernel.codec import digest
 from mika.kernel.registry import Registry
 from mika.runtime.mind import Mind
 from mika.runtime.state import RUNTIME
+from mika.sim.catalog import run_lane
 from mika.sim.report import write as write_report
-from mika.sim.scenarios import run_lane
 from mika.sim.selftest import run as sim_selftest
 
 
@@ -142,6 +147,36 @@ async def account_command(data: Path, args: argparse.Namespace) -> dict[str, obj
     return await _with_settings(data, run)
 
 
+async def telegram_command(data: Path, args: argparse.Namespace) -> dict[str, object]:
+    async def run(settings: Settings, store) -> dict[str, object]:  # type: ignore[no-untyped-def]
+        cfg = settings.telegram()
+        if args.tg_cmd == "token":
+            await settings.save_telegram(token=args.token)
+        elif args.tg_cmd == "allow":
+            await settings.save_telegram(allowed_chats=[*cfg["allowed_chats"], *args.chats])
+        elif args.tg_cmd == "disallow":
+            await settings.save_telegram(allowed_chats=[c for c in cfg["allowed_chats"] if c not in args.chats])
+        elif args.tg_cmd == "owner":
+            await settings.save_telegram(owners=[*cfg["owners"], *args.users])
+        cfg = settings.telegram()
+        return {"token": "…" + cfg["token"][-4:] if cfg["token"] else "", "allowed_chats": cfg["allowed_chats"],
+                "owners": cfg["owners"]}
+
+    return await _with_settings(data, run)
+
+
+async def operator_event(data: Path, draft, emitter: str) -> dict[str, object]:  # type: ignore[no-untyped-def]
+    from mika.kernel.events import Origin  # noqa: PLC0415
+
+    mind = _mind(data)
+    await mind.boot(append_boot=False)
+    try:
+        commit = await mind.append([draft], emitter=emitter, correlation="opérateur", origin=Origin.EXTERNAL)
+    finally:
+        await mind.close()
+    return {"ok": True, "seq": commit.seqs[-1] if commit.seqs else None}
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="mika")
     p.add_argument("--data", type=Path, default=Path("data/v2"), help="dossier des bases (mind.db, views.db)")
@@ -184,6 +219,29 @@ def main(argv: list[str] | None = None) -> int:
     ac.add_argument("password")
     ac.add_argument("--operator", action="store_true")
     ac.add_argument("--full-name", default="")
+    tg = sub.add_parser("telegram", help="le robot Telegram")
+    tsub = tg.add_subparsers(dest="tg_cmd", required=True)
+    tsub.add_parser("show")
+    tt = tsub.add_parser("token")
+    tt.add_argument("token")
+    ta = tsub.add_parser("allow", help="n'écouter que ces conversations (identifiants de chat)")
+    ta.add_argument("chats", nargs="+", type=int)
+    td = tsub.add_parser("disallow")
+    td.add_argument("chats", nargs="+", type=int)
+    to = tsub.add_parser("owner", help="comptes Telegram propriétaires (identifiants d'utilisateur)")
+    to.add_argument("users", nargs="+", type=int)
+    idp = sub.add_parser("identity", help="relier une poignée à une personne (serveur arrêté)")
+    isub = idp.add_subparsers(dest="id_cmd", required=True)
+    il = isub.add_parser("link")
+    il.add_argument("handle")
+    il.add_argument("person")
+    iu = isub.add_parser("unlink")
+    iu.add_argument("handle")
+    so = sub.add_parser("social", help="ce qu'un opérateur sait des liens (serveur arrêté)")
+    ssub = so.add_subparsers(dest="social_cmd", required=True)
+    sc = ssub.add_parser("closeness")
+    sc.add_argument("person")
+    sc.add_argument("level", choices=["stranger", "acquaintance", "friend", "close", "auto"])
     args = p.parse_args(argv)
 
     if args.cmd == "replay":
@@ -222,6 +280,19 @@ def main(argv: list[str] | None = None) -> int:
         out = asyncio.run(account_command(args.data, args))
         print(json.dumps(out, ensure_ascii=False))
         return 0 if out["ok"] else 1
+    if args.cmd == "telegram":
+        print(json.dumps(asyncio.run(telegram_command(args.data, args)), ensure_ascii=False))
+        return 0
+    if args.cmd == "identity":
+        person = args.person if args.id_cmd == "link" else None
+        draft = identity_c.LINKED.draft(handle=args.handle, person=person, by="operator")
+        print(json.dumps(asyncio.run(operator_event(args.data, draft, "identity")), ensure_ascii=False))
+        return 0
+    if args.cmd == "social":
+        level = "" if args.level == "auto" else args.level
+        draft = social_c.CLOSENESS_SET.draft(person=args.person, closeness=level, by="operator")
+        print(json.dumps(asyncio.run(operator_event(args.data, draft, "social")), ensure_ascii=False))
+        return 0
     return 2
 
 

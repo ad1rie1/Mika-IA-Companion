@@ -22,7 +22,7 @@ from mika.vocab import affect as A
 from mika.vocab import circadian
 from mika.vocab.affect import Emotion
 from mika.vocab.temperament import Temperament
-from tests.fixtures.mika import AFTERNOON, PARIS, at_paris, boot, build, said
+from tests.fixtures.mika import AFTERNOON, PARIS, at_paris, befriend, boot, build, said
 
 GATE = 0.6  # la porte de débordement de l'humeur (conscience, M4)
 
@@ -70,7 +70,10 @@ def stance(kernel, handle):
     return kernel.mind.frame().get(affect_c.STANCE(handle))
 
 
-async def sustained(kernel, script, emotion, n=8, gap_s=90, handle="user_1"):
+async def sustained(kernel, script, emotion, n=8, gap_s=90, handle="user_1", closeness="friend"):
+    """Une amie (par défaut) qui vit quelque chose, tour après tour."""
+    if closeness:
+        await befriend(kernel, handle, closeness)
     readings = []
     for _ in range(n):
         await turn(kernel, script, handle, emotion, 0.8)
@@ -90,6 +93,17 @@ def test_sustained_sadness_overflows_within_a_handful_of_turns(tmp_path, hour):
     first = next((i + 1 for i, v in enumerate(readings) if v > GATE), None)
     assert first is not None and first <= 6, readings
     assert readings[0] < GATE  # un seul tour ne suffit pas
+
+
+def test_a_stranger_moves_her_less_than_a_friend(tmp_path):
+    """La même tristesse, dite par une inconnue, la remue moins : ce que vit
+    une relation déborde sur son humeur selon la proximité."""
+    friend = run(tmp_path / "ami", lambda k, s: sustained(k, s, "sad", closeness="friend"))
+    stranger = run(tmp_path / "inconnue", lambda k, s: sustained(k, s, "sad", closeness=""))
+    close = run(tmp_path / "proche", lambda k, s: sustained(k, s, "sad", closeness="close"))
+    assert stranger[-1] < friend[-1] - 0.05 < close[-1] - 0.05, (stranger, friend, close)
+    # contre-exemple : même une inconnue qui pleure huit fois finit par la toucher
+    assert stranger[-1] > 0.3
 
 
 def test_sustained_anger_overflows_too(tmp_path):

@@ -154,6 +154,14 @@ def rate_bound(rows: Sequence[Row], policy: ArbitrationPolicy) -> float:
     return sum(policy.max_rates.get(r.kind, 0.0) for r in rows if not r.vetoes)
 
 
+def local_bound(rows: Sequence[Row], headroom: float = 2.0) -> float:
+    """Une borne de l'intensité totale valable jusqu'à la prochaine
+    réévaluation : ``headroom`` fois l'intensité actuelle. L'intensité ne
+    change qu'avec un événement (réévaluation immédiate) ou avec le temps
+    (réévaluation périodique) ; entre deux, la marge couvre sa dérive."""
+    return headroom * sum(r.hazard for r in rows)
+
+
 def next_arrival_us(rng: random.Random, bound_per_s: float) -> int | None:
     if bound_per_s <= 0:
         return None

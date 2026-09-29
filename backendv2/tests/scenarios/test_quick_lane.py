@@ -9,7 +9,7 @@ import time
 import pytest
 
 from mika.app.composition import for_simulation
-from mika.sim.scenarios import QUICK, run_lane, run_plan
+from mika.sim.catalog import QUICK, run_lane, run_plan
 
 
 @pytest.fixture(autouse=True)

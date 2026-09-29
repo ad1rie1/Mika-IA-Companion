@@ -1,0 +1,271 @@
+"""Les liens, par leurs intentions.
+
+- la proximité se vit (jours, messages, chaleur) : dix minutes d'insultes ne
+  font pas une connaissance, et une rancune ne fait jamais une amie ;
+- le rythme d'une relation est le sien ;
+- elle relance une amie joignable, jamais une connaissance, jamais la nuit,
+  jamais quelqu'un qu'elle ne peut pas joindre ;
+- sous la détresse, elle va vers la personne auprès de qui elle se sent bien ;
+- sa fiche d'une personne n'entre dans le prompt que pour elle, en privé ;
+- un souvenir qui touche un sujet délicat de quelqu'un devient une confidence.
+"""
+
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+
+from mika.contracts import memory as memory_c
+from mika.contracts import social as social_c
+from mika.faculties.social.faculty import Contact, SocialParams, lived, rhythm
+from mika.faculties.social.sections import read_tone
+from mika.kernel.clock import DAY, HOUR, US, local
+from mika.kernel.events import Content, Origin
+from mika.ports.llm import LLMResponse
+from mika.sim.clock import run_virtual
+from mika.vocab.privacy import Sensitivity
+from tests.fixtures.mika import PARIS, at_paris, befriend, boot, build, connect, disconnect, said
+
+P = SocialParams()
+
+
+def contact(days: int, messages: int) -> Contact:
+    return Contact(days=tuple(range(1000, 1000 + days)), inbound=messages, first_in=1, last_in=1)
+
+
+# (jours, messages, regard, attendu, pourquoi)
+LIVED = [
+    (0, 0, 0.0, "stranger", "jamais parlé"),
+    (1, 12, -0.5, "stranger", "dix minutes d'insultes ne font pas une connaissance"),
+    (1, 25, 0.2, "acquaintance", "une longue première conversation"),
+    (2, 4, 0.0, "acquaintance", "se reparler un autre jour"),
+    (3, 15, 0.0, "friend", "trois jours, quinze messages : une amie"),
+    (3, 15, -0.1, "friend", "une curiosité banale, sans chaleur particulière, suffit"),
+    (3, 15, -0.3, "acquaintance", "une rancune ne fait jamais une amie"),
+    (30, 6, 0.4, "acquaintance", "un contact rare reste une connaissance"),
+    (7, 50, 0.3, "close", "une semaine de conversations chaleureuses"),
+    (7, 50, 0.0, "friend", "beaucoup d'échanges sans chaleur : amie, pas proche"),
+]
+
+
+@pytest.mark.parametrize("days,messages,regard,expected,why", LIVED)
+def test_closeness_is_lived(days, messages, regard, expected, why):
+    assert lived(contact(days, messages), regard, P) == expected, why
+
+
+def test_the_rhythm_of_a_relationship_is_its_own():
+    daily = Contact(days=tuple(range(100, 108)))
+    every_three = Contact(days=(100, 103, 106, 109, 112))
+    irregular = Contact(days=(100, 101, 105, 106, 113))
+    young = Contact(days=(100, 101))
+    rare = Contact(days=(100, 160, 220))
+    assert rhythm(daily, 110, "friend", P) == (1.0, True)
+    assert rhythm(every_three, 115, "friend", P) == (3.0, True)
+    assert rhythm(irregular, 115, "friend", P) == (2.5, True)  # la médiane, pas la moyenne
+    assert rhythm(young, 102, "close", P) == (P.fallback_close_days, False)
+    assert rhythm(young, 102, "friend", P) == (P.fallback_friend_days, False)
+    assert rhythm(rare, 225, "friend", P)[0] <= P.rhythm_max_days
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("JE SUIS TROP CONTENTE", "majuscules"),
+    ("non mais sérieux !!", "exclamation"),
+    ("bon... je sais pas... enfin bref", "suspension"),
+    ("ok", "très court"),
+    ("j'en ai marre, je suis épuisée", "lourds"),
+    ("trop bien, j'ai hâte !", "entrain"),
+    ("ça va 😭", "émoji triste"),
+])
+def test_reading_the_tone_of_a_message(text, expected):
+    assert any(expected in cue for cue in read_tone(text)), read_tone(text)
+
+
+def test_an_ordinary_message_has_no_cue():
+    assert read_tone("On se voit demain à la bibliothèque pour réviser ?") == []
+
+
+# ── De bout en bout ───────────────────────────────────────────────────────
+
+
+class Script:
+    def __init__(self) -> None:
+        self.tag = "[EMOTION:happy:0.5]"
+
+    def __call__(self, req):
+        if req.role in ("extract", "profile"):
+            return LLMResponse("{}")
+        if req.role == "initiative":
+            return LLMResponse(f"coucou, ça fait un moment ! {self.tag}")
+        return LLMResponse(f"ah oui ? {self.tag}")
+
+
+def run(tmp_path, scenario, start=at_paris(2026, 9, 28, 18, 0), *, with_llm=False):
+    script = Script()
+    kernel, clock, llm, out = build(tmp_path, script, start=start)
+
+    async def main():
+        await boot(kernel)
+        try:
+            return await scenario(kernel, clock, script)
+        finally:
+            await kernel.stop()
+
+    got = run_virtual(clock, main)
+    return (got, llm) if with_llm else got
+
+
+def prompts(llm, target, containing=""):
+    return ["\n".join(m.content for m in c.messages) for c in llm.calls
+            if c.meta.get("target") == target and containing in c.messages[-1].content]
+
+
+async def evening(kernel, handle, *, channel="telegram", per_day=4):
+    for i in range(per_day):
+        p = await kernel.perceive(said(handle, f"message {i} du soir", channel=channel))
+        await p.reply
+        await asyncio.sleep(60)
+
+
+async def daily(kernel, handle, days, *, channel="telegram", per_day=4):
+    """Une relation qui vit : quelques messages chaque soir."""
+    for _ in range(days):
+        await evening(kernel, handle, channel=channel, per_day=per_day)
+        await asyncio.sleep(DAY / US - per_day * 60)
+
+
+def started(kernel):
+    from mika.contracts import runtime as rt
+
+    mind = kernel.mind
+    return [mind.decode(e) for e in mind.store.read() if e.type == rt.EPISODE_STARTED.name]
+
+
+def test_she_misses_a_reachable_friend_but_not_an_acquaintance_nor_someone_unreachable(tmp_path):
+    async def scenario(kernel, clock, script):
+        await daily(kernel, "tg_1", 5)  # une amie, sur Telegram (joignable)
+        await daily(kernel, "tg_2", 1, per_day=5)  # une connaissance d'un soir
+        await connect(kernel, "user_3", "Chloé")
+        await daily(kernel, "user_3", 5, channel="web")  # une amie, mais seulement dans le navigateur
+        await disconnect(kernel, "user_3")
+        await asyncio.sleep(4 * DAY / US)
+        return [(e.data.target, e.data.reason) for e in started(kernel) if e.data.kind == "INITIATIVE"]
+
+    fired = run(tmp_path, scenario)
+    recontacts = [t for t, reason in fired if social_c.RECONTACT in reason.split(",")]
+    assert recontacts == ["tg_1"], fired
+
+
+def test_a_friend_missed_at_night_is_written_to_in_the_morning(tmp_path):
+    async def scenario(kernel, clock, script):
+        await daily(kernel, "tg_1", 5)
+        # le manque (1,5 × un jour) tombe vers 6 h du matin : elle attend 10 h
+        await asyncio.sleep(3 * DAY / US)
+        return [(local(e.at, PARIS), e.data.reason) for e in started(kernel) if e.data.kind == "INITIATIVE"]
+
+    fired = run(tmp_path, scenario)
+    hours = [t.hour for t, reason in fired if social_c.RECONTACT in reason.split(",")]
+    assert hours and all(10 <= h <= 20 for h in hours), fired
+
+
+def test_in_distress_she_turns_to_the_friend_she_feels_good_with(tmp_path):
+    async def scenario(kernel, clock, script):
+        for _ in range(4):  # deux amies qui écrivent chaque jour
+            script.tag = "[EMOTION:love:0.8]"
+            await evening(kernel, "tg_1")  # celle qui lui fait du bien
+            script.tag = "[EMOTION:curious:0.4]"
+            await evening(kernel, "tg_2")  # l'autre, sans plus
+            await asyncio.sleep(DAY / US - 8 * 60)
+        await befriend(kernel, "user_9", "close")
+        script.tag = "[EMOTION:sad:0.9]"  # quelqu'un de proche va très mal : elle aussi
+        await connect(kernel, "user_9", "Sam")
+        for _ in range(8):
+            p = await kernel.perceive(said("user_9", "ça va vraiment pas"))
+            await p.reply
+            await asyncio.sleep(60)
+        await asyncio.sleep(HOUR / US)
+        return [(e.data.target, e.data.reason) for e in started(kernel) if e.data.kind == "INITIATIVE"]
+
+    fired = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 11, 0))
+    comfort = [t for t, reason in fired if social_c.COMFORT in reason.split(",")]
+    assert comfort == ["tg_1"], fired  # vers celle qui lui fait du bien — et une seule
+
+
+def _profile(kernel, person, sensitive=()):
+    return kernel.mind.append([social_c.PROFILE_REVISED.draft(
+        person=person, summary=Content.of("C'est quelqu'un de drôle qui adore la montagne.", level=2),
+        tone="taquin", interests=("montagne",), sensitive=tuple(sensitive))], emitter="social", correlation="genese",
+        origin=Origin.GENESIS)
+
+
+def test_her_notes_on_someone_reach_the_prompt_only_for_them_in_private(tmp_path):
+    async def scenario(kernel, clock, script):
+        await connect(kernel, "user_1", "Alice")
+        await _profile(kernel, "user_1")
+        p = await kernel.perceive(said("user_1", "salut !"))
+        await p.reply
+        await connect(kernel, "user_2", "Bob")
+        p = await kernel.perceive(said("user_2", "tu connais Alice ?"))
+        await p.reply
+
+    _, llm = run(tmp_path, scenario, with_llm=True)
+    assert any("adore la montagne" in m for m in prompts(llm, "user_1"))
+    assert not any("adore la montagne" in m for m in prompts(llm, "user_2"))
+
+
+def test_a_memory_touching_someones_sensitive_topic_becomes_a_confidence(tmp_path):
+    async def scenario(kernel, clock, script):
+        await connect(kernel, "user_1", "Alice")
+        await connect(kernel, "user_2", "Bob")
+        await befriend(kernel, "user_2", "friend")
+        await _profile(kernel, "user_1", sensitive=("sa santé",))
+        for text, sens in (("Alice attend des résultats pour sa santé cette semaine", Sensitivity.PERSONAL),
+                           ("Alice prépare un voyage en Islande cette semaine", Sensitivity.PERSONAL)):
+            await kernel.mind.append([memory_c.BELIEVED.draft(text=Content.of(text, level=int(sens)),
+                                                               about=("user_1",), sensitivity=int(sens))],
+                                     emitter="memory", correlation="genese", origin=Origin.GENESIS)
+        await asyncio.sleep(5)
+        p = await kernel.perceive(said("user_2", "et Alice, elle fait quoi cette semaine ? sa santé, son voyage ?"))
+        await p.reply
+
+    _, llm = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 14, 0), with_llm=True)
+    shown = "\n".join(prompts(llm, "user_2"))
+    assert "Islande" in shown  # contrôle : le personnel sur Alice sort chez un ami
+    assert "résultats pour sa santé" not in shown
+
+
+def test_a_room_reply_sees_the_room_not_her_private_thread(tmp_path):
+    async def scenario(kernel, clock, script):
+        p = await kernel.perceive(said("tg_1", "CANARI-PRIVE je te le dis en privé", channel="telegram"))
+        await p.reply
+        p = await kernel.perceive(said("tg_2", "salut le groupe", channel="telegram", room="tg_chat_-1",
+                                       public=True, addressed=False))
+        p = await kernel.perceive(said("tg_1", "Mika, tu en penses quoi ?", channel="telegram", room="tg_chat_-1",
+                                       public=True))
+        await p.reply
+
+    _, llm = run(tmp_path, scenario, with_llm=True)
+    room = prompts(llm, "tg_1", "Mika, tu en penses quoi")
+    assert room
+    text = room[-1]
+    assert "[tg_2] salut le groupe" in text
+    assert "CANARI-PRIVE" not in text
+
+
+def test_contacts_follow_the_person_not_the_handle(tmp_path):
+    """Écrire sur un autre compte relié, c'est la même relation."""
+    from mika.contracts import identity as identity_c
+
+    async def scenario(kernel, clock, script):
+        await kernel.mind.append([identity_c.LINKED.draft(handle="tg_5", person="user_1")], emitter="identity",
+                                 correlation="genese", origin=Origin.GENESIS)
+        await connect(kernel, "user_1", "Alice")
+        p = await kernel.perceive(said("user_1", "coucou"))
+        await p.reply
+        await asyncio.sleep(HOUR / US)
+        p = await kernel.perceive(said("tg_5", "c'est encore moi", channel="telegram"))
+        await p.reply
+        return kernel.mind.frame().get(social_c.CONTACT("user_1")), kernel.mind.frame().get(social_c.CONTACT("tg_5"))
+
+    alice, handle = run(tmp_path, scenario)
+    assert alice.inbound == 2 and handle.inbound == 0

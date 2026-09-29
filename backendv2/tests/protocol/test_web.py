@@ -173,6 +173,12 @@ def test_ws_conversation_round_trip(world):
         inner = ws.receive_json()
         assert inner["type"] == "inner_state_update"
         assert inner["inner_state"]["sleep_phase"] == "awake" and inner["inner_state"]["person_scope"] is True
+        state = inner["inner_state"]
+        assert state["identity"]["known_as"] == "adrien" and isinstance(state["identity"]["pending_claims"], list)
+        profile = state["person_profile"]  # connecté avec son compte : sa fiche est ouverte
+        assert isinstance(profile["topics_of_interest"], list) and isinstance(profile["sensitive_topics"], list)
+        assert profile["closeness"] in ("stranger", "acquaintance", "friend", "close")
+        assert profile["interaction_count"] == 1
         # rattrapage : ce qui suit le curseur
         ws.send_json({"type": "sync", "after_id": speech["user_message_id"] - 1})
         catch = recv_until(ws, "history")[-1]

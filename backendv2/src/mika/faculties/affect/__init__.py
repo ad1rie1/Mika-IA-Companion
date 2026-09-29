@@ -17,6 +17,7 @@ from mika.contracts import body as body_c
 from mika.contracts import expression as expression_c
 from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
+from mika.contracts import social as social_c
 from mika.faculties.affect import physics as ph
 from mika.faculties.affect import prose
 from mika.faculties.affect.params import AffectParams, derive
@@ -47,7 +48,7 @@ def _clockwork(cx: Any) -> ph.Clockwork:
     return ph.Clockwork(cx.tz, cx.facts.get(body_c.RHYTHM))
 
 
-@AFFECT.reducer(rt.UTTERANCE, reads=[identity_c.PERSON, body_c.RHYTHM])
+@AFFECT.reducer(rt.UTTERANCE, reads=[identity_c.PERSON, body_c.RHYTHM, social_c.CLOSENESS])
 def _declared(s: AffectState, e, cx) -> AffectState:
     d = e.data
     if d.kind not in CONVERSATIONAL:
@@ -60,6 +61,10 @@ def _declared(s: AffectState, e, cx) -> AffectState:
     target = A.to_pad(declared.emotion, declared.intensity)
     mood = ph.advance_mood(s.mood, e.at, p, cw)
     gain = ph.mood_gain(declared.intensity, p)
+    if d.target and is_identifiable(d.target):
+        # ce qu'un inconnu lui fait vivre la touche moins que ce que vit un proche
+        level = cx.facts.get(social_c.CLOSENESS(cx.facts.get(identity_c.PERSON(d.target))))
+        gain = min(p.mood_gain_cap, gain * p.bleed(level))
     if gain > 0:
         mood = replace(mood, position=ph.ratchet(mood.position, target, gain))
     s = replace(s, mood=mood)
@@ -111,22 +116,31 @@ def _stance(s: AffectState, cx, person: str) -> c.StanceReading:
     return stance_reading(s, person, cx.now, _params(cx.params), _clockwork(cx))
 
 
-@AFFECT.fact(c.WARMTH, reads=[body_c.RHYTHM])
-def _warmth(s: AffectState, cx, person: str) -> float:
-    """Combien ce que cette personne a installé est plus chaleureux que le
-    repos de tout le monde : la part du chemin parcourue du plaisir du repos
-    vers le plaisir maximal. Lu dans l'absolu, le repos (déjà positif
-    l'après-midi) rendait chacun « chaleureux » dès le premier échange."""
+def regard(s: AffectState, person: str, now: int, p: AffectParams, cw: ph.Clockwork) -> float:
+    """Ce que cette personne a installé, signé : la part du chemin parcourue
+    du plaisir du repos commun vers le plaisir maximal (ou minimal). Lu dans
+    l'absolu, le repos (déjà positif l'après-midi) rendait chacun
+    « chaleureux » dès le premier échange."""
     stored = s.stances.get(person)
     if stored is None or stored.anchor is None:
         return 0.0
-    p = _params(cx.params)
-    cw = _clockwork(cx)
-    anchor = ph.heal(stored.anchor, stored.osc.at, cx.now, p, cw)
+    anchor = ph.heal(stored.anchor, stored.osc.at, now, p, cw)
     if anchor is None:
         return 0.0
-    rest = ph.common_home(cx.now, p, cw)[0]
-    return max(0.0, min(1.0, (anchor[0] - rest) / max(1e-6, 1.0 - rest)))
+    rest = ph.common_home(now, p, cw)[0]
+    delta = anchor[0] - rest
+    span = (1.0 - rest) if delta >= 0 else (1.0 + rest)
+    return max(-1.0, min(1.0, delta / max(1e-6, span)))
+
+
+@AFFECT.fact(c.WARMTH, reads=[body_c.RHYTHM])
+def _warmth(s: AffectState, cx, person: str) -> float:
+    return max(0.0, regard(s, person, cx.now, _params(cx.params), _clockwork(cx)))
+
+
+@AFFECT.fact(c.REGARD, reads=[body_c.RHYTHM])
+def _regard(s: AffectState, cx, person: str) -> float:
+    return regard(s, person, cx.now, _params(cx.params), _clockwork(cx))
 
 
 @AFFECT.fact(c.FACE, reads=[body_c.RHYTHM])

@@ -19,9 +19,9 @@ from mika.kernel.arbitration import (
     Modulation,
     Row,
     RowView,
+    local_bound,
     next_arrival_us,
     pool,
-    rate_bound,
     thin,
 )
 from mika.kernel.builtin import LEASE, SELECTED
@@ -39,12 +39,22 @@ if TYPE_CHECKING:
 Submit = Callable[[Row, Frame], Awaitable[Any]]
 
 
+#: Au plus tard, l'intensité est réévaluée à ce rythme (une preuve qui monte
+#: avec le temps seul — un silence qui s'allonge — est vue dans ce délai).
+REEVALUATE_US = 300 * 1_000_000
+
+
 class Arbiter:
-    def __init__(self, registry_of: Callable[[], Registry], submit: Submit, *, seed: int | str = 0) -> None:
+    def __init__(self, registry_of: Callable[[], Registry], submit: Submit, *, seed: int | str = 0,
+                 reevaluate_us: int = REEVALUATE_US) -> None:
         self._registry_of = registry_of
         self._submit = submit
         self._seed = seed
+        self.reevaluate_us = reevaluate_us
         self.next_at: int | None = None
+        #: la borne de l'occurrence en attente (0 : une simple réévaluation)
+        self._bound = 0.0
+        self.draws = 0
         self.first_seen: dict[str, int] = {}
         self.attempts = 0
         self.last_rows: list[Row] = []
@@ -56,6 +66,7 @@ class Arbiter:
 
     def invalidate(self, events: Sequence[Event[Any]] = (), root: Root | None = None) -> None:
         self.next_at = None
+        self._bound = 0.0
         for e in events:
             if e.type.name == "episode.ended":
                 self.queued.discard(f"{e.data.kind}:{e.data.target or 'none'}")
@@ -108,17 +119,29 @@ class Arbiter:
     def next_due(self, state: Any, frame: Frame, last_run: int | None) -> int | None:
         if self.next_at is None:
             rows = self.rows(frame)
-            dt = next_arrival_us(self._rng(frame, "arrivée"), rate_bound(rows, self._registry_of().arbitration))
-            self.next_at = None if dt is None else frame.now + dt
+            bound = local_bound(rows)
+            # deux réévaluations sans événement entre elles ne tirent pas le même
+            # délai ; le compteur (et non l'instant, sensible à la microseconde
+            # près au rythme des réveils) garde le tirage indépendant de la cadence
+            self.draws += 1
+            dt = next_arrival_us(self._rng(frame, f"arrivée:{self.draws}"), bound)
+            if dt is None or dt >= self.reevaluate_us:
+                self.next_at, self._bound = frame.now + self.reevaluate_us, 0.0
+            else:
+                self.next_at, self._bound = frame.now + dt, bound
         return self.next_at
 
     async def run(self, ctx: ProcessContext) -> None:
+        bound, self._bound = self._bound, 0.0
         self.next_at = None
+        if bound <= 0:
+            return  # une réévaluation, pas une occurrence
         self.attempts += 1
         frame = ctx.frame
         reg = self._registry_of()
         rows = self.rows(frame)
-        row, draw = thin(rows, rate_bound(rows, reg.arbitration), self._rng(frame, "amincissement"))
+        total = sum(r.hazard for r in rows)
+        row, draw = thin(rows, max(bound, total), self._rng(frame, "amincissement"))
         if row is None:
             return
         for res in sorted(row.resources):

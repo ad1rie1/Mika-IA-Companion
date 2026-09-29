@@ -6,7 +6,7 @@ import json
 from collections.abc import Sequence
 from pathlib import Path
 
-from mika.sim.scenarios import Result
+from mika.sim.lane import Result
 
 
 def markdown(results: Sequence[Result], *, day_lines: int = 60) -> str:

@@ -14,7 +14,7 @@ logging.disable(logging.WARNING)
 from mika.app.composition import for_simulation
 from mika.kernel.codec import digest
 from mika.adapters.store_sqlite import SqliteStore
-from mika.sim.scenarios import QUICK, run_plan
+from mika.sim.catalog import QUICK, run_plan
 import asyncio
 plan = next(p for p in QUICK if p.name.startswith("S13"))
 with tempfile.TemporaryDirectory() as tmp:

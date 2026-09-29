@@ -13,7 +13,8 @@ from mika.sim.world import Driver
 
 
 def log_metrics(events: Sequence[Any], driver: Driver) -> dict[str, Any]:
-    perceptions = {e.seq: e for e in events if e.type.name == rt.PERCEPTION_RECEIVED.name}
+    # ce qui lui était adressé (dans un groupe, elle entend aussi ce qui ne l'est pas)
+    perceptions = {e.seq: e for e in events if e.type.name == rt.PERCEPTION_RECEIVED.name and e.data.addressed}
     utterances = [e for e in events if e.type.name == rt.UTTERANCE.name]
     ended = [e for e in events if e.type.name == rt.EPISODE_ENDED.name]
     started = [e for e in events if e.type.name == rt.EPISODE_STARTED.name]

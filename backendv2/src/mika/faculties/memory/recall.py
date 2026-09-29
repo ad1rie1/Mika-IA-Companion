@@ -23,6 +23,7 @@ from typing import Any
 from mika.contracts import affect as affect_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
+from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
 from mika.faculties.memory.faculty import MEMORY, MemoryState, params
 from mika.faculties.memory.projections import ITEM_COLUMNS
@@ -32,6 +33,8 @@ from mika.kernel.frame import Frame
 from mika.kernel.prompt import SectionBody
 from mika.vocab import affect as A
 from mika.vocab.episodes import CONVERSATIONAL
+from mika.vocab.privacy import Sensitivity
+from mika.vocab.words import stems
 
 ORIGIN_FR = {"told": "on te l'a dit", "observed": "tu l'as vu", "inferred": "tu le déduis"}
 
@@ -83,6 +86,26 @@ def query_of(frame: Frame, store: Any) -> str:
     return " ".join(str(v) for k, v in args.items() if str(k).startswith("brief:"))
 
 
+def touches(text: str, topics: tuple[str, ...]) -> bool:
+    """Le texte touche-t-il un de ces sujets (radicaux communs) ?"""
+    if not topics:
+        return False
+    have = stems(text)
+    return any(stems(topic) & have for topic in topics)
+
+
+def sensitivity_of(frame: Frame, item: Item, interlocutor: str | None) -> int:
+    """Un souvenir qui touche un sujet délicat d'une autre personne concernée
+    devient une confidence, quoi qu'en ait dit la consolidation."""
+    level = item.sensitivity
+    for other in item.about:
+        if other == interlocutor or other.startswith("name:"):
+            continue
+        if touches(item.text, frame.get(social_c.SENSITIVE(other))):
+            return max(level, int(Sensitivity.CONFIDENCE))
+    return level
+
+
 def items_by_id(store: Any, ids: list[int]) -> dict[int, Item]:
     if not ids:
         return {}
@@ -121,7 +144,7 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
     for item in items.values():
         if item.status != "active" or item.kind not in (c.SOUVENIR, c.BELIEF) or dormant(item, now, p):
             continue
-        verdict = admissible(item.about, item.sensitivity, person, aud)
+        verdict = admissible(item.about, sensitivity_of(frame, item, person), person, aud)
         if not verdict.ok:
             continue
         ranked.append((rank(item, sims[item.id], now, p, interlocutor=person, mood_valence=mood_valence), item,
@@ -135,8 +158,19 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
     chunk_ids = [k for k, _ in hits if k not in items]
     if chunk_ids:
         marks = ",".join("?" * len(chunk_ids))
-        rows = store.query_mind(f"SELECT id, at, user_text, reply_text FROM {c.CHUNKS_TABLE} "
-                                f"WHERE id IN ({marks}) AND person=?", (*chunk_ids, ep.target))
+        room = ep.attrs.get("room") or aud.room
+        if room:
+            # dans un salon : seulement ce qui s'y est dit (public pour ce salon)
+            rows = store.query_mind(f"SELECT id, at, user_text, reply_text FROM {c.CHUNKS_TABLE} "
+                                    f"WHERE id IN ({marks}) AND room=?", (*chunk_ids, room))
+        else:
+            # en privé : ses échanges privés — sur ses autres poignées seulement si sa fiche est ouverte
+            handles = tuple(frame.get(identity_c.HANDLES(person))) if aud.private_ok else ()
+            handles = tuple(sorted({ep.target, *handles}))
+            hmarks = ",".join("?" * len(handles))
+            rows = store.query_mind(f"SELECT id, at, user_text, reply_text FROM {c.CHUNKS_TABLE} "
+                                    f"WHERE id IN ({marks}) AND room IS NULL AND person IN ({hmarks})",
+                                    (*chunk_ids, *handles))
         before = ep.attrs.get("reply_to") or now
         exchanges = [Exchange(int(i), int(at), u, r) for i, at, u, r in rows]
         # les échanges encore dans le fil montré ne se répètent pas ; les plus pertinents d'abord

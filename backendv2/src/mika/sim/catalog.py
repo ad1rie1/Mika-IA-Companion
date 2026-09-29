@@ -1,0 +1,20 @@
+"""Le catalogue des scénarios, et la voie rapide."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from mika.sim.lane import Plan, Result, run_plan
+from mika.sim.lane import run_lane as _run_lane
+from mika.sim.others import OTHERS
+from mika.sim.scenarios import BASE
+from mika.sim.world import Composition
+
+QUICK: tuple[Plan, ...] = BASE + OTHERS
+
+
+def run_lane(composition: Composition, root: Path, plans: tuple[Plan, ...] = QUICK) -> list[Result]:
+    return _run_lane(composition, root, plans)
+
+
+__all__ = ["QUICK", "Plan", "Result", "run_lane", "run_plan"]

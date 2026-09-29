@@ -14,6 +14,7 @@ from mika.adapters.store_sqlite import SqliteStore
 from mika.adapters.vectors import HashEmbedder, SqliteVectorIndex
 from mika.app import composition
 from mika.contracts import presence as presence_c
+from mika.contracts import social as social_c
 from mika.contracts.runtime import PerceptionReceived
 from mika.faculties.self import load
 from mika.kernel.clock import instant
@@ -99,6 +100,13 @@ async def disconnect(kernel: Kernel, handle: str, connection: str | None = None)
         [presence_c.DISCONNECTED.draft(handle=handle, connection=connection or f"c-{handle}")],
         emitter="presence", correlation=f"ws:{connection or handle}", origin=Origin.EXTERNAL,
     )
+
+
+async def befriend(kernel: Kernel, person: str, closeness: str = "friend") -> None:
+    """La genèse d'un lien : un opérateur déclare la proximité (on ne la
+    fabrique pas à la main dans l'état)."""
+    await kernel.mind.append([social_c.CLOSENESS_SET.draft(person=person, closeness=closeness)], emitter="social",
+                             correlation=f"genese:{person}", origin=Origin.GENESIS)
 
 
 def said(handle: str, text: str, **kw: Any) -> PerceptionReceived:

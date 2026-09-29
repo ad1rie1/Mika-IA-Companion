@@ -96,8 +96,18 @@ class Hub:
         if d.target is None:
             await self._send(targets, protocol.inner_state_update(frame, None))
         else:
-            await self._send(targets, protocol.inner_state_update(frame, d.target))
+            await self._send(targets, protocol.inner_state_update(frame, d.target, self.panel(d.target)))
         return True
+
+    def panel(self, handle: str) -> dict[str, Any] | None:
+        getter = getattr(self.port, "person_panel", None)
+        if getter is None:
+            return None
+        try:
+            return getter(handle)
+        except Exception as exc:  # le panneau ne doit jamais empêcher une livraison
+            log.debug("panneau de %s : %r", handle, exc)
+            return None
 
     # ── émotion entre deux tours ──
     def face(self, handle: str) -> affect_c.Face:

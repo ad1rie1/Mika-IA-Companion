@@ -28,6 +28,9 @@ class PerceptionReceived(Payload):
     client_msg_id: str | None = None
     display_name: str = ""
     attachments: tuple[AttachmentMeta, ...] = ()
+    #: Adressé à elle ? Dans un salon, elle entend tout mais ne répond qu'à ce
+    #: qui lui parle (son nom, une réponse à son message) ; en privé, toujours.
+    addressed: bool = True
 
 
 class EpisodeStarted(Payload):

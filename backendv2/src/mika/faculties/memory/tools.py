@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
 from mika.faculties.memory.faculty import MEMORY, params
-from mika.faculties.memory.recall import items_by_id, names_of
+from mika.faculties.memory.recall import items_by_id, names_of, sensitivity_of
 from mika.faculties.memory.salience import admissible, age_words, tag
 from mika.vocab.episodes import CONVERSATIONAL
 
@@ -42,7 +42,7 @@ async def memory_search(args: SearchArgs, ctx: Any) -> str:
     for item in sorted(items.values(), key=lambda it: order[it.id]):
         if item.status != "active":
             continue
-        verdict = admissible(item.about, item.sensitivity, person, aud)
+        verdict = admissible(item.about, sensitivity_of(frame, item, person), person, aud)
         if verdict.ok:
             found.append((item, verdict))
         if len(found) >= args.limit:

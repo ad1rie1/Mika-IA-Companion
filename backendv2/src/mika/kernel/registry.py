@@ -29,6 +29,7 @@ from mika.kernel.faculty import (
     EnricherSpec,
     Faculty,
     InspectSpec,
+    InterpreterSpec,
     InvariantSpec,
     ModulatorSpec,
     PreludeSpec,
@@ -157,6 +158,19 @@ class Registry:
         self.proposers: list[ProposerSpec] = [s for f in facs for s in f.proposers]
         self.modulators: list[ModulatorSpec] = [s for f in facs for s in f.modulators]
         self.preludes: list[PreludeSpec] = [s for f in facs for s in f.preludes]
+        self.interpreters: dict[str, list[InterpreterSpec]] = defaultdict(list)
+        for f in facs:
+            for spec in f.interpreters:
+                for name in sorted(spec.types):
+                    if name not in self.events:
+                        problems.append(f"{f.name} interprète un événement inconnu : {name}")
+                        continue
+                    t = self.events.get(name)
+                    if t.owner != f.name and not t.public:
+                        problems.append(f"{f.name} interprète l'événement privé {name} de {t.owner}")
+                    self.interpreters[name].append(spec)
+        for name in self.interpreters:
+            self.interpreters[name].sort(key=lambda s: s.owner)
         self.inspectors: list[InspectSpec] = [s for f in facs for s in f.inspectors]
         self.invariants: list[InvariantSpec] = [s for f in facs for s in f.invariants]
         self.processes: dict[str, ProcessSpec] = {}

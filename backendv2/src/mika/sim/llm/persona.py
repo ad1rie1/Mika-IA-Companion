@@ -88,6 +88,8 @@ class PersonaSimLLM:
             await self.clock.sleep_until(self.clock.now() + round(delay * US))
         if req.role == "extract":
             return self._extract(req)
+        if req.role == "profile":
+            return self._profile(req)
         if req.role == "compact":
             said = [ln.split(" : ", 1)[1] for ln in req.messages[-1].content.splitlines() if " : " in ln][:3]
             return self._out(req, "On a parlé de : " + " / ".join(s[:60] for s in said))
@@ -112,6 +114,16 @@ class PersonaSimLLM:
     def _out(self, req: LLMRequest, text: str) -> LLMResponse:
         chars = len(req.system_stable) + sum(len(m.content) for m in req.messages)
         return LLMResponse(text, usage=Usage(input_tokens=chars // 4, output_tokens=len(text) // 4), model=self.model)
+
+    def _profile(self, req: LLMRequest) -> LLMResponse:
+        """Un profil plausible, tiré de ce qu'elle sait de la personne."""
+        text = req.messages[-1].content if req.messages else ""
+        facts = [ln[2:] for ln in text.splitlines() if ln.startswith("- ")]
+        sensitive = sorted({w for f in facts for w in PERSONAL_WORDS if w in f.lower()})[:4]
+        args = {"resume": "C'est quelqu'un qui me parle de sa vie" + (f" ({facts[0][:80]})" if facts else "") + ".",
+                "ton": "simple et chaleureux", "interets": [], "sujets_sensibles": sensitive}
+        return LLMResponse("", tool_calls=(ToolCall(f"{req.call_id}:0", "record_profile", args),), stop="tool_use",
+                           usage=Usage(input_tokens=len(text) // 4, output_tokens=80), model=self.model)
 
     def _extract(self, req: LLMRequest) -> LLMResponse:
         """Une consolidation plausible et déterministe : chaque phrase un peu

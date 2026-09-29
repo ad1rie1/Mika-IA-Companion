@@ -204,7 +204,7 @@ def emotion_update(person_id: str, face: affect_c.Face) -> dict[str, Any]:
     }
 
 
-def inner_state(frame: Frame, handle: str | None) -> dict[str, Any]:
+def inner_state(frame: Frame, handle: str | None, panel: dict[str, Any] | None = None) -> dict[str, Any]:
     """L'état intérieur que montre le panneau ; ``person_scope`` dit si la
     trame concerne quelqu'un (sinon ses clés personnelles ne disent rien)."""
     local = frame.local()
@@ -228,11 +228,13 @@ def inner_state(frame: Frame, handle: str | None) -> dict[str, Any]:
             "trust": view.trust.value,
             "pending_claims": [],
         }
+        if panel:
+            out.update(panel)  # identité détaillée, et la fiche si elle est ouverte
     return out
 
 
-def inner_state_update(frame: Frame, handle: str | None) -> dict[str, Any]:
-    return {"type": "inner_state_update", "inner_state": inner_state(frame, handle)}
+def inner_state_update(frame: Frame, handle: str | None, panel: dict[str, Any] | None = None) -> dict[str, Any]:
+    return {"type": "inner_state_update", "inner_state": inner_state(frame, handle, panel)}
 
 
 FAILED_OUTCOMES = frozenset({"failed", "timeout"})

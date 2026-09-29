@@ -177,6 +177,18 @@ class PreludeSpec:
     fn: Callable[..., Any]
 
 
+@dataclass(frozen=True, slots=True)
+class InterpreterSpec:
+    """Ce qu'une faculté tire d'un événement externe au moment où il arrive
+    (un message qui dit « moi c'est Alice »). Synchrone, sans appel de
+    modèle ; ses brouillons sont journalisés juste après l'événement, avant
+    toute réponse — c'est un jugement enregistré, jamais recalculé au rejeu."""
+
+    owner: str
+    types: frozenset[str]
+    fn: Callable[..., Any]
+
+
 # ── La faculté ────────────────────────────────────────────────────────────
 
 
@@ -208,6 +220,7 @@ class Faculty(Generic[S, Pm]):
     inspectors: list[InspectSpec] = field(default_factory=list)
     invariants: list[InvariantSpec] = field(default_factory=list)
     preludes: list[PreludeSpec] = field(default_factory=list)
+    interpreters: list[InterpreterSpec] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self.namespaces:
@@ -414,6 +427,17 @@ class Faculty(Generic[S, Pm]):
     def prelude(self, *, kinds: Iterable[str]):
         def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
             self.preludes.append(PreludeSpec(self.name, frozenset(kinds), fn))
+            return fn
+
+        return deco
+
+    def interpret(self, *types: EventType[Any]):
+        """``fn(état, frame, événement, ports) -> brouillons`` ; le texte de
+        l'événement est lisible (il vient d'arriver)."""
+        names = frozenset(t.name for t in types)
+
+        def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
+            self.interpreters.append(InterpreterSpec(self.name, names, fn))
             return fn
 
         return deco

@@ -119,3 +119,6 @@ PROMISES_TO = FactFamily("memory.promises_to", arg=str, type=tuple)
 
 ITEMS_TABLE = "memory_items"
 CHUNKS_TABLE = "memory_chunks"
+#: À qui elle a répété quoi (``item``, ``handle``, ``at``) : d'après la
+#: provenance de ce qu'elle a dit. Ce qu'elle a raconté à Bob, Bob le sait.
+TOLD_TABLE = "memory_told"

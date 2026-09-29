@@ -151,7 +151,7 @@ class Consolidate:
                       rows: list[tuple[Any, ...]], vectors: Any, p: Any, call_id: str) -> list[Draft[Any]]:
         drafts: list[Draft[Any]] = []
         known_ids = {i for i, _, _ in known}
-        sources_of = self._sources(rows)
+        sources_of = self._sources(rows, {h: frame.get(identity_c.PERSON(h)) for h in {r[3] for r in rows if r[3]}})
         participants = tuple(sorted({people[k] for k in people}))
 
         def concerned(names: list[str]) -> tuple[str, ...]:
@@ -225,10 +225,12 @@ class Consolidate:
         return None
 
     @staticmethod
-    def _sources(rows: list[tuple[Any, ...]]) -> Any:
+    def _sources(rows: list[tuple[Any, ...]], person_of: dict[str, str]) -> Any:
+        """Les messages d'où vient un élément : ceux des personnes qu'il
+        concerne (toutes leurs poignées), sinon toute la fenêtre."""
         by_person: dict[str, list[int]] = {}
         for seq, _at, _role, handle, _text in rows:
-            by_person.setdefault(handle, []).append(int(seq))
+            by_person.setdefault(person_of.get(handle, handle), []).append(int(seq))
         everything = tuple(int(r[0]) for r in rows)
 
         def of(about: tuple[str, ...]) -> tuple[int, ...]:

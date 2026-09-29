@@ -22,6 +22,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 from mika.contracts import expression as expression_c
+from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
 from mika.contracts import transcript as c
@@ -176,7 +177,7 @@ def after(store: Any, person: str, after_id: int, limit: int) -> tuple[list[dict
 
 
 def thread_of(store: Any, person: str, limit: int, before: int | None = None, after: int = 0) -> list[dict[str, Any]]:
-    """Le fil avec une personne, entre ``after`` et ``before`` (le message en
+    """Le fil avec une poignée, entre ``after`` et ``before`` (le message en
     cours de réponse n'y est pas : il arrive comme dernier tour)."""
     bound = before if before is not None else 2**62
     rows = store.query_mind(
@@ -186,22 +187,57 @@ def thread_of(store: Any, person: str, limit: int, before: int | None = None, af
     return [dict(zip(_COLUMNS, r, strict=True)) for r in reversed(rows)]
 
 
+def private_thread(store: Any, handles: Sequence[str], limit: int, before: int | None = None,
+                   after: int = 0) -> list[dict[str, Any]]:
+    """Le fil privé avec une personne, toutes ses poignées confondues (ce
+    qu'elle a dit dans un salon n'y est pas : hors de son contexte)."""
+    bound = before if before is not None else 2**62
+    marks = ",".join("?" * len(handles))
+    rows = store.query_mind(
+        f"SELECT {','.join(_COLUMNS)} FROM {c.THREAD_TABLE} WHERE person IN ({marks}) AND room IS NULL AND id<? "
+        "AND id>? ORDER BY id DESC LIMIT ?", (*handles, bound, after, limit),
+    )
+    return [dict(zip(_COLUMNS, r, strict=True)) for r in reversed(rows)]
+
+
+def room_thread(store: Any, room: str, limit: int, before: int | None = None) -> list[dict[str, Any]]:
+    """Ce qui s'est dit dans un salon (public pour ce salon), tous ensemble."""
+    bound = before if before is not None else 2**62
+    rows = store.query_mind(
+        f"SELECT {','.join(_COLUMNS)} FROM {c.THREAD_TABLE} WHERE room=? AND id<? ORDER BY id DESC LIMIT ?",
+        (room, bound, limit),
+    )
+    return [dict(zip(_COLUMNS, r, strict=True)) for r in reversed(rows)]
+
+
 # ── L'historique du prompt ────────────────────────────────────────────────
 
 
 @TRANSCRIPT.enricher("thread", episodes=CONVERSATIONAL, deadline_ms=1500)
 async def _thread(s: TranscriptState, frame: Frame, ports: Mapping[str, Any]) -> tuple[ChatTurn, ...]:
-    """Le fil avec l'interlocuteur. Ce que les autres lui ont dit n'y est pas :
-    cela passe par la mémoire, filtrée par la divulgation (un fil partagé
-    verbatim ferait lire à Bob ce qu'Alice a écrit en privé)."""
+    """Le fil avec l'interlocuteur. Ce que les autres lui ont dit en privé n'y
+    est pas : cela passe par la mémoire, filtrée par la divulgation (un fil
+    partagé verbatim ferait lire à Bob ce qu'Alice a écrit en privé). Dans un
+    salon, le fil du salon — tout le monde l'a lu. En privé, ses poignées
+    reliées s'ajoutent seulement si sa fiche est ouverte."""
     store = ports.get("store")
     ep = frame.episode
     if store is None or ep is None or not ep.target:
         return ()
     p = _params(frame.env.params_of("transcript", frame.root))
+    before = ep.attrs.get("reply_to")
+    room = ep.attrs.get("room")
+    if room:
+        rows = room_thread(store, room, p.window, before=before)
+        return tuple(_turn(r, ep.target) for r in rows)
     summary = s.summaries.get(ep.target)
     since = summary[0] if summary else 0
-    rows = thread_of(store, ep.target, p.window, before=ep.attrs.get("reply_to"), after=since)
+    aud = frame.audience
+    handles: tuple[str, ...] = (ep.target,)
+    if aud is not None and aud.private_ok:
+        person = frame.get(identity_c.PERSON(ep.target))
+        handles = tuple(sorted({ep.target, *frame.get(identity_c.HANDLES(person))}))
+    rows = private_thread(store, handles, p.window, before=before, after=since)
     turns = [ChatTurn("assistant" if r["role"] == "assistant" else "user", r["text"], id=r["id"]) for r in rows]
     if summary:
         text = store.content([summary[1]]).get(summary[1])
@@ -214,6 +250,16 @@ COMPACT_SYSTEM = """Tu aides Mika à se souvenir d'une longue conversation. On t
 quelqu'un (et le résumé des échanges encore plus anciens, s'il existe). Écris un résumé à la première personne, du \
 point de vue de Mika (« On a parlé de… », « Il m'a dit que… »), en 5 à 10 phrases : les faits, ce qui a été promis, \
 le ton de la relation. N'invente rien. Réponds seulement par le résumé."""
+
+
+def _turn(r: Mapping[str, Any], target: str) -> ChatTurn:
+    """Un tour du fil d'un salon : ce que disent les autres est cité avec leur
+    nom d'affichage (poignée), pour qu'elle sache qui parle."""
+    if r["role"] == "assistant":
+        return ChatTurn("assistant", r["text"], id=r["id"])
+    if r["person"] == target:
+        return ChatTurn("user", r["text"], id=r["id"])
+    return ChatTurn("user", f"[{r['person']}] {r['text']}", id=r["id"])
 
 
 @TRANSCRIPT.process("transcript.compact", wake_on=[memory_c.CONSOLIDATED], lane="background",

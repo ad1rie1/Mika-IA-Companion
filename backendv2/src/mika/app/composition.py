@@ -38,7 +38,7 @@ from mika.vocab.episodes import VOICE_ROLES, Kind, Role
 
 
 def faculties() -> list[Faculty[Any, Any]]:
-    """Les facultés de Mika (M1)."""
+    """Les facultés de Mika (M3)."""
     return [PRESENCE, IDENTITY, TRANSCRIPT, MEMORY, BODY, AFFECT, SELF, EXPRESSION, SOCIAL, AGENCY]
 
 
@@ -54,10 +54,10 @@ def policies() -> dict[str, EpisodePolicy]:
     return {
         Kind.REPLY: EpisodePolicy(kind=Kind.REPLY, role=Role.REPLY, priority=0, lane="conversation",
                                   guard=_reply_guard, max_tokens=1024, deadline_s=180.0,
-                                  tool_bundles=frozenset({"memory"})),
+                                  tool_bundles=frozenset({"memory", "identity"})),
         Kind.INITIATIVE: EpisodePolicy(kind=Kind.INITIATIVE, role=Role.INITIATIVE, priority=1, lane="conversation",
                                        brief=initiative_brief, max_tokens=600, deadline_s=180.0,
-                                       tool_bundles=frozenset({"memory"})),
+                                       tool_bundles=frozenset({"memory", "identity"})),
     }
 
 

@@ -81,6 +81,16 @@ class AffectParams(BaseModel):
     mood_gain_slope: float = 1.6
     mood_gain_max_factor: float = 2.0
     mood_gain_cap: float = 0.5
+    #: Ce que vit la relation déborde sur son humeur selon la proximité : un
+    #: inconnu qui l'insulte la touche moins qu'une amie qui pleure.
+    bleed_stranger: float = 0.5
+    bleed_acquaintance: float = 0.8
+    bleed_friend: float = 1.0
+    bleed_close: float = 1.2
+
+    def bleed(self, closeness: str) -> float:
+        return {"stranger": self.bleed_stranger, "acquaintance": self.bleed_acquaintance, "friend": self.bleed_friend,
+                "close": self.bleed_close}.get(closeness, 1.0)
     #: Une impulsion alignée sur son humeur de fond est amplifiée (jamais
     #: atténuée : résister est déjà le rôle du repos).
     resonance: float = 0.45

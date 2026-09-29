@@ -90,7 +90,7 @@ class Chunks:
     def create(self, sql: Sql, sfx: str) -> None:
         sql.execute(
             f"CREATE TABLE IF NOT EXISTS {c.CHUNKS_TABLE}{sfx}(id INTEGER PRIMARY KEY, person TEXT NOT NULL, "
-            "question INTEGER, user_text TEXT NOT NULL, reply_text TEXT NOT NULL, at INTEGER NOT NULL)"
+            "question INTEGER, user_text TEXT NOT NULL, reply_text TEXT NOT NULL, at INTEGER NOT NULL, room TEXT)"
         )
         sql.execute(f"CREATE INDEX IF NOT EXISTS {c.CHUNKS_TABLE}{sfx}_person ON {c.CHUNKS_TABLE}{sfx}(person, id)")
 
@@ -105,13 +105,39 @@ class Chunks:
             row = sql.execute(f"SELECT text FROM {transcript_c.THREAD_TABLE} WHERE id=?", (d.reply_to,)).fetchone()
             user_text = (row[0] if row else "")[:CHUNK_TEXT_MAX]
             reply = strip_prosody(d.text.text or "")[:CHUNK_TEXT_MAX]
-            sql.execute(f"INSERT OR REPLACE INTO {c.CHUNKS_TABLE}{sfx}(id, person, question, user_text, reply_text, at) "
-                        "VALUES(?,?,?,?,?,?)", (e.seq, d.target, d.reply_to, user_text, reply, e.at))
+            sql.execute(f"INSERT OR REPLACE INTO {c.CHUNKS_TABLE}{sfx}(id, person, question, user_text, reply_text, at, "
+                        "room) VALUES(?,?,?,?,?,?,?)", (e.seq, d.target, d.reply_to, user_text, reply, e.at, d.room))
 
     def forget(self, sql: Sql, subject: str, sfx: str) -> None:
         sql.execute(f"DELETE FROM {c.CHUNKS_TABLE}{sfx} WHERE person=?", (subject,))
 
 
+class Told:
+    """À qui elle a répété quoi : ce que montrait le prompt d'un énoncé adressé
+    à quelqu'un (sa provenance). Ce qu'elle a raconté à Bob, Bob le sait."""
+
+    def create(self, sql: Sql, sfx: str) -> None:
+        sql.execute(f"CREATE TABLE IF NOT EXISTS {c.TOLD_TABLE}{sfx}(item INTEGER NOT NULL, handle TEXT NOT NULL, "
+                    "at INTEGER NOT NULL, PRIMARY KEY(item, handle))")
+
+    def drop(self, sql: Sql, sfx: str) -> None:
+        sql.execute(f"DROP TABLE IF EXISTS {c.TOLD_TABLE}{sfx}")
+
+    def apply(self, sql: Sql, events: Sequence[Any], sfx: str) -> None:
+        rows = []
+        for e in events:
+            d = e.data
+            if not d.visible or not d.target:
+                continue
+            rows += [(int(p.split(":", 1)[1]), d.target, e.at) for p in d.provenance if p.startswith("memory:")]
+        if rows:
+            sql.executemany(f"INSERT OR REPLACE INTO {c.TOLD_TABLE}{sfx}(item, handle, at) VALUES(?,?,?)", rows)
+
+    def forget(self, sql: Sql, subject: str, sfx: str) -> None:
+        sql.execute(f"DELETE FROM {c.TOLD_TABLE}{sfx} WHERE handle=?", (subject,))
+
+
 MEMORY.projector(c.ITEMS_TABLE, version=1, tier=Tier.T0,
                  types=[*c.ALL, rt.UTTERANCE])(Items)
-MEMORY.projector(c.CHUNKS_TABLE, version=1, tier=Tier.T0, types=[rt.UTTERANCE])(Chunks)
+MEMORY.projector(c.CHUNKS_TABLE, version=2, tier=Tier.T0, types=[rt.UTTERANCE])(Chunks)
+MEMORY.projector(c.TOLD_TABLE, version=1, tier=Tier.T0, types=[rt.UTTERANCE])(Told)

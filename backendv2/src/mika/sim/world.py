@@ -52,6 +52,8 @@ class Heard:
     declared: bool
     message_id: int
     reply_to: int | None
+    room: str | None = None
+    kind: str = "speech"
 
 
 class Transport:
@@ -80,7 +82,7 @@ class Transport:
         if d.target is not None and not self.online(d.target):
             return True  # hors ligne : rattrapage par l'historique
         self.heard.append(Heard(self.clock.now(), d.key, d.target, d.text, d.emotion.emotion, d.emotion.declared,
-                                d.message_id, d.reply_to))
+                                d.message_id, d.reply_to, d.room, d.source))
         return True
 
 
@@ -101,7 +103,8 @@ class Driver:
     transport: Transport | None = None
 
     def __post_init__(self) -> None:
-        self.transport = Transport(self.clock, lambda h: h in self.online)
+        # une messagerie (Telegram) reçoit même hors ligne : on y écrit à quelqu'un d'absent
+        self.transport = Transport(self.clock, lambda h: h in self.online or h.startswith("tg_"))
 
     # ── cycle de vie ──
     async def boot(self) -> Kernel:
@@ -163,10 +166,16 @@ class Driver:
         await self.kernel.mind.append([presence_c.DISCONNECTED.draft(handle=handle, connection=conn)],
                                       emitter="presence", correlation=f"sim:{conn}", origin=Origin.EXTERNAL)
 
-    async def say(self, handle: str, text: str, *, wait: bool = True, key: str | None = None) -> Any:
+    async def say(self, handle: str, text: str, *, wait: bool = True, key: str | None = None,
+                  room: str | None = None, addressed: bool = True) -> Any:
+        """Un message : web authentifié pour ``user_…``, Telegram pour ``tg_…``
+        (privé, ou dans le salon ``room``)."""
         assert self.kernel is not None
-        p = PerceptionReceived(handle=handle, channel="web", text=Content.of(text), authenticated=True,
-                               display_name=self.names.get(handle, ""), client_msg_id=key)
+        telegram = handle.startswith("tg_")
+        p = PerceptionReceived(handle=handle, channel="telegram" if telegram else "web", text=Content.of(text),
+                               authenticated=not telegram, display_name=self.names.get(handle, ""),
+                               client_msg_id=key, room=room, public=room is not None, addressed=addressed,
+                               reply_ref=room or (handle[3:] if telegram else None))
         got = await self.kernel.perceive(p, dedupe_key=f"{handle}:{key}" if key else None)
         if wait and got.reply is not None:
             try:

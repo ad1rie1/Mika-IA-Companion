@@ -18,6 +18,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from mika.adapters.llm.config import BackendSpec, LLMConfig
 
 LLM_KEY = "llm"
+TELEGRAM_KEY = "telegram"
 
 
 class SecretBox:
@@ -88,3 +89,22 @@ class Settings:
             backends[name] = data
         await self._put(LLM_KEY, {"backends": backends, "routes": dict(cfg.routes),
                                   "context_tokens": cfg.context_tokens})
+
+    # ── Telegram ──
+    def telegram(self) -> dict[str, Any]:
+        """``{"token": …, "allowed_chats": [...], "owners": [...]}`` (jeton déchiffré)."""
+        data = dict(self._get(TELEGRAM_KEY) or {})
+        return {"token": self.box.open(data.get("token_sealed", "")),
+                "allowed_chats": [int(c) for c in data.get("allowed_chats") or []],
+                "owners": [int(o) for o in data.get("owners") or []]}
+
+    async def save_telegram(self, *, token: str | None = None, allowed_chats: list[int] | None = None,
+                            owners: list[int] | None = None) -> None:
+        data = dict(self._get(TELEGRAM_KEY) or {})
+        if token is not None:
+            data["token_sealed"] = self.box.seal(token.strip())
+        if allowed_chats is not None:
+            data["allowed_chats"] = sorted({int(c) for c in allowed_chats})
+        if owners is not None:
+            data["owners"] = sorted({int(o) for o in owners})
+        await self._put(TELEGRAM_KEY, data)

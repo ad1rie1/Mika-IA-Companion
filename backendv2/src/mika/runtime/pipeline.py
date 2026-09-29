@@ -161,7 +161,7 @@ class EpisodeRunner:
                 )
                 mind.track(eid, guard, start.root, eid, on_supersede)
                 attrs: dict[str, Any] = {"channel": req.channel or audience.channel, "reply_to": req.reply_to,
-                                         "reason": req.reason}
+                                         "reason": req.reason, "room": req.room or audience.room}
                 if req.selected is not None:
                     attrs["reasons"] = tuple(sorted({p[1] for p in req.selected.parts}))
                     attrs["args"] = req.selected.args

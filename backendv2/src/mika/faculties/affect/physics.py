@@ -17,6 +17,7 @@ from dataclasses import dataclass, field, replace
 from zoneinfo import ZoneInfo
 
 from mika.faculties.affect.params import AffectParams
+from mika.kernel.clock import DAY, local, next_local
 from mika.kernel.dynamics import propagate, propagate_toward
 from mika.vocab import affect as A
 from mika.vocab import circadian
@@ -90,23 +91,86 @@ def new_stance(t: int, p: AffectParams, cw: Clockwork) -> Stance:
     return Stance(Osc(common_home(t, p, cw), ZERO, t))
 
 
+def _heal_segments(anchor: Vec3, t0: int, t1: int, p: AffectParams, cw: Clockwork) -> Vec3:
+    for a, b in _segments(t0, t1, cw):
+        anchor = A.lerp(anchor, common_home(a, p, cw), 1.0 - math.exp(-p.heal_rate * (b - a) / 1e6))
+    return anchor
+
+
+def _day_map(start: int, end: int, p: AffectParams, cw: Clockwork) -> tuple[float, Vec3]:
+    """Une journée de guérison comme application affine : ``a ↦ k·a + c``
+    (composée de ses segments de phase)."""
+    k, c = 1.0, (0.0, 0.0, 0.0)
+    for a, b in _segments(start, end, cw):
+        w = 1.0 - math.exp(-p.heal_rate * (b - a) / 1e6)
+        k, c = k * (1.0 - w), A.add(A.scale(c, 1.0 - w), A.scale(common_home(a, p, cw), w))
+    return k, c
+
+
+def _plain_days(start: int, end: int, tz: ZoneInfo) -> int:
+    """Combien de jours de 24 h à partir de minuit ``start`` avant ``end`` ou
+    le prochain changement d'heure. Deux changements d'heure sont séparés de
+    cinq mois au moins : au-delà de quatre mois, on avance prudemment."""
+    remaining = (end - start) // DAY
+    offset = local(start, tz).utcoffset()
+    if remaining > 120:
+        n = 0
+        while n < remaining and local(start + (n + 1) * DAY, tz).utcoffset() == offset:
+            n += 1
+        return n
+    lo, hi = 0, remaining  # le plus grand n dont le minuit a encore le même décalage
+    if local(start + hi * DAY, tz).utcoffset() == offset:
+        return hi
+    while lo < hi - 1:
+        mid = (lo + hi) // 2
+        if local(start + mid * DAY, tz).utcoffset() == offset:
+            lo = mid
+        else:
+            hi = mid
+    return lo
+
+
 def heal(anchor: Vec3 | None, t0: int, t1: int, p: AffectParams, cw: Clockwork) -> Vec3 | None:
+    """L'ancre ramenée vers le repos commun, phase par phase. Sur plusieurs
+    jours, les journées de 24 h se ressemblent toutes : leur composition est
+    calculée une fois puis élevée à la puissance (forme close, O(1) en jours)."""
     if anchor is None or t1 <= t0:
         return anchor
     if (t1 - t0) > HEALED_HALF_LIVES * p.anchor_half_life_us:
         return None
-    for a, b in _segments(t0, t1, cw):
-        base = common_home(a, p, cw)
-        anchor = A.lerp(anchor, base, 1.0 - math.exp(-p.heal_rate * (b - a) / 1e6))
-    return anchor
+    if t1 - t0 <= 2 * DAY:
+        return _heal_segments(anchor, t0, t1, p, cw)
+    midnight = next_local(t0, 0, 0, cw.tz)
+    anchor = _heal_segments(anchor, t0, midnight, p, cw)
+    cursor = midnight
+    while cursor < t1:
+        nxt = next_local(cursor, 0, 0, cw.tz)
+        if nxt > t1:
+            break
+        if nxt - cursor != DAY:  # un jour de changement d'heure : exactement
+            anchor = _heal_segments(anchor, cursor, nxt, p, cw)
+            cursor = nxt
+            continue
+        # une suite de jours de 24 h : jusqu'au prochain changement d'heure (ou à t1)
+        n = _plain_days(cursor, t1, cw.tz)
+        probe = cursor + n * DAY
+        k, c = _day_map(cursor, cursor + DAY, p, cw)
+        kn = k ** n
+        anchor = A.add(A.scale(anchor, kn), A.scale(c, (1.0 - kn) / (1.0 - k) if k < 1.0 else float(n)))
+        cursor = probe
+    return _heal_segments(anchor, cursor, t1, p, cw)
 
 
 def advance_stance(st: Stance, t: int, p: AffectParams, cw: Clockwork) -> Stance:
     if t <= st.osc.at:
         return st
+    settled = (t - st.osc.at) / 1e6 > SETTLED_TAUS * p.person.tau_s
+    if settled:
+        # au repos : seule l'ancre a bougé (forme close sur plusieurs jours)
+        anchor = heal(st.anchor, st.osc.at, t, p, cw)
+        return replace(st, osc=Osc(person_home(anchor, common_home(t, p, cw), p), ZERO, t), anchor=anchor)
     oscillator = p.person.oscillator()
     pos, vel, anchor = st.osc.position, st.osc.velocity, st.anchor
-    settled = (t - st.osc.at) / 1e6 > SETTLED_TAUS * p.person.tau_s
     for a, b in _segments(st.osc.at, t, cw):
         base = common_home(a, p, cw)
         dt = (b - a) / 1e6

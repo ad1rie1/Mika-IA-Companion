@@ -15,26 +15,16 @@ import asyncio
 import concurrent.futures
 import hashlib
 import math
-import re
-import unicodedata
 from collections.abc import Sequence
 from typing import Any
 
-_WORD = re.compile(r"[a-z0-9]+")
-#: Les mots qui ne disent rien du sujet (repliés, sans accents) : sans eux,
-#: « tu te souviens de ce que je t'ai dit pour samedi » ressemble surtout à
-#: toute phrase contenant « dit » ou « pour ».
-STOPWORDS = frozenset("""
-les des une uns aux que qui quoi dont pour par sur sous dans avec sans chez entre vers mais donc car pas plus moins
-tres trop bien tout tous toute toutes cette ces son sa ses mon ma mes ton ta tes leur leurs notre nos votre vos
-est sont suis etais etait ete etre avoir avais avait ont fait faire dit dire dis vais vas va aller peu peut peux
-elle elles lui ils nous vous moi toi ceux celle cela ceci comme quand alors aussi encore deja meme autre autres
-quelque chose rien oui non bon bah ben hein ouais cest jai tai quil quelle souviens rappelles rappelle sais
-""".split())
+from mika.vocab.words import STOPWORDS as _STOPWORDS
+from mika.vocab.words import WORD as _WORD
+from mika.vocab.words import fold as _fold
 
-
-def _fold(text: str) -> str:
-    return "".join(c for c in unicodedata.normalize("NFKD", text.lower()) if not unicodedata.combining(c))
+#: Les mots qui ne disent rien du sujet : sans eux, « tu te souviens de ce que
+#: je t'ai dit pour samedi » ressemble surtout à toute phrase contenant « dit ».
+STOPWORDS = _STOPWORDS
 
 
 class HashEmbedder:
