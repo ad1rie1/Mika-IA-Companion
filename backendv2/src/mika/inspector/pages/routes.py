@@ -12,9 +12,9 @@ from starlette.responses import RedirectResponse, Response
 from starlette.routing import Route
 
 from mika.inspector import render
-from mika.inspector.catalog import Builtin, Destination, Panel, destinations
-from mika.inspector.formview import action_view, slot_key
-from mika.inspector.pages import reglages
+from mika.inspector.catalog import Builtin, Destination, Panel, builtin_keys, destinations
+from mika.inspector.formview import action_view, slot_key, visible_fields
+from mika.inspector.pages import accounts, reglages
 from mika.inspector.pages.journal import EPISODE_TABS, episode_head, episode_tab, event_blocks
 from mika.inspector.pages.subjects import Subjects
 from mika.inspector.ui import PREFIX, SESSION_COOKIE, UI, secure
@@ -30,8 +30,23 @@ MOVED = {"chronologie": "systeme/chronologie", "etat": "systeme/etat", "contribu
          "comptes": "reglages/comptes"}
 
 
-#: les anciens onglets qui ont pris leur propre place
-MOVED_TABS = {("reglages", "apps"): "apps", ("sens", "courrier"): "courrier/reception"}
+#: les anciens onglets qui ont pris leur propre place (la requête suit)
+MOVED_TABS = {("reglages", "apps"): "apps", ("sens", "courrier"): "courrier/reception",
+              ("reglages", "modeles"): "reglages/fournisseurs", ("reglages", "personnalite"): "reglages/identite",
+              ("reglages", "canaux"): "reglages/telegram", ("reglages", "sens"): "reglages/boites",
+              ("reglages", "parametres"): "reglages/comportement"}
+
+
+#: une action à plus de champs s'ouvre sur sa propre page, pas en panneau
+PANEL_FIELDS_MAX = 2
+#: un champ « sujet » propose au plus tant d'objets connus
+SUBJECT_CHOICES = 300
+
+#: au-delà, les rubriques d'un sous-menu qui ne contiennent pas la page se replient
+SUBMENU_OPEN_MAX = 18
+
+#: les anciens onglets de réglages qui recevaient des enregistrements
+LEGACY_POSTS = {("modeles", ""), ("personnalite", ""), ("canaux", ""), ("sens", "")}
 
 
 def safe_back(target: str) -> str:
@@ -63,11 +78,14 @@ class Pages:
     # ── utilitaires ──
     def tabs_of(self, d: Destination) -> list[tuple[str, str, Builtin | InspectSpec]]:
         out: list[tuple[str, str, Builtin | InspectSpec]] = []
-        for key in d.builtin:
+        for key in builtin_keys(d, self.ui.builtins):
             b = self.ui.builtins[key]
             out.append((b.slug, b.title, b))
         for v in self.ui.inspection.in_section(d.key):
             out.append((v.name, v.title, v))
+        if d.order:
+            rank = {name: i for i, name in enumerate(d.order)}
+            out.sort(key=lambda t: rank.get(t[0], len(rank)))
         return out
 
     def tab_badge(self, item: Builtin | InspectSpec) -> int:
@@ -109,7 +127,8 @@ class Pages:
                         initial = dict(b.initial)
                         dynamic = dynamic_fields(self.ui.kernel, spec, subject, initial) if spec.fields else None
                         out[slot_key(b.action, b.initial)] = action_view(spec, csrf=csrf, back=back, subject=subject,
-                                                                          initial=initial, dynamic=dynamic)
+                                                                          initial=initial, dynamic=dynamic,
+                                                                          subjects=self.subject_choices)
                 elif isinstance(b, Grid | Section | Disclosure):
                     walk(b.items)
                 elif isinstance(b, Table):
@@ -118,12 +137,51 @@ class Pages:
         walk(blocks)
         return out
 
+    def subject_choices(self, kind: str) -> list[tuple[str, str]]:
+        """Les objets connus d'un type (une personne, un but) : ce qu'un champ « sujet » propose."""
+        return [(f.key, f"{f.title} — {f.subtitle}" if f.subtitle else f.title)
+                for f in self.ui.inspection.search(kind, "", SUBJECT_CHOICES)]
+
     def head_actions(self, request: Request, *, section: str = "", kind: str = "", subject: str = "") -> list[Any]:
+        """Les actions d'une page : une action courte s'ouvre en panneau ; une action à plus de deux champs a
+        sa propre page (``/action/<clé>``), qui ramène ici."""
         specs = self.ui.inspection.actions_for(section=section) if section else \
             self.ui.inspection.actions_for(subject=kind)
         csrf, back = self.ui.csrf(request), self.back(request)
-        return [action_view(a, csrf=csrf, back=back, subject=subject) for a in specs
-                if offered(self.ui.kernel, a, subject)]
+        out = []
+        for a in specs:
+            if not offered(self.ui.kernel, a, subject):
+                continue
+            view = action_view(a, csrf=csrf, back=back, subject=subject, subjects=self.subject_choices)
+            if visible_fields(view) > PANEL_FIELDS_MAX:
+                view["page"] = f"{PREFIX}/action/{quote(a.key, safe='')}?" + urlencode(
+                    {"retour": back, **({"sujet": subject} if subject else {})})
+            out.append(view)
+        return out
+
+    async def action_page(self, request: Request) -> Response:
+        """Une action sur sa propre page : son formulaire en entier, chaque champ expliqué."""
+        key = request.path_params["key"]
+        spec = self.ui.inspection.action(key)
+        subject = request.query_params.get("sujet", "")[:300]
+        back = safe_back(request.query_params.get("retour", ""))
+        if spec is None:
+            return self.render_page(request, title="Action inconnue", active="", status=404,
+                                    blocks=[Note("Cette action n'existe pas.", "warn")])
+        if not offered(self.ui.kernel, spec, subject):
+            return self.render_page(request, title=spec.title, active="", status=409, crumbs=[("Retour", back)],
+                                    blocks=[Note("Cette action n'est pas possible maintenant (l'objet a changé ?).",
+                                                 "warn")])
+        dynamic = dynamic_fields(self.ui.kernel, spec, subject, {}) if spec.fields else None
+        form = action_view(spec, csrf=self.ui.csrf(request), back=back, subject=subject, dynamic=dynamic,
+                           subjects=self.subject_choices)
+        form["description"] = ""  # dite en sous-titre de la page
+        home = self.dests.get(spec.section) if spec.section else next(
+            (d for d in self.dests.values() if spec.subject and spec.subject in d.subjects), None)
+        crumbs = ([(home.label, dest_url(home.key))] if home else []) + [("Retour", back)]
+        return self.render_page(request, title=spec.title, heading=spec.title, subtitle=spec.description,
+                                active=home.key if home else "", crumbs=crumbs, blocks=[],
+                                panel=Panel("_action_page.html", {"form": form}))
 
     def render_page(self, request: Request, *, title: str, active: str, blocks: Sequence[Any],
                     filters: Sequence[Param] = (), panel: Panel | None = None, keep: Sequence[tuple[str, str]] = (),
@@ -149,7 +207,14 @@ class Pages:
         key = key or request.path_params.get("key", "accueil")
         moved_tab = MOVED_TABS.get((key, request.path_params.get("tab", "")))
         if moved_tab and not tab:
-            return RedirectResponse(f"{PREFIX}/{moved_tab}", status_code=301)
+            query = dict(request.query_params)
+            owner = query.pop("faculte", "")
+            if moved_tab == "reglages/comportement" and owner:
+                moved_tab = f"reglages/comportement-{owner}"
+            if moved_tab == "reglages/fournisseurs" and query.get("section") not in (None, "modeles"):
+                query.pop("section", None)
+            target = f"{PREFIX}/{moved_tab}" + ("?" + urlencode(query) if query else "")
+            return RedirectResponse(target, status_code=301)
         if key in MOVED and "tab" not in request.path_params and not tab:
             return RedirectResponse(f"{PREFIX}/{MOVED[key]}", status_code=301)
         d = self.dests.get(key)
@@ -163,8 +228,10 @@ class Pages:
                 got = await self.produce(item, request)
                 if "response" in got:
                     continue
-                blocks.append(Section(title, tuple(got["blocks"])))
-            return self.render_page(request, title=d.label, active=d.key, blocks=blocks, subtitle=d.description)
+                blocks.append(Section(title, tuple(got["blocks"]),
+                                      item.description if isinstance(item, Builtin) else ""))
+            return self.render_page(request, title=d.label, active=d.key, blocks=blocks, subtitle=d.description,
+                                    head_actions=self.head_actions(request, section=d.key))
         slug = tab or request.path_params.get("tab", "") or (tabs[0][0] if tabs else "")
         current = next((t for t in tabs if t[0] == slug), None)
         if current is None:
@@ -177,7 +244,26 @@ class Pages:
             return got["response"]
         tab_list = [{"title": t, "href": (b.href if isinstance(b, Builtin) and b.href else f"{dest_url(d.key)}/{s}"
                                           if d.key != "accueil" else f"{PREFIX}/accueil/{s}"),
-                     "on": s == slug, "badge": self.tab_badge(b)} for s, t, b in tabs]
+                     "on": s == slug, "badge": self.tab_badge(b),
+                     "group": b.group if isinstance(b, Builtin) else ""} for s, t, b in tabs]
+        if d.layout == "menu":
+            # un sous-menu rangé par rubrique : la page porte le titre de la sous-page
+            submenu: list[dict[str, Any]] = []
+            for t in tab_list:
+                if not submenu or submenu[-1]["title"] != t["group"]:
+                    submenu.append({"title": t["group"], "items": []})
+                submenu[-1]["items"].append(t)
+            group = next((t["group"] for t in tab_list if t["on"]), "")
+            long_menu = len(tab_list) > SUBMENU_OPEN_MAX
+            for g in submenu:
+                g["open"] = not long_menu or any(t["on"] for t in g["items"]) or not g["title"]
+            crumbs = [(d.label, dest_url(d.key))] + ([(group, "")] if group else []) + list(got.get("crumbs") or [])
+            description = item.description if isinstance(item, Builtin) else getattr(item, "description", "")
+            return self.render_page(request, title=f"{current[1]} · {d.label}", heading=current[1], active=d.key,
+                                    subtitle=description or "", submenu=submenu, blocks=got["blocks"],
+                                    head_actions=self.head_actions(request, section=d.key),
+                                    filters=got.get("filters") or (), panel=got.get("panel"),
+                                    messages=got.get("messages") or [], crumbs=crumbs, status=status)
         return self.render_page(request, title=f"{current[1]} · {d.label}", heading=d.label, active=d.key,
                                 subtitle=d.description, tabs=tab_list, blocks=got["blocks"],
                                 head_actions=self.head_actions(request, section=d.key),
@@ -282,7 +368,7 @@ class Pages:
             dynamic = dynamic_fields(self.ui.kernel, spec, subject, fixed) if spec.fields else None
             form = action_view(spec, csrf=self.ui.csrf(request), back=back, subject=subject, initial=fixed,
                                values={k: v for k, v in single.items() if not k.startswith("_") and k not in fixed},
-                               errors=outcome.errors, dynamic=dynamic)
+                               errors=outcome.errors, dynamic=dynamic, subjects=self.subject_choices)
             return self.render_page(request, title=spec.title, active="", status=400, crumbs=[("Retour", back)],
                                     blocks=[], head_actions=[], messages=[("danger", outcome.message)],
                                     panel=Panel("_action_page.html", {"form": form}))
@@ -315,18 +401,32 @@ class Pages:
         return RedirectResponse(f"{target}?fait={outcome}", status_code=303)
 
     async def settings_post(self, request: Request) -> Response:
-        """Enregistrer une section de réglages, ou des surcharges de paramètres."""
+        """Enregistrer une page de configuration : une section de réglages, les
+        paramètres d'une faculté, un compte."""
         tab = request.path_params["tab"]
-        if tab == "parametres":
+        if tab == "comptes":
+            response, state, status = await accounts.post(self.ui, request)
+            if response is not None:
+                return response
+            produced = await accounts.page(self.ui, request, state)
+            return await self.destination(request, key="reglages", tab=tab, produced=produced, status=status)
+        if tab in ("comportement", "parametres") or tab.startswith(reglages.FACULTY_PAGE):
             response, state, status = await reglages.parametres_post(self.ui, request)
             if response is not None:
                 return response
-            got = await reglages.parametres(self.ui, request, state)
-            produced = got if isinstance(got, dict) else {"blocks": list(got),
-                                                          "messages": list(state.get("messages", []))}
-            return await self.destination(request, key="reglages", tab=tab, produced=produced, status=status)
+            owner = state.get("owner", "")
+            target = f"{reglages.FACULTY_PAGE}{owner}" if owner and self.ui.builtins.get(
+                f"reglages.{reglages.FACULTY_PAGE}{owner}") else "comportement"
+            got = await reglages.faculty_page(self.ui, request, owner, state) if owner else \
+                {"blocks": reglages.overview(self.ui), "messages": list(state.get("messages", []))}
+            return await self.destination(request, key="reglages", tab=target, produced=got, status=status)
         forms_ = self.ui.settings_forms
-        if forms_ is None or tab not in forms_.tabs:
+        if forms_ is not None and tab not in forms_.pages and (tab, "") in LEGACY_POSTS:
+            # une ancienne adresse d'enregistrement (un onglet par section) : la page qui montre ce champ
+            data = await request.form()
+            path = str(data.get("_enregistrement") or data.get("_supprimer") or data.get("_champs") or "")
+            tab = forms_.page_for(str(data.get("_section") or ""), path) or tab
+        if forms_ is None or tab not in forms_.pages:
             return self.render_page(request, title="Réglage inconnu", active="reglages", status=404,
                                     blocks=[Note("Cette page de réglages n'existe pas.", "warn")])
         response, states, status = await forms_.post(self.ui, request, tab)
@@ -346,6 +446,7 @@ class Pages:
             Route(PREFIX + "/_vitals", g(self.vitals)),
             Route(PREFIX + "/approbations", g(self.approve), methods=["POST"]),
             Route(PREFIX + "/action/{key:str}", g(self.act), methods=["POST"]),
+            Route(PREFIX + "/action/{key:str}", g(self.action_page), methods=["GET"]),
             Route(PREFIX + "/episode/{corr:str}", g(self.episode)),
             Route(PREFIX + "/evenement/{seq:str}", g(self.event)),
             Route(PREFIX + "/facultes/{owner:str}/{name:str}", g(self.view)),

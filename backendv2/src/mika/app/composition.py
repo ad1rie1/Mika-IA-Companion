@@ -25,6 +25,7 @@ from mika.faculties.goals import GOALS, step_brief
 from mika.faculties.identity import IDENTITY, audience_for
 from mika.faculties.memory import MEMORY
 from mika.faculties.needs import NEEDS
+from mika.faculties.others import OTHERS
 from mika.faculties.presence import PRESENCE
 from mika.faculties.self import SELF, load, persona_for
 from mika.faculties.social import SOCIAL
@@ -50,8 +51,8 @@ log = logging.getLogger("mika.composition")
 
 def faculties() -> list[Faculty[Any, Any]]:
     """Les facultés de Mika, puis ses plugins (M7)."""
-    return [PRESENCE, IDENTITY, TRANSCRIPT, MEMORY, BODY, AFFECT, NEEDS, ATTENTION, SELF, EXPRESSION, SOCIAL,
-            AGENCY, GOALS, EMAIL, RSS, CAMERA, FORGE, SENSORS]
+    return [PRESENCE, IDENTITY, TRANSCRIPT, MEMORY, BODY, AFFECT, NEEDS, OTHERS, ATTENTION, SELF, EXPRESSION,
+            SOCIAL, AGENCY, GOALS, EMAIL, RSS, CAMERA, FORGE, SENSORS]
 
 
 def _reply_guard(frame: Frame, target: str | None, audience: Audience | None) -> Guard | None:

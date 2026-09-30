@@ -20,7 +20,7 @@ import heapq
 import itertools
 import logging
 from collections import deque
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -85,6 +85,10 @@ class PrioritySlots:
     @property
     def busy(self) -> int:
         return self._used
+
+    @property
+    def waiting(self) -> int:
+        return sum(1 for _p, _c, fut in self._waiters if not fut.done())
 
     async def acquire(self, priority: int, *, preempt: bool = False) -> int:
         if self._used < self.n and not self._waiters:
@@ -165,6 +169,32 @@ class Gateway:
 
     def is_voice(self, role: str) -> bool:
         return role in self.voice_roles
+
+    def status(self) -> list[dict[str, Any]]:
+        """L'état vivant de chaque fournisseur : créneaux (total, occupés, en attente),
+        préemption, repli, et ce que le fournisseur dit de lui (le quota d'un abonnement)."""
+        out = []
+        for name, backend in sorted(self.backends.items()):
+            slots = self._slots[name]
+            own = getattr(backend, "status", None)
+            try:
+                extra = own() if callable(own) else {}
+            except Exception:  # noqa: BLE001 — un état illisible ne casse pas la console
+                extra = {}
+            out.append({"name": name, "slots": slots.n, "busy": slots.busy, "waiting": slots.waiting,
+                        "preempt": name in self.preempt, "fallback": self.backend_fallbacks.get(name, ""),
+                        "extra": extra if isinstance(extra, dict) else {}})
+        return out
+
+    def resolution(self, roles: Iterable[str]) -> dict[str, str]:
+        """Pour chaque rôle, le fournisseur qui le sert vraiment (replis compris) ; « » : aucun."""
+        out = {}
+        for role in roles:
+            try:
+                out[role] = self.resolve(role)
+            except UnconfiguredRole:
+                out[role] = ""
+        return out
 
     def resolve(self, role: str) -> str:
         seen = set()

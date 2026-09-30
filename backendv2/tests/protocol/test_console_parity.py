@@ -48,14 +48,14 @@ PARITY: dict[str, tuple[str, str]] = {
     "Modules › Forge": ("/inspecteur/apps", "Apps forgées"),
     "Configuration › IA (fournisseurs, modèles, rôles)": ("/inspecteur/reglages/modeles", "Fournisseurs"),
     "Configuration › Personnalité": ("/inspecteur/reglages/personnalite", "Personnage"),
-    "Configuration › Tempérament": ("/inspecteur/reglages/personnalite", "Ce que pilote chaque curseur"),
+    "Configuration › Tempérament": ("/inspecteur/reglages/temperament", "Ce que pilote chaque curseur"),
     "Configuration › Réglages internes": ("/inspecteur/reglages/parametres", "Les facultés"),
     "Configuration › Canaux (Telegram)": ("/inspecteur/reglages/canaux", "Telegram"),
     "Configuration › Comptes": ("/inspecteur/reglages/comptes", "Comptes"),
     "Système › Santé": ("/inspecteur/systeme/sante", "Santé"),
-    "Système › Quotas et cache": ("/inspecteur/systeme/appels", "Appels"),
+    "Système › Quotas et cache": ("/inspecteur/systeme/appels", "Coûts et appels"),
     "Système › Consolidation": ("/inspecteur/memoire/consolidation", "Consolidation"),
-    "Système › Journal de configuration": ("/inspecteur/reglages/journal", "Journal de configuration"),
+    "Système › Journal de configuration": ("/inspecteur/reglages/journal", "Journal des modifications"),
 }
 
 

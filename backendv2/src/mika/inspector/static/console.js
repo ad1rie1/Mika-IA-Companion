@@ -69,17 +69,75 @@
       });
     });
 
-    // Champs conditionnels : data-only="chemin=valeur1|valeur2".
+    // Champs conditionnels : data-only="chemin=v1|v2;chemin2=v" (toutes), alternatives « || » (l'une).
+    function valueOf(form, name) {
+      var input = (form || document).querySelector('[name="' + name + '"]');
+      if (!input) return null;
+      if (input.type === "checkbox") return input.checked ? "true" : "false";
+      return input.value;
+    }
+    function holds(form, cond) {
+      return cond.split(";").every(function (part) {
+        var i = part.indexOf("=");
+        if (i < 0) return true;
+        var v = valueOf(form, part.slice(0, i));
+        return v === null || part.slice(i + 1).split("|").indexOf(v) !== -1;
+      });
+    }
     function syncOnly() {
       document.querySelectorAll("[data-only]").forEach(function (el) {
-        var spec = el.getAttribute("data-only").split("=");
-        var input = document.querySelector('[name="' + spec[0] + '"]');
-        if (!input) return;
-        el.hidden = spec[1].split("|").indexOf(input.value) === -1;
+        var form = el.closest("form");
+        el.hidden = !el.getAttribute("data-only").split("||").some(function (alt) { return holds(form, alt); });
       });
     }
     document.querySelectorAll("select, input").forEach(function (i) { i.addEventListener("change", syncOnly); });
     syncOnly();
+
+    // Tables : une ligne entière mène à sa fiche ; le détail se déplie par un chevron.
+    document.querySelectorAll("table.tbl tr[data-href]").forEach(function (tr) {
+      tr.addEventListener("click", function (ev) {
+        if (ev.target.closest("a, button, input, select, textarea, label, summary, details, form")) return;
+        if (window.getSelection && String(window.getSelection()).length) return;
+        var url = tr.getAttribute("data-href");
+        if (ev.ctrlKey || ev.metaKey || ev.button === 1) window.open(url, "_blank"); else window.location = url;
+      });
+    });
+    document.querySelectorAll("table.tbl tr.detail").forEach(function (detail) {
+      var row = detail.previousElementSibling;
+      var first = row && row.querySelector("td");
+      var inner = detail.querySelector("details.row-detail");
+      if (!first || !inner) return;
+      inner.open = true;
+      detail.classList.add("js-folded");
+      var btn = document.createElement("button");
+      btn.type = "button"; btn.className = "row-toggle"; btn.textContent = "▸";
+      btn.setAttribute("aria-expanded", "false"); btn.setAttribute("aria-label", "Voir les détails");
+      btn.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        var open = detail.classList.toggle("js-folded") === false;
+        btn.setAttribute("aria-expanded", String(open));
+      });
+      first.insertBefore(btn, first.firstChild);
+      var summary = inner.querySelector("summary");
+      if (summary) summary.hidden = true;
+    });
+
+    // Actions d'en-tête : un seul panneau ouvert à la fois ; Échap ou un clic ailleurs le ferme.
+    var pops = document.querySelectorAll("details[data-exclusive]");
+    pops.forEach(function (d) {
+      d.addEventListener("toggle", function () {
+        if (!d.open) return;
+        pops.forEach(function (o) { if (o !== d) o.open = false; });
+        var first = d.querySelector("input:not([type=hidden]), select, textarea");
+        if (first) first.focus();
+      });
+    });
+    document.addEventListener("click", function (ev) {
+      pops.forEach(function (d) { if (d.open && !d.contains(ev.target)) d.open = false; });
+    });
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape") pops.forEach(function (d) { d.open = false; });
+    });
 
     // Curseurs : la valeur à côté.
     document.querySelectorAll("input[type=range][data-out]").forEach(function (r) {

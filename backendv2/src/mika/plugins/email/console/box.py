@@ -16,6 +16,7 @@ from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     ActionSlot,
     Block,
+    Cell,
     Column,
     Disclosure,
     Fields,
@@ -36,7 +37,6 @@ from mika.kernel.inspect import (
 from mika.plugins.email import EMAIL, KEEP, EmailParams, EmailState, name_of, params_of
 from mika.plugins.email.console.common import (
     CACHE_SHOWN,
-    NOTICED_SHOWN,
     PAGE,
     SECTION,
     TODAY_MAX,
@@ -60,7 +60,22 @@ STATES = (("non_lus", "non lus"), ("importants", "importants, non lus"), ("suivi
 INBOX = "INBOX"
 
 
-def _stats(s: EmailState, frame: Frame, ctx: InspectContext, p: EmailParams, shown: int) -> Stats:
+def _in_box(port: Any, keys: list[str], folder: str) -> int:
+    """Combien de mails le cache de la boîte garde dans ce dossier (« * » : tous ses dossiers),
+    selon les comptes que tient l'adaptateur (sans rien relire)."""
+    wanted = None if folder == "*" else (folder or INBOX)
+    return sum(f.total for key in keys for f in port.folders(key) if wanted is None or f.name == wanted)
+
+
+def _in_box_value(total: int, read: int) -> Cell:
+    """Le vrai total du dossier ; s'il n'est pas connu (moins que ce qui a été relu), ce qui a été
+    relu — « 500+ » quand la relecture a buté sur sa borne."""
+    if total >= read:
+        return total
+    return f"{read}+" if read >= CACHE_SHOWN else read
+
+
+def _stats(s: EmailState, frame: Frame, ctx: InspectContext, p: EmailParams, in_box: Cell = 0) -> Stats:
     waiting = frame.get(c.UNREAD)
     urgent = sum(1 for m in waiting if m.importance >= p.mention_from)
     today = since(ctx, c.NOTICED, day_start(frame), TODAY_MAX)
@@ -74,7 +89,7 @@ def _stats(s: EmailState, frame: Frame, ctx: InspectContext, p: EmailParams, sho
              href=Ref("local", f"/inspecteur/{SECTION}/brouillons", "") if drafts else None),
         Stat("dernier mail remarqué", When(last) if last else "jamais",
              sub=f"relève toutes les {p.poll_every_us // MINUTE} min, éveillée"),
-        Stat("dans la boîte", f"{shown}+" if shown >= CACHE_SHOWN else shown, sub="gardés par le relevé"),
+        Stat("dans la boîte", in_box, sub="gardés par le relevé"),
     ))
 
 
@@ -127,7 +142,8 @@ def _quick(m: Any, seen: Any) -> tuple[Block, ...]:
 
 
 def _list(s: EmailState, ctx: InspectContext, p: EmailParams, port: Any, account: str, folder: str,
-          several: bool) -> Table:
+          several: bool, total: int) -> tuple[Table, int]:
+    """La liste du dossier, et combien de mails ont été relus du cache pour la faire."""
     cached = port.cached(CACHE_SHOWN, account=account, folder="" if folder == "*" else (folder or INBOX))
     state, query, sender = ctx.value("etat") or "", fold(ctx.value("q") or ""), fold(ctx.value("de") or "")
     kept = []
@@ -162,14 +178,20 @@ def _list(s: EmailState, ctx: InspectContext, p: EmailParams, port: Any, account
         where = next((f.label for f in port.folders(account) if f.name == (folder or INBOX)), folder or "Réception")
     else:
         where = "Réception" if folder in ("", INBOX) else folder
+    if len(cached) < CACHE_SHOWN:
+        caption = "« voir les détails » : lu/non lu, suivre, archiver, corbeille."
+    elif total > len(cached):
+        caption = f"Seuls les {CACHE_SHOWN} plus récents des {total} mails du cache sont relus ici (filtres, pages)."
+    else:
+        caption = f"Seuls les {CACHE_SHOWN} mails les plus récents du cache sont relus ici (filtres, pages)."
     return Table(tuple(columns), tuple(rows), title=f"{where} ({len(kept)})", pager=pager,
                  empty="aucun mail ne correspond à ces filtres" if filtered else "rien dans ce dossier",
-                 caption=f"Seuls les {CACHE_SHOWN} mails les plus récents du cache sont relus ici."
-                 if len(cached) >= CACHE_SHOWN else "« voir les détails » : lu/non lu, suivre, archiver, corbeille.")
+                 caption=caption), len(cached)
 
 
 def _noticed(s: EmailState, ctx: InspectContext, p: EmailParams) -> Table:
-    noticed = sorted(s.mails.items(), key=lambda kv: -kv[1].seq)[:NOTICED_SHOWN]
+    noticed, pager = paginate(sorted(s.mails.items(), key=lambda kv: -kv[1].seq),
+                              ctx.pager("page_remarques", size=PAGE))
     texts = ctx.store.content([m.summary_ref for _, m in noticed if m.summary_ref])
     rows = tuple(Row((Text(clip(name_of(m.sender), 60)), When(m.at), Text(texts.get(m.summary_ref, "—"), clamp=200),
                       pertinence(m), "oui" if m.needs_reply else "non", state_badge(m, None, p),
@@ -178,9 +200,8 @@ def _noticed(s: EmailState, ctx: InspectContext, p: EmailParams) -> Table:
                  for k, m in noticed)
     return Table(("de", Column("remarqué", "fit"), "ce qu'elle en a retenu", Column("pertinence", "fit"),
                   Column("réponse attendue", "fit"), Column("état", "fit"), Column("journal", "fit")), rows,
-                 title="Ce qu'elle a remarqué", empty="elle n'a encore remarqué aucun mail",
-                 caption=f"Elle garde les {KEEP} derniers mails remarqués ; ici, les {NOTICED_SHOWN} plus récents."
-                 if len(s.mails) > NOTICED_SHOWN else "")
+                 title="Ce qu'elle a remarqué", empty="elle n'a encore remarqué aucun mail", pager=pager,
+                 caption=f"Elle garde les {KEEP} derniers mails remarqués, du plus récent au plus ancien.")
 
 
 @EMAIL.inspect("reception", title="Boîte", section=SECTION, order=10, badge=fresh_important,
@@ -194,10 +215,10 @@ def _box(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     p = params_of(frame)
     blocks: list[Block] = [box_note(port, p)]
     if port is None:
-        return [*blocks, _stats(s, frame, ctx, p, 0), _noticed(s, ctx, p)]
+        return [*blocks, _stats(s, frame, ctx, p), _noticed(s, ctx, p)]
     accounts = port.accounts()
     if not accounts:
-        return [*blocks, Fields((("pour commencer", add_account()),)), _stats(s, frame, ctx, p, 0),
+        return [*blocks, Fields((("pour commencer", add_account()),)), _stats(s, frame, ctx, p),
                 _noticed(s, ctx, p)]
     account = ctx.value("compte") or ""
     if account and account not in {a.key for a in accounts}:
@@ -205,9 +226,10 @@ def _box(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
         account = ""
     folder = ctx.value("dossier") or ""
     key = account or (accounts[0].key if len(accounts) == 1 else "")
+    total = _in_box(port, [key] if key else [a.key for a in accounts], folder)
+    table, read = _list(s, ctx, p, port, key, folder, len(accounts) > 1, total)
+    blocks.append(_stats(s, frame, ctx, p, _in_box_value(total, read)))
     blocks += _navigation(port, account, folder)
-    table = _list(s, ctx, p, port, key, folder, len(accounts) > 1)
-    blocks.append(_stats(s, frame, ctx, p, len(table.rows)))
     blocks.append(table)
     known = {f.name: f for f in port.folders(key)} if key else {}
     chosen = known.get(folder or INBOX)
@@ -217,7 +239,9 @@ def _box(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     if key and folder != "*":
         blocks.append(ActionSlot("email.relire", (("compte", key), ("dossier", folder or INBOX),
                                                   ("_bouton", "Relire ce dossier")), compact=True))
-    blocks.append(Disclosure("Ce qu'elle a remarqué", (_noticed(s, ctx, p),)))
+    # replié, sauf quand on y tourne les pages
+    blocks.append(Disclosure("Ce qu'elle a remarqué", (_noticed(s, ctx, p),),
+                             open=ctx.int_param("page_remarques", 1) > 1))
     blocks.append(Disclosure("Comment elle relève", (Fields((
         ("cadence", f"toutes les {p.poll_every_us // MINUTE} min, quand elle est éveillée"),
         ("à chaque relevé", f"{p.per_poll} mails au plus, dont {p.triage_per_poll} triés par le modèle"),

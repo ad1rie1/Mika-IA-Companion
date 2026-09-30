@@ -44,12 +44,11 @@ FORGOTTEN = "(oublié)"
 CLAMP = 160
 #: une page de l'historique (pensées nées, signaux remarqués, attentes closes)
 HISTORY = 25
-#: au plus tant de lignes lues dans l'état (les pensées vivantes sont déjà bornées)
-SHOWN = 64
 
 ORIGIN_FR = {c.EXCHANGE: "un échange", c.REVISION: "une croyance révisée", c.MISSING: "un manque",
-             c.BLOCKED: "un but bloqué", c.SIGNAL: "un signal"}
-EXPECTED_FR = {c.REPLY: "sa réponse", c.RETURN: "son retour"}
+             c.BLOCKED: "un but bloqué", c.SIGNAL: "un signal", c.CONCERN: "une inquiétude",
+             c.PROMISE: "une promesse non tenue"}
+EXPECTED_FR = {c.REPLY: "sa réponse", c.RETURN: "son retour", c.PROMISE: "tenir sa promesse"}
 SENSITIVITY_FR = {int(Sensitivity.NONE): "rien d'autrui", int(Sensitivity.ANODYNE): "anodin",
                   int(Sensitivity.PERSONAL): "personnel", int(Sensitivity.CONFIDENCE): "confidence"}
 
@@ -108,7 +107,7 @@ def _before(ctx: InspectContext) -> int | None:
 def _thought_rows(s: AttentionState, frame: Frame, ctx: InspectContext,
                   keep: set[str] | None = None) -> tuple[Row, ...]:
     p = _p(frame)
-    thoughts = [t for t in frame.get(c.THOUGHTS) if keep is None or keep & set(t.about)][:SHOWN]
+    thoughts = [t for t in frame.get(c.THOUGHTS) if keep is None or keep & set(t.about)]
     texts = ctx.store.content([t.text_ref for t in thoughts if t.text_ref])
     rows = []
     for t in thoughts:
@@ -198,8 +197,8 @@ def _dosed(emotion: str, intensity: float) -> Cell:
 
 
 def _recent(s: AttentionState, ctx: InspectContext) -> Table:
-    heard = list(reversed(s.heard[-SHOWN:]))
-    noticed = {e.data.signal: e.data for e in ctx.events([c.NOTICED], SHOWN)}
+    heard = list(reversed(s.heard))  # borné par l'état ; le rendu pagine
+    noticed = {e.data.signal: e.data for e in ctx.events([c.NOTICED], max(1, len(heard)))}
     rows = []
     for h in heard:
         d = noticed.get(h.signal)
@@ -223,7 +222,7 @@ def _waiting(s: AttentionState, frame: Frame, ctx: InspectContext) -> Table:
     p = _p(frame)
     texts = ctx.store.content([x.summary_ref for x in s.signals if x.summary_ref])
     rows = []
-    for x in reversed(s.signals[-SHOWN:]):
+    for x in reversed(s.signals):
         weight, _room = habituation(s, x.source, x.kind, frame.now, p)
         rows.append((When(x.at), Ref("event", str(x.seq), x.source), x.kind, _text(texts, x.summary_ref),
                      Meter(x.pertinence, number(x.pertinence)),
@@ -269,7 +268,7 @@ def _expectation_rows(s: AttentionState, frame: Frame, keep: set[str] | None = N
     done = set(met(s, frame))
     rows: list[tuple[Cell, ...]] = []
     ordered = sorted(s.expectations.items(), key=lambda kv: (kv[1].since, kv[0]))
-    for key, x in [kv for kv in ordered if keep is None or kv[1].person in keep][:SHOWN]:
+    for key, x in [kv for kv in ordered if keep is None or kv[1].person in keep]:
         if key in done:
             status = Badge("comblée (pas encore constatée)", "ok")
         elif x.deadline is not None and x.deadline <= frame.now:
@@ -279,7 +278,7 @@ def _expectation_rows(s: AttentionState, frame: Frame, keep: set[str] | None = N
         rows.append((EXPECTED_FR.get(x.kind, x.kind), person_ref(frame, x.person), When(x.since),
                      When(x.deadline) if x.deadline is not None else Text("sans échéance", kind="muted"), status))
     late = sorted(s.late.items(), key=lambda kv: (kv[1], kv[0]))
-    for person, since in [kv for kv in late if keep is None or kv[0] in keep][:SHOWN]:
+    for person, since in [kv for kv in late if keep is None or kv[0] in keep]:
         status = Badge("venue en retard (pas encore constatée)", "ok") if f"late:{person}" in done else \
             Badge("manquée — une réponse tardive compte encore", "danger")
         rows.append((EXPECTED_FR[c.REPLY], person_ref(frame, person), When(since), Text("passée", kind="muted"),
@@ -334,14 +333,21 @@ def _person(s: AttentionState, frame: Frame, ctx: InspectContext) -> list[Block]
     if not ctx.subject:
         return [Note("Choisissez une personne : cet onglet se lit sur sa fiche.", tone="muted")]
     keys = person_keys(frame, ctx.subject)
-    closed: list[Any] = []
-    for key in sorted(keys):
-        closed += ctx.events([c.EXPECTATION_MET, c.EXPECTATION_MISSED], HISTORY, where=("person", key))
-    closed = sorted(closed, key=lambda e: -e.seq)[:HISTORY]
+    before = _before(ctx)
+    merged: list[Any] = []
+    for key in sorted(keys):  # une lecture par poignée, fusionnées : une page de 25, un curseur commun
+        merged += ctx.events([c.EXPECTATION_MET, c.EXPECTATION_MISSED], HISTORY + 1, where=("person", key),
+                             before=before)
+    merged = sorted({e.seq: e for e in merged}.values(), key=lambda e: -e.seq)
+    closed = merged[:HISTORY]
+    more = len(merged) > HISTORY
     return [
         Table(THOUGHT_COLUMNS, _thought_rows(s, frame, ctx, keys), title="Ce qui lui trotte dans la tête à son sujet",
               empty="rien ne lui trotte dans la tête à son sujet"),
         Table(EXPECTATION_COLUMNS, _expectation_rows(s, frame, keys), title="Ce qu'elle en attend",
               empty="elle n'attend rien de cette personne"),
-        Table(CLOSED_COLUMNS, _closed(frame, ctx, closed), title="Attentes closes", empty="aucune attente close"),
+        Table(CLOSED_COLUMNS, _closed(frame, ctx, closed), title="Attentes closes",
+              empty="plus rien avant" if before else "aucune attente close",
+              pager=Pager(param="avant", older=(("avant", str(closed[-1].seq)),) if more and closed else ())
+              if more or before else None),
     ]

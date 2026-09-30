@@ -142,7 +142,7 @@ class GoalsParams(BaseModel):
     seed_day_end_min: Annotated[int, Knob(
         label="Fin de la journée", group="Entreprendre d'elle-même", lo=0, hi=24 * 60,
         help="L'heure locale (depuis minuit) après laquelle elle n'ouvre plus d'exploration d'un centre "
-             "d'intérêt.")] = 21 * 60
+             "d'intérêt. Avant le début, la plage passe minuit.")] = 21 * 60
     no_reopen_us: Annotated[int, Knob(
         label="Ne pas rouvrir avant", group="Entreprendre d'elle-même", lo=HOUR, hi=30 * DAY,
         help="Un sujet qu'elle vient de clore (la même pensée, la même personne) ne se rouvre pas avant ce "

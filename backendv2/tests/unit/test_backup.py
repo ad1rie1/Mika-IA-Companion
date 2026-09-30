@@ -204,3 +204,30 @@ def test_old_archives_are_pruned(tmp_path, monkeypatch):
         backup.backup(data, dest, keep=2, now=datetime(2026, 9, day, 3, 0, tzinfo=UTC))
     assert sorted(p.name for p in dest.glob("mika-*.tar.gz")) == ["mika-20260903-030000.tar.gz",
                                                                   "mika-20260904-030000.tar.gz"]
+
+
+def test_each_backup_and_verification_is_noted_for_the_console(tmp_path, monkeypatch):
+    """La console (Système › Stockage) lit la dernière sauvegarde et la dernière vérification ; la note
+    vit dans le dossier de données mais n'entre pas dans les archives."""
+    from datetime import UTC, datetime
+
+    monkeypatch.delenv("MIKA_SECRET_KEY", raising=False)
+    data, dest = tmp_path / "data", tmp_path / "archives"
+    live(data, talk=False)
+    assert backup.overview(data) == {"archives": []}  # jamais sauvegardée
+    made = backup.backup(data, dest, keep=3, now=datetime(2026, 9, 30, 3, 0, tzinfo=UTC))
+    seen = backup.overview(data)
+    last = seen["sauvegarde"]
+    assert last["archive"] == str(made.archive) and last["tete"] == made.head and last["garde"] == 3
+    assert last["at"] == int(datetime(2026, 9, 30, 3, 0, tzinfo=UTC).timestamp() * 1_000_000)
+    assert [a["nom"] for a in seen["archives"]] == [made.archive.name]
+    with tarfile.open(made.archive) as tar:
+        assert not any(backup.RECORD in m for m in tar.getnames())
+    backup.verify(made.archive, record=data)
+    assert backup.recorded(data)["verification"]["ok"] is True
+    forged = dest / "mika-19990101-000000.tar.gz"
+    forged.write_bytes(b"pas une archive")
+    with pytest.raises(backup.BackupError):
+        backup.verify(forged, record=data)
+    failed = backup.recorded(data)["verification"]
+    assert failed["ok"] is False and failed["erreur"] and backup.recorded(data)["sauvegarde"] == last

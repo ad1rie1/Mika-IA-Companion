@@ -254,8 +254,6 @@ async def rss_read(args: ReadArgs, ctx: Any) -> Any:
 #: la console ne relit pas plus que ceci du cache des flux (filtres, pages)
 CACHE_SHOWN = 500
 PAGE = 25
-NOTICED_SHOWN = 50
-FEEDS_SHOWN = 50
 #: le graphe : tant de jours, et jamais plus de titres relus que ceci
 DAYS = 14
 CHART_MAX = 1_000
@@ -329,17 +327,50 @@ def _chart(frame: Frame, days: list[tuple[date, int]], noticed: list[Any], cut: 
                  empty=f"aucun titre remarqué ces {DAYS} derniers jours")
 
 
-def _followed(port: Any, cached: list[Any], s: RssState) -> Table:
+def _health(port: Any) -> list[dict[str, Any]]:
+    """La santé de chaque flux suivi (ce que le dernier relevé a donné) ; un port sans santé : ses flux, sans
+    état connu."""
+    health = getattr(port, "health", None)
+    if callable(health):
+        return list(health())
+    return [{"title": title, "url": url, "attempted_at": 0, "ok_at": 0, "error": "", "failures": 0, "items": 0,
+             "added": 0, "kept": 0} for title, url in port.followed()]
+
+
+def _state(h: dict[str, Any]) -> Badge:
+    if h["error"] and h["failures"]:
+        return Badge(f"en erreur ({h['failures']} d'affilée)", "danger")
+    if h["error"]:
+        return Badge("répond, mais illisible", "warn")
+    if not h["attempted_at"]:
+        return Badge("pas encore relevé", "muted")
+    return Badge("va bien", "ok")
+
+
+def _followed(port: Any, cached: list[Any], s: RssState, health: list[dict[str, Any]]) -> Table:
     by_feed = Counter(e.feed for e in cached)
     noticed = Counter(v.feed for v in s.noticed.values())
     rows = []
-    for title, url in port.followed()[:FEEDS_SHOWN]:
+    for h in health:  # tous : la console les montre par pages
+        title = str(h["title"])
         name = _clip(title, 80)
-        rows.append((Ref.view("rss", "flux", name, flux=title[:200]) if title else Text("(titre inconnu)", kind="muted"),
-                     Text(url or "—", kind="mono"), by_feed.get(title, 0), noticed.get(title, 0)))
-    return Table(("flux", "adresse", Column("relevés", "num"), Column("remarqués", "num")), tuple(rows),
-                 title="Flux suivis", empty="aucun flux suivi",
-                 caption="Cliquer un flux filtre la page sur lui. Les jetons des adresses ne sont jamais montrés.")
+        detail = (Fields((("adresse", Text(str(h["url"]) or "—", kind="mono")),
+                          ("dernière tentative", When(h["attempted_at"]) if h["attempted_at"] else "jamais"),
+                          ("dernier succès", When(h["ok_at"]) if h["ok_at"] else "jamais"),
+                          ("erreur", Text(str(h["error"]) or "aucune", kind="muted" if not h["error"] else "text")),
+                          ("articles lus au dernier relevé", h["items"]), ("nouveaux au dernier relevé", h["added"]),
+                          ("gardés dans le cache", h["kept"])), title="Son dernier relevé"),)
+        rows.append(Row((
+            Ref.view("rss", "flux", name, flux=title[:200]) if title else Text("(titre inconnu)", kind="muted"),
+            _state(h), When(h["ok_at"]) if h["ok_at"] else Text("jamais", kind="muted"),
+            Text(_clip(str(h["error"]), 90) or "—", kind="muted"), h["items"], h["added"],
+            by_feed.get(title, 0), noticed.get(title, 0)),
+            tone="danger" if h["error"] and h["failures"] else "", detail=detail))
+    return Table(("flux", "état", Column("dernier succès", "fit"), "erreur", Column("lus", "num"),
+                  Column("nouveaux", "num"), Column("relevés", "num"), Column("remarqués", "num")), tuple(rows),
+                 title=f"Flux suivis ({len(rows)})", empty="aucun flux suivi",
+                 caption="« lus » et « nouveaux » : au dernier relevé. Cliquer un flux filtre la page sur lui. Les "
+                         "jetons des adresses ne sont jamais montrés.")
 
 
 def _entries(s: RssState, ctx: InspectContext, cached: list[Any], words: frozenset[str]) -> Table:
@@ -365,7 +396,8 @@ def _entries(s: RssState, ctx: InspectContext, cached: list[Any], words: frozens
 
 
 def _noticed(s: RssState, ctx: InspectContext, feed: str) -> Table:
-    noticed = sorted((v for v in s.noticed.values() if _matches(feed, v.feed)), key=lambda v: -v.seq)[:NOTICED_SHOWN]
+    noticed, pager = paginate(sorted((v for v in s.noticed.values() if _matches(feed, v.feed)), key=lambda v: -v.seq),
+                              ctx.pager("page_remarques", size=PAGE))
     texts = ctx.store.content([v.summary_ref for v in noticed if v.summary_ref])
     return Table(
         (Column("remarqué", "fit"), "flux", "ce qu'elle a remarqué", Column("pertinence", "fit"),
@@ -373,7 +405,8 @@ def _noticed(s: RssState, ctx: InspectContext, feed: str) -> Table:
         tuple((When(v.at), Text(_clip(v.feed, 60)), Text(texts.get(v.summary_ref, "(oublié)"), clamp=300),
                Meter(v.pertinence, f"{v.pertinence:.2f}"), Ref("event", str(v.seq), f"#{v.seq}")) for v in noticed),
         title="Ce qu'elle a remarqué", empty="elle n'a encore remarqué aucun titre" if not feed else
-        "rien de remarqué dans ce flux")
+        "rien de remarqué dans ce flux", pager=pager,
+        caption=f"Elle garde les {KEEP} derniers titres remarqués, du plus récent au plus ancien.")
 
 
 @RSS.inspect("flux", title="Flux", section="sens", order=20,
@@ -390,11 +423,14 @@ def _inspect(s: RssState, frame: Frame, ctx: InspectContext) -> list[Block]:
     window = [e for e in window if _matches(feed, e.data.feed)]
     today = days[-1][1]
     cached = port.cached(CACHE_SHOWN) if port is not None else []
-    followed = len(port.followed()) if port is not None else 0
+    health = _health(port) if port is not None else []
+    broken = sum(1 for h in health if h["error"] and h["failures"])
     last = max((v.at for v in s.noticed.values() if _matches(feed, v.feed)), default=0)
     passed = sum(1 for e in cached if e.id not in s.noticed and _matches(feed, e.feed))
     stats = Stats((
-        Stat("flux suivis", followed if port is not None else "—"),
+        Stat("flux suivis", len(health) if port is not None else "—",
+             sub=f"{broken} en erreur" if broken else "tous répondent" if health else "",
+             tone="danger" if broken else ""),
         Stat("laissés passer", f"{passed}+" if len(cached) >= CACHE_SHOWN else passed,
              sub="relevés sans la toucher (elle ne marque pas ses lectures)"),
         Stat("remarqués aujourd'hui", sum(1 for e in window if e.at >= today)),
@@ -402,7 +438,7 @@ def _inspect(s: RssState, frame: Frame, ctx: InspectContext) -> list[Block]:
     ))
     blocks: list[Block] = [_feeds_note(port, p), stats, _chart(frame, days, window, cut, feed)]
     if port is not None:
-        blocks += [_followed(port, cached, s), _entries(s, ctx, cached, words)]
+        blocks += [_followed(port, cached, s, health), _entries(s, ctx, cached, words)]
     blocks.append(_noticed(s, ctx, feed))
     blocks.append(Disclosure("Ce qui la touche", (Fields((
         ("titres remarqués (gardés)", len(s.noticed)),

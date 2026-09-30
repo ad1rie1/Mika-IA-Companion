@@ -37,8 +37,8 @@ from mika.adapters.web.accounts import Accounts
 from mika.adapters.web.app import WebConfig, create_app
 from mika.adapters.web.hub import Hub
 from mika.adapters.workshop import BwrapWorkshop
-from mika.app import composition, reglages
-from mika.app.console import NAVIGATION
+from mika.app import backup, composition, reglages
+from mika.app.console import FACULTY_LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.delivery import Router
 from mika.app.mindport import KernelPort
 from mika.app.paths import PERSONA
@@ -257,7 +257,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                                      restart_telegram=restart_telegram, after_decision=hub.refresh_panels,
                                      reports=reports, navigation=NAVIGATION,
                                      sections=reglages.sections(live), settings_tabs=reglages.TABS,
-                                     parameters=reglages.parameters(live)),
+                                     parameters=reglages.parameters(live), param_families=PARAM_FAMILIES,
+                                     faculty_labels=FACULTY_LABELS, backups=lambda: backup.overview(data)),
                        cookie_secure=(web.cookie_secure if web else False))
     preprocess = LocalPreprocessor(gateway, transcribe=whisper(settings.stt))
     live.preprocess = preprocess

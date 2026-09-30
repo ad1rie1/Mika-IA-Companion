@@ -24,9 +24,9 @@ from mika.contracts import identity as identity_c
 from mika.contracts import presence as presence_c
 from mika.contracts import social as c
 from mika.contracts import transcript as transcript_c
-from mika.faculties.social.faculty import SOCIAL, SocialState, params
+from mika.faculties.social.faculty import SOCIAL, SocialState, grudging, params
 from mika.kernel.arbitration import Candidate, Modulation, RowView
-from mika.kernel.clock import HOUR, MINUTE
+from mika.kernel.clock import HOUR, MINUTE, within_daily_window
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard, floor
 from mika.kernel.state import FrozenDict
@@ -46,8 +46,7 @@ _RANK = {level: i for i, level in enumerate(c.CLOSENESS_LEVELS)}
 
 def _daytime(frame: Frame, start: int, end: int) -> bool:
     local = frame.local()
-    minute = local.hour * 60 + local.minute
-    return start <= minute <= end
+    return within_daily_window(local.hour * 60 + local.minute, start, end)
 
 
 def _silence_words(days: float) -> str:
@@ -184,7 +183,7 @@ def _restraint(s: SocialState, frame: Frame, row: RowView) -> Modulation:
         return Modulation()
     p = params(frame.env.params_of("social", frame.root))
     person = frame.get(identity_c.PERSON(row.target))
-    if frame.get(affect_c.HOSTILITY(person)) >= p.grudge:
+    if grudging(frame.get(affect_c.HOSTILITY(person)), p):
         return Modulation(veto=c.GRUDGE)
     if c.GREETING in row.reasons or goals_c.REMIND in row.reasons:
         return Modulation()  # un rappel promis se dit, même à quelqu'un qui n'a pas répondu

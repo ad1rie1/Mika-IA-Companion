@@ -72,6 +72,9 @@ class SelfParams(BaseModel):
     stuck_knock: Annotated[float, Knob(
         label="But bloqué", group="L'estime", lo=-0.3, hi=0.0, step=0.01,
         help="Ce que lui coûte un but sur lequel elle bloque ; renoncer par manque d'envie ne coûte rien.")] = -0.04
+    broken_promise_knock: Annotated[float, Knob(
+        label="Promesse non tenue", group="L'estime", lo=-0.3, hi=0.0, step=0.01,
+        help="Ce que lui coûte une promesse dont l'échéance passe sans qu'elle l'ait tenue.")] = -0.03
     doubt_below: Annotated[float, Knob(
         label="Elle doute sous", group="L'estime", lo=0.0, hi=0.5, step=0.01,
         help="Sous ce seuil, son prompt lui dit qu'elle doute un peu d'elle-même (un ressenti, jamais un "
@@ -139,10 +142,13 @@ def _knock(s: SelfState, delta: float, at: int, p: SelfParams) -> SelfState:
 
 @SELF.reducer(attention_c.EXPECTATION_MISSED)
 def _ignored(s: SelfState, e, cx) -> SelfState:
-    if e.data.kind != attention_c.REPLY:
-        return s
+    """Une initiative ignorée, ou sa propre parole pas tenue à temps."""
     p = params(cx.params)
-    return _knock(s, p.ignored_knock, e.at, p)
+    if e.data.kind == attention_c.REPLY:
+        return _knock(s, p.ignored_knock, e.at, p)
+    if e.data.kind == attention_c.PROMISE:
+        return _knock(s, p.broken_promise_knock, e.at, p)
+    return s
 
 
 @SELF.reducer(attention_c.EXPECTATION_MET, reads=[attention_c.IGNORED])

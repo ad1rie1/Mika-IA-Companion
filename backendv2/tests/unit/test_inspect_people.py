@@ -323,9 +323,12 @@ def test_a_person_has_a_fiche_that_gathers_her_handles(tmp_path):
     for key, blocks in tabs.items():
         assert blocks and not failed(blocks), key
     synthese = tabs[("person", "identity", "synthese")]
-    handles = titled(synthese, "Ses poignées")
+    handles = titled(tabs[("person", "identity", "poignees")], "Ses poignées")  # la table vit dans son onglet
     assert {row_cells(r)[0].key for r in handles.rows} == {"handle/user_1", f"handle/{ANON}"}
     assert all(isinstance(r, Row) and r.href.kind == "subject" for r in handles.rows)
+    pointer = next(b for b in synthese if isinstance(b, Fields) and b.title == "Ses poignées")
+    assert pointer.pairs[0][1].params == (("onglet", "poignees"),)  # la synthèse y renvoie, sans la répéter
+    assert not any(isinstance(b, Table) and b.title == "Ses poignées" for b in synthese)
     assert row_of(titled(synthese, "Ce que ça ouvre"), "en privé")["sur autrui"] == "confidences"
     others = tabs[("handle", "identity", "autres")]
     assert [row_cells(r)[0].key for r in titled(others, "Les autres poignées").rows] == ["handle/user_1"]

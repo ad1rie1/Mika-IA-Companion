@@ -1,4 +1,3 @@
-<p class="muted">Ce qu'elle voudrait faire hors de la machine et qui attend ton accord. Ce qui est montré ici est exactement ce qui sera exécuté.</p>
 <div class="stack">
 {% for p in items %}
 <div class="card stack">
@@ -12,10 +11,10 @@
   {% else %}
   <pre class="code">{{ p.args }}</pre>
   {% endif %}
-  <form method="post" action="{{ PREFIX }}/approbations" class="filters">
+  <form method="post" action="{{ PREFIX }}/approbations" class="approve-form">
     <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="proposal" value="{{ p.proposal }}">
     <input type="hidden" name="seen" value="{{ p.seen }}">
-    <label>note <input name="note" placeholder="facultative"></label>
+    <label class="field">Note (facultative) <input name="note" placeholder="pourquoi, pour elle et pour l'historique"></label>
     <button class="btn" name="decision" value="approve">Approuver</button>
     <button class="btn quiet" name="decision" value="reject">Refuser</button>
   </form>

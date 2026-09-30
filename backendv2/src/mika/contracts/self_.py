@@ -23,8 +23,8 @@ from mika.vocab.temperament import Temperament
 OWNER = "self"
 
 
-def _lines(label: str, help: str, order: int) -> Knob:
-    return Knob(label=label, help=help + " Une phrase par ligne.", group="Caractère", advanced=False, order=order)
+def _lines(label: str, help: str, order: int, group: str = "Caractère") -> Knob:
+    return Knob(label=label, help=help + " Une phrase par ligne.", group=group, advanced=False, order=order)
 
 
 class PersonaDoc(BaseModel):
@@ -32,19 +32,21 @@ class PersonaDoc(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    name: Annotated[str, Knob(label="Nom", group="Identité", advanced=False, order=10)] = "Mika"
+    name: Annotated[str, Knob(label="Nom", help="Comme elle se présente.", group="Identité", advanced=False,
+                              order=10)] = "Mika"
     description: Annotated[str, Knob(label="Description", help="Qui elle est, en quelques phrases.",
                                      group="Identité", widget="textarea", advanced=False, order=20)] = ""
-    language: Annotated[str, Knob(label="Langue", group="Identité", advanced=False, order=30)] = "français"
-    tone: Annotated[str, Knob(label="Ton", help="Comment elle parle, en général.", group="Identité",
+    language: Annotated[str, Knob(label="Langue", help="Celle dans laquelle elle parle et écrit.",
+                                  group="Identité", advanced=False, order=30)] = "français"
+    tone: Annotated[str, Knob(label="Ton", help="Comment elle parle, en général.", group="Sa parole",
                               widget="textarea", advanced=False, order=40)] = ""
     traits: Annotated[tuple[str, ...], _lines("Traits", "Ce qui la définit.", 50)] = ()
     quirks: Annotated[tuple[str, ...], _lines("Manies", "Ses petites habitudes.", 60)] = ()
     vulnerabilities: Annotated[tuple[str, ...], _lines("Fragilités", "Ce qui la touche.", 70)] = ()
     values: Annotated[tuple[str, ...], _lines("Valeurs", "Ce à quoi elle tient.", 80)] = ()
     interests: Annotated[tuple[str, ...], _lines("Centres d'intérêt", "Ce qui la passionne.", 90)] = ()
-    speech: Annotated[tuple[str, ...], _lines("Façons de parler", "Ses tournures.", 100)] = ()
-    greetings: Annotated[tuple[str, ...], _lines("Salutations", "Comment elle dit bonjour.", 110)] = ()
+    speech: Annotated[tuple[str, ...], _lines("Façons de parler", "Ses tournures.", 100, "Sa parole")] = ()
+    greetings: Annotated[tuple[str, ...], _lines("Salutations", "Comment elle dit bonjour.", 110, "Sa parole")] = ()
     timezone: Annotated[str, Knob(label="Fuseau horaire", help="Celui qu'elle vit (nom IANA : Europe/Paris, "
                                                               "America/Montreal…).", group="Identité",
                                   advanced=False, order=35)] = "Europe/Paris"

@@ -258,6 +258,8 @@ class Timeline:
     entries: tuple[Entry, ...]
     title: str = ""
     empty: str = "rien pour l'instant"
+    #: une pagination, comme une table (sans elle, le rendu découpe une longue chronologie)
+    pager: Pager | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -338,8 +340,9 @@ class Param:
     hi: int | None = None
 
 
-#: réservés à la console (pagination, onglet, retour des actions)
-RESERVED = frozenset({"page", "taille", "onglet", "fait", "avant", "q_global"})
+#: réservés à la console (pagination, onglet, retour des actions) ; ``pg<n>`` : les pages
+#: qu'ajoute le rendu à une table qui n'en a pas, ``pile`` : le chemin d'une pagination à curseur
+RESERVED = frozenset({"page", "taille", "onglet", "fait", "avant", "q_global", "pile", "flash"})
 
 
 def _fold(text: str) -> str:

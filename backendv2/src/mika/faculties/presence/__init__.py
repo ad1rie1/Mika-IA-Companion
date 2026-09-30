@@ -122,7 +122,7 @@ def _inspect(s: PresenceState, frame: Frame, ctx: InspectContext) -> list[Block]
     return [
         Stats((Stat("connexions vivantes", len(s.links)), Stat("poignées présentes", len(_handles(s))))),
         Table(("personne", "poignée", "nom", "canal", "connexion", "présente depuis", "audience"), tuple(rows),
-              pager=pager, empty="personne n'est connecté"),
+              title="Présents", pager=pager, empty="personne n'est connecté"),
     ]
 
 

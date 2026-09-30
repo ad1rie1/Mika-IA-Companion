@@ -458,7 +458,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.cmd == "backup":
                 done = backup.backup(args.data, args.dest, keep=args.keep)
             elif args.cmd == "verify":
-                done = backup.verify(args.archive)
+                done = backup.verify(args.archive, record=args.data if (args.data / "mind.db").exists() else None)
             else:
                 done = backup.restore(args.archive, args.data, force=args.force)
         except backup.BackupError as exc:

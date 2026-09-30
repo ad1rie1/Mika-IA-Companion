@@ -59,10 +59,11 @@ from mika.vocab import privacy
 from mika.vocab.people import fold, is_identifiable, is_internal
 from mika.vocab.privacy import ChannelTrust, Disclosure, Sensitivity
 
-#: Au plus tant de lignes au registre des preuves par page, tant de poignées par tableau.
+#: Au plus tant de lignes au registre des preuves par page, tant de lignes par page d'une liste.
 MAX_LEDGER = 50
-MAX_HANDLES = 200
 PAGE = 50
+#: la page d'un tableau de poignées (une fiche n'en montre qu'un)
+HANDLES_PAGE = "page_poignees"
 #: Une personne connue seulement de nom (``name:alice``) : pas de poignée.
 NAMED = "name:"
 
@@ -501,12 +502,13 @@ def _ledger(s: IdentityState, handle: str, ctx: InspectContext) -> Block:
                  empty="aucune revendication, preuve ni liaison")
 
 
-def _handles_table(s: IdentityState, frame: Frame, handles: Sequence[str], *, title: str, empty: str) -> Table:
+def _handles_table(s: IdentityState, frame: Frame, ctx: InspectContext, handles: Sequence[str], *, title: str,
+                   empty: str) -> Table:
+    """Ces poignées, toutes, par pages."""
+    page, pager = paginate([k for k in handles if k in s.handles], ctx.pager(HANDLES_PAGE, size=PAGE))
     rows = []
-    for k in handles[:MAX_HANDLES]:
-        o = s.handles.get(k)
-        if o is None:
-            continue
+    for k in page:
+        o = s.handles[k]
         view = view_of(s, k, frame.now)
         rows.append(Row((handle_ref(k), o.name or "—", o.channel or "—", Badge(TRUST_SHORT[o.trust], TRUST_TONE[o.trust]),
                          certainty_fr(view.certainty), "elle-même" if not o.person else VIA_FR.get(o.via, o.via or "?"),
@@ -515,7 +517,8 @@ def _handles_table(s: IdentityState, frame: Frame, handles: Sequence[str], *, ti
                          When(last) if (last := frame.get(transcript_c.LAST_FROM(k))) else "jamais"),
                         href=handle_ref(k)))
     return Table(("poignée", "nom", "canal", "confiance", "certitude", "liée par", "revendique",
-                  "vue pour la première fois", "dernier message"), tuple(rows), title=title, empty=empty)
+                  "vue pour la première fois", "dernier message"), tuple(rows), title=title, empty=empty,
+                 pager=pager)
 
 
 # ── Fiche d'une personne ──────────────────────────────────────────────────
@@ -568,7 +571,10 @@ def _synthesis(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Bloc
         _opens(frame, main, h, view),
     ), description="Sur sa poignée principale (celle dont le canal prouve le plus). Chaque poignée a son verdict "
                    "pas à pas sur sa fiche."))
-    blocks.append(_handles_table(s, frame, handles, title="Ses poignées", empty="aucune poignée"))
+    # la liste des poignées vit dans l'onglet « Poignées » : ici, un renvoi (pas deux fois la même table)
+    blocks.append(Fields((("ses poignées", Ref.subject("person", person, f"{len(handles)} poignée(s) : voir l'onglet "
+                                                                          "Poignées", "poignees")),),
+                         title="Ses poignées"))
     return blocks
 
 
@@ -583,7 +589,7 @@ def _person_handles(s: IdentityState, frame: Frame, ctx: InspectContext) -> list
     blocks += [
         Stats((Stat("poignées", len(handles)), Stat("reliées à elle", bound, "par recoupement ou par un opérateur"),
                Stat("revendications en attente", sum(1 for k in handles if view_of(s, k, frame.now).claim)))),
-        _handles_table(s, frame, handles, title="Ses poignées", empty="aucune poignée connue"),
+        _handles_table(s, frame, ctx, handles, title="Ses poignées", empty="aucune poignée connue"),
         Note(f"Pour relier une autre poignée à cette personne : ouvre la fiche de la poignée, puis « Relier », "
              f"et indique « {person} ».", tone="muted"),
     ]
@@ -643,7 +649,7 @@ def _handle_others(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[
     view = view_of(s, handle, frame.now)
     others = [k for k in handles_of(s, view.person) if k != handle]
     return [Fields((("personne", person_ref(s, view.person)),)),
-            _handles_table(s, frame, others, title=f"Les autres poignées de {known_as(s, view.person)}",
+            _handles_table(s, frame, ctx, others, title=f"Les autres poignées de {known_as(s, view.person)}",
                            empty="aucune autre poignée ne parle pour cette personne")]
 
 
@@ -688,7 +694,8 @@ def _people(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
                Stat("propriétaires", len(frame.get(c.OWNERS))),
                Stat("reliées à plusieurs poignées", sum(1 for hs in everyone.values() if len(hs) > 1)))),
         Table(("personne", Column("poignées", "num"), "canal principal", "certitude", "proximité", "propriétaire",
-               "dernier message reçu", "vue pour la première fois"), tuple(rows), pager=pager, filters=("q",),
+               "dernier message reçu", "vue pour la première fois"), tuple(rows), title="Personnes", pager=pager,
+              filters=("q",),
               empty=f"personne ne correspond à « {ctx.value('q')} »" if q else "personne pour l'instant"),
     ]
 
@@ -724,7 +731,7 @@ def _directory(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Bloc
                     href=Ref.view("identity", "politique", "politique")))),
         Table(("poignée", "nom", "canal", "confiance du canal", "certitude", "parle pour", "propriétaire",
                "revendique", "divulgation en privé", "divulgation en public", "vue pour la première fois"),
-              tuple(rows), pager=pager, filters=("q", "confiance"),
+              tuple(rows), title="Poignées", pager=pager, filters=("q", "confiance"),
               empty="aucune poignée ne correspond" if q or trust else "aucune poignée vue pour l'instant"),
     ]
 
@@ -761,7 +768,8 @@ def _claims(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
             ", ".join(_used(u) for u in claim.used) or "—", When(claim.at), When(claim.at + ttl),
         ), href=handle_ref(handle, tab="revendication")))
     return [Table(("poignée", "nom revendiqué", "vise", "canal", "vers la barre", "preuves comptées", "depuis",
-                   "s'éteint"), tuple(rows), pager=pager, empty="aucune revendication en attente"),
+                   "s'éteint"), tuple(rows), title="Revendications en attente", pager=pager,
+                  empty="aucune revendication en attente"),
             Note(f"Une affirmation seule ne franchit jamais la barre ({number(bar)}) ; une revendication jamais "
                  f"confirmée s'éteint au bout de {privacy.POLICY.pending_claim_ttl_days} jours.", tone="muted")]
 
@@ -826,7 +834,7 @@ def _legacy_person(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[
                    title="Cette page vit désormais sur les fiches"),
             _handle_fields(s, frame, handle, h, view), *_verdict(frame, handle, h, view),
             *_claim(s, h, view, ctx),
-            _handles_table(s, frame, [k for k in handles_of(s, view.person) if k != handle],
+            _handles_table(s, frame, ctx, [k for k in handles_of(s, view.person) if k != handle],
                            title=f"Les autres poignées de {known_as(s, view.person)}",
                            empty="aucune autre poignée ne parle pour cette personne"),
             _ledger(s, handle, ctx)]

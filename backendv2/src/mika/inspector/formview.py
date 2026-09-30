@@ -4,9 +4,10 @@ de valeur rendue (vide = inchangé)."""
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import secrets as _secrets
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from mika.kernel import forms
@@ -15,7 +16,7 @@ from mika.kernel.faculty import ActionSpec
 #: les sortes de champ que le gabarit sait rendre ; les autres deviennent du texte
 TEMPLATE_KINDS = {"bool": "bool", "select": "select", "textarea": "textarea", "lines": "lines", "yaml": "yaml",
                   "secret": "secret", "slider": "slider", "int": "int", "float": "float", "duration": "text",
-                  "subject": "text", "text": "text"}
+                  "subject": "text", "text": "text", "datetime": "datetime"}
 
 
 def field_view(f: forms.FormField, value: Any, *, error: str = "", prefix: str = "f") -> dict[str, Any] | None:
@@ -29,9 +30,21 @@ def field_view(f: forms.FormField, value: Any, *, error: str = "", prefix: str =
         "error": error, "unit": f.unit if kind != "slider" else "", "readonly": f.readonly,
         "required": f.required and kind != "bool", "choices": list(f.choices), "lo": f.lo, "hi": f.hi,
         "step": f.step, "has_value": bool(value) if kind == "secret" else False,
-        "only": "|".join(f"{path}={'|'.join(vals)}" for path, vals in f.only[:1]) if f.only else "",
-        "rows": _rows(text, kind),
+        "only": only_attr(f),
+        "rows": _rows(text, kind), "group": f.group,
     }
+
+
+def only_attr(f: forms.FormField) -> str:
+    """Les conditions d'affichage d'un champ pour ``console.js`` : ``chemin=v1|v2``
+    reliées par « ; » (toutes), et des alternatives reliées par « || » (l'une)."""
+    def one(only: forms.Only) -> str:
+        return ";".join(f"{path}={'|'.join(vals)}" for path, vals in only)
+
+    if not f.only and not f.only_any:
+        return ""
+    alternatives = [tuple(f.only) + tuple(alt) for alt in f.only_any] or [tuple(f.only)]
+    return "||".join(one(alt) for alt in alternatives)
 
 
 def _rows(text: str, kind: str) -> int:
@@ -42,7 +55,8 @@ def _rows(text: str, kind: str) -> int:
 
 def action_view(spec: ActionSpec, *, csrf: str, back: str, subject: str = "", initial: Mapping[str, Any] | None = None,
                 values: Mapping[str, Any] | None = None, errors: Mapping[str, str] | None = None,
-                dynamic: Sequence[forms.FormField] | None = None) -> dict[str, Any]:
+                dynamic: Sequence[forms.FormField] | None = None,
+                subjects: Callable[[str], Sequence[tuple[str, str]]] | None = None) -> dict[str, Any]:
     """Le formulaire d'une action : ses champs (depuis son modèle d'arguments, ou
     ``dynamic`` pour une action aux champs connus à l'exécution), son jeton de
     formulaire et son jeton d'unicité (un double envoi ne refait rien). Les valeurs
@@ -51,6 +65,9 @@ def action_view(spec: ActionSpec, *, csrf: str, back: str, subject: str = "", in
     fields = tuple(dynamic) if dynamic is not None else forms.describe(spec.args)
     defaults = {f.path: f.default for f in fields}
     given = {**defaults, **dict(initial or {}), **dict(values or {})}
+    if subjects is not None:  # une personne, un but… : un choix parmi ceux que la console connaît
+        fields = tuple(_as_choice(f, subjects(f.subject), given.get(f.path)) if f.kind == "subject" and f.subject
+                       else f for f in fields)
     prefix = f"a-{spec.owner}-{spec.name}-{_secrets.token_hex(3)}"
     views = [v for f in fields if (v := field_view(f, given.get(f.path), error=errors.get(f.path, ""),
                                                    prefix=prefix)) is not None]
@@ -62,6 +79,20 @@ def action_view(spec: ActionSpec, *, csrf: str, back: str, subject: str = "", in
             "back": back, "title": button, "description": spec.description, "fields": views,
             "retype": spec.retype, "subject": subject, "confirm": spec.confirm, "danger": spec.danger,
             "button": button, "errors": errors, "id": prefix, "key": spec.key, "fixed": fixed}
+
+
+def _as_choice(f: forms.FormField, choices: Sequence[tuple[str, str]], value: Any) -> forms.FormField:
+    pairs = tuple(choices)
+    if not pairs:
+        return f  # rien de connu : le champ reste à taper
+    if value not in (None, "") and str(value) not in {v for v, _ in pairs}:
+        pairs = ((str(value), f"{value} (tapé)"), *pairs)
+    return dataclasses.replace(f, kind="select", choices=pairs)
+
+
+def visible_fields(view: Mapping[str, Any]) -> int:
+    """Combien de champs un opérateur remplit dans ce formulaire (au-delà de deux : une page à part)."""
+    return len([f for f in view.get("fields", ()) if f.get("kind") != "hidden"])
 
 
 def slot_key(action: str, initial: Sequence[tuple[str, str]] | Mapping[str, str]) -> str:

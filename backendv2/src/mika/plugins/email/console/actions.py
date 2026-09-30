@@ -6,6 +6,7 @@ montre deux jours, et une réponse à ce mail lui est présentée comme telle.""
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import email.utils
 from typing import Annotated, Any
@@ -25,6 +26,8 @@ from mika.plugins.email.console.mail import _server
 from mika.ports.mail import addresses
 from mika.vocab.privacy import Sensitivity
 
+#: « tout lu » marque les mails sur le serveur par lots (entre deux lots, la boucle respire)
+SERVER_BATCH = 50
 NOT_READY = "Aucune boîte ne peut envoyer : elle n'est pas configurée (ajoute ou complète un compte, Courrier › Comptes)."
 
 
@@ -144,17 +147,21 @@ def _unread_keys(s: EmailState) -> list[str]:
               confirm="Marquer comme lus tous les mails qu'elle n'a pas encore lus ?",
               available=lambda s, frame, key: bool(_unread_keys(s)))
 async def _all_read(s: EmailState, frame: Frame, args: NoArgs, ctx: Any) -> Done:
+    """Tous ceux qu'elle n'a pas lus : sur le serveur (chacun, lot après lot) comme pour elle."""
     keys = _unread_keys(s)
     port = ctx.ports.get("mail")
     failed = 0
     if port is not None:
-        for ref in keys[:50]:
-            m = port.cached_one(ref)
-            if m is not None and not m.seen:
-                try:
-                    await port.set_flags(m.ref, seen=True)
-                except (OSError, RuntimeError, ValueError):
-                    failed += 1
+        for start in range(0, len(keys), SERVER_BATCH):
+            if start:
+                await asyncio.sleep(0)
+            for ref in keys[start:start + SERVER_BATCH]:
+                m = port.cached_one(ref)
+                if m is not None and not m.seen:
+                    try:
+                        await port.set_flags(m.ref, seen=True)
+                    except (OSError, RuntimeError, ValueError):
+                        failed += 1
     note = f" ({failed} n'ont pas pu être marqués sur le serveur)" if failed else ""
     return Done(drafts=tuple(READ.draft(mail=k, by=ctx.by, how="lu") for k in keys),
                 message=f"{len(keys)} mail(s) marqué(s) comme lu(s){note}.")

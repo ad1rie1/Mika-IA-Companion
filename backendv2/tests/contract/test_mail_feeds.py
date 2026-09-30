@@ -80,3 +80,24 @@ def test_feeds_hand_new_entries_once_and_skip_the_archives(tmp_path, site):
     text = go(feeds.article(fresh.id))
     assert "Le pixel art revient." in text and "voler" not in text
     assert go(feeds.article("une-adresse-inventée")) == ""  # seulement un article relevé
+    # chaque relevé se note : la console dit quel flux ne répond plus, et pourquoi (jamais son adresse entière)
+    health = {h["title"] or h["url"].rsplit("/", 1)[-1]: h for h in feeds.health()}
+    journal, blog, absent = health["Le Journal"], health["Le Blog"], health["absent.xml"]
+    assert not journal["error"] and journal["failures"] == 0 and journal["ok_at"] and journal["items"] == 9
+    assert journal["added"] == 1 and journal["kept"] == 9  # le dernier relevé a apporté « Titre 20 »
+    assert not blog["error"] and blog["items"] == 1
+    assert absent["error"] == "le serveur répond 404" and absent["failures"] == 3 and not absent["ok_at"]
+    assert absent["attempted_at"] and absent["kept"] == 0
+
+
+def test_a_feed_cache_from_before_feed_health_is_completed(tmp_path, site):
+    import sqlite3
+
+    old = sqlite3.connect(str(tmp_path / "f.db"))
+    old.executescript("CREATE TABLE feeds(url TEXT PRIMARY KEY, polled INTEGER DEFAULT 0);"
+                      f"INSERT INTO feeds VALUES('{site}/flux.xml', 1);")
+    old.commit()
+    old.close()
+    feeds = HttpFeeds(lambda: [f"{site}/flux.xml"], tmp_path / "f.db")
+    assert feeds.health()[0]["attempted_at"] == 0  # colonnes ajoutées, rien de faux inventé
+    assert go(feeds.poll(30)) and feeds.health()[0]["ok_at"]  # déjà relevé : tout ce qui paraît est neuf

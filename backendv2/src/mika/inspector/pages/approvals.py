@@ -12,7 +12,7 @@ from starlette.requests import Request
 from mika.contracts import runtime as rt
 from mika.inspector.catalog import Panel
 from mika.inspector.pages.tabs import TABS
-from mika.kernel.inspect import Badge, Column, Row, Table, Text, When
+from mika.kernel.inspect import Badge, Column, Pager, Ref, Row, Table, Text, When
 from mika.runtime import decisions
 
 
@@ -20,7 +20,8 @@ def _pending(ui: Any) -> int:
     return len(ui.kernel.mind.frame().get(rt.PENDING_EFFECTS))
 
 
-@TABS.tab("approbations.en_attente", title="En attente", badge=_pending)
+@TABS.tab("approbations.en_attente", title="En attente", badge=_pending,
+          description="Ce qui attend ton accord. Ce qui est montré est exactement ce qui partira.")
 async def pending(ui: Any, request: Request) -> Any:
     kernel = ui.kernel
     frame = kernel.mind.frame()
@@ -39,21 +40,41 @@ async def pending(ui: Any, request: Request) -> Any:
                       "preview": shown.text if shown is not None else "",
                       "seen": shown.digest if shown is not None else "",
                       "blocked": shown.blocked if shown is not None else ""})
-    ctx = ui.inspection.context(request.query_params)
-    done = ctx.events([rt.EFFECT_RESOLVED, rt.EFFECT_EXECUTED], 40)
-    history = Table((Column("quand", "fit"), "quoi", "action", "détail"), tuple(
-        Row((When(e.at), Badge("décidé" if e.type.name == rt.EFFECT_RESOLVED.name else "exécuté",
-                               "info" if e.type.name == rt.EFFECT_RESOLVED.name else "ok"),
-             f"n° {e.data.proposal}",
-             Text(_detail(e), "muted", clamp=200))) for e in done), title="Décisions et exécutions récentes",
-        empty="aucune")
     done_flag = request.query_params.get("fait", "")
     messages = {"oui": [("ok", "Approuvé.")], "non": [("ok", "Refusé.")],
                 "inconnu": [("warn", "Action inconnue ou déjà décidée.")],
                 "change": [("warn", decisions.MESSAGES[decisions.CHANGED])],
                 "bloque": [("warn", "Ça ne peut pas partir tel quel : relis-le.")],
                 "jeton": [("danger", "Jeton de formulaire invalide : recharge la page.")]}.get(done_flag, [])
-    return {"panel": Panel("approvals.html", {"items": items}), "blocks": [history], "messages": messages}
+    return {"panel": Panel("approvals.html", {"items": items}), "blocks": [], "messages": messages}
+
+
+#: l'historique, par page
+HISTORY_PAGE = 30
+
+
+@TABS.tab("approbations.historique", title="Historique",
+          description="Chaque décision (approuvé, refusé, par qui) et chaque exécution (réussie ou non), avec la "
+                      "capacité concernée.")
+async def history(ui: Any, request: Request) -> list[Any]:
+    ctx = ui.inspection.context(request.query_params)
+    before = ctx.int_param("avant", 0) or None
+    done = ctx.events([rt.EFFECT_RESOLVED, rt.EFFECT_EXECUTED], HISTORY_PAGE, before=before)
+    # la capacité d'une exécution se lit sur sa décision
+    resolved = {e.data.proposal: e.data for e in ctx.events([rt.EFFECT_RESOLVED], 500, before=before)}
+    rows = []
+    for e in done:
+        is_decision = e.type.name == rt.EFFECT_RESOLVED.name
+        capability = e.data.capability if is_decision else getattr(resolved.get(e.data.proposal), "capability", "")
+        tone = "" if is_decision and e.data.approved else "muted" if is_decision else \
+            ("ok" if e.data.ok else "danger")
+        rows.append(Row((When(e.at), Badge("décidé" if is_decision else "exécuté", "info" if is_decision else "ok"),
+                         Text(capability or "—", "mono"), Ref("event", str(e.data.proposal), f"n° {e.data.proposal}"),
+                         Text(_detail(e), "muted", clamp=200)), href=Ref("event", str(e.seq), ""), tone=tone))
+    pager = Pager(older=(("avant", str(done[-1].seq)),)) if len(done) == HISTORY_PAGE else None
+    return [Table((Column("quand", "fit"), Column("quoi", "fit"), "capacité", Column("proposition", "fit"),
+                   "détail"), tuple(rows), title="Décisions et exécutions", empty="Rien n'a encore été décidé.",
+                  pager=pager)]
 
 
 def _detail(e: Any) -> str:

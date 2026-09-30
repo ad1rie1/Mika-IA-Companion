@@ -185,8 +185,9 @@ def _received(s: NeedsState, e, cx) -> NeedsState:
 
 
 @NEEDS.reducer(goals_c.STEP_REPORTED)
-def _explored(s: NeedsState, e, cx) -> NeedsState:
-    """Un pas d'exploration comble un peu la curiosité (on a appris quelque chose)."""
+def _learned_on_a_step(s: NeedsState, e, cx) -> NeedsState:
+    """Un pas d'exploration mené avec des outils comble un peu la curiosité : on
+    a appris quelque chose (``learned_curiosity``, comme une croyance nouvelle)."""
     if e.data.kind != goals_c.EXPLORATION or not e.data.tools:
         return s
     p = params(cx.params)
@@ -194,8 +195,9 @@ def _explored(s: NeedsState, e, cx) -> NeedsState:
 
 
 @NEEDS.reducer(goals_c.GOAL_CLOSED)
-def _satisfied(s: NeedsState, e, cx) -> NeedsState:
-    """Mener une exploration à bout comble franchement la curiosité."""
+def _exploration_achieved(s: NeedsState, e, cx) -> NeedsState:
+    """Mener une exploration à bout comble franchement la curiosité
+    (``explored_curiosity``)."""
     if e.data.kind != goals_c.EXPLORATION or e.data.status != goals_c.ACHIEVED:
         return s
     p = params(cx.params)
@@ -216,7 +218,7 @@ def _said(s: NeedsState, e, cx) -> NeedsState:
 
 
 @NEEDS.reducer(memory_c.BELIEVED)
-def _learned(s: NeedsState, e, cx) -> NeedsState:
+def _learned_a_belief(s: NeedsState, e, cx) -> NeedsState:
     p = params(cx.params)
     return _relieve(_touch(s, e.at, p), c.CURIOSITY, p.learned_curiosity, e.at, p)
 

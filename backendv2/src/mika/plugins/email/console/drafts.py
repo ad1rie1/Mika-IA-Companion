@@ -52,17 +52,23 @@ from mika.plugins.email import (
     EmailState,
     operator_name,
 )
-from mika.plugins.email.console.common import FOLD, NO_PORT, PAGE, SECTION, VOICE_LABEL, clip, fold, mail_key
+from mika.plugins.email.console.common import (
+    FOLD,
+    NO_PORT,
+    PAGE,
+    SECTION,
+    VOICE_LABEL,
+    clip,
+    draft_state,
+    fold,
+    mail_key,
+)
 from mika.ports.mail import TO_FILL
 from mika.vocab.privacy import Sensitivity
 
-STATES = {WAITING: ("attend ton accord", "warn"), APPROVED: ("approuvé, en partance", "info"),
-          GONE: ("parti", "ok"), REFUSED: ("refusé", "muted"), FAILED: ("échec de l'envoi", "danger")}
 
-
-def _badge(d: DraftSeen) -> Badge:
-    text, tone_ = STATES.get(d.state, (d.state, ""))
-    return Badge(text, tone_)
+def _badge(state: str) -> Badge:
+    return Badge(*draft_state(state))
 
 
 def _waiting_count(s: EmailState, frame: Frame) -> tuple[int, str]:
@@ -95,7 +101,7 @@ def _drafts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
                     Ref.subject("mail", mail_key(d.mail), clip(answered.subject, 60)) if answered is not None
                     else ("—" if not d.mail else Text("un mail plus dans la boîte", "muted")),
                     Badge("demandé" if d.asked else "d'elle-même", "info" if d.asked else ""), When(d.at),
-                    _badge(d), Badge("à compléter", "warn") if got is not None and TO_FILL in got.body else ""),
+                    _badge(d.state), Badge("à compléter", "warn") if got is not None and TO_FILL in got.body else ""),
                    href=Ref.subject("brouillon", d.draft, clip(got.subject if got else d.draft, 60))
                    if d.draft else None, tone="warn" if d.state == WAITING else "")
 
@@ -105,7 +111,8 @@ def _drafts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     if waiting:
         blocks.append(Note("Ouvre un brouillon pour lire exactement ce qui partira, le retoucher, l'envoyer ou le "
                            "refuser. Rien ne part sans toi.", tone="info"))
-    blocks.append(Table(columns, tuple(row(d) for d in waiting), title=f"À décider ({len(waiting)})",
+    shown, pending = paginate(waiting, ctx.pager("page_a_decider", size=PAGE))
+    blocks.append(Table(columns, tuple(row(d) for d in shown), title=f"À décider ({len(waiting)})", pager=pending,
                         empty="rien n'attend ton accord"))
     page, pager = paginate(done, ctx.pager(size=PAGE))
     blocks.append(Table(columns, tuple(row(d) for d in page), title=f"Déjà décidés ({len(done)})", pager=pager,
@@ -120,7 +127,7 @@ def _head(s: EmailState, frame: Frame, ctx: InspectContext, key: str) -> Head | 
     seen = _seen_for(s, key)
     if got is None and seen is None:
         return None
-    badges: list[Badge] = [_badge(seen)] if seen is not None else [Badge(got.state if got else "?", "")]
+    badges: list[Badge] = [_badge(seen.state if seen is not None else got.state if got is not None else "")]
     if got is not None and got.edited_by:
         badges.append(Badge(f"retouché par {operator_name(frame, got.edited_by)}".replace("ton opérateur",
                                                                                           "l'opérateur"), "warn"))
@@ -145,7 +152,9 @@ def _search(s: EmailState, frame: Frame, ctx: InspectContext, text: str, limit: 
     for d in port.drafts(200) if port is not None else ():
         if query and query not in fold(f"{d.subject} {d.to}"):
             continue
-        out.append(Found(d.id, clip(d.subject, 120) or "(sans objet)", f"à {clip(d.to, 80)} · {d.state}"))
+        seen = _seen_for(s, d.id)
+        state = draft_state(seen.state if seen is not None else d.state)[0]
+        out.append(Found(d.id, clip(d.subject, 120) or "(sans objet)", f"à {clip(d.to, 80)} · {state}"))
         if len(out) >= limit:
             break
     return out
@@ -187,7 +196,7 @@ def _tab_draft(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
                 APPROVED: "Approuvé : il part dans un instant."}.get(seen.state, "")
         if seen.note:
             said += f" Note : « {seen.note} »."
-        blocks.append(Note(said or seen.state, tone="info"))
+        blocks.append(Note(said or f"État : {draft_state(seen.state)[0]}.", tone="info"))
     return blocks
 
 

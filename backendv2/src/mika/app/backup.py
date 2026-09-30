@@ -48,9 +48,11 @@ from mika.runtime.state import RUNTIME
 FORMAT = 1
 MANIFEST = "MANIFEST.json"
 #: jetables : se reconstruisent depuis le journal
-SKIPPED = frozenset({"views.db", "views.db-wal", "views.db-shm"})
+SKIPPED = frozenset({"views.db", "views.db-wal", "views.db-shm", "sauvegardes.json", "sauvegardes.partial"})
 _SQLITE_SIDECARS = ("-wal", "-shm", "-journal")
 ARCHIVE_PREFIX = "mika-"
+#: ce que la console lit des sauvegardes : la dernière, la dernière vérification (dans le dossier de données)
+RECORD = "sauvegardes.json"
 
 
 class BackupError(RuntimeError):
@@ -163,7 +165,57 @@ def backup(data: Path, dest: Path, *, keep: int = 0, now: datetime | None = None
     if keep > 0:
         for old in sorted(dest.glob(f"{ARCHIVE_PREFIX}*.tar.gz"))[:-keep]:
             old.unlink()
-    return Summary(archive, head, state, len(files), archive.stat().st_size, tuple(warnings))
+    done = Summary(archive, head, state, len(files), archive.stat().st_size, tuple(warnings))
+    note(data, "sauvegarde", {"at": _us(now), "archive": str(archive), "dossier": str(dest), "tete": head,
+                              "fichiers": len(files), "octets": done.size, "garde": keep,
+                              "remarques": list(warnings)})
+    return done
+
+
+def _us(now: datetime | None) -> int:
+    return int((now or datetime.now(UTC)).timestamp() * 1_000_000)
+
+
+def note(data: Path, kind: str, fields: dict[str, Any]) -> None:
+    """Note dans le dossier de données ce qu'une sauvegarde ou une vérification a donné (la console
+    le lit : Système › Stockage). Écrit d'un coup, jamais à moitié ; un échec d'écriture ne fait pas
+    échouer la sauvegarde."""
+    path = Path(data) / RECORD
+    try:
+        current = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        if not isinstance(current, dict):
+            current = {}
+        current[kind] = fields
+        partial = path.with_suffix(".partial")
+        partial.write_text(json.dumps(current, indent=1, ensure_ascii=False), encoding="utf-8")
+        partial.replace(path)
+    except (OSError, ValueError):
+        pass
+
+
+def overview(data: Path) -> dict[str, Any]:
+    """Pour la console : la dernière sauvegarde, la dernière vérification, et les archives présentes
+    dans le dossier de la dernière sauvegarde (nom, octets, date)."""
+    got = recorded(data)
+    folder = Path(str((got.get("sauvegarde") or {}).get("dossier") or ""))
+    archives: list[dict[str, Any]] = []
+    if str(folder) not in ("", ".") and folder.is_dir():
+        for f in sorted(folder.glob(f"{ARCHIVE_PREFIX}*.tar.gz"), reverse=True):
+            try:
+                st = f.stat()
+            except OSError:
+                continue
+            archives.append({"nom": f.name, "octets": st.st_size, "at": int(st.st_mtime * 1_000_000)})
+    return {**got, "archives": archives}
+
+
+def recorded(data: Path) -> dict[str, Any]:
+    """Ce que les dernières sauvegardes et vérifications ont noté (vide : jamais)."""
+    try:
+        got = json.loads((Path(data) / RECORD).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return got if isinstance(got, dict) else {}
 
 
 def _extract(archive: Path, into: Path) -> dict[str, Any]:
@@ -186,13 +238,21 @@ def _extract(archive: Path, into: Path) -> dict[str, Any]:
     return manifest
 
 
-def verify(archive: Path) -> Summary:
-    """Vérifie une archive sans rien restaurer : sommes, rejeu, empreinte."""
-    with tempfile.TemporaryDirectory(prefix="mika-verif-") as tmp:
-        manifest = _extract(archive, Path(tmp))
-        head, state = state_of(Path(tmp) / "data" / "mind.db")
-    if (head, state) != (manifest["head"], manifest["state"]):
-        raise BackupError("la copie ne rejoue pas à l'état enregistré dans le manifeste")
+def verify(archive: Path, *, record: Path | None = None, now: datetime | None = None) -> Summary:
+    """Vérifie une archive sans rien restaurer : sommes, rejeu, empreinte. ``record`` : le dossier de
+    données où noter le résultat (réussi ou non) pour la console."""
+    try:
+        with tempfile.TemporaryDirectory(prefix="mika-verif-") as tmp:
+            manifest = _extract(archive, Path(tmp))
+            head, state = state_of(Path(tmp) / "data" / "mind.db")
+        if (head, state) != (manifest["head"], manifest["state"]):
+            raise BackupError("la copie ne rejoue pas à l'état enregistré dans le manifeste")
+    except BackupError as exc:
+        if record is not None:
+            note(record, "verification", {"at": _us(now), "archive": str(archive), "ok": False, "erreur": str(exc)})
+        raise
+    if record is not None:
+        note(record, "verification", {"at": _us(now), "archive": str(archive), "ok": True, "tete": head})
     return Summary(archive, head, state, len(manifest["files"]), archive.stat().st_size)
 
 

@@ -116,3 +116,40 @@ def test_only_an_operator_decides_and_only_an_owner_sees_the_queue(world):  # no
     assert reject.status_code == 403  # toujours pas opératrice
     assert not _events(client, live, rt.EFFECT_RESOLVED.name)
 
+
+
+def test_a_project_is_confided_on_its_own_page_and_read_on_its_fiche(world):  # noqa: F811
+    """« Confier un projet » : une page à elle (pas un panneau), chaque champ expliqué, un calendrier pour
+    l'échéance, des agendas proposés, la personne choisie parmi celles qu'elle connaît ; enregistré, on
+    arrive sur la fiche du projet, dont chaque onglet s'ouvre — cadre, décisions, prompts compris."""
+    import html
+    import re
+
+    client, live, _ = world
+    bootstrap(client)
+    with client.websocket_connect(WS) as ws:  # qu'elle la connaisse : sa poignée, sa personne
+        ws.receive_json(), ws.receive_json()
+    listing = html.unescape(client.get("/inspecteur/buts").text)
+    assert "Projets en cours" in listing  # l'onglet Projets vient en premier
+    link = re.search(r'<a class="btn quiet small" href="(/inspecteur/action/goals\.confier\?[^"]+)">Confier un projet',
+                     listing)
+    assert link, "l'action à plusieurs champs mène à sa page"
+    page = html.unescape(client.get(link.group(1).replace("&amp;", "&")).text)
+    assert "<legend>Le projet</legend>" in page and "<legend>Son rythme</legend>" in page
+    assert 'type="datetime-local" name="due"' in page and '<datalist id=' in page
+    assert re.search(r'<select name="owner"[^>]*>.*?<option value="user_1"', page, re.S)
+    assert "rien ne part sans que tu l'approuves" in page
+    done = client.post("/inspecteur/action/goals.confier", data={
+        "csrf": client.cookies.get("csrftoken"), "_op": "confier-1", "_retour": "/inspecteur/buts/projets", "_sujet": "",
+        "title": "Un script de bonjour", "details": "Écrire bonjour.py.", "owner": "user_1",
+        "due": "2027-03-02T18:00", "schedule": "interval:2h", "max_steps": "4", "approval": "on",
+        "_champs": ["title", "details", "owner", "due", "schedule", "max_steps", "approval"]})
+    assert done.status_code == 200, re.findall(r'class="(?:error|flash danger)"[^>]*>([^<]+)', html.unescape(done.text))
+    gid = _events(client, live, goals_c.GOAL_OPENED.name)[-1].seq
+    for tab in ("resume", "politique", "pas", "carnet", "effets", "decisions", "episodes", "atelier"):
+        r = client.get(f"/inspecteur/fiche/goal/{gid}?onglet={tab}")
+        assert r.status_code == 200 and "a échoué" not in r.text, tab
+    policy = html.unescape(client.get(f"/inspecteur/fiche/goal/{gid}?onglet=politique").text)
+    assert "toutes les 2 h (interval:2h)" in policy and "4 au plus" not in policy and "sur 4 au plus" in policy
+    projects = html.unescape(client.get("/inspecteur/buts/projets").text)
+    assert "Un script de bonjour" in projects and "sort avec ton accord" in projects

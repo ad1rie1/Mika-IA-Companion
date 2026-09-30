@@ -116,13 +116,22 @@ class CallLog:
 
         return int(await self.store.run_views(run))
 
-    def recent(self, limit: int = 100, *, role: str = "") -> list[LLMTrace]:
+    def recent(self, limit: int = 100, *, role: str = "", offset: int = 0) -> list[LLMTrace]:
         if not self._ready:
             return []
         where, args = ("WHERE role=?", (role,)) if role else ("", ())
-        rows = self.store.query_views(f"SELECT {', '.join(_COLUMNS)} FROM {TABLE} {where} ORDER BY at DESC LIMIT ?",
-                                      (*args, max(1, min(limit, 1000))))
+        rows = self.store.query_views(
+            f"SELECT {', '.join(_COLUMNS)} FROM {TABLE} {where} ORDER BY at DESC, id DESC LIMIT ? OFFSET ?",
+            (*args, max(1, min(limit, 1000)), max(0, offset)))
         return [_trace(r) for r in rows]
+
+    def count(self, *, role: str = "") -> int:
+        """Combien d'appels le registre garde (pour paginer)."""
+        if not self._ready:
+            return 0
+        where, args = ("WHERE role=?", (role,)) if role else ("", ())
+        rows = self.store.query_views(f"SELECT COUNT(*) FROM {TABLE} {where}", args)
+        return int(rows[0][0]) if rows else 0
 
     def for_correlation(self, correlation: str, *, limit: int = 200) -> list[LLMTrace]:
         """Les appels d'un épisode (ou d'un passage de processus), dans l'ordre où
@@ -146,16 +155,17 @@ class CallLog:
         return _trace(rows[0]) if rows else None
 
     def usage(self, since: int, *, by: str = "role", day_of: Any = None) -> list[Usage]:
-        """Agrégats depuis ``since``, par ``role``, ``backend`` ou jour (``by="day"``,
-        ``day_of(at) -> str`` donne le jour local)."""
+        """Agrégats depuis ``since``, par ``role``, ``backend``, ``model`` ou jour
+        (``by="day"``, ``day_of(at) -> str`` donne le jour local)."""
         if not self._ready:
             return []
         rows = self.store.query_views(
             f"SELECT at, role, backend, outcome, input_tokens, output_tokens, cache_read, cache_write, cost_usd, "
-            f"latency_us FROM {TABLE} WHERE at >= ? ORDER BY at", (since,))
+            f"latency_us, model FROM {TABLE} WHERE at >= ? ORDER BY at", (since,))
         acc: dict[str, list[float]] = {}
-        for at, role, backend, outcome, i, o, cr, cw, cost, lat in rows:
-            key = day_of(at) if by == "day" and day_of is not None else backend if by == "backend" else role
+        for at, role, backend, outcome, i, o, cr, cw, cost, lat, model in rows:
+            key = day_of(at) if by == "day" and day_of is not None else backend if by == "backend" else \
+                f"{backend} · {model}" if by == "model" else role
             a = acc.setdefault(key, [0, 0, 0, 0, 0, 0, 0.0, 0])
             a[0] += 1
             a[1] += 0 if outcome == "ok" else 1

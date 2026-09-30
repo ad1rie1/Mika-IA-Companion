@@ -1,17 +1,29 @@
 {% extends "base.html" %}
 {% from "_blocks.html" import render, action_form, cell %}
-{% block content %}
+{% macro head_and_body() %}
 {% if crumbs %}<nav class="crumbs" aria-label="Fil d'Ariane">{% for c in crumbs %}{% if c[1] %}<a href="{{ c[1] }}">{{ c[0] }}</a>{% else %}<span>{{ c[0] }}</span>{% endif %}{% if not loop.last %}<span aria-hidden="true">›</span>{% endif %}{% endfor %}</nav>{% endif %}
 <div class="page-head">
-  <div>
+  <div class="page-title">
     <h1>{{ heading or title }}</h1>
     {% if subtitle %}<p>{{ subtitle }}</p>{% endif %}
     {% if head_badges %}<div class="badges">{% for b in head_badges %}<span class="badge {{ b.tone }}">{{ b.text }}</span>{% endfor %}</div>{% endif %}
     {% if facts %}<div class="head-facts">{% for f in facts %}<span><span class="k">{{ f.label }}</span>{% if f.cell %}{{ cell(f.cell) }}{% else %}{{ f.value }}{% endif %}</span>{% endfor %}</div>{% endif %}
   </div>
-  {% if head_actions %}<div class="head-actions">{% for a in head_actions %}<details class="card"><summary class="btn quiet small{{ ' danger' if a.danger }}">{{ a.title }}</summary>{{ action_form(a, True) }}</details>{% endfor %}</div>{% endif %}
 </div>
-{% for m in messages or [] %}<div class="flash {{ m[0] }}" role="status">{{ m[1] }}</div>{% endfor %}
+{% if head_actions %}
+<div class="action-bar" role="group" aria-label="Actions">
+  {% for a in head_actions %}
+  {% if a.page %}<a class="btn {{ 'danger' if a.danger else 'quiet' }} small" href="{{ a.page }}">{{ a.title }}</a>
+  {% else %}
+  <details class="action-pop" data-exclusive>
+    <summary class="btn {{ 'danger' if a.danger else 'quiet' }} small">{{ a.title }}</summary>
+    <div class="action-panel">{{ action_form(a, True) }}</div>
+  </details>
+  {% endif %}
+  {% endfor %}
+</div>
+{% endif %}
+{% for m in messages or [] %}<div class="flash {{ {'ko': 'danger', 'ok': 'ok'}.get(m[0], m[0]) }}" role="status">{{ m[1] }}</div>{% endfor %}
 {% if tabs %}<nav class="tabs" aria-label="Onglets">{% for t in tabs %}<a class="tab{{ ' on' if t.on }}" href="{{ t.href }}"{% if t.on %} aria-current="page"{% endif %}>{{ t.title }}{% if t.badge %}<span class="count">{{ t.badge }}</span>{% endif %}</a>{% endfor %}</nav>{% endif %}
 {% if filters %}
 <form class="filters" method="get">
@@ -34,4 +46,21 @@
 {% if panel and panel_after %}{% include panel %}{% endif %}
 {% if not blocks and not panel %}<div class="empty-state"><b>Rien à montrer ici pour l'instant.</b>{{ empty or "Cette page se remplira quand elle aura vécu un peu." }}</div>{% endif %}
 </div>
+{% endmacro %}
+{% block content %}
+{% if submenu %}
+<div class="with-submenu">
+  <nav class="submenu" aria-label="Sous-menu">
+    {% for g in submenu %}
+    <details class="submenu-group"{{ ' open' if g.open }}>
+      <summary class="submenu-title">{{ g.title or "Général" }}{% set n = g["items"]|sum(attribute="badge") %}{% if n and not g.open %}<span class="count">{{ n }}</span>{% endif %}</summary>
+      {% for t in g["items"] %}<a class="submenu-item{{ ' on' if t.on }}" href="{{ t.href }}"{% if t.on %} aria-current="page"{% endif %}><span>{{ t.title }}</span>{% if t.badge %}<span class="count">{{ t.badge }}</span>{% endif %}</a>{% endfor %}
+    </details>
+    {% endfor %}
+  </nav>
+  <div class="submain">{{ head_and_body() }}</div>
+</div>
+{% else %}
+{{ head_and_body() }}
+{% endif %}
 {% endblock %}

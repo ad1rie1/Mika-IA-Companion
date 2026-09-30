@@ -43,13 +43,17 @@ from mika.kernel.inspect import (
     Found,
     Head,
     InspectContext,
+    Nav,
+    NavItem,
     Note,
+    Pager,
     Param,
     Prose,
     Ref,
     Row,
     Table,
     Text,
+    When,
     paginate,
 )
 from mika.kernel.operate import ActionContext, Done, Refused
@@ -84,10 +88,15 @@ from mika.plugins.forge.views import (
 )
 from mika.ports.forge import AppInfo, AppUI, AppViewSpec, CallResult, ForgeRefused, form_field, ui_load
 
-APPS_SHOWN = 50
+#: une page de ses apps, de ce qu'une app a vécu (au journal), des lignes de son journal
+APPS_PAGE = 25
+LIVED_PAGE = 25
+LOGS_PAGE = 50
 CODE_SHOWN = 20_000
+#: l'ancienne page d'une app ne montre que ses dernières lignes (sa fiche les montre toutes, par pages)
 LOGS_SHOWN = 50
-OUTCOMES_SHOWN = 30
+#: le journal d'une app relu par la console : l'hôte n'en garde pas davantage
+LOGS_READ = 500
 MESSAGE_MAX = 500
 APP_NAME = re.compile(r"^[a-z][a-z0-9_]{1,30}$")
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -224,10 +233,16 @@ def _outcome(e: Any) -> tuple[str, str, str]:
 
 
 def _lived(name: str, ctx: InspectContext, types: tuple[Any, ...]) -> Table:
-    lived = _latest(ctx, types, name, OUTCOMES_SHOWN)
-    return Table(("quand", "quoi", "issue", "détail", "journal"),
-                 tuple((ctx.when(e.at), *_outcome(e), Ref("event", str(e.seq), f"#{e.seq}")) for e in lived),
-                 title=f"Ce qu'elle a vécu (les {OUTCOMES_SHOWN} derniers)", empty="rien pour l'instant")
+    """Ce qu'une app a vécu, au journal : une page, puis « plus anciens » (un de plus pour savoir s'il y en a)."""
+    before = ctx.int_param("avant", 0) or None
+    found = ctx.events(types, LIVED_PAGE + 1, where=("app", name), before=before)
+    lived = found[:LIVED_PAGE]
+    older = (("avant", str(lived[-1].seq)),) if len(found) > LIVED_PAGE else ()
+    return Table((Column("quand", "fit"), "quoi", "issue", "détail", Column("journal", "fit")),
+                 tuple((When(e.at), *_outcome(e), Ref("event", str(e.seq), f"#{e.seq}")) for e in lived),
+                 title="Ce qu'elle a vécu, du plus récent au plus ancien" + (" (plus anciens)" if before else ""),
+                 empty="plus rien avant" if before else "rien pour l'instant",
+                 pager=Pager(param="avant", size=LIVED_PAGE, older=older) if older or before else None)
 
 
 # ── L'objet « app » : en-tête et recherche ────────────────────────────────
@@ -289,9 +304,9 @@ def _inspect(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
     on_disk = {i.name: i for i in port.apps()} if port is not None else {}
     blocks: list[Block] = []
     if port is None:
-        blocks.append(Note("Forge non configurée : aucun hôte ne peut faire tourner ses apps.", tone="mut"))
+        blocks.append(Note("Forge non configurée : aucun hôte ne peut faire tourner ses apps.", tone="muted"))
     signals = {str(app): (count, last) for app, count, last in ctx.tally(c.SIGNALED, "app")}
-    names, pager = paginate(sorted(set(s.apps) | set(on_disk)), ctx.pager(size=APPS_SHOWN))
+    names, pager = paginate(sorted(set(s.apps) | set(on_disk)), ctx.pager(size=APPS_PAGE))
     out = []
     for name in names:
         app, info = s.apps.get(name), on_disk.get(name)
@@ -301,12 +316,14 @@ def _inspect(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
         count, last = signals.get(name, (0, 0))
         failures = f" ({app.failures} échec(s) d'affilée)" if app is not None and app.failures else ""
         text, tone = _state(app, info, port)
-        out.append((_fiche(name), _clip(title, 80), version, rule or "manual", Badge(text, tone),
-                    "oui" if app is not None and app.promoted else "non", _last_tick(name, ctx) + failures,
-                    f"{count} (le dernier : {ctx.when(last)})" if count else "0"))
+        link = _fiche(name)
+        out.append(Row((link, _clip(title, 80), version, rule or "manual", Badge(text, tone),
+                        "oui" if app is not None and app.promoted else "non", _last_tick(name, ctx) + failures,
+                        f"{count} (le dernier : {ctx.when(last)})" if count else "0"),
+                       href=link if isinstance(link, Ref) else None, tone="danger" if tone == "danger" else ""))
     blocks.append(Table(("app", "titre", Column("version", "num"), "agenda", "état", "promue", "dernier tour",
                          "signaux"), tuple(out), title="Ses apps", empty="elle n'a encore écrit aucune app",
-                        pager=pager if pager.total and pager.total > pager.size else None))
+                        pager=pager, caption="Un clic ouvre la fiche de l'app (état, vues, réglages, code, journal)."))
     return blocks
 
 
@@ -317,16 +334,16 @@ def _inspect_app(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block
     name = ctx.param("app")
     if not APP_NAME.match(name):
         return [back, Note("Donne le nom d'une app : des minuscules, chiffres et _, commençant par une lettre.",
-                           tone="mut")]
+                           tone="muted")]
     port = ctx.ports.get("forge")
     app = s.apps.get(name)
     info = port.info(name) if port is not None else None
     if app is None and info is None:
-        return [back, Note(f"L'app « {name} » n'existe pas.", tone="mut")]
+        return [back, Note(f"L'app « {name} » n'existe pas.", tone="muted")]
     blocks: list[Block] = [back, Fields((("sa fiche", _fiche(name, "ouvrir la fiche de l'app")),))]
     if port is None:
         blocks.append(Note("Forge non configurée : son manifeste, son code et son journal ne sont pas disponibles.",
-                           tone="mut"))
+                           tone="muted"))
     blocks.append(Fields(tuple(_about(name, app, info, port, frame, ctx)), title="L'app"))
     if info is not None:
         blocks.append(Table(("réglage", "défaut du manifeste"), tuple((k, _shown(v)) for k, v in info.config),
@@ -343,8 +360,9 @@ def _inspect_app(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block
             blocks.append(Prose(code[:CODE_SHOWN] + (f"\n… (coupé : {len(code)} caractères en tout)" if cut else ""),
                                 title="main.py"))
         logs = port.logs(name, LOGS_SHOWN)
-        blocks.append(Prose("\n".join(logs), title=f"Son journal ({len(logs)} dernières lignes)") if logs
-                      else Note("Son journal est vide.", tone="mut"))
+        blocks.append(Prose("\n".join(logs), title=f"Son journal ({len(logs)} dernières lignes ; tout son journal, "
+                                                   "par pages, dans l'onglet Journal de sa fiche)") if logs
+                      else Note("Son journal est vide.", tone="muted"))
     blocks.append(_lived(name, ctx, (TICKED, HANDLED, EMITTED, SWITCHED)))
     return blocks
 
@@ -423,10 +441,9 @@ async def _tab_views(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[B
             known = ", ".join(v.key for v in info.views)
             blocks.append(Note(f"Vue « {_clip(wanted, 40)} » inconnue (au choix : {known}).", tone="warn"))
         spec = info.views[0]
-    nav = tuple(Row((_fiche_view(name, v) if v.key != spec.key else Badge(v.label, "info"), v.description or "—"),
-                    tone="info" if v.key == spec.key else "") for v in info.views)
     if len(info.views) > 1:
-        blocks.append(Table(("vue", "ce qu'elle montre"), nav, title="Ses vues"))
+        blocks.append(Nav(tuple(NavItem(v.label, _fiche_view(name, v), active=v.key == spec.key)
+                                for v in info.views), title="Ses vues"))
     values, notes = view_params(spec, ctx.params)
     blocks += [Note(n, tone="warn") for n in notes]
     if spec.description:
@@ -530,10 +547,15 @@ def _tab_logs(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
     name, app, info, port = got
     if port is None:
         return [Note(NOT_HERE, tone="muted")]
-    logs = port.logs(name, LOGS_SHOWN)
+    logs = port.logs(name, LOGS_READ)
     if not logs:
         return [Note("Son journal est vide.", tone="muted")]
-    return [Code("\n".join(logs), title=f"Son journal ({len(logs)} dernières lignes, une donnée)")]
+    numbered = [(n, line) for n, line in enumerate(logs, start=1)][::-1]  # la plus récente d'abord
+    page, pager = paginate(numbered, ctx.pager(size=LOGS_PAGE))
+    return [Table((Column("n°", "num"), "ligne"), tuple((n, Text(line, kind="mono")) for n, line in page),
+                  title=f"Son journal ({len(logs)} ligne(s), la plus récente d'abord ; une donnée)", pager=pager,
+                  caption=f"L'hôte ne garde que ses {LOGS_READ} dernières lignes." if len(logs) >= LOGS_READ
+                  else "")]
 
 
 @FORGE.inspect("vecu", title="Vécu", subject="app", order=60)

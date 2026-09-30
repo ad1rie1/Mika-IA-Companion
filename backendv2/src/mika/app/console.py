@@ -1,6 +1,12 @@
 """La carte de la console, décidée par la composition (comme la liste des
 facultés) : ses groupes, ses destinations, et les onglets que la console
 fournit elle-même. Les facultés, elles, y rangent leurs vues par ``section``.
+
+La carte répond à des questions d'opérateur, dans cet ordre : que dois-je
+faire (tableau de bord) ; comment va-t-elle (Elle) ; qui connaît-elle (Ses
+relations) ; que fait-elle et pourquoi (Son activité) ; par où perçoit-elle et
+agit-elle (Ses canaux) ; que décide-t-on, la machine tient-elle
+(Exploitation). ``docs/console-carte.md`` détaille chaque menu.
 """
 
 from __future__ import annotations
@@ -9,49 +15,71 @@ from mika.inspector.catalog import Destination, NavGroup
 
 NAVIGATION: tuple[NavGroup, ...] = (
     NavGroup("", (
-        Destination("accueil", "Vue d'ensemble", "◉", "Ce qui demande ton attention, et comment elle va.",
-                    builtin=("accueil.a_traiter", "accueil.courbes", "accueil.maintenant"), layout="stack"),
+        Destination("accueil", "Tableau de bord", "◉", "Ce qui attend ton attention, son état en ce moment et sa "
+                    "journée.",
+                    builtin=("accueil.a_traiter", "accueil.maintenant", "accueil.courbes", "accueil.aujourdhui"),
+                    layout="stack"),
     )),
     NavGroup("Elle", (
         Destination("vie", "Humeur et corps", "♡", "Son humeur, ses postures envers chacun, ses besoins, son "
                     "rythme, son estime."),
         Destination("pensees", "Pensées et nuits", "☁", "Ce qui lui trotte dans la tête, ce qu'elle a remarqué, "
                     "ce qu'elle attend, ses nuits."),
-        Destination("decisions", "Décisions", "⚖", "Pourquoi elle parle ou se tait : les preuves de l'arbitre, "
-                    "ses choix, ses épisodes, ses échéances.",
-                    builtin=("decisions.maintenant", "decisions.selections", "decisions.episodes",
-                             "decisions.echeances")),
-    )),
-    NavGroup("Ses liens", (
-        Destination("personnes", "Personnes", "☺", "Les gens qu'elle connaît et ce qui les lie."),
-        Destination("identites", "Identités", "◎", "Qui parle derrière chaque poignée, et ce que ça ouvre."),
-        Destination("fil", "Fil", "✉", "Ce qui a été dit, avec qui, et les questions qui attendent."),
-    )),
-    NavGroup("Sa mémoire", (
         Destination("memoire", "Mémoire", "❖", "Souvenirs, croyances, promesses, et la relecture qui les "
                     "produit. (La v2 n'extrait ni thèmes ni entités.)"),
     )),
-    NavGroup("Son travail", (
-        Destination("buts", "Buts", "➤", "Ses rappels, explorations et projets : où ils en sont."),
-        Destination("approbations", "Approbations", "✓", "Ce qu'elle voudrait faire hors de la machine.",
-                    builtin=("approbations.en_attente",)),
-        Destination("apps", "Apps forgées", "⚒", "Les petites apps qu'elle écrit elle-même."),
+    NavGroup("Ses relations", (
+        Destination("personnes", "Personnes", "☺", "Les gens qu'elle connaît et ce qui les lie.",
+                    subjects=("person",)),
+        Destination("identites", "Identités", "◎", "Qui parle derrière chaque poignée, et ce que ça ouvre.",
+                    subjects=("handle",)),
+        Destination("fil", "Conversations", "❝", "Ce qui a été dit, avec qui, et les questions qui attendent."),
     )),
-    NavGroup("Ses sens", (
+    NavGroup("Son activité", (
+        Destination("decisions", "Décisions", "⚖", "Pourquoi elle parle ou se tait : les preuves de l'arbitre, ce "
+                    "qui tourne en ce moment, son budget d'initiatives, ses choix, ses épisodes, ses échéances.",
+                    builtin=("decisions.maintenant", "decisions.en_cours", "decisions.selections",
+                             "decisions.episodes", "decisions.echeances"),
+                    order=("maintenant", "en_cours", "initiatives", "selections", "episodes", "echeances")),
+        Destination("buts", "Buts", "➤", "Ses rappels, explorations et projets : où ils en sont.",
+                    subjects=("goal",)),
+        Destination("approbations", "Approbations", "✓", "Ce qu'elle voudrait faire sortir de la machine, et ce "
+                    "qui en a été décidé.", builtin=("approbations.en_attente", "approbations.historique")),
+    )),
+    NavGroup("Ses canaux", (
         Destination("courrier", "Courrier", "✉", "Ses boîtes aux lettres : leurs dossiers, ce qui arrive, ce qu'elle "
                     "a préparé et qui attend ton accord, ce qui part, avec qui, et ses comptes. Ce que tu écris ici "
-                    "part de sa boîte, et elle le sait."),
-        Destination("sens", "Sens", "◌", "Flux, caméra, appareils."),
+                    "part de sa boîte, et elle le sait.", subjects=("mail", "brouillon", "compte")),
+        Destination("sens", "Flux et capteurs", "◌", "Ce qu'elle lit du monde (flux RSS), ce qu'elle voit "
+                    "(caméra), ce que ses appareils lui signalent."),
+        Destination("apps", "Apps forgées", "⚒", "Les petites apps qu'elle écrit elle-même.", subjects=("app",)),
     )),
     NavGroup("Exploitation", (
-        Destination("reglages", "Réglages", "⚙", "Ce qu'un opérateur décide : modèles, personnalité, canaux, "
-                    "sens, comptes.",
-                    builtin=("reglages.modeles", "reglages.personnalite", "reglages.parametres",
-                             "reglages.canaux", "reglages.sens", "reglages.comptes",
-                             "reglages.journal")),
-        Destination("systeme", "Système", "▣", "Santé, processus, coûts, journal, anatomie.",
-                    builtin=("systeme.sante", "systeme.appels", "systeme.chronologie", "systeme.etat",
-                             "systeme.contributions", "systeme.operations", "systeme.simulations",
-                             "systeme.vues")),
+        Destination("reglages", "Configuration", "⚙", "Ce qu'un opérateur décide. Chaque page ne règle qu'un "
+                    "sujet ; chaque champ dit ce qu'il fait.", layout="menu", dynamic=True),
+        Destination("systeme", "Système", "▣", "La machine : santé, processus, anomalies, sorties, modèles, coûts, "
+                    "stockage, journaux, anatomie.", layout="menu",
+                    builtin=("systeme.sante", "systeme.processus", "systeme.anomalies", "systeme.sorties",
+                             "systeme.passerelle", "systeme.appels", "systeme.stockage", "systeme.chronologie",
+                             "systeme.operations", "systeme.etat", "systeme.contributions", "systeme.vues",
+                             "systeme.simulations")),
     )),
 )
+
+#: Configuration › Comportement : les facultés rangées par famille, et leur nom
+#: pour un opérateur (les autres tombent dans « Autres », sous leur nom technique)
+PARAM_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Émotions", ("affect", "needs", "body", "self")),
+    ("Esprit", ("attention", "memory", "transcript")),
+    ("Relations", ("social", "others", "identity")),
+    ("Action", ("agency", "goals")),
+    ("Canaux", ("email", "rss", "camera", "forge")),
+    ("Noyau", ("kernel",)),
+)
+FACULTY_LABELS: dict[str, str] = {
+    "affect": "Humeur et postures", "needs": "Besoins", "body": "Corps et sommeil", "self": "Estime et récit",
+    "attention": "Attention et pensées", "memory": "Mémoire", "transcript": "Fil des conversations",
+    "social": "Liens", "others": "Ce qu'elle devine des autres", "identity": "Identités",
+    "agency": "Initiatives", "goals": "Buts", "email": "Courrier", "rss": "Flux RSS", "camera": "Caméra",
+    "forge": "Apps forgées", "kernel": "Noyau",
+}

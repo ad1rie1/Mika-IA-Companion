@@ -38,6 +38,7 @@ from mika.kernel.inspect import (
     InspectContext,
     Meter,
     Note,
+    Pager,
     Param,
     Ref,
     Row,
@@ -58,9 +59,8 @@ from mika.vocab.people import is_identifiable
 
 #: les postures par page (les plus récemment touchées d'abord)
 STANCES_PAGE = 50
-#: les dernières balises déclarées (vue générale) ; envers une personne
-DECLARED_SHOWN = 10
-DECLARED_TOWARD_SHOWN = 20
+#: ses balises déclarées, par page (tout l'historique, du plus récent au plus ancien)
+DECLARED_PAGE = 25
 EXCERPT = 160
 
 #: la période des courbes
@@ -157,11 +157,15 @@ def _arousal(s: AffectState, frame: Frame) -> float:
 # ── Humeur ────────────────────────────────────────────────────────────────
 
 
-def _declared_rows(frame: Frame, ctx: InspectContext, handles: tuple[str, ...] | None = None,
-                   limit: int = DECLARED_SHOWN) -> list[tuple[int, str, str, float, str, str | None]]:
-    """Ses dernières balises, lues dans le fil (ce qu'elle a vraiment écrit) :
-    (instant, poignée, émotion, intensité, sorte, texte) ; ``handles`` : envers
-    ces poignées seulement."""
+#: une balise lue dans le fil : (n° du message, instant, poignée, émotion, intensité, sorte, texte)
+Tag = tuple[int, int, str, str, float, str, str | None]
+
+
+def _declared_rows(ctx: InspectContext, handles: tuple[str, ...] | None = None, limit: int = DECLARED_PAGE,
+                   before: int | None = None) -> list[Tag]:
+    """Ses balises, lues dans le fil (ce qu'elle a vraiment écrit), de la plus
+    récente à la plus ancienne ; ``handles`` : envers ces poignées seulement ;
+    ``before`` : avant ce message."""
     if ctx.store is None:
         return []
     where, args = "", ()
@@ -170,11 +174,22 @@ def _declared_rows(frame: Frame, ctx: InspectContext, handles: tuple[str, ...] |
             return []
         where = f" AND person IN ({','.join('?' * len(handles))})"
         args = tuple(handles)
+    if before:
+        where += " AND id<?"
+        args = (*args, before)
     rows = ctx.store.query_mind(
-        f"SELECT at, person, emotion, emotion_intensity, kind, text FROM {transcript_c.THREAD_TABLE} "
+        f"SELECT id, at, person, emotion, emotion_intensity, kind, text FROM {transcript_c.THREAD_TABLE} "
         f"WHERE role='assistant' AND emotion IS NOT NULL{where} ORDER BY id DESC LIMIT ?", (*args, limit))
-    return [(int(at), str(person or ""), str(name), float(intensity or 0.0), str(kind or ""), text)
-            for at, person, name, intensity, kind, text in rows]
+    return [(int(n), int(at), str(person or ""), str(name), float(intensity or 0.0), str(kind or ""), text)
+            for n, at, person, name, intensity, kind, text in rows]
+
+
+def _declared_page(ctx: InspectContext, handles: tuple[str, ...] | None = None) -> tuple[list[Tag], Pager]:
+    """Une page de ses balises (``?avant=`` : la suite), et le curseur de la suivante."""
+    found = _declared_rows(ctx, handles, DECLARED_PAGE + 1, ctx.int_param("avant", 0) or None)
+    page = found[:DECLARED_PAGE]
+    older = (("avant", str(page[-1][0])),) if len(found) > DECLARED_PAGE else ()
+    return page, Pager(param="avant", size=DECLARED_PAGE, older=older)
 
 
 def _how(kind: str) -> str:
@@ -194,14 +209,16 @@ def _mood_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Block]
     p = _p(frame)
     m = mood_reading(s, frame.now, p, _clockwork(frame))
     rest = _at_rest(m, p)
-    declared = _declared_rows(frame, ctx)
+    declared, pager = _declared_page(ctx)
+    # la dernière balise, quelle que soit la page lue
+    newest = declared[:1] if not ctx.int_param("avant", 0) else _declared_rows(ctx, limit=1)
     span = _span(ctx)
     since = frame.now - span
     points = tuple(ctx.series("affect.valence", since, frame.now))
     last: Cell = "aucune"
     last_sub = "elle n'a encore rien déclaré"
-    if declared:
-        at, handle, name, intensity, _kind, _text = declared[0]
+    if newest:
+        _n, at, handle, name, intensity, _kind, _text = newest[0]
         last = _declared_cell(name, intensity)
         last_sub = f"{ctx.when(at)}, {_who_text(frame, handle)}"
     return [
@@ -222,8 +239,8 @@ def _mood_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Block]
             (Column("quand", "fit"), "à qui", "émotion déclarée", "comment"),
             tuple(Row((When(at), _who(frame, handle), _declared_cell(name, intensity), _how(kind)),
                       detail=(Note(_excerpt(text), title="ce qu'elle a dit"),))
-                  for at, handle, name, intensity, kind, text in declared),
-            title="Dernières balises", empty="elle n'a encore rien déclaré"),
+                  for _n, at, handle, name, intensity, kind, text in declared),
+            title="Dernières balises", empty="elle n'a encore rien déclaré", pager=pager),
         Disclosure("Détails", (Fields((
             ("ressentie (écart au repos)", "au repos" if rest else _feeling(m.felt, m.felt_intensity)),
             ("lecture absolue (le visage)", _feeling(m.label, m.intensity)),
@@ -343,9 +360,9 @@ def _person_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Bloc
             ), title="Envers elle" if key == person else f"Envers la poignée {key} (avant d'être reliée)"),
             Note(prose.stance(r, common, p) or "Rien de particulier envers cette personne."),
         ]
-    tags = _declared_rows(frame, ctx, handles, DECLARED_TOWARD_SHOWN)
-    blocks.append(Timeline(tuple(_tag_entry(*row) for row in tags), title="Ses dernières balises envers elle",
-                           empty="elle ne lui a encore rien déclaré"))
+    tags, pager = _declared_page(ctx, handles)
+    blocks.append(Timeline(tuple(_tag_entry(*row[1:]) for row in tags), title="Ses dernières balises envers elle",
+                           empty="elle ne lui a encore rien déclaré", pager=pager))
     return blocks
 
 

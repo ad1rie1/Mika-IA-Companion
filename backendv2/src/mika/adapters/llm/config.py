@@ -31,50 +31,71 @@ _AUTHS = (("abonnement", "le login de la CLI (abonnement)"), ("cle_api", "une cl
 
 class BackendSpec(BaseModel):
     """Un fournisseur de modèles déclaré (les bornes et libellés servent au
-    formulaire de la console ; la validation reste celle du modèle)."""
+    formulaire de la console ; la validation reste celle du modèle).
+
+    Le formulaire ne montre que ce qui sert au type choisi : la clé d'API d'un
+    service hébergé (ou de Claude Code sur une clé), le modèle choisi dans la liste
+    du fournisseur, le repli parmi les autres. Ce que le SDK ou la CLI savent déjà
+    (adresse, hôte, commande, dossier) est rangé dans « Options avancées »."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    kind: Annotated[Kind, Knob(label="Type", choices=_KINDS, advanced=False, order=10)]
-    model: Annotated[str, Knob(label="Modèle", help="L'identifiant chez le fournisseur ; « charger » liste ceux "
-                                              "qu'il propose.", loader="models", advanced=False, order=20)]
+    kind: Annotated[Kind, Knob(label="Type", help="Le service qui fait tourner le modèle. Claude Code passe par la "
+                                             "CLI et son propre login (jamais un jeton) ; Ollama tourne sur ta "
+                                             "machine.", group="Le fournisseur", choices=_KINDS, advanced=False,
+                               order=10)]
+    model: Annotated[str, Knob(label="Modèle", help="Choisi dans la liste que propose le fournisseur (elle se "
+                                              "charge d'elle-même une fois le fournisseur enregistré).",
+                               group="Le fournisseur", loader="models", advanced=False, order=20)]
     auth: Annotated[Literal["abonnement", "cle_api"], Knob(
-        label="Connexion", help="Mika ne voit jamais le login : la CLI s'authentifie elle-même. Une clé d'API "
-                                "Console se déclare ci-dessous.", choices=_AUTHS, advanced=False, order=25,
-        only=(("kind", ("claude_code",)),))] = "abonnement"
-    api_key: Annotated[str, Knob(label="Clé d'API", secret=True, advanced=False, order=30,
-                                 only=(("kind", ("claude", "openai", "ollama_cloud", "claude_code")),))] = ""
-    base_url: Annotated[str, Knob(label="URL de base", help="Un serveur compatible OpenAI (vide : OpenAI).",
-                                  advanced=False, order=40, only=(("kind", ("openai",)),))] = ""
-    host: Annotated[str, Knob(label="Hôte", help="Vide : http://localhost:11434 en local, https://ollama.com "
-                                                "pour le cloud.", advanced=False, order=40,
-                              only=(("kind", ("ollama", "ollama_cloud")),))] = ""
+        label="Connexion", help="Mika ne voit jamais le login : la CLI s'authentifie elle-même. Avec une clé d'API "
+                                "Console, la clé se déclare juste dessous.", group="Connexion", choices=_AUTHS,
+        advanced=False, order=25, only=(("kind", ("claude_code",)),))] = "abonnement"
+    api_key: Annotated[str, Knob(label="Clé d'API", help="Chiffrée au repos, jamais réaffichée. Vide : inchangée.",
+                                 group="Connexion", secret=True, advanced=False, order=30,
+                                 only_any=((("kind", ("claude", "openai", "ollama_cloud")),),
+                                           (("kind", ("claude_code",)), ("auth", ("cle_api",)))))] = ""
+    fallback: Annotated[str, Knob(label="Repli", help="Le fournisseur qui prend le relais quand celui-ci échoue "
+                                                      "(non connecté, quota, panne). Aucun : l'appel échoue.",
+                                  group="Connexion", choices_from="backends", advanced=False, order=35)] = ""
+    base_url: Annotated[str, Knob(label="Adresse du serveur", help="Seulement pour un serveur compatible OpenAI "
+                                                                   "qui n'est pas OpenAI. Vide : OpenAI.",
+                                  group="Options avancées", order=40, only=(("kind", ("openai",)),))] = ""
+    host: Annotated[str, Knob(label="Hôte", help="Vide : http://localhost:11434 en local, https://ollama.com pour "
+                                                "le cloud — il n'y a presque jamais à y toucher.",
+                              group="Options avancées", order=40, only=(("kind", ("ollama", "ollama_cloud")),))] = ""
     slots: Annotated[int, Knob(label="Créneaux", help="Appels simultanés (0 : 1 en local, 4 hébergé).", lo=0, hi=32,
-                               order=50)] = Field(default=0, ge=0, le=32)
+                               group="Options avancées", order=50)] = Field(default=0, ge=0, le=32)
     temperature: Annotated[float | None, Knob(label="Température", help="Vide : celle du fournisseur.", lo=0.0,
-                                              hi=2.0, step=0.05, order=60)] = None
-    cache_ttl: Annotated[Literal["5m", "1h"], Knob(label="Durée du cache", choices=(("5m", "5 minutes"),
-                                                                                    ("1h", "1 heure")),
-                                                   order=70, only=(("kind", ("claude",)),))] = "5m"
+                                              hi=2.0, step=0.05, group="Options avancées", order=60,
+                                              only=(("kind", ("claude", "openai", "ollama", "ollama_cloud")),))] \
+        = None
+    cache_ttl: Annotated[Literal["5m", "1h"], Knob(label="Durée du cache", help="Combien de temps l'API garde le "
+                                                   "début du prompt en cache : une heure coûte plus à l'écriture, "
+                                                   "moins quand elle parle souvent.",
+                                                   choices=(("5m", "5 minutes"), ("1h", "1 heure")),
+                                                   group="Options avancées", order=70,
+                                                   only=(("kind", ("claude",)),))] = "5m"
     think: Annotated[bool, Knob(label="Laisser réfléchir", help="Les modèles à raisonnement (lents en local).",
-                                order=80, only=(("kind", ("ollama", "ollama_cloud")),))] = False
-    max_reply_tokens: Annotated[int, Knob(label="Réponse max. (jetons)", help="0 : défaut du type.", lo=0,
-                                          hi=65_536, order=90)] = Field(default=0, ge=0)
+                                group="Options avancées", order=80, only=(("kind", ("ollama", "ollama_cloud")),))] \
+        = False
+    max_reply_tokens: Annotated[int, Knob(label="Réponse max. (jetons)", help="0 : défaut du type (768 en local, "
+                                          "2048 dans le cloud).", lo=0, hi=65_536, group="Options avancées",
+                                          order=90, only=(("kind", ("ollama", "ollama_cloud")),))] = \
+        Field(default=0, ge=0)
     claude_bin: Annotated[str, Knob(label="Commande claude", help="Vide : « claude » dans le PATH, sinon "
-                                                                  "~/.local/bin/claude.", order=100,
-                                    only=(("kind", ("claude_code",)),))] = ""
+                                                                  "~/.local/bin/claude.", group="Options avancées",
+                                    order=100, only=(("kind", ("claude_code",)),))] = ""
     config_dir: Annotated[str, Knob(label="Dossier de la CLI", help="Vide : la CLI telle que tu l'as connectée. "
                                                                     "Rempli : un dossier à part, où tu te "
                                                                     "connectes avec « mika claude-code login ».",
-                                    order=110, only=(("kind", ("claude_code",)),))] = ""
+                                    group="Options avancées", order=110, only=(("kind", ("claude_code",)),))] = ""
     quota_ceiling: Annotated[float, Knob(label="Réserve d'abonnement", help="Au-delà de cet usage de "
                                          "l'abonnement, ses appels de fond passent au repli (la conversation "
                                          "n'est jamais retenue). 0,8 = 80 % ; 0 : pas de réserve.", lo=0.0,
-                                         hi=1.0, step=0.05, order=120, only=(("kind", ("claude_code",)),))] = \
+                                         hi=1.0, step=0.05, group="Options avancées", order=120,
+                                         only=(("kind", ("claude_code",)),))] = \
         Field(default=0.8, ge=0.0, le=1.0)
-    fallback: Annotated[str, Knob(label="Repli", help="Le fournisseur (son nom) qui prend le relais quand "
-                                                      "celui-ci échoue : non connecté, quota, panne.",
-                                  order=130)] = ""
 
     @property
     def local(self) -> bool:
@@ -97,7 +118,9 @@ ROLE_LABELS = {"reply": "répondre (voix)", "initiative": "prendre la parole (vo
 class LLMConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    backends: Annotated[dict[str, BackendSpec], Knob(label="Fournisseurs", advanced=False, order=10)] = \
+    backends: Annotated[dict[str, BackendSpec], Knob(
+        label="Fournisseurs", help="Les services déclarés ; les rôles désignent l'un d'eux par son nom.",
+        advanced=False, order=10)] = \
         Field(default_factory=dict)
     #: rôle → nom de fournisseur déclaré
     routes: Annotated[dict[str, str], Knob(
@@ -105,9 +128,10 @@ class LLMConfig(BaseModel):
                              "sans fournisseur retombe sur son rôle de repli.",
         keys=tuple((str(r), ROLE_LABELS.get(str(r), str(r))) for r in Role), choices_from="backends",
         advanced=False, order=20)] = Field(default_factory=dict)
-    context_tokens: Annotated[int, Knob(label="Contexte (jetons)", help="La fenêtre que le prompt peut remplir.",
-                                        lo=2_000, hi=1_000_000, step=1_000, order=30)] = Field(default=24_000,
-                                                                                               ge=2_000)
+    context_tokens: Annotated[int, Knob(label="Contexte (jetons)", help="La fenêtre que le prompt peut remplir : "
+                                        "persona, fil, souvenirs. Au-delà, le plus ancien du fil est replié et les "
+                                        "citations extérieures coupées d'abord.", lo=2_000, hi=1_000_000,
+                                        step=1_000, advanced=False, order=30)] = Field(default=24_000, ge=2_000)
 
     def problems(self) -> list[str]:
         out = []
@@ -195,6 +219,15 @@ class LiveGateway:
 
     def routes(self) -> Mapping[str, str]:
         return dict(self._inner.routes) if self._inner is not None else {}
+
+    def status(self) -> list[dict[str, Any]]:
+        """L'état vivant de chaque fournisseur (vide sans configuration)."""
+        return self._inner.status() if self._inner is not None else []
+
+    def resolution(self) -> dict[str, str]:
+        """Rôle → fournisseur qui le sert vraiment (« » : aucun)."""
+        roles = [str(r) for r in Role]
+        return self._inner.resolution(roles) if self._inner is not None else dict.fromkeys(roles, "")
 
     def is_voice(self, role: str) -> bool:
         return role in {str(r) for r in VOICE_ROLES}

@@ -172,8 +172,10 @@ def test_an_app_is_an_object_with_a_head_a_search_and_its_tabs(tmp_path):
     assert "Carnet météo" in repr(got["rendus"]["etat"]) and of(got["rendus"]["code"], Code)
     assert "sur la fiche d'une app" in of(got["sans fiche"], Note)[0].text
     [listing] = [b for b in got["apps"] if isinstance(b, Table)]
-    rows = {r[0].text: r for r in listing.rows}
-    assert rows["meteo"][0] == Ref.subject("app", "meteo", "meteo") and rows["meteo"][4] == Badge("active", "ok")
+    rows = {r.cells[0].text: r for r in listing.rows}
+    meteo = rows["meteo"].cells
+    assert meteo[0] == Ref.subject("app", "meteo", "meteo") and meteo[4] == Badge("active", "ok")
+    assert rows["meteo"].href == Ref.subject("app", "meteo", "meteo")  # la ligne entière mène à la fiche
 
 
 @needs_bwrap

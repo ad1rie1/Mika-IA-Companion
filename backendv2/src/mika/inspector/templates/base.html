@@ -16,7 +16,7 @@
     <div class="brand"><span class="brand-mark">M</span><span><span class="brand-name">Mika</span><br><span class="brand-sub">console</span></span></div>
     <form class="search" method="get" action="{{ PREFIX }}/recherche" role="search">
       <label class="sr" for="q-global">Chercher une personne, un but, une app…</label>
-      <input id="q-global" name="q" placeholder="Chercher…  ( / )" autocomplete="off">
+      <input id="q-global" name="q" placeholder="Chercher…  ( / )" autocomplete="off" value="{{ search_q or '' }}">
     </form>
     <nav>
     {% for g in nav %}

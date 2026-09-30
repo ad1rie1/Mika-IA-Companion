@@ -100,27 +100,44 @@ def _still(goal: int, wanted: tuple[str, ...]) -> Guard:
 # ── Confier un projet ─────────────────────────────────────────────────────
 
 
+#: des agendas courants (proposés ; une autre règle se tape)
+SCHEDULES = (("manual", "dès qu'elle peut (manuel)"), ("interval:30m", "toutes les 30 min"),
+             ("interval:2h", "toutes les 2 h"), ("interval:6h", "toutes les 6 h"),
+             ("cron:0 9 * * *", "chaque jour à 9 h"), ("cron:0 9 * * MON-FRI", "les jours ouvrés à 9 h"),
+             ("cron:0 18 * * SUN", "le dimanche à 18 h"))
+
+
 class ConfideArgs(BaseModel):
-    title: Annotated[str, Knob(label="Titre", help="ce qu'elle doit mener à bout, en quelques mots", order=10),
+    title: Annotated[str, Knob(label="Titre", help="Ce qu'elle doit mener à bout, en quelques mots : il nomme le "
+                                                   "projet partout (liste, fiche, ce qu'elle en raconte).",
+                               group="Le projet", advanced=False, order=10),
                      Field(max_length=120)]
-    details: Annotated[str, Knob(label="Le cadre", widget="textarea", order=20,
-                                 help="ce qu'il faut faire, comment, et ce qui est hors sujet (elle ne le "
-                                      "modifiera pas)"),
+    details: Annotated[str, Knob(label="Le cadre", widget="textarea", group="Le projet", advanced=False, order=20,
+                                 help="Ce qu'il faut faire, comment, et ce qui est hors sujet. Elle le lit à chaque "
+                                      "pas et ne le modifiera jamais ; tu pourras ajouter des consignes ensuite."),
                        Field(max_length=2000)] = ""
-    due: Annotated[str, Knob(label="Échéance", order=30,
-                             help="facultative, en heure locale : « 2026-10-02 18:00 » ou « 02/10/2026 18h » "
-                                  "(une date seule : 18 h)"),
-                   Field(max_length=40)] = ""
-    schedule: Annotated[str, Knob(label="Agenda", order=40,
-                                  help="quand elle y avance : manual (dès qu'elle peut), interval:2h, "
-                                       "cron:0 9 * * MON-FRI"),
-                        Field(max_length=120)] = "manual"
-    approval: Annotated[bool, Knob(label="Ce qui sort de la machine attend ton accord", order=50)] = True
-    owner: Annotated[str, Knob(label="Pour qui", widget="subject", subject="person", order=60,
-                               help="la clé d'une personne connue ; vide : pour toi"),
+    owner: Annotated[str, Knob(label="Pour qui", widget="subject", subject="person", group="Le projet",
+                               advanced=False, order=30,
+                               help="La personne pour qui elle travaille (elle lui en parle, lui raconte le "
+                                    "résultat). Vide : pour toi."),
                      Field(max_length=120)] = ""
-    max_steps: Annotated[int, Knob(label="Pas au plus", help="0 : la valeur par défaut", order=70),
+    due: Annotated[str, Knob(label="Échéance", widget="datetime", group="Son rythme", advanced=False, order=40,
+                             help="Facultative, en heure locale. Sans heure : 18 h. Plus elle approche, plus elle "
+                                  "s'y met."),
+                   Field(max_length=40)] = ""
+    schedule: Annotated[str, Knob(label="Agenda", widget="suggest", choices=SCHEDULES, group="Son rythme",
+                                  advanced=False, order=50,
+                                  help="Quand elle y avance : « manual » dès qu'elle peut, « interval:2h » toutes "
+                                       "les deux heures, « cron:0 9 * * MON-FRI » les jours ouvrés à 9 h."),
+                        Field(max_length=120)] = "manual"
+    max_steps: Annotated[int, Knob(label="Pas au plus", group="Son rythme", advanced=False, order=60,
+                                   help="Combien de pas de travail au plus avant de s'arrêter. 0 : la valeur par "
+                                        "défaut (Configuration › Comportement › Buts)."),
                          Field(ge=0, le=50)] = 0
+    approval: Annotated[bool, Knob(label="Ce qui sort de la machine attend ton accord", group="Sa liberté",
+                                   advanced=False, order=70,
+                                   help="Un mail, une commande avec le réseau : rien ne part sans que tu l'approuves "
+                                        "(Approbations). Dans son atelier, elle travaille librement.")] = True
 
 
 @GOALS.action("confier", title="Confier un projet", args=ConfideArgs, emits=[c.GOAL_OPENED], section="buts",

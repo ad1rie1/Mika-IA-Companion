@@ -224,6 +224,7 @@ def test_the_goal_fiche_fresh_then_after_a_project_lived_a_step(tmp_path):
             "unknown": await tab(kernel, "resume", "999"), "nowhere": await tab(kernel, "pas", ""),
             "atelier": await tab(kernel, "atelier", "12"),
             "vivants": await tab(kernel, "vivants", ""), "clos": await tab(kernel, "clos", ""),
+            "projets": await tab(kernel, "projets", ""),
         }
         await connect(kernel, "user_1", "Adrien", operator=True)
         got = await perform(kernel, "goals.confier", form(title="Un script de bonjour",
@@ -232,6 +233,7 @@ def test_the_goal_fiche_fresh_then_after_a_project_lived_a_step(tmp_path):
         assert got.ok, got
         gid = str(events(kernel, goals_c.GOAL_OPENED)[-1].seq)
         opened = {"head": ins.head("goal", gid), "vivants": await tab(kernel, "vivants", ""),
+                  "projets": await tab(kernel, "projets", ""), "politique": await tab(kernel, "politique", gid),
                   "by_number": ins.search("goal", f"#{gid}"), "by_title": ins.search("goal", "BONJOUR"),
                   "none": ins.search("goal", "tricot")}
         for _ in range(3 * 60):
@@ -240,7 +242,7 @@ def test_the_goal_fiche_fresh_then_after_a_project_lived_a_step(tmp_path):
             await asyncio.sleep(MINUTE / US)
         await kernel.lanes.join()
         after = {name: await tab(kernel, name, gid) for name in ("resume", "pas", "carnet", "effets", "episodes",
-                                                               "atelier")}
+                                                               "atelier", "decisions", "projets")}
         after["head"] = ins.head("goal", f"#{gid}")
         after["clos"] = await tab(kernel, "clos", "")
         after["person"] = await ins.arun(next(v for v in ins.tabs("person") if v.owner == "goals"), {},
@@ -251,7 +253,8 @@ def test_the_goal_fiche_fresh_then_after_a_project_lived_a_step(tmp_path):
     fresh, opened, after, gid, reported, tz = live(tmp_path, scenario, mode="honest", ports={"workshop": atelier})
     # neuve : rien, et le dit
     assert fresh["head"] is None and fresh["search"] == []
-    assert fresh["tabs"] == ["resume", "pas", "carnet", "effets", "episodes", "atelier"]
+    assert fresh["tabs"] == ["resume", "politique", "pas", "carnet", "effets", "decisions", "episodes", "atelier"]
+    assert "aucun projet en cours" in flat(fresh["projets"])
     assert "buts" in fresh["person_tabs"]
     assert "Aucun but « 999 »" in flat(fresh["unknown"]) and fresh["unknown"][0].tone == "warn"
     assert "fiche d'un but" in flat(fresh["nowhere"]) and "Aucun but « 12 »" in flat(fresh["atelier"])
@@ -268,6 +271,16 @@ def test_the_goal_fiche_fresh_then_after_a_project_lived_a_step(tmp_path):
     assert [f.key for f in opened["by_number"]] == [gid] and [f.key for f in opened["by_title"]] == [gid]
     assert isinstance(opened["by_title"][0], Found) and "projet" in opened["by_title"][0].subtitle
     assert opened["none"] == []
+    # la liste des projets : son état, son avancement, son agenda, ce qu'il a le droit de faire sortir
+    project = table(opened["projets"], "Projets en cours").rows[0]
+    assert project.href == Ref.subject("goal", gid, f"#{gid}") and project.cells[0].text == "Un script de bonjour"
+    assert project.cells[2].text == "en cours" and project.cells[3].text == f"0 / {params(None).project_steps}"
+    assert project.cells[6] == "dès qu'elle peut (manuel)" and project.cells[7].text == "sort avec ton accord"
+    # son cadre et sa politique : le cadre confié en entier, sa liberté, son rythme
+    policy = opened["politique"]
+    frame_text = next(b for b in policy if type(b).__name__ == "Prose")
+    assert frame_text.text == "Écrire bonjour.py et le tester." and "sort avec ton accord" in flat(policy)
+    assert "Son rythme" in flat(policy) and "Quand elle s'arrête" in flat(policy)
     # après un pas (écrit, lancé, fini avec preuve) : chaque onglet le dit
     assert reported and reported[0].data.proven
     assert after["head"].key == gid  # « #12 » : la fiche canonique
@@ -281,11 +294,20 @@ def test_the_goal_fiche_fresh_then_after_a_project_lived_a_step(tmp_path):
     assert "aucune consigne" in flat(after["carnet"])
     assert "aucune demande" in flat(after["effets"])
     assert "pas de travail" in flat(after["episodes"])
+    # chaque épisode mène à son prompt exact, ses outils, ses appels, sa décision ; son pas y dit son résultat
+    episode = table(after["episodes"], "Ses épisodes").rows[-1]
+    assert episode.cells[6].params == (("onglet", "prompt"),) and episode.cells[9].params == (("onglet", "decision"),)
+    assert episode.cells[4].text == "fini"
+    # l'arbitre l'a pesé : le tirage qui a donné ce pas, ses preuves
+    decided = table(after["decisions"], "Ce que l'arbitre en a pensé").rows
+    assert decided and any(r.cells[1].text == "choisi" for r in decided) and decided[0].detail
+    assert "abouti" in flat(after["projets"]) and "Projets clos" in flat(after["projets"])
     atelier_tab = after["atelier"]
     files = table(atelier_tab, "Ses fichiers")
     assert [r[0].text for r in files.rows] == ["bonjour.py", "test_bonjour.py"]
     history = next(b for b in atelier_tab if isinstance(b, Timeline))
-    assert [e.meta for e in history.entries] == ["c000001", "a000000"]  # le plus récent d'abord
+    # le plus récent d'abord ; un enregistrement sans pas le dit (il n'a pas de date à lui)
+    assert [e.meta for e in history.entries] == ["c000001", "a000000 · sans pas associé"]
     assert history.entries[0].at == reported[0].at and history.entries[0].href.kind == "episode"
     assert history.entries[1].title == "atelier ouvert" and history.entries[1].at == 0
     assert "Rien de changé depuis le dernier pas" in flat(atelier_tab)
@@ -512,7 +534,7 @@ def test_the_badges_say_what_needs_the_operator(tmp_path):
         return [v for v in views], waiting, ins.badge(views["clos"]), effects
 
     names, waiting, stuck, effects = live(tmp_path, scenario)
-    assert names == ["vivants", "clos"]
+    assert names == ["projets", "vivants", "clos"]
     assert waiting == (1, "attendent ton accord") and stuck == (1, "confiés : bloqués ou en échec")
     assert "attend ton accord" in flat(effects) and "installer requests" in flat(effects)
     approvals = next(b for b in effects if isinstance(b, Fields))

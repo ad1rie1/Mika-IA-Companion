@@ -14,8 +14,11 @@ from starlette.routing import Route
 
 from mika.inspector import render
 from mika.inspector.ui import PREFIX, secure
-from mika.kernel.inspect import Head, Note, Ref, Table
+from mika.kernel.inspect import Head, Note, Ref, Row, Table
 from mika.runtime import operations
+
+#: une recherche lit au plus tant d'objets par sorte (la table se pagine)
+SEARCH_MAX = 500
 
 
 def fiche_url(kind: str, key: str, tab: str = "") -> str:
@@ -62,13 +65,16 @@ class Subjects:
         if spec.forgettable:
             actions.append(forget_form(self.ui, request, kind, key))
         title = head.title if isinstance(head, Head) else key
+        home = next((d for d in self.pages.dests.values() if kind in d.subjects), None)
+        crumbs = ([(home.label, f"{PREFIX}/{home.key}")] if home else []) + \
+            [(spec.plural, f"{PREFIX}/recherche?sorte={quote(kind)}")]
         env = self.ui.env()
         facts = [{"label": k, "cell": render.cell(v, env)} for k, v in (head.facts if isinstance(head, Head) else ())]
         badges = [{"text": b.text, "tone": b.tone} for b in (head.badges if isinstance(head, Head) else ())]
         return self.pages.render_page(
-            request, title=f"{title} · {spec.label}", heading=title, active="",
+            request, title=f"{title} · {spec.label}", heading=title, active=home.key if home else "",
             subtitle=head.subtitle if isinstance(head, Head) else "", head_badges=badges, facts=facts,
-            crumbs=[(spec.plural, f"{PREFIX}/recherche?sorte={quote(kind)}")], tabs=tab_list, blocks=blocks,
+            crumbs=crumbs, tabs=tab_list, blocks=blocks,
             filters=current.typed if current is not None else (), head_actions=actions, subject=key,
             keep=(("onglet", current.name),) if current is not None else ())
 
@@ -81,11 +87,12 @@ class Subjects:
             spec = self.ui.inspection.subject(kind)
             if spec is None or spec.search is None:
                 continue
-            found = self.ui.inspection.search(kind, q, 50)
+            found = self.ui.inspection.search(kind, q, SEARCH_MAX)
             if found or only:
-                blocks.append(Table(("", "détail"), tuple(
-                    (Ref.subject(kind, f.key, f.title), f.subtitle or "—") for f in found),
-                    title=spec.plural, empty="Aucun résultat."))
+                blocks.append(Table((spec.label.lower(), "détail"), tuple(
+                    Row((Ref.subject(kind, f.key, f.title), f.subtitle or "—"), href=Ref.subject(kind, f.key, ""))
+                    for f in found), title=f"{spec.plural} ({len(found)}{'+' if len(found) == SEARCH_MAX else ''})",
+                    empty="Aucun résultat."))
         if q.isdigit():
             blocks.insert(0, Table(("événement",), ((Ref("event", q, f"l'événement n° {q}"),),), title="Journal"))
         views = [v for v in self.ui.inspection.views() if q and q.lower() in v.title.lower()]
@@ -95,7 +102,7 @@ class Subjects:
         if not blocks:
             blocks = [Note("Rien ne correspond." if q else "Tape un nom, un numéro d'événement, un titre.", "muted")]
         return self.pages.render_page(request, title="Recherche", heading=f"Recherche : « {q} »" if q else "Recherche",
-                                      active="", blocks=blocks)
+                                      active="", blocks=blocks, search_q=q)
 
     async def forget(self, request: Request) -> Response:
         kind, key = request.path_params["kind"], request.path_params["key"]

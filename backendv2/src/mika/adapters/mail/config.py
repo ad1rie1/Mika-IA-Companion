@@ -28,26 +28,37 @@ class MailAccount(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     label: Annotated[str, Knob(label="Nom affiché", help="Comme la console le montre (vide : la clé du compte).",
-                               advanced=False, order=5)] = ""
+                               group="La boîte", advanced=False, order=5)] = ""
     address: Annotated[str, Knob(label="Adresse", help="L'adresse de la boîte (expéditrice des mails).",
-                                 advanced=False, order=10)] = ""
+                                 group="La boîte", advanced=False, order=10)] = ""
     enabled: Annotated[bool, Knob(label="Actif", help="Décoché : ni relevé ni envoi, les réglages restent.",
-                                  advanced=False, order=12)] = True
-    imap_host: Annotated[str, Knob(label="Serveur IMAP", group="Lire", advanced=False, order=20)] = ""
-    imap_port: Annotated[int, Knob(label="Port IMAP", group="Lire", lo=1, hi=65_535, order=21)] = 993
-    imap_ssl: Annotated[bool, Knob(label="IMAP chiffré (SSL)", group="Lire", order=22)] = True
-    user: Annotated[str, Knob(label="Utilisateur", group="Lire", advanced=False, order=23)] = ""
-    password: Annotated[str, Knob(label="Mot de passe", group="Lire", secret=True, advanced=False, order=24)] = ""
+                                  group="La boîte", advanced=False, order=12)] = True
+    imap_host: Annotated[str, Knob(label="Serveur IMAP", help="Donné par ton fournisseur de mail "
+                                                              "(imap.gmail.com, imap.fastmail.com…).",
+                                   group="Lire", advanced=False, order=20)] = ""
+    imap_port: Annotated[int, Knob(label="Port IMAP", help="993 presque toujours (IMAP chiffré).", group="Lire",
+                                   lo=1, hi=65_535, order=21)] = 993
+    imap_ssl: Annotated[bool, Knob(label="IMAP chiffré (SSL)", help="À laisser coché, sauf serveur de test.",
+                                   group="Lire", order=22)] = True
+    user: Annotated[str, Knob(label="Utilisateur", help="Souvent l'adresse elle-même.", group="Lire",
+                              advanced=False, order=23)] = ""
+    password: Annotated[str, Knob(label="Mot de passe", help="Un mot de passe d'application de préférence. "
+                                                             "Chiffré, jamais réaffiché ; vide : inchangé.",
+                                  group="Lire", secret=True, advanced=False, order=24)] = ""
     folders: Annotated[tuple[str, ...], Knob(
         label="Dossiers relevés", group="Lire", order=25,
         help="Un par ligne : ceux où elle remarque ce qui arrive. Les autres se consultent dans la console.")] = \
         ("INBOX",)
     since_days: Annotated[int, Knob(label="Fenêtre de relève (jours)", group="Lire", lo=1, hi=60, order=26,
                                     help="Au premier relevé d'un dossier, on ne remonte pas plus loin.")] = 2
-    smtp_host: Annotated[str, Knob(label="Serveur SMTP", group="Envoyer", advanced=False, order=30)] = ""
-    smtp_port: Annotated[int, Knob(label="Port SMTP", group="Envoyer", lo=1, hi=65_535, order=31)] = 587
+    smtp_host: Annotated[str, Knob(label="Serveur SMTP", help="Pour envoyer (smtp.gmail.com…). Vide : cette boîte "
+                                                              "ne fait que lire.", group="Envoyer", advanced=False,
+                                   order=30)] = ""
+    smtp_port: Annotated[int, Knob(label="Port SMTP", help="587 avec STARTTLS, 465 avec SSL.", group="Envoyer",
+                                   lo=1, hi=65_535, order=31)] = 587
     #: « ssl » (port 465), « starttls » (587), « none » (tests)
-    smtp_security: Annotated[str, Knob(label="Sécurité SMTP", group="Envoyer", order=32,
+    smtp_security: Annotated[str, Knob(label="Sécurité SMTP", help="Doit aller avec le port.", group="Envoyer",
+                                       order=32,
                                        choices=(("starttls", "STARTTLS (587)"), ("ssl", "SSL (465)"),
                                                 ("none", "aucune (tests)")))] = "starttls"
     smtp_user: Annotated[str, Knob(label="Utilisateur SMTP", group="Envoyer", order=33,

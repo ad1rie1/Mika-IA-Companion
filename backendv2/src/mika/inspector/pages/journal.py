@@ -196,7 +196,7 @@ def event_blocks(ui: Any, seq: int) -> tuple[str, list[Any]] | None:
     processes = sorted(p.name for p in reg.processes.values() if e.type.name in p.wake_on)
     projectors = sorted(p.name for p in reg.projectors.values() if e.type.name in p.types)
     subjects = sorted({str(v) for f in e.type.subject_fields for v in _values(getattr(e.data, f, None))})
-    triggered = ui.inspection.context().events([rt.EPISODE_STARTED], 20, where=("reply_to", seq))
+    triggered = ui.inspection.context().events([rt.EPISODE_STARTED], 200, where=("reply_to", seq))
     pairs: list[tuple[str, Any]] = [
         ("quand", ui.when_long(e.at)), ("propriétaire", f"{e.type.owner} · {'public' if e.type.public else 'privé'}"),
         ("corrélation", Ref("episode", e.correlation, e.correlation)), ("origine", str(e.origin.value)),

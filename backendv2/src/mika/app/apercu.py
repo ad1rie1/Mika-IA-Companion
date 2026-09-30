@@ -107,6 +107,9 @@ def export(out: Path) -> list[str]:
                     if d.layout == "tabs":
                         urls += [f"{base}/{k.split('.', 1)[1]}" for k in d.builtin]
                         urls += [f"{base}/{v.name}" for v in live.kernel.registry.inspectors if v.section == d.key]
+                    elif d.layout == "menu":  # un sous-menu : chacune de ses pages
+                        page = client.get(base, follow_redirects=True).text
+                        urls += re.findall(rf'class="submenu-item[^"]*" href="({re.escape(base)}/[\w-]+)"', page)
             for kind in ("person", "handle"):  # la première personne connectée, et sa poignée
                 urls += [f"/inspecteur/fiche/{kind}/user_1?onglet={quote(v.name)}"
                          for v in live.kernel.registry.inspectors if v.subject == kind]
@@ -115,7 +118,9 @@ def export(out: Path) -> list[str]:
                 corr = quote(ended[0].correlation, safe="")
                 urls += [f"/inspecteur/episode/{corr}?onglet={t}" for t in
                          ("deroule", "dit", "prompt", "outils", "appels", "decision")]
-            urls += ["/inspecteur/reglages/parametres?faculte=affect", "/inspecteur/recherche?q=a"]
+            urls += ["/inspecteur/reglages/fournisseurs?enregistrement=backends&cle=",
+                     "/inspecteur/reglages/comportement-affect?groupe=repos-et-ancre",
+                     "/inspecteur/reglages/comptes?nouveau=1", "/inspecteur/recherche?q=a"]
             for url in dict.fromkeys(u for u in urls if u):
                 r = client.get(url, follow_redirects=True)
                 name = _name(url)

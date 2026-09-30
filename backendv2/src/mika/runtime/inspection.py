@@ -140,7 +140,7 @@ class Inspection:
             return []
         frame = self.kernel.mind.frame()
         out: Any = call(spec.search, frame.state(spec.owner), frame, self.context(), text.strip()[:200],
-                        max(1, min(limit, 100)), label=f"recherche {kind}")
+                        max(1, min(limit, 500)), label=f"recherche {kind}")
         return [] if isinstance(out, Failed) else list(out or [])[:limit]
 
     def badge(self, spec: InspectSpec) -> tuple[int, str] | None:

@@ -50,6 +50,7 @@ from mika.faculties.goals.faculty import (
     workable,
 )
 from mika.faculties.goals.tools import closing
+from mika.kernel.clock import within_daily_window
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
@@ -83,8 +84,7 @@ def _live_self(s: GoalsState, now: int) -> int:
 
 def _daytime(frame: Frame, p: Any) -> bool:
     t = frame.local()
-    minute = t.hour * 60 + t.minute
-    return p.seed_day_start_min <= minute <= p.seed_day_end_min
+    return within_daily_window(t.hour * 60 + t.minute, p.seed_day_start_min, p.seed_day_end_min)
 
 
 @GOALS.process("goals.seed", wake_on=[attention_c.THOUGHT_BORN, attention_c.DWELT, needs_c.FELT, *body_c.ALL,

@@ -251,8 +251,10 @@ class Parameters:
         natural = forms.flatten(p.natural)
         layer = dict(self.overrides().get(owner) or {})
         for path, value in values.items():
+            if _close(value, current.get(path)) and not _plain_eq(value, current.get(path)):
+                continue  # la valeur montrée arrondie, renvoyée telle quelle : rien n'a changé
             layer = {k: v for k, v in layer.items() if not (k == path or k.startswith(path + "."))}
-            if _plain_eq(value, natural.get(path)):
+            if _plain_eq(value, natural.get(path)) or _close(value, natural.get(path)):
                 continue
             layer[path] = _jsonable(value)
         fac = self.kernel.registry.faculties[owner]
@@ -281,6 +283,22 @@ class Parameters:
             await self.apply()
             raise ValueError("; ".join(problems))
         return True
+
+
+#: la console montre un réel à 6 chiffres significatifs : renvoyé tel quel, il vaut la valeur exacte
+SHOWN_DIGITS = 6
+
+
+def shown(value: float) -> str:
+    """Un réel tel que la console l'affiche dans un champ (``1.42857``, ``5.21757e-06``)."""
+    return f"{value:.{SHOWN_DIGITS}g}"
+
+
+def _close(a: Any, b: Any) -> bool:
+    """Deux réels égaux à l'affichage près (un champ montré arrondi, renvoyé sans y toucher)."""
+    if isinstance(a, bool) or isinstance(b, bool) or not isinstance(a, float | int) or not isinstance(b, float):
+        return False
+    return shown(float(a)) == shown(b)
 
 
 def _plain_eq(a: Any, b: Any) -> bool:

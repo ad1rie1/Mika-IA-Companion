@@ -4,9 +4,11 @@
   doit réviser, ou du manque de quelqu'un qu'elle ne peut pas joindre ; elle
   s'estompe (demi-vie), revient par moments, et s'allège quand elle en parle ;
 - une **attente** naît quand elle écrit d'elle-même à quelqu'un (une
-  réponse), ou quand quelqu'un lui manque (un retour) : elle se comble ou se
-  dément, et chacun en tire ce qui le concerne (l'humeur, l'estime, la
-  retenue).
+  réponse), quand quelqu'un lui manque (un retour), ou quand elle promet
+  quelque chose pour une date (sa parole : une attente envers elle-même) :
+  elle se comble ou se dément, et chacun en tire ce qui le concerne
+  (l'humeur, l'estime, la retenue). Une promesse qui passe son échéance sans
+  être tenue ne s'oublie pas en silence : elle le sait, et ça la travaille.
 """
 
 from __future__ import annotations
@@ -19,11 +21,16 @@ from mika.kernel.facts import FactKey
 OWNER = "attention"
 
 EXCHANGE, REVISION, MISSING = "exchange", "revision", "missing"
+#: quelqu'un qui compte n'avait pas l'air comme d'habitude (``others``)
+CONCERN = "concern"
+#: une promesse qu'elle n'a pas tenue à temps
+PROMISE = "promise"
 #: un but sur lequel elle bloque (« Je bloque sur… »)
 BLOCKED = "blocked"
 #: ce qu'une source extérieure lui a signalé (un mail, un titre, ce qu'elle voit)
 SIGNAL = "signal"
 REPLY, RETURN = "reply", "return"
+#: une attente envers elle-même : tenir une promesse avant son échéance (clé : ``PROMISE``)
 #: Raison de preuve d'initiative : une pensée qui insiste, vers la personne concernée.
 THOUGHT = "thought"
 
@@ -78,15 +85,17 @@ class Dwelt(Payload):
 
 
 class ExpectationMet(Payload):
-    kind: str  # REPLY | RETURN
+    kind: str  # REPLY | RETURN | PROMISE
     person: str
     since: int
+    ref: int | None = None  # la promesse, pour ``PROMISE``
 
 
 class ExpectationMissed(Payload):
     kind: str
     person: str
     since: int
+    ref: int | None = None
 
 
 class DigestedThought(Payload):

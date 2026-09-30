@@ -71,8 +71,8 @@ def _outbox(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     account = ctx.value("compte") or ""
     blocks += _accounts_nav(port, account, "envoyes")
     query = fold(ctx.value("q") or "")
-    sent = [m for m in gone(port, account=account)
-            if not query or query in fold(f"{m.subject} {m.to} {m.body[:2000]}")]
+    read = gone(port, account=account)
+    sent = [m for m in read if not query or query in fold(f"{m.subject} {m.to} {m.body[:2000]}")]
     page, pager = paginate(sent, ctx.pager(size=PAGE))
     several = len(port.accounts()) > 1
     rows = []
@@ -91,7 +91,9 @@ def _outbox(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     columns: list[Any] = ["objet", "à"] + ([Column("boîte", "fit")] if several else [])
     columns += [Column("parti", "fit"), Column("écrit par", "fit"), "en réponse à"]
     blocks.append(Table(tuple(columns), tuple(rows), title=f"Envoyés ({len(sent)})", pager=pager,
-                        empty="aucun envoi ne correspond" if query else "rien n'est encore parti de sa boîte"))
+                        empty="aucun envoi ne correspond" if query else "rien n'est encore parti de sa boîte",
+                        caption=f"Seuls les {CACHE_SHOWN} envois les plus récents sont relus ici (recherche, pages)."
+                        if len(read) >= CACHE_SHOWN else ""))
     return blocks
 
 
@@ -141,4 +143,6 @@ def _contacts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
             Table(("nom", "adresse", Column("reçus", "num"), Column("envoyés", "num"), Column("dernier échange", "fit")),
                   rows, title=f"Contacts ({len(book)})", pager=pager,
                   empty="aucun contact ne correspond" if query else "aucun échange encore",
-                  caption="Un clic ouvre ses mails ; « voir les détails » pour lui écrire.")]
+                  caption=f"Comptés sur les {CACHE_SHOWN} derniers mails reçus (gardés par le relevé) et les "
+                          f"{CACHE_SHOWN} derniers partis. Un clic ouvre ses mails ; « voir les détails » pour lui "
+                          "écrire.")]

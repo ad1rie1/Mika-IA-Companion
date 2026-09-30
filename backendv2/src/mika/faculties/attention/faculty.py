@@ -10,14 +10,21 @@
   lieu d'en créer une autre, et il n'y a jamais plus de trois pensées nées
   d'échanges en même temps (douze insultes ne font pas douze ruminations).
 - **Attentes** : écrire d'elle-même à quelqu'un fait attendre sa réponse
-  (vingt minutes sur l'application, une heure par message) ; quelqu'un qui
-  lui manque fait attendre son retour.
+  (vingt minutes sur l'application, une heure par message — plus, quand elle
+  a appris que cette personne met plus longtemps : ``others``) ; quelqu'un
+  qui lui manque fait attendre son retour ; une promesse datée fait attendre
+  d'elle-même qu'elle la tienne.
+- **Inquiétude** : quelqu'un qui compte et qui n'avait pas l'air comme
+  d'habitude (``others``) laisse une pensée — la même règle qu'un échange qui
+  marque : une par personne à la fois.
+- **Une promesse non tenue** à son échéance laisse une pensée (« j'avais
+  promis… »), qui pousse à le lui dire ; la tenir, même en retard, l'apaise.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -26,6 +33,7 @@ from mika.contracts import expression as expression_c
 from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
+from mika.contracts import others as others_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.kernel.clock import DAY, HOUR, MINUTE
@@ -112,6 +120,28 @@ class AttentionParams(BaseModel):
     reply_window_message_us: Annotated[int, Knob(
         label="Délai de réponse (messagerie)", group="Attentes", lo=5 * MINUTE, hi=DAY,
         help="Le même délai sur Telegram, où un message se lit quand on y pense, pas quand il arrive.")] = HOUR
+    reply_learned_after: Annotated[int, Knob(
+        label="Délais mesurés avant d'en tenir compte", group="Attentes", lo=1, hi=50,
+        help="Après tant de réponses mesurées de la même personne sur le même canal, elle attend à la mesure de "
+             "son délai habituel (jamais moins que le délai ci-dessus).")] = 3
+    reply_window_factor: Annotated[float, Knob(
+        label="Attendre tant de fois son délai habituel", group="Attentes", lo=1.0, hi=10.0, step=0.5,
+        help="Une personne qui répond d'habitude en deux heures n'ignore pas un message au bout de trois : "
+             "elle attend ce multiple de son délai habituel.")] = 2.0
+    reply_window_max_us: Annotated[int, Knob(
+        label="Délai de réponse attendu au plus", group="Attentes", lo=HOUR, hi=7 * DAY,
+        help="Même appris, le délai attendu ne dépasse jamais cette durée.")] = DAY
+    promise_grace_us: Annotated[int, Knob(
+        label="Délai de grâce d'une promesse", group="Promesses", lo=0, hi=3 * DAY,
+        help="Une promesse datée n'est tenue pour manquée que ce délai après son échéance.")] = 2 * HOUR
+    promise_intensity: Annotated[float, Knob(
+        label="Une promesse non tenue", group="Promesses", lo=0.0, hi=1.0, step=0.05,
+        help="L'intensité de la pensée (« j'avais promis… ») quand une promesse passe son échéance sans être "
+             "tenue ; assez forte, elle pousse à le dire à la personne.")] = 0.55
+    concern_intensity: Annotated[float, Knob(
+        label="Quelqu'un qui n'avait pas l'air bien", group="Révision, manque, blocage", lo=0.0, hi=1.0, step=0.05,
+        help="L'intensité de la pensée quand une amie ou une proche n'avait pas l'air comme d'habitude (un "
+             "message nettement plus sombre que ce qu'elle attendait d'elle).")] = 0.45
     # la nuit : les pensées de la veille s'allègent (÷3) et se calment
     digest_after_sleep_us: Annotated[int, Knob(
         label="Digérer après", group="La nuit", lo=0, hi=10 * HOUR,
@@ -183,6 +213,7 @@ class Thought:
     about: tuple[str, ...] = ()
     sensitivity: int = 2
     bundle: str = ""
+    source: int | None = None  # le message, la promesse… d'où elle vient
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,6 +270,7 @@ class Expectation:
     person: str
     since: int
     deadline: int | None
+    ref: int | None = None  # la promesse (``PROMISE``)
 
 
 @dataclass(frozen=True, slots=True)
@@ -258,7 +290,10 @@ class AttentionState:
 
 
 ATTENTION = Faculty("attention", state=AttentionState, init=lambda p: AttentionState(), params=AttentionParams,
-                    state_version=2)
+                    state_version=3)
+
+#: Les pensées nées d'une relation : une par personne à la fois, trois au plus.
+RELATIONAL = (c.EXCHANGE, c.CONCERN)
 ATTENTION.declare(*c.ALL)
 
 
@@ -283,14 +318,41 @@ def _marking(declared: Declared, p: AttentionParams) -> bool:
     return declared.intensity >= p.marking_intensity or A.valence(declared.emotion) <= p.marking_valence
 
 
-def _expect(s: AttentionState, kind: str, person: str, since: int, deadline: int | None) -> AttentionState:
-    return replace(s, expectations=s.expectations.set(f"{kind}:{person}", Expectation(kind, person, since, deadline)))
+def expectation_key(kind: str, person: str, ref: int | None = None) -> str:
+    """Une attente par personne (sa réponse, son retour) ; une par promesse."""
+    return f"{kind}:{ref}" if kind == c.PROMISE else f"{kind}:{person}"
+
+
+def _expect(s: AttentionState, kind: str, person: str, since: int, deadline: int | None,
+            ref: int | None = None) -> AttentionState:
+    return replace(s, expectations=s.expectations.set(expectation_key(kind, person, ref),
+                                                      Expectation(kind, person, since, deadline, ref)))
+
+
+def _relational(s: AttentionState, person: str, emotion: str, intensity: float, source: int, origin: str, at: int,
+                p: AttentionParams, public: bool = False) -> AttentionState:
+    """Une pensée née d'une relation — un échange qui marque, une inquiétude :
+    une par personne à la fois (une nouvelle ravive celle qui est là), trois
+    au plus en même temps."""
+    alive = _alive(s, at, p)
+    same = sorted((t for t in alive.values() if t.origin in RELATIONAL and person in t.about
+                   and at - t.touched_at < p.exchange_spacing_us), key=lambda t: t.id)
+    if same:
+        t = same[0]
+        stronger = max(current(t, at, p), intensity)
+        return replace(s, thoughts=s.thoughts.set(t.id, replace(t, intensity=stronger, touched_at=at)))
+    born = sum(1 for t in alive.values() if t.origin in RELATIONAL)
+    queued = sum(1 for q in s.pending if q.origin in RELATIONAL)
+    if born + queued >= p.exchange_cap or any(q.person == person for q in s.pending):
+        return s
+    return replace(s, pending=(*s.pending, Pending(source, origin, person, emotion, round(intensity, 3), at,
+                                                   public=public)))
 
 
 # ── Réducteurs ────────────────────────────────────────────────────────────
 
 
-@ATTENTION.reducer(rt.UTTERANCE, reads=[identity_c.PERSON])
+@ATTENTION.reducer(rt.UTTERANCE, reads=[identity_c.PERSON, others_c.REPLY_DELAY])
 def _uttered(s: AttentionState, e, cx) -> AttentionState:
     d = e.data
     if not d.visible or not d.target or not is_identifiable(d.target):
@@ -308,26 +370,60 @@ def _uttered(s: AttentionState, e, cx) -> AttentionState:
         s = replace(s, openings=s.openings.delete(e.correlation))
         # saluer, rappeler : ce n'est pas prendre la parole pour qu'on lui réponde
         if social_c.GREETING not in reasons and goals_c.REMIND not in reasons:
-            window = p.reply_window_message_us if d.channel == "telegram" else p.reply_window_us
-            s = _expect(s, c.REPLY, person, e.at, e.at + window)
+            s = _expect(s, c.REPLY, person, e.at, e.at + reply_window(cx, person, d.channel, p))
     declared = Declared.decode(d.annotation(expression_c.EMOTION_ANNOTATION))
     if d.kind != Kind.REPLY or declared is None or not _marking(declared, p):
         return s
     # un échange qui marque : une pensée par personne à la fois
-    alive = _alive(s, e.at, p)
-    same = sorted((t for t in alive.values() if t.origin == c.EXCHANGE and person in t.about
-                   and e.at - t.touched_at < p.exchange_spacing_us), key=lambda t: t.id)
-    if same:
-        t = same[0]
-        stronger = max(current(t, e.at, p), declared.intensity * p.birth_factor)
-        return replace(s, thoughts=s.thoughts.set(t.id, replace(t, intensity=stronger, touched_at=e.at)))
-    born = sum(1 for t in alive.values() if t.origin == c.EXCHANGE)
-    queued = sum(1 for q in s.pending if q.origin == c.EXCHANGE)
-    if born + queued >= p.exchange_cap or any(q.person == person for q in s.pending):
+    return _relational(s, person, declared.emotion.value, declared.intensity * p.birth_factor, d.reply_to or e.seq,
+                       c.EXCHANGE, e.at, p, public=d.room is not None)
+
+
+def reply_window(cx: Any, person: str, channel: str, p: AttentionParams) -> int:
+    """Combien de temps attendre sa réponse : le délai du canal, ou — quand elle
+    a appris que cette personne met plus longtemps — un multiple de son délai
+    habituel (borné). Jamais moins que le délai du canal : répondre vite
+    d'habitude ne rend pas impatiente."""
+    window = p.reply_window_message_us if channel == "telegram" else p.reply_window_us
+    learned = cx.facts.get(others_c.REPLY_DELAY((person, channel)))
+    if learned.samples >= p.reply_learned_after:
+        window = max(window, min(p.reply_window_max_us, round(learned.median_us * p.reply_window_factor)))
+    return window
+
+
+@ATTENTION.reducer(others_c.READ)
+def _worried(s: AttentionState, e, cx) -> AttentionState:
+    """Quelqu'un qui compte n'avait pas l'air comme d'habitude : ça lui reste
+    en tête (une pensée, comme un échange qui marque)."""
+    d = e.data
+    if not d.concern:
         return s
-    pending = Pending(d.reply_to or e.seq, c.EXCHANGE, person, declared.emotion.value,
-                      round(declared.intensity * p.birth_factor, 3), e.at, public=d.room is not None)
-    return replace(s, pending=(*s.pending, pending))
+    p = params(cx.params)
+    return _relational(s, d.person, Emotion.ANXIOUS.value, p.concern_intensity, d.message, c.CONCERN, e.at, p,
+                       public=d.public)
+
+
+@ATTENTION.reducer(memory_c.PROMISE_NOTICED)
+def _promised(s: AttentionState, e, cx) -> AttentionState:
+    """Une promesse datée : elle attend d'elle-même de la tenir."""
+    d = e.data
+    if d.due is None or not d.to:
+        return s
+    p = params(cx.params)
+    return _expect(s, c.PROMISE, d.to, e.at, d.due + p.promise_grace_us, ref=e.seq)
+
+
+@ATTENTION.reducer(memory_c.PROMISE_RESOLVED)
+def _resolved(s: AttentionState, e, cx) -> AttentionState:
+    """Tenue (ou abandonnée d'un commun accord) : plus rien à attendre, et la
+    pensée d'une promesse manquée s'éteint — elle l'a fait."""
+    promise = e.data.promise
+    thoughts = s.thoughts
+    for t in s.thoughts.values():
+        if t.origin == c.PROMISE and t.source == promise:
+            thoughts = thoughts.delete(t.id)
+    return replace(s, expectations=s.expectations.delete(expectation_key(c.PROMISE, "", promise)), thoughts=thoughts,
+                   pending=tuple(q for q in s.pending if not (q.origin == c.PROMISE and q.source == promise)))
 
 
 @ATTENTION.reducer(memory_c.BELIEVED)
@@ -379,7 +475,7 @@ def _born(s: AttentionState, e, cx) -> AttentionState:
     d = e.data
     p = params(cx.params)
     thought = Thought(e.seq, d.text.ref or "", d.emotion, d.intensity, e.at, e.at, d.origin, tuple(d.about),
-                      d.sensitivity, d.bundle)
+                      d.sensitivity, d.bundle, d.source)
     s = replace(s, thoughts=_alive(replace(s, thoughts=s.thoughts.set(e.seq, thought)), e.at, p),
                 pending=tuple(q for q in s.pending if q.source != d.source or q.origin != d.origin))
     if d.origin == c.MISSING and d.about:
@@ -435,7 +531,9 @@ def _dwelt(s: AttentionState, e, cx) -> AttentionState:
 @ATTENTION.reducer(c.EXPECTATION_MET)
 def _met(s: AttentionState, e, cx) -> AttentionState:
     d = e.data
-    s = replace(s, expectations=s.expectations.delete(f"{d.kind}:{d.person}"))
+    s = replace(s, expectations=s.expectations.delete(expectation_key(d.kind, d.person, d.ref)))
+    if d.kind == c.PROMISE:
+        return s
     if d.kind == c.REPLY:
         return replace(s, ignored=0, late=s.late.delete(d.person))
     # quelqu'un qui manquait revient : le manque s'éteint (parce qu'il est là, pas parce que le temps a passé)
@@ -449,7 +547,12 @@ def _met(s: AttentionState, e, cx) -> AttentionState:
 @ATTENTION.reducer(c.EXPECTATION_MISSED)
 def _missed(s: AttentionState, e, cx) -> AttentionState:
     d = e.data
-    s = replace(s, expectations=s.expectations.delete(f"{d.kind}:{d.person}"))
+    s = replace(s, expectations=s.expectations.delete(expectation_key(d.kind, d.person, d.ref)))
+    if d.kind == c.PROMISE and d.ref is not None:
+        # sa parole pas tenue : ça la travaille (le texte de la promesse, jamais inventé)
+        p = params(cx.params)
+        return replace(s, pending=(*s.pending, Pending(d.ref, c.PROMISE, d.person, Emotion.EMBARRASSED.value,
+                                                       p.promise_intensity, e.at)))
     if d.kind != c.REPLY:
         return s
     return replace(s, ignored=s.ignored + 1, late=s.late.set(d.person, e.at))
@@ -525,5 +628,7 @@ def _digest_felt(e, cx) -> Appraisal | None:
 
 @ATTENTION.appraisal(c.EXPECTATION_MISSED)
 def _missed_felt(e, cx) -> Appraisal | None:
+    if e.data.kind == c.PROMISE:
+        return Appraisal(Emotion.EMBARRASSED, 0.3, reason="promesse non tenue")
     return Appraisal(Emotion.SAD, 0.15, reason="sans réponse") if e.data.kind == c.REPLY else None
 

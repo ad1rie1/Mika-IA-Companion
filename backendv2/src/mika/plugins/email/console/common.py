@@ -17,7 +17,18 @@ from mika.contracts import email as c
 from mika.kernel.clock import MINUTE, instant
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import Badge, InspectContext, Meter, Note, Ref
-from mika.plugins.email import EmailParams, EmailState, Seen, operator_name, params_of
+from mika.plugins.email import (
+    APPROVED,
+    FAILED,
+    GONE,
+    REFUSED,
+    WAITING,
+    EmailParams,
+    EmailState,
+    Seen,
+    operator_name,
+    params_of,
+)
 from mika.ports.mail import Mail, split_ref
 
 SECTION = "courrier"
@@ -27,7 +38,6 @@ SETTINGS = "/inspecteur/reglages/sens"
 #: la console ne relit pas plus que ceci du cache de la boîte (filtres, pages, recherche, contacts)
 CACHE_SHOWN = 500
 PAGE = 25
-NOTICED_SHOWN = 50
 #: le texte d'un mail montré à l'opérateur, au plus ; replié au-delà de ``FOLD``
 BODY_SHOWN = 20_000
 FOLD = 600
@@ -37,12 +47,21 @@ DIGEST = "#"
 #: les mails remarqués « aujourd'hui » : jamais plus relus que ceci
 TODAY_MAX = 500
 BATCH = 250
-THREAD_MAX = 30
 NO_MAIL = "Aucun mail demandé : choisis-en un dans le courrier."
 UNKNOWN = "Ce mail n'est ni dans la boîte, ni parmi les envoyés, ni dans ce qu'elle a remarqué."
 NOT_CONFIGURED = "Aucune boîte n'est configurée : ajoute un compte (Courrier › Comptes)."
 NO_PORT = "Courrier non configuré : aucune boîte aux lettres n'est branchée."
 VOICE_LABEL = {"elle": "en son nom", "assistante": "en assistante", "proprietaire": "à ta place"}
+#: où en est un brouillon, en toutes lettres (et son ton) : ce qu'elle en sait (sa proposition)…
+DRAFT_STATES = {WAITING: ("attend ton accord", "warn"), APPROVED: ("approuvé, en partance", "info"),
+                GONE: ("parti", "ok"), REFUSED: ("refusé", "muted"), FAILED: ("échec de l'envoi", "danger"),
+                # … et, à défaut, ce qu'en garde la boîte (``Draft.state``)
+                "brouillon": ("brouillon", ""), "envoye": ("parti", "ok"), "abandonne": ("abandonné", "muted")}
+
+
+def draft_state(state: str) -> tuple[str, str]:
+    """L'état d'un brouillon en français, et son ton (jamais le code brut)."""
+    return DRAFT_STATES.get(state, ("état inconnu", "muted"))
 
 
 def clip(text: str, n: int = 120) -> str:

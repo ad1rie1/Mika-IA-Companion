@@ -68,6 +68,15 @@ def next_local(after: int, hour: int, minute: int, tz: ZoneInfo) -> Instant:
     raise AssertionError("aucune occurrence locale trouvée en trois jours")
 
 
+def within_daily_window(minute: int, start: int, end: int) -> bool:
+    """``minute`` (depuis minuit, heure locale) tombe-t-elle dans la plage
+    quotidienne ``[start, end]`` ? Une plage dont la fin précède le début passe
+    minuit (22 h – 2 h) ; début = fin : cette minute-là seulement."""
+    if start <= end:
+        return start <= minute <= end
+    return minute >= start or minute <= end
+
+
 def local_date_of_night(t: int, tz: ZoneInfo, day_starts_at_hour: int = 5):
     """La date « de la journée vécue » : avant ``day_starts_at_hour`` h, une
     heure de la nuit appartient encore à la veille."""

@@ -32,6 +32,7 @@ from mika.kernel.inspect import (
     Text,
     Timeline,
     When,
+    paginate,
 )
 from mika.kernel.operate import Done, Refused
 from mika.plugins.email import (
@@ -48,11 +49,12 @@ from mika.plugins.email.console.common import (
     CACHE_SHOWN,
     FOLD,
     NO_MAIL,
-    THREAD_MAX,
+    PAGE,
     UNKNOWN,
     author,
     can_send,
     clip,
+    draft_state,
     fold,
     gone,
     important,
@@ -251,20 +253,25 @@ def _tab_thread(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]
         return [Note("Ce mail n'est plus dans la boîte : son fil n'est pas lisible.", tone="muted")]
     thread = {mid}
     root = mid
-    while items.get(root, (0, "", "", False, "", ""))[4] in items and len(thread) < THREAD_MAX:
-        root = items[root][4]
+    # remonter jusqu'au premier mail connu (un fil qui boucle s'arrête où il revient)
+    while (parent := items[root][4]) in items and parent not in thread:
+        root = parent
         thread.add(root)
     grew = True
-    while grew and len(thread) < THREAD_MAX:
+    while grew:
         more = {k for k, v in items.items() if v[4] in thread and k not in thread}
         thread |= more
         grew = bool(more)
+    ordered = sorted(thread, key=lambda k: items[k][0])
+    page, pager = paginate(ordered, ctx.pager(size=PAGE))
     entries = tuple(Entry(items[k][0], f"{'↗ ' if items[k][3] else ''}{clip(items[k][2], 120) or '(sans objet)'}",
                           text=items[k][1], tone="info" if items[k][3] else "",
                           href=Ref.subject("mail", mail_key(items[k][5]), ""), meta="ce mail" if k == mid else "")
-                    for k in sorted(thread, key=lambda k: items[k][0]))
-    return [Timeline(entries, title=f"Le fil ({len(entries)} mail(s))", empty="un mail seul"),
-            Note("↗ : parti de sa boîte.", tone="muted")]
+                    for k in page)
+    return [Timeline(entries, title=f"Le fil ({len(ordered)} mail(s), du plus ancien au plus récent)",
+                     empty="un mail seul", pager=pager),
+            Note(f"↗ : parti de sa boîte. Le fil se lit dans les {CACHE_SHOWN} derniers mails reçus et les "
+                 f"{CACHE_SHOWN} derniers partis.", tone="muted")]
 
 
 @EMAIL.inspect("remarque", title="Ce qu'elle en sait", subject="mail", order=20)
@@ -292,7 +299,7 @@ def _tab_noticed(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block
     if drafted:
         latest = max(drafted, key=lambda d: d.proposal)
         blocks.append(Fields((("brouillon de réponse", Ref.subject("brouillon", latest.draft, latest.draft)),
-                              ("où il en est", latest.state)), title="Sa réponse"))
+                              ("où il en est", Badge(*draft_state(latest.state)))), title="Sa réponse"))
     ask = s.asked.get(ref)
     if ask is not None:
         blocks.append(Note(f"Tu lui as demandé d'y répondre ({ctx.when(ask.at)}) : elle le fera à son prochain "

@@ -138,8 +138,8 @@ class SocialParams(BaseModel):
              "pour discuter. Les salutations n'en dépendent pas.")] = 10 * 60
     day_end_min: Annotated[int, Knob(
         label="Écrire d'elle-même : jusqu'à", group="Heures d'initiative", lo=0, hi=24 * 60,
-        help="Heure locale après laquelle elle ne le fait plus. Doit suivre le début : la plage ne passe pas "
-             "minuit (sinon, jamais).")] = 20 * 60 + 30
+        help="Heure locale après laquelle elle ne le fait plus. Avant le début, la plage passe minuit (un "
+             "tempérament nocturne : de 18 h à 1 h).")] = 20 * 60 + 30
     # initiatives restées sans réponse : chaque nouvelle vers la même personne attend plus
     ignored_shift: Annotated[float, Knob(
         label="Recul par initiative sans réponse", group="Retenue", lo=-10, hi=0, step=0.5,
@@ -287,6 +287,14 @@ def _declared(s: SocialState, e, cx) -> SocialState:
 # ── Lectures ──────────────────────────────────────────────────────────────
 
 
+def grudging(hostility: float, p: SocialParams) -> bool:
+    """Une rancune : une hostilité **installée** qui atteint le seuil. Sans
+    hostilité du tout, il n'y a rien à garder contre personne — même un seuil
+    à zéro (une surcharge passée, un réglage extrême) ne coupe pas les ponts
+    avec tout le monde."""
+    return hostility > 0.0 and hostility >= p.grudge
+
+
 def lived(ct: Contact | None, regard: float, p: SocialParams, hostility: float = 0.0) -> str:
     """Ce que leur histoire a fait d'elles : on devient amies en passant du
     temps ensemble, sans rancune — pas en le disant (ni parce qu'un modèle
@@ -294,7 +302,7 @@ def lived(ct: Contact | None, regard: float, p: SocialParams, hostility: float =
     if ct is None or not ct.days:
         return c.STRANGER
     days, n = len(ct.days), ct.inbound
-    friendly = hostility < p.grudge
+    friendly = not grudging(hostility, p)
     if friendly and days >= p.close_days and n >= p.close_messages and \
             (regard >= p.close_regard or days >= p.close_long_days):
         return c.CLOSE

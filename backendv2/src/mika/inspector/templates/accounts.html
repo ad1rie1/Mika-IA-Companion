@@ -1,0 +1,41 @@
+{% if mode == "create" %}
+<form method="post" action="{{ action }}" class="form card record-form">
+  <h3>Créer un compte</h3>
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="create">
+  <fieldset class="group">
+    <legend>Le compte</legend>
+    <div class="field"><label for="acc-username">Identifiant</label>
+      <input id="acc-username" name="username" value="{{ values.username or '' }}" required autocomplete="off" maxlength="60">
+      <span class="help">Ce qu'on tape pour se connecter. Il ne change plus ensuite.</span></div>
+    <div class="field"><label for="acc-full-name">Nom affiché</label>
+      <input id="acc-full-name" name="full_name" value="{{ values.full_name or '' }}" maxlength="80">
+      <span class="help">Le nom sous lequel elle connaîtra cette personne (vide : l'identifiant).</span></div>
+    <div class="field"><label for="acc-password">Mot de passe</label>
+      <input id="acc-password" name="password" type="password" autocomplete="new-password" required>
+      <span class="help">8 caractères au moins, pas seulement des chiffres, sans l'identifiant dedans.</span></div>
+    <div class="field"><label class="check"><input type="checkbox" name="operator"{{ ' checked' if values.operator }}> Opérateur</label>
+      <span class="help">Ouvre la console (tout ce qu'elle vit, sa configuration), décide des approbations et des apps. Sans : le frontend seulement.</span></div>
+  </fieldset>
+  <div class="form-actions"><button class="btn">Créer</button> <a class="btn quiet" href="{{ action }}">Annuler</a></div>
+</form>
+{% elif mode == "edit" %}
+<form method="post" action="{{ action }}" class="form card record-form">
+  <h3>{{ account.username }} <span class="muted">· {{ account.handle }}</span></h3>
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="update">
+  <input type="hidden" name="account" value="{{ account.id }}">
+  <fieldset class="group">
+    <legend>Droits</legend>
+    <div class="field"><label class="check"><input type="checkbox" name="operator"{{ ' checked' if account.operator }}> Opérateur</label>
+      <span class="help">Ouvre la console et décide de ce qui sort de la machine.{% if account.operator and operators <= 1 %} C'est le dernier opérateur actif : il ne peut pas perdre ce droit.{% endif %}</span></div>
+    <div class="field"><label class="check"><input type="checkbox" name="active"{{ ' checked' if account.active }}> Actif</label>
+      <span class="help">Décoché : le compte ne peut plus se connecter et ses sessions sont fermées. Ce qu'elle sait de la personne reste.</span></div>
+  </fieldset>
+  <fieldset class="group">
+    <legend>Mot de passe</legend>
+    <div class="field"><label for="acc-new-password">Nouveau mot de passe</label>
+      <input id="acc-new-password" name="password" type="password" autocomplete="new-password" placeholder="vide : inchangé">
+      <span class="help">Le changer ferme les sessions ouvertes de ce compte.</span></div>
+  </fieldset>
+  <div class="form-actions"><button class="btn">Enregistrer</button> <a class="btn quiet" href="{{ action }}">Annuler</a></div>
+</form>
+{% endif %}

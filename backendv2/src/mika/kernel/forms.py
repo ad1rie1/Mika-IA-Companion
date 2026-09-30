@@ -46,10 +46,12 @@ CLEARED = "_effacer"
 
 KINDS = frozenset({
     "text", "textarea", "int", "float", "slider", "bool", "select", "lines", "duration", "secret",
-    "subject", "yaml", "group", "records", "mapping", "hidden",
+    "subject", "yaml", "group", "records", "mapping", "hidden", "datetime",
 })
+#: ``datetime`` : une date et une heure (un calendrier dans le navigateur) ; ``suggest`` : un texte libre
+#: accompagné de suggestions (``choices``), jamais limité à elles
 WIDGETS = frozenset({"", "slider", "textarea", "lines", "yaml", "password", "select", "duration", "subject",
-                     "hidden"})
+                     "hidden", "datetime", "suggest"})
 
 # mêmes unités que kernel.clock (le noyau n'importe rien de mika)
 _US, _MS, _SECOND = 1, 1_000, 1_000_000
@@ -94,6 +96,8 @@ class Knob:
     choices_from: str = ""
     #: affiché seulement si le champ ``chemin`` (relatif au modèle) vaut l'une de ces valeurs
     only: Only = ()
+    #: affiché si **l'une** de ces conditions tient (chacune comme ``only``) — « ou » ; s'ajoute à ``only``
+    only_any: tuple[Only, ...] = ()
     secret: bool = False
     readonly: bool = False
     order: int = 100
@@ -133,6 +137,8 @@ class FormField:
     choices_from: str = ""
     #: ``T | None`` : un champ laissé vide vaut ``None``
     nullable: bool = False
+    #: d'autres conditions d'affichage, dont une seule doit tenir (``Knob.only_any``)
+    only_any: tuple[Only, ...] = ()
 
 
 # ── Décrire ───────────────────────────────────────────────────────────────
@@ -181,9 +187,10 @@ def _describe_field(name: str, info: FieldInfo, scope: _Scope) -> list[FormField
         "subject": knob.subject, "only": scope.only + _rebase_only(knob.only, scope.prefix),
         "keys": knob.keys, "choices_from": scope.prefix + knob.choices_from if knob.choices_from else "",
         "nullable": nullable,
+        "only_any": tuple(_rebase_only(alt, scope.prefix) for alt in knob.only_any),
     }
     if _groups(annotation, knob, nullable):
-        marker = _make(kind="group", **{**common, "default": None})
+        marker = _make(kind="group", **{**common, "default": None, "only_any": ()})
         child = _Scope(prefix=path + ".", group=label, advanced=marker.advanced, readonly=marker.readonly,
                        only=marker.only, defaults=default if isinstance(default, BaseModel) else None)
         return [marker, *_describe(annotation, child)]
@@ -221,6 +228,10 @@ def _scalar(name: str, annotation: Any, knob: Knob, metadata: Sequence[Any], com
             return _make(kind="hidden", **common)
         if knob.secret or knob.widget == "password" or (not knob.widget and _secret_name(name)):
             return _make(kind="secret", secret=True, **common)
+        if knob.widget == "datetime":
+            return _make(kind="datetime", **common)
+        if knob.widget == "suggest":  # un texte libre : les choix ne sont que des suggestions
+            return _make(kind="text", choices=choices, **common)
         if choices or knob.loader or knob.widget == "select":
             return _make(kind="select", choices=choices, **common)
         if knob.widget == "textarea":
@@ -237,6 +248,8 @@ def _scalar(name: str, annotation: Any, knob: Knob, metadata: Sequence[Any], com
 def _number(name: str, annotation: Any, knob: Knob, metadata: Sequence[Any], common: dict[str, Any]) -> FormField:
     lo, hi, step = _bounds(knob, metadata)
     unit = knob.unit or _guess_unit(name)
+    if unit == "min" and not knob.unit and annotation is float:
+        unit = ""  # « fond_min », « esteem_min » : un seuil minimal, pas des minutes
     bounds = {"lo": lo, "hi": hi, "step": step, "unit": unit}
     if knob.choices:
         return _make(kind="select", choices=knob.choices, **bounds, **common)
@@ -261,7 +274,7 @@ def _value_item(annotation: Any) -> FormField:
         "path": "", "label": knob.label, "help": knob.help, "group": "", "advanced": knob.advanced,
         "readonly": knob.readonly, "required": True, "default": None, "order": knob.order,
         "loader": knob.loader, "subject": knob.subject, "only": (), "keys": (), "choices_from": "",
-        "nullable": nullable,
+        "nullable": nullable, "only_any": (),
     }
     return _scalar("", inner, knob, metadata, common)
 
@@ -270,11 +283,11 @@ def _make(*, kind: str, path: str, label: str, help: str, group: str, advanced: 
           required: bool, default: Any, order: int, loader: str, subject: str, only: Only, keys: Pairs,
           choices_from: str, nullable: bool, secret: bool = False, choices: Pairs = (),
           lo: float | None = None, hi: float | None = None, step: float | None = None, unit: str = "",
-          item: tuple[FormField, ...] = ()) -> FormField:
+          item: tuple[FormField, ...] = (), only_any: tuple[Only, ...] = ()) -> FormField:
     return FormField(path=path, label=label, help=help, group=group, kind=kind, advanced=advanced, secret=secret,
                      readonly=readonly, required=required, default=default, lo=lo, hi=hi, step=step, unit=unit,
                      choices=choices, loader=loader, subject=subject, only=only, order=order, item=item,
-                     keys=keys, choices_from=choices_from, nullable=nullable)
+                     keys=keys, choices_from=choices_from, nullable=nullable, only_any=only_any)
 
 
 def _knob_of(metadata: Iterable[Any]) -> Knob:
@@ -557,7 +570,7 @@ def parse(fields: Sequence[FormField], form: Mapping[str, Any], *, current: Mapp
     # un champ masqué par sa condition ne s'écrit pas (sa case absente n'est pas un « non »)
     merged = {**current, **values}
     for f in fields:
-        if f.only and not _visible(f, merged):
+        if (f.only or f.only_any) and not _visible(f, merged):
             values.pop(f.path, None)
             for path in [p for p in errors if p == f.path or p.startswith(f.path + ".")]:
                 del errors[path]
@@ -581,7 +594,7 @@ def _read_text(f: FormField, raw: str, load: Callable[[str], Any]) -> Any:
     text = raw.replace("\r\n", "\n").strip()
     if f.kind == "lines":
         return tuple(line.strip() for line in text.splitlines() if line.strip())
-    if f.kind in ("text", "textarea", "subject"):
+    if f.kind in ("text", "textarea", "subject", "datetime"):
         return None if not text and f.nullable else text
     if not text:
         if f.nullable:
@@ -640,7 +653,15 @@ def _read_mapping(f: FormField, form: Mapping[str, Any], current: Mapping[str, A
 
 
 def _visible(f: FormField, values: Mapping[str, Any]) -> bool:
-    return all(_choice(values.get(path)) in allowed for path, allowed in f.only)
+    def holds(only: Only) -> bool:
+        return all(_choice(values.get(path)) in allowed for path, allowed in only)
+
+    return holds(f.only) and (not f.only_any or any(holds(alt) for alt in f.only_any))
+
+
+def visible(f: FormField, values: Mapping[str, Any]) -> bool:
+    """Le champ s'affiche-t-il avec ces valeurs (aplaties) ? (``only`` et ``only_any``)."""
+    return _visible(f, values)
 
 
 def _choice(value: Any) -> str:

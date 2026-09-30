@@ -90,6 +90,18 @@ def _thoughts(s: AttentionState, frame: Frame, enrich: Mapping[str, Any]) -> Sec
     return SectionBody("\n".join(lines))
 
 
+def _insisting(origin: str, name: str, feeling: str) -> str:
+    """Pourquoi elle a envie de lui en reparler, selon d'où vient la pensée."""
+    if origin == c.PROMISE:
+        return (f"Tu avais promis quelque chose à « {name} » et tu ne l'as pas fait à temps : tu as envie de le lui "
+                "dire simplement, sans te justifier des heures, et de voir ce que tu peux faire maintenant.")
+    if origin == c.CONCERN:
+        return (f"« {name} » n'avait pas l'air comme d'habitude la dernière fois : tu t'inquiètes un peu, et tu as "
+                "envie de prendre de ses nouvelles.")
+    return (f"Tu repenses à ton dernier échange avec « {name} » ({feeling}) : tu as envie d'en reparler, "
+            "ou simplement de prendre de ses nouvelles.")
+
+
 def _address(frame: Frame, person: str) -> str | None:
     handles = frame.get(identity_c.HANDLES(person))
     present = [h for h in frame.get(presence_c.PRESENT) if h in handles]
@@ -122,8 +134,7 @@ def _insists(s: AttentionState, frame: Frame) -> list[Candidate]:
         evidence = p.thought_evidence * min(1.0, (t.intensity - p.thought_from) / max(1e-9, 1.0 - p.thought_from) * 2)
         name = frame.get(identity_c.IDENTITY(person)).name or "cette personne"
         feeling = A.FR.get(A.emotion_of(t.emotion) or A.Emotion.THINKING, "")
-        brief = (f"Tu repenses à ton dernier échange avec « {name} » ({feeling}) : tu as envie d'en reparler, "
-                 "ou simplement de prendre de ses nouvelles.")
+        brief = _insisting(t.origin, name, feeling)
         handles = frame.get(identity_c.HANDLES(person)) or (person,)
         guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
         out.append(Candidate(Kind.INITIATIVE, address, c.THOUGHT, evidence, resources=frozenset({floor(address)}),

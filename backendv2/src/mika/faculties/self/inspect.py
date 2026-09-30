@@ -44,6 +44,8 @@ FORGOTTEN = "(oublié)"
 CLAMP = 200
 #: la chronologie montre les plus récentes ; toutes ses nuits se lisent par pages
 RECENT = 14
+#: l'aperçu en tête de page (le reste se lit dans l'historique paginé, dessous)
+PREVIEW = 4
 PAGE = 14
 #: la courbe de l'estime
 CURVE_DAYS = 7
@@ -138,7 +140,8 @@ def _esteem(s: SelfState, frame: Frame, ctx: InspectContext) -> list[Block]:
         ("sûre d'elle au-dessus de", number(p.assured_above)),
         ("ce qui la bouscule", f"une initiative ignorée {p.ignored_knock:+.2f}, une réponse qui rompt la série "
                                f"{p.heard_again_knock:+.2f}, un but mené à bout {p.achieved_knock:+.2f}, un but "
-                               f"bloqué {p.stuck_knock:+.2f}".replace(".", ",")),
+                               f"bloqué {p.stuck_knock:+.2f}, une promesse non tenue "
+                               f"{p.broken_promise_knock:+.2f}".replace(".", ",")),
     ), title="L'estime", columns=2)
     return [stats, curve, rules]
 
@@ -217,7 +220,8 @@ def _timeline(journals: Sequence[Journal], dreams: Sequence[Dream], frame: Frame
                            f"couleur : {feeling(d.emotion)}")
                 for d in dreams]
     entries.sort(key=lambda e: -e.at)
-    return Timeline(tuple(entries[:RECENT]), title="Ses dernières nuits", empty="pas encore de nuit racontée")
+    return Timeline(tuple(entries[:PREVIEW]), title="Ses dernières nuits, en bref",
+                    empty="pas encore de nuit racontée")
 
 
 def _history(s: SelfState, frame: Frame, ctx: InspectContext) -> Table:
@@ -261,6 +265,8 @@ def _inspect_nights(s: SelfState, frame: Frame, ctx: InspectContext) -> list[Blo
     texts = ctx.store.content(sorted({r for r in (*(j.text_ref for j in journals), *(d.text_ref for d in dreams))
                                       if r}))
     blocks: list[Block] = []
+    if ctx.int_param("avant", 0):  # en feuilletant l'historique, l'aperçu ne se répète pas
+        return [_history(s, frame, ctx)]
     if journals:
         latest = journals[0]
         blocks.append(Prose(texts.get(latest.text_ref) or FORGOTTEN, title=f"Journal du {latest.day}, en entier"))

@@ -26,6 +26,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
 from mika.contracts import transcript as c
+from mika.kernel.clock import DAY, MINUTE
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp, Faculty, Tier, Zone
 from mika.kernel.forms import Knob
@@ -76,8 +77,22 @@ class TranscriptParams(BaseModel):
     #: … en gardant les derniers tels quels
     keep: Annotated[int, Knob(
         label="Messages gardés tels quels", group="Résumé des longs fils", lo=10, hi=1000,
-        help="Les derniers messages que le résumé laisse intacts ; un repli n'a lieu que s'il reste au moins dix "
-             "messages à replier au-delà.")] = 60
+        help="Les derniers messages que le résumé laisse intacts ; un repli n'a lieu que s'il reste assez de "
+             "messages à replier au-delà (ci-dessous).")] = 60
+    compact_min_fold: Annotated[int, Knob(
+        label="Messages à replier au moins", group="Résumé des longs fils", lo=2, hi=500,
+        help="Un repli n'a lieu que s'il y a au moins tant de messages déjà relus par la mémoire à replier : pas "
+             "un appel au modèle pour trois phrases.")] = 10
+    compact_batch: Annotated[int, Knob(
+        label="Messages repliés par appel", group="Résumé des longs fils", lo=20, hi=2000,
+        help="Un appel replie au plus tant de messages, les plus anciens d'abord ; un retard se rattrape en "
+             "plusieurs passages plutôt qu'en un prompt démesuré.")] = 200
+    compact_retry_us: Annotated[int, Knob(
+        label="Réessayer un repli après", group="Résumé des longs fils", lo=MINUTE, hi=DAY,
+        help="Si l'appel au modèle échoue, le repli suivant attend ce délai : pas de rafale d'appels.")] = 10 * MINUTE
+    compact_max_tokens: Annotated[int, Knob(
+        label="Longueur d'un résumé (jetons)", group="Résumé des longs fils", lo=200, hi=4000,
+        help="La réponse du modèle qui résume est bornée à tant de jetons.")] = 800
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,6 +232,21 @@ def thread_of(store: Any, person: str, limit: int, before: int | None = None, af
     return [dict(zip(_COLUMNS, r, strict=True)) for r in reversed(rows)]
 
 
+def oldest_after(store: Any, person: str, after: int, limit: int) -> list[dict[str, Any]]:
+    """Les ``limit`` plus anciens messages du fil d'une poignée après ``after``,
+    dans l'ordre : ce qu'un résumé replie en premier."""
+    rows = store.query_mind(
+        f"SELECT {','.join(_COLUMNS)} FROM {c.THREAD_TABLE} WHERE person=? AND id>? ORDER BY id LIMIT ?",
+        (person, after, limit),
+    )
+    return [dict(zip(_COLUMNS, r, strict=True)) for r in rows]
+
+
+def count_after(store: Any, person: str, after: int) -> int:
+    rows = store.query_mind(f"SELECT COUNT(*) FROM {c.THREAD_TABLE} WHERE person=? AND id>?", (person, after))
+    return int(rows[0][0]) if rows else 0
+
+
 def private_thread(store: Any, handles: Sequence[str], limit: int, before: int | None = None,
                    after: int = 0) -> list[dict[str, Any]]:
     """Le fil privé avec une personne, toutes ses poignées confondues (ce
@@ -320,18 +350,21 @@ class Compact:
         for (person,) in store.query_mind(f"SELECT DISTINCT person FROM {c.THREAD_TABLE} ORDER BY person"):
             summary = state.summaries.get(person)
             since = summary[0] if summary else 0
-            rows = thread_of(store, person, 10_000, after=since)
-            if len(rows) <= p.compact_after:
+            total = count_after(store, person, since)
+            if total <= p.compact_after:
                 continue
-            fold = [r for r in rows[: len(rows) - p.keep] if r["id"] <= checkpoint]
-            if len(fold) < 10:
+            # les plus anciens d'abord, par lots : jamais « résumé » ce qui n'a pas été lu
+            fold = [r for r in oldest_after(store, person, since, min(total - p.keep, p.compact_batch))
+                    if r["id"] <= checkpoint]
+            if len(fold) < p.compact_min_fold:
                 continue
             previous = store.content([summary[1]]).get(summary[1]) if summary else None
             lines = "\n".join(f"{'Mika' if r['role'] == 'assistant' else 'Elle ou lui'} : {r['text']}" for r in fold)
             prompt = (f"Résumé précédent : {previous}\n\n" if previous else "") + f"Suite des échanges :\n{lines}"
-            self.retry_at = frame.now + 600 * 1_000_000  # si l'appel lève, pas de rafale
+            self.retry_at = frame.now + p.compact_retry_us  # si l'appel lève, pas de rafale
             request = LLMRequest(role="compact", call_id=f"{ctx.run_id}#{person}", system_stable=COMPACT_SYSTEM,
-                                 messages=(Message("user", prompt),), max_tokens=800, lane="background", priority=3)
+                                 messages=(Message("user", prompt),), max_tokens=p.compact_max_tokens,
+                                 lane="background", priority=3)
             response = await ctx.llm.call(request)
             self.retry_at = 0
             text = (response.text or "").strip()
@@ -359,7 +392,6 @@ def _history(s: TranscriptState, frame: Frame, enrich: Mapping[str, Any]) -> Sec
 PAGE = 50
 INSPECT_CHARS = 300
 TEXT_CAP = 4000
-MAX_SUMMARIES = 100
 FORGOTTEN = "(oublié)"
 ROLES = (("user", "la personne"), ("assistant", "elle"))
 
@@ -441,15 +473,15 @@ def _messages(frame: Frame, ctx: InspectContext, rows: Sequence[Mapping[str, Any
 
 
 def _summaries(store: Any, s: TranscriptState, frame: Frame, handles: Sequence[str] | None) -> Block | None:
-    folded = [(p, v) for p, v in sorted(s.summaries.items()) if handles is None or p in handles][:MAX_SUMMARIES]
+    folded = [(p, v) for p, v in sorted(s.summaries.items()) if handles is None or p in handles]  # le rendu pagine
     if not folded:
         return None
     texts = store.content([ref for _p, (_upto, ref) in folded if ref])
     rows = tuple((_who(frame, p), Ref("event", str(upto), str(upto)),
                   Text(_clip(texts[ref], TEXT_CAP), clamp=INSPECT_CHARS) if texts.get(ref) else FORGOTTEN)
                  for p, (upto, ref) in folded)
-    return Disclosure("Débuts de fil repliés en résumé", (
-        Table(("avec", "replié jusqu'au message", "résumé"), rows, empty="aucun fil replié"),))
+    return Disclosure(f"Débuts de fil repliés en résumé ({len(rows)})", (
+        Table(("avec", "replié jusqu'au message", "résumé"), rows, title="Fils repliés", empty="aucun fil replié"),))
 
 
 def _no_store() -> list[Block]:
@@ -487,7 +519,7 @@ def _all_messages(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list
     scope = f" avec « {handle} »" if handle else ""
     found = f" contenant « {q} »" if q else ""
     blocks: list[Block] = [
-        Stats((Stat("dernier message du fil", s.head or "—"),
+        Stats((Stat("dernier message du fil", Ref("event", str(s.head), f"n° {s.head}") if s.head else "—"),
                Stat("questions sans réponse", len(awaiting), tone="warn" if awaiting else "",
                     href=Ref.view("transcript", "questions", "questions")),
                Stat("fils repliés en résumé", len(s.summaries)))),
@@ -526,7 +558,9 @@ def _questions(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Bl
         rows.append(Row((link, When(r[1]), _who(frame, r[2]), Text(_clip(r[3], TEXT_CAP), clamp=INSPECT_CHARS)),
                         href=link))
     return [Table((Column("n°", "fit"), Column("reçue", "fit"), "de", "texte"), tuple(rows), pager=pager,
-                  empty="aucune question en attente")]
+                  title="Questions sans réponse", empty="aucune question en attente",
+                  caption="Une question reste ici tant qu'aucune réponse ne l'a réglée ; « reçue » dit depuis quand "
+                          "elle attend.")]
 
 
 def _stats(store: Any, handles: Sequence[str]) -> Stats:
@@ -553,7 +587,7 @@ def _exchanges(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Bl
     marks = ",".join("?" * len(handles))
     rows, pager = _page(store, [f"person IN ({marks})"], handles, ctx.int_param("avant", 0) or None)
     blocks: list[Block] = [_stats(store, handles),
-                           Table(MESSAGE_COLUMNS, _messages(frame, ctx, rows), pager=pager,
+                           Table(MESSAGE_COLUMNS, _messages(frame, ctx, rows), pager=pager, title="Échanges",
                                  empty="aucun échange pour l'instant")]
     folded = _summaries(store, s, frame, handles)
     if folded is not None:
@@ -575,7 +609,8 @@ def _handle_thread(s: TranscriptState, frame: Frame, ctx: InspectContext) -> lis
     if not rows and not before and not (handle in s.last_from or handle in s.last_to):
         return [Note(f"Aucun message avec « {handle} ».", tone="muted")]
     blocks: list[Block] = [_stats(store, [handle]),
-                           Table(MESSAGE_COLUMNS, _messages(frame, ctx, rows), pager=pager, empty="aucun message")]
+                           Table(MESSAGE_COLUMNS, _messages(frame, ctx, rows), pager=pager, title="Messages",
+                                 empty="aucun message")]
     folded = _summaries(store, s, frame, [handle])
     if folded is not None:
         blocks.append(folded)

@@ -21,6 +21,7 @@ from mika.kernel.inspect import (
     InspectContext,
     Meter,
     Note,
+    Pager,
     Ref,
     Series,
     Stat,
@@ -34,7 +35,8 @@ from mika.kernel.inspect import (
 from mika.vocab import circadian
 from mika.vocab.affect import emotion_cell
 
-TRANSITIONS_SHOWN = 12
+#: ses transitions (s'endormir, se réveiller), par page : tout le journal, du plus récent au plus ancien
+TRANSITIONS_PAGE = 25
 
 SLEEP_FR = {
     c.SleepPhase.AWAKE: "éveillée",
@@ -109,14 +111,18 @@ def _pressure_series(s: BodyState, frame: Frame) -> float:
 # ── Rythme ────────────────────────────────────────────────────────────────
 
 
-def _transitions(ctx: InspectContext) -> tuple[Entry, ...]:
+def _transitions(ctx: InspectContext) -> tuple[tuple[Entry, ...], Pager]:
+    """Une page de ses transitions (``?avant=`` : la suite, plus ancienne)."""
+    found = ctx.events([c.FELL_ASLEEP, c.WOKE], TRANSITIONS_PAGE + 1, before=ctx.int_param("avant", 0) or None)
+    page = found[:TRANSITIONS_PAGE]
     out = []
-    for e in ctx.events([c.FELL_ASLEEP, c.WOKE], TRANSITIONS_SHOWN):
+    for e in page:
         asleep = e.type.name == c.FELL_ASLEEP.name
         out.append(Entry(int(e.data.at), "s'endort" if asleep else "se réveille",
                          f"pression de sommeil {_percent(float(e.data.pressure))}", tone="info" if asleep else "ok",
                          href=Ref("event", str(e.seq), "l'événement")))
-    return tuple(out)
+    older = (("avant", str(page[-1].seq)),) if len(found) > TRANSITIONS_PAGE else ()
+    return tuple(out), Pager(param="avant", size=TRANSITIONS_PAGE, older=older)
 
 
 @BODY.inspect("rythme", title="Rythme", section="vie", order=40,
@@ -137,6 +143,7 @@ def _rhythm_view(s: BodyState, frame: Frame, ctx: InspectContext) -> list[Block]
     tired = level < p.tired_below
     phase = circadian.phase_of(frame.local(), profile)
     since = now - DAY
+    transitions, pager = _transitions(ctx)
     return [
         Stats((
             Stat("sommeil", SLEEP_FR[sl.phase(sleep, now, p.sleep)],
@@ -169,5 +176,5 @@ def _rhythm_view(s: BodyState, frame: Frame, ctx: InspectContext) -> list[Block]
         Table(("phase", "début", "teinte"),
               tuple((circadian.PHASE_FR[ph], _hm(m), emotion_cell(profile.tints[ph])) for ph, m in profile.starts),
               title="Son rythme"),
-        Timeline(_transitions(ctx), title="Dernières transitions", empty="aucune transition encore"),
+        Timeline(transitions, title="Dernières transitions", empty="aucune transition encore", pager=pager),
     ]

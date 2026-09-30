@@ -28,6 +28,7 @@ from mika.kernel.forms import (
     parse_duration,
     show_duration,
     validate,
+    visible,
     within,
 )
 from mika.vocab.affect import Emotion
@@ -240,7 +241,17 @@ def test_real_llm_config():
     # bornée et documentée pour la console : modifiable, vide = celle du fournisseur
     assert not backends["temperature"].readonly and backends["temperature"].nullable
     assert (backends["temperature"].lo, backends["temperature"].hi) == (0.0, 2.0)
-    assert backends["model"].loader == "models" and backends["api_key"].only
+    assert backends["model"].loader == "models" and backends["api_key"].only_any
+    # un champ ne se montre que s'il sert : la clé d'un service hébergé, ou de Claude Code sur une clé
+    item = backends["api_key"]
+    assert visible(item, {"kind": "claude"}) and visible(item, {"kind": "ollama_cloud"})
+    assert not visible(item, {"kind": "ollama"})
+    assert not visible(item, {"kind": "claude_code", "auth": "abonnement"})
+    assert visible(item, {"kind": "claude_code", "auth": "cle_api"})
+    # ce que le SDK ou la CLI savent déjà est rangé à part ; le repli se choisit parmi les autres
+    assert backends["host"].advanced and backends["base_url"].advanced and backends["claude_bin"].advanced
+    assert backends["fallback"].choices_from == "backends" and not backends["fallback"].advanced
+    assert all(i.help for i in f["backends"].item), [i.path for i in f["backends"].item if not i.help]
     assert f["routes"].kind == "mapping"
     assert (f["context_tokens"].lo, f["context_tokens"].hi, f["context_tokens"].readonly) == (2000, 1_000_000, False)
     assert f["routes"].choices_from == "backends" and ("reply", "répondre (voix)") in f["routes"].keys

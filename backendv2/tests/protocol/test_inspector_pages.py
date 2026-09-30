@@ -28,6 +28,18 @@ def post(client, path: str, **data: str):
     return client.post(path, data={"csrf": token(client), **data})
 
 
+def every_page(client, url: str, limit: int = 50) -> str:
+    """Une page et toutes celles qui la suivent (« → », « Plus anciens → ») : toute table est paginée."""
+    out, seen = [], set()
+    while url and url not in seen and len(seen) < limit:
+        seen.add(url)
+        page = html_of(client.get(url))
+        out.append(page)
+        nxt = re.search(r'<a href="([^"]+)" rel="next">', page)
+        url = (url.split("?")[0] + nxt.group(1).replace("&amp;", "&")) if nxt else ""
+    return "\n".join(out)
+
+
 def converse(client) -> None:
     with client.websocket_connect(WS) as ws:
         ws.receive_json(), ws.receive_json()
@@ -47,15 +59,19 @@ def test_every_page_and_every_faculty_view_opens(world):  # noqa: F811
             r = client.get(base)
             assert r.status_code == 200 and d.label in html_of(r), (d.key, r.status_code)
             slugs = [k.split(".", 1)[1] for k in d.builtin] + [v.name for v in views if v.section == d.key]
-            for slug in slugs if d.layout == "tabs" else ():
+            if d.layout == "menu":  # un sous-menu : chacune de ses pages
+                slugs = [u.rsplit("/", 1)[1] for u in re.findall(rf'class="submenu-item[^"]*" href="({base}/[\w-]+)"',
+                                                                 html_of(r))]
+                assert len(slugs) >= 5, (d.key, slugs)
+            for slug in slugs if d.layout != "stack" else ():
                 r = client.get(f"{base}/{slug}", follow_redirects=True)
                 page = html_of(r)
                 assert r.status_code == 200 and "a échoué" not in page, (d.key, slug, r.status_code)
     for v in views:
         r = client.get(f"/inspecteur/facultes/{v.owner}/{v.name}")
         assert r.status_code == 200 and "Cette vue a échoué" not in html_of(r), (v.owner, v.name)
-    listed = html_of(client.get("/inspecteur/systeme/vues"))
-    assert all(v.title in listed for v in views)
+    listed = every_page(client, "/inspecteur/systeme/vues")
+    assert all(v.title in listed for v in views), [v.title for v in views if v.title not in listed]
     assert client.get("/inspecteur/facultes/nobody/nothing").status_code == 404
     assert client.get("/inspecteur/nulle-part").status_code == 404
 
@@ -116,6 +132,16 @@ def test_accounts_are_managed_without_ever_locking_out(world):  # noqa: F811
     assert "dernier opérateur actif" in html_of(alone)
     accounts = client.portal.call(live.accounts.all)
     assert accounts[0].operator and not accounts[1].operator
+    # créer et modifier un compte sont audités (sans contenu) et paraissent dans le journal des modifications
+    post(client, "/inspecteur/reglages/comptes", action="update", account="2", active="on", operator="on")
+    ops = client.portal.call(lambda: live.kernel.mind.store.latest([rt.OPERATED.name], 20))
+    actions = [json.loads(o.data)["action"] for o in ops]
+    assert "console.comptes.creer" in actions and "console.comptes.modifier" in actions
+    journal = html_of(client.get("/inspecteur/reglages/journal"))
+    assert "comptes.creer" in journal and "longue-phrase-secrete" not in journal
+    # une page par geste : la liste, créer, modifier
+    assert "Créer un compte" in html_of(client.get("/inspecteur/reglages/comptes?nouveau=1"))
+    assert "Nouveau mot de passe" in html_of(client.get("/inspecteur/reglages/comptes?compte=2"))
 
 
 def test_an_operator_approves_from_the_inspector(world):  # noqa: F811

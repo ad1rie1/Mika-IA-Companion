@@ -24,8 +24,16 @@ class Destination:
     description: str = ""
     #: les onglets fournis par la console, dans l'ordre (``"decisions.maintenant"``)
     builtin: tuple[str, ...] = ()
-    #: ``tabs`` (un onglet à la fois) | ``stack`` (tout l'un sous l'autre : l'accueil)
+    #: ``tabs`` (des onglets) | ``menu`` (un sous-menu rangé par rubrique, à gauche) |
+    #: ``stack`` (tout l'un sous l'autre : l'accueil)
     layout: str = "tabs"
+    #: prend aussi tous les onglets de la console dont la clé commence par « <clé>. »
+    #: (rangés par ``Builtin.order``) : des pages connues seulement au démarrage
+    dynamic: bool = False
+    #: l'ordre des onglets (leurs noms courts) ; les autres suivent dans l'ordre déclaré
+    order: tuple[str, ...] = ()
+    #: les types d'objets dont la fiche « habite » ici (le menu s'y allume, le fil d'Ariane y mène)
+    subjects: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,8 +51,13 @@ class Builtin:
     fn: Callable[..., Awaitable[Any]]
     #: ce qui demande une action : ``fn(ui) -> int``
     badge: Callable[..., int] | None = None
-    #: un lien vers une page à part (réglages en cours de refonte) plutôt qu'un contenu
+    #: un lien vers une page à part plutôt qu'un contenu
     href: str = ""
+    #: la rubrique du sous-menu (destinations ``menu``)
+    group: str = ""
+    order: int = 100
+    #: ce que montre la page, sous son titre
+    description: str = ""
 
     @property
     def slug(self) -> str:
@@ -61,6 +74,30 @@ class Command:
     run: Callable[[str], Awaitable[tuple[str, str]]]
     confirm: str = ""
     danger: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SettingsPage:
+    """Une sous-page de la configuration : un seul sujet, jamais toute une section.
+
+    ``fields`` : les chemins montrés (vide : toute la section) ; une liste
+    d'enregistrements (``records``) parmi eux s'affiche en table, chaque entrée sur
+    sa propre page. ``commands``, ``blocks`` et ``yaml`` disent si la page porte les
+    boutons, les blocs d'explication et l'import YAML de sa section."""
+
+    key: str
+    title: str
+    fields: tuple[str, ...] = ()
+    description: str = ""
+    order: int = 100
+    commands: bool = False
+    blocks: bool = False
+    yaml: bool = False
+    facts: bool = True
+    #: la page n'a pas de formulaire (seulement l'import YAML, des commandes, des blocs)
+    form: bool = True
+    #: des blocs propres à cette page (un historique, une table de résolution)
+    extra: Callable[[], Sequence[Any]] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +130,11 @@ class SettingsSection:
     exclude: tuple[str, ...] = ()
     #: propose aussi d'importer / exporter le tout en YAML (sans secret)
     yaml: bool = False
+    #: ses sous-pages (vide : une seule page, la section entière)
+    pages: tuple[SettingsPage, ...] = ()
+    #: des choix connus au rendu pour un champ texte (chemin → ``fn() -> [(valeur, libellé)]``) :
+    #: il devient un sélecteur (les fuseaux horaires)
+    choices: Mapping[str, Callable[[], Sequence[tuple[str, str]]]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,14 +156,26 @@ class Panel:
 class Builtins:
     items: dict[str, Builtin] = field(default_factory=dict)
 
-    def tab(self, key: str, *, title: str, badge: Callable[..., int] | None = None, href: str = ""):
+    def tab(self, key: str, *, title: str, badge: Callable[..., int] | None = None, href: str = "",
+            group: str = "", order: int = 100, description: str = ""):
         def deco(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
             if key in self.items:
                 raise ValueError(f"onglet de la console déclaré deux fois : {key}")
-            self.items[key] = Builtin(key, title, fn, badge, href)
+            self.items[key] = Builtin(key, title, fn, badge, href, group, order, description)
             return fn
 
         return deco
+
+
+def builtin_keys(d: Destination, builtins: Mapping[str, Builtin]) -> list[str]:
+    """Les onglets de console d'une destination : ceux qu'elle nomme, puis (``dynamic``)
+    tous ceux de son préfixe, rangés par ``order``."""
+    keys = list(d.builtin)
+    if d.dynamic:
+        prefix = d.key + "."
+        extra = [b for k, b in builtins.items() if k.startswith(prefix) and k not in keys]
+        keys += [b.key for b in sorted(extra, key=lambda b: b.order)]
+    return keys
 
 
 def destinations(nav: Sequence[NavGroup]) -> dict[str, Destination]:
@@ -139,7 +193,7 @@ def check(nav: Sequence[NavGroup], registry: Any, builtins: Mapping[str, Builtin
             seen[d.key] = d.label
     for d in destinations(nav).values():
         slugs: set[str] = set()
-        for key in d.builtin:
+        for key in builtin_keys(d, builtins):
             b = builtins.get(key)
             if b is None:
                 problems.append(f"destination {d.key} : onglet de console inconnu {key}")
@@ -154,6 +208,9 @@ def check(nav: Sequence[NavGroup], registry: Any, builtins: Mapping[str, Builtin
             slugs.add(v.name)
         if not slugs:
             problems.append(f"destination {d.key} : aucun onglet")
+        for name in d.order:
+            if name not in slugs:
+                problems.append(f"destination {d.key} : ordre vers un onglet inconnu {name}")
     for v in registry.inspectors:
         if v.section and v.section not in seen:
             problems.append(f"vue {v.owner}/{v.name} : destination inconnue {v.section}")

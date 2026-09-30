@@ -490,9 +490,11 @@ def test_the_feeds_view_counts_by_day_filters_by_feed_and_links_articles(tmp_pat
     assert [at for at, _ in series.points] == sorted(at for at, _ in series.points)
     assert "chart" in html([chart]) and "<svg" in html([chart])
     # les flux suivis : chacun filtre la page sur lui
-    followed = {shown(r[0]): r for r in table(blocks, "Flux suivis").rows}
+    followed = {shown(r.cells[0]): r.cells for r in table(blocks, "Flux suivis").rows}
     assert followed["Le Journal"][0] == Ref.view("rss", "flux", "Le Journal", flux="Le Journal")
-    assert followed["Le Journal"][2:] == (3, 2) and followed["Autre Gazette"][2:] == (1, 1)
+    assert followed["Le Journal"][6:] == (3, 2) and followed["Autre Gazette"][6:] == (1, 1)
+    # un port qui ne dit rien de sa santé : ses flux sont là, sans état inventé
+    assert followed["Le Journal"][1] == Badge("pas encore relevé", "muted")
     # les articles : un lien http(s) devient un lien, jamais un autre schéma
     recent = {shown(r.cells[0]): r for r in table(blocks, "Derniers articles relevés").rows}
     oil, trap = recent["Le cours du pétrole"], recent["<i>Jeux rétro</i> : un lien piégé"]
@@ -637,7 +639,8 @@ def test_the_forge_views_show_each_app_its_code_logs_and_life_without_running_it
     for blocks in (apps, cafe, meteo):
         clean(blocks)
         assert token not in text(blocks)
-    rows = {r[0].text: r for r in table(apps, "Ses apps").rows}
+    rows = {row(r)[0].text: row(r) for r in table(apps, "Ses apps").rows}
+    assert {r.href for r in table(apps, "Ses apps").rows} == {Ref.subject("app", n, n) for n in ("cafe", "meteo")}
     assert rows["cafe"][1] == "Veille café" and rows["cafe"][4] == Badge("active", "ok")
     assert rows["cafe"][6].startswith("ok, ")
     assert rows["cafe"][7].startswith("1 (le dernier")  # un signal, espacé
@@ -694,5 +697,6 @@ def test_the_devices_view_shows_what_they_signaled(tmp_path):
     page = table(clean(busy), "Ce que « robot »")
     assert len(page.rows) == 50 and page.pager.older and page.pager.total is None
     rest = table(clean(older), "Ce que « robot »")
-    assert [shown(r.cells[2]) for r in rest.rows] == ["<b>bip</b> n°1", "<b>bip</b> n°0"] and rest.pager is None
+    assert [shown(r.cells[2]) for r in rest.rows] == ["<b>bip</b> n°1", "<b>bip</b> n°0"]
+    assert rest.pager is not None and not rest.pager.older  # la dernière page : plus rien d'ancien, mais un retour
     assert "<b>bip" not in html(busy) and "&lt;b&gt;bip&lt;/b&gt;" in html(busy)

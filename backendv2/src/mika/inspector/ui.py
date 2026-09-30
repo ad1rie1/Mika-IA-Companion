@@ -21,7 +21,7 @@ from starlette.responses import HTMLResponse, RedirectResponse, Response
 from mika.adapters.web.accounts import Account, Accounts
 from mika.contracts import runtime as rt
 from mika.inspector import render
-from mika.inspector.catalog import Builtin, Destination, NavGroup, SettingsSection, SettingsTab
+from mika.inspector.catalog import Builtin, Destination, NavGroup, SettingsSection, SettingsTab, builtin_keys
 from mika.kernel.clock import US
 from mika.kernel.inspect import Vital
 from mika.runtime import health
@@ -34,7 +34,7 @@ CSRF_COOKIE = "csrftoken"
 SESSION_COOKIE = "sessionid"
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
-ASSET_VERSION = "1"
+ASSET_VERSION = "2"
 
 SECURITY_HEADERS = {
     "Content-Security-Policy": "default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:; "
@@ -77,6 +77,11 @@ class InspectorDeps:
     settings_tabs: Sequence[SettingsTab] = field(default_factory=tuple)
     #: les paramètres internes des facultés (``runtime/params.Parameters``)
     parameters: Any = None
+    #: les sauvegardes : ``fn() -> {sauvegarde, verification, archives}`` (``app/backup.overview``)
+    backups: Callable[[], Mapping[str, Any]] | None = None
+    #: Configuration › Comportement : (famille, facultés) et le nom lisible de chacune
+    param_families: Sequence[tuple[str, Sequence[str]]] = field(default_factory=tuple)
+    faculty_labels: Mapping[str, str] = field(default_factory=dict)
 
 
 env = Environment(loader=FileSystemLoader(TEMPLATES), autoescape=select_autoescape(default=True),
@@ -146,11 +151,33 @@ class UI:
         for v in self.inspection.in_section(d.key):
             b = self.inspection.badge(v)
             total += b[0] if b else 0
-        for key in d.builtin:
+        for key in builtin_keys(d, self.builtins):
             b = self.builtins.get(key)
             if b is not None and b.badge is not None:
                 total += int(b.badge(self) or 0)
         return total
+
+    def attention_items(self) -> list[dict[str, Any]]:
+        """Ce qui demande une action, onglet par onglet : ``{label, count, hint, href}``
+        (le tableau de bord en fait des cadres qui mènent à la bonne page)."""
+        out: list[dict[str, Any]] = []
+        for g in self.deps.navigation:
+            for d in g.items:
+                base = f"{PREFIX}/" if d.key == "accueil" else f"{PREFIX}/{d.key}"
+                for key in builtin_keys(d, self.builtins):
+                    b = self.builtins.get(key)
+                    if b is None or b.badge is None:
+                        continue
+                    n = int(b.badge(self) or 0)
+                    if n:
+                        out.append({"label": f"{d.label} › {b.title}", "count": n, "hint": "",
+                                    "href": f"{base}/{b.slug}"})
+                for v in self.inspection.in_section(d.key):
+                    got = self.inspection.badge(v)
+                    if got and got[0]:
+                        out.append({"label": f"{d.label} › {v.title}", "count": got[0],
+                                    "hint": got[1] if len(got) > 1 else "", "href": f"{base}/{v.name}"})
+        return out
 
     def nav(self, active: str) -> list[dict[str, Any]]:
         groups = []

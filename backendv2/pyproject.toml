@@ -112,6 +112,7 @@ modules = [
     "mika.faculties.self",
     "mika.faculties.expression",
     "mika.faculties.agency",
+    "mika.faculties.others",
     "mika.plugins.email",
     "mika.plugins.rss",
     "mika.plugins.camera",

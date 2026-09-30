@@ -34,6 +34,9 @@ from mika.kernel.inspect import (
 from mika.runtime.boundary import Failed, call
 
 EPISODES_PAGE = 50
+#: un filtre lit le journal par lots de tant d'épisodes, au plus tant de lots par page
+EPISODE_SCAN = 200
+EPISODE_SCAN_BATCHES = 10
 
 
 def _parts(parts: Any) -> str:
@@ -77,7 +80,45 @@ def _row_detail(r: Any) -> list[Any]:
     return [waterfall(r)]
 
 
-@TABS.tab("decisions.maintenant", title="Maintenant")
+@TABS.tab("decisions.en_cours", title="En cours",
+          description="Ce qui tourne à cet instant : les épisodes ouverts, les files d'attente, les baux tenus, les "
+                      "questions qui attendent une réponse.")
+async def running(ui: Any, request: Request) -> list[Any]:
+    kernel = ui.kernel
+    frame = kernel.mind.frame()
+    now = ui.now()
+    rt_state = frame.state("runtime")
+    open_ = sorted(rt_state.open.items(), key=lambda kv: kv[1].started_at)
+    lanes = kernel.lanes
+    leases = frame.root.slices["kernel"].leases
+    procs = sorted(kernel.scheduler.running())
+    blocks: list[Any] = [Stats((
+        Stat("Épisodes ouverts", len(open_), "en train de se dérouler", "info" if open_ else ""),
+        Stat("En file", sum(lanes.pending(x) for x in lanes.capacities),
+             " · ".join(f"{x} {lanes.pending(x)}/{c}" for x, c in lanes.capacities.items())),
+        Stat("Processus en cours", len(procs), ", ".join(procs)[:90] or "aucun"),
+        Stat("Questions sans réponse", len(rt_state.pending), "attendent qu'elle réponde",
+             "warn" if rt_state.pending else "", Ref("local", "/inspecteur/fil/questions", "questions")),
+    ))]
+    blocks.append(Table((Column("depuis", "fit"), "épisode", "vers", Column("durée", "num"), "en réponse à"), tuple(
+        Row((When(o.started_at), KINDS.get(o.kind, o.kind), o.target or "—",
+             f"{max(0, now - o.started_at) / US:.0f} s",
+             Ref("event", str(o.reply_to), f"message n° {o.reply_to}") if o.reply_to else "—"),
+            href=Ref("episode", corr, ""), tone="warn" if now - o.started_at > 120 * US else "")
+        for corr, o in open_), title="Épisodes ouverts", empty="Aucun épisode en cours."))
+    blocks.append(Table(("voie", Column("capacité", "num"), Column("en attente", "num")), tuple(
+        (lane, cap, lanes.pending(lane)) for lane, cap in lanes.capacities.items()), title="Files d'attente",
+        caption="Une voie exécute au plus « capacité » épisodes à la fois ; les autres attendent leur tour."))
+    blocks.append(Table(("ressource", "tenue par", "jusqu'à"), tuple(
+        (Text(res, "mono"), Text(lease.holder, "mono"), When(lease.until)) for res, lease in sorted(leases.items())),
+        title="Baux tenus", empty="Aucun bail tenu.",
+        caption="Un bail réserve une ressource (une personne à qui répondre, un but) le temps d'un épisode."))
+    return blocks
+
+
+@TABS.tab("decisions.maintenant", title="Maintenant",
+          description="La table de l'arbitre à cet instant : pour chaque ligne (une sorte d'épisode vers une "
+                      "cible), les preuves qui poussent, le seuil, le score et le taux qui en sortent.")
 async def live(ui: Any, request: Request) -> list[Any]:
     kernel = ui.kernel
     rows = kernel.arbiter.rows(kernel.mind.frame())
@@ -100,7 +141,8 @@ async def live(ui: Any, request: Request) -> list[Any]:
     return [table, policy_fields] + [Note(a, "warn") for a in anomalies]
 
 
-@TABS.tab("decisions.selections", title="Ses choix")
+@TABS.tab("decisions.selections", title="Ses choix",
+          description="Chaque initiative décidée, le tirage qui l'a acceptée, et les lignes au moment du choix.")
 async def selections(ui: Any, request: Request) -> list[Any]:
     ctx = ui.inspection.context(request.query_params)
     before = ctx.int_param("avant", 0) or None
@@ -137,21 +179,37 @@ EPISODE_PARAMS = (
 )
 
 
-@TABS.tab("decisions.episodes", title="Épisodes")
+@TABS.tab("decisions.episodes", title="Épisodes",
+          description="Tout ce qu'elle a fait (répondre, prendre la parole, travailler, rêver…) et comment ça "
+                      "s'est terminé.")
 async def episodes(ui: Any, request: Request) -> Any:
     ctx = ui.inspection.context(request.query_params)
     values, notes = read_params(EPISODE_PARAMS, request.query_params)
     before = ctx.int_param("avant", 0) or None
     where = ("kind", values["sorte"]) if values["sorte"] else ("outcome", values["issue"]) if values["issue"] else \
         ("target", values["cible"]) if values["cible"] else None
-    batch = ctx.events([rt.EPISODE_ENDED], 400 if where else EPISODES_PAGE, where=where, before=before)
-    shown = [e for e in batch if (not values["issue"] or e.data.outcome == values["issue"])
-             and (not values["cible"] or (e.data.target or "") == values["cible"])][:EPISODES_PAGE]
+    def matches(e: Any) -> bool:
+        return (not values["issue"] or e.data.outcome == values["issue"]) and \
+            (not values["cible"] or (e.data.target or "") == values["cible"])
+
+    # une page de filtrés : lire par lots jusqu'à la remplir, et reprendre après le dernier montré
+    shown: list[Any] = []
+    cursor = before
+    for _ in range(EPISODE_SCAN_BATCHES):
+        batch = ctx.events([rt.EPISODE_ENDED], EPISODE_SCAN, where=where, before=cursor)
+        for e in batch:
+            if matches(e):
+                shown.append(e)
+                if len(shown) == EPISODES_PAGE:
+                    break
+        if len(shown) == EPISODES_PAGE or len(batch) < EPISODE_SCAN:
+            break
+        cursor = batch[-1].seq
     rows = tuple(Row((When(e.at), KINDS.get(e.data.kind, e.data.kind), e.data.target or "—",
                       outcome_badge(e.data.outcome), Text((e.data.detail or e.data.guard or "")[:200], "muted")),
                      href=Ref("episode", e.correlation, ""),
                      tone="danger" if e.data.outcome in ("failed", "timeout") else "") for e in shown)
-    pager = Pager(older=(("avant", str(batch[-1].seq)),)) if len(batch) >= EPISODES_PAGE and batch else None
+    pager = Pager(older=(("avant", str(shown[-1].seq)),)) if len(shown) == EPISODES_PAGE else None
     now = ui.now()
     recent = ctx.events([rt.EPISODE_ENDED], 1000)
     per_day: Counter[str] = Counter()
@@ -179,7 +237,8 @@ async def episodes(ui: Any, request: Request) -> Any:
     return {"blocks": out, "filters": EPISODE_PARAMS, "values": values}
 
 
-@TABS.tab("decisions.echeances", title="Échéances")
+@TABS.tab("decisions.echeances", title="Échéances",
+          description="Quand chaque processus tournera la prochaine fois.")
 async def schedule(ui: Any, request: Request) -> list[Any]:
     kernel = ui.kernel
     sched = kernel.scheduler

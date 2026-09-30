@@ -7,6 +7,8 @@ standard, un cache SQLite à part.
   du flux, jamais d'un texte. Les redirections sont suivies dans la limite
   de trois, la taille est bornée.
 - La liste des flux est relue à chaque relevé.
+- Chaque relevé d'un flux se note (tentative, succès, erreur, articles lus,
+  nouveaux) : la console dit quel flux ne répond plus, et pourquoi.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ import hashlib
 import html
 import re
 import sqlite3
+import time
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,6 +39,20 @@ SUMMARY_MAX = 2000
 ARTICLE_MAX = 12_000
 FIRST_POLL = 5
 MAX_BYTES = 5_000_000
+#: ce qu'un relevé note de chaque flux (ajouté à un cache plus ancien)
+HEALTH_COLUMNS = (("attempted_at", "INTEGER DEFAULT 0"), ("ok_at", "INTEGER DEFAULT 0"), ("error", "TEXT DEFAULT ''"),
+                  ("failures", "INTEGER DEFAULT 0"), ("items", "INTEGER DEFAULT 0"), ("added", "INTEGER DEFAULT 0"))
+
+
+def _why(exc: BaseException) -> str:
+    """Une erreur de relevé en mots (jamais l'adresse : elle peut porter un jeton)."""
+    if isinstance(exc, httpx.TimeoutException):
+        return "trop long : le serveur ne répond pas à temps"
+    if isinstance(exc, httpx.ConnectError):
+        return "injoignable (nom inconnu ou connexion refusée)"
+    if isinstance(exc, httpx.TooManyRedirects):
+        return "trop de redirections"
+    return f"erreur réseau ({type(exc).__name__})"
 
 
 def clean(raw: str) -> str:
@@ -137,6 +154,11 @@ class HttpFeeds:
             "CREATE TABLE IF NOT EXISTS entries(id TEXT PRIMARY KEY, feed_url TEXT, feed TEXT, title TEXT,"
             " link TEXT, summary TEXT, published INTEGER, handed INTEGER DEFAULT 0, n INTEGER);"
             "CREATE TABLE IF NOT EXISTS feeds(url TEXT PRIMARY KEY, polled INTEGER DEFAULT 0);")
+        known = {r[1] for r in self._db.execute("PRAGMA table_info(feeds)")}
+        for column, kind in HEALTH_COLUMNS:  # un cache d'avant la santé des flux : on complète la table
+            if column not in known:
+                self._db.execute(f"ALTER TABLE feeds ADD COLUMN {column} {kind}")
+        self._db.commit()
 
     def configured(self) -> bool:
         return bool(list(self._feeds()))
@@ -162,20 +184,27 @@ class HttpFeeds:
     async def poll(self, limit: int) -> list[Entry]:
         n = self._db.execute("SELECT COALESCE(MAX(n), 0) FROM entries").fetchone()[0]
         for url in list(self._feeds()):
+            now = int(time.time() * 1_000_000)
             try:
                 raw = await self._get(url)
-            except (httpx.HTTPError, OSError):
-                continue  # un flux injoignable n'empêche pas les autres
+            except httpx.HTTPStatusError as exc:  # un flux injoignable n'empêche pas les autres : on le note
+                self._note(url, now, error=f"le serveur répond {exc.response.status_code}")
+                continue
+            except (httpx.HTTPError, OSError) as exc:
+                self._note(url, now, error=_why(exc))
+                continue
             title, items = parse(raw)
-            first = not self._db.execute("SELECT polled FROM feeds WHERE url=?", (url,)).fetchone()
+            first = not self._db.execute("SELECT polled FROM feeds WHERE url=? AND polled=1", (url,)).fetchone()
             ordered = sorted(items, key=lambda it: -it[4])
+            added = 0
             for i, (uid, t, link, summary, date) in enumerate(ordered):
                 n += 1
                 handed = 1 if first and i >= FIRST_POLL else 0  # le premier relevé n'hérite pas des archives
-                self._db.execute("INSERT OR IGNORE INTO entries VALUES(?,?,?,?,?,?,?,?,?)",
-                                 (_key(url, uid), url, title or url, t, link, summary, date, handed, n))
-            self._db.execute("INSERT INTO feeds(url, polled) VALUES(?, 1) ON CONFLICT(url) DO UPDATE SET polled=1",
-                             (url,))
+                added += self._db.execute("INSERT OR IGNORE INTO entries VALUES(?,?,?,?,?,?,?,?,?)",
+                                          (_key(url, uid), url, title or url, t, link, summary, date, handed,
+                                           n)).rowcount
+            self._note(url, now, ok=True, items=len(items), added=added,
+                       error="" if items or title else "rien de lisible (ni RSS, ni Atom)")
         rows = self._db.execute("SELECT id, feed, title, link, summary, published FROM entries WHERE handed=0 "
                                 "ORDER BY published DESC, n LIMIT ?", (limit,)).fetchall()
         self._db.executemany("UPDATE entries SET handed=1 WHERE id=?", [(r[0],) for r in rows])
@@ -194,6 +223,34 @@ class HttpFeeds:
         rows = self._db.execute("SELECT id, feed, title, link, summary, published FROM entries "
                                 "ORDER BY published DESC, n DESC LIMIT ?", (limit,)).fetchall()
         return [Entry(*r) for r in rows]
+
+    def _note(self, url: str, at: int, *, ok: bool = False, items: int = 0, added: int = 0,
+              error: str = "") -> None:
+        if ok:
+            self._db.execute("INSERT INTO feeds(url, polled, attempted_at, ok_at, error, items, added) "
+                             "VALUES(?, 1, ?, ?, ?, ?, ?) ON CONFLICT(url) DO UPDATE SET polled=1, attempted_at=?, "
+                             "ok_at=?, error=?, items=?, added=?, failures=0",
+                             (url, at, at, error, items, added, at, at, error, items, added))
+        else:
+            self._db.execute("INSERT INTO feeds(url, polled, attempted_at, error, failures) VALUES(?, 0, ?, ?, 1) "
+                             "ON CONFLICT(url) DO UPDATE SET attempted_at=?, error=?, failures=failures+1",
+                             (url, at, error[:300], at, error[:300]))
+
+    def health(self) -> list[dict[str, Any]]:
+        """Pour chaque flux suivi : son titre, son adresse montrable, la dernière tentative, le dernier
+        succès, l'erreur (vide : il va bien), les échecs d'affilée, les articles lus au dernier relevé, les
+        nouveaux, et ce que le cache en garde. Lecture seule (l'inspecteur)."""
+        out = []
+        for url in list(self._feeds()):
+            row = self._db.execute("SELECT attempted_at, ok_at, error, failures, items, added FROM feeds WHERE url=?",
+                                   (url,)).fetchone()
+            title = self._db.execute("SELECT feed FROM entries WHERE feed_url=? LIMIT 1", (url,)).fetchone()
+            kept = self._db.execute("SELECT COUNT(*) FROM entries WHERE feed_url=?", (url,)).fetchone()[0]
+            attempted, ok, error, failures, items, added = row if row else (0, 0, "", 0, 0, 0)
+            out.append({"title": title[0] if title and title[0] != url else "", "url": shown(url),
+                        "attempted_at": attempted or 0, "ok_at": ok or 0, "error": error or "",
+                        "failures": failures or 0, "items": items or 0, "added": added or 0, "kept": kept})
+        return out
 
     def followed(self) -> list[tuple[str, str]]:
         out = []

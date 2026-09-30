@@ -23,6 +23,7 @@ from mika.kernel.inspect import (
     Fields,
     InspectContext,
     Meter,
+    Pager,
     Ref,
     Stat,
     Stats,
@@ -34,8 +35,8 @@ from mika.kernel.inspect import (
 from mika.vocab.episodes import Kind
 from mika.vocab.people import is_identifiable
 
-#: ses dernières prises de parole d'elle-même, relues dans le fil
-SPOKEN_SHOWN = 20
+#: ses prises de parole d'elle-même, relues dans le fil, par page (tout l'historique)
+SPOKEN_PAGE = 25
 EXCERPT = 160
 
 
@@ -55,17 +56,24 @@ def _restraint_fr(frame: Frame) -> str:
     return f"plus rares (décalage {m.shift:+.1f})" if m.shift else "libres"
 
 
-def _spoken(ctx: InspectContext) -> list[tuple[int, str, str | None, int]]:
-    """Ce qu'elle a dit d'elle-même (salutations et rappels compris), et quand
-    la personne lui a écrit depuis (0 : pas encore) : (instant, poignée, texte, réponse)."""
+def _spoken(ctx: InspectContext) -> tuple[list[tuple[int, str, str | None, int]], Pager]:
+    """Une page de ce qu'elle a dit d'elle-même (salutations et rappels compris),
+    et quand la personne lui a écrit depuis (0 : pas encore) : (instant, poignée,
+    texte, réponse) ; ``?avant=`` : la suite, plus ancienne."""
+    pager = Pager(param="avant", size=SPOKEN_PAGE)
     if ctx.store is None:
-        return []
+        return [], pager
     t = transcript_c.THREAD_TABLE
+    before = ctx.int_param("avant", 0)
     rows = ctx.store.query_mind(
-        f"SELECT m.at, m.person, m.text, (SELECT MIN(u.at) FROM {t} u WHERE u.role='user' AND u.person=m.person "
-        f"AND u.id>m.id) FROM {t} m WHERE m.role='assistant' AND m.kind=? ORDER BY m.id DESC LIMIT ?",
-        (str(Kind.INITIATIVE), SPOKEN_SHOWN))
-    return [(int(at), str(person or ""), text, int(answered or 0)) for at, person, text, answered in rows]
+        f"SELECT m.id, m.at, m.person, m.text, (SELECT MIN(u.at) FROM {t} u WHERE u.role='user' "
+        f"AND u.person=m.person AND u.id>m.id) FROM {t} m WHERE m.role='assistant' AND m.kind=?"
+        f"{' AND m.id<?' if before else ''} ORDER BY m.id DESC LIMIT ?",
+        (str(Kind.INITIATIVE), *((before,) if before else ()), SPOKEN_PAGE + 1))
+    page = rows[:SPOKEN_PAGE]
+    if len(rows) > SPOKEN_PAGE:
+        pager = Pager(param="avant", size=SPOKEN_PAGE, older=(("avant", str(page[-1][0])),))
+    return [(int(at), str(person or ""), text, int(answered or 0)) for _n, at, person, text, answered in page], pager
 
 
 def _excerpt(text: str | None) -> str:
@@ -111,7 +119,7 @@ def _inspect(s: AgencyState, frame: Frame, ctx: InspectContext) -> list[Block]:
     tz = frame.env.tz_of(frame.root)
     today = frame.local().date()
     counted = tuple((When(t), "oui" if local(t, tz).date() == today else "non") for t in reversed(s.initiatives))
-    spoken = _spoken(ctx)
+    spoken, spoken_pager = _spoken(ctx)
     return [
         Stats((
             Stat("aujourd'hui", Meter(r.initiatives_today / max(1, p.daily_cap), f"{r.initiatives_today} / {p.daily_cap}",
@@ -123,7 +131,7 @@ def _inspect(s: AgencyState, frame: Frame, ctx: InspectContext) -> list[Block]:
             Stat("initiatives ordinaires", _restraint_fr(frame), sub="saluer, dire un rappel promis : hors budget"),
         ), title="Son budget"),
         Timeline(tuple(_entry(frame, ctx, *row) for row in spoken), title="Ce qu'elle a dit d'elle-même",
-                 empty="elle n'a encore rien dit d'elle-même"),
+                 empty="elle n'a encore rien dit d'elle-même", pager=spoken_pager),
         Fields((
             ("dernière initiative comptée", ctx.when(r.last_initiative_at) if r.last_initiative_at else "—"),
             ("durée tirée à la dernière", f"{(s.refractory_us or p.refractory_us) / MINUTE:.0f} min"),
@@ -131,5 +139,6 @@ def _inspect(s: AgencyState, frame: Frame, ctx: InspectContext) -> list[Block]:
             ("dernier murmure", ctx.when(r.murmured_at) if r.murmured_at else "—"),
         ), title="En détail", columns=2),
         Disclosure("Initiatives comptées (dernières 24 h)", (
-            Table((Column("quand", "fit"), "aujourd'hui"), counted, empty="aucune initiative comptée"),)),
+            Table((Column("quand", "fit"), "aujourd'hui"), counted, title="Initiatives comptées",
+                  empty="aucune initiative comptée"),)),
     ]

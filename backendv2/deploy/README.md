@@ -48,11 +48,30 @@ mandataire TLS devant (Caddy, nginx) plutôt que de changer `--host`.
 
 1. Ouvre le frontend : le premier compte créé est opérateur (ou
    `sudo -u mika .venv/bin/python -m mika --data /var/lib/mika account <nom> <mot de passe> --operator`).
-2. `http://localhost:8001/inspecteur/modeles` : déclare un fournisseur (sa clé
-   est chiffrée et jamais réaffichée) et associe les rôles. Tant qu'aucun
-   modèle n'est branché, `/health` dit `degraded` et elle ne peut pas parler.
-3. Le reste se règle dans l'inspecteur : persona, tempérament, canaux
-   (Telegram), sens (courrier, flux, transcription, appareils), comptes.
+2. `http://localhost:8001/inspecteur/reglages/modeles` (la console, **Réglages ›
+   Modèles**) : ajoute un fournisseur (sa clé est chiffrée et jamais réaffichée ;
+   « Enregistrer et charger la liste » propose ses modèles) et associe les rôles.
+   Tant qu'aucun modèle n'est branché, `/health` dit `degraded` et elle ne peut
+   pas parler.
+3. Le reste se règle dans la console, **Réglages** : personnalité et tempérament
+   (avec ce que pilote chaque curseur), paramètres internes (lisibles ; une
+   surcharge seulement dans le bloc « avancé », bornée et journalisée), canaux
+   (Telegram), sens (courrier, flux, transcription, appareils), comptes. Chaque
+   enregistrement laisse une ligne dans **Journal de configuration**.
+4. Ses boîtes aux lettres : **Courrier › Comptes** (ou Réglages › Sens ›
+   Courrier) — un enregistrement par boîte : serveurs IMAP/SMTP, dossiers
+   relevés, et sa voix (en son nom, en assistante, ou à ta place ; ton,
+   consignes, signature ; préparer des réponses d'elle-même). « Tester la
+   connexion » sur la fiche du compte. En ligne de commande, serveur arrêté :
+   `mika mail set --compte perso --address … --imap-host … --user … --password …
+   --smtp-host … --voix proprietaire --nom "Ton Nom"` (`mika mail show`,
+   `mika mail remove --compte perso`). Rien de ce qu'elle rédige ne part sans
+   ton accord (Courrier › Brouillons).
+
+Pour relire la console sans serveur (après une mise à jour, par exemple) :
+`.venv/bin/python -m mika console apercu --out /tmp/console` exporte chaque
+page, en clair et en sombre, d'une Mika neuve (modèle factice, rien ne sort de
+la machine) ; ouvrir `/tmp/console/index.html`.
 
 ## Surveiller
 
@@ -67,12 +86,12 @@ mandataire TLS devant (Caddy, nginx) plutôt que de changer `--host`.
 |---|---|---|
 | `ok` | 200 | tout va bien |
 | `degraded` | 200 | elle répond, moins bien (pas de modèle, projection en retard, processus qui échoue, file de sortie bloquée) |
-| `ko` | 200 | quelque chose est cassé et rien ne le réparera seul (tranche corrompue, boucle arrêtée) : regarder l'inspecteur, redémarrer |
+| `ko` | 200 | quelque chose est cassé et rien ne le réparera seul (tranche corrompue, boucle arrêtée) : regarder la console, redémarrer |
 | `starting`, `stopping` | 503 | pas prête |
 
-Le détail de chaque contrôle est dans l'inspecteur, page **Santé** ; les
+Le détail de chaque contrôle est dans la console, **Système › Santé** ; les
 journaux dans `journalctl -u mika`. Les coûts et le taux de cache des appels
-de modèle sont dans la page **Appels de modèle**.
+de modèle sont dans **Système › Appels de modèle**.
 
 ## Sauvegarder
 

@@ -1,20 +1,40 @@
 {% from "_blocks.html" import field %}
 {% for m in panel_messages %}<div class="flash {{ m[0] }}" role="status">{{ m[1] }}</div>{% endfor %}
-<details class="advanced card"{{ ' open' if open }}>
-  <summary>Modifier (avancé) — surcharges de {{ owner }}</summary>
-  <p class="muted">Une valeur égale à celle du tempérament retire la surcharge. Chaque enregistrement est borné,
-  journalisé avec ton nom, et rejoué tel quel.{% if overridden %} Surchargés aujourd'hui : {{ overridden|join(", ") }}.{% endif %}</p>
-  <form method="post" action="{{ action }}" class="form">
-    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_faculte" value="{{ owner }}">
-    {% for e in general %}<div class="flash danger">{{ e }}</div>{% endfor %}
-    <div class="form-grid">{% for f in fields %}{{ field(f) }}{% endfor %}</div>
-    <div class="form-actions"><button class="btn">Enregistrer les surcharges</button></div>
-  </form>
-  {% if overridden %}
-  <form method="post" action="{{ action }}" class="inline" data-confirm="Retirer toutes les surcharges de {{ owner }} ?">
-    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_faculte" value="{{ owner }}">
-    <input type="hidden" name="_reinitialiser" value="1">
-    <button class="btn quiet danger">Tout remettre au tempérament</button>
-  </form>
-  {% endif %}
-</details>
+<form method="post" action="{{ action }}" class="form params-form">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_faculte" value="{{ owner }}">
+  <input type="hidden" name="_groupe" value="{{ group }}">
+  {% for e in general %}<div class="flash danger">{{ e }}</div>{% endfor %}
+  {% for g in groups %}
+  <fieldset class="group params-group">
+    <legend>{{ g.title }}</legend>
+    {% for it in g["items"] %}
+    <div class="param{{ ' is-overridden' if it.overridden }}">
+      <div class="param-main">
+        {% if it.field %}{{ field(it.field) }}
+        {% else %}<div class="field"><span class="label">{{ it.label }}</span><span class="value-ro">{{ it.value }}</span>{% if it.help %}<span class="help">{{ it.help }}</span>{% endif %}</div>{% endif %}
+      </div>
+      <div class="param-meta">
+        <span class="badge {{ it.tone }}" title="{{ it.source_label }}">{{ it.source }}</span>
+        {% if it.drivers %}<span>piloté par <b>{{ it.drivers }}</b></span>{% endif %}
+        {% if it.bounds %}<span>bornes {{ it.bounds }}</span>{% endif %}
+        {% if it.natural %}<span>sans surcharge : <b>{{ it.natural }}</b></span>{% endif %}
+        {% if it.pending %}<span class="t-warn">en vigueur : {{ it.pending }} (pas encore journalisé)</span>{% endif %}
+        <span class="mono muted">{{ it.path }}</span>
+        {% if it.overridden %}<button class="btn quiet small" name="_reinitialiser_chemin" value="{{ it.path }}">revenir au tempérament</button>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </fieldset>
+  {% endfor %}
+  <div class="form-actions">
+    <button class="btn">Enregistrer</button>
+    <span class="muted small">Une valeur changée devient une surcharge (bornée, journalisée avec ton nom) ; une valeur égale à celle du tempérament la retire.</span>
+  </div>
+</form>
+{% if overridden %}
+<form method="post" action="{{ action }}" class="inline" data-confirm="Retirer toutes les surcharges de {{ label }} ?">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_faculte" value="{{ owner }}">
+  <input type="hidden" name="_reinitialiser" value="1">
+  <button class="btn quiet danger">Tout remettre au tempérament ({{ overridden|length }} surcharge(s))</button>
+</form>
+{% endif %}

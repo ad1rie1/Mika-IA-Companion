@@ -9,20 +9,24 @@ rechargement est défait : on ne laisse pas une configuration à moitié prise.
 from __future__ import annotations
 
 import logging
+import zoneinfo
+from functools import cache
 from typing import TYPE_CHECKING, Annotated, Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
-from mika.adapters.llm.config import BackendSpec, LLMConfig
+from mika.adapters.llm.config import ROLE_LABELS, BackendSpec, LLMConfig
 from mika.adapters.llm.models import ListingFailed, list_models
 from mika.adapters.mail import MailConfig
+from mika.contracts import self_ as self_c
 from mika.contracts.self_ import PersonaDoc
-from mika.inspector.catalog import Command, SettingsSection, SettingsTab
+from mika.inspector.catalog import Command, SettingsPage, SettingsSection, SettingsTab
 from mika.kernel import forms
 from mika.kernel.forms import Knob
-from mika.kernel.inspect import Column, Table, Text
+from mika.kernel.inspect import Badge, Column, Row, Table, Text, When
 from mika.runtime.params import Parameters
+from mika.vocab.episodes import FALLBACKS, VOICE_ROLES, Role
 from mika.vocab.temperament import Temperament
 
 if TYPE_CHECKING:
@@ -30,8 +34,21 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("mika.reglages")
 
-TABS = (SettingsTab("modeles", "Modèles"), SettingsTab("personnalite", "Personnalité"),
+#: les rubriques du sous-menu de la configuration, dans l'ordre
+TABS = (SettingsTab("intelligence", "Intelligence"), SettingsTab("personnage", "Personnage"),
         SettingsTab("canaux", "Canaux"), SettingsTab("sens", "Sens"))
+
+#: la famille de chaque rôle (la page « Qui sert quoi »)
+ROLE_FAMILIES = {**{str(r): "voix" for r in VOICE_ROLES}, "extract": "mémoire", "validate": "mémoire",
+                 "compact": "mémoire", "profile": "compréhension", "interpret": "compréhension",
+                 "triage": "sens", "caption": "sens", "plan": "travail"}
+
+
+@cache
+def timezones() -> tuple[tuple[str, str], ...]:
+    """Les fuseaux IANA connus de la machine (Europe/Paris…), triés."""
+    names = sorted(n for n in zoneinfo.available_timezones() if "/" in n and not n.startswith(("Etc/", "SystemV")))
+    return tuple((n, n.replace("_", " ")) for n in names)
 
 
 class TelegramSettings(BaseModel):
@@ -67,8 +84,10 @@ class SttSettings(BaseModel):
 
     base_url: Annotated[str, Knob(label="Adresse du service", help="Un service compatible OpenAI (vide : OpenAI).",
                                   advanced=False, order=10)] = ""
-    model: Annotated[str, Knob(label="Modèle", advanced=False, order=20)] = "whisper-1"
-    api_key: Annotated[str, Knob(label="Clé d'API", secret=True, advanced=False, order=30)] = ""
+    model: Annotated[str, Knob(label="Modèle", help="Le modèle de transcription chez ce service (whisper-1 chez "
+                                              "OpenAI).", advanced=False, order=20)] = "whisper-1"
+    api_key: Annotated[str, Knob(label="Clé d'API", help="Chiffrée, jamais réaffichée. Vide : inchangée.",
+                                 secret=True, advanced=False, order=30)] = ""
 
 
 def _dump(doc: PersonaDoc) -> str:
@@ -106,6 +125,36 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         except ListingFailed as exc:
             raise ValueError(str(exc)) from None
 
+    def routing() -> list[Any]:
+        """Qui sert vraiment chaque rôle : le fournisseur déclaré, sinon le repli de rôle."""
+        cfg = settings.llm()
+        rows = []
+        for role in Role:
+            r = str(role)
+            chain, seen, cur, served = [], set(), r, ""
+            while cur and cur not in seen:
+                seen.add(cur)
+                name = cfg.routes.get(cur)
+                if name and name in cfg.backends:
+                    served = name
+                    break
+                chain.append(ROLE_LABELS.get(cur, cur))
+                nxt = FALLBACKS.get(Role(cur)) if cur in {str(x) for x in Role} else None
+                cur = str(nxt) if nxt else ""
+            spec = cfg.backends.get(served)
+            how = "déclaré" if cfg.routes.get(r) == served and served else \
+                (f"par repli ({' → '.join(chain[1:] + [ROLE_LABELS.get(cur, cur)])})" if served else "")
+            rows.append(Row((Text(ROLE_LABELS.get(r, r)), Badge(ROLE_FAMILIES.get(r, "—"), "muted"),
+                             Text(served or "aucun", "mono" if served else "muted"),
+                             Text(f"{spec.kind} · {spec.model}" if spec else "—", "muted"),
+                             Badge(how, "ok" if how == "déclaré" else "info") if served
+                             else Badge("chaque appel échoue", "danger")),
+                            tone="" if served else "danger"))
+        return [Table((Column("rôle"), Column("famille", "fit"), "fournisseur qui sert", "type · modèle",
+                       "comment"), tuple(rows), title="Ce qui sert vraiment chaque rôle",
+                      caption="Un rôle sans fournisseur retombe sur son rôle de repli (murmurer → répondre, "
+                              "vérifier → retenir → répondre…). Les rôles « voix » reçoivent sa persona.")]
+
     def llm_facts() -> list[tuple[str, str]]:
         cfg = settings.llm()
         return [("Passerelle", "configurée" if live.gateway.configured else "aucun modèle : chaque tour échoue "
@@ -138,6 +187,27 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
 
     def persona_facts() -> list[tuple[str, str]]:
         return [("Source", "la console" if settings.persona_yaml() else f"le fichier {live.persona_file.name}")]
+
+    def revisions() -> list[Any]:
+        """Les révisions de sa persona, de la plus récente, et ce que chacune a changé."""
+        kernel = live.kernel
+        stored = kernel.mind.store.latest([self_c.PERSONA_REVISED.name], 200)
+        events = [kernel.mind.decode(e) for e in stored]
+        labels = {f.path: f.label for f in forms.describe(self_c.PersonaDoc)}
+        rows = []
+        for i, e in enumerate(events):
+            doc = e.data.persona.model_dump(mode="json")
+            before = events[i + 1].data.persona.model_dump(mode="json") if i + 1 < len(events) else None
+            if before is None:
+                changed = ["première version"]
+            else:
+                changed = [labels.get(k, k) for k in doc if doc[k] != before.get(k)] or ["rien (rejournalisée)"]
+            rows.append(Row((When(e.at), Text(", ".join(changed), clamp=200), Text(str(e.origin.value), "muted")),
+                            href=None))
+        return [Table((Column("quand", "fit"), "ce qui a changé", Column("origine", "fit")), tuple(rows),
+                      title=f"Révisions de sa persona ({len(rows)})", empty="Aucune révision journalisée.",
+                      caption="Chaque enregistrement du personnage (ou du tempérament) journalise une révision "
+                              "complète : l'ancienne se rejoue telle quelle.")]
 
     def drives() -> list[Any]:
         labels = params.slider_labels()
@@ -199,35 +269,86 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         return "ok", f"Jeton neuf (l'ancien ne vaut plus ; montré une seule fois) : {token}"
 
     return (
-        SettingsSection("modeles", "Modèles", "modeles", LLMConfig, settings.llm, save_llm,
+        SettingsSection("modeles", "Modèles", "intelligence", LLMConfig, settings.llm, save_llm,
                         description="Les fournisseurs de modèles, et lequel sert chaque rôle. Les clés sont "
-                                    "chiffrées, jamais réaffichées.", loaders={"models": models}, facts=llm_facts),
-        SettingsSection("personnage", "Personnage", "personnalite", PersonaDoc, live.persona, save_persona,
+                                    "chiffrées, jamais réaffichées.", loaders={"models": models}, facts=llm_facts,
+                        pages=(
+                            SettingsPage("fournisseurs", "Fournisseurs", ("backends",), order=10, description=(
+                                "Les services qui font tourner ses modèles. Chaque fournisseur a sa page : son "
+                                "type, le modèle choisi dans la liste qu'il propose, sa clé ; le reste est rangé "
+                                "dans « Options avancées ».")),
+                            SettingsPage("roles", "Qui sert quoi", ("routes",), order=20, extra=routing,
+                                         facts=False, description=(
+                                             "Chaque rôle (répondre, rêver, retenir, trier le courrier…) choisit "
+                                             "son fournisseur. Laisse vide : le rôle retombe sur son repli.")),
+                            SettingsPage("contexte", "Contexte", ("context_tokens",), order=30, facts=False,
+                                         description="La place que le prompt peut occuper : plus grande, elle se "
+                                                     "souvient de plus de fil et de souvenirs, pour plus cher."),
+                        )),
+        SettingsSection("personnage", "Personnage", "personnage", PersonaDoc, live.persona, save_persona,
                         description="Qui elle est. Chaque enregistrement journalise une révision de sa persona.",
                         exclude=("temperament",), yaml=True, facts=persona_facts,
+                        choices={"timezone": timezones},
                         commands=(Command("fichier", "Revenir au fichier", back_to_file, danger=True,
-                                          confirm="La persona rédigée ici sera oubliée ; le fichier fera foi."),)),
-        SettingsSection("temperament", "Tempérament", "personnalite", Temperament,
+                                          confirm="La persona rédigée ici sera oubliée ; le fichier fera foi."),),
+                        pages=(
+                            SettingsPage("identite", "Identité", ("name", "description", "language", "timezone"),
+                                         order=10, description="Son nom, qui elle est, sa langue et l'heure qu'elle "
+                                                               "vit (ses nuits, ses salutations en dépendent)."),
+                            SettingsPage("parole", "Ton et parole", ("tone", "speech", "greetings"), order=20,
+                                         facts=False, description="Comment elle parle : son ton général, ses "
+                                                                  "tournures, ses façons de dire bonjour."),
+                            SettingsPage("caractere", "Caractère",
+                                         ("traits", "quirks", "vulnerabilities", "values", "interests"), order=30,
+                                         facts=False, description="Ce qui la définit, la touche et la passionne : "
+                                                                  "une phrase par ligne."),
+                            SettingsPage("document", "Import / export", order=50, form=False, yaml=True,
+                                         commands=True, extra=revisions, description=(
+                                             "Le personnage entier en YAML (pour le garder ou le coller d'un "
+                                             "coup), le retour au fichier, et l'historique de ses révisions.")),
+                        )),
+        SettingsSection("temperament", "Tempérament", "personnage", Temperament,
                         lambda: live.persona().temperament, save_temperament, order=110,
                         description="Huit curseurs et une humeur de fond : l'entrée principale de son caractère. "
-                                    "Chaque faculté en dérive ses paramètres (Paramètres internes).",
-                        blocks=drives),
+                                    "Chaque faculté en dérive ses paramètres (Comportement).",
+                        blocks=drives,
+                        pages=(SettingsPage("temperament", "Tempérament", blocks=True, description=(
+                            "Huit curseurs (0,5 = comme la plupart des gens) et une humeur de fond. Chaque "
+                            "faculté en dérive ses paramètres ; la table dessous dit ce que pilote chaque "
+                            "curseur, mesuré en le poussant à ses deux bouts.")),)),
         SettingsSection("telegram", "Telegram", "canaux", TelegramSettings, telegram, save_telegram,
                         description="Le robot qui la relie à Telegram. L'enregistrer le redémarre.",
-                        facts=telegram_facts),
+                        facts=telegram_facts,
+                        pages=(SettingsPage("telegram", "Telegram", description=(
+                            "Le robot qui la relie à Telegram : son jeton, qui peut lui écrire, et qui elle traite "
+                            "comme toi. L'enregistrer redémarre le robot. Les identifiants se lisent dans "
+                            "Identités › Poignées (tg_<nombre>).")),)),
         SettingsSection("courrier", "Courrier", "sens", MailConfig, settings.email, save_mail,
                         description="Ses boîtes aux lettres (IMAP pour lire et ranger, SMTP pour envoyer) et, pour "
                                     "chacune, sa façon d'y écrire. Relues à chaque relève.", order=10,
-                        facts=mail_facts),
+                        facts=mail_facts,
+                        pages=(SettingsPage("boites", "Boîtes aux lettres", ("accounts",), description=(
+                            "Chaque boîte a sa page : lire (IMAP), envoyer (SMTP), sa voix dans cette boîte et ce "
+                            "qu'elle y prépare d'elle-même. Ce qui s'y passe se lit dans Courrier.")),)),
         SettingsSection("flux", "Flux", "sens", FeedsSettings, lambda: FeedsSettings(urls=tuple(settings.feeds())),
-                        save_feeds, description="Ce qu'elle lit du monde.", order=20),
+                        save_feeds, description="Ce qu'elle lit du monde.", order=20,
+                        pages=(SettingsPage("flux", "Flux RSS", description=(
+                            "Les flux RSS ou Atom qu'elle relève. Ce qu'elle en remarque se lit dans Flux et "
+                            "capteurs › Flux.")),)),
         SettingsSection("transcription", "Transcription", "sens", SttSettings, stt, save_stt, order=30,
-                        description="Pour entendre les messages vocaux (un service compatible Whisper)."),
+                        description="Pour entendre les messages vocaux (un service compatible Whisper).",
+                        pages=(SettingsPage("transcription", "Transcription vocale", description=(
+                            "Le service qui transcrit les messages vocaux qu'on lui envoie (compatible Whisper). "
+                            "Sans lui, un vocal lui arrive comme « un message vocal » sans son contenu.")),)),
         SettingsSection("appareils", "Appareils", "sens", None, order=40,
                         description="Les appareils envoient leurs signaux à POST /api/perceptions, avec ce jeton.",
                         facts=lambda: [("Jeton", "défini" if settings.sensors_token() else "aucun")],
                         commands=(Command("jeton", "Nouveau jeton", new_token,
-                                          confirm="L'ancien jeton ne vaudra plus rien."),)),
+                                          confirm="L'ancien jeton ne vaudra plus rien."),),
+                        pages=(SettingsPage("appareils", "Appareils connectés", commands=True, description=(
+                            "Les appareils envoient leurs signaux à POST /api/perceptions avec ce jeton "
+                            "(en-tête Authorization: Bearer). Un nouveau jeton se montre une seule fois ; l'ancien "
+                            "ne vaut plus rien.")),)),
     )
 
 

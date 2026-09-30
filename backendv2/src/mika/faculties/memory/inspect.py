@@ -30,6 +30,7 @@ from mika.kernel.inspect import (
     InspectContext,
     Meter,
     Note,
+    Pager,
     Param,
     Prose,
     Ref,
@@ -54,8 +55,10 @@ PER_KIND = 20
 SOURCES_SHOWN = 20
 #: une personne tapée dans un filtre : au plus tant de clés
 PEOPLE_MAX = 200
-#: l'historique de la relecture
-RUNS_SHOWN = 20
+#: l'historique de la relecture et des tris de la nuit, par page (tout le journal) ; chacun son curseur
+RUNS_PAGE = 25
+RUNS_CURSOR = "avant"
+NIGHTS_CURSOR = "avant_nuits"
 
 KIND_FR = {c.SOUVENIR: "souvenir", c.BELIEF: "croyance", c.PROMISE: "promesse"}
 STATUS_FR = {"active": "actif", "superseded": "remplacée", "merged": "fondu dans un autre", "pending": "en cours",
@@ -385,26 +388,42 @@ def _volumes(ctx: InspectContext) -> Stats | None:
     ), title="Ce qu'elle garde")
 
 
+def _history(ctx: InspectContext, event_type: Any, cursor: str) -> tuple[list[Any], Pager]:
+    """Une page du journal pour ce type (``?<curseur>=`` : la suite, plus ancienne)."""
+    found = ctx.events([event_type], RUNS_PAGE + 1, before=ctx.int_param(cursor, 0) or None)
+    page = found[:RUNS_PAGE]
+    older = ((cursor, str(page[-1].seq)),) if len(found) > RUNS_PAGE else ()
+    return page, Pager(param=cursor, size=RUNS_PAGE, older=older)
+
+
 def _runs(ctx: InspectContext) -> Table:
     rows = []
-    for e in ctx.events([c.CONSOLIDATED], RUNS_SHOWN):
+    found, pager = _history(ctx, c.CONSOLIDATED, RUNS_CURSOR)
+    for e in found:
         d = e.data
         rows.append(Row((When(e.at), Ref("event", str(d.upto), f"n° {d.upto}") if d.upto else "—", d.produced,
                          Badge("abandonnée", "danger") if d.failed else Badge("faite", "ok"), d.model or "—"),
                         href=Ref("event", str(e.seq), f"n° {e.seq}"), tone="danger" if d.failed else ""))
     return Table((Column("quand", "fit"), Column("relu jusqu'au"), Column("retenus", "num"), Column("issue", "fit"),
                   Column("modèle")), tuple(rows), title="Les dernières relectures",
-                 empty="pas encore de relecture")
+                 empty="pas encore de relecture", pager=pager)
 
 
 def _nights(ctx: InspectContext) -> Table:
-    rows = []
-    for e in ctx.events([c.NIGHT_SORTED], RUNS_SHOWN):
+    rows: list[Row] = []
+    found, pager = _history(ctx, c.NIGHT_SORTED, NIGHTS_CURSOR)
+    for e in found:
         merges = e.data.merges
-        rows.append((e.data.night, len(merges), ", ".join(f"n° {drop} → n° {keep}" for keep, drop in merges[:6])
-                     + (" …" if len(merges) > 6 else "") or "—", When(e.at)))
+        # au-delà de six, la cellule s'abrège : le détail de la ligne les donne toutes
+        every = (Table((Column("fondu"), Column("gardé")),
+                       tuple((Ref("event", str(drop), f"n° {drop}"), Ref("event", str(keep), f"n° {keep}"))
+                             for keep, drop in merges), title=f"Les {len(merges)} fusions de cette nuit"),) \
+            if len(merges) > 6 else ()
+        rows.append(Row((e.data.night, len(merges), ", ".join(f"n° {drop} → n° {keep}" for keep, drop in merges[:6])
+                         + (" …" if len(merges) > 6 else "") or "—", When(e.at)),
+                        href=Ref("event", str(e.seq), f"n° {e.seq}"), detail=every))
     return Table((Column("nuit", "fit"), Column("fusions", "num"), Column("fondu → gardé"), Column("quand", "fit")),
-                 tuple(rows), title="Les tris de la nuit", empty="pas encore de nuit triée")
+                 tuple(rows), title="Les tris de la nuit", empty="pas encore de nuit triée", pager=pager)
 
 
 @MEMORY.inspect("consolidation", title="Consolidation", section="memoire", order=40,

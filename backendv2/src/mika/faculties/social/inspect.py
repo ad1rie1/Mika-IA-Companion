@@ -122,7 +122,7 @@ def settable(frame: Frame, person: str) -> bool:
     return frame.get(identity_c.PERSON(person)) == person and bool(frame.get(identity_c.HANDLES(person)))
 
 
-def _detail(s: SocialState, frame: Frame, ctx: InspectContext, person: str) -> list[Block]:
+def _detail(s: SocialState, frame: Frame, ctx: InspectContext, person: str, *, on_fiche: bool = False) -> list[Block]:
     p = params(frame.env.params_of("social", frame.root))
     reading = frame.get(c.CONTACT(person))
     profile = s.profiles.get(person)
@@ -137,7 +137,7 @@ def _detail(s: SocialState, frame: Frame, ctx: InspectContext, person: str) -> l
                Stat("dernier message reçu", _when(reading.last_in)),
                Stat("ses initiatives sans réponse", reading.unanswered))),
         Fields((
-            ("personne", _ref(frame, person)),
+            *((() if on_fiche else (("personne", _ref(frame, person)),))),  # sur sa fiche : pas de lien vers elle-même
             ("jours de contact", reading.days), ("messages reçus", reading.inbound),
             ("premier message reçu", _when(reading.first_in)),
             ("dernier message envoyé", _when(reading.last_out)),
@@ -171,7 +171,7 @@ def _link(s: SocialState, frame: Frame, ctx: InspectContext) -> list[Block]:
         return [Note("Ouvre la fiche d'une personne : Personnes, puis la personne.", tone="muted")]
     if not is_identifiable(person):
         return [Note("Une connexion de passage : aucun lien durable ne s'y attache.", tone="muted")]
-    blocks: list[Block] = (_detail(s, frame, ctx, person) if person in _known(s) else
+    blocks: list[Block] = (_detail(s, frame, ctx, person, on_fiche=True) if person in _known(s) else
                            [Note("Aucun lien pour l'instant : elle ou il ne lui a jamais écrit, et rien n'a été "
                                  "déclaré.", tone="muted")])
     if settable(frame, person):
@@ -211,12 +211,13 @@ def _links(s: SocialState, frame: Frame, ctx: InspectContext) -> list[Block]:
     return [
         Stats((Stat("personnes", len(people)),
                Stat("qui lui manquent", len(missed),
-                    ", ".join(f"{_name(frame, k)} (×{_ratio(r)})" for k, r in missed[:5]) or "personne",
+                    (", ".join(f"{_name(frame, k)} (×{_ratio(r)})" for k, r in missed[:5])
+                     + (f" et {len(missed) - 5} autre(s)" if len(missed) > 5 else "")) or "personne",
                     tone="warn" if missed else ""),
                Stat("dernier réconfort cherché", _when(s.comforted_at)))),
         Table(("personne", "proximité", "rythme", Column("silence ÷ rythme", hint="la moitié de la jauge : elle "
                                                          "lui manque"), "dernier message reçu",
                Column("initiatives sans réponse", "num"), "ce qu'elle en sait"), tuple(rows), pager=pager,
-              filters=("q", "proximite"),
+              title="Liens", filters=("q", "proximite"),
               empty="aucun lien ne correspond" if q or level else "aucun lien pour l'instant"),
     ]

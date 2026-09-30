@@ -40,6 +40,12 @@ class FeedPort(Protocol):
         identifiants ni valeurs de paramètres, qui peuvent porter un jeton)."""
         ...
 
+    def health(self) -> list[dict[str, object]]:
+        """Pour chaque flux suivi, ce que son dernier relevé a donné (lecture seule) : ``title``, ``url``
+        (montrable), ``attempted_at``, ``ok_at`` (µs), ``error`` (vide : il va bien), ``failures`` (d'affilée),
+        ``items`` (lus au dernier relevé), ``added`` (nouveaux), ``kept`` (dans le cache)."""
+        ...
+
     async def article(self, entry_id: str) -> str:
         """Le texte d'un article relevé (borné) ; ``""`` s'il est illisible."""
         ...

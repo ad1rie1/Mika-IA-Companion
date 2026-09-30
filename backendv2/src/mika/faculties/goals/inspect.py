@@ -22,6 +22,7 @@ from typing import Any
 from mika.contracts import goals as c
 from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
+from mika.faculties.goals.actions import SCHEDULES
 from mika.faculties.goals.faculty import (
     GOAL_AMENDED,
     GOALS,
@@ -36,7 +37,8 @@ from mika.faculties.goals.faculty import (
     status,
 )
 from mika.faculties.goals.work import next_step_at
-from mika.kernel.clock import DAY, HOUR
+from mika.kernel.builtin import SELECTED
+from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.events import Content, Event
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
@@ -53,8 +55,11 @@ from mika.kernel.inspect import (
     Note,
     Pager,
     Param,
+    Prose,
     Ref,
     Row,
+    Stat,
+    Stats,
     Table,
     Text,
     Timeline,
@@ -64,15 +69,23 @@ from mika.kernel.inspect import (
 from mika.vocab.episodes import Kind, goal_of, goal_target
 
 GOALS_PAGE = 50
-STEPS_SHOWN = 100
-NOTES_SHOWN = 100
-EPISODES_SHOWN = 100
-EFFECTS_SHOWN = 50
-#: les décisions et exécutions relues pour dire ce que sont devenus ses effets
+#: l'historique d'un but (pas, consignes, notes, effets, épisodes), par page : tout le journal, du plus récent
+#: au plus ancien (``?avant=`` : la suite ; le carnet a un second curseur pour ses notes)
+HISTORY_PAGE = 25
+NOTES_CURSOR = "avant_notes"
+#: les buts clos filtrés par autorité : relus par lots jusqu'à remplir la page, au plus tant de lots
+CLOSED_SCAN = 200
+CLOSED_SCAN_BATCHES = 10
+#: les décisions et exécutions relues d'un coup pour dire ce que sont devenus ses effets (au-delà : relues
+#: demande par demande)
 OUTCOMES_SCANNED = 500
-TREE_SHOWN = 200
+#: les pas relus pour rattacher un enregistrement de l'atelier à son pas
+STEPS_MATCHED = 1000
 DIFF_SHOWN = 20_000
-LOG_SHOWN = 30
+#: ce qu'on montre du résultat d'un effet (au-delà, coupé et dit)
+EFFECT_DETAIL = 4000
+#: les enregistrements de l'atelier relus (au-delà, la vue le dit)
+LOG_MAX = 500
 SUMMARY_CLAMP = 280
 FORGOTTEN = "(oublié)"
 #: les approbations, dans la console
@@ -179,6 +192,15 @@ def _step_badges(verdict: str, proven: bool, frame: Frame, wait_s: int, wait_for
     return Badge(shown, VERDICT_TONE.get(verdict, "")), proof
 
 
+def _journal_page(ctx: InspectContext, types: Sequence[Any], where: tuple[str, Any] | None,
+                  cursor: str = "avant") -> tuple[list[Event[Any]], Pager]:
+    """Une page du journal (``?<curseur>=`` : la suite, plus ancienne), et le curseur de la suivante."""
+    found = ctx.events(types, HISTORY_PAGE + 1, where=where, before=ctx.int_param(cursor, 0) or None)
+    page = found[:HISTORY_PAGE]
+    older = ((cursor, str(page[-1].seq)),) if len(found) > HISTORY_PAGE else ()
+    return page, Pager(param=cursor, size=HISTORY_PAGE, older=older)
+
+
 def _subject_goal(s: GoalsState, ctx: InspectContext) -> Goal | Note:
     """Le but de la fiche, ou une note qui dit pourquoi il n'y en a pas."""
     if not ctx.subject:
@@ -254,12 +276,100 @@ def _stuck_recently(s: GoalsState, frame: Frame) -> tuple[int, str]:
     return n, "confiés : bloqués ou en échec"
 
 
+# ── Buts : les projets ────────────────────────────────────────────────────
+
+#: une décision de l'arbitre se cherche par lots de tant de sélections, au plus tant de lots par page
+SELECTED_SCAN = 200
+SELECTED_SCAN_BATCHES = 10
+STATE_PARAM = Param("etat", "État", kind="select", choices=((c.ACTIVE, "en cours"), (c.WAITING, "en attente"),
+                                                              (c.PAUSED, "en pause")))
+SENSITIVITY_FR = {0: "rien d'autrui", 1: "anodin", 2: "personnel", 3: "confidence"}
+
+
+def agenda(rule: str) -> str:
+    """Un agenda en mots (« toutes les 2 h ») ; une règle inconnue telle quelle."""
+    rule = rule or "manual"
+    return next((label for value, label in SCHEDULES if value == rule), rule)
+
+
+def _progress(g: Goal, p: Any) -> Meter:
+    most = g.max_steps or (p.project_steps if g.kind == c.PROJECT else p.exploration_steps)
+    return Meter(g.steps / most if most else 0.0, f"{g.steps} / {most}")
+
+
+def _freedom(g: Goal) -> Badge:
+    return Badge("sort avec ton accord", "info") if g.approval else Badge("sort librement", "warn")
+
+
+def _pending_goals(frame: Frame) -> set[int]:
+    return {n for n in (goal_of(v.context) for v in frame.get(rt.PENDING_EFFECTS) if v.owner == c.OWNER)
+            if n is not None}
+
+
+PROJECT_COLUMNS = (Column("projet"), Column("pour qui"), Column("statut", "fit"), Column("avancement", "fit"),
+                   Column("prochain pas", "fit"), Column("échéance", "fit"), Column("agenda"),
+                   Column("ce qui sort", hint="un mail, une commande avec le réseau : avec ton accord, ou librement"),
+                   Column("consignes", "num"), Column("où elle en est"))
+
+
+@GOALS.inspect("projets", title="Projets", section="buts", order=5, params=[STATE_PARAM, AUTHORITY_PARAM],
+               description="Les projets qu'elle mène : leur état, leur avancement, leur agenda et ce qu'ils ont le "
+                           "droit de faire. Une ligne ouvre le projet : son cadre, ses pas, ses décisions, ses "
+                           "prompts, son atelier.")
+def _projects_view(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    now = frame.now
+    p = params(frame.env.params_of("goals", frame.root))
+    projects = sorted((g for g in s.goals.values() if g.kind == c.PROJECT), key=lambda g: -g.id)
+    alive = [g for g in projects if live(g, now)]
+    closed = [g for g in projects if g.status in c.CLOSED_STATUSES]
+    waiting = _pending_goals(frame)
+    wanted, authority = str(ctx.value("etat") or ""), str(ctx.value("autorite") or "")
+    shown = [g for g in alive if (not wanted or status(g, now) == wanted or (wanted == c.PAUSED and g.paused_at))
+             and (not authority or g.authority == authority)]
+    page, pager = paginate(shown, ctx.pager(size=GOALS_PAGE, total=len(shown)))
+    texts = _texts(ctx, [r for g in (*page, *closed) for r in (g.title_ref, g.summary_ref, g.result_ref) if r])
+    rows = []
+    for g in page:
+        nxt = next_step_at(g, s, frame)
+        rows.append(Row((
+            _link(g, _text(texts, g.title_ref, "(sans titre)")), _person(frame, g.owner), _status(g, now),
+            _progress(g, p), ("dès que possible" if nxt <= now else When(nxt)) if nxt is not None else "—",
+            _due(g), agenda(g.schedule), _freedom(g), len(g.instructions),
+            Text(_text(texts, g.summary_ref, "pas encore de pas"), clamp=160)),
+            href=_link(g), tone="warn" if g.paused_at else "info" if g.id in waiting else ""))
+    done = [g for g in closed if g.status == c.ACHIEVED]
+    blocks: list[Block] = [
+        Stats((Stat("En cours", sum(1 for g in alive if status(g, now) == c.ACTIVE and not g.paused_at)),
+               Stat("En attente", sum(1 for g in alive if status(g, now) == c.WAITING), "d'une réponse ou d'un délai"),
+               Stat("En pause", sum(1 for g in alive if g.paused_at), "par un opérateur",
+                    "warn" if any(g.paused_at for g in alive) else ""),
+               Stat("Attendent ton accord", sum(1 for g in alive if g.id in waiting), "pour faire sortir quelque chose",
+                    "warn" if any(g.id in waiting for g in alive) else "", APPROVALS),
+               Stat("Clos (7 jours)", len(closed), f"{len(done)} abouti(s), {len(closed) - len(done)} arrêté(s)"))),
+        Table(PROJECT_COLUMNS, tuple(rows), title="Projets en cours", pager=pager,
+              empty="aucun projet avec ces filtres" if wanted or authority else
+              "aucun projet en cours : « Confier un projet » en ouvre un",
+              caption=f"Un projet avance d'un pas au plus toutes les {p.project_spacing_us // MINUTE} min, "
+                      f"{p.steps_per_hour} pas par heure au plus pour tous ses buts (Configuration › Comportement "
+                      "› Buts)."),
+    ]
+    if closed:
+        blocks.append(Table((Column("projet"), Column("pour qui"), Column("issue", "fit"), Column("clos", "fit"),
+                             Column("pas", "num"), Column("résultat")), tuple(
+            Row((_link(g, _text(texts, g.title_ref, "(sans titre)")), _person(frame, g.owner), _status(g, now),
+                 When(g.closed_at), g.steps, Text(_text(texts, g.result_ref), clamp=200)), href=_link(g))
+            for g in sorted(closed, key=lambda g: -g.closed_at)),
+            title="Projets clos ces sept derniers jours",
+            caption="Plus anciens : l'onglet Clos (filtre « projet »), lu dans le journal."))
+    return blocks
+
+
 LIVE_COLUMNS = (Column("but", "fit"), Column("titre"), Column("sorte"), Column("autorité"), Column("statut"),
                 Column("envie", hint="une exploration : son envie s'use ; un projet : un engagement"),
                 Column("pas", "num"), Column("prochain pas"), Column("échéance"), Column("pour qui"))
 
 
-@GOALS.inspect("vivants", title="Vivants", section="buts", order=10, params=[KIND_PARAM, AUTHORITY_PARAM],
+@GOALS.inspect("vivants", title="Tous les buts vivants", section="buts", order=10, params=[KIND_PARAM, AUTHORITY_PARAM],
                badge=_awaiting_approval, description="Ce qu'elle a en train : actif, en attente, ou en pause.")
 def _live_view(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     now = frame.now
@@ -296,17 +406,37 @@ CLOSED_COLUMNS = (Column("but", "fit"), Column("titre"), Column("sorte"), Column
                   Column("clos"), Column("raison ou résultat"), Column("pour qui"))
 
 
+def _closed_page(ctx: InspectContext, kind: str, authority: str) -> tuple[list[Event[Any]], str, bool]:
+    """Une page de clôtures : la sorte filtre au journal, l'autorité après coup —
+    on lit donc par lots jusqu'à remplir la page. Rend (la page, le curseur de
+    la suivante, si la lecture s'est arrêtée au plafond de lots avant de la remplir)."""
+    where = ("kind", kind) if kind else None
+    size = CLOSED_SCAN if authority else GOALS_PAGE + 1
+    cursor = ctx.int_param("avant", 0) or None
+    shown: list[Event[Any]] = []
+    for _ in range(CLOSED_SCAN_BATCHES):
+        batch = ctx.events([c.GOAL_CLOSED], size, where=where, before=cursor)
+        for e in batch:
+            cursor = e.seq
+            if authority and e.data.authority != authority:
+                continue
+            shown.append(e)
+            if len(shown) > GOALS_PAGE:  # un de plus : il y a une suite, qui reprend après le dernier montré
+                return shown[:GOALS_PAGE], str(shown[GOALS_PAGE - 1].seq), False
+        if len(batch) < size:  # le journal est lu jusqu'au bout
+            return shown, "", False
+    # le plafond de lecture atteint sans remplir la page : la suite reprend là où la lecture s'est arrêtée
+    return shown, str(cursor) if cursor else "", True
+
+
 @GOALS.inspect("clos", title="Clos", section="buts", order=20, params=[KIND_PARAM, AUTHORITY_PARAM],
                badge=_stuck_recently, description="Ce qu'elle a mené à bout, bloqué, abandonné, ou qu'on a annulé.")
 def _closed_view(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     kind, authority = ctx.value("sorte") or "", ctx.value("autorite") or ""
-    before = ctx.int_param("avant", 0) or None
-    found = ctx.events([c.GOAL_CLOSED], GOALS_PAGE, where=("kind", kind) if kind else None, before=before)
+    found, cursor, stopped = _closed_page(ctx, kind, authority)
     rows = []
     for e in found:
         d = e.data
-        if authority and d.authority != authority:
-            continue
         kept = s.goals.get(d.goal)
         link = _link(kept) if kept is not None else Ref("event", str(e.seq), f"#{d.goal}")
         result = _said(d.result, "") or d.reason or "—"
@@ -314,11 +444,14 @@ def _closed_view(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block
             link, _said(d.title, "(sans titre)"), KIND_FR.get(d.kind, d.kind), AUTHORITY_FR.get(d.authority, d.authority),
             Badge(STATUS_FR.get(d.status, d.status), STATUS_TONE.get(d.status, "")), When(e.at),
             Text(result, clamp=SUMMARY_CLAMP), _person(frame, d.owner)), href=link))
-    older = (("avant", str(found[-1].seq)),) if len(found) >= GOALS_PAGE else ()
+    older = (("avant", cursor),) if cursor else ()
     empty = "aucun but clos avec ces filtres" if (kind or authority) else "aucun but clos"
+    caption = (f"Recherche arrêtée après {CLOSED_SCAN * CLOSED_SCAN_BATCHES} clôtures relues sans remplir la page : "
+               "« Plus anciens » la reprend là où elle s'est arrêtée.") if stopped else ""
     return [
-        Table(CLOSED_COLUMNS, tuple(rows), title="Buts clos", pager=Pager(param="avant", older=older),
-              filters=("sorte", "autorite"), empty=empty),
+        Table(CLOSED_COLUMNS, tuple(rows), title="Buts clos", pager=Pager(param="avant", size=GOALS_PAGE, older=older),
+              filters=("sorte", "autorite"), empty=empty if not stopped else "rien dans cette tranche du journal",
+              caption=caption),
         Note("Un but clos depuis plus de sept jours n'a plus de fiche : son lien mène à l'événement qui l'a clos.",
              tone="muted"),
     ]
@@ -408,6 +541,69 @@ def _summary_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block
     return [*blocks, _fields(g, s, frame, ctx, texts), _wait_table(g, frame)]
 
 
+# ── La fiche : cadre et politique ─────────────────────────────────────────
+
+
+@GOALS.inspect("politique", title="Cadre et politique", subject="goal", order=15,
+               description="Ce qui encadre son travail : le cadre confié, les consignes, ce qu'elle a le droit de "
+                           "faire, son rythme, quand elle s'arrête, pour qui.")
+def _policy_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    g = _subject_goal(s, ctx)
+    if isinstance(g, Note):
+        return [g]
+    now = frame.now
+    p = params(frame.env.params_of("goals", frame.root))
+    texts = _texts(ctx, (g.details_ref, *g.instructions))
+    most = g.max_steps or (p.project_steps if g.kind == c.PROJECT else p.exploration_steps)
+    spacing = p.project_spacing_us if g.kind == c.PROJECT else p.step_spacing_us
+    nxt = next_step_at(g, s, frame) if status(g, now) in (c.ACTIVE, c.WAITING) and g.kind != c.REMINDER else None
+    waiting = g.id in _pending_goals(frame)
+    blocks: list[Block] = [
+        Prose(_text(texts, g.details_ref), title="Le cadre (elle le lit à chaque pas, ne le change jamais)")
+        if g.details_ref else Note("Aucun cadre écrit : elle suit le titre, et les consignes s'il y en a.", "muted"),
+    ]
+    if g.instructions:
+        blocks.append(Table((Column("n°", "fit"), Column("consigne")), tuple(
+            (i + 1, Text(_text(texts, ref), clamp=400)) for i, ref in enumerate(reversed(g.instructions))),
+            title=f"Consignes reçues ({len(g.instructions)}, la plus récente d'abord — elle prime)"))
+    blocks += [
+        Fields((
+            ("ce qui sort de la machine", _freedom(g)),
+            ("un accord attend", Ref("local", "/inspecteur/approbations", "oui : ouvrir les approbations")
+             if waiting else "non"),
+            ("ses outils", ", ".join(g.bundles) or "ceux de l'atelier"),
+            ("autorité", f"{AUTHORITY_FR.get(g.authority, g.authority)} — " +
+             ("un opérateur l'a confié : elle le mène même sans envie" if g.authority == c.USER else
+              "elle l'a entrepris d'elle-même : son envie s'use, elle peut l'abandonner")),
+        ), title="Sa liberté", columns=2),
+        Fields((
+            ("agenda", f"{agenda(g.schedule)} ({g.schedule or 'manual'})"),
+            ("prochain pas", ("dès que possible" if nxt <= now else When(nxt)) if nxt is not None else "—"),
+            ("échéance", _due(g)),
+            ("pas", f"{g.steps} faits sur {most} au plus" + ("" if g.max_steps else " (valeur par défaut)")),
+            ("espacement des pas", f"{spacing // MINUTE} min au moins"),
+            ("pas par heure (tous buts)", f"{p.steps_per_hour} au plus"),
+            ("attente", f"de {p.wait_min_us // MINUTE} min à {p.wait_max_us // HOUR} h quand elle attend"),
+        ), title="Son rythme", columns=2),
+        Fields((
+            ("sans verdict d'affilée", f"{g.silent} (bloqué à {p.silent_before_blocked})"),
+            ("pannes d'affilée", f"{g.failures} (en échec à {p.failures_before_failed})"),
+            ("« fini » sans preuve", g.unproven),
+            ("pas au plus", most),
+        ), title="Quand elle s'arrête", columns=2),
+        Fields((
+            ("pour qui", _person(frame, g.owner)), ("où lui en parler", _who(frame, g.address)),
+            ("concerne", ", ".join(_who(frame, a) for a in g.about) or "—"),
+            ("sensibilité", SENSITIVITY_FR.get(g.sensitivity, str(g.sensitivity))),
+            ("d'où il vient", g.source or "—"),
+        ), title="Pour qui, et ce qu'elle peut en dire", columns=2),
+        Note("Les réglages communs à tous les buts (espacement, pas au plus, pannes avant échec…) se changent dans "
+             "Configuration › Comportement › Buts ; ce projet-ci se pilote par les actions de sa fiche (pause, "
+             "consigne, clore).", "muted"),
+    ]
+    return blocks
+
+
 # ── La fiche : pas ────────────────────────────────────────────────────────
 
 
@@ -421,7 +617,7 @@ def _steps_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     if isinstance(g, Note):
         return [g]
     rows = []
-    found = ctx.events([c.STEP_REPORTED], STEPS_SHOWN, where=("goal", g.id))
+    found, pager = _journal_page(ctx, [c.STEP_REPORTED], ("goal", g.id))
     for e in found:
         d = e.data
         verdict, proof = _step_badges(str(d.verdict), bool(d.proven), frame, int(d.wait_s), d.wait_for)
@@ -431,10 +627,8 @@ def _steps_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     blocks: list[Block] = [
         Fields((("pas faits", _steps(g)), ("sans verdict d'affilée", g.silent), ("« fini » sans preuve", g.unproven),
                 ("preuves", g.evidence)), title="Où il en est", columns=2),
-        Table(STEP_COLUMNS, tuple(rows), title="Ses pas", empty="aucun pas rapporté"),
+        Table(STEP_COLUMNS, tuple(rows), title="Ses pas", empty="aucun pas rapporté", pager=pager),
     ]
-    if len(found) >= STEPS_SHOWN:
-        blocks.append(Note(f"Seuls les {STEPS_SHOWN} derniers pas sont montrés.", tone="muted"))
     return blocks
 
 
@@ -446,15 +640,15 @@ def _notebook_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Bloc
     g = _subject_goal(s, ctx)
     if isinstance(g, Note):
         return [g]
-    notes = ctx.events([NOTED], NOTES_SHOWN, where=("goal", g.id))
-    orders = ctx.events([GOAL_AMENDED], NOTES_SHOWN, where=("goal", g.id))
+    orders, orders_pager = _journal_page(ctx, [GOAL_AMENDED], ("goal", g.id))
+    notes, notes_pager = _journal_page(ctx, [NOTED], ("goal", g.id), NOTES_CURSOR)
     return [
         Timeline(tuple(Entry(e.at, "consigne", _said(e.data.instruction),
                              meta=f"de {_who(frame, e.data.by)}" if e.data.by else "", tone="info",
                              href=Ref("event", str(e.seq), "consigne"))
-                       for e in orders), title="Consignes reçues", empty="aucune consigne"),
+                       for e in orders), title="Consignes reçues", empty="aucune consigne", pager=orders_pager),
         Timeline(tuple(Entry(e.at, "note", _said(e.data.text), href=Ref("episode", e.correlation, "note"))
-                       for e in notes), title="Son carnet", empty="aucune note"),
+                       for e in notes), title="Son carnet", empty="aucune note", pager=notes_pager),
     ]
 
 
@@ -476,7 +670,12 @@ def _effect_state(proposal: Event[Any], pending: bool, outcomes: Sequence[Event[
         return Badge("approuvé, en cours", "info"), f"par {resolved.data.by or 'un opérateur'}"
     if not proposal.data.approval:
         return Badge("lancé sans accord", "info"), ""
-    return Badge("inconnu", "muted"), "sa décision est trop ancienne pour être relue ici"
+    return Badge("inconnu", "muted"), "aucune décision n'est enregistrée pour cette demande"
+
+
+def _cut(text: str, n: int) -> str:
+    """Un texte borné, qui dit qu'il l'est."""
+    return text if len(text) <= n else text[:n] + f"\n[… coupé à {n} caractères …]"
 
 
 EFFECT_COLUMNS = (Column("proposition", "fit"), Column("quand", "fit"), Column("capacité"), Column("résumé"),
@@ -489,13 +688,18 @@ def _effects_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block
     if isinstance(g, Note):
         return [g]
     pending = {v.proposal for v in frame.get(rt.PENDING_EFFECTS) if v.owner == c.OWNER and goal_of(v.context) == g.id}
-    proposed = ctx.events([rt.EFFECT_PROPOSED], EFFECTS_SHOWN, where=("context", goal_target(g.id)))
+    proposed, pager = _journal_page(ctx, [rt.EFFECT_PROPOSED], ("context", goal_target(g.id)))
     wanted = {e.seq for e in proposed}
     outcomes: dict[int, list[Event[Any]]] = {}
     if wanted:
         for e in ctx.events([rt.EFFECT_RESOLVED, rt.EFFECT_EXECUTED], OUTCOMES_SCANNED):
             if e.data.proposal in wanted:
                 outcomes.setdefault(e.data.proposal, []).append(e)
+        # une demande plus ancienne que ces décisions : son issue, relue pour elle seule
+        for seq in sorted(wanted - outcomes.keys() - pending):
+            found = ctx.events([rt.EFFECT_RESOLVED, rt.EFFECT_EXECUTED], 4, where=("proposal", seq))
+            if found:
+                outcomes[seq] = found
     rows = []
     for e in proposed:
         state, detail = _effect_state(e, e.seq in pending, outcomes.get(e.seq, ()))
@@ -503,13 +707,13 @@ def _effects_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block
                          Text(_said(e.data.summary), clamp=SUMMARY_CLAMP),
                          "requis" if e.data.approval else "non requis", state),
                         tone="warn" if e.seq in pending else "",
-                        detail=(Code(detail[:4000], title="ce qu'il en est"),) if detail else ()))
+                        detail=(Code(_cut(detail, EFFECT_DETAIL), title="ce qu'il en est"),) if detail else ()))
     blocks: list[Block] = []
     if pending:
         blocks.append(Fields(((f"{len(pending)} demande(s) attendent ton accord", APPROVALS),),
                              title="À décider"))
     blocks.append(Table(EFFECT_COLUMNS, tuple(rows), title="Ce qu'il a voulu faire sortir de la machine",
-                        empty="aucune demande : tout s'est fait dans l'atelier"))
+                        empty="aucune demande : tout s'est fait dans l'atelier", pager=pager))
     return blocks
 
 
@@ -528,13 +732,19 @@ def _episode_kind(d: rt.EpisodeStarted) -> str:
     return kind.lower()
 
 
-def _started(g: Goal, ctx: InspectContext) -> list[Event[Any]]:
-    """Les derniers épisodes de ce but : ceux qu'il vise (ses pas), et ceux
-    qui portent sur lui en visant quelqu'un (le rappel, le récit)."""
+def _started(g: Goal, ctx: InspectContext) -> tuple[list[Event[Any]], Pager]:
+    """Une page des épisodes de ce but : ceux qu'il vise (ses pas), et ceux qui
+    portent sur lui en visant quelqu'un (le rappel, le récit). Deux lectures
+    fusionnées : chacune rend un de plus que la page, la page prend les plus
+    récents de l'union, et la suite reprend après le dernier montré."""
     target = goal_target(g.id)
+    before = ctx.int_param("avant", 0) or None
     found = {e.seq: e for field in ("target", "subject")
-             for e in ctx.events([rt.EPISODE_STARTED], EPISODES_SHOWN, where=(field, target))}
-    return [found[seq] for seq in sorted(found, reverse=True)[:EPISODES_SHOWN]]
+             for e in ctx.events([rt.EPISODE_STARTED], HISTORY_PAGE + 1, where=(field, target), before=before)}
+    ordered = [found[seq] for seq in sorted(found, reverse=True)]
+    page = ordered[:HISTORY_PAGE]
+    older = (("avant", str(page[-1].seq)),) if len(ordered) > HISTORY_PAGE else ()
+    return page, Pager(param="avant", size=HISTORY_PAGE, older=older)
 
 
 def _outcomes(started: list[Event[Any]], ctx: InspectContext) -> dict[str, str]:
@@ -544,24 +754,100 @@ def _outcomes(started: list[Event[Any]], ctx: InspectContext) -> dict[str, str]:
     return {e.correlation: str(e.data.outcome) for e in ended}
 
 
-@GOALS.inspect("episodes", title="Épisodes", subject="goal", order=50)
+def _episode_tab(corr: str, tab: str, text: str) -> Ref:
+    return Ref("episode", corr, text, (("onglet", tab),))
+
+
+@GOALS.inspect("episodes", title="Épisodes et prompts", subject="goal", order=50,
+               description="Chaque fois qu'elle y a travaillé (ou en a parlé) : le résultat du pas, et de quoi relire "
+                           "le prompt exact, les outils appelés, les appels de modèle et la décision.")
 def _episodes_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     g = _subject_goal(s, ctx)
     if isinstance(g, Note):
         return [g]
     target = goal_target(g.id)
-    started = _started(g, ctx)
+    started, pager = _started(g, ctx)
     outcomes = _outcomes(started, ctx)
+    corrs = [e.correlation for e in started]
+    reported = {e.correlation: e.data for e in ctx.events([c.STEP_REPORTED], len(corrs) + 1, correlations=corrs)} \
+        if corrs else {}
     rows = []
     for e in started:
         outcome = outcomes.get(e.correlation)
         towards = e.data.target if e.data.target != target else None
         issue = (Badge(OUTCOME_FR.get(outcome, outcome), OUTCOME_TONE.get(outcome, "")) if outcome
                  else Badge("en cours", "info"))
+        step = reported.get(e.correlation)
+        result: Any = Text(_said(step.summary), clamp=SUMMARY_CLAMP) if step is not None else "—"
+        verdict: Any = Badge(VERDICT_FR.get(str(step.verdict), str(step.verdict)),
+                             VERDICT_TONE.get(str(step.verdict), "")) if step is not None else "—"
         rows.append(Row((When(e.at), _episode_kind(e.data), _who(frame, towards) if towards else "—", issue,
-                         Ref("episode", e.correlation, "voir l'épisode")), href=Ref("episode", e.correlation, "")))
-    return [Table(("quand", "épisode", "vers", "issue", ""), tuple(rows), title="Ses épisodes",
-                  empty="aucun épisode encore")]
+                         verdict, result, _episode_tab(e.correlation, "prompt", "prompt"),
+                         _episode_tab(e.correlation, "outils", "outils"), _episode_tab(e.correlation, "appels", "appels"),
+                         _episode_tab(e.correlation, "decision", "décision")),
+                        href=Ref("episode", e.correlation, "")))
+    return [Table((Column("quand", "fit"), "épisode", "vers", Column("issue", "fit"), Column("verdict", "fit"),
+                   "résultat", Column("", "fit"), Column("", "fit"), Column("", "fit"), Column("", "fit")),
+                  tuple(rows), title="Ses épisodes", empty="aucun épisode encore", pager=pager,
+                  caption="« prompt » : ce qu'elle a vraiment reçu (persona, cadre, carnet, fil) et ce qu'elle a "
+                          "répondu ; « outils » : chaque appel et son résultat ; « décision » : pourquoi ce pas-là.")]
+
+
+# ── La fiche : décisions ──────────────────────────────────────────────────
+
+
+@GOALS.inspect("decisions", title="Décisions", subject="goal", order=45,
+               description="Chaque fois que l'arbitre a pesé ce but : ses preuves (l'envie, l'échéance, l'agenda…), "
+                           "son score, et s'il a été choisi.")
+def _decisions_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    g = _subject_goal(s, ctx)
+    if isinstance(g, Note):
+        return [g]
+    target = goal_target(g.id)
+    before = ctx.int_param("avant", 0) or None
+    found: list[tuple[Event[Any], Any]] = []
+    cursor, exhausted = before, False
+    for _ in range(SELECTED_SCAN_BATCHES):  # lire par lots jusqu'à remplir la page
+        batch = ctx.events([SELECTED], SELECTED_SCAN, before=cursor)
+        for e in batch:
+            mine = next((r for r in e.data.rows if r.target == target), None)
+            if mine is not None:
+                found.append((e, mine))
+                if len(found) > HISTORY_PAGE:
+                    break
+        if len(found) > HISTORY_PAGE or len(batch) < SELECTED_SCAN:
+            exhausted = len(batch) < SELECTED_SCAN
+            break
+        cursor = batch[-1].seq
+    page = found[:HISTORY_PAGE]
+    rows = []
+    for e, r in page:
+        fired = f"{r.kind}:{r.target}" in e.data.fired
+        parts = "\n".join(f"{owner} · {reason}  {value:+.2f}" for owner, reason, value in r.parts) or "—"
+        detail = (Fields((("preuves", Text(parts, "mono")), ("décalage", f"{r.shift:+.2f}"),
+                          ("attente", f"{getattr(r, 'aging', 0.0):+.2f}"),
+                          ("seuil", f"{-getattr(r, 'threshold', 0.0):+.2f}"),
+                          ("vetos", ", ".join(f"{o} ({why})" for o, why in r.vetoes) or "aucun"),
+                          ("choisi ce jour-là", ", ".join(e.data.fired) or "rien")), title="Du signal au score"),)
+        rows.append(Row((When(e.at), Badge("choisi", "ok") if fired else Badge("en lice", "muted"),
+                         Text(f"{r.score:+.2f}", "num", "ok" if r.score > 0 else ""), f"{r.hazard * 3600:.2f} /h",
+                         Badge(", ".join(o for o, _ in r.vetoes), "danger") if r.vetoes else "—",
+                         Text(", ".join(f"{reason} {value:+.1f}" for _o, reason, value in r.parts[:3]) or "—", "muted"),
+                         Ref("event", str(e.seq), f"n° {e.seq}")), href=Ref("event", str(e.seq), ""), detail=detail,
+                        tone="ok" if fired else ""))
+    # la suite reprend après la dernière montrée ; un lot épuisé sans remplir la page reprend où la lecture s'est
+    # arrêtée (le journal continue plus loin)
+    resume = str(page[-1][0].seq) if len(found) > HISTORY_PAGE and page else \
+        (str(cursor) if not exhausted and cursor is not None and len(found) <= HISTORY_PAGE else "")
+    pager = Pager(param="avant", size=HISTORY_PAGE, older=(("avant", resume),) if resume else ()) \
+        if resume or before else None
+    return [Table((Column("quand", "fit"), Column("", "fit"), Column("score", "num"), Column("taux", "num"),
+                   Column("vetos", "fit"), Column("preuves principales"), Column("sélection", "fit")), tuple(rows),
+                  title="Ce que l'arbitre en a pensé", pager=pager,
+                  empty="plus rien avant" if before else "l'arbitre ne l'a encore jamais pesé (ou pas dans les "
+                                                          "sélections gardées au journal)",
+                  caption="Une ligne par tirage où ce but était parmi les premiers en lice : « choisi » a donné un "
+                          "pas (ou un rappel, un récit). La table complète du moment : Décisions › Ses choix.")]
 
 
 # ── La fiche : atelier ────────────────────────────────────────────────────
@@ -590,25 +876,27 @@ async def _workshop_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> lis
         return [Note("L'atelier n'est pas encore ouvert : aucun pas n'y a encore écrit.", tone="muted")]
     tree = await port.tree(g.id)
     diff = await port.diff(g.id)
-    log = await port.log(g.id, LOG_SHOWN)
+    log = await port.log(g.id, LOG_MAX)
     files = []
-    for line in tree[:TREE_SHOWN]:
+    for line in tree:
         m = _TREE_LINE.match(line)
         files.append((Text(m.group("path"), "mono"), f"{int(m.group('size'))} o") if m else (Text(line, "muted"), ""))
-    steps = ctx.events([c.STEP_REPORTED], STEPS_SHOWN, where=("goal", g.id))
+    steps = ctx.events([c.STEP_REPORTED], STEPS_MATCHED, where=("goal", g.id))
     by_title = {}
     for e in reversed(steps):  # le plus récent l'emporte
         if e.data.summary.text is not None:
             by_title[_commit_title(e.data.summary.text)] = e
     entries = []
-    for line in log.splitlines():
-        sha, _, title = line.strip().partition(" ")
-        if not sha:
-            continue
+    lines = [line.strip() for line in log.splitlines() if line.strip()]
+    for line in lines:
+        sha, _, title = line.partition(" ")
         step = by_title.get(title)
-        entries.append(Entry(step.at if step is not None else 0, title or "(sans message)", meta=sha,
-                             href=Ref("episode", step.correlation, title) if step is not None else None))
-    shown = diff if len(diff) <= DIFF_SHOWN else diff[:DIFF_SHOWN] + f"\n[… coupé à {DIFF_SHOWN} caractères …]"
+        if step is not None:
+            entries.append(Entry(step.at, title or "(sans message)", meta=sha,
+                                 href=Ref("episode", step.correlation, title)))
+        else:  # l'enregistrement ne dit pas sa date : sans pas pour la porter, il n'en a pas ici
+            entries.append(Entry(0, title or "(sans message)", meta=f"{sha} · sans pas associé"))
+    shown = _cut(diff, DIFF_SHOWN)
     return [
         Table((Column("fichier"), Column("taille", "num")), tuple(files), title="Ses fichiers",
               empty="le dossier est vide"),
@@ -616,6 +904,8 @@ async def _workshop_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> lis
         else Note("Rien de changé depuis le dernier pas : tout est enregistré.", tone="muted"),
         Timeline(tuple(entries), title="Historique (un enregistrement par pas qui a changé quelque chose)",
                  empty="aucun enregistrement encore"),
+        *([Note(f"Seuls les {LOG_MAX} derniers enregistrements sont relus.", tone="muted")]
+          if len(lines) >= LOG_MAX else []),
     ]
 
 

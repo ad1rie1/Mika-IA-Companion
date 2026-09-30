@@ -12,8 +12,8 @@ from __future__ import annotations
 from starlette.routing import BaseRoute, Mount
 from starlette.staticfiles import StaticFiles
 
-from mika.inspector import catalog, settings
-from mika.inspector.pages import TABS
+from mika.inspector import catalog
+from mika.inspector.pages import TABS, reglages
 from mika.inspector.pages.routes import Pages
 from mika.inspector.pages.settings_form import SettingsForms
 from mika.inspector.ui import PREFIX, STATIC, UI, InspectorDeps
@@ -23,11 +23,11 @@ __all__ = ["InspectorDeps", "routes"]
 
 def routes(deps: InspectorDeps, *, cookie_secure: bool = False) -> list[BaseRoute]:
     forms = SettingsForms(deps.sections, deps.settings_tabs) if deps.settings_tabs else None
-    builtins = {**TABS.items, **(forms.builtins() if forms else {})}
+    builtins = {**TABS.items, **(forms.builtins() if forms else {}),
+                **reglages.param_builtins(deps.parameters, deps.param_families, deps.faculty_labels)}
     catalog.check(deps.navigation, deps.kernel.registry, builtins)
     ui = UI(deps, builtins, cookie_secure=cookie_secure)
     ui.settings_forms = forms
     pages = Pages(ui)
-    # les pages encore à part (apps forgées, comptes) passent avant l'enregistrement générique
     return [Mount(PREFIX + "/static", StaticFiles(directory=STATIC), name="console-static"),
-            *settings.routes(ui), *pages.routes(), *pages.catchall()]
+            *pages.routes(), *pages.catchall()]

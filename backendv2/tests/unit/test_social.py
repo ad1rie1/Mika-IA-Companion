@@ -18,8 +18,8 @@ import pytest
 
 from mika.contracts import memory as memory_c
 from mika.contracts import social as social_c
+from mika.faculties.others.tone import read_tone
 from mika.faculties.social.faculty import Contact, SocialParams, lived, rhythm
-from mika.faculties.social.sections import read_tone
 from mika.kernel.clock import DAY, HOUR, US, local
 from mika.kernel.events import Content, Origin
 from mika.ports.llm import LLMResponse
@@ -300,3 +300,71 @@ def test_whatever_the_reason_no_second_message_to_an_absent_friend_who_has_not_a
     absent, present = run(tmp_path, scenario)
     assert absent.veto == social_c.UNANSWERED
     assert present.veto is None and present.shift < 0  # en sa présence : plus rare, pas interdit
+
+
+def test_a_grudge_needs_installed_hostility():
+    """Un seuil de rancune à zéro (une surcharge passée, un réglage extrême) ne
+    coupe pas les ponts avec tout le monde : sans hostilité, rien à garder
+    contre personne. La moindre hostilité, elle, suffit alors."""
+    from mika.faculties.social.faculty import grudging
+
+    zero = SocialParams(grudge=0.0)
+    assert not grudging(0.0, zero)
+    assert lived(contact(3, 15), 0.0, zero, 0.0) == "friend"
+    assert grudging(0.01, zero)  # contrôle : le seuil s'applique dès qu'il y a de l'hostilité
+    assert lived(contact(3, 15), 0.0, zero, 0.01) == "acquaintance"
+    assert not grudging(0.19, P) and grudging(0.2, P)
+
+
+@pytest.mark.parametrize("hm,start,end,inside", [
+    ((12, 0), (10, 0), (20, 30), True),
+    ((21, 0), (10, 0), (20, 30), False),
+    ((23, 30), (18, 0), (1, 0), True),  # une plage nocturne passe minuit…
+    ((0, 30), (18, 0), (1, 0), True),
+    ((1, 0), (18, 0), (1, 0), True),
+    ((12, 0), (18, 0), (1, 0), False),  # … sans devenir « toujours »
+    ((9, 59), (10, 0), (10, 0), False),
+])
+def test_a_daily_window_may_cross_midnight(hm, start, end, inside):
+    from mika.kernel.clock import within_daily_window
+
+    minute = hm[0] * 60 + hm[1]
+    assert within_daily_window(minute, start[0] * 60 + start[1], end[0] * 60 + end[1]) is inside
+
+
+def test_a_night_owl_reaches_out_to_a_friend_late_in_the_evening(tmp_path):
+    """Réglée pour écrire de 18 h à 1 h, elle relance une amie absente à 23 h
+    (la plage passe minuit) ; réglée de 10 h à 20 h 30, jamais à cette heure-là."""
+    from mika.contracts import runtime as rt
+
+    async def scenario(kernel, window):
+        await boot(kernel)
+        await kernel.set_params("social", SocialParams(day_start_min=window[0], day_end_min=window[1]))
+        await befriend(kernel, "tg_1", social_c.FRIEND)
+        for day in range(4):  # une amie qui écrit tous les jours à 22 h 30…
+            await asyncio.sleep((DAY if day else 0) / US)
+            p = await kernel.perceive(said("tg_1", "coucou, tu fais quoi ce soir ?", channel="telegram"))
+            await p.reply
+        await asyncio.sleep(2 * DAY / US + HOUR / US)  # … puis plus rien
+        mind = kernel.mind
+        sent = [mind.decode(e) for e in mind.store.read() if e.type == rt.UTTERANCE.name]
+        return [local(e.at, PARIS).hour for e in sent if e.data.kind == "INITIATIVE" and e.data.target == "tg_1"]
+
+    def go(path, window):
+        kernel, clock, _, _ = build(path, lambda req: LLMResponse("d'accord [EMOTION:happy:0.5]"),
+                                    start=at_paris(2026, 9, 28, 22, 30))
+
+        async def main():
+            try:
+                return await scenario(kernel, window)
+            finally:
+                await kernel.stop()
+
+        return run_virtual(clock, main)
+
+    (tmp_path / "hibou").mkdir()
+    (tmp_path / "jour").mkdir()
+    owl = go(tmp_path / "hibou", (18 * 60, 60))
+    day = go(tmp_path / "jour", (10 * 60, 20 * 60 + 30))
+    assert owl and all(h >= 18 or h <= 1 for h in owl), owl
+    assert all(10 <= h <= 20 for h in day), day
