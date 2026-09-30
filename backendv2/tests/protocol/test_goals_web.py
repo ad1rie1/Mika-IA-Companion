@@ -150,6 +150,6 @@ def test_a_project_is_confided_on_its_own_page_and_read_on_its_fiche(world):  # 
         r = client.get(f"/inspecteur/fiche/goal/{gid}?onglet={tab}")
         assert r.status_code == 200 and "a échoué" not in r.text, tab
     policy = html.unescape(client.get(f"/inspecteur/fiche/goal/{gid}?onglet=politique").text)
-    assert "toutes les 2 h (interval:2h)" in policy and "4 au plus" not in policy and "sur 4 au plus" in policy
+    assert "toutes les 2 h (interval:2h)" in policy and "0 faits sur 4 au plus" in policy
     projects = html.unescape(client.get("/inspecteur/buts/projets").text)
     assert "Un script de bonjour" in projects and "sort avec ton accord" in projects

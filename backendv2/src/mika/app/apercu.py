@@ -120,7 +120,8 @@ def export(out: Path) -> list[str]:
                          ("deroule", "dit", "prompt", "outils", "appels", "decision")]
             urls += ["/inspecteur/reglages/fournisseurs?enregistrement=backends&cle=",
                      "/inspecteur/reglages/comportement-affect?groupe=repos-et-ancre",
-                     "/inspecteur/reglages/comptes?nouveau=1", "/inspecteur/recherche?q=a"]
+                     "/inspecteur/reglages/comptes?nouveau=1", "/inspecteur/recherche?q=a",
+                     "/inspecteur/action/goals.confier?retour=/inspecteur/buts"]
             for url in dict.fromkeys(u for u in urls if u):
                 r = client.get(url, follow_redirects=True)
                 name = _name(url)

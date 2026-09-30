@@ -52,7 +52,7 @@
   {% endif %}
   {% if a.retype %}<div class="field{{ ' has-error' if a.errors.get('_confirmer') }}"><label for="{{ a.id }}-confirmer">Retape « {{ a.subject }} » pour confirmer</label><input id="{{ a.id }}-confirmer" name="_confirmer" autocomplete="off" required>{% if a.errors.get('_confirmer') %}<span class="error">{{ a.errors['_confirmer'] }}</span>{% endif %}</div>{% endif %}
   {% if a.confirm %}<noscript><label class="check"><input type="checkbox" name="_je_confirme" required> je confirme : {{ a.confirm }}</label></noscript>{% endif %}
-  <div><button class="btn{{ ' danger' if a.danger }}{{ ' small' if compact }}">{{ a.button or a.title }}</button></div>
+  <div class="form-actions-inline"><button class="btn{{ ' danger' if a.danger }}{{ ' small' if compact }}">{{ a.button or a.title }}</button>{% if not compact and a.back %} <a class="btn quiet" href="{{ a.back }}">Annuler</a>{% endif %}</div>
 </form>
 {% endif %}
 {%- endmacro %}

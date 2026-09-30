@@ -28,7 +28,7 @@ Vérifié à chaque test (`lint-imports`) : une couche n'importe que celles d'en
 - **Épisodes** (`runtime/pipeline.py`) : admission → baux → départ gardé → enrichissements → composition → appel (boucle d'outils unique) → analyse → commit gardé → règlement (ADR 0009).
 - **Prompt** (`kernel/prompt.py`) : des sections déclarées (zones stable / historique / volatile, ancres, rang de coupe) ; filtrées par la divulgation, budgétées, historique coupé avec hystérésis pour garder le cache. Ce qui vient d'ailleurs est **cité** et coupé en premier (ADR 0022).
 - **Autres contributions** : évaluations (ce qu'un événement fait ressentir, ADR 0017), préludes, interprètes (ADR 0014), formes de signal (`shapes=`), outils, projections, **vues d'inspection** (`@f.inspect`, ADR 0024).
-- **Passerelle LLM** : routage par rôle, un rôle « voix » exige la persona, créneaux à priorité avec préemption, une trace chiffrée par appel.
+- **Passerelle LLM** : routage par rôle, un rôle « voix » exige la persona, créneaux à priorité avec préemption, une trace chiffrée par appel, un repli par fournisseur. Fournisseurs : Claude (API), **Claude Code** (la CLI `claude -p` et son propre login, jamais un jeton ; ses appels d'outils passent par un relais MCP local et c'est le runtime qui les exécute — ADR 0026), compatibles OpenAI, Ollama. Les lots d'outils hors du socle d'un épisode sont « à la demande » : le modèle les cherche (recherche d'outils), un catalogue d'une ligne par lot le lui dit.
 
 ## Persistance
 
@@ -44,7 +44,8 @@ Vérifié à chaque test (`lint-imports`) : une couche n'importe que celles d'en
 | `memory` | souvenirs, croyances, promesses, échanges ; consolidation, index, rappel filtré (ADR 0010) |
 | `body` | rythme circadien, sommeil à deux processus (ADR 0016) |
 | `needs` | besoins de compagnie, de s'exprimer, d'apprendre ; le vide ressenti |
-| `attention` | signaux remarqués (habituation, dosage), pensées, attentes, digestion nocturne |
+| `others` | ce qu'elle devine des autres : ton habituel et du moment, surprise, inquiétude et prise de nouvelles, délais de réponse et heures où l'on répond, appris de l'expérience (ADR 0028) |
+| `attention` | signaux remarqués (habituation, dosage), pensées, attentes (réponses, retours, sa parole donnée), digestion nocturne |
 | `affect` | humeur, posture par personne, ancres qui guérissent ; reçoit les évaluations |
 | `self` | persona, tempérament, estime, récit de soi, journal, rêves (ADR 0019) |
 | `expression` | la balise d'émotion, le style, le murmure, la livraison |
@@ -52,15 +53,15 @@ Vérifié à chaque test (`lint-imports`) : une couche n'importe que celles d'en
 | `agency` | le budget d'initiatives, la période réfractaire |
 | `goals` | rappels, explorations, projets : autorité, pas prouvés, attentes, carnets, atelier (ADR 0020) |
 
-Les **plugins** ont la même forme et une confiance restreinte — des signaux, des preuves, des sections citées, jamais la parole forcée ; leur monde vit hors du journal : `email` (IMAP/SMTP, envoi approuvé), `rss`, `camera`, `forge` (ses apps, hors processus, ADR 0023), `sensors` (`POST /api/perceptions`). Les pièces jointes sont perçues au bord (port `preprocess`).
+Les **plugins** ont la même forme et une confiance restreinte — des signaux, des preuves, des sections citées, jamais la parole forcée ; leur monde vit hors du journal : `email` (plusieurs boîtes IMAP/SMTP et leurs dossiers, sa voix par boîte, des brouillons qu'un opérateur lit et peut retoucher avant de les approuver, ADR 0027), `rss`, `camera`, `forge` (ses apps, hors processus, ADR 0023), `sensors` (`POST /api/perceptions`). Les pièces jointes sont perçues au bord (port `preprocess`).
 
 ## Autour du noyau
 
 - **Web** : le protocole du frontend (inchangé), comptes et sessions, CSRF, CORS ; une réponse ne part qu'aux connexions de sa personne. **Telegram** : liste blanche avant toute écriture, salons publics, réponse au salon d'origine.
 - **Atelier** et **Forge** : bubblewrap sans repli, environnement reconstruit, réseau coupé sauf capacité approuvée ; délais tenus en tuant le processus.
-- **Console** (`/inspecteur/`, opérateurs, ADR 0025) : un back-office que **les facultés déclarent** — vues rangées par destination (`@f.inspect(section=…)`), fiches d'objets auxquelles chacune ajoute ses onglets (personne, poignée, but, mail, app), actions d'opérateur journalisées (`@f.action`, origine extérieure, garde, audit `runtime.operated`), vitaux, badges « à traiter », courbes (`@f.series`, `views.db`). La carte est dans `app/console.py`, les réglages dans `app/reglages.py` : des modèles pydantic annotés (`Knob`) rendus en formulaires, secrets jamais réaffichés. Les paramètres internes disent d'où vient chaque valeur (défaut ← tempérament ← réglage ← surcharge, `runtime/params.py`). Pour « pourquoi a-t-elle dit ça ? » : le prompt exact, les outils et la décision de chaque épisode (`runtime/traces.py`, 14 jours).
+- **Console** (`/inspecteur/`, opérateurs, ADR 0025, refondue ADR 0029 ; carte : `docs/console-carte.md`) : un back-office que **les facultés déclarent** — vues rangées par destination (`@f.inspect(section=…)`), fiches d'objets auxquelles chacune ajoute ses onglets (personne, poignée, but, mail, app), actions d'opérateur journalisées (`@f.action`, origine extérieure, garde, audit `runtime.operated`), vitaux, badges « à traiter », courbes (`@f.series`, `views.db`). La carte est dans `app/console.py` : des menus qui répondent à des questions, des sous-menus par rubrique pour Configuration et Système ; toute table est paginée (le rendu découpe ce qu'une vue oublie). Les réglages sont dans `app/reglages.py` : des modèles pydantic annotés (`Knob`) découpés en sous-pages d'un seul sujet, un champ ne se montrant que s'il sert (`only`, `only_any`), un choix limité en sélecteur, secrets jamais réaffichés. Les paramètres internes ont une page par faculté et disent d'où vient chaque valeur (défaut ← tempérament ← réglage ← surcharge, `runtime/params.py`). Pour « pourquoi a-t-elle dit ça ? » : le prompt exact, les outils et la décision de chaque épisode (`runtime/traces.py`, 14 jours).
 - **Santé** (`/health`, public) : noms et états seulement ; 503 tant qu'elle n'est pas prête.
-- **Simulateur** (`sim/`) : le vrai noyau sur temps virtuel, des interlocuteurs, un modèle factice qui répète tout secret qu'on lui montre, des pannes, des mesures. Voie rapide S01–S18. On valide par cibles d'intention (ADR 0007) et on casse exprès ce qu'un test garde pour vérifier qu'il n'est pas vide.
+- **Simulateur** (`sim/`) : le vrai noyau sur temps virtuel, des interlocuteurs, un modèle factice qui répète tout secret qu'on lui montre, des pannes, des mesures. Voie rapide S01–S19. On valide par cibles d'intention (ADR 0007) et on casse exprès ce qu'un test garde pour vérifier qu'il n'est pas vide.
 
 ## Ajouter une faculté
 

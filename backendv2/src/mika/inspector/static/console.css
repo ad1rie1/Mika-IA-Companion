@@ -528,3 +528,4 @@ form.inline { display: inline; }
 [hidden] { display: none !important; }
 .action-card fieldset.group { display: grid; gap: 12px; }
 .action-card fieldset.group .field:has(textarea) { grid-column: 1 / -1; }
+.form-actions-inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
