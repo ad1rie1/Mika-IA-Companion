@@ -10,8 +10,10 @@ from pydantic import BaseModel, Field
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
 from mika.faculties.memory.faculty import MEMORY, params
-from mika.faculties.memory.recall import items_by_id, names_of, sensitivity_of
+from mika.faculties.memory.recall import Recall, items_by_id, names_of, promises_to, sensitivity_of
+from mika.faculties.memory.recall import _promises as promises_section
 from mika.faculties.memory.salience import admissible, age_words, tag
+from mika.kernel.prompt import readable
 from mika.vocab.episodes import CONVERSATIONAL, Kind
 
 
@@ -23,6 +25,9 @@ class SearchArgs(BaseModel):
 class PromiseArgs(BaseModel):
     promise: int = Field(description="le numéro de la promesse (#)")
     status: Literal["honored", "dropped"] = Field(description="honored : tenue ; dropped : abandonnée")
+
+
+MEMORY.bundle("memory", "fouiller tes souvenirs et ce que tu sais ; dire qu'une promesse est tenue")
 
 
 @MEMORY.tool("memory_search", description="Chercher dans ta mémoire (souvenirs, ce que tu sais), même ce qui ne te "
@@ -64,3 +69,19 @@ async def memory_promise_done(args: PromiseArgs, ctx: Any) -> str:
         return "Je ne trouve pas cette promesse (déjà réglée, ou faite à quelqu'un d'autre)."
     await ctx.emit(c.PROMISE_RESOLVED.draft(promise=args.promise, status=args.status, by="tool"))
     return "C'est noté." if args.status == c.HONORED else "D'accord, tu l'as laissée tomber."
+
+
+class NoPromiseArgs(BaseModel):
+    pass
+
+
+@MEMORY.tool("memory_promises", description="Relire ce que tu as promis à la personne à qui tu parles.",
+             args=NoPromiseArgs, bundle="memory", episodes=CONVERSATIONAL)
+async def memory_promises(args: NoPromiseArgs, ctx: Any) -> str:
+    frame, store = ctx.frame, ctx.ports.get("store")
+    ep, aud = frame.episode, frame.audience
+    if store is None or ep is None or not ep.target or aud is None or not aud.private_ok:
+        return "Tu ne peux pas relire ses promesses ici."
+    recall = Recall(promises=promises_to(frame, store, frame.get(identity_c.PERSON(ep.target))))
+    return readable(promises_section(ctx.state, frame, {"recall": recall}), aud) or \
+        "Tu ne lui dois rien en ce moment."

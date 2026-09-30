@@ -153,6 +153,22 @@ def brief(frame: Frame, req: Any) -> str:
             "Si finalement tu n'as rien à dire, réponds exactement [SILENCE].")
 
 
+def task_brief(frame: Frame, req: Any) -> str:
+    """Le tour d'une tâche silencieuse (``Kind.TASK``) : personne ne lit ce qu'elle
+    écrit ici ; ce qu'elle a à faire est dit par la faculté qui la lui confie."""
+    lines: list[str] = []
+    ep = frame.episode
+    args = ep.attrs.get("args") if ep is not None else None
+    if args:
+        for key, value in args.items():
+            if str(key).startswith("brief:") and value:
+                lines.append(f"- {value}")
+    what = "\n".join(lines) if lines else "- Fais ce qu'on attend de toi, avec tes outils."
+    return ("(Personne ne te parle : c'est une tâche, pour toi seule — personne ne lit ce que tu écris ici.)\n"
+            f"Ce que tu as à faire :\n{what}\n"
+            "Quand c'est fait, dis-le en une phrase.")
+
+
 # ── Inspection ────────────────────────────────────────────────────────────
 
 from mika.faculties.agency import inspect as _inspect  # noqa: E402,F401 — contributions : sa vue

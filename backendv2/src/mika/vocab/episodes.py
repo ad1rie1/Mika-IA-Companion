@@ -20,6 +20,8 @@ class Kind(enum.StrEnum):
     DREAM = "DREAM"
     NARRATIVE = "NARRATIVE"
     DECISION = "DECISION"
+    #: une tâche silencieuse qu'une faculté lui confie (préparer un brouillon de réponse) : pour elle seule
+    TASK = "TASK"
 
 
 #: Les épisodes où elle s'adresse à quelqu'un, dans le fil de conversation.
@@ -32,6 +34,28 @@ GOAL_PREFIX = "goal:"
 
 def goal_target(goal: int) -> str:
     return f"{GOAL_PREFIX}{goal}"
+
+
+#: La cible d'une tâche (``Kind.TASK``) : ``task:<faculté>:<objet>`` (``task:email:perso:<id@x>``).
+#: Personne ne l'écoute non plus.
+TASK_PREFIX = "task:"
+
+
+def task_target(owner: str, key: str) -> str:
+    return f"{TASK_PREFIX}{owner}:{key}"
+
+
+def task_of(target: str | None) -> tuple[str, str] | None:
+    """``(faculté, objet)`` d'une cible de tâche, sinon ``None``."""
+    if not target or not target.startswith(TASK_PREFIX):
+        return None
+    owner, _, key = target[len(TASK_PREFIX):].partition(":")
+    return (owner, key) if owner and key else None
+
+
+def is_work_target(target: str | None) -> bool:
+    """Un but ou une tâche : une cible qui n'est pas quelqu'un."""
+    return goal_of(target) is not None or task_of(target) is not None
 
 
 def goal_of(target: str | None) -> int | None:

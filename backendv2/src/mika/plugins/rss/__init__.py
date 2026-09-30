@@ -100,6 +100,7 @@ class RssState:
 
 
 RSS = Faculty("rss", state=RssState, init=lambda p: RssState(), params=RssParams)
+RSS.bundle(BUNDLE, "les flux d'actualité : les derniers titres, lire un article")
 RSS.declare(*c.ALL)
 
 

@@ -18,7 +18,7 @@ from typing import Any
 from cryptography.fernet import Fernet, InvalidToken
 
 from mika.adapters.llm.config import BackendSpec, LLMConfig
-from mika.adapters.mail import MailConfig
+from mika.adapters.mail import MailAccount, MailConfig, from_stored
 
 LLM_KEY = "llm"
 TELEGRAM_KEY = "telegram"
@@ -26,6 +26,8 @@ EMAIL_KEY = "email"
 FEEDS_KEY = "feeds"
 STT_KEY = "stt"
 SENSORS_KEY = "sensors"
+#: le jeton du point MCP de la console (le Claude Code d'une opératrice), scellé
+CONSOLE_MCP_KEY = "console_mcp"
 PERSONA_KEY = "persona"
 OVERRIDES_KEY = "overrides"
 FORGE_CONFIG_KEY = "forge_config"
@@ -128,22 +130,46 @@ class Settings:
         await self._put(TELEGRAM_KEY, data)
 
     # ── Courrier, flux, transcription ──
+    #: les secrets d'un compte de courrier (scellés à part, jamais en clair dans ``mind.db``)
+    MAIL_SECRETS = ("password", "smtp_password")
+
     def email(self) -> MailConfig:
-        data = dict(self._get(EMAIL_KEY) or {})
-        data["password"] = self.box.open(data.pop("password_sealed", ""))
+        """Les comptes de courrier (mots de passe déchiffrés) ; une ancienne
+        configuration à un seul compte devient le compte « principal »."""
+        raw = dict(self._get(EMAIL_KEY) or {})
+        if "accounts" not in raw:  # l'ancienne forme : un compte, ses secrets au premier niveau
+            raw = {**raw, **{k: self.box.open(raw.pop(f"{k}_sealed", "")) for k in self.MAIL_SECRETS}}
+            data = from_stored(raw)
+        else:
+            accounts = {}
+            for name, spec in dict(raw.get("accounts") or {}).items():
+                spec = dict(spec)
+                for k in self.MAIL_SECRETS:
+                    spec[k] = self.box.open(spec.pop(f"{k}_sealed", ""))
+                accounts[name] = spec
+            data = {"accounts": accounts}
         try:
             return MailConfig.model_validate(data)
         except ValueError:
             return MailConfig()
 
-    async def save_email(self, **fields: Any) -> MailConfig:
-        current = self.email().model_dump()
-        current.update({k: v for k, v in fields.items() if v is not None})
-        cfg = MailConfig.model_validate(current)
-        data = cfg.model_dump()
-        data["password_sealed"] = self.box.seal(data.pop("password"))
-        await self._put(EMAIL_KEY, data)
+    async def save_email(self, cfg: MailConfig) -> MailConfig:
+        accounts = {}
+        for name, account in cfg.accounts.items():
+            spec = account.model_dump(mode="json")
+            for k in self.MAIL_SECRETS:
+                spec[f"{k}_sealed"] = self.box.seal(spec.pop(k))
+            accounts[name] = spec
+        await self._put(EMAIL_KEY, {"accounts": accounts})
         return cfg
+
+    async def save_mail_account(self, name: str, **fields: Any) -> MailConfig:
+        """Crée ou modifie un compte (la ligne de commande) : les champs ``None`` ne changent pas."""
+        cfg = self.email()
+        current = cfg.accounts[name].model_dump() if name in cfg.accounts else {}
+        current.update({k: v for k, v in fields.items() if v is not None})
+        account = MailAccount.model_validate(current)
+        return await self.save_email(MailConfig(accounts={**cfg.accounts, name: account}))
 
     def feeds(self) -> list[str]:
         return [str(u) for u in (self._get(FEEDS_KEY) or [])]
@@ -170,6 +196,15 @@ class Settings:
         """Un jeton neuf (l'ancien ne vaut plus) ; montré une fois."""
         token = secrets.token_urlsafe(32)
         await self._put(SENSORS_KEY, {"token_sealed": self.box.seal(token)})
+        return token
+
+    def console_mcp_token(self) -> str:
+        return self.box.open(dict(self._get(CONSOLE_MCP_KEY) or {}).get("token_sealed", ""))
+
+    async def new_console_mcp_token(self) -> str:
+        """Un jeton neuf pour ``/mcp/console`` (l'ancien ne vaut plus) ; montré une fois."""
+        token = secrets.token_urlsafe(32)
+        await self._put(CONSOLE_MCP_KEY, {"token_sealed": self.box.seal(token)})
         return token
 
     # ── Persona, surcharges avancées (l'inspecteur ; le fichier YAML reste le défaut) ──

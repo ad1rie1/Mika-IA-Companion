@@ -72,6 +72,9 @@ class EpisodePolicy:
     max_tokens: int = 1024
     deadline_s: float = 180.0
     tool_bundles: frozenset[str] = frozenset()
+    #: les lots « en main » ; les autres lots offerts sont à la demande (le modèle
+    #: les cherche quand il en a besoin). None : tout est en main.
+    core_bundles: frozenset[str] | None = None
     muted_tags: frozenset[str] = frozenset()
     guard: GuardFactory | None = None
     brief: Brief | None = None

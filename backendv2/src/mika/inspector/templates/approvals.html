@@ -5,9 +5,16 @@
   <div class="page-head"><div><h2>{{ p.capability }}</h2><p class="muted">proposé par {{ p.owner }} · {{ p.when }} · n° {{ p.proposal }}</p></div></div>
   {% if p.summary %}<div class="prose">{{ p.summary }}</div>{% endif %}
   {% if p.context %}<p class="muted">{{ p.context }}</p>{% endif %}
+  {% if p.preview %}
+  <p class="muted"><b>Ce qui partira</b>{% if p.blocked %} — <span class="badge warn">ne peut pas partir tel quel : {{ p.blocked }}</span>{% endif %}</p>
+  <pre class="code">{{ p.preview }}</pre>
+  <details><summary class="muted">arguments</summary><pre class="code">{{ p.args }}</pre></details>
+  {% else %}
   <pre class="code">{{ p.args }}</pre>
+  {% endif %}
   <form method="post" action="{{ PREFIX }}/approbations" class="filters">
     <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="proposal" value="{{ p.proposal }}">
+    <input type="hidden" name="seen" value="{{ p.seen }}">
     <label>note <input name="note" placeholder="facultative"></label>
     <button class="btn" name="decision" value="approve">Approuver</button>
     <button class="btn quiet" name="decision" value="reject">Refuser</button>

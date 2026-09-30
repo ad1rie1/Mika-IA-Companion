@@ -1,0 +1,95 @@
+title: Veille Hacker News
+description: Je repère les histoires HN qui touchent mes sujets, je les garde, et je ne te préviens que pour
+  les pépites. En mode « demo », un faux flux local exerce toute la chaîne sans réseau.
+schedule: interval:30m
+context: true
+allowed_domains:
+  - hn.algolia.com
+events:
+  - rss.noticed
+config:
+  - key: actif
+    type: bool
+    label: Veille active
+    default: true
+    description: Décoche pour suspendre sans perdre les données.
+  - key: source
+    type: select
+    label: Source
+    choices: [demo, hn]
+    default: demo
+    description: demo = faux flux local (test sans réseau) ; hn = l'API publique de Hacker News.
+  - key: sujets
+    type: lines
+    label: Sujets suivis
+    group: Sujets
+    default:
+      - ia | ai | 1.0
+    description: "Un sujet par ligne : nom | requête | poids (poids facultatif, 1 par défaut)."
+  - key: mots_cles
+    type: lines
+    label: Mots-clés qui comptent
+    group: Sujets
+    default: [sandbox, rust, llm, cache]
+    description: Chaque mot du titre qui en fait partie ajoute de l'intérêt.
+  - key: seuil_pepite
+    type: int
+    label: Seuil de pépite
+    group: Pépites
+    min: 0
+    max: 1000
+    default: 120
+    description: Au-dessus, c'est une pépite.
+  - key: prevenir
+    type: bool
+    label: Me signaler une pépite
+    group: Pépites
+    default: false
+    description: Coché, une pépite attire mon attention. Laissé décoché tant que la source est en mode demo.
+  - key: score_plancher
+    type: float
+    label: Intérêt minimum gardé
+    min: 0
+    max: 500
+    default: 0
+  - key: max_gardees
+    type: int
+    label: Histoires gardées
+    min: 10
+    max: 1000
+    default: 200
+  - key: note
+    type: text
+    label: Note pour moi-même
+    default: Garder un œil sur les bacs à sable et les petits modèles.
+  - key: jeton
+    type: secret
+    label: Jeton d'API (optionnel)
+    description: Non requis par HN — déclaré pour un miroir authentifié.
+views:
+  - key: veille
+    label: Histoires
+    order: 10
+    description: Les histoires repérées, par intérêt, avec leur sujet et leur source.
+    params:
+      - {key: q, label: Rechercher, kind: search}
+      - {key: sujet, label: Sujet, kind: search}
+      - {key: min_score, label: Intérêt minimum, kind: select, choices: ["50", "100", "150"]}
+    actions:
+      - key: recolter
+        label: Récolter maintenant
+        description: Un passage de veille tout de suite, sans attendre la demi-heure.
+      - key: purger
+        label: Vider une collection
+        danger: true
+        confirm: Supprimer toutes les lignes de cette collection ?
+        fields:
+          - {key: collection, type: select, label: Collection, choices: [histoires, passages], required: true}
+  - key: passages
+    label: Passages
+    order: 20
+    description: Chaque passage de veille, ce qu'il a trouvé.
+  - key: bac
+    label: Bac à sable
+    order: 30
+    description: Ce que je peux faire ici, vérifié en l'exécutant.

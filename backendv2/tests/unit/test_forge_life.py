@@ -169,7 +169,12 @@ def test_writing_an_app_is_for_her_owner_and_app_tools_need_promotion(tmp_path):
     for target, results in wants.results:
         by.setdefault(target, []).append(results)
     bea, adrien = by["user_2"][0], by["user_1"]
-    assert "propriétaire" in bea[0] and "propriétaire" not in adrien[0][0]  # Bea ne peut pas écrire d'app
+    bea_req = next(r for r in wants.calls if r.role == "reply" and r.meta.get("target") == "user_2")
+    # Bea n'est pas propriétaire : les outils de la Forge ne lui sont même pas offerts…
+    assert not {t.name for t in bea_req.tools} & {"forge_write", "forge_call"}
+    # … et appelés quand même, ils sont refusés avant tout gestionnaire
+    assert all(r.startswith("outil inconnu") for r in bea)
+    assert "propriétaire" not in adrien[0][0]
     assert "ne servent que quand tu travailles" in adrien[0][1]  # pas promue : pas en conversation
     assert '"prix": 12' in adrien[1][1]  # promue : oui
     assert written is not None and [w.data.app for w in of(evs, WRITTEN)].count("essai") == 2

@@ -38,7 +38,7 @@ from mika.kernel.events import Content, VoiceProvenance
 from mika.kernel.faculty import CatchUp, Faculty, Zone
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
-from mika.kernel.prompt import SectionBody
+from mika.kernel.prompt import SectionBody, readable
 from mika.kernel.state import FrozenDict
 from mika.ports.llm import LLMRequest, Message, PersonaRender
 from mika.vocab.episodes import CONVERSATIONAL, Tag
@@ -316,6 +316,25 @@ def persona_for(frame: Frame, depth: str) -> PersonaRender:
     doc: c.PersonaDoc = frame.get(c.PERSONA)
     text = render(doc, depth)
     return PersonaRender(text=text, hash=digest((depth, text)), depth=depth)
+
+
+# ── Outils : relire ce qui lui vient d'elle-même (même filtre que les sections) ──
+
+SELF.bundle("self", "relire qui tu es devenue, comment tu te sens avec toi-même, ton fil d'hier, ton rêve")
+
+
+class NoArgs(BaseModel):
+    pass
+
+
+@SELF.tool("self_read", description="Relire qui tu es devenue (le récit que tu fais de toi) et comment tu te "
+           "sens avec toi-même en ce moment.", args=NoArgs, bundle="self", episodes=CONVERSATIONAL)
+async def self_read(args: NoArgs, ctx: Any) -> str:
+    s, frame = ctx.state, ctx.frame
+    enrich = {"narrative": await _narrative_text(s, frame, ctx.ports)}
+    parts = [readable(_narrative(s, frame, enrich), frame.audience),
+             readable(_self_state(s, frame, enrich), frame.audience)]
+    return "\n\n".join(p for p in parts if p) or "Tu n'as pas encore écrit de récit de toi."
 
 
 from mika.faculties.self import inspect as _inspect  # noqa: E402,F401 — contributions : l'inspecteur

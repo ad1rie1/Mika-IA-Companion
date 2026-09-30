@@ -26,6 +26,8 @@ from mika.kernel.inspect import (
     Fields,
     Grid,
     Meter,
+    Nav,
+    NavItem,
     Note,
     Pager,
     Prose,
@@ -156,10 +158,13 @@ RICH = [
     Grid((Note("g1"), Prose("g2")), columns=3),
     Section("Partie", (Disclosure("Plus", (Code("x"),), open=True),), description="desc"),
     ActionSlot("envoyer", initial=(("to", "a@b.c"), ("n", "2")), title="Envoyer", compact=True),
+    Nav((NavItem("Réception", Ref.view("forge", "meteo/liste", "", dossier="INBOX"), count=3, active=True),
+         NavItem("Archives", Ref.url("https://example.org/archives", ""), count="12+", tone="warn")),
+        title="Dossiers"),
 ]
 
 ALL_TYPES = {"table", "fields", "note", "prose", "code", "stats", "timeline", "chart", "grid", "section",
-             "disclosure", "form"}
+             "disclosure", "form", "nav"}
 ALL_KINDS = {"text", "mono", "num", "muted", "badge", "meter", "emotion", "when", "link"}
 
 

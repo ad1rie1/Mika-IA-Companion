@@ -131,6 +131,10 @@
   <section class="section-block stack"><div><h2>{{ b.title }}</h2>{% if b.description %}<p>{{ b.description }}</p>{% endif %}</div>{{ render(b["items"], forms) }}</section>
 {% elif b.t == "disclosure" %}
   <details class="card"{{ ' open' if b.open }}><summary><b>{{ b.title }}</b></summary><div class="stack">{{ render(b["items"], forms) }}</div></details>
+{% elif b.t == "nav" %}
+  <nav class="chips" aria-label="{{ b.title or 'navigation' }}">{% if b.title %}<span class="chips-title muted">{{ b.title }}</span>{% endif %}
+    {% for i in b["items"] %}{% if i.href %}<a class="chip {{ i.tone }}{% if i.active %} active{% endif %}" href="{{ i.href }}"{% if i.active %} aria-current="page"{% endif %}>{{ i.text }}{% if i.count %} <span class="chip-count">{{ i.count }}</span>{% endif %}</a>{% else %}<span class="chip muted">{{ i.text }}</span>{% endif %}{% endfor %}
+  </nav>
 {% elif b.t == "action" %}
   {{ action_form(forms.get(b.slot), b.compact) }}
 {% endif %}

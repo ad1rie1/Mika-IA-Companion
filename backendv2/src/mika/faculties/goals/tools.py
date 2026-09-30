@@ -64,6 +64,9 @@ class ReportArgs(BaseModel):
                                                                "personne concernée — tu reprendras dès qu'elle écrit")
 
 
+GOALS.bundle("goals", "rappels, projets confiés ; noter et rendre compte de ton travail")
+
+
 @GOALS.tool(REPORT, description="Conclure ce pas de travail par un verdict. « done » n'est cru que si tu as "
             "réellement fait quelque chose (un outil qui a produit un résultat) pendant ce but.",
             args=ReportArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=1)
@@ -197,7 +200,8 @@ def project_opened(*, title: str, details: str, owner: str | None, address: str 
 
 @GOALS.tool("create_project", description="Accepter un projet que ta propriétaire te confie : il aura son "
             "atelier (un dossier, des programmes isolés) et tu y avanceras par pas.",
-            args=ProjectArgs, bundle="goals", episodes=[Kind.REPLY], max_calls_per_episode=1)
+            args=ProjectArgs, bundle="goals", episodes=[Kind.REPLY], max_calls_per_episode=1,
+            owner_only=True)
 async def create_project(args: ProjectArgs, ctx: Any) -> str:
     who = _person(ctx.frame)
     if who is None or not ctx.frame.get(identity_c.IS_OWNER(who[1])):

@@ -9,12 +9,13 @@ from __future__ import annotations
 import contextlib
 import logging
 from collections.abc import AsyncIterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
 from starlette.applications import Starlette
+from starlette.routing import Mount
 
 from mika.adapters.camera import CameraBuffer
 from mika.adapters.feeds import HttpFeeds
@@ -23,6 +24,8 @@ from mika.adapters.llm.calls import CallLog
 from mika.adapters.llm.config import LiveGateway, build_gateway
 from mika.adapters.llm.gateway import LLMTrace
 from mika.adapters.mail import ImapSmtpMail
+from mika.adapters.mcp.relay import PREFIX as RELAY_PREFIX
+from mika.adapters.mcp.relay import Relay
 from mika.adapters.preprocess import LocalPreprocessor, whisper
 from mika.adapters.store_sqlite import SqliteStore
 from mika.adapters.system import RandomIdGen, RealClock
@@ -43,6 +46,8 @@ from mika.app.settings import SecretBox, Settings
 from mika.contracts.self_ import PersonaDoc
 from mika.faculties.self import load
 from mika.inspector.app import routes
+from mika.inspector.mcp import PREFIX as CONSOLE_MCP_PREFIX
+from mika.inspector.mcp import console_app
 from mika.inspector.ui import InspectorDeps
 from mika.kernel.prompt import Budget
 from mika.runtime.bootstrap import Kernel
@@ -111,6 +116,11 @@ class Live:
     preprocess: Any = None
     calls: CallLog | None = None
     persona_file: Path = PERSONA
+    #: le relais MCP des fournisseurs Claude Code (monté sous /mcp/relais, local seulement)
+    relay: Relay = field(default_factory=Relay)
+    #: l'adresse locale où le serveur l'écoute (fixée par ``serve``) ; vide : pas joignable
+    relay_base: str = ""
+    data: Path | None = None
 
     def trace(self, tr: LLMTrace) -> None:
         self.gateway.traces.append(tr)
@@ -134,6 +144,11 @@ class Live:
         owners = self.settings.telegram()["owners"]
         if owners:
             out["identity"] = {"owners": tuple(handle_of(o) for o in owners)}
+        accounts = self.settings.email().accounts
+        drafting = tuple(sorted(k for k, a in accounts.items() if a.autodraft and a.enabled))
+        if drafting:
+            out["email"] = {"autodraft": drafting,
+                            "autodraft_skip": tuple(sorted({s for k in drafting for s in accounts[k].autodraft_skip}))}
         return out
 
     async def reconfigure(self) -> list[str]:
@@ -170,7 +185,9 @@ class Live:
         cfg = self.settings.llm()
         problems = cfg.problems()
         if cfg.backends and not problems:
-            self.gateway.set(build_gateway(cfg, self.kernel.deps.clock, on_trace=self.trace))
+            self.gateway.set(build_gateway(cfg, self.kernel.deps.clock, on_trace=self.trace, relay=self.relay,
+                                           relay_base=lambda: self.relay_base,
+                                           work_dir=self.data / "claude-code" if self.data else None))
             self.kernel.runner.budget = Budget(max_tokens=cfg.context_tokens)
         else:
             self.gateway.set(None)
@@ -203,7 +220,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     port = KernelPort(kernel)
     hub.port = port
     live = Live(kernel, hub, port, Accounts(store), settings, gateway, router, fixed, calls=CallLog(store),
-                persona_file=persona)
+                persona_file=persona, data=data)
 
     @contextlib.asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
@@ -227,6 +244,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         finally:
             await live.stop_telegram()
             await hub.stop()
+            await gateway.aclose()
             await live.calls.flush()
             await kernel.stop()
 
@@ -243,8 +261,22 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                        cookie_secure=(web.cookie_secure if web else False))
     preprocess = LocalPreprocessor(gateway, transcribe=whisper(settings.stt))
     live.preprocess = preprocess
-    return create_app(port, live.accounts, hub, web, lifespan=lifespan, extra_routes=inspector,
+    relay = Mount(RELAY_PREFIX, app=live.relay.app)
+    console_mcp = Mount(CONSOLE_MCP_PREFIX, app=console_app(kernel, settings.console_mcp_token))
+    return create_app(port, live.accounts, hub, web, lifespan=lifespan,
+                      extra_routes=[*inspector, relay, console_mcp],
                       preprocess=preprocess, camera=camera, sensor_token=settings.sensors_token), live
+
+
+def relay_base(host: str, port: int) -> str:
+    """Où la CLI de Claude Code joint le relais : la boucle locale (le relais
+    ne sert qu'elle). Un serveur qui n'écoute que sur une autre adresse ne peut
+    pas servir de relais : vide, et les appels Claude Code échouent en le disant."""
+    if host in ("", "127.0.0.1", "0.0.0.0", "localhost"):
+        return f"http://127.0.0.1:{port}"
+    if host in ("::1", "::"):
+        return f"http://[::1]:{port}"
+    return ""
 
 
 def serve(*, host: str = "127.0.0.1", port: int = 8001, data: Path = Path("data/v2"),
@@ -252,7 +284,8 @@ def serve(*, host: str = "127.0.0.1", port: int = 8001, data: Path = Path("data/
     import uvicorn  # noqa: PLC0415 — seul le serveur réel en a besoin
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s : %(message)s")
-    app, _ = build(data, reports=reports)
+    app, live = build(data, reports=reports)
+    live.relay_base = relay_base(host, port)
     # un arrêt (SIGTERM) laisse 20 s aux connexions, puis le cycle de vie arrête le noyau
     uvicorn.run(app, host=host, port=port, ws_max_size=protocol.MAX_FRAME_BYTES, log_level="info",
                 timeout_graceful_shutdown=20)

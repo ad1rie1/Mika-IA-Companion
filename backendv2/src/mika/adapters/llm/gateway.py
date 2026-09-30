@@ -8,6 +8,9 @@
   de fond en cours — qui se règle en ``preempted`` et sera reproposé.
 - Chaque appel laisse une trace (rôle, fournisseur, modèle, jetons, cache,
   coût, latence, issue).
+- Un fournisseur peut avoir un repli : s'il échoue (non connecté, quota,
+  délai, panne), l'appel repart une fois sur le repli — deux traces, l'échec
+  puis la reprise. Une annulation n'est jamais reprise ailleurs.
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import heapq
 import itertools
+import logging
 from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -26,6 +30,8 @@ from mika.ports.llm import PREEMPTED, LLMBackend, LLMRequest, LLMResponse, Missi
 
 #: les derniers appels gardés en mémoire
 TRACES_KEPT = 2000
+
+log = logging.getLogger("mika.llm.gateway")
 
 
 class UnconfiguredRole(LookupError):
@@ -139,6 +145,7 @@ class Gateway:
         preempt: frozenset[str] = frozenset(),
         on_trace: Callable[[LLMTrace], None] | None = None,
         pricing: Mapping[str, tuple[str, str]] | None = None,
+        backend_fallbacks: Mapping[str, str] | None = None,
     ) -> None:
         self.backends = dict(backends)
         self.routes = dict(routes)
@@ -152,6 +159,9 @@ class Gateway:
         self._on_trace = on_trace
         #: fournisseur → (type, durée du cache) : de quoi chiffrer un appel
         self.pricing = dict(pricing or {})
+        #: fournisseur → fournisseur de repli quand il échoue
+        self.backend_fallbacks = {k: v for k, v in (backend_fallbacks or {}).items()
+                                  if v in self.backends and v != k}
 
     def is_voice(self, role: str) -> bool:
         return role in self.voice_roles
@@ -170,6 +180,16 @@ class Gateway:
         if self.is_voice(req.role) and req.persona is None:
             raise MissingPersona(f"le rôle voix « {req.role} » exige une persona")
         name = self.resolve(req.role)
+        try:
+            return await self._on(name, req)
+        except Exception as exc:
+            alt = self.backend_fallbacks.get(name)
+            if alt is None:
+                raise
+            log.warning("%s a échoué pour « %s » (%s) : repli sur %s", name, req.role, exc, alt)
+            return await self._on(alt, req)
+
+    async def _on(self, name: str, req: LLMRequest) -> LLMResponse:
         backend = self.backends[name]
         slots = self._slots[name]
         t_wait = self.clock.now()

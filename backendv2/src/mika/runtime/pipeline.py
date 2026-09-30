@@ -31,7 +31,7 @@ from mika.kernel.prompt import Budget, Composer, ComposeTrace, SectionBody
 from mika.kernel.state import FrozenDict
 from mika.ports.llm import PREEMPTED, LLMGateway, LLMRequest, Message, PersonaRender
 from mika.runtime.boundary import Failed, acall, call
-from mika.runtime.tools import LoopResult, ToolContext, declare, run_tool_loop
+from mika.runtime.tools import LoopResult, ToolContext, catalogue, declare, run_tool_loop
 from mika.runtime.traces import STABLE_KEY, EpisodeTraces
 
 if TYPE_CHECKING:
@@ -214,14 +214,17 @@ class EpisodeRunner:
                 persona = self.persona(frame, policy.persona_depth) if (policy.voice and self.persona) else None
                 tools = self._tools(policy, req.kind, audience,
                                     req.selected.args.get("bundles") if req.selected is not None else None)
+                offered = list(tools.values())
+                stable = (persona.text + "\n\n" + prompt.system_stable).strip() if persona else prompt.system_stable
+                more = catalogue(offered, policy.core_bundles, mind.registry.bundles)
                 llm_req = LLMRequest(
                     role=policy.role, call_id=f"{eid}#0",
-                    system_stable=(persona.text + "\n\n" + prompt.system_stable).strip() if persona else prompt.system_stable,
+                    system_stable=f"{stable}\n\n{more}".strip() if more else stable,
                     # l'état volatil voyage dans le dernier tour utilisateur (après les
                     # points de cache) : ne pas le répéter dans le système
                     system_volatile="",
                     messages=tuple(Message(m["role"], m["content"]) for m in prompt.chat_messages()),
-                    tools=declare(list(tools.values())), max_tokens=policy.max_tokens, persona=persona,
+                    tools=declare(offered, policy.core_bundles), max_tokens=policy.max_tokens, persona=persona,
                     lane=policy.lane, priority=req.priority,
                     meta={"episode": eid, "kind": req.kind, "target": req.target, "sections": trace.included,
                           "audience_level": audience.level},
@@ -394,7 +397,8 @@ class EpisodeRunner:
     def _tools(self, policy: EpisodePolicy, kind: str, audience: Audience, only: Any = None) -> dict[str, Any]:
         """Les outils offerts : les lots de la politique — restreints, quand le
         candidat le dit (``bundles`` : « goals,workshop »), à ceux-là seuls. Un
-        lot est offert entier ou pas du tout."""
+        lot est offert entier ou pas du tout, moins les outils réservés à ses
+        propriétaires quand quelqu'un d'autre écoute (``owner_only``)."""
         bundles = policy.tool_bundles
         if only:
             bundles = bundles & frozenset(b.strip() for b in str(only).split(",") if b.strip())
@@ -403,6 +407,8 @@ class EpisodeRunner:
             if kind not in spec.episodes or spec.bundle not in bundles:
                 continue
             if spec.min_level is not None and audience.level < spec.min_level:
+                continue
+            if spec.owner_only and not audience.owner:
                 continue
             out[name] = spec
         return out

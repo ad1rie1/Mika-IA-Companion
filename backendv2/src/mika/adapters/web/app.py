@@ -189,6 +189,9 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
                                            by=account.handle, note=str(data.get("note") or "")[:500])
         if status == "unknown":
             return JSONResponse({"error": "Action inconnue ou déjà décidée."}, status_code=404)
+        if status in ("changed", "blocked"):  # ce qui partirait n'est plus ce qui a été proposé
+            return JSONResponse({"error": "Ce qui partirait a changé ou ne peut pas partir tel quel : décide depuis "
+                                          "la console, qui le montre.", "status": status}, status_code=409)
         await hub.refresh_panels()  # chacun voit la file d'approbation à jour
         return JSONResponse({"ok": True, "status": status})
 

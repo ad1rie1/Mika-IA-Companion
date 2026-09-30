@@ -36,6 +36,9 @@ class Audience:
     private_ok: bool = False
     certainty: float = 0.0
     name: str = ""
+    #: l'interlocuteur est l'un de ses propriétaires (ou personne n'écoute :
+    #: elle travaille pour elle) — ouvre les outils ``owner_only``
+    owner: bool = False
 
 
 CLOSED = Audience()

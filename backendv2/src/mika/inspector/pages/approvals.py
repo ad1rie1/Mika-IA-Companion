@@ -1,5 +1,6 @@
 """Approbations : ce qu'elle voudrait faire hors de la machine. Ce qui est
-montré est exactement ce qui partira."""
+montré est exactement ce qui partira : quand la capacité le sait
+(``preview``), l'aperçu du résultat, et c'est cet aperçu-là qu'on approuve."""
 
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ from mika.contracts import runtime as rt
 from mika.inspector.catalog import Panel
 from mika.inspector.pages.tabs import TABS
 from mika.kernel.inspect import Badge, Column, Row, Table, Text, When
+from mika.runtime import decisions
 
 
 def _pending(ui: Any) -> int:
@@ -31,8 +33,12 @@ async def pending(ui: Any, request: Request) -> Any:
             args = json.dumps(json.loads(full.args_json), ensure_ascii=False, indent=1) if full else ""
         except ValueError:
             args = full.args_json if full else ""
+        shown = await decisions.preview(kernel.mind, kernel.ports, p.capability, full.args_json) if full else None
         items.append({"proposal": p.proposal, "capability": p.capability, "owner": p.owner, "context": p.context,
-                      "summary": summary, "args": args, "when": ui.when_long(p.at)})
+                      "summary": summary, "args": args, "when": ui.when_long(p.at),
+                      "preview": shown.text if shown is not None else "",
+                      "seen": shown.digest if shown is not None else "",
+                      "blocked": shown.blocked if shown is not None else ""})
     ctx = ui.inspection.context(request.query_params)
     done = ctx.events([rt.EFFECT_RESOLVED, rt.EFFECT_EXECUTED], 40)
     history = Table((Column("quand", "fit"), "quoi", "action", "détail"), tuple(
@@ -44,6 +50,8 @@ async def pending(ui: Any, request: Request) -> Any:
     done_flag = request.query_params.get("fait", "")
     messages = {"oui": [("ok", "Approuvé.")], "non": [("ok", "Refusé.")],
                 "inconnu": [("warn", "Action inconnue ou déjà décidée.")],
+                "change": [("warn", decisions.MESSAGES[decisions.CHANGED])],
+                "bloque": [("warn", "Ça ne peut pas partir tel quel : relis-le.")],
                 "jeton": [("danger", "Jeton de formulaire invalide : recharge la page.")]}.get(done_flag, [])
     return {"panel": Panel("approvals.html", {"items": items}), "blocks": [history], "messages": messages}
 

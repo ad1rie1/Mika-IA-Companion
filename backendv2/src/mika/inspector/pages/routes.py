@@ -31,7 +31,7 @@ MOVED = {"chronologie": "systeme/chronologie", "etat": "systeme/etat", "contribu
 
 
 #: les anciens onglets qui ont pris leur propre place
-MOVED_TABS = {("reglages", "apps"): "apps"}
+MOVED_TABS = {("reglages", "apps"): "apps", ("sens", "courrier"): "courrier/reception"}
 
 
 def safe_back(target: str) -> str:
@@ -307,10 +307,11 @@ class Pages:
             proposal = 0
         approved = data.get("decision") == "approve"
         status = await self.ui.deps.port.resolve_effect(proposal, approved, by=account.handle,
-                                                        note=data.get("note", "")[:500])
-        if status != "unknown" and self.ui.deps.after_decision is not None:
+                                                        note=data.get("note", "")[:500], seen=data.get("seen", ""))
+        if status in ("approved", "rejected") and self.ui.deps.after_decision is not None:
             await self.ui.deps.after_decision()
-        outcome = "inconnu" if status == "unknown" else ("oui" if approved else "non")
+        outcome = {"approved": "oui", "rejected": "non", "changed": "change", "blocked": "bloque"}.get(status,
+                                                                                                    "inconnu")
         return RedirectResponse(f"{target}?fait={outcome}", status_code=303)
 
     async def settings_post(self, request: Request) -> Response:

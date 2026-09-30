@@ -12,7 +12,7 @@ from mika.kernel.frame import CLOSED as CLOSED_AUDIENCE
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.prompt import SectionBody
 from mika.vocab import privacy
-from mika.vocab.episodes import CONVERSATIONAL, Kind, goal_of
+from mika.vocab.episodes import CONVERSATIONAL, Kind, is_work_target
 from mika.vocab.privacy import ChannelTrust
 
 CHANNEL_FR = {"web": "sur l'application", "telegram": "par Telegram"}
@@ -90,13 +90,14 @@ def audience_for(frame: Frame, req: Any) -> Audience:
     """L'audience d'un épisode, résolue une fois au bord. Toute panne → fermée."""
     target = getattr(req, "target", None)
     kind = getattr(req, "kind", "")
-    if not target or goal_of(target) is not None:
+    if not target or is_work_target(target):
         if kind in (Kind.REPLY, Kind.INITIATIVE):
             return CLOSED_AUDIENCE
-        # un épisode sans destinataire (pas de travail, murmure, journal) : personne n'écoute
+        # un épisode sans destinataire (pas de travail, tâche, murmure, journal) : personne n'écoute
         d = privacy.EVERYTHING
         return Audience(persons=(), channel="internal", public=False, level=int(d.level),
-                        witness_level=int(d.witness_level), private_ok=True, trust=ChannelTrust.INTERNAL.value)
+                        witness_level=int(d.witness_level), private_ok=True, trust=ChannelTrust.INTERNAL.value,
+                        owner=True)
     s: IdentityState = frame.state("identity")
     room = getattr(req, "room", None)
     h = s.handles.get(target)
@@ -108,6 +109,7 @@ def audience_for(frame: Frame, req: Any) -> Audience:
         persons=(target,), channel=channel, room=room, public=public, level=int(d.level),
         witness_level=int(d.witness_level), private_ok=d.own_file, trust=view.trust.value,
         certainty=view.certainty, name=view.name,
+        owner=bool(frame.get(c.IS_OWNER(frame.get(c.PERSON(target))))),
     )
 
 

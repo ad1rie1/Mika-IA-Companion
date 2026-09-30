@@ -70,7 +70,8 @@ class MindPort(Protocol):
         """Un appareil lui signale quelque chose ; rend le ``seq`` (``None`` : refusé)."""
         ...
 
-    async def resolve_effect(self, proposal: int, approved: bool, *, by: str, note: str = "") -> str:
+    async def resolve_effect(self, proposal: int, approved: bool, *, by: str, note: str = "",
+                             seen: str = "") -> str:
         """Approuver ou refuser un effet externe proposé : ``"approved"``,
         ``"rejected"``, ``"unknown"`` (rien en attente sous ce numéro)."""
         ...

@@ -214,6 +214,12 @@ class Registry:
             if s.name in self.tools:
                 problems.append(f"outil déclaré deux fois : {s.name}")
             self.tools[s.name] = s
+        self.bundles: dict[str, str] = {}
+        for f in facs:
+            for name, text in f.bundles.items():
+                if name in self.bundles:
+                    problems.append(f"lot d'outils décrit deux fois : {name}")
+                self.bundles[name] = text
         self.projectors: dict[str, ProjectorSpec] = {}
         for s in (s for f in facs for s in f.projectors):
             if s.name in self.projectors:

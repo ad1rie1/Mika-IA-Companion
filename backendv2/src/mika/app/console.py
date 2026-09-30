@@ -38,7 +38,10 @@ NAVIGATION: tuple[NavGroup, ...] = (
         Destination("apps", "Apps forgées", "⚒", "Les petites apps qu'elle écrit elle-même."),
     )),
     NavGroup("Ses sens", (
-        Destination("sens", "Sens", "◌", "Courrier, flux, caméra, appareils."),
+        Destination("courrier", "Courrier", "✉", "Ses boîtes aux lettres : leurs dossiers, ce qui arrive, ce qu'elle "
+                    "a préparé et qui attend ton accord, ce qui part, avec qui, et ses comptes. Ce que tu écris ici "
+                    "part de sa boîte, et elle le sait."),
+        Destination("sens", "Sens", "◌", "Flux, caméra, appareils."),
     )),
     NavGroup("Exploitation", (
         Destination("reglages", "Réglages", "⚙", "Ce qu'un opérateur décide : modèles, personnalité, canaux, "

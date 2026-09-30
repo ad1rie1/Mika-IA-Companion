@@ -15,6 +15,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from pydantic import BaseModel
+
 from mika.contracts import goals as c
 from mika.contracts import identity as identity_c
 from mika.faculties.goals.faculty import GOALS, Goal, GoalsState, live, status
@@ -22,7 +24,7 @@ from mika.faculties.goals.work import FULL, MENTION
 from mika.kernel.clock import DAY, local
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Frame
-from mika.kernel.prompt import SectionBody
+from mika.kernel.prompt import SectionBody, readable
 from mika.vocab.episodes import CONVERSATIONAL, Kind, goal_of
 from mika.vocab.privacy import hearable
 
@@ -214,3 +216,17 @@ def _live_section(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> Sec
 def step_brief(frame: Frame, req: Any) -> str:
     return ("(Personne ne te parle : c'est un moment de travail, pour toi seule — personne ne lit ce que tu écris "
             "ici.) Avance d'un pas sur ce but avec tes outils, puis conclus par report_step.")
+
+
+# ── Outil : relire ce qu'elle a en train (même filtre que la section) ──
+
+
+class NoArgs(BaseModel):
+    pass
+
+
+@GOALS.tool("goals_list", description="Relire ce que tu as en train : tes projets, tes explorations, tes rappels.",
+            args=NoArgs, bundle="goals", episodes=CONVERSATIONAL)
+async def goals_list(args: NoArgs, ctx: Any) -> str:
+    enrich = {"goals": await _texts(ctx.state, ctx.frame, ctx.ports) or {}}
+    return readable(_live_section(ctx.state, ctx.frame, enrich), ctx.frame.audience) or "Tu n'as rien en train."

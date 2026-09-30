@@ -10,6 +10,7 @@ l'audit ``runtime.operated``. Rien ici ne nomme une faculté.
 
 from __future__ import annotations
 
+import functools
 import inspect as pyinspect
 from collections import OrderedDict
 from collections.abc import Mapping, Sequence
@@ -26,6 +27,7 @@ from mika.kernel.faculty import ActionSpec
 from mika.kernel.guards import Superseded
 from mika.kernel.inspect import Ref
 from mika.kernel.operate import ActionContext, Done, Refused
+from mika.runtime import decisions
 from mika.runtime.boundary import Failed, acall, call
 
 if TYPE_CHECKING:
@@ -50,11 +52,21 @@ class Outcome:
     show: tuple[Any, ...] = ()
 
 
+def _wants_ports(fn: Any) -> bool:
+    """Des champs qui dépendent du monde (les boîtes d'un compte, ses dossiers) : la
+    fonction déclare un paramètre ``ports`` et les reçoit, en lecture."""
+    try:
+        return "ports" in pyinspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+
+
 def offered(kernel: Kernel, spec: ActionSpec, subject: str) -> bool:
     if spec.available is None:
         return True
     frame = kernel.mind.frame()
-    got = call(spec.available, frame.state(spec.owner), frame, subject, label=f"action {spec.key} offerte ?")
+    fn = functools.partial(spec.available, ports=kernel.ports) if _wants_ports(spec.available) else spec.available
+    got = call(fn, frame.state(spec.owner), frame, subject, label=f"action {spec.key} offerte ?")
     return got is True
 
 
@@ -65,7 +77,8 @@ def fixed_values(form: Mapping[str, Sequence[str]]) -> dict[str, str]:
 
 def dynamic_fields(kernel: Kernel, spec: ActionSpec, subject: str, fixed: Mapping[str, str]) -> tuple[Any, ...]:
     frame = kernel.mind.frame()
-    got = call(spec.fields, frame.state(spec.owner), frame, subject, dict(fixed), label=f"champs de {spec.key}")
+    fn = functools.partial(spec.fields, ports=kernel.ports) if _wants_ports(spec.fields) else spec.fields
+    got = call(fn, frame.state(spec.owner), frame, subject, dict(fixed), label=f"champs de {spec.key}")
     return () if isinstance(got, Failed) or got is None else tuple(got)
 
 
@@ -83,6 +96,8 @@ def parse_args(spec: ActionSpec, form: Mapping[str, Sequence[str]], kernel: Kern
     values, errors = forms.parse(fields, {k: list(v) for k, v in form.items()}, current={})
     if errors:
         return None, errors
+    fixed = fixed_values(form)
+    values.update({f.path: fixed[f.path] for f in fields if f.kind == "hidden" and f.path in fixed})
     try:
         return spec.args.model_validate(forms.nest(values)), {}
     except ValidationError as exc:
@@ -131,6 +146,15 @@ async def perform(kernel: Kernel, key: str, form: Mapping[str, Sequence[str]], *
         await _audit(kernel, spec, by, subject, (), "refused", correlation, nonce)
         return Outcome(False, f"Action refusée : elle émettrait {', '.join(stray)} sans l'avoir déclaré.", "danger")
 
+    resolutions = []
+    for d in done.decide:  # ses propres propositions seulement, telles qu'elles ont été lues
+        got_ = await decisions.prepare(mind, kernel.ports, d.proposal, d.approved, by=by, note=d.note, seen=d.seen,
+                                       owner=spec.owner)
+        if got_.draft is None:
+            await _audit(kernel, spec, by, subject, (), "refused", correlation, nonce)
+            return Outcome(False, got_.message, "warn")
+        resolutions.append((d.proposal, got_.draft))
+
     seqs: tuple[int, ...] = ()
     deduped = False
     if done.drafts:
@@ -143,6 +167,18 @@ async def perform(kernel: Kernel, key: str, form: Mapping[str, Sequence[str]], *
             await _audit(kernel, spec, by, subject, (), "superseded", correlation, nonce)
             return Outcome(False, "La situation a changé depuis l'ouverture de la page : rien n'a été fait.", "warn")
         seqs, deduped = tuple(commit.seqs), bool(commit.deduped)
+    for proposal, draft in resolutions:
+        keyed_ = replace(draft, dedupe_key=f"décision:{proposal}")
+        try:
+            decided = await mind.append([keyed_], emitter=rt.OWNER, correlation=correlation, origin=Origin.EXTERNAL,
+                                        guard=decisions.still_pending(proposal))
+        except Superseded:
+            await _audit(kernel, spec, by, subject, seqs, "superseded", correlation, nonce)
+            return Outcome(False, decisions.MESSAGES[decisions.UNKNOWN], "warn")
+        if decided.deduped:
+            await _audit(kernel, spec, by, subject, seqs, "superseded", correlation, nonce)
+            return Outcome(False, decisions.MESSAGES[decisions.UNKNOWN], "warn")
+        seqs += tuple(decided.seqs)
     if deduped:
         return Outcome(True, "Déjà fait.", "info", seqs=seqs, deduped=True, go=done.go)
     await _audit(kernel, spec, by, subject, seqs, "done", correlation, nonce)

@@ -13,6 +13,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from pydantic import BaseModel
+
 from mika.contracts import attention as c
 from mika.contracts import identity as identity_c
 from mika.contracts import presence as presence_c
@@ -24,7 +26,7 @@ from mika.kernel.clock import DAY, HOUR
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.guards import Guard, floor
-from mika.kernel.prompt import SectionBody
+from mika.kernel.prompt import SectionBody, readable
 from mika.kernel.state import FrozenDict
 from mika.vocab import affect as A
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
@@ -127,3 +129,19 @@ def _insists(s: AttentionState, frame: Frame) -> list[Candidate]:
         out.append(Candidate(Kind.INITIATIVE, address, c.THOUGHT, evidence, resources=frozenset({floor(address)}),
                              guards=(guard,), args=FrozenDict({"brief:attention": brief})))
     return out
+
+
+# ── Outil : relire ce qui lui trotte dans la tête (même filtre que la section) ──
+
+ATTENTION.bundle("attention", "ce qui te trotte dans la tête en ce moment")
+
+
+class NoArgs(BaseModel):
+    pass
+
+
+@ATTENTION.tool("attention_thoughts", description="Ce qui te trotte dans la tête en ce moment.", args=NoArgs,
+                bundle="attention", episodes=CONVERSATIONAL)
+async def attention_thoughts(args: NoArgs, ctx: Any) -> str:
+    enrich = {"thoughts": await _texts(ctx.state, ctx.frame, ctx.ports) or {}}
+    return readable(_thoughts(ctx.state, ctx.frame, enrich), ctx.frame.audience) or "Rien ne te trotte dans la tête."

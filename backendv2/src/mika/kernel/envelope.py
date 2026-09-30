@@ -53,6 +53,8 @@ from mika.kernel.inspect import (
     Fields,
     Grid,
     Meter,
+    Nav,
+    NavItem,
     Note,
     Pager,
     Prose,
@@ -137,6 +139,7 @@ _BLOCKS: dict[str, _Shape] = {
     "section": _shape(("type", "title", "items"), ("description",)),
     "disclosure": _shape(("type", "title", "items"), ("open",)),
     "form": _shape(("type", "action"), ("initial", "title", "compact")),
+    "nav": _shape(("type", "items"), ("title",)),
 }
 _TEXT_KINDS = ("text", "mono", "num", "muted")
 _CELLS: dict[str, _Shape] = {
@@ -157,6 +160,7 @@ _FIELD = _shape(("label", "value"), ("hint",))
 _STAT = _shape(("label", "value"), ("sub", "tone", "href", "trend"))
 _ENTRY = _shape(("at", "title"), ("text", "meta", "tone", "href"))
 _SERIES = _shape(("label", "points"), ("slot",))
+_NAV_ITEM = _shape(("text", "href"), ("count", "active", "tone"))
 
 # pré-contrôle avant de connaître le type : toute clé d'un bloc, d'une cellule
 _ANY_BLOCK = _shape((), tuple(sorted({k for s in _BLOCKS.values() for k in s.allowed})))
@@ -520,6 +524,8 @@ class _Decoder:
                 return Disclosure(self.string(d["title"], _at(path, "title")),
                                   self.blocks(d["items"], _at(path, "items"), depth + 1),
                                   open=self.boolean(d.get("open", False), _at(path, "open")))
+            case "nav":
+                return self.nav(d, path)
             case _:
                 return self.form(d, path)
 
@@ -644,6 +650,21 @@ class _Decoder:
                               href=self.link(s["href"], _at(p, "href")) if "href" in s else None,
                               trend=trend))
         return Stats(tuple(items), title=self.string(d.get("title", ""), _at(path, "title")))
+
+    def nav(self, d: dict[str, Any], path: str) -> Nav:
+        ipath = _at(path, "items")
+        items: list[NavItem] = []
+        for i, raw in enumerate(self.seq(d["items"], ipath, self.limits.items, "liens")):
+            p = _ix(ipath, i)
+            n = self.obj(raw, p, _NAV_ITEM)
+            count: int | str | None = None
+            if "count" in n:
+                cp = _at(p, "count")
+                count = self.integer(n["count"], cp) if type(n["count"]) is int else self.string(n["count"], cp)
+            items.append(NavItem(self.string(n["text"], _at(p, "text")), self.link(n["href"], _at(p, "href")),
+                                 count=count, active=self.boolean(n.get("active", False), _at(p, "active")),
+                                 tone=self.tone(n.get("tone", ""), _at(p, "tone"))))
+        return Nav(tuple(items), title=self.string(d.get("title", ""), _at(path, "title")))
 
     def timeline(self, d: dict[str, Any], path: str) -> Timeline:
         ipath = _at(path, "items")
@@ -799,6 +820,15 @@ def _enc_block(b: Any) -> dict[str, Any]:
         case Disclosure():
             out = {"type": "disclosure", "title": b.title, "items": [_enc_block(x) for x in b.items]}
             _put(out, b, "open")
+            return out
+        case Nav():
+            items = []
+            for i in b.items:
+                item: dict[str, Any] = {"text": i.text, "href": _enc_link(i.href)}
+                _put(item, i, "count", "active", "tone")
+                items.append(item)
+            out = {"type": "nav", "items": items}
+            _put(out, b, "title")
             return out
         case ActionSlot():
             out = {"type": "form", "action": b.action}
@@ -1031,6 +1061,9 @@ def schema(*, limits: Limits = Limits()) -> dict[str, Any]:
         "grid": {"items": blocks, "columns": columns_1_3},
         "section": {"items": blocks},
         "disclosure": {"items": blocks},
+        "nav": {"items": _array(_obj(_NAV_ITEM, {"text": text, "href": _ref("link"), "tone": tones, "active": flag,
+                                                 "count": {"oneOf": [{"type": "integer", "minimum": 0,
+                                                                      "maximum": _I64}, text]}}), limits.items)},
         "form": {"action": {"type": "string", "pattern": _pattern(_ACTION)},
                  "initial": {"type": "object", "maxProperties": limits.items, "propertyNames": param_name,
                              "additionalProperties": scalar}},

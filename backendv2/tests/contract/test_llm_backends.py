@@ -335,6 +335,60 @@ async def test_claude_replays_the_thinking_of_a_tool_turn_unchanged():
     assert [b["type"] for b in fake.create.calls[2]["messages"][1]["content"]] == ["text", "tool_use"]
 
 
+DEFERRED = (ToolDecl("email_list", "Lister les mails.", {"type": "object", "properties": {}}, deferred=True),
+            ToolDecl("memory_search", "Chercher un souvenir.", {"type": "object", "properties": {}}),
+            ToolDecl("rss_read", "Lire un article.", {"type": "object", "properties": {}}, deferred=True))
+
+
+async def test_claude_deferred_tools_load_on_demand_through_tool_search():
+    fake = FakeAnthropic(claude_reply(text("ok")), claude_reply(text("ok")))
+    backend = ClaudeBackend("k", "claude-opus-5-5", client=fake)
+    await backend.complete(request(Message("user", "x"), tools=DEFERRED))
+    body = fake.create.calls[0]
+    assert body["tools"][0] == {"type": "tool_search_tool_bm25_20251119", "name": "tool_search_tool_bm25"}
+    deferred = {t["name"] for t in body["tools"] if t.get("defer_loading")}
+    assert deferred == {"email_list", "rss_read"}  # l'outil de recherche et le socle restent chargés
+    assert not any("cache_control" in t for t in body["tools"])  # le système porte le point du préfixe
+    # sans système, le point du préfixe va au dernier outil chargé d'emblée, jamais à un différé (400)
+    await backend.complete(request(Message("user", "x"), tools=DEFERRED, system=""))
+    marked = [t["name"] for t in fake.create.calls[1]["tools"] if "cache_control" in t]
+    assert marked == ["memory_search"]
+
+
+async def test_claude_without_deferred_tools_sends_no_search_tool():
+    fake = FakeAnthropic(claude_reply(text("ok")))
+    await ClaudeBackend("k", "claude-opus-5-5", client=fake).complete(request(Message("user", "x")))
+    assert all(t.get("type") is None and not t.get("defer_loading") for t in fake.create.calls[0]["tools"])
+
+
+async def test_claude_replays_the_tool_search_blocks_unchanged():
+    search = {"type": "server_tool_use", "id": "srvtoolu_1", "name": "tool_search_tool_bm25",
+              "input": {"query": "lire mes mails"}}
+    found = {"type": "tool_search_tool_result", "tool_use_id": "srvtoolu_1",
+             "content": {"type": "tool_search_tool_search_result",
+                         "tool_references": [{"type": "tool_reference", "tool_name": "email_list"}]}}
+    fake = FakeAnthropic(
+        claude_reply(text("Je cherche."), search, found, tool_use("toolu_9", "email_list", {}), stop="tool_use",
+                     model="claude-opus-5-5"),
+        claude_reply(text("Deux mails."), model="claude-opus-5-5"),
+    )
+    backend = ClaudeBackend("k", "claude-opus-5-5", client=fake)
+    req = request(Message("user", "J'ai des mails ?"), tools=DEFERRED)
+    first = await backend.complete(req)
+    assert [c.name for c in first.tool_calls] == ["email_list"]  # la recherche n'est pas un appel à exécuter
+    result = Message("tool", "2 mails", tool_call_id="toolu_9", name="email_list")
+    await backend.complete(req.extend(Message("assistant", first.text, tool_calls=first.tool_calls), result))
+    sent = fake.create.calls[1]["messages"][1]["content"]
+    assert [b["type"] for b in sent] == ["text", "server_tool_use", "tool_search_tool_result", "tool_use"]
+    assert sent[1]["id"] == "srvtoolu_1" and sent[1]["input"] == {"query": "lire mes mails"}
+    assert sent[2]["content"]["tool_references"] == [{"type": "tool_reference", "tool_name": "email_list"}]
+    assert "cache_control" not in sent[1] and "cache_control" not in sent[2]
+    # aucun tool_result pour l'identifiant de la recherche (l'API le refuserait)
+    results = [b for m in fake.create.calls[1]["messages"] if m["role"] == "user" and isinstance(m["content"], list)
+               for b in m["content"] if b.get("type") == "tool_result"]
+    assert [b["tool_use_id"] for b in results] == ["toolu_9"]
+
+
 async def test_claude_through_the_runtime_tool_loop():
     """La boucle unique du runtime : appel coupé rejoué au double, outil exécuté, réflexion rejouée."""
     seen: list[str] = []

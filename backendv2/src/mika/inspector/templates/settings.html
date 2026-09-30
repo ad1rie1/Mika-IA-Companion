@@ -65,6 +65,7 @@
     <h3>{{ 'Ajouter à' if rec.new else 'Modifier' }} · {{ rec.label }}{% if not rec.new and rec.keyed %} · <span class="mono">{{ rec.key }}</span>{% endif %}</h3>
     <input type="hidden" name="csrf" value="{{ s.csrf }}"><input type="hidden" name="_section" value="{{ s.key }}">
     <input type="hidden" name="_enregistrement" value="{{ rec.path }}"><input type="hidden" name="_ancienne" value="{{ rec.key }}">
+    {% if rec.back %}<input type="hidden" name="_retour" value="{{ rec.back }}">{% endif %}
     {% for e in rec.general %}<div class="flash danger">{{ e }}</div>{% endfor %}
     {% if rec.keyed %}
     <div class="field{{ ' has-error' if rec.name_error }}"><label for="rec-{{ s.key }}-nom">Nom</label>

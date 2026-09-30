@@ -263,7 +263,7 @@ async def _show(ev: Any, ports: Mapping[str, Any]) -> None:
 # ── Arbitrage ─────────────────────────────────────────────────────────────
 
 
-@BODY.modulate(kinds=[Kind.INITIATIVE, Kind.STEP], reads=[c.SLEEP, c.ENERGY, c.AWAKE_SINCE])
+@BODY.modulate(kinds=[Kind.INITIATIVE, Kind.STEP, Kind.TASK], reads=[c.SLEEP, c.ENERGY, c.AWAKE_SINCE])
 def _night(s: BodyState, frame: Frame, row: RowView) -> Modulation:
     """Elle ne prend pas la parole ni ne travaille en dormant ; tirée du
     sommeil en pleine nuit, pas davantage (elle va se rendormir) ; juste

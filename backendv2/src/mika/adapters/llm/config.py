@@ -21,11 +21,12 @@ from mika.kernel.forms import Knob
 from mika.ports.llm import LLMBackend, LLMRequest, LLMResponse, MissingPersona
 from mika.vocab.episodes import FALLBACKS, VOICE_ROLES, Role
 
-Kind = Literal["claude", "openai", "ollama", "ollama_cloud"]
+Kind = Literal["claude", "claude_code", "openai", "ollama", "ollama_cloud"]
 
 
-_KINDS = (("claude", "Claude (Anthropic)"), ("openai", "Compatible OpenAI"), ("ollama", "Ollama (local)"),
-          ("ollama_cloud", "Ollama Cloud"))
+_KINDS = (("claude", "Claude (Anthropic)"), ("claude_code", "Claude Code (la CLI, son login)"),
+          ("openai", "Compatible OpenAI"), ("ollama", "Ollama (local)"), ("ollama_cloud", "Ollama Cloud"))
+_AUTHS = (("abonnement", "le login de la CLI (abonnement)"), ("cle_api", "une clé d'API Console"))
 
 
 class BackendSpec(BaseModel):
@@ -37,8 +38,12 @@ class BackendSpec(BaseModel):
     kind: Annotated[Kind, Knob(label="Type", choices=_KINDS, advanced=False, order=10)]
     model: Annotated[str, Knob(label="Modèle", help="L'identifiant chez le fournisseur ; « charger » liste ceux "
                                               "qu'il propose.", loader="models", advanced=False, order=20)]
+    auth: Annotated[Literal["abonnement", "cle_api"], Knob(
+        label="Connexion", help="Mika ne voit jamais le login : la CLI s'authentifie elle-même. Une clé d'API "
+                                "Console se déclare ci-dessous.", choices=_AUTHS, advanced=False, order=25,
+        only=(("kind", ("claude_code",)),))] = "abonnement"
     api_key: Annotated[str, Knob(label="Clé d'API", secret=True, advanced=False, order=30,
-                                 only=(("kind", ("claude", "openai", "ollama_cloud")),))] = ""
+                                 only=(("kind", ("claude", "openai", "ollama_cloud", "claude_code")),))] = ""
     base_url: Annotated[str, Knob(label="URL de base", help="Un serveur compatible OpenAI (vide : OpenAI).",
                                   advanced=False, order=40, only=(("kind", ("openai",)),))] = ""
     host: Annotated[str, Knob(label="Hôte", help="Vide : http://localhost:11434 en local, https://ollama.com "
@@ -55,6 +60,21 @@ class BackendSpec(BaseModel):
                                 order=80, only=(("kind", ("ollama", "ollama_cloud")),))] = False
     max_reply_tokens: Annotated[int, Knob(label="Réponse max. (jetons)", help="0 : défaut du type.", lo=0,
                                           hi=65_536, order=90)] = Field(default=0, ge=0)
+    claude_bin: Annotated[str, Knob(label="Commande claude", help="Vide : « claude » dans le PATH, sinon "
+                                                                  "~/.local/bin/claude.", order=100,
+                                    only=(("kind", ("claude_code",)),))] = ""
+    config_dir: Annotated[str, Knob(label="Dossier de la CLI", help="Vide : la CLI telle que tu l'as connectée. "
+                                                                    "Rempli : un dossier à part, où tu te "
+                                                                    "connectes avec « mika claude-code login ».",
+                                    order=110, only=(("kind", ("claude_code",)),))] = ""
+    quota_ceiling: Annotated[float, Knob(label="Réserve d'abonnement", help="Au-delà de cet usage de "
+                                         "l'abonnement, ses appels de fond passent au repli (la conversation "
+                                         "n'est jamais retenue). 0,8 = 80 % ; 0 : pas de réserve.", lo=0.0,
+                                         hi=1.0, step=0.05, order=120, only=(("kind", ("claude_code",)),))] = \
+        Field(default=0.8, ge=0.0, le=1.0)
+    fallback: Annotated[str, Knob(label="Repli", help="Le fournisseur (son nom) qui prend le relais quand "
+                                                      "celui-ci échoue : non connecté, quota, panne.",
+                                  order=130)] = ""
 
     @property
     def local(self) -> bool:
@@ -94,11 +114,26 @@ class LLMConfig(BaseModel):
         for role, name in self.routes.items():
             if name not in self.backends:
                 out.append(f"le rôle « {role} » vise un fournisseur inconnu : {name}")
+        for name, spec in self.backends.items():
+            if spec.fallback and spec.fallback not in self.backends:
+                out.append(f"le fournisseur « {name} » se replie sur un inconnu : {spec.fallback}")
+            elif spec.fallback == name:
+                out.append(f"le fournisseur « {name} » ne peut pas être son propre repli")
+            if spec.kind == "claude_code" and spec.auth == "cle_api" and not spec.api_key:
+                out.append(f"le fournisseur « {name} » (clé d'API) n'a pas de clé")
         return out
 
 
-def build_backend(name: str, spec: BackendSpec) -> LLMBackend:
+def build_backend(name: str, spec: BackendSpec, *, relay: Any = None, relay_base: Any = None,
+                  work_dir: Any = None) -> LLMBackend:
     # imports ici : chaque fournisseur tire son SDK, qui peut manquer (extra « llm »)
+    if spec.kind == "claude_code":
+        from mika.adapters.llm.claude_code import ClaudeCodeBackend  # noqa: PLC0415
+        from mika.adapters.mcp.relay import Relay  # noqa: PLC0415
+
+        return ClaudeCodeBackend(spec.model, relay=relay or Relay(), relay_base=relay_base, name=name,
+                                 auth=spec.auth, api_key=spec.api_key, claude_bin=spec.claude_bin,
+                                 config_dir=spec.config_dir, work_dir=work_dir, quota_ceiling=spec.quota_ceiling)
     if spec.kind == "claude":
         from mika.adapters.llm.claude import ClaudeBackend  # noqa: PLC0415
 
@@ -121,14 +156,26 @@ def build_backend(name: str, spec: BackendSpec) -> LLMBackend:
                               name=name)
 
 
+def price_kind(spec: BackendSpec) -> str:
+    """Le tarif d'un fournisseur : Claude Code sur l'abonnement ne se paie pas au jeton."""
+    if spec.kind == "claude_code":
+        return "claude_code" if spec.auth == "abonnement" else "claude"
+    return spec.kind
+
+
 def build_gateway(cfg: LLMConfig, clock: Clock, *, on_trace: Callable[[LLMTrace], None] | None = None,
-                  make: Callable[[str, BackendSpec], LLMBackend] = build_backend) -> Gateway:
+                  make: Callable[[str, BackendSpec], LLMBackend] | None = None, relay: Any = None,
+                  relay_base: Any = None, work_dir: Any = None) -> Gateway:
+    if make is None:
+        def make(name: str, spec: BackendSpec) -> LLMBackend:
+            return build_backend(name, spec, relay=relay, relay_base=relay_base, work_dir=work_dir)
     backends = {name: make(name, spec) for name, spec in sorted(cfg.backends.items())}
     slots = {name: spec.slots or (1 if spec.local else 4) for name, spec in cfg.backends.items()}
     preempt = frozenset(name for name, spec in cfg.backends.items() if slots[name] == 1)
     return Gateway(backends, dict(cfg.routes), clock=clock, voice_roles=frozenset(str(r) for r in VOICE_ROLES),
                    fallbacks={str(k): str(v) for k, v in FALLBACKS.items()}, slots=slots, preempt=preempt,
-                   on_trace=on_trace, pricing={n: (s.kind, s.cache_ttl) for n, s in cfg.backends.items()})
+                   on_trace=on_trace, pricing={n: (price_kind(s), s.cache_ttl) for n, s in cfg.backends.items()},
+                   backend_fallbacks={n: s.fallback for n, s in cfg.backends.items() if s.fallback})
 
 
 class LiveGateway:
@@ -158,3 +205,10 @@ class LiveGateway:
         if self._inner is None:
             raise UnconfiguredRole(req.role)
         return await self._inner.call(req)
+
+    async def aclose(self) -> None:
+        """Arrête ce que les fournisseurs tiennent encore (les CLI de Claude Code)."""
+        for backend in (self._inner.backends.values() if self._inner is not None else ()):
+            close = getattr(backend, "aclose", None)
+            if close is not None:
+                await close()

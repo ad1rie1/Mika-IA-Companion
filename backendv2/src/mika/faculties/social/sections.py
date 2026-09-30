@@ -13,6 +13,8 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from pydantic import BaseModel
+
 from mika.contracts import identity as identity_c
 from mika.contracts import social as c
 from mika.contracts import transcript as transcript_c
@@ -21,7 +23,7 @@ from mika.faculties.social.profile import describe_level
 from mika.kernel.clock import DAY
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Frame
-from mika.kernel.prompt import SectionBody
+from mika.kernel.prompt import SectionBody, readable
 from mika.vocab.episodes import CONVERSATIONAL, Kind
 from mika.vocab.privacy import Sensitivity
 from mika.vocab.words import fold
@@ -138,3 +140,22 @@ async def _profile_text(s: SocialState, frame: Frame, ports: Mapping[str, Any]) 
     if profile is None or not profile.summary_ref:
         return None
     return store.content([profile.summary_ref])
+
+
+# ── Outil : relire sa fiche de la personne en face (même porte que la section) ──
+
+SOCIAL.bundle("social", "relire ce que tu sais de la personne à qui tu parles")
+
+
+class NoArgs(BaseModel):
+    pass
+
+
+@SOCIAL.tool("social_about", description="Relire ce que tu sais de la personne à qui tu parles (ce qu'elle aime, "
+             "ce qui la touche, où vous en êtes).", args=NoArgs, bundle="social", episodes=CONVERSATIONAL)
+async def social_about(args: NoArgs, ctx: Any) -> str:
+    aud = ctx.frame.audience
+    if aud is None or not aud.private_ok:
+        return "Tu ne peux pas relire de fiche sur cette personne ici."
+    enrich = {"profile_text": await _profile_text(ctx.state, ctx.frame, ctx.ports) or {}}
+    return readable(_about(ctx.state, ctx.frame, enrich), aud) or "Tu ne sais encore presque rien de cette personne."

@@ -292,10 +292,31 @@ class ActionSlot:
     compact: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class NavItem:
+    """Un lien d'une rangée de navigation : son texte, où il mène, un compte
+    facultatif (« 3 » non lus) et s'il désigne la page où l'on est."""
+
+    text: str
+    href: Ref
+    count: int | str | None = None
+    active: bool = False
+    tone: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class Nav:
+    """Une rangée de liens en puces (les boîtes d'un courrier, ses dossiers) :
+    une navigation dans la vue, qui se replie sur plusieurs lignes."""
+
+    items: tuple[NavItem, ...]
+    title: str = ""
+
+
 Block = (Table | Fields | Note | Prose | Code | Stats | Timeline | Chart | Grid | Section | Disclosure
-         | ActionSlot)
+         | ActionSlot | Nav)
 BLOCKS: tuple[type, ...] = (Table, Fields, Note, Prose, Code, Stats, Timeline, Chart, Grid, Section, Disclosure,
-                            ActionSlot)
+                            ActionSlot, Nav)
 
 
 # ── Paramètres typés d'une vue ────────────────────────────────────────────

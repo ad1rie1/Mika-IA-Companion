@@ -47,10 +47,34 @@ class ActionContext:
 
 
 @dataclass(frozen=True, slots=True)
+class Preview:
+    """Exactement ce qu'un effet ferait s'il partait maintenant (voir
+    ``CapabilitySpec.preview``) : le texte montré à qui décide, son condensé, et
+    ce qui l'empêcherait de partir tel quel (vide : rien)."""
+
+    text: str
+    digest: str
+    blocked: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class Decision:
+    """Décider d'une de ses propres propositions en attente (``effect.proposed``)
+    depuis une fiche : l'approuver (telle que ``seen`` la montrait) ou la refuser."""
+
+    proposal: int
+    approved: bool
+    note: str = ""
+    #: le condensé de l'aperçu que l'opérateur a lu (vide : celui de la proposition)
+    seen: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class Done:
     """Ce qu'une action a décidé : des brouillons à journaliser (sous ``guard``),
     un message pour l'opérateur, une page où aller, ou des blocs à montrer en
-    place (le résultat d'un test)."""
+    place (le résultat d'un test). ``decide`` : des propositions de la faculté
+    elle-même, approuvées ou refusées (le runtime journalise ``effect.resolved``)."""
 
     drafts: tuple[Draft[Any], ...] = ()
     message: str = ""
@@ -58,3 +82,4 @@ class Done:
     guard: Guard | None = None
     go: Ref | None = None
     show: tuple[Any, ...] = ()
+    decide: tuple[Decision, ...] = ()

@@ -26,6 +26,8 @@ from mika.kernel.inspect import (
     Fields,
     Grid,
     Meter,
+    Nav,
+    NavItem,
     Note,
     Pager,
     Prose,
@@ -62,9 +64,11 @@ def href(ref: Ref) -> str:
     """L'adresse d'un lien de la console (clés encodées, jamais d'autre hôte)."""
     if ref.kind == "url":
         return safe_url(ref.key)
-    if ref.kind == "local":  # une adresse de la console déjà construite par la console
-        return ref.key if ref.key.startswith(PREFIX + "/") and "//" not in ref.key else ""
     query = ("?" + urlencode(ref.params)) if ref.params else ""
+    if ref.kind == "local":  # une adresse de la console déjà construite par la console
+        if not ref.key.startswith(PREFIX + "/") or "//" in ref.key:
+            return ""
+        return ref.key + (("&" if "?" in ref.key else "?") + urlencode(ref.params) if ref.params else "")
     if ref.kind == "episode":
         return f"{PREFIX}/episode/{quote(ref.key, safe='')}{query}"
     if ref.kind == "event":
@@ -218,6 +222,10 @@ def block(b: Any, env: Env, query: Mapping[str, str], depth: int = 0) -> dict[st
     if isinstance(b, Disclosure):
         return {"t": "disclosure", "title": b.title, "open": b.open,
                 "items": [block(x, env, query, depth + 1) for x in b.items]}
+    if isinstance(b, Nav):
+        return {"t": "nav", "title": b.title, "items": [
+            {"text": i.text, "href": href(i.href), "count": "" if i.count is None else str(i.count),
+             "active": i.active, "tone": tone(i.tone)} for i in b.items if isinstance(i, NavItem)]}
     if isinstance(b, ActionSlot):
         return {"t": "action", "key": b.action, "initial": dict(b.initial), "title": b.title, "compact": b.compact,
                 "slot": f"{b.action}|{json.dumps(dict(b.initial), sort_keys=True)}"}

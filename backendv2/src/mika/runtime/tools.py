@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
+from mika.contracts import runtime as rt
 from mika.kernel.events import Draft, Origin
 from mika.kernel.faculty import ToolResult, ToolSpec
 from mika.kernel.frame import Frame
@@ -62,13 +63,32 @@ class ToolContext:
         return self.frame.state(self.spec.owner)
 
     async def emit(self, *drafts: Draft[Any]) -> Commit:
+        return await self._append(drafts, emitter=self.spec.owner)
+
+    async def propose(self, draft: Draft[Any]) -> Commit:
+        """Proposer un effet extérieur : une capacité de la faculté de l'outil.
+
+        ``effect.proposed`` appartient au runtime, qui l'exécute après commit
+        (ou après accord) : un outil ne peut pas l'émettre en son nom (le Mind
+        refuserait l'émetteur). Le runtime l'écrit donc pour lui, corrélé à
+        l'épisode comme une écriture de l'outil — et seulement pour une capacité
+        que la faculté de l'outil possède."""
+        if draft.type is not rt.EFFECT_PROPOSED:
+            raise TypeError(f"propose attend {rt.EFFECT_PROPOSED.name}, reçu {draft.type.name}")
+        owner = self.spec.owner
+        if draft.data.owner != owner or not draft.data.capability.startswith(f"{owner}."):
+            raise PermissionError(f"{owner} ne peut proposer que ses propres capacités "
+                                  f"(pas {draft.data.capability})")
+        return await self._append((draft,), emitter=rt.OWNER)
+
+    async def _append(self, drafts: Sequence[Draft[Any]], *, emitter: str) -> Commit:
         keyed = []
         for d in drafts:
             key = d.dedupe_key or f"{self.call_id}:{self._emitted}"
             self._emitted += 1
             keyed.append(replace(d, dedupe_key=key))
         commit = await self.mind.append(
-            keyed, emitter=self.spec.owner, correlation=self.episode_id, origin=Origin.TOOL,
+            keyed, emitter=emitter, correlation=self.episode_id, origin=Origin.TOOL,
             causation=None, basis=self.frame.root, guard=self.guard, holder=self.episode_id,
         )
         self.frame = Frame(commit.root, self.mind.clock.now(), self.mind.registry,
@@ -111,12 +131,34 @@ class LoopResult:
         return list(dict.fromkeys(cid for cid, _ in self.exchanges))
 
 
-def declare(specs: Sequence[ToolSpec]) -> tuple[ToolDecl, ...]:
-    """Déclarations triées par nom : un préfixe stable pour le cache."""
+def declare(specs: Sequence[ToolSpec], core: frozenset[str] | None = None) -> tuple[ToolDecl, ...]:
+    """Déclarations triées par nom : un préfixe stable pour le cache. Un outil
+    dont le lot n'est pas « en main » (``core``) est déclaré à la demande."""
     return tuple(
-        ToolDecl(s.name, s.description, s.args.model_json_schema())
+        ToolDecl(s.name, s.description, s.args.model_json_schema(), deferred=core is not None and s.bundle not in core)
         for s in sorted(specs, key=lambda s: s.name)
     )
+
+
+CATALOGUE_HEADER = "--- CE QUE TU PEUX AUSSI FAIRE ---"
+
+
+def catalogue(specs: Sequence[ToolSpec], core: frozenset[str] | None, described: Mapping[str, str]) -> str:
+    """Les lots offerts mais pas en main, une ligne chacun : ce qu'elle peut
+    aller chercher. Vide quand tout est en main. Stable d'un tour à l'autre
+    (trié), donc à sa place dans le préfixe en cache."""
+    if core is None:
+        return ""
+    away: dict[str, list[str]] = {}
+    for s in specs:
+        if s.bundle not in core:
+            away.setdefault(s.bundle, []).append(s.name)
+    if not away:
+        return ""
+    lines = [f"- {b} : {described.get(b) or ', '.join(sorted(names))}" for b, names in sorted(away.items())]
+    return "\n".join([CATALOGUE_HEADER,
+                      "Ces outils ne sont pas chargés d'emblée : quand tu en as besoin, cherche-les par ce "
+                      "qu'ils font.", *lines])
 
 
 async def run_tool_loop(

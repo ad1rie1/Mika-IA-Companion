@@ -115,6 +115,16 @@ def items_by_id(store: Any, ids: list[int]) -> dict[int, Item]:
     return {int(r[0]): Item.of(dict(zip(ITEM_COLUMNS, r, strict=True))) for r in rows}
 
 
+def promises_to(frame: Frame, store: Any, person: str) -> list[tuple[int, str, int | None]]:
+    """Les promesses en cours faites à cette personne, avec leur texte. Ne
+    vérifie pas la porte de sa fiche (``private_ok``) : à l'appelant de le faire."""
+    pending = frame.get(c.PROMISES_TO(person))
+    if not pending:
+        return []
+    texts = {i: it.text for i, it in items_by_id(store, [pr.id for pr in pending]).items()}
+    return [(pr.id, texts.get(pr.id, ""), pr.due) for pr in pending if texts.get(pr.id)]
+
+
 @MEMORY.enricher("recall", episodes=CONVERSATIONAL, deadline_ms=2500)
 async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Recall | None:
     vectors, store = ports.get("vectors"), ports.get("store")
@@ -125,10 +135,7 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
     person = frame.get(identity_c.PERSON(ep.target))
     out = Recall(name=frame.get(identity_c.IDENTITY(ep.target)).name)
     if aud.private_ok:
-        pending = frame.get(c.PROMISES_TO(person))
-        if pending:
-            texts = {i: it.text for i, it in items_by_id(store, [pr.id for pr in pending]).items()}
-            out.promises = [(pr.id, texts.get(pr.id, ""), pr.due) for pr in pending if texts.get(pr.id)]
+        out.promises = promises_to(frame, store, person)
     query = query_of(frame, store)
     if vectors is None or not query.strip():
         return out

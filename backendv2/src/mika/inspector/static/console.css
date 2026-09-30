@@ -285,6 +285,18 @@ a.stat:hover { border-color: var(--accent); text-decoration: none; }
 .badge.danger { background: var(--danger-bg); color: var(--danger); border-color: transparent; }
 .badge.info { background: var(--info-bg); color: var(--info); border-color: transparent; }
 .badge.muted { color: var(--muted); }
+/* une rangée de navigation dans une vue (bloc Nav) : des puces */
+.chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.chips-title { font-size: 12.5px; margin-right: 4px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 11px; border-radius: 99px; font-size: 13px;
+  background: var(--surface); color: var(--text-2); border: 1px solid var(--border); white-space: nowrap; }
+.chip:hover { border-color: var(--accent); color: var(--accent); }
+.chip.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); font-weight: 600; }
+.chip.warn { border-color: var(--warn); }
+.chip.muted { color: var(--muted); }
+.chip-count { min-width: 18px; padding: 0 5px; border-radius: 99px; background: var(--sunken); color: var(--text-2);
+  font-size: 11.5px; font-weight: 650; text-align: center; }
+.chip.active .chip-count { background: var(--accent); color: var(--on-accent); }
 .count { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 99px; background: var(--danger); color: #fff;
   font-size: 11.5px; font-weight: 650; display: inline-grid; place-items: center; }
 .count.soft { background: var(--sunken); color: var(--text-2); }

@@ -80,11 +80,16 @@ def _family(table: Mapping[str, object], model: str) -> str | None:
     return max(matches, key=len) if matches else None
 
 
+#: payés autrement qu'au jeton (Claude Code sur l'abonnement de l'utilisateur)
+FREE_PROVIDERS = frozenset({"claude_code"})
+
+
 def price_usd(model: str, usage: Usage, *, provider: str = "", cache_ttl: str = "5m") -> float:
-    """Coût en dollars d'un appel ; ``provider`` est le nom du fournisseur (``ollama*`` = gratuit)."""
+    """Coût en dollars d'un appel ; ``provider`` est le nom du fournisseur (``ollama*`` et Claude Code
+    sur l'abonnement : gratuits au jeton)."""
     if cache_ttl not in CACHE_WRITE_MULTIPLIER:
         raise ValueError(f"cache_ttl inconnu : {cache_ttl!r}")
-    if provider.strip().lower().startswith("ollama"):
+    if provider.strip().lower().startswith("ollama") or provider.strip().lower() in FREE_PROVIDERS:
         return 0.0
     norm = model.strip().lower()
     key = _family(PRICING_PER_MILLION, norm)

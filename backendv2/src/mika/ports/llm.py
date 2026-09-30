@@ -45,6 +45,9 @@ class ToolDecl:
     name: str
     description: str
     schema: Mapping[str, Any]
+    #: à la demande : un fournisseur qui sait différer (recherche d'outils) ne le
+    #: charge pas d'emblée ; celui qui ne sait pas l'envoie comme les autres
+    deferred: bool = False
 
 
 @dataclass(frozen=True, slots=True)

@@ -169,8 +169,18 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
 
     # ── sens ──
     async def save_mail(cfg: MailConfig, by: str) -> list[str]:
-        await settings.save_email(**cfg.model_dump())
+        await settings.save_email(cfg)
+        # ce que ses proposeurs lisent (les comptes où elle prépare des réponses) est un réglage journalisé
+        problems = await live.reconfigure()
+        if problems:  # le courrier est enregistré ; seuls ses paramètres attendent la prochaine reconfiguration
+            log.warning("courrier enregistré, paramètres non rejournalisés : %s", "; ".join(problems))
         return []
+
+    def mail_facts() -> list[tuple[str, str]]:
+        accounts = settings.email().accounts
+        ready = sum(1 for a in accounts.values() if a.ready)
+        return [("Comptes", f"{len(accounts)} ({ready} prêt(s) à relever)" if accounts else "aucun"),
+                ("Dans la console", "Courrier › Comptes")]
 
     async def save_feeds(cfg: FeedsSettings, by: str) -> list[str]:
         await settings.save_feeds(list(cfg.urls))
@@ -206,9 +216,9 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                         description="Le robot qui la relie à Telegram. L'enregistrer le redémarre.",
                         facts=telegram_facts),
         SettingsSection("courrier", "Courrier", "sens", MailConfig, settings.email, save_mail,
-                        description="Sa boîte aux lettres (IMAP pour lire, SMTP pour envoyer), relue à chaque "
-                                    "relève.", order=10,
-                        facts=lambda: [("Boîte", "prête" if settings.email().ready else "incomplète")]),
+                        description="Ses boîtes aux lettres (IMAP pour lire et ranger, SMTP pour envoyer) et, pour "
+                                    "chacune, sa façon d'y écrire. Relues à chaque relève.", order=10,
+                        facts=mail_facts),
         SettingsSection("flux", "Flux", "sens", FeedsSettings, lambda: FeedsSettings(urls=tuple(settings.feeds())),
                         save_feeds, description="Ce qu'elle lit du monde.", order=20),
         SettingsSection("transcription", "Transcription", "sens", SttSettings, stt, save_stt, order=30,

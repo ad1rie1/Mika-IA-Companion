@@ -19,7 +19,7 @@ TEMPLATE_KINDS = {"bool": "bool", "select": "select", "textarea": "textarea", "l
 
 
 def field_view(f: forms.FormField, value: Any, *, error: str = "", prefix: str = "f") -> dict[str, Any] | None:
-    if f.kind in ("group", "records", "mapping"):
+    if f.kind in ("group", "records", "mapping", "hidden"):
         return None
     kind = TEMPLATE_KINDS.get(f.kind, "text")
     text = forms.as_text(f, value) if value is not None else ""
@@ -54,7 +54,8 @@ def action_view(spec: ActionSpec, *, csrf: str, back: str, subject: str = "", in
     prefix = f"a-{spec.owner}-{spec.name}-{_secrets.token_hex(3)}"
     views = [v for f in fields if (v := field_view(f, given.get(f.path), error=errors.get(f.path, ""),
                                                    prefix=prefix)) is not None]
-    paths = {f.path for f in fields}
+    # un champ caché (posé par la page) repart comme une valeur fixée, pas comme un champ
+    paths = {f.path for f in fields if f.kind != "hidden"}
     fixed = [(k, str(v)) for k, v in dict(initial or {}).items() if k not in paths and not k.startswith("_")]
     button = str(dict(initial or {}).get("_bouton", "") or spec.title)
     return {"url": f"/inspecteur/action/{spec.key}", "csrf": csrf, "nonce": _secrets.token_urlsafe(12),

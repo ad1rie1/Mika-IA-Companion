@@ -163,6 +163,8 @@ class Emitted(Payload):
 
 
 FORGE = Faculty("forge", state=ForgeState, init=lambda p: ForgeState(), params=ForgeParams)
+FORGE.bundle(BUNDLE, "la Forge : écrire, tester, relire et commander tes apps")
+FORGE.bundle(APPS_BUNDLE, "utiliser les outils de tes apps")
 FORGE.declare(*c.ALL)
 WRITTEN = FORGE.event("written", Written)
 SWITCHED = FORGE.event("switched", Switched)
@@ -485,7 +487,7 @@ def _port(ctx: Any) -> Any:
 
 
 @FORGE.tool("forge_list", description="Tes apps : état, version, erreurs.", args=NoArgs, bundle=BUNDLE,
-            episodes=BUILD)
+            episodes=BUILD, owner_only=True)
 async def forge_list(args: NoArgs, ctx: Any) -> Any:
     port = _port(ctx)
     if port is None or not _may_build(ctx):
@@ -501,7 +503,7 @@ async def forge_list(args: NoArgs, ctx: Any) -> Any:
 
 
 @FORGE.tool("forge_read", description="Relire le manifeste, le code et le journal d'une app.", args=AppArgs,
-            bundle=BUNDLE, episodes=BUILD)
+            bundle=BUNDLE, episodes=BUILD, owner_only=True)
 async def forge_read(args: AppArgs, ctx: Any) -> Any:
     port = _port(ctx)
     if port is None or not _may_build(ctx):
@@ -525,7 +527,7 @@ def _written_of(info: AppInfo | None, app: str, version: int) -> Any:
             "déclarer des vues (view_<vue>(api, params) rend une enveloppe de blocs), leurs actions à champs "
             "(action_<vue>_<action>(api, data) rend {ok, message}) et des réglages typés, que la console rend ; "
             "forge_help te donne le mode d'emploi et un exemple complet.", args=WriteArgs,
-            bundle=BUNDLE, episodes=BUILD, max_calls_per_episode=3)
+            bundle=BUNDLE, episodes=BUILD, max_calls_per_episode=3, owner_only=True)
 async def forge_write(args: WriteArgs, ctx: Any) -> Any:
     port = _port(ctx)
     if port is None or not _may_build(ctx):
@@ -556,7 +558,8 @@ def _tested(r: Any, verdict: str = "") -> ToolResult:
 
 @FORGE.tool("forge_test", description="Lancer une fonction d'une app maintenant, et voir ce qu'elle fait (une vue : "
             "son enveloppe est vérifiée ; une action : elle doit rendre {ok, message}).",
-            args=TestArgs, bundle=BUNDLE, episodes=BUILD, max_calls_per_episode=4)
+            args=TestArgs, bundle=BUNDLE, episodes=BUILD, max_calls_per_episode=4,
+            owner_only=True)
 async def forge_test(args: TestArgs, ctx: Any) -> Any:
     port = _port(ctx)
     if port is None or not _may_build(ctx):
@@ -591,7 +594,8 @@ async def _test_view(port: Any, app: str, method: str, raw: dict[str, Any]) -> T
     return _tested(r, verdict + said)
 
 
-@FORGE.tool("forge_logs", description="Le journal d'une app.", args=AppArgs, bundle=BUNDLE, episodes=BUILD)
+@FORGE.tool("forge_logs", description="Le journal d'une app.", args=AppArgs, bundle=BUNDLE, episodes=BUILD,
+            owner_only=True)
 async def forge_logs(args: AppArgs, ctx: Any) -> Any:
     port = _port(ctx)
     if port is None or not _may_build(ctx):
@@ -600,7 +604,8 @@ async def forge_logs(args: AppArgs, ctx: Any) -> Any:
 
 
 @FORGE.tool("forge_command", description="Activer, arrêter, revenir à la version précédente, effacer (à la "
-            "corbeille) ou vider le stockage d'une app.", args=CommandArgs, bundle=BUNDLE, episodes=BUILD)
+            "corbeille) ou vider le stockage d'une app.", args=CommandArgs, bundle=BUNDLE, episodes=BUILD,
+            owner_only=True)
 async def forge_command(args: CommandArgs, ctx: Any) -> Any:
     port = _port(ctx)
     if port is None or not _may_build(ctx):
@@ -626,13 +631,17 @@ async def forge_command(args: CommandArgs, ctx: Any) -> Any:
 
 
 @FORGE.tool("forge_call", description="Utiliser un outil d'une de tes apps.", args=CallArgs, bundle=APPS_BUNDLE,
-            episodes=[Kind.REPLY, Kind.INITIATIVE, Kind.STEP], max_calls_per_episode=3)
+            episodes=[Kind.REPLY, Kind.INITIATIVE, Kind.STEP], max_calls_per_episode=3,
+            owner_only=True)
 async def forge_call(args: CallArgs, ctx: Any) -> Any:
     port = _port(ctx)
     app = ctx.frame.state("forge").apps.get(args.app)
     ep = ctx.frame.episode
     if port is None or app is None or not app.enabled or app.broken:
         return ToolResult(ok=False, content="Cette app n'est pas disponible.")
+    if not _may_build(ctx):
+        # une app peut sortir ce qu'on lui passe vers ses domaines : pas devant n'importe qui
+        return ToolResult(ok=False, content="Tu n'utilises tes apps que pour tes propriétaires.")
     if not app.promoted and (ep is None or ep.kind != Kind.STEP):
         return ToolResult(ok=False, content="Les outils de cette app ne servent que quand tu travailles "
                                             "(un opérateur peut les promouvoir).")

@@ -90,6 +90,7 @@ class CameraState:
 
 
 CAMERA = Faculty("camera", state=CameraState, init=lambda p: CameraState(), params=CameraParams)
+CAMERA.bundle(BUNDLE, "regarder maintenant par la caméra")
 CAMERA.declare(*c.ALL)
 
 
@@ -217,7 +218,7 @@ class LookArgs(BaseModel):
 
 
 @CAMERA.tool("camera_look", description="Regarder maintenant par la caméra.", args=LookArgs, bundle=BUNDLE,
-             episodes=[Kind.REPLY, Kind.STEP], max_calls_per_episode=2)
+             episodes=[Kind.REPLY, Kind.STEP], max_calls_per_episode=2, owner_only=True)
 async def camera_look(args: LookArgs, ctx: Any) -> Any:
     port, llm = ctx.ports.get("camera"), ctx.ports.get("llm")
     if not _for_owner(ctx.frame):

@@ -16,7 +16,8 @@
 {% if filters %}
 <form class="filters" method="get">
   {% for k, v in keep %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
-  {% for f in filters %}
+  {% for f in filters if f.kind == "hidden" %}{% if f.value %}<input type="hidden" name="{{ f.name }}" value="{{ f.value }}">{% endif %}{% endfor %}
+  {% for f in filters if f.kind != "hidden" %}
   <label>{{ f.label }}
     {% if f.kind == "select" %}<select name="{{ f.name }}"><option value="">Tous</option>{% for v, l in f.choices %}<option value="{{ v }}"{{ ' selected' if v == f.value }}>{{ l }}</option>{% endfor %}</select>
     {% elif f.kind == "bool" %}<select name="{{ f.name }}"><option value="">—</option><option value="oui"{{ ' selected' if f.value == 'oui' }}>oui</option><option value="non"{{ ' selected' if f.value == 'non' }}>non</option></select>

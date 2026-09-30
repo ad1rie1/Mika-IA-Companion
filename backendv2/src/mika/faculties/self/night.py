@@ -33,14 +33,14 @@ from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as c
 from mika.contracts import transcript as transcript_c
-from mika.faculties.self import SELF, SelfState, persona_for
+from mika.faculties.self import SELF, NoArgs, SelfState, persona_for
 from mika.faculties.self.records import Dream, Journal
 from mika.kernel.clock import DAY, MINUTE, instant, local_date_of_night
 from mika.kernel.codec import h64
 from mika.kernel.events import Content, VoiceProvenance
 from mika.kernel.faculty import CatchUp, Zone
 from mika.kernel.frame import Audience, Frame
-from mika.kernel.prompt import SectionBody
+from mika.kernel.prompt import SectionBody, readable
 from mika.ports.llm import LLMRequest, Message
 from mika.vocab import affect as A
 from mika.vocab import privacy
@@ -398,3 +398,19 @@ def _dream_section(s: SelfState, frame: Frame, enrich: Mapping[str, Any]) -> Sec
     return SectionBody(f"Tu as fait {word} cette nuit, il te revient encore : {text}\n"
                        "Tu peux en parler si ça vient, ou pas.", provenance=(f"dream:{d.id}",))
 
+
+
+@SELF.tool("self_yesterday", description="Relire ton fil d'hier : le journal que tu as écrit cette nuit.",
+           args=NoArgs, bundle="self", episodes=CONVERSATIONAL)
+async def self_yesterday(args: NoArgs, ctx: Any) -> str:
+    enrich = {"night": await _night_texts(ctx.state, ctx.frame, ctx.ports) or {}}
+    return readable(_yesterday_section(ctx.state, ctx.frame, enrich), ctx.frame.audience) or \
+        "Tu n'as rien écrit pour hier."
+
+
+@SELF.tool("self_dream", description="Te rappeler le rêve de cette nuit (le matin seulement, tant qu'il est vif).",
+           args=NoArgs, bundle="self", episodes=CONVERSATIONAL)
+async def self_dream(args: NoArgs, ctx: Any) -> str:
+    enrich = {"night": await _night_texts(ctx.state, ctx.frame, ctx.ports) or {}}
+    return readable(_dream_section(ctx.state, ctx.frame, enrich), ctx.frame.audience) or \
+        "Tu ne te souviens d'aucun rêve."

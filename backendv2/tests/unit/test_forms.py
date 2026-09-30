@@ -12,7 +12,7 @@ from hypothesis import strategies as st
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from mika.adapters.llm.config import BackendSpec, LLMConfig
-from mika.adapters.mail import MailConfig
+from mika.adapters.mail import MailAccount, MailConfig
 from mika.contracts.self_ import PersonaDoc
 from mika.kernel.forms import (
     UNBOUNDED_NOTE,
@@ -234,7 +234,7 @@ def test_real_llm_config():
     backends = {i.path: i for i in f["backends"].item}
     assert f["backends"].kind == "records"
     assert backends["kind"].kind == "select" and backends["kind"].required
-    assert {v for v, _ in backends["kind"].choices} == {"claude", "openai", "ollama", "ollama_cloud"}
+    assert {v for v, _ in backends["kind"].choices} == {"claude", "claude_code", "openai", "ollama", "ollama_cloud"}
     assert backends["api_key"].kind == "secret"
     assert (backends["slots"].lo, backends["slots"].hi) == (0, 32)
     # bornée et documentée pour la console : modifiable, vide = celle du fournisseur
@@ -247,12 +247,17 @@ def test_real_llm_config():
 
 
 def test_real_mail_config():
-    f = fields_by_path(MailConfig)
-    assert f["password"].kind == "secret"
-    assert f["imap_ssl"].kind == "bool"
+    """Plusieurs comptes : une liste d'enregistrements, chacun avec ses secrets et sa voix."""
+    accounts = fields_by_path(MailConfig)["accounts"]
+    assert accounts.kind == "records"
+    f = {i.path: i for i in accounts.item}
+    assert f["password"].kind == "secret" and f["smtp_password"].kind == "secret"
+    assert f["imap_ssl"].kind == "bool" and f["autodraft"].kind == "bool"
     # bornés pour la console : modifiables
     assert not f["imap_port"].readonly and (f["since_days"].lo, f["since_days"].hi) == (1, 60)
     assert {v for v, _ in f["smtp_security"].choices} == {"starttls", "ssl", "none"}
+    assert {v for v, _ in f["voice"].choices} == {"elle", "assistante", "proprietaire"}
+    assert f["tone"].kind == "textarea" and f["instructions"].kind == "textarea" and f["folders"].kind == "lines"
 
 
 # ── flatten / nest ────────────────────────────────────────────────────────
@@ -264,7 +269,7 @@ def test_real_mail_config():
            color=Color.BLUE, limit=4.0),
     PersonaDoc(traits=("curieuse",), temperament=Temperament(optimism=0.8, background=Emotion.SAD)),
     LLMConfig(backends={"main": BackendSpec(kind="claude", model="m", api_key="k")}, routes={"conversation": "main"}),
-    MailConfig(imap_host="h", password="p"),
+    MailConfig(accounts={"perso": MailAccount(imap_host="h", password="p", folders=("INBOX", "Pro"))}),
 ])
 def test_flatten_nest_round_trip(value):
     flat = flatten(value)

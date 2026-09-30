@@ -41,6 +41,8 @@ from mika.runtime import operations
 SECTION = "_section"
 LOAD = "_charger"
 RECORD = "_enregistrement"
+#: la page de la console où revenir après avoir enregistré un enregistrement
+BACK = "_retour"
 RECORD_KEY = "_cle"
 RECORD_OLD = "_ancienne"
 DELETE = "_supprimer"
@@ -62,6 +64,8 @@ class State:
     record_values: dict[str, Any] = field(default_factory=dict)
     record_errors: dict[str, str] = field(default_factory=dict)
     yaml_text: str | None = None
+    #: la page de la console d'où l'on vient (vide : les réglages)
+    back: str = ""
 
 
 def tab_url(tab: str, **query: str) -> str:
@@ -184,6 +188,7 @@ class SettingsForms:
             loaded: dict[str, list[tuple[str, str]]] = {}
             if editing is None and query.get("section") == s.key and query.get("enregistrement"):
                 editing = (query["enregistrement"], query.get("cle", ""))
+                state.back = back_to(query.get("retour", ""))
                 wanted = query.get("charger", "")
                 if wanted:
                     got = await self._load_choices(s, editing, wanted)
@@ -284,7 +289,7 @@ class SettingsForms:
                 "name": name, "name_error": state.record_errors.get(RECORD_KEY, ""), "groups": groups,
                 "advanced": advanced, "open": any(v.get("error") for f, v in placed if f.advanced),
                 "general": _placed([f.path for f in fields] + [RECORD_KEY], state.record_errors),
-                "cancel": tab_url(tab)}
+                "back": state.back, "cancel": state.back or tab_url(tab)}
 
     async def _load_choices(self, s: SettingsSection, editing: tuple[str, str],
                             wanted: str) -> list[tuple[str, str]] | str:
@@ -340,7 +345,7 @@ class SettingsForms:
         return await self._commit(ui, s, new, by, tab, s.key, State(values=values))
 
     async def _commit(self, ui: Any, s: SettingsSection, new: Any, by: str, tab: str, subject: str,
-                      state: State, message: str = "") -> tuple[Response | None, dict[str, State], int]:
+                      state: State, message: str = "", back: str = "") -> tuple[Response | None, dict[str, State], int]:
         assert s.save is not None
         try:
             problems = await s.save(new, by)
@@ -351,7 +356,7 @@ class SettingsForms:
             return None, {s.key: state}, 400
         await operations.audit(ui.kernel, f"console.reglages.{s.key}", by=by, subject_kind="reglage",
                                subject=subject)
-        return self._done(ui, tab, "ok", message or f"{s.label} : enregistré."), {}, 303
+        return self._done(ui, tab, "ok", message or f"{s.label} : enregistré.", back), {}, 303
 
     async def _save_record(self, ui: Any, s: SettingsSection, current: Any, data: Mapping[str, str],
                            lists: Mapping[str, list[str]], by: str,
@@ -375,7 +380,8 @@ class SettingsForms:
         record = None
         if not errors:
             record, errors = _record_from(model, entry, flat, values)
-        state = State(record=(path, old), record_values={**values, RECORD_KEY: name}, record_errors=errors)
+        state = State(record=(path, old), record_values={**values, RECORD_KEY: name}, record_errors=errors,
+                      back=back_to(data.get(BACK, "")))
         if errors or record is None:
             state.messages = [("danger", "Rien n'a été enregistré : corrige les champs signalés.")]
             return None, {s.key: state}, 400
@@ -396,7 +402,8 @@ class SettingsForms:
             return None, {s.key: state}, 400
         subject = f"{s.key}/{path}/{name}"
         response, states, status = await self._commit(ui, s, new, by, tab, subject, state,
-                                                      f"« {name} » enregistré." if keyed else "Enregistré.")
+                                                      f"« {name} » enregistré." if keyed else "Enregistré.",
+                                                      back_to(data.get(BACK, "")))
         wanted = data.get(LOAD, "")
         if response is not None and wanted:
             target = tab_url(tab, section=s.key, enregistrement=path, cle=name, charger=wanted)
@@ -452,10 +459,22 @@ class SettingsForms:
                                subject_kind="reglage", subject=s.key)
         return self._done(ui, tab, tone, message), {}, 303
 
-    def _done(self, ui: Any, tab: str, tone: str, message: str) -> Response:
+    def _done(self, ui: Any, tab: str, tone: str, message: str, back: str = "") -> Response:
         token = _secrets.token_urlsafe(9)
         ui.flash(token, tone, message)
+        if back:  # revenir d'où l'on venait (une page de la console : le courrier, ses comptes)
+            sep = "&" if "?" in back else "?"
+            return secure(RedirectResponse(f"{back}{sep}flash={token}", status_code=303))
         return secure(RedirectResponse(tab_url(tab, flash=token), status_code=303))
+
+
+def back_to(target: str) -> str:
+    """Un retour dans la console seulement (jamais une autre adresse) ; vide sinon."""
+    target = target.strip()
+    if target.startswith(PREFIX + "/") and "//" not in target and "\\" not in target and len(target) < 2000 \
+            and all(ord(ch) >= 32 for ch in target):
+        return target
+    return ""
 
 
 def _entry(current: Any, path: str, key: str, keyed: bool) -> BaseModel | None:

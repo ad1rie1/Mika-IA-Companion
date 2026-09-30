@@ -15,7 +15,7 @@ from mika.app.paths import PERSONA
 from mika.contracts import identity as identity_c
 from mika.contracts import self_ as self_c
 from mika.faculties.affect import AFFECT
-from mika.faculties.agency import AGENCY
+from mika.faculties.agency import AGENCY, task_brief
 from mika.faculties.agency import brief as initiative_brief
 from mika.faculties.attention import ATTENTION
 from mika.faculties.body import BODY
@@ -67,16 +67,24 @@ def policies() -> dict[str, EpisodePolicy]:
         Kind.REPLY: EpisodePolicy(kind=Kind.REPLY, role=Role.REPLY, priority=0, lane="conversation",
                                   guard=_reply_guard, max_tokens=1024, deadline_s=180.0,
                                   tool_bundles=frozenset({"memory", "identity", "goals", "email", "rss", "camera",
-                                                          "forge", "forge_apps"})),
+                                                          "forge", "forge_apps", "self", "attention", "social"}),
+                                  core_bundles=frozenset({"memory", "identity", "goals"})),
         Kind.INITIATIVE: EpisodePolicy(kind=Kind.INITIATIVE, role=Role.INITIATIVE, priority=1, lane="conversation",
                                        brief=initiative_brief, max_tokens=600, deadline_s=180.0,
-                                       tool_bundles=frozenset({"memory", "identity", "rss", "forge_apps"})),
+                                       tool_bundles=frozenset({"memory", "identity", "rss", "forge_apps", "self",
+                                                               "attention", "social"}),
+                                       core_bundles=frozenset({"memory", "identity"})),
         # un pas de travail : sa voix (compacte), pour elle seule — ni fil, ni livraison ; le verdict fait l'affect
         Kind.STEP: EpisodePolicy(kind=Kind.STEP, role=Role.STEP, priority=2, lane="background",
                                  persona_depth="compact", visible=False, delivered=False, brief=step_brief,
                                  max_tool_turns=12, max_tokens=2048, deadline_s=300.0,
                                  tool_bundles=frozenset({"goals", "memory", "workshop", "email", "rss",
                                                          "camera", "forge", "forge_apps"})),
+        # une tâche qu'une faculté lui confie (préparer un brouillon de réponse) : sa voix, pour elle seule
+        Kind.TASK: EpisodePolicy(kind=Kind.TASK, role=Role.STEP, priority=2, lane="background",
+                                 persona_depth="compact", visible=False, delivered=False, brief=task_brief,
+                                 max_tool_turns=6, max_tokens=2048, deadline_s=240.0,
+                                 tool_bundles=frozenset({"email", "memory", "identity"})),
         # une pensée à voix haute : sa voix brève, pas dans le fil, à l'écran seulement
         Kind.MURMUR: EpisodePolicy(kind=Kind.MURMUR, role=Role.MURMUR, priority=1, lane="conversation",
                                    persona_depth="compact", visible=False, max_tokens=80, deadline_s=60.0),
@@ -90,9 +98,9 @@ def arbitration() -> ArbitrationPolicy:
     travail, en quelques minutes quand l'envie est là ; rarement quand elle
     s'use."""
     return ArbitrationPolicy(
-        thresholds={Kind.INITIATIVE: 9.0, Kind.STEP: 8.0},
-        max_rates={Kind.INITIATIVE: 0.1, Kind.STEP: 1 / 120},
-        aging_per_hour={Kind.INITIATIVE: 0.0, Kind.STEP: 0.0},
+        thresholds={Kind.INITIATIVE: 9.0, Kind.STEP: 8.0, Kind.TASK: 8.0},
+        max_rates={Kind.INITIATIVE: 0.1, Kind.STEP: 1 / 120, Kind.TASK: 1 / 300},
+        aging_per_hour={Kind.INITIATIVE: 0.0, Kind.STEP: 0.0, Kind.TASK: 0.0},
     )
 
 

@@ -38,6 +38,9 @@ def _atelier(ctx: Any) -> tuple[Any, Any] | str:
     return g, port
 
 
+GOALS.bundle(BUNDLE, "l'atelier d'un projet : lire, écrire, lancer des programmes isolés")
+
+
 class PathArgs(BaseModel):
     path: str = Field(default=".", max_length=300, description="chemin relatif au dossier du projet")
 
@@ -150,7 +153,7 @@ async def ws_network(args: NetworkArgs, ctx: Any) -> str:
     if g is None:
         return "Ce but n'est plus en cours."
     summary = f"{args.why.strip()} — commande : {' '.join(args.argv)}"
-    await ctx.emit(rt.EFFECT_PROPOSED.draft(
+    await ctx.propose(rt.EFFECT_PROPOSED.draft(
         capability=NETWORKED, owner=GOALS.name, args_json=json.dumps({"goal": g.id, "argv": args.argv}),
         summary=Content.of(summary[:600], level=0), approval=g.approval, context=f"goal:{g.id}",
         about=tuple(x for x in (g.owner, *g.about) if x)))

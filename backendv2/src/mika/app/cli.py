@@ -22,11 +22,17 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
+import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
+from mika.adapters.llm.claude_code import FORBIDDEN, ClaudeCodeBackend, ClaudeCodeError
 from mika.adapters.llm.config import BackendSpec, LLMConfig
+from mika.adapters.mail import LEGACY_ACCOUNT
+from mika.adapters.mcp.relay import Relay
 from mika.adapters.store_sqlite import SqliteStore
 from mika.adapters.system import RandomIdGen, RealClock
 from mika.adapters.web.accounts import Accounts, password_problems
@@ -39,6 +45,7 @@ from mika.contracts import social as social_c
 from mika.kernel.codec import digest
 from mika.kernel.registry import Registry
 from mika.plugins.forge import SWITCHED
+from mika.ports.llm import LLMRequest, Message
 from mika.runtime.mind import Mind
 from mika.runtime.state import RUNTIME
 from mika.sim.catalog import run_lane
@@ -118,9 +125,15 @@ async def llm_command(data: Path, args: argparse.Namespace) -> dict[str, object]
         if args.llm_cmd == "backend":
             previous = backends.get(args.name)
             key = args.api_key if args.api_key is not None else (previous.api_key if previous else "")
+
+            def kept(value, attr, default):  # type: ignore[no-untyped-def]
+                return value if value is not None else (getattr(previous, attr) if previous else default)
+
             backends[args.name] = BackendSpec(
                 kind=args.kind, model=args.model, api_key=key, base_url=args.base_url or "", host=args.host or "",
                 slots=args.slots, temperature=args.temperature, think=args.think,
+                auth=kept(args.auth, "auth", "abonnement"), claude_bin=kept(args.claude_bin, "claude_bin", ""),
+                config_dir=kept(args.config_dir, "config_dir", ""), fallback=kept(args.fallback, "fallback", ""),
             )
         elif args.llm_cmd == "route":
             for role in args.roles:
@@ -137,6 +150,53 @@ async def llm_command(data: Path, args: argparse.Namespace) -> dict[str, object]
                 "context_tokens": cfg.context_tokens, "problems": cfg.problems()}
 
     return await _with_settings(data, run)
+
+
+async def _claude_code_spec(data: Path, name: str | None) -> BackendSpec:
+    """Le fournisseur Claude Code déclaré (le premier, ou celui nommé) ; à défaut, la CLI telle quelle."""
+    async def run(settings: Settings, store) -> BackendSpec:  # type: ignore[no-untyped-def]
+        backends = settings.llm().backends
+        if name:
+            if name not in backends or backends[name].kind != "claude_code":
+                raise SystemExit(f"aucun fournisseur Claude Code nommé « {name} »")
+            return backends[name]
+        return next((b for b in backends.values() if b.kind == "claude_code"),
+                    BackendSpec(kind="claude_code", model=""))
+
+    return await _with_settings(data, run)
+
+
+async def claude_code_check(data: Path, name: str | None) -> dict[str, object]:
+    """Un appel sans outil : la CLI répond-elle, avec quel modèle, quel usage de l'abonnement ?"""
+    spec = await _claude_code_spec(data, name)
+    backend = ClaudeCodeBackend(spec.model, relay=Relay(), relay_base=None, auth=spec.auth, api_key=spec.api_key,
+                                claude_bin=spec.claude_bin, config_dir=spec.config_dir, work_dir=data / "claude-code")
+    req = LLMRequest(role="check", call_id="verification#0", system_stable="Réponds exactement : ok",
+                     messages=(Message("user", "ping"),), priority=0)
+    t0 = time.monotonic()
+    try:
+        resp = await backend.complete(req)
+    except ClaudeCodeError as exc:
+        return {"ok": False, "erreur": str(exc), "commande": backend.binary(), "connexion": spec.auth}
+    finally:
+        await backend.aclose()
+    return {"ok": True, "réponse": resp.text, "modèle": resp.model, "connexion": spec.auth,
+            "secondes": round(time.monotonic() - t0, 1), "abonnement": backend.status()["quota"]}
+
+
+def claude_code_login(data: Path, name: str | None) -> int:
+    """Ouvre la CLI en interactif dans son dossier dédié : l'utilisateur s'y connecte lui-même
+    (``/login``) ; Mika ne voit rien passer."""
+    spec = asyncio.run(_claude_code_spec(data, name))
+    if not spec.config_dir:
+        print("Ce fournisseur utilise la CLI telle que tu l'as connectée : lance « claude » et « /login » "
+              "si elle ne l'est pas.")
+        return 0
+    env = {k: v for k, v in os.environ.items() if k not in FORBIDDEN}
+    env["CLAUDE_CONFIG_DIR"] = spec.config_dir
+    binary = ClaudeCodeBackend(relay=Relay(), relay_base=None, claude_bin=spec.claude_bin).binary()
+    print(f"Connexion de la CLI dans {spec.config_dir} : tape /login, puis quitte.")
+    return subprocess.run([binary], env=env, check=False).returncode
 
 
 async def account_command(data: Path, args: argparse.Namespace) -> dict[str, object]:
@@ -177,14 +237,26 @@ async def world_command(data: Path, args: argparse.Namespace) -> dict[str, objec
     async def run(settings: Settings, store) -> dict[str, object]:  # type: ignore[no-untyped-def]
         if args.cmd == "mail":
             if args.mail_cmd == "set":
-                await settings.save_email(address=args.address, imap_host=args.imap_host, imap_port=args.imap_port,
-                                          imap_ssl=None if args.imap_ssl is None else args.imap_ssl == "oui",
-                                          user=args.user, password=args.password, smtp_host=args.smtp_host,
-                                          smtp_port=args.smtp_port, smtp_security=args.smtp_security,
-                                          since_days=args.since_days)
-            cfg = settings.email().model_dump()
-            cfg["password"] = "…" if cfg["password"] else ""
-            return cfg
+                await settings.save_mail_account(
+                    args.compte, address=args.address, imap_host=args.imap_host, imap_port=args.imap_port,
+                    imap_ssl=None if args.imap_ssl is None else args.imap_ssl == "oui", user=args.user,
+                    password=args.password, smtp_host=args.smtp_host, smtp_port=args.smtp_port,
+                    smtp_security=args.smtp_security, since_days=args.since_days,
+                    folders=tuple(args.dossiers) if args.dossiers else None, voice=args.voix,
+                    display_name=args.nom)
+            elif args.mail_cmd == "remove":
+                cfg = settings.email()
+                if args.compte not in cfg.accounts:
+                    raise SystemExit(f"compte inconnu : {args.compte}")
+                await settings.save_email(cfg.model_copy(update={"accounts": {
+                    k: a for k, a in cfg.accounts.items() if k != args.compte}}))
+            out = {}
+            for name, account in settings.email().accounts.items():
+                shown = account.model_dump(mode="json")
+                for secret in ("password", "smtp_password"):
+                    shown[secret] = "…" if shown[secret] else ""
+                out[name] = shown
+            return {"accounts": out}
         if args.cmd == "rss":
             feeds = settings.feeds()
             if args.rss_cmd == "add":
@@ -243,7 +315,7 @@ def main(argv: list[str] | None = None) -> int:
     lsub.add_parser("show")
     lb = lsub.add_parser("backend", help="déclarer ou modifier un fournisseur")
     lb.add_argument("name")
-    lb.add_argument("--kind", required=True, choices=["claude", "openai", "ollama", "ollama_cloud"])
+    lb.add_argument("--kind", required=True, choices=["claude", "claude_code", "openai", "ollama", "ollama_cloud"])
     lb.add_argument("--model", required=True)
     lb.add_argument("--api-key", default=None, help="laissé vide : la clé actuelle est gardée")
     lb.add_argument("--base-url", default="")
@@ -251,6 +323,17 @@ def main(argv: list[str] | None = None) -> int:
     lb.add_argument("--slots", type=int, default=0)
     lb.add_argument("--temperature", type=float, default=None)
     lb.add_argument("--think", action="store_true")
+    lb.add_argument("--auth", choices=["abonnement", "cle_api"], default=None,
+                    help="claude_code : le login de la CLI (défaut) ou une clé d'API")
+    lb.add_argument("--claude-bin", default=None, help="claude_code : la commande claude (vide : PATH)")
+    lb.add_argument("--config-dir", default=None, help="claude_code : un dossier de CLI à part (vide : l'habituel)")
+    lb.add_argument("--fallback", default=None, help="le fournisseur qui prend le relais en cas d'échec")
+    cc = sub.add_parser("claude-code", help="la CLI Claude Code comme moteur (son login, jamais un jeton)")
+    ccsub = cc.add_subparsers(dest="cc_cmd", required=True)
+    for name, text in (("check", "un appel d'essai : connectée ? quel modèle ? quel usage de l'abonnement ?"),
+                       ("login", "se connecter dans le dossier dédié du fournisseur (s'il en a un)")):
+        c = ccsub.add_parser(name, help=text)
+        c.add_argument("--name", default=None, help="le fournisseur (défaut : le premier de type claude_code)")
     lr = lsub.add_parser("route", help="associer des rôles à un fournisseur")
     lr.add_argument("name")
     lr.add_argument("roles", nargs="+")
@@ -289,7 +372,8 @@ def main(argv: list[str] | None = None) -> int:
     ml = sub.add_parser("mail", help="la boîte aux lettres de Mika (IMAP pour lire, SMTP pour envoyer)")
     msub = ml.add_subparsers(dest="mail_cmd", required=True)
     msub.add_parser("show")
-    ms = msub.add_parser("set")
+    ms = msub.add_parser("set", help="crée ou modifie un compte")
+    ms.add_argument("--compte", default=LEGACY_ACCOUNT, help="le nom court du compte (défaut : principal)")
     ms.add_argument("--address")
     ms.add_argument("--imap-host")
     ms.add_argument("--imap-port", type=int)
@@ -300,6 +384,11 @@ def main(argv: list[str] | None = None) -> int:
     ms.add_argument("--smtp-port", type=int)
     ms.add_argument("--smtp-security", choices=["ssl", "starttls", "none"])
     ms.add_argument("--since-days", type=int)
+    ms.add_argument("--dossiers", nargs="+", help="les dossiers relevés (défaut : INBOX)")
+    ms.add_argument("--voix", choices=["elle", "assistante", "proprietaire"])
+    ms.add_argument("--nom", help="ton nom (pour écrire en assistante ou à ta place)")
+    mr = msub.add_parser("remove", help="retire un compte")
+    mr.add_argument("--compte", required=True)
     rs = sub.add_parser("rss", help="les flux qu'elle suit")
     rsub = rs.add_subparsers(dest="rss_cmd", required=True)
     rsub.add_parser("list")
@@ -313,6 +402,9 @@ def main(argv: list[str] | None = None) -> int:
     sts.add_argument("base_url")
     sts.add_argument("api_key")
     sts.add_argument("--model", default="whisper-1")
+    mc = sub.add_parser("mcp", help="lire Mika depuis ton Claude Code (point /mcp/console, lecture seule)")
+    mcsub = mc.add_subparsers(dest="mcp_cmd", required=True)
+    mcsub.add_parser("token", help="un jeton neuf (l'ancien ne vaut plus), montré une fois")
     se = sub.add_parser("sensors", help="le jeton des appareils (POST /api/perceptions)")
     sesub = se.add_subparsers(dest="sensors_cmd", required=True)
     sesub.add_parser("token", help="un jeton neuf (l'ancien ne vaut plus), montré une fois")
@@ -380,6 +472,12 @@ def main(argv: list[str] | None = None) -> int:
         out = asyncio.run(llm_command(args.data, args))
         print(json.dumps(out, ensure_ascii=False, indent=2))
         return 0 if not out["problems"] else 1
+    if args.cmd == "claude-code":
+        if args.cc_cmd == "login":
+            return claude_code_login(args.data, args.name)
+        out = asyncio.run(claude_code_check(args.data, args.name))
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+        return 0 if out["ok"] else 1
     if args.cmd == "account":
         out = asyncio.run(account_command(args.data, args))
         print(json.dumps(out, ensure_ascii=False))
@@ -391,6 +489,14 @@ def main(argv: list[str] | None = None) -> int:
         person = args.person if args.id_cmd == "link" else None
         draft = identity_c.LINKED.draft(handle=args.handle, person=person, by="operator")
         print(json.dumps(asyncio.run(operator_event(args.data, draft, "identity")), ensure_ascii=False))
+        return 0
+    if args.cmd == "mcp":
+        async def mcp_token(settings: Settings, store) -> dict[str, object]:  # type: ignore[no-untyped-def]
+            token = await settings.new_console_mcp_token()
+            return {"token": token, "usage": "claude mcp add --transport http mika http://127.0.0.1:8001/mcp/console "
+                                              f"--header \"Authorization: Bearer {token}\""}
+
+        print(json.dumps(asyncio.run(_with_settings(args.data, mcp_token)), ensure_ascii=False, indent=2))
         return 0
     if args.cmd == "sensors":
         async def token(settings: Settings, store) -> dict[str, object]:  # type: ignore[no-untyped-def]

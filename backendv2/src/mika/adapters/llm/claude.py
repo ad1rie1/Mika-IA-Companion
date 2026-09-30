@@ -19,7 +19,12 @@ Contrat :
   la nomme est rejoué une fois sans elle, et le refus mémorisé par modèle ;
 - ``tool_use`` coupé par ``max_tokens`` → ``truncated_tool_call`` ; refus →
   ``stop="refusal"`` ; jetons de cache comptés à part (``cache_read``,
-  ``cache_write``), hors ``input_tokens``.
+  ``cache_write``), hors ``input_tokens`` ;
+- outils à la demande (``ToolDecl.deferred``) : ``defer_loading`` et l'outil de
+  recherche d'outils (BM25) ; le point de cache des outils ne va jamais sur un
+  outil différé (400) ; les blocs de la recherche (``server_tool_use``,
+  ``tool_search_tool_result``) reviennent tels quels au tour suivant, par la
+  même mémoire que la réflexion.
 """
 
 from __future__ import annotations
@@ -63,6 +68,10 @@ _STOPS = {
     "refusal": "refusal",
 }
 _THINKING = frozenset({"thinking", "redacted_thinking"})
+#: la recherche d'outils côté serveur : les outils différés se chargent quand le modèle les cherche
+SEARCH_TOOL = {"type": "tool_search_tool_bm25_20251119", "name": "tool_search_tool_bm25"}
+#: des blocs produits par le serveur, à rendre inchangés au tour suivant
+_SERVER = frozenset({"server_tool_use", "tool_search_tool_result"})
 
 
 class ClaudeBackend:
@@ -102,15 +111,17 @@ class ClaudeBackend:
 
     def payload(self, req: LLMRequest) -> dict[str, Any]:
         """Le corps de ``messages.create``, hors ``temperature`` (décidée à l'envoi)."""
-        tools = [
-            {"name": t.name, "description": t.description, "input_schema": _plain(t.schema)}
-            for t in sorted(req.tools, key=lambda t: t.name)
-        ]
+        decls = sorted(req.tools, key=lambda t: t.name)
+        tools = [_tool(t) for t in decls]
+        if any(t.deferred for t in decls):
+            tools.insert(0, dict(SEARCH_TOOL))
         system: list[dict[str, Any]] = []
         if req.system_stable.strip():
             system.append({"type": "text", "text": req.system_stable, "cache_control": self.cache_mark()})
         elif tools:
-            tools[-1]["cache_control"] = self.cache_mark()
+            # un outil différé ne peut pas porter le point de cache : le dernier chargé d'emblée
+            loaded = [t for t in tools if not t.get("defer_loading")]
+            loaded[-1]["cache_control"] = self.cache_mark()
         volatile = _volatile_system(req)
         if volatile:
             system.append({"type": "text", "text": volatile})
@@ -213,7 +224,10 @@ class ClaudeBackend:
         thought = False
         for block in getattr(resp, "content", None) or ():
             kind = getattr(block, "type", None)
-            if kind == "text":
+            if kind in _SERVER:
+                thought = True  # à rejouer tel quel, comme une réflexion
+                replay.append(_dump(block))
+            elif kind == "text":
                 texts.append(block.text)
                 if block.text:
                     replay.append({"type": "text", "text": block.text})
@@ -250,6 +264,20 @@ def _plain(value: Any) -> Any:
     return value
 
 
+def _tool(t: Any) -> dict[str, Any]:
+    decl = {"name": t.name, "description": t.description, "input_schema": _plain(t.schema)}
+    if t.deferred:
+        decl["defer_loading"] = True
+    return decl
+
+
+def _dump(block: Any) -> dict[str, Any]:
+    """Un bloc de réponse tel quel, sérialisable (champs vides omis)."""
+    if hasattr(block, "model_dump"):
+        return block.model_dump(mode="json", exclude_none=True)
+    return _plain(block)
+
+
 def _volatile_system(req: LLMRequest) -> str:
     """Le bloc volatile à ajouter au système ; vide s'il voyage déjà dans le dernier tour utilisateur."""
     volatile = req.system_volatile
@@ -277,10 +305,10 @@ def _tool_result(m: Message) -> dict[str, Any]:
 
 
 def _mark_last_block(message: dict[str, Any], mark: Mapping[str, str]) -> None:
-    """Point de cache sur le dernier bloc marquable du message (un bloc de réflexion ne l'est pas)."""
+    """Point de cache sur le dernier bloc marquable du message (ni réflexion, ni bloc serveur)."""
     content = message["content"]
     for i in range(len(content) - 1, -1, -1):
-        if content[i].get("type") not in _THINKING:
+        if content[i].get("type") not in _THINKING and content[i].get("type") not in _SERVER:
             content[i] = {**content[i], "cache_control": dict(mark)}
             return
 

@@ -149,12 +149,26 @@ def test_senses_mail_feeds_transcription_and_a_device_token_shown_once(world):  
     bootstrap(client)
     url = "/inspecteur/reglages/sens"
     client.get(url)
-    mail = post(client, url, {"_section": "courrier", "_champs": ["address", "imap_host", "user", "password",
-                                                                  "imap_port"],
-                              "address": "mika@exemple.fr", "imap_host": "imap.exemple.fr", "user": "mika",
-                              "password": CANARY_MAIL, "imap_port": "993"})
+    account = {"_section": "courrier", "_enregistrement": "accounts", "_ancienne": "", "_cle": "perso",
+               "_champs": ["address", "imap_host", "user", "password", "imap_port", "voice", "tone"],
+               "address": "mika@exemple.fr", "imap_host": "imap.exemple.fr", "user": "mika",
+               "password": CANARY_MAIL, "imap_port": "993", "voice": "proprietaire", "tone": "sobre",
+               "_retour": "/inspecteur/courrier/comptes"}
+    mail = post(client, url, account)
     assert mail.status_code == 200 and CANARY_MAIL not in mail.text
-    assert client.portal.call(live.settings.email).password == CANARY_MAIL
+    assert "/inspecteur/courrier/comptes" in str(mail.url)  # l'enregistrement ramène au courrier
+    saved = client.portal.call(live.settings.email).accounts["perso"]
+    assert saved.password == CANARY_MAIL and saved.voice == "proprietaire" and saved.tone == "sobre"
+    # modifier sans retaper le mot de passe le garde ; un retour hors de la console est ignoré
+    again = post(client, url, {**account, "_ancienne": "perso", "password": "", "tone": "chaleureux",
+                               "_retour": "https://ailleurs.example/"})
+    assert again.status_code == 200 and "ailleurs.example" not in str(again.url)
+    saved = client.portal.call(live.settings.email).accounts["perso"]
+    assert saved.password == CANARY_MAIL and saved.tone == "chaleureux"
+    assert CANARY_MAIL not in html_of(client.get("/inspecteur/courrier/comptes"))
+    assert CANARY_MAIL not in html_of(client.get("/inspecteur/fiche/compte/perso"))
+    bad = post(client, url, {**account, "_cle": "Mon Compte"})
+    assert bad.status_code == 400 and "nom de compte invalide" in html_of(bad)
     feeds = post(client, url, {"_section": "flux", "_champs": ["urls"], "urls": "https://a.fr/rss\nftp://b"})
     assert feeds.status_code == 400 and "non http(s)" in html_of(feeds)
     post(client, url, {"_section": "flux", "_champs": ["urls"], "urls": "https://a.fr/rss\nhttps://b.fr/atom"})

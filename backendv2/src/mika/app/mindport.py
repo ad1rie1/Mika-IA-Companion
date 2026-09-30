@@ -23,8 +23,8 @@ from mika.faculties.self import night
 from mika.kernel.clock import local
 from mika.kernel.events import Content, Origin
 from mika.kernel.frame import Audience, Frame
-from mika.kernel.guards import Guard, Superseded
-from mika.runtime import health
+from mika.kernel.operate import Preview
+from mika.runtime import decisions, health
 from mika.runtime.bootstrap import Kernel, ReadOnlyStore
 from mika.vocab.affect import emotion_of
 from mika.vocab.episodes import goal_of
@@ -113,28 +113,21 @@ class KernelPort:
                                                origin=Origin.EXTERNAL)
         return commit.seqs[-1] if commit.seqs else None
 
-    async def resolve_effect(self, proposal: int, approved: bool, *, by: str, note: str = "") -> str:
-        frame = self.kernel.mind.frame()
-        pending = frame.state("runtime").effects.get(proposal)
+    async def resolve_effect(self, proposal: int, approved: bool, *, by: str, note: str = "",
+                             seen: str = "") -> str:
+        """Approuver ou refuser un effet en attente (``runtime/decisions.py``) : ``approved``,
+        ``rejected``, ``unknown`` (inconnu ou déjà décidé), ``changed`` (ce qui partirait a
+        changé depuis qu'on l'a lu) ou ``blocked`` (ça ne peut pas partir tel quel)."""
+        got = await decisions.decide(self.kernel.mind, self.kernel.ports, proposal, approved, by=by, note=note,
+                                     seen=seen)
+        return got.status
+
+    async def effect_preview(self, proposal: int) -> Preview | None:
+        """Exactement ce que ferait un effet en attente s'il partait maintenant."""
+        pending = self.kernel.mind.frame().state("runtime").effects.get(proposal)
         if pending is None:
-            return "unknown"
-        draft = rt.EFFECT_RESOLVED.draft(
-            proposal=proposal, approved=approved, note=note[:500], by=by, capability=pending.capability,
-            owner=pending.owner, args_json=pending.args_json, context=pending.context,
-            dedupe_key=f"décision:{proposal}")
-
-        def still_pending(view: Any) -> bool:
-            return any(e.proposal == proposal for e in view.get(rt.PENDING_EFFECTS))
-
-        try:
-            commit = await self.kernel.mind.append(
-                [draft], emitter="runtime", correlation=f"décision:{proposal}", origin=Origin.EXTERNAL,
-                guard=Guard("en attente", predicate=still_pending))
-        except Superseded:
-            return "unknown"  # une autre décision est passée avant
-        if commit.deduped:
-            return "unknown"  # la même décision, déjà prise (une par proposition)
-        return "approved" if approved else "rejected"
+            return None
+        return await decisions.preview(self.kernel.mind, self.kernel.ports, pending.capability, pending.args_json)
 
     def _work(self, frame: Any) -> dict[str, Any]:
         """Ses projets et ce qui attend un accord — pour une propriétaire."""

@@ -162,6 +162,9 @@ class ToolSpec:
     min_level: int | None = None
     effect: EffectClass = EffectClass.NONE
     max_calls_per_episode: int | None = None
+    #: réservé à ses propriétaires : pas offert à quelqu'un d'autre, sauf quand
+    #: elle travaille (STEP, personne n'écoute). Le gestionnaire garde sa garde.
+    owner_only: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,11 +246,13 @@ class ActionSpec:
     danger: bool = False
     #: irréversible : il faut retaper la clé de l'objet
     retype: bool = False
-    #: offerte seulement si ``available(tranche, frame, clé)``
+    #: offerte seulement si ``available(tranche, frame, clé)`` (``ports=`` en plus, si la
+    #: fonction le déclare : ce qui dépend du monde, comme les drapeaux d'un mail)
     available: Callable[..., bool] | None = None
     order: int = 100
     #: des champs connus seulement à l'exécution (les actions d'une app forgée) :
-    #: ``fields(tranche, frame, clé, valeurs_fixes) -> Sequence[FormField]`` ; l'action
+    #: ``fields(tranche, frame, clé, valeurs_fixes) -> Sequence[FormField]`` (``ports=`` en
+    #: plus, si la fonction le déclare : les boîtes d'un compte, ses dossiers) ; l'action
     #: reçoit alors un dictionnaire (champs lus + valeurs fixes), pas un modèle
     fields: Callable[..., Any] | None = None
 
@@ -302,12 +307,17 @@ class CapabilitySpec:
     le réseau, envoyer un message…). Il ne part jamais d'un outil : un outil
     le *propose* (``effect.proposed``) ; le runtime l'exécute après commit —
     tout de suite si la politique ne demande pas d'accord, après
-    ``effect.resolved`` sinon. ``fn(args, context, ports) -> (ok, résultat)``."""
+    ``effect.resolved`` sinon. ``fn(args, context, ports) -> (ok, résultat)``.
+
+    ``preview(args, ports) -> Preview | None`` (facultatif) : exactement ce qui
+    partirait maintenant (un mail tel qu'il sera envoyé), montré à qui décide.
+    Son condensé épingle l'accord : décider, c'est approuver ce qui a été lu."""
 
     owner: str
     name: str
     description: str
     fn: Callable[..., Any]
+    preview: Callable[..., Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -348,6 +358,9 @@ class Faculty(Generic[S, Pm]):
     modulators: list[ModulatorSpec] = field(default_factory=list)
     processes: list[ProcessSpec] = field(default_factory=list)
     tools: list[ToolSpec] = field(default_factory=list)
+    #: une ligne par lot d'outils : ce qu'il permet (le catalogue de ce qu'elle
+    #: peut aller chercher quand le lot n'est pas en main)
+    bundles: dict[str, str] = field(default_factory=dict)
     projectors: list[ProjectorSpec] = field(default_factory=list)
     effects: list[EffectSpec] = field(default_factory=list)
     inspectors: list[InspectSpec] = field(default_factory=list)
@@ -537,17 +550,22 @@ class Faculty(Generic[S, Pm]):
         min_level: int | None = None,
         effect: EffectClass = EffectClass.NONE,
         max_calls_per_episode: int | None = None,
+        owner_only: bool = False,
     ):
         def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
             self.tools.append(
                 ToolSpec(
                     self.name, name, description, args, fn, bundle or self.name,
-                    frozenset(episodes), min_level, effect, max_calls_per_episode,
+                    frozenset(episodes), min_level, effect, max_calls_per_episode, owner_only,
                 )
             )
             return fn
 
         return deco
+
+    def bundle(self, name: str, description: str) -> None:
+        """Décrire un lot d'outils en une ligne (« lire et écrire des mails »)."""
+        self.bundles[name] = description
 
     # ── E/S ──
     def projector(self, name: str, *, version: int, tier: Tier, types: Iterable[EventType[Any] | str]):
@@ -560,13 +578,13 @@ class Faculty(Generic[S, Pm]):
 
         return deco
 
-    def capability(self, name: str, *, description: str):
+    def capability(self, name: str, *, description: str, preview: Callable[..., Any] | None = None):
         """Un effet externe exécutable (voir ``CapabilitySpec``) ; le nom est
         préfixé par la faculté (``goals.networked``)."""
         full = name if "." in name else f"{self.name}.{name}"
 
         def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
-            self.capabilities.append(CapabilitySpec(self.name, full, description, fn))
+            self.capabilities.append(CapabilitySpec(self.name, full, description, fn, preview))
             return fn
 
         return deco

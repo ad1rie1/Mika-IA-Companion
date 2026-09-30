@@ -29,6 +29,9 @@ def _target(ctx: Any) -> str | None:
     return ep.target if ep is not None else None
 
 
+IDENTITY.bundle(BUNDLE, "savoir à qui tu parles ; douter d'une identité, défaire un lien")
+
+
 @IDENTITY.tool("identity_whoami_with", description="Ce que tu sais de qui t'écrit en ce moment : son nom, "
                "à quel point tu en es sûre, s'il ou elle dit être quelqu'un d'autre.", args=NoArgs,
                bundle=BUNDLE, episodes=CONVERSATIONAL)

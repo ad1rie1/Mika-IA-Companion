@@ -16,6 +16,8 @@ from mika.adapters.llm.config import BackendSpec
 
 TIMEOUT_S = 8.0
 LIMIT = 500
+#: ce que ``claude --model`` comprend sans rien demander ; vide : le modèle par défaut de la CLI
+CLAUDE_CODE_MODELS = ("fable", "haiku", "opus", "sonnet")
 
 
 class ListingFailed(Exception):
@@ -50,6 +52,8 @@ def _names(payload: Any, shape: str) -> list[str]:
 
 async def list_models(spec: BackendSpec, *, client: httpx.AsyncClient | None = None) -> list[str]:
     """Les identifiants de modèles du fournisseur ; lève ``ListingFailed``."""
+    if spec.kind == "claude_code":
+        return list(CLAUDE_CODE_MODELS)  # la CLI choisit : ses alias suffisent, sans réseau
     if spec.kind in ("claude",) and not spec.api_key:
         raise ListingFailed("Il faut une clé d'API pour lister les modèles.")
     url, headers, shape = _endpoint(spec)

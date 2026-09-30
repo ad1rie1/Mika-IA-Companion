@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 from mika.kernel.codec import digest
 from mika.kernel.faculty import SectionSpec, Zone
@@ -63,6 +64,27 @@ class SectionBody:
     #: vrai quand ce qui est dit d'autrui concerne aussi l'interlocuteur (il était
     #: là) : la garde compare alors au niveau « témoin » de l'audience
     witness: bool = False
+
+
+def audible(body: SectionBody, audience_level: int, witness_level: int | None = None) -> bool:
+    """La seconde barrière de la divulgation : ce qu'un bloc dit d'autrui ne
+    dépasse pas ce que l'audience peut entendre (au niveau « témoin » quand
+    l'interlocuteur y figure lui-même)."""
+    limit = witness_level if (body.witness and witness_level is not None) else audience_level
+    return body.level <= limit
+
+
+def readable(body: SectionBody | str | None, audience: Any) -> str | None:
+    """Le texte d'une section rendu par un outil, sous la même barrière que le
+    prompt : rien si la section se tait, ou si elle en dit trop pour qui écoute."""
+    if body is None:
+        return None
+    if isinstance(body, str):
+        body = SectionBody(body)
+    if audience is None or not audible(body, audience.level, audience.witness_level):
+        return None
+    text = body.content if isinstance(body.content, str) else "\n".join(t.content for t in body.content)
+    return text.strip() or None
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,8 +185,7 @@ class Composer:
             if spec.tags & muted_tags:
                 dropped.append((spec.key, "coupée pour cet épisode"))
                 continue
-            limit = witness_level if (body.witness and witness_level is not None) else audience_level
-            if body.level > limit:
+            if not audible(body, audience_level, witness_level):
                 dropped.append((spec.key, "trop sensible pour l'audience"))
                 continue
             b = _Block(spec, body)

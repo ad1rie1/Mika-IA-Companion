@@ -46,9 +46,10 @@ CLEARED = "_effacer"
 
 KINDS = frozenset({
     "text", "textarea", "int", "float", "slider", "bool", "select", "lines", "duration", "secret",
-    "subject", "yaml", "group", "records", "mapping",
+    "subject", "yaml", "group", "records", "mapping", "hidden",
 })
-WIDGETS = frozenset({"", "slider", "textarea", "lines", "yaml", "password", "select", "duration", "subject"})
+WIDGETS = frozenset({"", "slider", "textarea", "lines", "yaml", "password", "select", "duration", "subject",
+                     "hidden"})
 
 # mêmes unités que kernel.clock (le noyau n'importe rien de mika)
 _US, _MS, _SECOND = 1, 1_000, 1_000_000
@@ -215,6 +216,9 @@ def _scalar(name: str, annotation: Any, knob: Knob, metadata: Sequence[Any], com
     if annotation in (int, float):
         return _number(name, annotation, knob, metadata, common)
     if annotation is str:
+        if knob.widget == "hidden":
+            # posé par la page (le mail auquel on répond), jamais tapé : reposté tel quel
+            return _make(kind="hidden", **common)
         if knob.secret or knob.widget == "password" or (not knob.widget and _secret_name(name)):
             return _make(kind="secret", secret=True, **common)
         if choices or knob.loader or knob.widget == "select":
