@@ -24,7 +24,7 @@ from mika.contracts.self_ import PersonaDoc
 from mika.inspector.catalog import Command, SettingsPage, SettingsSection, SettingsTab
 from mika.kernel import forms
 from mika.kernel.forms import Knob
-from mika.kernel.inspect import Badge, Column, Row, Table, Text, When
+from mika.kernel.inspect import Badge, Column, Nav, NavItem, Note, Ref, Row, Table, Text, When
 from mika.runtime.params import Parameters
 from mika.vocab.episodes import FALLBACKS, VOICE_ROLES, Role
 from mika.vocab.temperament import Temperament
@@ -36,7 +36,7 @@ log = logging.getLogger("mika.reglages")
 
 #: les rubriques du sous-menu de la configuration, dans l'ordre
 TABS = (SettingsTab("intelligence", "Intelligence"), SettingsTab("personnage", "Personnage"),
-        SettingsTab("canaux", "Canaux"), SettingsTab("sens", "Sens"))
+        SettingsTab("canaux", "Canaux"), SettingsTab("sens", "Plugins"))
 
 #: la famille de chaque rôle (la page « Qui sert quoi »)
 ROLE_FAMILIES = {**{str(r): "voix" for r in VOICE_ROLES}, "extract": "mémoire", "validate": "mémoire",
@@ -250,7 +250,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         accounts = settings.email().accounts
         ready = sum(1 for a in accounts.values() if a.ready)
         return [("Comptes", f"{len(accounts)} ({ready} prêt(s) à relever)" if accounts else "aucun"),
-                ("Dans la console", "Courrier › Comptes")]
+                ("Lire et envoyer", "Courrier › Réception")]
 
     async def save_feeds(cfg: FeedsSettings, by: str) -> list[str]:
         await settings.save_feeds(list(cfg.urls))
@@ -268,7 +268,28 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         token = await settings.new_sensors_token()
         return "ok", f"Jeton neuf (l'ancien ne vaut plus ; montré une seule fois) : {token}"
 
+    def plugin_settings() -> list[Any]:
+        rows = (
+            ("Courrier", "Boîtes, serveurs, identifiants et façon d'écrire", "boites", "email", "courrier/reception"),
+            ("Flux RSS", "Adresses des flux suivis", "flux", "rss", "sens/flux"),
+            ("Caméra", "Fréquence des regards et durée des observations", "comportement-camera", "", "sens/camera"),
+            ("Appareils", "Jeton d'accès des capteurs", "appareils", "", "sens/appareils"),
+            ("Forge", "Comportement du moteur qui exécute les apps", "comportement-forge", "", "apps"),
+        )
+        return [Note("Les connexions et le comportement des plugins se règlent ici. Les réglages propres à une "
+                     "app forgée restent dans sa fiche, dans la Forge."),
+                Table(("Plugin", "Ce qui se règle", "Configuration", "Comportement", "Utiliser / consulter"),
+                      tuple((label, help_, Ref("local", f"/inspecteur/reglages/{settings_page}", "Configurer"),
+                             Ref("local", f"/inspecteur/reglages/comportement-{owner}", "Paramètres") if owner else "—",
+                             Ref("local", f"/inspecteur/{usage}", "Ouvrir"))
+                            for label, help_, settings_page, owner, usage in rows), title="Plugins"),
+                Nav((NavItem("Configurer la transcription vocale", Ref("local", "/inspecteur/reglages/transcription",
+                                                                         "Transcription vocale")),))]
+
     return (
+        SettingsSection("plugins", "Plugins", "sens", None, order=0, blocks=plugin_settings,
+                        pages=(SettingsPage("plugins", "Vue d'ensemble des plugins", form=False, blocks=True,
+                                            description="Choisis le plugin à configurer ou ouvre sa vue d'utilisation."),)),
         SettingsSection("modeles", "Modèles", "intelligence", LLMConfig, settings.llm, save_llm,
                         description="Les fournisseurs de modèles, et lequel sert chaque rôle. Les clés sont "
                                     "chiffrées, jamais réaffichées.", loaders={"models": models}, facts=llm_facts,

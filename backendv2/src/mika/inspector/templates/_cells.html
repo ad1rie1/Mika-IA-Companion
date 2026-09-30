@@ -1,0 +1,15 @@
+{# Cellules partagées : texte, liens, états et mesures. #}
+{% macro cell(c) -%}
+{%- if c.t == "link" -%}<a href="{{ c.href }}"{% if c.external %} class="ext" rel="noopener noreferrer nofollow" target="_blank"{% endif %}>{{ c.text }}</a>
+{%- elif c.t == "badge" -%}<span class="badge {{ c.tone }}">{{ c.text }}</span>
+{%- elif c.t == "meter" -%}<span class="meter {{ c.tone }}"><meter min="0" max="1" value="{{ '%.3f'|format(c.ratio) }}">{{ c.text }}</meter><span class="num">{{ c.text }}</span></span>
+{%- elif c.t == "swatch" -%}<span class="swatch sw-{{ c.key }}">{{ c.text }}{% if c.weight %} <span class="w">{{ c.weight }}</span>{% endif %}</span>
+{%- elif c.t == "when" -%}<span class="when" title="{{ c.exact }}">{{ c.text }}</span>
+{%- elif c.secondary -%}<span class="cell-preview"><span class="cell-title{{ ' emphasis' if c.emphasis }}">{{ c.text }}</span><span class="cell-secondary">{{ c.secondary }}</span></span>
+{%- else -%}
+  {%- set cls = ("mono" if c.kind == "mono" else "num" if c.kind == "num" else "cell-muted" if c.kind == "muted" else "") ~ (" t-" ~ c.tone if c.tone else "") -%}
+  {%- if c.clamp -%}<details class="more"><summary><span class="{{ cls }}">{{ c.short }}…</span> lire la suite</summary><span class="{{ cls }} prose">{{ c.text }}</span></details>
+  {%- elif cls or c.hint -%}<span class="{{ cls }}"{% if c.hint %} title="{{ c.hint }}"{% endif %}>{{ c.text }}</span>
+  {%- else -%}{{ c.text }}{%- endif -%}
+{%- endif -%}
+{%- endmacro %}

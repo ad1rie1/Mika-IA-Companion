@@ -88,6 +88,9 @@ def test_feeds_hand_new_entries_once_and_skip_the_archives(tmp_path, site):
     assert not blog["error"] and blog["items"] == 1
     assert absent["error"] == "le serveur répond 404" and absent["failures"] == 3 and not absent["ok_at"]
     assert absent["attempted_at"] and absent["kept"] == 0
+    assert feeds.cached_count() == 10
+    feeds._feeds = lambda: []  # un abonnement retiré ne fait pas disparaître ses articles de la consultation
+    assert feeds.health() == [] and feeds.cached_count() == len(feeds.cached(100)) == 10
 
 
 def test_a_feed_cache_from_before_feed_health_is_completed(tmp_path, site):

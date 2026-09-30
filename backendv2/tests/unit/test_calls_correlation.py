@@ -5,7 +5,7 @@ passerelle note la corrélation de chaque appel, le registre durable la garde
 from __future__ import annotations
 
 from mika.adapters.llm.calls import TABLE, CallLog
-from mika.adapters.llm.gateway import Gateway
+from mika.adapters.llm.gateway import Gateway, LLMTrace
 from mika.adapters.store_sqlite import SqliteStore
 from mika.kernel.clock import ManualClock
 from mika.ports.llm import LLMRequest, LLMResponse, Usage
@@ -82,3 +82,21 @@ async def test_a_log_created_before_the_column_is_completed_in_place(tmp_path):
     await calls.flush()
     assert [t.call_id for t in calls.for_correlation("neuf")] == ["neuf#0"]
     await store.close()
+
+
+async def test_episode_call_pages_reach_beyond_the_old_two_hundred_call_limit(tmp_path):
+    store = store_at(tmp_path)
+    await store.open()
+    calls = CallLog(store)
+    await calls.open()
+    try:
+        for i in range(555):
+            calls.record(LLMTrace(at=i, role="reply", backend="fake", model="m", call_id=f"long#{i}", correlation="long",
+                                 lane="conversation", priority=0, latency_us=1, wait_us=0, input_tokens=1, output_tokens=1, outcome="ok"))
+        await calls.flush()
+        assert calls.count(correlation="long") == 555 and calls.count(correlation="absent") == 0
+        tail = calls.for_correlation("long", limit=25, offset=550)
+        assert [t.call_id for t in tail] == [f"long#{i}" for i in range(550, 555)]
+        assert not calls.for_correlation("long", offset=555)
+    finally:
+        await store.close()

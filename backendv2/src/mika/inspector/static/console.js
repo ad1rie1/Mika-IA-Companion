@@ -23,6 +23,13 @@
 
   ready(function () {
     applyTheme(readTheme());
+    // Les longues rubriques restent accessibles sans prendre tout l'écran mobile.
+    var narrow = window.matchMedia("(max-width: 1100px)");
+    function fitMenus() {
+      document.querySelectorAll("[data-responsive-menu]").forEach(function (menu) { menu.open = !narrow.matches; });
+    }
+    fitMenus();
+    narrow.addEventListener("change", fitMenus);
     document.querySelectorAll("[data-theme-set]").forEach(function (b) {
       b.addEventListener("click", function () {
         var v = b.getAttribute("data-theme-set");
@@ -102,20 +109,25 @@
         if (ev.ctrlKey || ev.metaKey || ev.button === 1) window.open(url, "_blank"); else window.location = url;
       });
     });
-    document.querySelectorAll("table.tbl tr.detail").forEach(function (detail) {
+    document.querySelectorAll("table.tbl tr.detail").forEach(function (detail, index) {
       var row = detail.previousElementSibling;
       var first = row && row.querySelector("td");
       var inner = detail.querySelector("details.row-detail");
       if (!first || !inner) return;
+      var initiallyOpen = inner.open;
       inner.open = true;
-      detail.classList.add("js-folded");
+      if (!initiallyOpen) detail.classList.add("js-folded");
       var btn = document.createElement("button");
       btn.type = "button"; btn.className = "row-toggle"; btn.textContent = "▸";
-      btn.setAttribute("aria-expanded", "false"); btn.setAttribute("aria-label", "Voir les détails");
+      detail.id = "row-detail-" + index;
+      btn.setAttribute("aria-controls", detail.id);
+      btn.setAttribute("aria-expanded", String(initiallyOpen));
+      btn.setAttribute("aria-label", initiallyOpen ? "Masquer les détails" : "Voir les détails");
       btn.addEventListener("click", function (ev) {
         ev.stopPropagation();
         var open = detail.classList.toggle("js-folded") === false;
         btn.setAttribute("aria-expanded", String(open));
+        btn.setAttribute("aria-label", open ? "Masquer les détails" : "Voir les détails");
       });
       first.insertBefore(btn, first.firstChild);
       var summary = inner.querySelector("summary");

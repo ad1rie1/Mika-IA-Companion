@@ -5,6 +5,7 @@ serveur (feuille de style copiée, script retiré)."""
 from __future__ import annotations
 
 from mika.app.apercu import export
+from tests.fixtures.console_html import ConsoleHTML
 
 
 def test_the_console_exports_page_by_page(tmp_path):
@@ -17,5 +18,6 @@ def test_the_console_exports_page_by_page(tmp_path):
         for f in files:
             text = f.read_text(encoding="utf-8")
             assert f'data-theme="{attr}"' in text, f.name
-            assert "a échoué" not in text and "Bloc inconnu" not in text, f.name
+            assert "Cette vue a échoué" not in text and "Bloc inconnu" not in text, f.name
+            ConsoleHTML(text).check()
             assert "console.js" not in text and "../static/console.css" in text, f.name

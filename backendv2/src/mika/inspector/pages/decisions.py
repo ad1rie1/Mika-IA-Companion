@@ -17,6 +17,7 @@ from mika.kernel.inspect import (
     Badge,
     Chart,
     Column,
+    Disclosure,
     Fields,
     Note,
     Pager,
@@ -138,7 +139,7 @@ async def live(ui: Any, request: Request) -> list[Any]:
                            + tuple((f"taux max · {KINDS.get(k, k)}", f"{v * 3600:.2f} /h")
                                    for k, v in sorted(policy.max_rates.items())), title="Politique")
     anomalies = list(getattr(kernel.arbiter, "anomalies", []))[-10:]
-    return [table, policy_fields] + [Note(a, "warn") for a in anomalies]
+    return [*[Note(a, "warn") for a in anomalies], table, Disclosure("Comprendre les seuils de décision", (policy_fields,))]
 
 
 @TABS.tab("decisions.selections", title="Ses choix",
@@ -164,7 +165,7 @@ async def selections(ui: Any, request: Request) -> list[Any]:
                          Text(f"{total * 3600:.2f} / {bound * 3600:.2f}", "num") if bound else "—",
                          getattr(d, "candidates", 0) or len(d.rows)), href=Ref("event", str(e.seq), ""),
                         detail=tuple(detail)))
-    pager = Pager(older=(("avant", str(chosen[-1].seq)),)) if len(chosen) == 40 else None
+    pager = Pager(older=(("avant", str(chosen[-1].seq)),)) if len(chosen) == 40 else Pager()
     return [Table((Column("quand", "fit"), "choisi", Column("tirage", "num"),
                    Column("Σλ / borne (/h)", "num", hint="l'intensité totale et la borne de l'amincissement"),
                    Column("lignes", "num")), tuple(rows),
@@ -189,7 +190,8 @@ async def episodes(ui: Any, request: Request) -> Any:
     where = ("kind", values["sorte"]) if values["sorte"] else ("outcome", values["issue"]) if values["issue"] else \
         ("target", values["cible"]) if values["cible"] else None
     def matches(e: Any) -> bool:
-        return (not values["issue"] or e.data.outcome == values["issue"]) and \
+        return (not values["sorte"] or e.data.kind == values["sorte"]) and \
+            (not values["issue"] or e.data.outcome == values["issue"]) and \
             (not values["cible"] or (e.data.target or "") == values["cible"])
 
     # une page de filtrés : lire par lots jusqu'à la remplir, et reprendre après le dernier montré
@@ -209,9 +211,12 @@ async def episodes(ui: Any, request: Request) -> Any:
                       outcome_badge(e.data.outcome), Text((e.data.detail or e.data.guard or "")[:200], "muted")),
                      href=Ref("episode", e.correlation, ""),
                      tone="danger" if e.data.outcome in ("failed", "timeout") else "") for e in shown)
-    pager = Pager(older=(("avant", str(shown[-1].seq)),)) if len(shown) == EPISODES_PAGE else None
+    stopped = len(shown) < EPISODES_PAGE and len(batch) == EPISODE_SCAN
+    older = shown[-1].seq if len(shown) == EPISODES_PAGE else cursor if stopped else None
+    pager = Pager(older=(("avant", str(older)),)) if older else Pager()
     now = ui.now()
-    recent = ctx.events([rt.EPISODE_ENDED], 1000)
+    sampled = ctx.events([rt.EPISODE_ENDED], 1000)
+    recent = [e for e in sampled if matches(e)]
     per_day: Counter[str] = Counter()
     stamps: dict[str, int] = {}
     for e in recent:
@@ -227,13 +232,17 @@ async def episodes(ui: Any, request: Request) -> Any:
     stats = Stats(tuple(Stat(OUTCOMES.get(k, (k, ""))[0], n, "dernières 24 h", OUTCOMES.get(k, ("", ""))[1])
                         for k, n in counts.most_common()))
     out: list[Any] = [Note(n, "warn") for n in notes]
-    if counts:
-        out.append(stats)
-    if chart:
-        out.append(chart)
+    if stopped:
+        out.append(Note("La recherche continue dans les épisodes plus anciens : utilise « Plus anciens ».", "info"))
     out.append(Table((Column("quand", "fit"), "épisode", "vers", "issue", "détail"), rows, title="Épisodes",
                      empty="Aucun épisode ne correspond." if where else "Aucun épisode encore.", pager=pager,
                      filters=("sorte", "issue", "cible")))
+    activity = ([stats] if counts else []) + ([chart] if chart else [])
+    if len(sampled) == 1000:
+        activity.append(Note("Indicateurs calculés sur les 1 000 derniers épisodes, avec les filtres actuels. "
+                             "Le tableau permet de parcourir tout l'historique.", "info"))
+    if activity:
+        out.append(Disclosure("Activité correspondant aux filtres", tuple(activity)))
     return {"blocks": out, "filters": EPISODE_PARAMS, "values": values}
 
 

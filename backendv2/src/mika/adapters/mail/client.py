@@ -25,7 +25,9 @@ import uuid
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta, tzinfo
+from email import policy
 from email.message import EmailMessage
+from email.parser import BytesParser
 from pathlib import Path
 from typing import Any
 
@@ -33,15 +35,18 @@ from mika.adapters.mail import compose
 from mika.adapters.mail.cache import MailCache
 from mika.adapters.mail.config import MailAccount, MailConfig
 from mika.adapters.mail.imap import ImapError, Session, role_of, since
-from mika.adapters.mail.parse import parse
+from mika.adapters.mail.parse import attachment_files, parse
 from mika.ports.mail import (
     AccountInfo,
     AccountStatus,
+    Attachment,
     Draft,
+    File,
     Folder,
     Mail,
     Preview,
     Sent,
+    forwarded_text,
     mail_ref,
     split_ref,
 )
@@ -158,18 +163,22 @@ class ImapSmtpMail:
         taken = uids[:max(0, limit)]
         out: list[Mail] = []
         for uid, flags, raw in s.fetch(taken):
-            mail = replace(parse(raw, str(uid), account=key, folder=folder), seen="\\seen" in flags,
+            mail = replace(parse(raw, str(uid), account=key, folder=folder, complete=True), seen="\\seen" in flags,
                            flagged="\\flagged" in flags, answered="\\answered" in flags)
             self._cache.store(mail, uid)
             if hand and not self._cache.handed(key, mail.message_id):
                 self._cache.hand(key, mail.message_id)
                 out.append(mail)
+        if not hand:
+            for uid, flags, raw in s.fetch(self._cache.missing_html(key, folder, limit)):
+                self._cache.store(replace(parse(raw, str(uid), account=key, folder=folder, complete=True),
+                                          seen="\\seen" in flags, flagged="\\flagged" in flags,
+                                          answered="\\answered" in flags), uid)
         nxt = (max(taken) + 1) if len(taken) < len(uids) else max(uidnext, (max(taken) + 1) if taken else start)
         self._refresh_flags(s, key, folder, hand=hand)
         self._cache.save_folder(key, folder, uidvalidity=validity or None, uidnext=nxt or None,
                                 last_sync=self._at())
         self._cache.recount(key, folder)
-        self._cache.prune(key, folder)
         return out
 
     def _refresh_flags(self, s: Session, key: str, folder: str, *, hand: bool) -> None:
@@ -203,6 +212,99 @@ class ImapSmtpMail:
     def cached_one(self, ref: str) -> Mail | None:
         return self._cache.one(ref)
 
+    def find_ref(self, key: str) -> str | None:
+        return self._cache.find_ref(key)
+
+    def messages_page(self, query, page=1, size=25):
+        return self._cache.browse("messages", query, page, size)
+
+    def outgoing_page(self, query, page=1, size=25):
+        return self._cache.browse("outgoing", query, page, size)
+
+    def contacts_page(self, account="", text="", page=1, size=25):
+        return self._cache.browse("contacts", account, text, tuple(a.address for a in self.accounts()), page, size)
+
+    def thread_page(self, ref, page=1, size=25):
+        return self._cache.browse("thread", ref, page, size)
+
+    def search_page(self, text, limit=25, offset=0):
+        return self._cache.browse("hits", text, limit, offset)
+
+    def search_count(self, text):
+        return self._cache.browse("search_count", text)
+
+    def drafts_page(self, text="", page=1, size=25):
+        return self._cache.browse("drafts", text, page, size)
+
+    async def _source(self, ref: str) -> bytes:
+        local = self._cache.sent_source(ref)
+        if local is not None:
+            return local
+        sent = self._cache.sent_one(ref)
+        if sent is not None:
+            msg = EmailMessage()
+            msg['From'] = compose.sender(self._account(sent.account).info(sent.account))
+            msg['To'], msg['Subject'], msg['Message-ID'] = sent.to, sent.subject, split_ref(sent.message_id)[1]
+            msg.set_content(sent.body)
+            return msg.as_bytes()
+        key, acc, mail, uid = self._where(ref)
+        def read():
+            with self._session(acc) as session:
+                _, validity, _ = session.select(mail.folder)
+                previous, _ = self._cache.cursor(key, mail.folder) or (0, 0)
+                if validity and previous and validity != previous:
+                    raise ValueError("Le dossier a changé sur le serveur. Actualise-le avant de relire ce message.")
+                actual = self._uid_sync(session, mail, uid)
+                rows = session.fetch([actual])
+                if not rows:
+                    raise FileNotFoundError("Ce message n'est plus disponible sur le serveur.")
+                number, flags, raw = rows[0]
+                full = parse(raw, str(number), account=key, folder=mail.folder, complete=True)
+                if full.message_id != mail.message_id:
+                    raise ValueError("Ce message a changé sur le serveur. Actualise le dossier.")
+                self._cache.store(replace(full, seen="\\seen" in flags, flagged="\\flagged" in flags,
+                                           answered="\\answered" in flags), number)
+                return raw
+        return await self._in_thread(key, read)
+
+    async def document(self, ref: str) -> Mail | None:
+        cached = self._cache.one(ref)
+        if cached is not None and cached.complete:
+            return cached
+        raw = await self._source(ref)
+        if cached is not None:
+            return self._cache.one(ref)
+        sent = self._cache.sent_one(ref)
+        return parse(raw, account=sent.account if sent else "", complete=True)
+
+    async def file(self, ref: str, part: str) -> File:
+        if part == "texte":
+            full = await self.document(ref)
+            if full is None:
+                raise FileNotFoundError("Ce message n'est plus disponible.")
+            return File("message.txt", "text/plain", full.body.encode())
+        raw = await self._source(ref)
+        if part == "source":
+            return File("message.eml", "message/rfc822", raw)
+        if not part.isdecimal() or len(part) > 5:
+            raise FileNotFoundError("Pièce jointe inconnue.")
+        files = attachment_files(raw)
+        if int(part) >= len(files):
+            raise FileNotFoundError("Cette pièce jointe n'est plus disponible.")
+        return files[int(part)]
+
+    async def forward(self, ref, to, subject, body, *, cc="", by="", attachments=True):
+        original = await self.document(ref)
+        if original is None:
+            raise ValueError("Ce message n'est plus disponible.")
+        files = attachment_files(await self._source(ref)) if attachments and original.attachments else ()
+        key = self._sender_key(original.account, "")
+        draft = Draft("", key, to, subject, forwarded_text(original, body), cc=cc, author=by)
+        shown, _ = self._preview(draft)
+        if shown.blocked:
+            raise ValueError(shown.blocked)
+        return await self._deliver(key, shown, None, "", by=by, draft_id="", files=files)
+
     def search(self, text: str, limit: int, *, account: str = "") -> list[Mail]:
         return self._cache.search(text, limit, account=account) if text.strip() else []
 
@@ -225,12 +327,34 @@ class ImapSmtpMail:
         acc = self._account(account)
 
         def run() -> int:
-            before = {m.message_id for m in self._cache.recent(10_000, account=account, folder=folder)}
+            before = self._cache.folder_count(account, folder)
             with self._session(acc) as s:
                 self._sync_sync(s, account, acc, folder, limit, hand=False)
-            after = {m.message_id for m in self._cache.recent(10_000, account=account, folder=folder)}
-            return len(after - before)
+            return max(0, self._cache.folder_count(account, folder) - before)
 
+        return int(await self._in_thread(account, run))
+
+    async def older(self, account: str, folder: str, limit: int = 50) -> int:
+        acc = self._account(account)
+        def run():
+            with self._session(acc) as session:
+                _, validity, _ = session.select(folder)
+                previous, _ = self._cache.cursor(account, folder) or (0, 0)
+                if previous and validity and previous != validity:
+                    raise ValueError("Le dossier a changé sur le serveur : actualise-le avant de charger son historique.")
+                first = self._cache.oldest_uid(account, folder)
+                if first == 1:
+                    return 0
+                uids = sorted(u for u in session.search(f"UID 1:{first - 1}" if first else "ALL") if not first or u < first)
+                rows = session.fetch(uids[-max(1, min(100, limit)):])
+                for uid, flags, raw in rows:
+                    mail = replace(parse(raw, str(uid), account=account, folder=folder, complete=True),
+                                   seen="\\seen" in flags, flagged="\\flagged" in flags, answered="\\answered" in flags)
+                    self._cache.store(mail, uid)
+                    self._cache.hand(account, mail.message_id)
+                self._cache.save_folder(account, folder, uidvalidity=validity or None)
+                self._cache.recount(account, folder)
+                return len(rows)
         return int(await self._in_thread(account, run))
 
     # ── ranger ──
@@ -353,6 +477,8 @@ class ImapSmtpMail:
     async def send(self, to: str, subject: str, body: str, in_reply_to: str = "", by: str = "", *,
                    account: str = "", cc: str = "", quote: bool = False) -> str:
         key = self._sender_key(account, in_reply_to)
+        if quote and in_reply_to:
+            await self.document(in_reply_to)
         draft = Draft(id="", account=key, to=to, subject=subject, body=body, cc=cc, reply_to=in_reply_to,
                       quote=quote, author=by)
         shown, parent = self._preview(draft)
@@ -377,15 +503,22 @@ class ImapSmtpMail:
         return message_id
 
     async def _deliver(self, key: str, shown: Preview, parent: Mail | None, reply_to: str, *, by: str,
-                       draft_id: str) -> str:
+                       draft_id: str, files: tuple[File, ...] = ()) -> str:
         acc = self._account(key)
         info = acc.info(key)
         message_id = compose.new_message_id(info)
         msg = compose.message(shown, parent, message_id, when=self._now(), in_reply_to=split_ref(reply_to)[1])
+        for file in files:
+            if file.mime == "message/rfc822":
+                msg.add_attachment(BytesParser(policy=policy.default).parsebytes(file.data), filename=file.name)
+                continue
+            maintype, _, subtype = file.mime.partition('/')
+            msg.add_attachment(file.data, maintype=maintype or "application", subtype=subtype or "octet-stream", filename=file.name)
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._smtp_sync, acc, msg)
         self._cache.remember_sent(Sent(message_id, shown.to[:300], shown.subject[:300], shown.text, self._at(),
-                                       reply_to, by[:100], key, draft_id, shown.cc[:300]))
+                                       reply_to, by[:100], key, draft_id, shown.cc[:300],
+                                       tuple(Attachment(f.name, f.mime, len(f.data)) for f in files)), msg.as_bytes())
         try:  # ranger une copie, marquer « répondu » : jamais au prix de l'envoi
             await self._in_thread(key, self._after_send_sync, key, acc, msg, parent)
         except (OSError, ImapError, ValueError, EOFError) as exc:

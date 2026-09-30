@@ -41,7 +41,9 @@ from mika.kernel.inspect import (
     Table,
     Text,
     Timeline,
+    Toolbar,
     When,
+    Workspace,
 )
 
 try:
@@ -127,12 +129,14 @@ def validate(payload: dict) -> None:
 # ── Un exemple riche : chaque bloc, chaque genre de cellule ───────────────
 
 RICH = [
+    Workspace((Nav((NavItem("Menu", Ref.url("https://example.org", "")),)),),
+              (Toolbar((ActionSlot("ajouter", presentation="button"),)),)),
     Table(
-        columns=("Nom", Column("Valeur", align="num", hint="en unités"), Column("État", align="fit")),
+        columns=("Nom", Column("Valeur", align="num", hint="en unités"), Column("État", align="fit", detail=True)),
         rows=(
             ("a", 1, None),
             ("b", 2.5, True),
-            Row(("c", Text("12", kind="num", tone="ok", hint="douze", clamp=4), Badge("vif", tone="warn")),
+            Row(("c", Text("12", kind="num", tone="ok", hint="douze", clamp=4, secondary="Un aperçu", emphasis=True), Badge("vif", tone="warn")),
                 href=Ref.view("forge", "meteo/detail", "voir", id="3"), tone="info",
                 detail=(Note("dans le détail", tone="muted"), ActionSlot("relancer", initial=(("id", "3"),)))),
             (Text("mono", kind="mono"), Text("gris", kind="muted"), Meter(0.4, text="40 %", tone="ok")),
@@ -145,7 +149,7 @@ RICH = [
     Fields((("âge", 3), ("humeur", Swatch("calme", "emotion", "relieved"))), title="Fiche",
            hints=(("âge", "en jours"),), columns=2),
     Note("attention", tone="warn", title="Note"),
-    Prose("un long récit\nsur deux lignes\tet une tabulation", title="Récit", clamp=200),
+    Prose("un long récit\nsur deux lignes\tet une tabulation", title="Récit", clamp=200, reading=True),
     Code("print('x')", title="Code"),
     Stats((Stat("messages", 42, sub="aujourd'hui", tone="ok", href=Ref.url("https://example.org", "x"),
                 trend=Chart((Series("n", ((0, 1.0), (1, 2.0))),), kind="spark")),
@@ -164,7 +168,7 @@ RICH = [
 ]
 
 ALL_TYPES = {"table", "fields", "note", "prose", "code", "stats", "timeline", "chart", "grid", "section",
-             "disclosure", "form", "nav"}
+             "disclosure", "form", "nav", "workspace", "toolbar"}
 ALL_KINDS = {"text", "mono", "num", "muted", "badge", "meter", "emotion", "when", "link"}
 
 
@@ -934,3 +938,32 @@ def test_schema_rejects_what_decode_rejects_structurally():
 def test_chart_bounds_must_be_finite():
     assert invalid(env({"type": "chart", "series": [], "zero": math.inf})) == "blocks[0].zero : nombre non fini"
     assert invalid(env({"type": "chart", "series": [], "y": [0, math.nan]})) == "blocks[0].y[1] : nombre non fini"
+
+
+def test_named_table_pagination_roundtrips_and_matches_the_schema():
+    import jsonschema
+
+    from mika.kernel.envelope import decode, encode, schema
+    from mika.kernel.inspect import Pager, Table
+
+    tables = [Table(("valeur",), (("x",),), pager=Pager(param="page_articles", number=2, size=1, total=3)),
+              Table(("valeur",), (("y",),), pager=Pager(param="page_alertes", size=1, total=2))]
+    payload = encode(tables)
+    jsonschema.validate(payload, schema())
+    assert decode(payload) == tables
+    payload["blocks"][0]["pagination"]["param"] = "onglet"
+    refused = decode(payload)
+    assert len(refused) == 1 and "pagination.param" in refused[0].text
+
+
+def test_forge_named_pages_are_bounded_and_preserved_in_links():
+    from mika.plugins.forge.views import Links, view_params
+    from mika.ports.forge import AppViewSpec
+
+    spec = AppViewSpec(key="liste", label="Liste", function="view_liste")
+    values, notes = view_params(spec, {"page_articles": "3", "page_alertes": "-1", "page_erreurs": "non",
+                                      "onglet": "code", "pg1": "2"})
+    assert not notes
+    assert values == {"page": 1, "page_articles": 3, "page_alertes": 1, "page_erreurs": 1}
+    link = Links("meteo", {"liste": spec}).view("liste", {"page_articles": "3", "onglet": "code"})
+    assert dict(link.params) == {"onglet": "vues", "vue": "liste", "page_articles": "3"}

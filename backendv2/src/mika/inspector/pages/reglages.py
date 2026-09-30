@@ -338,6 +338,6 @@ async def journal(ui: Any, request: Request) -> list[Any]:
             what = e.data.action.removeprefix("console.")
             rows.append(Row((When(e.at), Badge("opérateur", "ok"), Text(what, "mono"), e.data.by,
                              Text(e.data.subject or "—", "muted")), href=Ref("event", str(e.seq), "")))
-    pager = Pager(older=(("avant", str(merged[-1].seq)),)) if len(merged) == 50 else None
+    pager = Pager(older=(("avant", str(merged[-1].seq)),)) if len(merged) == 50 else Pager()
     return [Table((Column("quand", "fit"), "sorte", "quoi", "par", "sur / origine"), tuple(rows),
                   title="Journal des modifications", empty="Rien encore.", pager=pager)]

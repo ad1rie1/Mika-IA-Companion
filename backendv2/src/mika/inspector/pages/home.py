@@ -17,6 +17,8 @@ from mika.kernel.inspect import (
     Badge,
     Chart,
     Column,
+    Disclosure,
+    Grid,
     Note,
     Pager,
     Ref,
@@ -98,14 +100,10 @@ async def now_tab(ui: Any, request: Request) -> list[Any]:
     lanes = kernel.lanes
     waiting = {lane: lanes.pending(lane) for lane in lanes.capacities}
     open_ = frame.state("runtime").open
-    pending = len(frame.get(rt.PENDING_EFFECTS))
     cards += [
-        Stat("Épisodes en cours", len(open_), ", ".join(KINDS.get(o.kind, o.kind) for o in open_.values())[:80]
-             or "aucun", "info" if open_ else "", _local("/inspecteur/decisions/en_cours", "en cours")),
-        Stat("En file", sum(waiting.values()), " · ".join(f"{k} {v}" for k, v in waiting.items()),
-             "info" if sum(waiting.values()) else "", _local("/inspecteur/decisions/en_cours", "file")),
-        Stat("À approuver", pending, "effets en attente", "warn" if pending else "",
-             _local("/inspecteur/approbations", "approbations")),
+        Stat("Épisodes en cours", len(open_), f"{sum(waiting.values())} en attente · " + (
+             ", ".join(KINDS.get(o.kind, o.kind) for o in open_.values())[:80] or "aucun travail en cours"),
+             "info" if open_ else "", _local("/inspecteur/decisions/en_cours", "en cours")),
     ]
     return [Stats(tuple(cards))]
 
@@ -135,7 +133,8 @@ async def curves(ui: Any, request: Request) -> list[Any]:
                 charts.append(Chart(tuple(lines), title=" · ".join(s.label for s in lines), unit=unit, y=y,
                                     zero=0.0 if lo is not None and lo < 0 < (hi or 0) else None, since=since,
                                     until=now))
-    return charts or [Note("Pas encore de mesure sur les dernières 24 heures.", "muted")]
+    return [Disclosure("Consulter les courbes", (Grid(tuple(charts)),))] if charts else [
+        Note("Pas encore de mesure sur les dernières 24 heures.", "muted")]
 
 
 @TABS.tab("accueil.aujourdhui", title="Aujourd'hui",
@@ -166,7 +165,9 @@ async def today(ui: Any, request: Request) -> list[Any]:
                       outcome_badge(e.data.outcome), Text((e.data.detail or "")[:160], "muted")),
                      href=Ref("episode", e.correlation, ""),
                      tone="danger" if e.data.outcome in ("failed", "timeout") else "") for e in ended)
-    pager = Pager(older=(("avant", str(ended[-1].seq)),)) if len(ended) == EPISODES_PAGE else None
-    return [Stats(tuple(cards)),
+    pager = Pager(older=(("avant", str(ended[-1].seq)),)) if len(ended) == EPISODES_PAGE else Pager()
+    scope = [Note("Ces indicateurs portent sur les 1 000 derniers épisodes : la journée peut en contenir davantage.",
+                  "info")] if len(day) == 1000 else []
+    return [Stats(tuple(cards)), *scope,
             Table((Column("quand", "fit"), "épisode", "vers", "issue", "détail"), rows, title="Derniers épisodes",
                   empty="aucun épisode encore", pager=pager)]

@@ -17,7 +17,7 @@ NAVIGATION: tuple[NavGroup, ...] = (
     NavGroup("", (
         Destination("accueil", "Tableau de bord", "◉", "Ce qui attend ton attention, son état en ce moment et sa "
                     "journée.",
-                    builtin=("accueil.a_traiter", "accueil.maintenant", "accueil.courbes", "accueil.aujourdhui"),
+                    builtin=("accueil.a_traiter", "accueil.maintenant", "accueil.aujourdhui", "accueil.courbes"),
                     layout="stack"),
     )),
     NavGroup("Elle", (
@@ -25,8 +25,7 @@ NAVIGATION: tuple[NavGroup, ...] = (
                     "rythme, son estime."),
         Destination("pensees", "Pensées et nuits", "☁", "Ce qui lui trotte dans la tête, ce qu'elle a remarqué, "
                     "ce qu'elle attend, ses nuits."),
-        Destination("memoire", "Mémoire", "❖", "Souvenirs, croyances, promesses, et la relecture qui les "
-                    "produit. (La v2 n'extrait ni thèmes ni entités.)"),
+        Destination("memoire", "Mémoire", "❖", "Ses souvenirs, ses croyances, ses promesses et la relecture de ses échanges."),
     )),
     NavGroup("Ses relations", (
         Destination("personnes", "Personnes", "☺", "Les gens qu'elle connaît et ce qui les lie.",
@@ -47,9 +46,8 @@ NAVIGATION: tuple[NavGroup, ...] = (
                     "qui en a été décidé.", builtin=("approbations.en_attente", "approbations.historique")),
     )),
     NavGroup("Ses canaux", (
-        Destination("courrier", "Courrier", "✉", "Ses boîtes aux lettres : leurs dossiers, ce qui arrive, ce qu'elle "
-                    "a préparé et qui attend ton accord, ce qui part, avec qui, et ses comptes. Ce que tu écris ici "
-                    "part de sa boîte, et elle le sait.", subjects=("mail", "brouillon", "compte")),
+        Destination("courrier", "Courrier", "✉", "Lire les messages, répondre et suivre les brouillons de chaque boîte.",
+                    subjects=("mail", "brouillon", "compte"), context=("compte",), automatic_actions=False),
         Destination("sens", "Flux et capteurs", "◌", "Ce qu'elle lit du monde (flux RSS), ce qu'elle voit "
                     "(caméra), ce que ses appareils lui signalent."),
         Destination("apps", "Apps forgées", "⚒", "Les petites apps qu'elle écrit elle-même.", subjects=("app",)),
@@ -81,5 +79,5 @@ FACULTY_LABELS: dict[str, str] = {
     "attention": "Attention et pensées", "memory": "Mémoire", "transcript": "Fil des conversations",
     "social": "Liens", "others": "Ce qu'elle devine des autres", "identity": "Identités",
     "agency": "Initiatives", "goals": "Buts", "email": "Courrier", "rss": "Flux RSS", "camera": "Caméra",
-    "forge": "Apps forgées", "kernel": "Noyau",
+    "forge": "Moteur de la Forge", "kernel": "Noyau",
 }

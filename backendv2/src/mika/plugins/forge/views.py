@@ -35,6 +35,9 @@ from mika.kernel.inspect import (
     Row,
     Section,
     Table,
+    Toolbar,
+    Workspace,
+    is_page_param,
     read_params,
 )
 from mika.ports.forge import AppInfo, AppViewSpec, CallResult
@@ -68,7 +71,7 @@ class Links:
         if spec is None:
             return None
         declared = {p.key for p in spec.params} | {"page"}
-        kept = tuple((k, str(v)) for k, v in params.items() if k in declared)
+        kept = tuple((k, str(v)) for k, v in params.items() if k in declared or is_page_param(k))
         return Ref("subject", f"app/{self.app}", "", (("onglet", "vues"), ("vue", key), *kept))
 
 
@@ -81,11 +84,12 @@ def view_params(spec: AppViewSpec, raw: Mapping[str, str]) -> tuple[dict[str, An
     et le dit), plus ``page`` (≥ 1)."""
     specs = [Param(p.key, p.label, p.kind, p.choices, p.default) for p in spec.params]
     values, notes = read_params(specs, raw)
-    try:
-        page = int(str(raw.get("page", "") or 1))
-    except ValueError:
-        page = 1
-    values["page"] = max(1, min(page, MAX_PAGE))
+    for key in {"page", *(k for k in raw if is_page_param(k))}:
+        try:
+            page = int(str(raw.get(key, "") or 1))
+        except ValueError:
+            page = 1
+        values[key] = max(1, min(page, MAX_PAGE))
     return values, notes
 
 
@@ -116,8 +120,11 @@ def qualify(blocks: Sequence[Any], app: str, spec: AppViewSpec) -> list[Any]:
             given = tuple(sorted((k, v) for k, v in b.initial if k in fields))
             label = ("⚠ " if action.danger else "") + action.label
             fixed = (("action", action.key), ("app", app), ("vue", spec.key), ("_bouton", label))
-            return ActionSlot(ACT, initial=(*fixed, *given), title=b.title or action.label, compact=b.compact)
-        if isinstance(b, Grid | Section | Disclosure):
+            return ActionSlot(ACT, initial=(*fixed, *given), title=b.title or action.label, compact=b.compact,
+                              presentation=b.presentation)
+        if isinstance(b, Workspace):
+            return replace(b, sidebar=tuple(one(x) for x in b.sidebar), items=tuple(one(x) for x in b.items))
+        if isinstance(b, Grid | Section | Disclosure | Toolbar):
             return replace(b, items=tuple(one(x) for x in b.items))
         if isinstance(b, Table):
             return replace(b, rows=tuple(replace(r, detail=tuple(one(x) for x in r.detail))
@@ -181,7 +188,9 @@ def without_forms(blocks: Sequence[Any]) -> list[Any]:
         if isinstance(b, ActionSlot):
             label = dict(b.initial).get("_bouton", b.action)
             return Note(f"Formulaire « {label} » (utilisable depuis l'onglet Vues).", tone="muted")
-        if isinstance(b, Grid | Section | Disclosure):
+        if isinstance(b, Workspace):
+            return replace(b, sidebar=tuple(one(x) for x in b.sidebar), items=tuple(one(x) for x in b.items))
+        if isinstance(b, Grid | Section | Disclosure | Toolbar):
             return replace(b, items=tuple(one(x) for x in b.items))
         if isinstance(b, Table):
             return replace(b, rows=tuple(replace(r, detail=tuple(one(x) for x in r.detail))
@@ -203,7 +212,9 @@ def summary(blocks: Sequence[Any]) -> str:
                 forms.append(dict(b.initial).get("action", b.action))
                 name = "form"
             counts[name] = counts.get(name, 0) + 1
-            if isinstance(b, Grid | Section | Disclosure):
+            if isinstance(b, Workspace):
+                walk((*b.sidebar, *b.items))
+            elif isinstance(b, Grid | Section | Disclosure | Toolbar):
                 walk(b.items)
             elif isinstance(b, Table):
                 walk([x for r in b.rows if isinstance(r, Row) for x in r.detail])

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import enum
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel
@@ -225,6 +225,7 @@ class SubjectSpec:
     #: la fiche offre « oublier » (l'objet est un sujet de contenus)
     forgettable: bool = False
     icon: str = ""
+    download: Callable[..., Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -628,11 +629,20 @@ class Faculty(Generic[S, Pm]):
         def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
             for i, spec in enumerate(self.subjects):
                 if spec.kind == kind:
-                    self.subjects[i] = SubjectSpec(spec.owner, spec.kind, spec.label, spec.plural, spec.head, fn,
-                                                   spec.forgettable, spec.icon)
+                    self.subjects[i] = replace(spec, search=fn)
                     return fn
             raise ValueError(f"{self.name} : recherche pour un type non déclaré ici : {kind}")
 
+        return deco
+
+    def download(self, kind: str):
+        """Un document de fiche : fn(état, frame, ctx, clé, fichier) -> Download."""
+        def deco(fn):
+            for i, spec in enumerate(self.subjects):
+                if spec.kind == kind:
+                    self.subjects[i] = replace(spec, download=fn)
+                    return fn
+            raise ValueError(f"{self.name} : document pour un type non déclaré ici : {kind}")
         return deco
 
     def action(self, name: str, *, title: str, args: type[BaseModel], emits: Iterable[EventType[Any] | str],

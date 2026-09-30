@@ -22,6 +22,7 @@ import asyncio
 import copy
 import html
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -40,15 +41,14 @@ from mika.kernel.inspect import (
     Badge,
     Chart,
     Code,
-    Disclosure,
     Fields,
+    Filters,
     Head,
     Note,
     Ref,
-    Row,
-    Section,
     Stats,
     Table,
+    walk_blocks,
 )
 from mika.plugins.forge import (
     EMITTED,
@@ -65,6 +65,7 @@ from mika.plugins.forge.views import decode_view, is_invalid
 from mika.runtime.inspection import Inspection, find
 from mika.runtime.operations import dynamic_fields, offered, perform
 from mika.sim.clock import run_virtual
+from tests.fixtures.console_html import ConsoleHTML
 from tests.fixtures.mika import boot, build, reply
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
@@ -116,12 +117,7 @@ def form(values: dict[str, str], fixed: dict[str, str] | None = None) -> dict[st
 
 
 def walk(blocks):
-    for b in blocks:
-        yield b
-        if isinstance(b, Section | Disclosure):
-            yield from walk(b.items)
-        elif isinstance(b, Table):
-            yield from walk([x for r in b.rows if isinstance(r, Row) for x in r.detail])
+    yield from walk_blocks(blocks)
 
 
 def of(blocks, kind):
@@ -215,9 +211,11 @@ def test_the_views_tab_renders_a_real_app_view(tmp_path):
     assert add == {"action": "ajouter", "app": "meteo", "vue": "releves", "_bouton": "Ajouter un relevé",
                    "ville": "Paris"}
     assert dict(forms[1].initial)["_bouton"] == "⚠ Effacer cette ville"
-    # les paramètres de la vue, en liens
-    params = next(t for t in of(page1, Table) if t.title == "Paramètres de la vue")
-    assert any(isinstance(r.cells[1], Ref) and ("froid", "oui") in r.cells[1].params for r in params.rows)
+    # Les paramètres deviennent un formulaire natif, dans le contexte de la bonne app/vue.
+    [filters] = of(page1, Filters)
+    assert dict(filters.keep) == {"onglet": "vues", "vue": "releves"}
+    assert {p.kind for p in filters.params} >= {"search", "bool"}
+    assert dict(filters.values)["ville"] == "Paris"
     assert "Vue « nulle-part » inconnue (au choix : releves)" in of(unknown, Note)[0].text
     assert of(unknown, Chart)  # retombe sur la première vue
     raw = of(legacy, Code)
@@ -617,6 +615,14 @@ def test_the_forge_help_example_is_valid_and_its_view_decodes_cleanly(tmp_path):
     table = next(t for t in of(blocks, Table) if t.title == "Relevés à Paris")
     assert len(chart.series[0].points) == 15 and table.pager.total == 15 and table.pager.number == 2
     assert {s.action for s in of(blocks, ActionSlot)} == {"forge.agir"} and api.signals  # il gèle fort
+    complex_view = {"version": 2, "blocks": [{"type": "workspace", "sidebar": [
+        {"type": "toolbar", "items": [{"type": "form", "action": "ajouter", "presentation": "button"}]}],
+        "items": value["blocks"]}]}
+    nested = decode_view(complex_view, "meteo", info, spec)
+    assert not is_invalid(nested), nested
+    slots = of(nested, ActionSlot)
+    assert len(slots) > 1 and all(s.action == "forge.agir" for s in slots)
+    assert slots[0].presentation == "button" and dict(slots[0].initial)["app"] == "meteo"
     for sujet in TOPICS:
         assert len(asyncio.run(forge_help(HelpArgs(sujet=sujet), None))) > 200
     assert "view_releves" in asyncio.run(forge_help(HelpArgs(sujet="exemple"), None))
@@ -626,7 +632,7 @@ def test_the_forge_help_example_is_valid_and_its_view_decodes_cleanly(tmp_path):
 
 
 @needs_bwrap
-def test_the_app_fiche_renders_and_its_forms_post_through_the_console(world):  # noqa: F811
+def test_the_app_fiche_renders_and_its_forms_post_through_the_console(world, tmp_path):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
     forge, kernel = live.kernel.ports["forge"], live.kernel
@@ -639,8 +645,19 @@ def test_the_app_fiche_renders_and_its_forms_post_through_the_console(world):  #
     page = client.get(fiche)
     body = html.unescape(page.text)
     assert page.status_code == 200 and "Température à Paris" in body and "Carnet météo" in body
+    ConsoleHTML(page.text).check()
+    filters = re.search(r'<form class="filters".*?</form>', body, re.S).group(0)
+    assert 'name="onglet" value="vues"' in filters and 'name="vue" value="releves"' in filters
+    assert '<input name="ville" value="Paris" type="search"' in filters
+    assert '<select name="froid">' in filters and 'name="page"' not in filters
+    assert "Paramètres de la vue" not in body
+    searched = html.unescape(client.get(fiche.replace("ville=Paris", "ville=Lyon&froid=oui")).text)
+    assert 'value="Lyon" type="search"' in searched and 'value="oui" selected' in searched
+    assert "Relevés à Lyon" in searched
     assert 'action="/inspecteur/action/forge.agir"' in body and "Ajouter un relevé" in body
-    assert "Arrêter" in body and "Effacer" in body and "Tester" in body  # les commandes de la fiche
+    assert "/inspecteur/action/forge.effacer" not in body and "/inspecteur/action/forge.tester" not in body
+    management = html.unescape(client.get("/inspecteur/fiche/app/meteo?onglet=etat").text)
+    assert "Arrêter" in management and "Effacer" in management and "Tester" in management
     token = client.cookies.get("csrftoken")
     add = {"csrf": token, "_op": "p1", "_retour": fiche, "_sujet": "meteo", "_fixes": ["app", "vue", "action"],
            "app": "meteo", "vue": "releves", "action": "ajouter", "_champs": ["ville", "temperature", "note"],
@@ -653,6 +670,7 @@ def test_the_app_fiche_renders_and_its_forms_post_through_the_console(world):  #
     for tab_name in ("etat", "reglages", "code", "journal", "vecu"):
         r = client.get(f"/inspecteur/fiche/app/meteo?onglet={tab_name}")
         assert r.status_code == 200 and "a échoué" not in html.unescape(r.text), tab_name
+        ConsoleHTML(r.text).check()
     assert "/inspecteur/fiche/app/meteo" in html.unescape(client.get("/inspecteur/apps").text)
     # régler : le secret part scellé au repos, l'app le lit, la console n'en dit que « défini »
     settle = {"csrf": token, "_op": "p3", "_retour": "/inspecteur/fiche/app/reglee?onglet=reglages",
@@ -665,3 +683,10 @@ def test_the_app_fiche_renders_and_its_forms_post_through_the_console(world):  #
     assert read.ok and f"('cle', '{SECRET}')" in read.value["blocks"][0]["text"]
     settings_page = html.unescape(client.get("/inspecteur/fiche/app/reglee?onglet=reglages").text)
     assert SECRET not in settings_page and "défini" in settings_page
+    # Documents en lecture seule pour la revue visuelle, avec les seules données fictives du test.
+    out = tmp_path / "review"
+    out.mkdir()
+    for name, url in (("forge-vues", fiche), ("forge-reglages", "/inspecteur/fiche/app/reglee?onglet=reglages")):
+        rendered = client.get(url).text.replace('/inspecteur/static/', 'static/')
+        rendered = rendered.replace('method="post"', 'method="dialog"').replace(' data-vitals="/inspecteur/_vitals"', '')
+        (out / (name + ".html")).write_text(rendered)

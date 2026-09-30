@@ -22,8 +22,19 @@ from mika.contracts import runtime as rt
 from mika.inspector.formview import action_view
 from mika.kernel.clock import MINUTE, US
 from mika.kernel.events import Origin
-from mika.kernel.inspect import Badge, Entry, Head, Table, Timeline
+from mika.kernel.inspect import (
+    ActionSlot,
+    Badge,
+    Entry,
+    Head,
+    InspectContext,
+    Prose,
+    Table,
+    Timeline,
+    walk_blocks,
+)
 from mika.plugins.email.console import mail_key
+from mika.plugins.email.console.mail import _document
 from mika.ports.mail import Mail
 from mika.runtime.inspection import Inspection, find, run_view
 from mika.runtime.operations import perform
@@ -32,6 +43,16 @@ from mika.sim.outside import FakeMail
 from tests.fixtures.mika import at_paris, boot, build, reply
 
 ALICE = "Alice <alice@exemple.fr>"
+
+
+def test_long_reading_parts_preserve_every_character_and_use_line_boundaries():
+    text = "Une ligne complète à conserver.\n" * 4000 + "DERNIÈRE LIGNE"
+    pieces = []
+    for number in (1, 2, 3):
+        ctx = InspectContext(store=None, ports={}, params={"page_texte": str(number)})
+        pieces.append(next(b.text for b in _document(ctx, "<long@x>", text) if isinstance(b, Prose)))
+    assert "".join(pieces) == text
+    assert all(p.startswith("Une ligne") for p in pieces)
 
 
 def form(**values: str) -> dict[str, list[str]]:
@@ -71,7 +92,7 @@ def view(kernel, name: str, subject: str = "", **params: str) -> list:
 
 
 def table(blocks, title: str) -> Table:
-    return next(b for b in blocks if isinstance(b, Table) and b.title.startswith(title))
+    return next(b for b in walk_blocks(blocks) if isinstance(b, Table) and b.title.startswith(title))
 
 
 def test_the_operator_writes_replies_and_she_knows(tmp_path):
@@ -131,8 +152,8 @@ def test_the_operator_writes_replies_and_she_knows(tmp_path):
         "Un café jeudi ?", "↗ Re: Un café jeudi ?", "Re: Un café jeudi ?"]
     assert isinstance(out["fiche"], Head) and "parti de sa boîte" in [b.text for b in out["fiche"].badges]
     assert any("opérateur" in str(getattr(b, "pairs", "")) for b in out["sait"])
-    slot = [b for b in out["message"] if type(b).__name__ == "Disclosure" and b.title == "Répondre"]
-    assert slot and dict(slot[0].items[0].initial)["reply_to"] == "<m1@exemple.fr>"
+    slot = [b for b in walk_blocks(out["message"]) if isinstance(b, ActionSlot) and b.title == "Répondre"]
+    assert slot and dict(slot[0].initial)["reply_to"] == "<m1@exemple.fr>"
 
 
 def test_an_unconfigured_box_refuses_and_sends_nothing(tmp_path):

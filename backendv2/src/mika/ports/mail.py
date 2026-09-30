@@ -21,9 +21,12 @@ d'ailleurs : une donnée, jamais une consigne.
 from __future__ import annotations
 
 import email.utils
+import hashlib
 import re
 from dataclasses import dataclass
 from typing import Literal, Protocol
+
+from mika.ports.paging import Page
 
 #: les trois façons d'écrire depuis une boîte
 Voice = Literal["elle", "assistante", "proprietaire"]
@@ -54,6 +57,13 @@ def split_ref(ref: str) -> tuple[str, str]:
     return (found.group(1), found.group(2)) if found else ("", ref or "")
 
 
+def reference_key(ref: str) -> str:
+    """Clé imprimable utilisable dans une URL, stable même pour un Message-ID long."""
+    if 0 < len(ref) <= 200 and ref.isprintable() and "/" not in ref and not ref.startswith("#"):
+        return ref
+    return "#" + hashlib.sha256(ref.encode("utf-8", "replace")).hexdigest()[:24]
+
+
 def reply_subject(subject: str) -> str:
     subject = " ".join((subject or "").split())
     return subject if subject.lower().startswith(("re:", "re :", "réf :", "rép :")) else f"Re: {subject}"
@@ -62,6 +72,13 @@ def reply_subject(subject: str) -> str:
 def forward_subject(subject: str) -> str:
     subject = " ".join((subject or "").split())
     return subject if subject.lower().startswith(("fwd:", "tr :", "tr:", "fw:")) else f"Tr : {subject}"
+
+
+def forwarded_text(mail, introduction: str = "") -> str:
+    """Le texte transféré n'est jamais coupé ; l'opérateur écrit son introduction séparément."""
+    sender = getattr(mail, "sender", "")
+    head = f"De : {sender}\nObjet : {mail.subject}\nÀ : {mail.to}"
+    return introduction.rstrip() + f"\n\n---------- Message transféré ----------\n{head}\n\n{mail.body}"
 
 
 def addresses(field: str) -> list[tuple[str, str]]:
@@ -116,10 +133,53 @@ class Mail:
     answered: bool = False
     attachments: tuple[Attachment, ...] = ()
     has_html: bool = False
+    #: source de lecture, jamais transmise au modèle ; assainie avant tout rendu web
+    html: str = ""
+    #: Un ancien cache peut ne contenir qu'un extrait ; le lecteur peut le compléter.
+    complete: bool = True
 
     @property
     def ref(self) -> str:
         return mail_ref(self.account, self.message_id)
+
+
+@dataclass(frozen=True, slots=True)
+class MailQuery:
+    account: str = ""
+    folder: str = ""
+    text: str = ""
+    sender: str = ""
+    seen: bool | None = None
+    flagged: bool | None = None
+    refs: tuple[str, ...] | None = None
+    exclude: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class MailHit:
+    ref: str
+    message_id: str
+    account: str
+    subject: str
+    date: int
+    who: str
+    sent: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class Contact:
+    address: str
+    name: str
+    received: int
+    sent: int
+    last: int
+
+
+@dataclass(frozen=True, slots=True)
+class File:
+    name: str
+    mime: str
+    data: bytes
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +198,7 @@ class Sent:
     #: le brouillon d'où il vient (vide : écrit directement)
     draft: str = ""
     cc: str = ""
+    attachments: tuple[Attachment, ...] = ()
 
     @property
     def ref(self) -> str:
@@ -241,6 +302,31 @@ class AccountStatus:
 
 
 class MailPort(Protocol):
+    def find_ref(self, key: str) -> str | None: ...
+
+    async def older(self, account: str, folder: str, limit: int = 50) -> int: ...
+
+    def messages_page(self, query: MailQuery, page: int = 1, size: int = 25) -> Page[Mail]: ...
+
+    def outgoing_page(self, query: MailQuery, page: int = 1, size: int = 25) -> Page[tuple[Mail | Sent, bool]]: ...
+
+    def contacts_page(self, account: str = "", text: str = "", page: int = 1, size: int = 25) -> Page[Contact]: ...
+
+    def thread_page(self, ref: str, page: int = 1, size: int = 25) -> Page[MailHit]: ...
+
+    def search_page(self, text: str, limit: int = 25, offset: int = 0) -> list[MailHit]: ...
+
+    def search_count(self, text: str) -> int: ...
+
+    def drafts_page(self, text: str = "", page: int = 1, size: int = 25) -> Page[Draft]: ...
+
+    async def document(self, ref: str) -> Mail | None: ...
+
+    async def file(self, ref: str, part: str) -> File: ...
+
+    async def forward(self, ref: str, to: str, subject: str, body: str, *, cc: str = "", by: str = "",
+                      attachments: bool = True) -> str: ...
+
     def configured(self) -> bool:
         """Au moins un compte prêt à relever."""
         ...

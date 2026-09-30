@@ -42,6 +42,7 @@ from mika.inspector.formview import field_view
 from mika.inspector.ui import PREFIX, secure
 from mika.kernel import forms
 from mika.kernel.clock import US
+from mika.kernel.inspect import Pager
 from mika.runtime import operations
 
 SECTION = "_section"
@@ -281,7 +282,10 @@ class SettingsForms:
                 else:
                     loaded[path] = got
         view = self._section_view(s, pg, state, csrf, page, env, editing, loaded, query)
-        return Panel("settings.html", {"sections": [view], "action": page_url(page)})
+        record = view.get("record")
+        heading = (("Ajouter · " + record["label"]) if record["new"] else
+                   "Modifier · " + (record["key"] or record["label"])) if record else ""
+        return Panel("settings.html", {"sections": [view], "action": page_url(page), "page_heading": heading})
 
     def _fields(self, s: SettingsSection, pg: SettingsPage) -> list[forms.FormField]:
         assert s.model is not None
@@ -364,7 +368,7 @@ class SettingsForms:
         return {"path": f.path, "label": f.label, "help": f.help, "keyed": keyed,
                 "columns": [i.label for i in shown] + [i.label for i in secrets_], "rows": rows,
                 "total": len(items),
-                "pager": _records_pager(number, pages, len(items), query) if pages > 1 else None,
+                "pager": render._pager(Pager(number=number, size=RECORDS_PAGE, total=len(items)), query),
                 "add": page_url(page, enregistrement=f.path, cle="", nouveau="1")}
 
     def _record_view(self, s: SettingsSection, current: Any, editing: tuple[str, str], state: State,
@@ -394,6 +398,9 @@ class SettingsForms:
             if view is not None:
                 view["load_button"] = view.get("loader", False)
                 view["load_label"] = "Charger la liste" if entry is None else "Enregistrer, puis choisir dans la liste"
+                # entrée neuve : charger n'enregistre rien, le champ vide qu'on vient remplir ne doit pas
+                # bloquer l'envoi (le navigateur refuse un « required » vide)
+                view["load_novalidate"] = entry is None
                 if f.secret and f.path in state.stashed:
                     view["has_value"] = True  # tapé, gardé côté serveur : vide = le garder
                 # ce qui ne sert pas au type choisi n'apparaît pas (le script suit les changements)
@@ -648,24 +655,6 @@ class SettingsForms:
             sep = "&" if "?" in back else "?"
             return secure(RedirectResponse(f"{back}{sep}flash={token}", status_code=303))
         return secure(RedirectResponse(page_url(page, flash=token), status_code=303))
-
-
-def _records_pager(number: int, pages: int, total: int, query: Mapping[str, str]) -> dict[str, Any]:
-    base = {k: v for k, v in query.items() if k not in ("page", "flash")}
-
-    def url(n: int) -> str:
-        return "?" + urlencode({**base, "page": n})
-
-    shown = sorted({1, pages, number - 1, number, number + 1} & set(range(1, pages + 1)))
-    links: list[dict[str, Any]] = []
-    for i, n in enumerate(shown):
-        if i and n - shown[i - 1] > 1:
-            links.append({"gap": True})
-        links.append({"n": n, "href": url(n), "current": n == number})
-    first = (number - 1) * RECORDS_PAGE + 1
-    return {"cursor": False, "pages": pages, "total": total, "first": first,
-            "last": min(total, number * RECORDS_PAGE), "links": links,
-            "prev": url(number - 1) if number > 1 else "", "next": url(number + 1) if number < pages else ""}
 
 
 def back_to(target: str) -> str:

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, urlencode, urlsplit
 
+from mika.inspector.document import readable_html, readable_text
 from mika.inspector.svg import chart_svg
 from mika.kernel.clock import US
 from mika.kernel.inspect import (
@@ -24,12 +25,14 @@ from mika.kernel.inspect import (
     Column,
     Disclosure,
     Fields,
+    Filters,
     Grid,
     Meter,
     Nav,
     NavItem,
     Note,
     Pager,
+    Param,
     Prose,
     Ref,
     Row,
@@ -39,7 +42,10 @@ from mika.kernel.inspect import (
     Table,
     Text,
     Timeline,
+    Toolbar,
     When,
+    Workspace,
+    read_params,
     tone,
 )
 
@@ -120,6 +126,7 @@ def cell(value: Any, env: Env) -> dict[str, Any]:
     if isinstance(value, Text):
         text = value.text[:TEXT_MAX]
         return {"t": "text", "kind": value.kind, "text": text, "tone": tone(value.tone), "hint": value.hint,
+                "secondary": value.secondary, "emphasis": value.emphasis,
                 "clamp": value.clamp and len(text) > value.clamp, "short": text[:value.clamp] if value.clamp else ""}
     if isinstance(value, Badge):
         return {"t": "badge", "text": value.text, "tone": tone(value.tone)}
@@ -173,8 +180,6 @@ def _cursor(p: Pager, query: Mapping[str, str]) -> dict[str, Any] | None:
             q[stack] = ",".join(pile[:-1])
         newer = "?" + urlencode(q)
         first = "?" + urlencode(base)
-    if not older and not newer:
-        return None
     return {"cursor": True, "older": older, "newer": newer, "first": first,
             "page": len(pile) + 1 if current else 1}
 
@@ -190,26 +195,21 @@ def _pager(p: Pager | None, query: Mapping[str, str]) -> dict[str, Any] | None:
     if p.total is None:
         return _cursor(p, query)
     pages = p.pages
-    if pages <= 1:
-        return None  # une seule page : l'en-tête de la table dit déjà combien
-    shown = sorted({1, pages, p.number - 1, p.number, p.number + 1} & set(range(1, pages + 1)))
+    shown = sorted(n for n in {1, pages, p.number - 1, p.number, p.number + 1} if 1 <= n <= pages)
     links: list[dict[str, Any]] = []
     for i, n in enumerate(shown):
         if i and n - shown[i - 1] > 1:
             links.append({"gap": True})
         links.append({"n": n, "href": url(**{p.param: n}), "current": n == p.number})
-    return {"cursor": False, "pages": pages, "total": p.total, "first": p.offset + 1,
+    return {"cursor": False, "pages": pages, "page": p.number, "total": p.total,
+            "first": p.offset + 1 if p.total else 0,
             "last": min(p.total, p.offset + p.size), "links": links,
             "prev": url(**{p.param: p.number - 1}) if p.number > 1 else "",
             "next": url(**{p.param: p.number + 1}) if p.number < pages else ""}
 
 
-def _auto(items: Sequence[Any], query: Mapping[str, str], counter: list[int]) -> tuple[Sequence[Any], Pager | None]:
-    """Découpe une liste trop longue qui n'a pas de pagination (``?pg<n>=``)."""
-    counter[0] += 1
-    if len(items) <= AUTO_PAGE:
-        return items, None
-    param = f"pg{counter[0]}"
+def _auto(items: Sequence[Any], query: Mapping[str, str], param: str) -> tuple[Sequence[Any], Pager]:
+    """Toute table a une pagination, y compris vide ou sur une seule page."""
     try:
         number = max(1, int(query.get(param, "1") or 1))
     except ValueError:
@@ -219,27 +219,39 @@ def _auto(items: Sequence[Any], query: Mapping[str, str], counter: list[int]) ->
     return items[pager.offset:pager.offset + AUTO_PAGE], pager
 
 
-def block(b: Any, env: Env, query: Mapping[str, str], depth: int = 0, counter: list[int] | None = None
+def block(b: Any, env: Env, query: Mapping[str, str], depth: int = 0, counter: list[int] | None = None,
+          namespace: str = "pg"
           ) -> dict[str, Any]:
     counter = counter if counter is not None else [0]
     if depth > 8:
         return {"t": "note", "text": "Trop d'imbrication.", "tone": "danger"}
     if isinstance(b, Table):
+        counter[0] += 1
+        key = f"{namespace}{counter[0]}"
         columns = [c if isinstance(c, Column) else Column(str(c)) for c in b.columns]
+        visible = [i for i, c in enumerate(columns) if not c.detail]
+        if not visible and columns:
+            visible = [0]
         rows = []
-        source, auto = (b.rows, None) if b.pager is not None else _auto(b.rows, query, counter)
-        total = b.pager.total if b.pager is not None and b.pager.total is not None else len(b.rows)
-        for r in source:
-            if isinstance(r, Row):
-                rows.append({"cells": [cell(v, env) for v in r.cells], "tone": tone(r.tone),
-                             "href": href(r.href) if r.href else "",
-                             "detail": [block(x, env, query, depth + 1, counter) for x in r.detail]})
-            else:
-                rows.append({"cells": [cell(v, env) for v in r], "tone": "", "href": "", "detail": []})
-        return {"t": "table", "title": b.title, "empty": b.empty, "caption": b.caption,
-                "columns": [{"label": c.label, "align": c.align, "hint": c.hint} for c in columns],
-                "rows": rows, "pager": _pager(b.pager or auto, query), "detail": any(r["detail"] for r in rows),
-                "count": total if total and (b.pager is not None or auto is not None) else None}
+        source, auto = (b.rows, None) if b.pager is not None else _auto(b.rows, query, key)
+        pager = b.pager or auto
+        total = pager.total
+        for index, r in enumerate(source, start=pager.offset):
+            rich = r if isinstance(r, Row) else Row(tuple(r))
+            extra = tuple((c.label, rich.cells[i]) for i, c in enumerate(columns)
+                          if i not in visible and i < len(rich.cells))
+            hints = tuple((c.label, c.hint) for i, c in enumerate(columns) if i not in visible and c.hint)
+            details = (*rich.detail, *((Fields(extra, title="Informations complémentaires", hints=hints),) if extra else ()))
+            nested = [0]
+            rows.append({"cells": [cell(rich.cells[i], env) for i in visible if i < len(rich.cells)],
+                         "tone": tone(rich.tone), "href": href(rich.href) if rich.href else "",
+                         "detail": [block(x, env, query, depth + 1, nested, f"{key}r{index}_") for x in details]})
+            rows[-1]["open"] = _active_page(rows[-1]["detail"])
+        title = b.title.removesuffix(f" ({total})") if total is not None else b.title
+        return {"t": "table", "id": key, "title": title, "empty": b.empty, "caption": b.caption,
+                "columns": [{"label": columns[i].label, "align": columns[i].align, "hint": columns[i].hint} for i in visible],
+                "rows": rows, "pager": _pager(pager, query), "detail": any(r["detail"] for r in rows),
+                "count": total, "shown": len(source)}
     if isinstance(b, Fields):
         hints = dict(b.hints)
         return {"t": "fields", "title": b.title, "columns": max(1, min(b.columns, 3)),
@@ -249,7 +261,9 @@ def block(b: Any, env: Env, query: Mapping[str, str], depth: int = 0, counter: l
     if isinstance(b, Prose):
         text = b.text[:TEXT_MAX]
         return {"t": "prose", "text": text, "title": b.title,
-                "clamp": bool(b.clamp) and len(text) > b.clamp, "short": text[:b.clamp] if b.clamp else ""}
+                "clamp": bool(b.clamp) and len(text) > b.clamp, "short": text[:b.clamp] if b.clamp else "",
+                "reading": b.reading, "html": readable_html(b.html) if b.html else readable_text(text) if b.reading else "",
+                "rich": bool(b.html)}
     if isinstance(b, Code):
         return {"t": "code", "text": b.text[:TEXT_MAX], "title": b.title}
     if isinstance(b, Stats):
@@ -258,7 +272,8 @@ def block(b: Any, env: Env, query: Mapping[str, str], depth: int = 0, counter: l
              "href": href(s.href) if s.href else "",
              "trend": chart_svg(s.trend, env.when, env.stamp) if s.trend is not None else ""} for s in b.items]}
     if isinstance(b, Timeline):
-        entries, auto = (b.entries, None) if b.pager is not None else _auto(b.entries, query, counter)
+        counter[0] += 1
+        entries, auto = (b.entries, None) if b.pager is not None else _auto(b.entries, query, f"{namespace}{counter[0]}")
         return {"t": "timeline", "title": b.title, "empty": b.empty, "pager": _pager(b.pager or auto, query),
                 "entries": [{"at": env.when(e.at) if e.at else "", "rel": relative(e.at, env.now) if e.at else "",
                              "title": e.title, "text": e.text, "tone": tone(e.tone),
@@ -267,36 +282,83 @@ def block(b: Any, env: Env, query: Mapping[str, str], depth: int = 0, counter: l
         points = [(at, v) for s in b.series for at, v in s.points]
         return {"t": "chart", "title": b.title, "empty": b.empty, "has": bool(points),
                 "svg": chart_svg(b, env.when, env.stamp) if points else "",
-                "table": _chart_table(b, env) if b.table and points else None}
+                "table": block(_chart_table(b, env), env, query, depth + 1, counter, namespace)
+                         if b.table and points else None}
+    if isinstance(b, Workspace):
+        return {"t": "workspace",
+                "sidebar": [block(x, env, query, depth + 1, counter, namespace) for x in b.sidebar],
+                "items": [block(x, env, query, depth + 1, counter, namespace) for x in b.items]}
+    if isinstance(b, Toolbar):
+        return {"t": "toolbar", "title": b.title,
+                "items": [block(x, env, query, depth + 1, counter, namespace) for x in b.items]}
     if isinstance(b, Grid):
         return {"t": "grid", "columns": max(1, min(b.columns, 3)),
-                "items": [block(x, env, query, depth + 1, counter) for x in b.items]}
+                "items": [block(x, env, query, depth + 1, counter, namespace) for x in b.items]}
     if isinstance(b, Section):
         return {"t": "section", "title": b.title, "description": b.description,
-                "items": [block(x, env, query, depth + 1, counter) for x in b.items]}
+                "items": [block(x, env, query, depth + 1, counter, namespace) for x in b.items]}
     if isinstance(b, Disclosure):
-        return {"t": "disclosure", "title": b.title, "open": b.open,
-                "items": [block(x, env, query, depth + 1, counter) for x in b.items]}
+        items = [block(x, env, query, depth + 1, counter, namespace) for x in b.items]
+        return {"t": "disclosure", "title": b.title, "open": b.open or _active_page(items), "items": items}
+    if isinstance(b, Filters):
+        fields, active = filters_ctx(b.params, dict(b.values))
+        return {"t": "filters", "title": b.title, "fields": fields, "active": active,
+                "keep": b.keep, "reset": "?" + urlencode(b.keep)}
     if isinstance(b, Nav):
         return {"t": "nav", "title": b.title, "items": [
             {"text": i.text, "href": href(i.href), "count": "" if i.count is None else str(i.count),
              "active": i.active, "tone": tone(i.tone)} for i in b.items if isinstance(i, NavItem)]}
     if isinstance(b, ActionSlot):
-        return {"t": "action", "key": b.action, "initial": dict(b.initial), "title": b.title, "compact": b.compact,
+        return {"t": "action", "key": b.action, "initial": dict(b.initial), "title": b.title, "compact": b.compact, "presentation": b.presentation,
                 "slot": f"{b.action}|{json.dumps(dict(b.initial), sort_keys=True)}"}
     return {"t": "note", "text": f"Bloc inconnu : {type(b).__name__}", "tone": "danger"}
 
 
-def _chart_table(b: Chart, env: Env) -> dict[str, Any]:
-    stamps = sorted({at for s in b.series for at, _ in s.points})[-200:]
+def _chart_table(b: Chart, env: Env) -> Table:
+    stamps = sorted({at for s in b.series for at, _ in s.points}, reverse=True)
     by = [dict(s.points) for s in b.series]
     unit = b.unit
     fmt = (lambda v: f"{v:.0%}") if unit == "%" else (lambda v: f"{v:.3g}")
-    return {"columns": [s.label for s in b.series],
-            "rows": [{"at": env.when(at), "values": ["" if at not in d else fmt(d[at]) for d in by]}
-                     for at in reversed(stamps)]}
+    return Table((Column("Quand", "fit"), *(Column(s.label, "num") for s in b.series)),
+                 tuple((env.when(at), *(None if at not in d else fmt(d[at]) for d in by)) for at in stamps),
+                 title="Valeurs · " + (b.title or "Graphique"))
+
+
+def _active_page(items: Sequence[Mapping[str, Any]]) -> bool:
+    """Garde ouverts les détails qui contiennent une collection déjà parcourue."""
+    return any((b.get("pager") or {}).get("page", 1) > 1
+               or _active_page(b.get("sidebar", []) + b.get("items", []))
+               or any(r.get("open", False) for r in b.get("rows", []))
+               or (b.get("table") is not None and _active_page([b["table"]])) for b in items)
+
+
+def filters_ctx(specs: Sequence[Param], raw: Mapping[str, str]) -> tuple[list[dict[str, Any]], bool]:
+    """Le contrôle montre la valeur réellement utilisée, même par défaut ou après validation."""
+    values, _ = read_params(specs, raw)
+    defaults, _ = read_params(specs, {})
+    out = []
+    for p in specs:
+        value = values[p.name]
+        shown = ("oui" if value else "non") if p.kind == "bool" else "" if value is None else str(value)
+        out.append({"name": p.name, "label": p.label, "kind": p.kind, "choices": p.choices,
+                    "value": shown, "placeholder": p.placeholder, "lo": p.lo, "hi": p.hi})
+    return out, any(values[p.name] != defaults[p.name] for p in specs if p.kind != "hidden")
 
 
 def blocks(items: Sequence[Any], env: Env, query: Mapping[str, str]) -> list[dict[str, Any]]:
     counter = [0]
-    return [block(b, env, query, 0, counter) for b in items]
+    rendered = [block(b, env, query, 0, counter) for b in items]
+    slots = [0]
+
+    def unique_forms(nodes: Sequence[dict[str, Any]]) -> None:
+        for b in nodes:
+            if b["t"] == "action":
+                slots[0] += 1
+                b["slot"] += f"@{slots[0]}"
+            elif b["t"] in ("grid", "section", "disclosure", "workspace", "toolbar"):
+                unique_forms(b.get("sidebar", []) + b["items"])
+            elif b["t"] == "table":
+                unique_forms([x for r in b["rows"] for x in r["detail"]])
+
+    unique_forms(rendered)
+    return rendered

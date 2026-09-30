@@ -13,6 +13,7 @@ from mika.app.console import NAVIGATION
 from mika.contracts import runtime as rt
 from mika.kernel.events import Content, Origin
 from mika.runtime import inspection
+from tests.fixtures.console_html import ConsoleHTML
 from tests.protocol.test_web import WS, bootstrap, recv_until, world  # noqa: F401 — fixture partagée
 
 
@@ -58,6 +59,7 @@ def test_every_page_and_every_faculty_view_opens(world):  # noqa: F811
             base = "/inspecteur/" if d.key == "accueil" else f"/inspecteur/{d.key}"
             r = client.get(base)
             assert r.status_code == 200 and d.label in html_of(r), (d.key, r.status_code)
+            ConsoleHTML(r.text).check()
             slugs = [k.split(".", 1)[1] for k in d.builtin] + [v.name for v in views if v.section == d.key]
             if d.layout == "menu":  # un sous-menu : chacune de ses pages
                 slugs = [u.rsplit("/", 1)[1] for u in re.findall(rf'class="submenu-item[^"]*" href="({base}/[\w-]+)"',
@@ -66,7 +68,8 @@ def test_every_page_and_every_faculty_view_opens(world):  # noqa: F811
             for slug in slugs if d.layout != "stack" else ():
                 r = client.get(f"{base}/{slug}", follow_redirects=True)
                 page = html_of(r)
-                assert r.status_code == 200 and "a échoué" not in page, (d.key, slug, r.status_code)
+                assert r.status_code == 200 and "Cette vue a échoué" not in page, (d.key, slug, r.status_code)
+                ConsoleHTML(r.text).check()
     for v in views:
         r = client.get(f"/inspecteur/facultes/{v.owner}/{v.name}")
         assert r.status_code == 200 and "Cette vue a échoué" not in html_of(r), (v.owner, v.name)

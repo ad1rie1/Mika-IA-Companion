@@ -134,14 +134,28 @@ class Inspection:
             return Note(f"L'en-tête de cette fiche a échoué : {out.error!r}"[:500], tone="danger")
         return out
 
-    def search(self, kind: str, text: str, limit: int = 20) -> list[Found]:
+    def search(self, kind: str, text: str, limit: int = 20, *, offset: int = 0) -> list[Found]:
         spec = self.subject(kind)
         if spec is None or spec.search is None:
             return []
         frame = self.kernel.mind.frame()
-        out: Any = call(spec.search, frame.state(spec.owner), frame, self.context(), text.strip()[:200],
-                        max(1, min(limit, 500)), label=f"recherche {kind}")
+        limit = max(1, min(limit, 100))
+        offset = max(0, min(offset, 2**63 - 101))
+        out: Any = call(spec.search, frame.state(spec.owner), frame, self.context({"_offset": str(offset)}), text.strip()[:200],
+                        limit, label=f"recherche {kind}")
         return [] if isinstance(out, Failed) else list(out or [])[:limit]
+
+    async def download(self, kind: str, key: str, name: str):
+        spec = self.subject(kind)
+        if spec is None or spec.download is None:
+            return None
+        frame = self.kernel.mind.frame()
+        out = call(spec.download, frame.state(spec.owner), frame, self.context(subject=key), key, name,
+                   label=f"document {kind}")
+        if pyinspect.isawaitable(out):
+            pending = out
+            out = await acall(lambda: pending, label=f"document {kind}")
+        return None if isinstance(out, Failed) else out
 
     def badge(self, spec: InspectSpec) -> tuple[int, str] | None:
         """Ce qui demande une action (mis en cache jusqu'au prochain événement)."""

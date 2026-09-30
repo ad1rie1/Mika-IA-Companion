@@ -62,13 +62,13 @@ def test_hostile_text_is_escaped_and_no_page_runs_inline_code(world):  # noqa: F
     assert seen_payload  # le texte hostile est bien montré… en texte
 
 
-def test_only_the_svg_module_makes_markup():
+def test_only_audited_renderers_make_markup():
     offenders = []
     for path in INSPECTOR.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", "")) == "Markup":
-                if path.name != "svg.py":
+                if path.name not in {"svg.py", "document.py"}:
                     offenders.append(f"{path.name}:{node.lineno}")
     assert offenders == []
     templates = [p for p in (INSPECTOR / "templates").rglob("*.html") if "|safe" in p.read_text(encoding="utf-8")]

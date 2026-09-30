@@ -249,9 +249,9 @@ def _history(s: SelfState, frame: Frame, ctx: InspectContext) -> Table:
                      emotion_cell(d.dominant) if d.dominant else None, None, None, names(frame, d.about))
         rows.append(Row(cells, detail=(Prose(text or FORGOTTEN, title="En entier"),)))
     pager = Pager(param="avant", size=PAGE, older=(("avant", str(events[-1].seq)),)) if len(events) >= PAGE \
-        else None
-    return Table((Column("n°", "fit"), Column("écrit", "fit"), Column("sorte", "fit"), Column("nuit", "fit"),
-                  Column("texte"), Column("couleur"), Column("vivacité"), Column("revenu au réveil", "fit"),
+        else Pager(param="avant", size=PAGE)
+    return Table((Column("n°", "fit", detail=True), Column("écrit", "fit", detail=True), Column("sorte", "fit"), Column("nuit", "fit"),
+                  Column("texte"), Column("couleur", detail=True), Column("vivacité", detail=True), Column("revenu au réveil", "fit"),
                   Column("concerne")), tuple(rows), title="Toutes ses nuits",
                  empty="plus rien avant" if before else "pas encore de nuit racontée", pager=pager)
 

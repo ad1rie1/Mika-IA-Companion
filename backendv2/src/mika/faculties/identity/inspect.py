@@ -253,7 +253,8 @@ def _search_people(s: IdentityState, frame: Frame, ctx: InspectContext, text: st
         shown = ", ".join(handles[:3]) + ("…" if len(handles) > 3 else "")
         found.append((_last_from(frame, handles), person, Found(person, name, shown or "aucune poignée")))
     found.sort(key=lambda x: (-x[0], x[1]))
-    return [f for _last, _key, f in found[:limit]]
+    offset = max(0, ctx.int_param("_offset", 0))
+    return [f for _last, _key, f in found[offset:offset + limit]]
 
 
 @IDENTITY.subject("handle", label="Poignée", plural="Poignées", icon="◎")
@@ -292,8 +293,12 @@ def _search_handles(s: IdentityState, frame: Frame, ctx: InspectContext, text: s
     q = fold(text)
     ordered = sorted(s.handles.items(), key=lambda kv: (-kv[1].first_seen, kv[0]))
     out: list[Found] = []
+    skip = max(0, ctx.int_param("_offset", 0))
     for key, h in ordered:
         if q and q not in fold(key) and q not in fold(h.name):
+            continue
+        if skip:
+            skip -= 1
             continue
         out.append(Found(key, key, f"{h.name or '—'} · {h.channel or '—'} · {TRUST_SHORT[h.trust]}"))
         if len(out) >= limit:
@@ -496,7 +501,7 @@ def _ledger(s: IdentityState, handle: str, ctx: InspectContext) -> Block:
         rows.append(Row((Ref("event", str(e.seq), str(e.seq)), When(e.at), Badge(label, _KIND_TONE.get(label, "")),
                          detail, who, Ref("event", str(message), f"message {message}") if message is not None
                          else "—")))
-    pager = Pager(older=(("avant", str(found[-1].seq)),)) if len(found) == MAX_LEDGER else None
+    pager = Pager(older=(("avant", str(found[-1].seq)),)) if len(found) == MAX_LEDGER else Pager()
     return Table((Column("n°", "fit"), Column("quand", "fit"), "sorte", "détail", "par", "message"), tuple(rows),
                  title="Registre des preuves (les plus récentes d'abord)", pager=pager,
                  empty="aucune revendication, preuve ni liaison")
@@ -516,8 +521,9 @@ def _handles_table(s: IdentityState, frame: Frame, ctx: InspectContext, handles:
                          When(o.first_seen) if o.first_seen else "—",
                          When(last) if (last := frame.get(transcript_c.LAST_FROM(k))) else "jamais"),
                         href=handle_ref(k)))
-    return Table(("poignée", "nom", "canal", "confiance", "certitude", "liée par", "revendique",
-                  "vue pour la première fois", "dernier message"), tuple(rows), title=title, empty=empty,
+    return Table(("poignée", "nom", "canal", "confiance", Column("certitude", detail=True),
+                  Column("liée par", detail=True), Column("revendique", detail=True),
+                  Column("vue pour la première fois", detail=True), "dernier message"), tuple(rows), title=title, empty=empty,
                  pager=pager)
 
 
@@ -693,8 +699,9 @@ def _people(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
         Stats((Stat("personnes", len(everyone)),
                Stat("propriétaires", len(frame.get(c.OWNERS))),
                Stat("reliées à plusieurs poignées", sum(1 for hs in everyone.values() if len(hs) > 1)))),
-        Table(("personne", Column("poignées", "num"), "canal principal", "certitude", "proximité", "propriétaire",
-               "dernier message reçu", "vue pour la première fois"), tuple(rows), title="Personnes", pager=pager,
+        Table(("personne", Column("poignées", "num"), Column("canal principal", detail=True), Column("certitude", detail=True),
+               "proximité", "propriétaire", "dernier message reçu", Column("vue pour la première fois", detail=True)),
+              tuple(rows), title="Personnes", pager=pager,
               filters=("q",),
               empty=f"personne ne correspond à « {ctx.value('q')} »" if q else "personne pour l'instant"),
     ]
@@ -729,8 +736,9 @@ def _directory(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Bloc
                Stat("propriétaires", owners),
                Stat("barre de divulgation", number(privacy.POLICY.private_threshold),
                     href=Ref.view("identity", "politique", "politique")))),
-        Table(("poignée", "nom", "canal", "confiance du canal", "certitude", "parle pour", "propriétaire",
-               "revendique", "divulgation en privé", "divulgation en public", "vue pour la première fois"),
+        Table(("poignée", "nom", "canal", "confiance du canal", Column("certitude", detail=True), "parle pour",
+               Column("propriétaire", detail=True), "revendique", Column("divulgation en privé", detail=True),
+               Column("divulgation en public", detail=True), Column("vue pour la première fois", detail=True)),
               tuple(rows), title="Poignées", pager=pager, filters=("q", "confiance"),
               empty="aucune poignée ne correspond" if q or trust else "aucune poignée vue pour l'instant"),
     ]

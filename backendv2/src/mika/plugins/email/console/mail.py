@@ -5,7 +5,9 @@ et ce qu'on peut en faire : répondre, lui faire rédiger une réponse, ranger
 from __future__ import annotations
 
 import dataclasses
+from email.header import decode_header, make_header
 from typing import Annotated, Any
+from urllib.parse import quote
 
 from pydantic import BaseModel, Field
 
@@ -20,19 +22,24 @@ from mika.kernel.inspect import (
     Badge,
     Block,
     Disclosure,
+    Download,
     Entry,
     Fields,
     Found,
     Head,
     InspectContext,
     Meter,
+    Nav,
+    NavItem,
     Note,
+    Pager,
     Prose,
     Ref,
+    Table,
     Text,
     Timeline,
+    Toolbar,
     When,
-    paginate,
 )
 from mika.kernel.operate import Done, Refused
 from mika.plugins.email import (
@@ -45,18 +52,15 @@ from mika.plugins.email import (
     params_of,
 )
 from mika.plugins.email.console.common import (
-    BODY_SHOWN,
-    CACHE_SHOWN,
-    FOLD,
     NO_MAIL,
     PAGE,
     UNKNOWN,
     author,
+    box_link,
     can_send,
     clip,
     draft_state,
     fold,
-    gone,
     important,
     mail_key,
     pertinence,
@@ -78,14 +82,11 @@ def _badges(seen: Seen | None, mail: Any, frame: Frame) -> tuple[Badge, ...]:
     if mail is not None and mail.answered:
         out.append(Badge("répondu", "ok"))
     if seen is None:
-        out.append(Badge("pas remarqué", "muted"))
         return tuple(out)
-    out.append(Badge("remarqué", "info"))
     if seen.mentioned:
         out.append(Badge("signalé à sa propriétaire", "info"))
     if seen.needs_reply:
         out.append(Badge("réponse attendue", "warn"))
-    out.append(Badge(f"pertinence {seen.importance:.2f}", "warn" if important(seen, p) else ""))
     return tuple(out)
 
 
@@ -104,7 +105,8 @@ def _head(s: EmailState, frame: Frame, ctx: InspectContext, key: str) -> Head | 
         to = sent.to if sent is not None else known.to if known is not None else ""
         facts = (("parti", ctx.when(sent.date) if sent is not None and sent.date else "—"),)
         return Head(key=mail_key(ref), title=title or "(sans objet)", subtitle=f"à {clip(to, 200)}",
-                    badges=(Badge("parti de sa boîte", "info"), author(frame, by, edited=edited)), facts=facts)
+                    badges=(Badge("parti de sa boîte", "info"), author(frame, by, edited=edited)), facts=facts, back=Ref("local", "/inspecteur/courrier/envoyes", "Retour aux envoyés",
+                                        (("compte", sent.account if sent else ""),)), automatic_actions=False)
     m = port.cached_one(ref) if port is not None else None
     seen = s.mails.get(ref)
     if m is not None:
@@ -115,43 +117,33 @@ def _head(s: EmailState, frame: Frame, ctx: InspectContext, key: str) -> Head | 
         return None
     facts: list[tuple[str, Any]] = [("reçu", ctx.when(m.date) if m is not None and m.date else "—")]
     if m is not None and (m.account or m.folder):
-        facts.append(("où", f"{m.account or 'sa boîte'} · {m.folder}"))
-    if seen is not None:
-        facts.append(("remarqué", ctx.when(seen.at)))
+        info = port.account(m.account) if port is not None else None
+        facts.append(("compte", info.name if info else m.account or "sa boîte"))
+        facts.append(("à", Text(m.to or "—")))
     if m is None:
         facts.append(("dans la boîte", "plus maintenant" if port is not None else "courrier non branché"))
     return Head(key=mail_key(ref), title=title, subtitle=clip(sender, 200), badges=_badges(seen, m, frame),
-                facts=tuple(facts))
+                facts=tuple(facts), back=box_link("Retour aux messages", account=m.account if m else "",
+                                                  folder=m.folder if m else ""), automatic_actions=False)
 
 
 @EMAIL.search("mail")
 def _search(s: EmailState, frame: Frame, ctx: InspectContext, text: str, limit: int) -> list[Found]:
     port = ctx.ports.get("mail")
     query = fold(text)
-    out: list[Found] = []
-    shown: set[str] = set()
-    for m in port.cached(CACHE_SHOWN) if port is not None else ():
-        if query and query not in fold(f"{m.subject} {m.sender}"):
-            continue
-        shown.add(m.ref)
-        out.append(Found(mail_key(m.ref), clip(m.subject) or "(sans objet)",
-                         clip(m.sender, 80) + (f" · reçu {ctx.when(m.date)}" if m.date else "")))
-        if len(out) >= limit:
-            return out
-    for m in gone(port):
-        if query and query not in fold(f"{m.subject} {m.to}"):
-            continue
-        shown.add(m.message_id)
-        out.append(Found(mail_key(m.message_id), clip(m.subject) or "(sans objet)",
-                         f"à {clip(m.to, 80)}" + (f" · parti {ctx.when(m.date)}" if m.date else "")))
-        if len(out) >= limit:
-            return out
-    for k, seen in sorted(s.mails.items(), key=lambda kv: -kv[1].seq):
-        if k in shown or (query and query not in fold(seen.sender)):
-            continue
-        out.append(Found(mail_key(k), f"Un mail de {clip(name_of(seen.sender), 80)}", f"remarqué {ctx.when(seen.at)}"))
-        if len(out) >= limit:
-            break
+    offset = max(0, ctx.int_param("_offset", 0))
+    hits = port.search_page(text, limit, offset) if port is not None else []
+    out = [Found(mail_key(m.ref), clip(m.subject) or "(sans objet)",
+                 clip(m.who, 80) + (f" · {ctx.when(m.date)}" if m.date else "")) for m in hits]
+    if len(out) >= limit:
+        return out
+    count = port.search_count(text) if port is not None else 0
+    missing = [(k, seen) for k, seen in sorted(s.mails.items(), key=lambda kv: -kv[1].seq)
+               if (not query or query in fold(seen.sender)) and
+               (port is None or port.cached_one(k) is None and port.sent_mail(k) is None)]
+    start = max(0, offset - count)
+    out.extend(Found(mail_key(k), f"Un mail de {clip(name_of(seen.sender), 80)}", f"remarqué {ctx.when(seen.at)}")
+               for k, seen in missing[start:start + limit - len(out)])
     return out
 
 
@@ -164,19 +156,73 @@ def _asked(s: EmailState, ctx: InspectContext, port: Any) -> tuple[str | None, N
     return (ref, None) if ref is not None else (None, Note(UNKNOWN, tone="muted"))
 
 
-def _body(text: str, what: str) -> Block:
-    if not text.strip():
-        return Note("Le message n'a pas de texte lisible.", tone="muted")
-    cut = f", coupé à {BODY_SHOWN} caractères" if len(text) > BODY_SHOWN else ""
-    return Prose(text[:BODY_SHOWN], title=f"{what} ({len(text)} caractères{cut})", clamp=FOLD)
+def _body(text: str, what: str, html: str = "") -> Block:
+    if not text.strip() and not html:
+        return Note("Ce message ne contient pas de texte.", tone="muted")
+    return Prose(text, title=what, reading=True, html=html)
 
 
-def _forwarded(m: Any) -> str:
-    head = f"De : {m.sender}\nObjet : {m.subject}\nÀ : {m.to}"
-    return f"\n\n---------- Message transféré ----------\n{head}\n\n{m.body[:6000]}"
+def _download_link(ref: str, part: str, label: str) -> Ref:
+    return Ref("local", "/inspecteur/telecharger/mail/" + quote(mail_key(ref), safe=""), label,
+               (("fichier", part),))
 
 
-@EMAIL.inspect("message", title="Message", subject="mail", subject_param="id", order=10)
+@EMAIL.download("mail")
+async def _download(s: EmailState, frame: Frame, ctx: InspectContext, key: str, part: str) -> Download | Note:
+    port = ctx.ports.get("mail")
+    ref, _ = _asked(s, ctx, port)
+    if port is None or ref is None or not (part in ("source", "texte") or part.isdecimal() and len(part) <= 5):
+        return Note("Ce fichier n'est pas disponible.", tone="warn")
+    try:
+        file = await port.file(ref, part)
+    except (OSError, RuntimeError, ValueError):
+        return Note("Impossible de récupérer ce fichier. Vérifie la connexion du compte et la présence du message sur le serveur.", tone="warn")
+    return Download(file.name, file.data)
+
+
+def _document(ctx: InspectContext, ref: str, text: str, title: str = "", html: str = "", *, kind: str = "mail") -> list[Block]:
+    size = 50_000
+    parts, start = [], 0
+    while start < len(text):
+        end = min(len(text), start + size)
+        if end < len(text):
+            boundary = text.rfind("\n", start + size // 2, end)
+            if boundary < 0:
+                boundary = text.rfind(" ", start + size // 2, end)
+            if boundary >= 0:
+                end = boundary + 1
+        parts.append(text[start:end])
+        start = end
+    pages = max(1, len(parts))
+    page = max(1, min(pages, ctx.int_param("page_texte", 1)))
+    blocks: list[Block] = []
+    if pages > 1 or len(html) > 200_000:
+        html = ""
+        blocks.append(Note(f"Message long : lecture en texte, partie {page} sur {pages}." +
+                           (" Le téléchargement contient le message entier." if kind == "mail" else ""), tone="info"))
+    blocks.append(_body(parts[page - 1] if parts else "", title, html))
+    links = []
+    context = tuple((k, v) for k, v in ctx.params.items() if k != "page_texte")
+    for number, label in ((page - 1, "Partie précédente"), (page + 1, "Partie suivante")):
+        if 1 <= number <= pages:
+            links.append(NavItem(label, Ref("subject", f"{kind}/{mail_key(ref)}", label,
+                                           (*context, ("page_texte", str(number))))))
+    if kind == "mail":
+        links.extend((NavItem("Télécharger le texte complet", _download_link(ref, "texte", "Texte complet")),
+                      NavItem("Télécharger le message (.eml)", _download_link(ref, "source", "Message original"))))
+    if links:
+        blocks.append(Nav(tuple(links)))
+    return blocks
+
+
+def _files(ref: str, attachments: tuple) -> list[Block]:
+    return [Table(("Fichier", "Taille", "Type"), tuple(
+        (_download_link(ref, str(i), a.name), f"{max(1, a.size // 1024)} Ko", a.mime)
+        for i, a in enumerate(attachments)), title="Pièces jointes")] if attachments else []
+
+
+@EMAIL.inspect("message", title="Message", subject="mail", subject_param="id", order=10,
+               description='Lis le contenu du message et choisis la suite : répondre, ranger ou marquer comme lu.')
 def _tab_message(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("mail")
     ref, note = _asked(s, ctx, port)
@@ -187,94 +233,82 @@ def _tab_message(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block
                      "remarqué).", tone="muted")]
     sent = port.sent_mail(ref)
     if sent is not None:
-        return [Fields((("à", Text(clip(sent.to, 300))), ("copie", Text(clip(sent.cc, 300)) if sent.cc else "—"),
-                        ("objet", Text(clip(sent.subject, 500) or "(sans objet)")),
-                        ("parti", When(sent.date, relative=False) if sent.date else None),
-                        ("de la boîte", sent.account or "—"), ("écrit par", author(frame, sent.by)),
-                        ("en réponse à", Text(clip(sent.in_reply_to, 300) or "—", kind="mono")),
-                        ("brouillon", Ref.subject("brouillon", sent.draft, sent.draft) if sent.draft else "—"),
-                        ("identifiant", Text(clip(sent.message_id, 300), kind="mono"))), title="En-têtes",
-                       columns=2),
-                _body(sent.body, "Ce qui est parti")]
+        info = port.account(sent.account)
+        actions = [Toolbar((ActionSlot("email.transferer", (("original", sent.ref),
+                            ("subject", forward_subject(sent.subject)[:200])), title="Transférer", presentation="button"),))] if info and info.can_send else []
+        return [*actions, *_document(ctx, sent.ref, sent.body, "Message envoyé"), *_files(sent.ref, sent.attachments),
+                Disclosure("Détails de l'envoi", (Fields((("À", Text(sent.to)), ("Copie", Text(sent.cc or "—")),
+                    ("Compte", sent.account or "—"), ("Écrit par", author(frame, sent.by)),
+                    ("Date", When(sent.date, relative=False) if sent.date else None),
+                    ("Identifiant", Text(sent.message_id, kind="mono"))), columns=2),))]
     m = port.cached_one(ref)
     if m is None:
         return [Note("Ce mail n'est plus dans la boîte : seul ce qu'elle en a remarqué reste.", tone="muted")]
-    pairs: list[tuple[str, Any]] = [
-        ("de", Text(clip(m.sender, 300))), ("adresse", Text(m.address or "—", kind="mono")),
-        ("à", Text(clip(m.to, 300) or "—")), ("copie", Text(clip(m.cc, 300)) if m.cc else "—"),
-        ("répondre à", Text(clip(m.reply_to, 300)) if m.reply_to else "—"),
-        ("objet", Text(clip(m.subject, 500) or "(sans objet)")),
-        ("reçu", When(m.date, relative=False) if m.date else None),
-        ("où", f"{m.account or 'sa boîte'} · {m.folder}"),
-        ("envoi de masse", "oui" if m.bulk else "non"),
-        ("en réponse à", Text(clip(m.in_reply_to, 300) or "—", kind="mono")),
-        ("identifiant", Text(clip(m.message_id, 300), kind="mono")),
-    ]
-    if m.attachments:
-        pairs.append(("pièces jointes", Text(", ".join(f"{a.name} ({a.size // 1024} Ko)" for a in m.attachments))))
-    blocks: list[Block] = [Fields(tuple(pairs), title="En-têtes", columns=2), _body(m.body, "Le message")]
-    if m.has_html:
-        blocks.append(Note("Ce mail avait aussi une version HTML : seul son texte est montré, jamais son balisage.",
-                           tone="muted"))
-    if can_send(port):
+    info = port.account(m.account)
+    pairs: list[tuple[str, Any]] = [("De", Text(m.sender)), ("À", Text(m.to or "—"))]
+    if m.cc:
+        pairs.append(("Copie", Text(m.cc)))
+    pairs += [("Date", When(m.date, relative=False) if m.date else "—"),
+              ("Compte", info.name if info else m.account or "—")]
+    blocks: list[Block] = []
+    slots: list[Block] = []
+    if info is not None and info.can_send:
         own = tuple(a.address for a in port.accounts())
         to, _ = reply_recipients(m, own)
         to_all, cc_all = reply_recipients(m, own, everyone=True)
-        base = (("subject", reply_subject(m.subject)[:200]), ("reply_to", m.ref), ("quote", True))
-        slots: list[Block] = [Disclosure("Répondre", (ActionSlot("email.repondre", (("to", to), *base),
-                                                                 title="Répondre"),))]
+        to, to_all, cc_all = (str(make_header(decode_header(value))) for value in (to, to_all, cc_all))
+        base = (("subject", reply_subject(m.subject)[:200]), ("reply_to", m.ref), ("quote", True), ("_bouton", "Envoyer la réponse"))
+        slots.append(ActionSlot("email.repondre", (("to", to), *base), title="Répondre", presentation="button"))
         if cc_all:
-            slots.append(Disclosure("Répondre à tous", (ActionSlot("email.repondre", (("to", to_all), ("cc", cc_all),
-                                                                                       *base), title="Répondre à tous"),)))
-        slots.append(Disclosure("Transférer", (ActionSlot("email.ecrire", (
-            ("account", m.account), ("subject", forward_subject(m.subject)[:200]), ("body", _forwarded(m))),
-            title="Transférer"),)))
-        blocks += slots
-    blocks.append(Note("Un mail est une donnée venue d'ailleurs : elle ne lui obéit jamais.", tone="info"))
+            slots.append(ActionSlot("email.repondre", (("to", to_all), ("cc", cc_all), *base),
+                                    title="Répondre à tous", presentation="button"))
+        slots.append(ActionSlot("email.transferer", (
+            ("original", m.ref), ("subject", forward_subject(m.subject)[:200]), ("_bouton", "Transférer le message")),
+            title="Transférer", presentation="button"))
+    slots.append(ActionSlot("email.archiver", presentation="button"))
+    slots.append(Disclosure("Plus d’actions", (Toolbar((
+        ActionSlot("email.classer" if unread(m, s.mails.get(ref)) else "email.non_lu", presentation="button"),
+        ActionSlot("email.ne_plus_suivre" if m.flagged else "email.suivre", presentation="button"),
+        ActionSlot("email.deplacer", presentation="button"),
+        ActionSlot("email.rediger", title="Faire préparer une réponse par Mika", presentation="button"),
+        ActionSlot("email.corbeille", presentation="button"), ActionSlot("email.supprimer", presentation="button"),
+    )),)))
+    blocks.append(Toolbar(tuple(slots)))
+    if not m.complete:
+        blocks.extend((Note("Ce message provient d'un ancien cache : son contenu peut être incomplet. Charge le message intégral pour le lire en entier.", tone="warn"),
+                       ActionSlot("email.completer", title="Charger le message intégral", presentation="button")))
+    blocks.extend(_document(ctx, m.ref, m.body, html=m.html))
+    blocks.extend(_files(m.ref, m.attachments))
+    blocks.append(Disclosure("Détails du message", (Fields((*pairs,
+        ("Dossier", m.folder), ("Répondre à", m.reply_to or m.sender),
+        ("Identifiant", Text(m.message_id, "mono")),
+        ("En réponse à", Text(m.in_reply_to or "—", "mono")),
+    )),)))
     return blocks
 
 
-@EMAIL.inspect("fil", title="Fil", subject="mail", order=15)
+@EMAIL.inspect("fil", title="Fil", subject="mail", order=15,
+               description="Les messages de cette conversation, dans leur ordre d'échange.")
 def _tab_thread(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     """Le fil : ce à quoi ce mail répond, et ce qui lui a répondu (reçus et partis)."""
     port = ctx.ports.get("mail")
     ref, note = _asked(s, ctx, port)
     if ref is None or port is None:
         return [note or Note("Courrier non branché.", tone="muted")]
-    items: dict[str, tuple[int, str, str, bool, str, str]] = {}  # id → (date, qui, objet, parti ?, parent, réf)
-    for m in port.cached(CACHE_SHOWN):
-        items[m.message_id] = (m.date, name_of(m.sender), m.subject, False, m.in_reply_to, m.ref)
-    for m in gone(port):
-        parent = m.in_reply_to.split(":", 1)[1] if ":" in m.in_reply_to and not m.in_reply_to.startswith("<") \
-            else m.in_reply_to
-        items[m.message_id] = (m.date, f"à {m.to}", m.subject, True, parent, m.message_id)
-    mid = next((k for k, v in items.items() if v[5] == ref), ref)
-    if mid not in items:
-        return [Note("Ce mail n'est plus dans la boîte : son fil n'est pas lisible.", tone="muted")]
-    thread = {mid}
-    root = mid
-    # remonter jusqu'au premier mail connu (un fil qui boucle s'arrête où il revient)
-    while (parent := items[root][4]) in items and parent not in thread:
-        root = parent
-        thread.add(root)
-    grew = True
-    while grew:
-        more = {k for k, v in items.items() if v[4] in thread and k not in thread}
-        thread |= more
-        grew = bool(more)
-    ordered = sorted(thread, key=lambda k: items[k][0])
-    page, pager = paginate(ordered, ctx.pager(size=PAGE))
-    entries = tuple(Entry(items[k][0], f"{'↗ ' if items[k][3] else ''}{clip(items[k][2], 120) or '(sans objet)'}",
-                          text=items[k][1], tone="info" if items[k][3] else "",
-                          href=Ref.subject("mail", mail_key(items[k][5]), ""), meta="ce mail" if k == mid else "")
-                    for k in page)
-    return [Timeline(entries, title=f"Le fil ({len(ordered)} mail(s), du plus ancien au plus récent)",
-                     empty="un mail seul", pager=pager),
-            Note(f"↗ : parti de sa boîte. Le fil se lit dans les {CACHE_SHOWN} derniers mails reçus et les "
-                 f"{CACHE_SHOWN} derniers partis.", tone="muted")]
+    request = ctx.pager(size=PAGE)
+    result = port.thread_page(ref, request.number, request.size)
+    pager = Pager(number=result.number, size=result.size, total=result.total)
+    entries = tuple(Entry(m.date, f"{'↗ ' if m.sent else ''}{clip(m.subject, 120) or '(sans objet)'}",
+                          text=m.who, tone="info" if m.sent else "",
+                          href=Ref.subject("mail", mail_key(m.ref), ""), meta="ce mail" if m.ref == ref else "")
+                    for m in result.items)
+    return [Timeline(entries, title=f"Le fil ({result.total} mail(s), du plus ancien au plus récent)",
+                     empty="Aucun message de cette conversation n'est disponible.", pager=pager),
+            Note("Tous les messages conservés de ce compte, reçus et envoyés. ↗ : message envoyé.", tone="muted")]
 
 
-@EMAIL.inspect("remarque", title="Ce qu'elle en sait", subject="mail", order=20)
+@EMAIL.inspect("remarque", title="Ce qu'elle en sait", subject="mail", order=20,
+               description='Ce que Mika a retenu de ce message et les événements associés.')
 def _tab_noticed(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("mail")
     ref, note = _asked(s, ctx, port)
@@ -331,6 +365,20 @@ def _tab_noticed(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block
 
 class NoArgs(BaseModel):
     pass
+
+
+@EMAIL.action("completer", title="Charger le message intégral", args=NoArgs, emits=[], subject="mail",
+              description="Récupère le contenu complet depuis le serveur du compte.")
+async def _complete(s: EmailState, frame: Frame, args: NoArgs, ctx: Any) -> Done:
+    port = _port(ctx)
+    ref = resolve(s, port, ctx.subject)
+    try:
+        m = await port.document(ref) if ref else None
+    except (OSError, RuntimeError, ValueError):
+        raise Refused("Le message n'a pas pu être récupéré. Vérifie la connexion du compte.") from None
+    if m is None:
+        raise Refused("Ce message n'est plus disponible.")
+    return Done(message="Le message intégral est disponible.", go=Ref.subject("mail", mail_key(ref), m.subject))
 
 
 class AskArgs(BaseModel):
@@ -507,4 +555,3 @@ def _ask(s: EmailState, frame: Frame, args: AskArgs, ctx: Any) -> Done:
                                 instruction=instruction, about=(ctx.by,) if ctx.by else ())
     return Done(drafts=(draft,), message="Demandé : elle préparera la réponse à son prochain moment de travail ; "
                                          "tu la trouveras dans Brouillons.")
-

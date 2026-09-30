@@ -19,7 +19,6 @@ from email.message import EmailMessage
 from mika.ports.mail import TO_FILL, AccountInfo, Draft, Mail, Preview, addresses
 
 HER_NAME = "Mika"
-QUOTE_MAX = 6000
 
 
 def sender(account: AccountInfo) -> str:
@@ -47,7 +46,7 @@ def final_text(body: str, account: AccountInfo, parent: Mail | None, *, quote: b
     if signature:
         text += "\n\n-- \n" + signature
     if quote and parent is not None and parent.body.strip():
-        cited = "\n".join("> " + line for line in parent.body[:QUOTE_MAX].splitlines())
+        cited = "\n".join("> " + line for line in parent.body.splitlines())
         when = _when(parent.date, tz)
         head = f"{when[:1].upper()}{when[1:]}, {parent.sender} a écrit :" if when else f"{parent.sender} a écrit :"
         text += f"\n\n{head}\n{cited}"
@@ -77,7 +76,8 @@ def preview(draft: Draft, account: AccountInfo | None, parent: Mail | None, *, t
     parent_id = parent.message_id if parent is not None else ""
     return Preview(sender=who, to=draft.to, cc=draft.cc, subject=draft.subject, text=text,
                    digest=digest(who, draft.to, draft.cc, draft.subject, text, parent_id),
-                   blocked=blocked(draft, account))
+                   blocked=blocked(draft, account) or ("le message cité est incomplet : ouvre sa fiche et charge le message intégral"
+                           if draft.quote and parent is not None and not parent.complete else ""))
 
 
 def message(shown: Preview, parent: Mail | None, message_id: str, *, when: datetime,

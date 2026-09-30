@@ -21,6 +21,7 @@ from mika.kernel.inspect import (
     Column,
     Disclosure,
     Fields,
+    Filters,
     Grid,
     Meter,
     Nav,
@@ -34,7 +35,9 @@ from mika.kernel.inspect import (
     Table,
     Text,
     Timeline,
+    Toolbar,
     When,
+    Workspace,
 )
 
 MAX_DEPTH = 8
@@ -65,7 +68,7 @@ def cell(value: Any, when: Callable[[int], str], now: int) -> str:
     if isinstance(value, Ref):
         return f"{value.text} ({target(value)})"
     if isinstance(value, Text):
-        return _clip(value.text)
+        return _clip(value.text + (" — " + value.secondary if value.secondary else ""))
     if isinstance(value, Badge):
         return f"[{value.text}]"
     if isinstance(value, Meter):
@@ -129,12 +132,18 @@ def _block(b: Any, out: list[str], when: Callable[[int], str], now: int, depth: 
             out.append(f"{pad}{b.description}")
         for item in b.items:
             _block(item, out, when, now, depth + 1)
-    elif isinstance(b, Grid):
+    elif isinstance(b, Workspace):
+        for item in (*b.sidebar, *b.items):
+            _block(item, out, when, now, depth + 1)
+    elif isinstance(b, Grid | Toolbar):
         for item in b.items:
             _block(item, out, when, now, depth)
     elif isinstance(b, Nav):
         out += [f"{pad}## {title}"] if title else []
         out += [f"{pad}- {i.text} ({target(i.href)})" for i in b.items]
+    elif isinstance(b, Filters):
+        values = dict(b.values)
+        out += [f"{pad}- Filtre {p.label} ({p.name}) : {values.get(p.name, p.default) or '—'}" for p in b.params]
     elif isinstance(b, ActionSlot):
         out.append(f"{pad}(action d'opérateur « {b.action} » : dans la console seulement)")
     else:

@@ -215,9 +215,9 @@ def _links(s: SocialState, frame: Frame, ctx: InspectContext) -> list[Block]:
                      + (f" et {len(missed) - 5} autre(s)" if len(missed) > 5 else "")) or "personne",
                     tone="warn" if missed else ""),
                Stat("dernier réconfort cherché", _when(s.comforted_at)))),
-        Table(("personne", "proximité", "rythme", Column("silence ÷ rythme", hint="la moitié de la jauge : elle "
+        Table(("personne", "proximité", Column("rythme", detail=True), Column("silence ÷ rythme", hint="la moitié de la jauge : elle "
                                                          "lui manque"), "dernier message reçu",
-               Column("initiatives sans réponse", "num"), "ce qu'elle en sait"), tuple(rows), pager=pager,
+               Column("initiatives sans réponse", "num", detail=True), "ce qu'elle en sait"), tuple(rows), pager=pager,
               title="Liens", filters=("q", "proximite"),
               empty="aucun lien ne correspond" if q or level else "aucun lien pour l'instant"),
     ]

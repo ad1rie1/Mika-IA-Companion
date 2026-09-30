@@ -48,13 +48,14 @@ async def page(ui: Any, request: Request, state: Mapping[str, Any]) -> dict[str,
     messages = list(state.get("messages") or [])
     if creating:
         return {"blocks": [], "messages": messages, "crumbs": [("Comptes", URL), ("Créer un compte", "")],
-                "panel": Panel("accounts.html", {"mode": "create", "action": URL,
+                "panel": Panel("accounts.html", {"mode": "create", "action": URL, "page_heading": "Créer un compte",
                                                  "values": state.get("values") or {}})}
     if editing:
         found = next((a for a in accounts if str(a.id) == editing), None)
         if found is not None:
             return {"blocks": [], "messages": messages, "crumbs": [("Comptes", URL), (found.username, "")],
                     "panel": Panel("accounts.html", {"mode": "edit", "action": URL, "account": found,
+                                                     "page_heading": f"Modifier · {found.username}",
                                                      "operators": sum(1 for a in accounts if a.operator and a.active)})}
         messages.append(("warn", "Ce compte n'existe pas."))
     ctx = ui.inspection.context(query)

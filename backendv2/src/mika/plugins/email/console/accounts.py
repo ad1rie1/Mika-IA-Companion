@@ -1,6 +1,6 @@
 """Ses comptes : l'état de chaque boîte, ses dossiers, et **comment elle y écrit**
 (le texte exact qu'elle lit avant d'écrire). Les réglages eux-mêmes (serveurs,
-mot de passe, voix) se modifient dans Réglages › Sens › Courrier : un lien y
+mot de passe, voix) se modifient dans Configuration › Plugins › Boîtes aux lettres : un lien y
 mène, et l'enregistrement ramène ici."""
 
 from __future__ import annotations
@@ -31,7 +31,6 @@ from mika.kernel.operate import Done, Refused
 from mika.plugins.email import EMAIL, POLL_ASKED, EmailState
 from mika.plugins.email.console.common import (
     NO_PORT,
-    SECTION,
     VOICE_LABEL,
     add_account,
     box_link,
@@ -56,7 +55,7 @@ def _fiche(key: str) -> str:
     return f"/inspecteur/fiche/compte/{key}"
 
 
-@EMAIL.inspect("comptes", title="Comptes", section=SECTION, order=50,
+@EMAIL.inspect("comptes", title="Comptes", hidden=True, order=50,
                description="Ses boîtes aux lettres : leur état, leurs dossiers, comment elle y écrit.")
 def _accounts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("mail")
@@ -77,8 +76,8 @@ def _accounts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
                         + (Fields((("fiche", Ref.subject("compte", a.key, "état, dossiers, tester la connexion")),
                                    ("réglages", edit_account(a.key)))),)))
     blocks: list[Block] = [Fields((("nouvelle boîte", add_account()),
-                                   ("tous les réglages", Ref("local", "/inspecteur/reglages/sens",
-                                                             "Réglages › Sens › Courrier"))))]
+                                   ("tous les réglages", Ref("local", "/inspecteur/reglages/boites",
+                                                             "Configuration › Plugins › Boîtes aux lettres"))))]
     blocks.append(Table(("nom", Column("clé", "fit"), "adresse", Column("elle écrit", "fit"), "relevés",
                          Column("état", "fit"), Column("dernier relevé", "fit"), Column("non lus", "num"),
                          Column("réponses préparées", "fit")), tuple(rows), title=f"Comptes ({len(rows)})",
@@ -106,11 +105,13 @@ def _head(s: EmailState, frame: Frame, ctx: InspectContext, key: str) -> Head | 
 def _search(s: EmailState, frame: Frame, ctx: InspectContext, text: str, limit: int) -> list[Found]:
     port = ctx.ports.get("mail")
     query = fold(text)
+    offset = max(0, ctx.int_param("_offset", 0))
     return [Found(a.key, a.name, a.address) for a in (port.accounts() if port is not None else ())
-            if not query or query in fold(f"{a.key} {a.name} {a.address}")][:limit]
+            if not query or query in fold(f"{a.key} {a.name} {a.address}")][offset:offset + limit]
 
 
-@EMAIL.inspect("etat", title="État", subject="compte", order=10)
+@EMAIL.inspect("etat", title="État", subject="compte", order=10,
+               description='Vérifie la connexion, les derniers relevés et les dossiers de cette boîte. Les connexions se modifient dans Configuration.')
 def _tab_state(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("mail")
     info = port.account(ctx.subject) if port is not None else None
@@ -137,7 +138,8 @@ def _tab_state(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     return blocks
 
 
-@EMAIL.inspect("voix", title="Sa voix", subject="compte", order=20)
+@EMAIL.inspect("voix", title="Sa voix", subject="compte", order=20,
+               description="Consulte la façon dont elle écrit depuis cette boîte, son nom d'expéditrice et sa signature.")
 def _tab_voice(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("mail")
     info = port.account(ctx.subject) if port is not None else None
@@ -203,4 +205,3 @@ def _poll(s: EmailState, frame: Frame, args: AccountArgs, ctx: Any) -> Done:
         raise Refused("Ce compte n'est pas prêt à relever.")
     return Done(drafts=(POLL_ASKED.draft(by=ctx.by),), message="Relève demandée : les nouveaux mails arrivent dans "
                 "quelques secondes.")
-

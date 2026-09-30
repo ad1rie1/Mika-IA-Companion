@@ -10,9 +10,10 @@ from typing import Any
 from starlette.requests import Request
 
 from mika.contracts import runtime as rt
+from mika.inspector import render
 from mika.inspector.catalog import Panel
 from mika.inspector.pages.tabs import TABS
-from mika.kernel.inspect import Badge, Column, Pager, Ref, Row, Table, Text, When
+from mika.kernel.inspect import Badge, Column, Pager, Ref, Row, Table, Text, When, paginate
 from mika.runtime import decisions
 
 
@@ -27,7 +28,9 @@ async def pending(ui: Any, request: Request) -> Any:
     frame = kernel.mind.frame()
     effects = frame.state("runtime").effects
     items = []
-    for p in frame.get(rt.PENDING_EFFECTS):
+    ctx = ui.inspection.context(request.query_params)
+    page, pager = paginate(frame.get(rt.PENDING_EFFECTS), ctx.pager(size=20))
+    for p in page:
         full = effects.get(p.proposal)
         summary = kernel.mind.store.content([p.summary_ref]).get(p.summary_ref, "(oublié)") if p.summary_ref else ""
         try:
@@ -46,7 +49,8 @@ async def pending(ui: Any, request: Request) -> Any:
                 "change": [("warn", decisions.MESSAGES[decisions.CHANGED])],
                 "bloque": [("warn", "Ça ne peut pas partir tel quel : relis-le.")],
                 "jeton": [("danger", "Jeton de formulaire invalide : recharge la page.")]}.get(done_flag, [])
-    return {"panel": Panel("approvals.html", {"items": items}), "blocks": [], "messages": messages}
+    return {"panel": Panel("approvals.html", {"items": items, "pending_pager": render._pager(pager, request.query_params)}),
+            "blocks": [], "messages": messages}
 
 
 #: l'historique, par page
@@ -61,7 +65,9 @@ async def history(ui: Any, request: Request) -> list[Any]:
     before = ctx.int_param("avant", 0) or None
     done = ctx.events([rt.EFFECT_RESOLVED, rt.EFFECT_EXECUTED], HISTORY_PAGE, before=before)
     # la capacité d'une exécution se lit sur sa décision
-    resolved = {e.data.proposal: e.data for e in ctx.events([rt.EFFECT_RESOLVED], 500, before=before)}
+    proposals = {e.data.proposal for e in done if e.type.name == rt.EFFECT_EXECUTED.name}
+    resolved = {p: found[0].data for p in proposals
+                if (found := ctx.events([rt.EFFECT_RESOLVED], 1, where=("proposal", p)))}
     rows = []
     for e in done:
         is_decision = e.type.name == rt.EFFECT_RESOLVED.name
@@ -71,7 +77,7 @@ async def history(ui: Any, request: Request) -> list[Any]:
         rows.append(Row((When(e.at), Badge("décidé" if is_decision else "exécuté", "info" if is_decision else "ok"),
                          Text(capability or "—", "mono"), Ref("event", str(e.data.proposal), f"n° {e.data.proposal}"),
                          Text(_detail(e), "muted", clamp=200)), href=Ref("event", str(e.seq), ""), tone=tone))
-    pager = Pager(older=(("avant", str(done[-1].seq)),)) if len(done) == HISTORY_PAGE else None
+    pager = Pager(older=(("avant", str(done[-1].seq)),)) if len(done) == HISTORY_PAGE else Pager()
     return [Table((Column("quand", "fit"), Column("quoi", "fit"), "capacité", Column("proposition", "fit"),
                    "détail"), tuple(rows), title="Décisions et exécutions", empty="Rien n'a encore été décidé.",
                   pager=pager)]

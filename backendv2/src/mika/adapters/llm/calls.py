@@ -125,22 +125,25 @@ class CallLog:
             (*args, max(1, min(limit, 1000)), max(0, offset)))
         return [_trace(r) for r in rows]
 
-    def count(self, *, role: str = "") -> int:
+    def count(self, *, role: str = "", correlation: str = "") -> int:
         """Combien d'appels le registre garde (pour paginer)."""
         if not self._ready:
             return 0
-        where, args = ("WHERE role=?", (role,)) if role else ("", ())
+        clauses = [("role=?", role)] if role else []
+        if correlation:
+            clauses.append(("correlation=?", correlation))
+        where, args = ("WHERE " + " AND ".join(c for c, _ in clauses), tuple(v for _, v in clauses)) if clauses else ("", ())
         rows = self.store.query_views(f"SELECT COUNT(*) FROM {TABLE} {where}", args)
         return int(rows[0][0]) if rows else 0
 
-    def for_correlation(self, correlation: str, *, limit: int = 200) -> list[LLMTrace]:
+    def for_correlation(self, correlation: str, *, limit: int = 200, offset: int = 0) -> list[LLMTrace]:
         """Les appels d'un épisode (ou d'un passage de processus), dans l'ordre où
         ils ont eu lieu."""
         if not self._ready or not correlation:
             return []
         rows = self.store.query_views(
-            f"SELECT {', '.join(_COLUMNS)} FROM {TABLE} WHERE correlation=? ORDER BY at, id LIMIT ?",
-            (correlation, max(1, min(limit, 1000))))
+            f"SELECT {', '.join(_COLUMNS)} FROM {TABLE} WHERE correlation=? ORDER BY at, id LIMIT ? OFFSET ?",
+            (correlation, max(1, min(limit, 1000)), max(0, offset)))
         return [_trace(r) for r in rows]
 
     def by_call_id(self, call_id: str) -> LLMTrace | None:

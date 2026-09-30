@@ -32,7 +32,17 @@ from mika.contracts import runtime as rt
 from mika.inspector import render
 from mika.kernel.clock import HOUR, MINUTE, US
 from mika.kernel.events import Content, Origin
-from mika.kernel.inspect import ActionSlot, Disclosure, Fields, Nav, NavItem, Note, Prose, Ref, Table
+from mika.kernel.inspect import (
+    ActionSlot,
+    Fields,
+    Nav,
+    NavItem,
+    Note,
+    Prose,
+    Ref,
+    Table,
+    walk_blocks,
+)
 from mika.plugins.email.console.common import mail_key
 from mika.ports.llm import LLMResponse, ToolCall
 from mika.ports.mail import AccountInfo, Mail
@@ -88,11 +98,7 @@ def view(kernel, name: str, subject: str = "", **params: str) -> list:
 
 
 def walk(blocks):
-    for b in blocks:
-        yield b
-        if isinstance(b, Disclosure):
-            yield from walk(b.items)
-
+    return walk_blocks(blocks)
 
 class Model:
     """Un modèle scripté : le tri dit « réponse attendue » ; une tâche rédige (ou pas)."""
@@ -325,8 +331,8 @@ def test_tidying_acts_on_the_server_and_quiets_her(tmp_path):
     assert out["how"]["<m3@exemple.fr>"] == "corbeille"
     listed = next(b for b in walk(out["box"]) if isinstance(b, Table) and b.title.startswith("Tous les dossiers"))
     starred = {r.cells[0].text: r.cells[-1] for r in listed.rows}
-    assert starred["À suivre"].text == "★ suivi"
-    nav = [b for b in out["box"] if isinstance(b, Nav)]
+    assert starred["À suivre"].text == "★ Suivi · Non lu"
+    nav = [b for b in walk(out["box"]) if isinstance(b, Nav) and b.title == "Dossiers"]
     assert nav and "Archives" in [i.text for i in nav[-1].items]
 
 
@@ -387,6 +393,6 @@ def test_the_draft_actions_are_placed_on_the_fiche_with_what_was_read(tmp_path):
     slots = {s.action: dict(s.initial) for s in walk(fiche) if isinstance(s, ActionSlot)}
     assert slots["email.envoyer_brouillon"]["seen"] == box.preview(draft.id).digest
     assert slots["email.retoucher"]["body"] == "Oui pour jeudi." and "email.refuser_brouillon" in slots
-    waiting = next(b for b in listing if isinstance(b, Table) and b.title.startswith("À décider"))
+    waiting = next(b for b in walk(listing) if isinstance(b, Table) and b.title.startswith("À décider"))
     assert len(waiting.rows) == 1 and waiting.rows[0].href.key == f"brouillon/{draft.id}"
     assert mail_key("perso:<m1@exemple.fr>") == "perso:<m1@exemple.fr>"

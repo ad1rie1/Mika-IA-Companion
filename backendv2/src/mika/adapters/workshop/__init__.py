@@ -275,10 +275,10 @@ class BwrapWorkshop:
         r = await self._git(goal, "diff", "--stat", "-p")
         return r.stdout if r.ok else ""
 
-    async def log(self, goal: int, n: int = 10) -> str:
+    async def log(self, goal: int, n: int = 10, *, offset: int = 0) -> str:
         if not (self.folder(goal) / ".git").exists():
             return ""
-        r = await self._git(goal, "log", f"-{max(1, n)}", "--format=%h %s")
+        r = await self._git(goal, "log", f"-{max(1, n)}", f"--skip={max(0, offset)}", "--format=%h %s")
         return r.stdout if r.ok else ""
 
 

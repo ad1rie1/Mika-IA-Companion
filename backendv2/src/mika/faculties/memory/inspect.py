@@ -202,30 +202,27 @@ def _meter(value: float | None) -> Cell:
 
 def _detail(k: Kept, frame: Frame, names: dict[str, str], ctx: InspectContext) -> tuple[Block, ...]:
     item = k.item
-    pairs: list[tuple[str, Cell]] = [("l'événement", Ref("event", str(item.id), f"n° {item.id}")),
-                                     ("sorte", KIND_FR.get(item.kind, item.kind))]
+    pairs: list[tuple[str, Cell]] = [("sorte", KIND_FR.get(item.kind, item.kind))]
     pairs += [("concerne", _person_ref(frame, a, names)) for a in item.about] or [("concerne", "personne")]
     if item.kind != c.PROMISE:
-        pairs += [("importance", number(item.importance)),
-                  ("touché pour la dernière fois", When(item.touched_at)),
+        pairs += [("touché pour la dernière fois", When(item.touched_at)),
                   ("rappels", f"{item.recalls}" + (f", le dernier {ctx.when(item.recalled_at)}"
                                                    if item.recalled_at else ""))]
     if item.kind == c.BELIEF:
         pairs += [("confiance déclarée", number(item.confidence)),
-                  ("origine", ORIGIN_FR.get(item.origin or "", item.origin or "—")),
                   ("dite par", names.get(item.source, item.source) if item.source else "—")]
         if k.replaces is not None:
             pairs.append(("remplace", Ref("event", str(k.replaces), f"la croyance n° {k.replaces}")))
     if item.kind == c.PROMISE:
         pairs.append(("échéance", When(item.due, relative=False) if item.due else "sans échéance"))
-    if item.emotion:
+    if item.emotion and item.kind != c.SOUVENIR:
         pairs.append(("émotion", emotion_cell(item.emotion)))
     pairs += [("vient du message", Ref("event", str(s), f"message n° {s}")) for s in k.sources[:SOURCES_SHOWN]]
     if len(k.sources) > SOURCES_SHOWN:
         pairs.append(("et encore", f"{len(k.sources) - SOURCES_SHOWN} autres messages"))
     if not k.sources:
         pairs.append(("vient du message", Text("aucun message relié", kind="muted")))
-    return (Fields(tuple(pairs), title="Détail"), Prose(item.text or FORGOTTEN, title="En entier"))
+    return (Prose(item.text or FORGOTTEN, title="En entier", reading=True), Fields(tuple(pairs), title="Détail"))
 
 
 # ── Les trois listes ──────────────────────────────────────────────────────
@@ -264,22 +261,22 @@ def _promise(k: Kept, frame: Frame, names: dict[str, str], p: MemoryParams) -> t
             When(it.born_at))
 
 
-N = Column("n°", "fit")
+N = Column("n°", "fit", detail=True)
 SOUVENIRS = Listing(c.SOUVENIR, "Ses souvenirs", "pas encore de souvenir",
                     (("active", "actif"), ("merged", "fondu dans un autre")),
-                    (N, Column("souvenir"), Column("concerne"), Column("sensibilité", "fit"), Column("importance"),
+                    (N, Column("souvenir"), Column("concerne"), Column("sensibilité", "fit"), Column("importance", detail=True),
                      Column("ce qu'il en reste", hint="l'importance, estompée depuis la dernière fois qu'il a été "
-                                                      "touché ; sous le seuil, il dort"),
-                     Column("émotion"), Column("statut", "fit"), Column("né", "fit")), _souvenir)
+                                                      "touché ; sous le seuil, il dort", detail=True),
+                     Column("émotion", detail=True), Column("statut", "fit"), Column("né", "fit")), _souvenir)
 BELIEFS = Listing(c.BELIEF, "Ses croyances", "pas encore de croyance",
                   (("active", "active"), ("superseded", "remplacée")),
                   (N, Column("croyance"), Column("concerne"), Column("sensibilité", "fit"),
-                   Column("confiance", hint="effective : elle baisse lentement avec le temps"), Column("importance"),
-                   Column("origine"), Column("statut", "fit"), Column("née", "fit")), _belief)
+                   Column("confiance", hint="effective : elle baisse lentement avec le temps"), Column("importance", detail=True),
+                   Column("origine", detail=True), Column("statut", "fit"), Column("née", "fit", detail=True)), _belief)
 PROMISES = Listing(c.PROMISE, "Ses promesses", "pas encore de promesse",
                    (("pending", "en cours"), (c.HONORED, "tenue"), (c.DROPPED, "abandonnée")),
                    (N, Column("promesse"), Column("à qui"), Column("sensibilité", "fit"), Column("échéance", "fit"),
-                    Column("statut", "fit"), Column("faite", "fit")), _promise)
+                    Column("statut", "fit"), Column("faite", "fit", detail=True)), _promise)
 LISTINGS = {x.kind: x for x in (SOUVENIRS, BELIEFS, PROMISES)}
 
 
@@ -325,9 +322,8 @@ def _params(listing: Listing) -> list[Param]:
 
 
 @MEMORY.inspect("souvenirs", title="Souvenirs", section="memoire", order=10, params=_params(SOUVENIRS),
-                description="Les épisodes qu'elle a vécus, à la première personne, tels que la relecture les a "
-                            "gardés. La v2 n'extrait ni thèmes ni entités : un souvenir porte seulement les "
-                            "personnes qu'il concerne, sa sensibilité et les messages d'où il vient.")
+                description="Ce qu'elle retient de ses échanges. Cherche un souvenir ou une personne, puis "
+                            "déplie une ligne pour lire le texte entier et retrouver les messages d'origine.")
 def _souvenirs(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
     return _list(SOUVENIRS, frame, ctx)
 

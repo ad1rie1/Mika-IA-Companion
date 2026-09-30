@@ -14,11 +14,11 @@ from starlette.routing import Route
 
 from mika.inspector import render
 from mika.inspector.ui import PREFIX, secure
-from mika.kernel.inspect import Head, Note, Ref, Row, Table
+from mika.kernel.inspect import Download, Head, Note, Pager, Ref, Row, Table, is_page_param
 from mika.runtime import operations
 
-#: une recherche lit au plus tant d'objets par sorte (la table se pagine)
-SEARCH_MAX = 500
+#: Une page par type d'objet, sans plafond sur l'ensemble des résultats.
+SEARCH_PAGE = 25
 
 
 def fiche_url(kind: str, key: str, tab: str = "") -> str:
@@ -51,23 +51,34 @@ class Subjects:
             return self.pages.render_page(request, title=f"{spec.label} inconnue", active="", status=404,
                                           blocks=[Note(f"Aucun objet « {key} » de ce type.", "warn")])
         if isinstance(head, Head) and head.key != key:
-            return RedirectResponse(fiche_url(kind, head.key, request.query_params.get("onglet", "")),
+            query = urlencode(dict(request.query_params))
+            return RedirectResponse(fiche_url(kind, head.key) + ("?" + query if query else ""),
                                     status_code=303)
         tabs = self.ui.inspection.tabs(kind)
-        slug = request.query_params.get("onglet", "") or (tabs[0].name if tabs else "")
+        slug = request.query_params.get("onglet", "") or (head.default_tab if isinstance(head, Head) else "") \
+            or (tabs[0].name if tabs else "")
         current = next((t for t in tabs if t.name == slug), tabs[0] if tabs else None)
         blocks: list[Any] = [head] if isinstance(head, Note) else []
         if current is not None:
             blocks += await self.ui.inspection.arun(current, request.query_params, self.ui.when_long, subject=key)
-        tab_list = [{"title": t.title, "href": fiche_url(kind, key, t.name), "on": current is not None
+        context = {k: v for k, v in request.query_params.items() if k not in ("onglet", "flash", "page", "taille")
+                   and not is_page_param(k) and not k.startswith(("avant", "pg", "pile"))}
+        tab_list = [{"title": t.title, "href": fiche_url(kind, key, t.name) + ("&" + urlencode(context) if context else ""), "on": current is not None
                      and t.name == current.name, "badge": 0} for t in tabs]
-        actions = self.pages.head_actions(request, kind=kind, subject=key)
+        actions = self.pages.head_actions(request, kind=kind, subject=key) \
+            if not isinstance(head, Head) or (head.automatic_actions and
+                (not head.action_tabs or current is not None and current.name in head.action_tabs)) else []
         if spec.forgettable:
             actions.append(forget_form(self.ui, request, kind, key))
         title = head.title if isinstance(head, Head) else key
         home = next((d for d in self.pages.dests.values() if kind in d.subjects), None)
         crumbs = ([(home.label, f"{PREFIX}/{home.key}")] if home else []) + \
             [(spec.plural, f"{PREFIX}/recherche?sorte={quote(kind)}")]
+        if isinstance(head, Head) and head.back:
+            crumbs = [(head.back.text or "Retour", render.href(head.back))]
+        back = request.query_params.get("retour", "")
+        if back.startswith(PREFIX + "/") and "//" not in back and "\\" not in back and len(back) < 2000:
+            crumbs = [("Retour à la liste", back)]
         env = self.ui.env()
         facts = [{"label": k, "cell": render.cell(v, env)} for k, v in (head.facts if isinstance(head, Head) else ())]
         badges = [{"text": b.text, "tone": b.tone} for b in (head.badges if isinstance(head, Head) else ())]
@@ -75,6 +86,7 @@ class Subjects:
             request, title=f"{title} · {spec.label}", heading=title, active=home.key if home else "",
             subtitle=head.subtitle if isinstance(head, Head) else "", head_badges=badges, facts=facts,
             crumbs=crumbs, tabs=tab_list, blocks=blocks,
+            view_description=current.description if current is not None else "",
             filters=current.typed if current is not None else (), head_actions=actions, subject=key,
             keep=(("onglet", current.name),) if current is not None else ())
 
@@ -87,11 +99,15 @@ class Subjects:
             spec = self.ui.inspection.subject(kind)
             if spec is None or spec.search is None:
                 continue
-            found = self.ui.inspection.search(kind, q, SEARCH_MAX)
-            if found or only:
+            param = "avant_" + kind
+            ctx = self.ui.inspection.context(request.query_params)
+            offset = max(0, ctx.int_param(param, 0))
+            found = self.ui.inspection.search(kind, q, SEARCH_PAGE + 1, offset=offset)
+            if found or only or offset:
+                pager = Pager(param=param, older=((param, str(offset + SEARCH_PAGE)),) if len(found) > SEARCH_PAGE else ())
                 blocks.append(Table((spec.label.lower(), "détail"), tuple(
                     Row((Ref.subject(kind, f.key, f.title), f.subtitle or "—"), href=Ref.subject(kind, f.key, ""))
-                    for f in found), title=f"{spec.plural} ({len(found)}{'+' if len(found) == SEARCH_MAX else ''})",
+                    for f in found[:SEARCH_PAGE]), title=spec.plural, pager=pager,
                     empty="Aucun résultat."))
         if q.isdigit():
             blocks.insert(0, Table(("événement",), ((Ref("event", q, f"l'événement n° {q}"),),), title="Journal"))
@@ -102,7 +118,8 @@ class Subjects:
         if not blocks:
             blocks = [Note("Rien ne correspond." if q else "Tape un nom, un numéro d'événement, un titre.", "muted")]
         return self.pages.render_page(request, title="Recherche", heading=f"Recherche : « {q} »" if q else "Recherche",
-                                      active="", blocks=blocks, search_q=q)
+                                      active="", blocks=blocks, search_q=q,
+                                      subtitle="Trouve une personne, un projet, un message ou une app, puis ouvre sa fiche.")
 
     async def forget(self, request: Request) -> Response:
         kind, key = request.path_params["kind"], request.path_params["key"]
@@ -127,9 +144,22 @@ class Subjects:
         self.ui.flash(f"oubli-{key}", "ok", f"« {key} » est oublié·e ({removed} contenu(s) effacé(s)).")
         return secure(RedirectResponse(f"{PREFIX}/?flash={quote('oubli-' + key, safe='')}", status_code=303))
 
+    async def download(self, request: Request) -> Response:
+        kind, key = request.path_params["kind"], request.path_params["key"]
+        result = await self.ui.inspection.download(kind, key, request.query_params.get("fichier", "source")[:100])
+        if not isinstance(result, Download):
+            return self.pages.render_page(request, title="Téléchargement indisponible", active="",
+                status=404, blocks=[result if isinstance(result, Note) else Note("Ce document n'est plus disponible.", "warn")],
+                crumbs=[("Retour à la fiche", fiche_url(kind, key))])
+        name = result.name.replace("\\", "/").rsplit("/", 1)[-1]
+        name = "".join(c for c in name if c.isprintable())[:200] or "document"
+        return secure(Response(result.data, media_type="application/octet-stream", headers={
+            "Content-Disposition": "attachment; filename*=UTF-8''" + quote(name, safe=""),
+            "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}))
+
     def routes(self) -> list[Any]:
         g = self.ui.guarded
         return [Route(PREFIX + "/fiche/{kind:str}/{key:str}", g(self.fiche)),
+                Route(PREFIX + "/telecharger/{kind:str}/{key:str}", g(self.download)),
                 Route(PREFIX + "/recherche", g(self.search)),
                 Route(PREFIX + "/oublier/{kind:str}/{key:str}", g(self.forget), methods=["POST"])]
-

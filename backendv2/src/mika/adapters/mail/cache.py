@@ -20,11 +20,24 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from mika.ports.mail import AccountStatus, Attachment, Draft, Folder, Mail, Sent, mail_ref, split_ref
+from mika.adapters.mail.browse import Browse
+from mika.ports.mail import (
+    AccountStatus,
+    Attachment,
+    Draft,
+    Folder,
+    Mail,
+    Sent,
+    addresses,
+    mail_ref,
+    reference_key,
+    split_ref,
+)
+from mika.ports.paging import fold_text
 
-#: au plus autant de mails gardés par dossier (les plus récents)
+#: limite d'une purge de maintenance explicite ; la synchronisation ne purge pas l'historique
 KEEP_PER_FOLDER = 2000
-SCHEMA = 2
+SCHEMA = 4
 LEGACY_ACCOUNT = "principal"
 
 _SCHEMA = """
@@ -37,6 +50,7 @@ CREATE TABLE IF NOT EXISTS messages(
   PRIMARY KEY(account, folder, uid));
 CREATE INDEX IF NOT EXISTS messages_mid ON messages(account, message_id);
 CREATE INDEX IF NOT EXISTS messages_date ON messages(date);
+CREATE INDEX IF NOT EXISTS messages_folder_date ON messages(account,folder,date DESC);
 CREATE TABLE IF NOT EXISTS folders(
   account TEXT NOT NULL, name TEXT NOT NULL, role TEXT, uidvalidity INTEGER, uidnext INTEGER,
   total INTEGER, unseen INTEGER, last_sync INTEGER, PRIMARY KEY(account, name));
@@ -49,8 +63,8 @@ CREATE TABLE IF NOT EXISTS envoyes(message_id TEXT PRIMARY KEY, dest TEXT, subje
   in_reply_to TEXT, by TEXT);
 """
 _COLUMNS = ("account", "folder", "uid", "message_id", "sender", "address", "reply_to", "dest", "cc", "subject",
-            "date", "body", "has_html", "attachments", "in_reply_to", "refs", "bulk", "seen", "flagged", "answered")
-_SENT_COLUMNS = ("message_id", "dest", "subject", "body", "date", "in_reply_to", "by", "account", "draft", "cc")
+            "date", "body", "has_html", "attachments", "in_reply_to", "refs", "bulk", "seen", "flagged", "answered", "html", "complete")
+_SENT_COLUMNS = ("message_id", "dest", "subject", "body", "date", "in_reply_to", "by", "account", "draft", "cc", "attachments")
 _DRAFT_COLUMNS = ("id", "account", "dest", "cc", "subject", "body", "reply_to", "quote", "author", "created",
                   "updated", "state", "sent_id", "edited_by")
 
@@ -63,6 +77,11 @@ class MailCache:
     def __init__(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(path), check_same_thread=False)
+        self._db.create_function("fold", 1, lambda s: fold_text(s or ""), deterministic=True)
+        self._db.create_function("mail_ref", 2, mail_ref, deterministic=True)
+        self._db.create_function("mail_mid", 1, lambda s: split_ref(s or "")[1], deterministic=True)
+        self._db.create_function("mail_key", 1, reference_key, deterministic=True)
+        self._db.create_function("mail_addresses", 1, lambda s: json.dumps(addresses(s or "")), deterministic=True)
         self._lock = threading.RLock()
         with self._lock:
             self._db.executescript(_SCHEMA)
@@ -70,7 +89,16 @@ class MailCache:
 
     # ── schéma ──
     def _migrate(self) -> None:
+        mail_cols = {r[1] for r in self._db.execute("PRAGMA table_info(messages)")}
+        if "html" not in mail_cols:
+            self._db.execute("ALTER TABLE messages ADD COLUMN html TEXT NOT NULL DEFAULT ''")
+        if "complete" not in mail_cols:
+            self._db.execute("ALTER TABLE messages ADD COLUMN complete INTEGER NOT NULL DEFAULT 0")
         sent_cols = {r[1] for r in self._db.execute("PRAGMA table_info(envoyes)")}
+        if "source" not in sent_cols:
+            self._db.execute("ALTER TABLE envoyes ADD COLUMN source BLOB")
+        if "attachments" not in sent_cols:
+            self._db.execute("ALTER TABLE envoyes ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'")
         for col in ("account", "draft", "cc"):
             if col not in sent_cols:
                 self._db.execute(f"ALTER TABLE envoyes ADD COLUMN {col} TEXT DEFAULT ''")
@@ -119,7 +147,7 @@ class MailCache:
                     in_reply_to=d["in_reply_to"] or "", bulk=bool(d["bulk"]), account=d["account"],
                     folder=d["folder"], cc=d["cc"] or "", reply_to=d["reply_to"] or "", references=d["refs"] or "",
                     seen=bool(d["seen"]), flagged=bool(d["flagged"]), answered=bool(d["answered"]),
-                    attachments=files, has_html=bool(d["has_html"]))
+                    attachments=files, has_html=bool(d["has_html"]), html=d["html"] or "", complete=bool(d["complete"]))
 
     def store(self, m: Mail, uid: int) -> None:
         files = json.dumps([[a.name, a.mime, a.size] for a in m.attachments], ensure_ascii=False)
@@ -131,7 +159,7 @@ class MailCache:
                 f"INSERT OR REPLACE INTO messages({', '.join(_COLUMNS)}) VALUES({', '.join('?' * len(_COLUMNS))})",
                 (m.account, m.folder, uid, m.message_id, m.sender, m.address, m.reply_to, m.to, m.cc, m.subject,
                  m.date, m.body, int(m.has_html), files, m.in_reply_to, m.references, int(m.bulk), int(m.seen),
-                 int(m.flagged), int(m.answered)))
+                 int(m.flagged), int(m.answered), m.html, int(m.complete)))
             self._db.commit()
 
     def one(self, ref: str) -> Mail | None:
@@ -141,6 +169,19 @@ class MailCache:
             rows = self._db.execute(f"SELECT {', '.join(_COLUMNS)} FROM messages WHERE {where} "
                                     "ORDER BY (folder='INBOX') DESC, date DESC LIMIT 1", args).fetchall()
         return self._mail(rows[0]) if rows else None
+
+    def at_row(self, rowid: int, *, sent: bool = False):
+        columns = _SENT_COLUMNS if sent else _COLUMNS
+        projection = ", ".join("substr(body,1,400)" if c == "body" else "''" if c == "html" else c for c in columns)
+        row = self._db.execute(f"SELECT {projection} FROM {'envoyes' if sent else 'messages'} WHERE rowid=?", (rowid,)).fetchone()
+        return self._sent(row) if sent else self._mail(row)
+
+    def draft_at_row(self, rowid: int):
+        return self._draft(self._db.execute(f"SELECT {', '.join(_DRAFT_COLUMNS)} FROM drafts WHERE rowid=?", (rowid,)).fetchone())
+
+    def browse(self, method: str, *args):
+        with self._lock:
+            return getattr(Browse(self), method)(*args)
 
     def located(self, ref: str) -> tuple[Mail, int] | None:
         """Le mail et son UID dans son dossier."""
@@ -181,6 +222,29 @@ class MailCache:
             return [(int(u), str(m), bool(s)) for u, m, s in self._db.execute(
                 "SELECT uid, message_id, seen FROM messages WHERE account=? AND folder=? AND uid>0 "
                 "ORDER BY uid DESC LIMIT ?", (account, folder, max(0, limit)))]
+
+    def oldest_uid(self, account: str, folder: str) -> int:
+        with self._lock:
+            return self._db.execute("SELECT COALESCE(MIN(uid),0) FROM messages WHERE account=? AND folder=? AND uid>0",
+                                    (account, folder)).fetchone()[0]
+
+    def folder_count(self, account: str, folder: str) -> int:
+        with self._lock:
+            return self._db.execute("SELECT COUNT(*) FROM messages WHERE account=? AND folder=?", (account, folder)).fetchone()[0]
+
+    def find_ref(self, key: str) -> str | None:
+        with self._lock:
+            row = self._db.execute("SELECT mail_ref(account,message_id) FROM messages WHERE mail_key(mail_ref(account,message_id))=? "
+                "UNION ALL SELECT mail_ref(account,mail_mid(message_id)) FROM envoyes "
+                "WHERE mail_key(mail_ref(account,mail_mid(message_id)))=? OR mail_key(message_id)=? LIMIT 1", (key, key, key)).fetchone()
+        return row[0] if row else None
+
+    def missing_html(self, account: str, folder: str, limit: int) -> list[int]:
+        """Sources HTML absentes d'un ancien cache ; relecture explicite seulement."""
+        with self._lock:
+            return [int(r[0]) for r in self._db.execute(
+                "SELECT uid FROM messages WHERE account=? AND folder=? AND uid>0 AND has_html=1 AND html='' "
+                "ORDER BY date DESC LIMIT ?", (account, folder, max(0, limit)))]
 
     def set_flags(self, account: str, folder: str, uid: int, *, seen: bool | None = None,
                   flagged: bool | None = None, answered: bool | None = None) -> None:
@@ -295,19 +359,29 @@ class MailCache:
         self.save_folder(account, folder, total=int(total), unseen=int(unseen))
 
     # ── envoyés ──
-    def remember_sent(self, s: Sent) -> None:
+    def remember_sent(self, s: Sent, source: bytes | None = None) -> None:
         with self._lock:
             self._db.execute(f"INSERT OR REPLACE INTO envoyes({', '.join(_SENT_COLUMNS)}) "
                              f"VALUES({', '.join('?' * len(_SENT_COLUMNS))})",
                              (s.message_id, s.to, s.subject, s.body, s.date, s.in_reply_to, s.by, s.account,
-                              s.draft, s.cc))
+                              s.draft, s.cc, json.dumps([[a.name, a.mime, a.size] for a in s.attachments])))
+            if source is not None:
+                self._db.execute("UPDATE envoyes SET source=? WHERE message_id=?", (source, s.message_id))
             self._db.commit()
+
+    def sent_source(self, ref: str) -> bytes | None:
+        account, mid = split_ref(ref)
+        with self._lock:
+            row = self._db.execute("SELECT source FROM envoyes WHERE message_id IN (?,?) AND (?='' OR account=?)",
+                                   (ref, mid, account, account)).fetchone()
+        return row[0] if row else None
 
     @staticmethod
     def _sent(r: tuple[Any, ...]) -> Sent:
         d = dict(zip(_SENT_COLUMNS, r, strict=True))
         return Sent(d["message_id"], d["dest"] or "", d["subject"] or "", d["body"] or "", d["date"] or 0,
-                    d["in_reply_to"] or "", d["by"] or "", d["account"] or "", d["draft"] or "", d["cc"] or "")
+                    d["in_reply_to"] or "", d["by"] or "", d["account"] or "", d["draft"] or "", d["cc"] or "",
+                    tuple(Attachment(*a) for a in json.loads(d["attachments"] or "[]")))
 
     def sent(self, limit: int, *, account: str = "") -> list[Sent]:
         clause, args = ("WHERE account=?", (account,)) if account else ("", ())
@@ -317,10 +391,10 @@ class MailCache:
         return [self._sent(r) for r in rows]
 
     def sent_one(self, message_id: str) -> Sent | None:
-        _, mid = split_ref(message_id)
+        account, mid = split_ref(message_id)
         with self._lock:
-            rows = self._db.execute(f"SELECT {', '.join(_SENT_COLUMNS)} FROM envoyes WHERE message_id IN (?, ?)",
-                                    (message_id, mid)).fetchall()
+            rows = self._db.execute(f"SELECT {', '.join(_SENT_COLUMNS)} FROM envoyes WHERE message_id IN (?, ?) AND (?='' OR account=?)",
+                                    (message_id, mid, account, account)).fetchall()
         return self._sent(rows[0]) if rows else None
 
     # ── brouillons ──

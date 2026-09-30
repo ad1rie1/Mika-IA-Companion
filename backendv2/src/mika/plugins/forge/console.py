@@ -39,7 +39,9 @@ from mika.kernel.inspect import (
     Cell,
     Code,
     Column,
+    Disclosure,
     Fields,
+    Filters,
     Found,
     Head,
     InspectContext,
@@ -272,7 +274,8 @@ def _head(s: ForgeState, frame: Frame, ctx: InspectContext, key: str) -> Head | 
         ("dernier tour", _last_tick(key, ctx)),
     )
     return Head(key, title, subtitle=info.description if info is not None else "", badges=tuple(badges),
-                facts=facts)
+                facts=facts, default_tab="vues" if info is not None and info.views and not info.error else "etat",
+                action_tabs=("etat", "code"), back=Ref("local", "/inspecteur/apps", "Toutes les apps"))
 
 
 @FORGE.search("app")
@@ -281,10 +284,14 @@ def _search(s: ForgeState, frame: Frame, ctx: InspectContext, text: str, limit: 
     disk = {i.name: i for i in port.apps()} if port is not None else {}
     wanted = fold(text)
     out: list[Found] = []
+    skip = max(0, ctx.int_param("_offset", 0))
     for name in sorted(set(s.apps) | set(disk)):
         app, info = s.apps.get(name), disk.get(name)
         title = app.title if app is not None else info.title if info is not None else name
         if not wanted or wanted in fold(name) or wanted in fold(title):
+            if skip:
+                skip -= 1
+                continue
             out.append(Found(name, title, _status(app, info, port)))
         if len(out) >= limit:
             break
@@ -298,7 +305,9 @@ def _broken(s: ForgeState, frame: Frame) -> int:
     return sum(1 for a in s.apps.values() if a.broken)
 
 
-@FORGE.inspect("apps", title="Apps forgées", section="apps", order=10, badge=_broken)
+@FORGE.inspect("apps", title="Apps forgées", section="apps", order=10, badge=_broken,
+               description="Ouvre une app pour l'utiliser, consulter son état ou modifier ses réglages dans la Forge.",
+               params=[Param("q", "Rechercher une app", placeholder="Nom ou titre")])
 def _inspect(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("forge")
     on_disk = {i.name: i for i in port.apps()} if port is not None else {}
@@ -306,7 +315,12 @@ def _inspect(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
     if port is None:
         blocks.append(Note("Forge non configurée : aucun hôte ne peut faire tourner ses apps.", tone="muted"))
     signals = {str(app): (count, last) for app, count, last in ctx.tally(c.SIGNALED, "app")}
-    names, pager = paginate(sorted(set(s.apps) | set(on_disk)), ctx.pager(size=APPS_PAGE))
+    names = sorted(set(s.apps) | set(on_disk))
+    query = fold(str(ctx.value("q") or ""))
+    if query:
+        names = [n for n in names if query in fold(n + " " + (
+            s.apps[n].title if n in s.apps else on_disk[n].title))]
+    names, pager = paginate(names, ctx.pager(size=APPS_PAGE))
     out = []
     for name in names:
         app, info = s.apps.get(name), on_disk.get(name)
@@ -321,8 +335,9 @@ def _inspect(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
                         "oui" if app is not None and app.promoted else "non", _last_tick(name, ctx) + failures,
                         f"{count} (le dernier : {ctx.when(last)})" if count else "0"),
                        href=link if isinstance(link, Ref) else None, tone="danger" if tone == "danger" else ""))
-    blocks.append(Table(("app", "titre", Column("version", "num"), "agenda", "état", "promue", "dernier tour",
-                         "signaux"), tuple(out), title="Ses apps", empty="elle n'a encore écrit aucune app",
+    blocks.append(Table(("app", "titre", Column("version", "num", detail=True), Column("agenda", detail=True), "état",
+                         Column("promue", detail=True), "dernier tour", Column("signaux", detail=True)),
+                        tuple(out), title="Ses apps", empty="Aucune app ne correspond à cette recherche." if query else "Elle n’a encore écrit aucune app.",
                         pager=pager, caption="Un clic ouvre la fiche de l'app (état, vues, réglages, code, journal)."))
     return blocks
 
@@ -370,7 +385,8 @@ def _inspect_app(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block
 # ── Les onglets de la fiche ───────────────────────────────────────────────
 
 
-@FORGE.inspect("etat", title="État", subject="app", order=10)
+@FORGE.inspect("etat", title="État", subject="app", order=10,
+               description="L'état de fonctionnement, la version chargée, le rythme d'exécution et les éventuels problèmes de cette app.")
 def _tab_state(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
     got = _subject(s, ctx)
     if isinstance(got, list):
@@ -391,26 +407,6 @@ def _tab_state(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
     return blocks
 
 
-def _choice_rows(name: str, spec: AppViewSpec, values: dict[str, Any]) -> list[Row]:
-    """Les paramètres de la vue et leurs valeurs possibles, en liens (un texte ou un
-    nombre se donne par les liens de la vue elle-même)."""
-    rows: list[Row] = []
-    base = [(p.key, _param_text(p.kind, values.get(p.key))) for p in spec.params]
-    for p in spec.params:
-        current = _param_text(p.kind, values.get(p.key))
-        options = list(p.choices) if p.kind == "select" else [("oui", "oui"), ("non", "non")] if p.kind == "bool" \
-            else []
-        if not options:
-            rows.append(Row((p.label, current or "—", Text("par les liens de la vue", kind="muted"))))
-            continue
-        for value, label in options:
-            query = [(k, v) for k, v in base if k != p.key and v] + ([(p.key, value)] if value else [])
-            ref = Ref("subject", f"app/{name}", label, (("onglet", "vues"), ("vue", spec.key), *query))
-            on = value == current
-            rows.append(Row((p.label, ref, Badge("actuel", "info") if on else ""), tone="info" if on else ""))
-    return rows
-
-
 def _param_text(kind: str, value: Any) -> str:
     if kind == "bool":
         return "oui" if value else "non"
@@ -418,7 +414,7 @@ def _param_text(kind: str, value: Any) -> str:
 
 
 @FORGE.inspect("vues", title="Vues", subject="app", order=20,
-               params=[Param("vue", "Vue", placeholder="clé ou titre d'une vue")])
+               description="Utilise les vues de cette app et leurs actions. Les filtres ne modifient aucune donnée.")
 async def _tab_views(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
     got = _subject(s, ctx)
     if isinstance(got, list):
@@ -433,7 +429,7 @@ async def _tab_views(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[B
     if not info.views:
         return [Note("Cette app ne déclare aucune vue (views: dans son manifeste, view_<clé>(api, params) dans son "
                      "code).", tone="muted")]
-    wanted = str(ctx.value("vue") or ctx.param("vue"))
+    wanted = ctx.param("vue")
     spec = find_view(info, wanted)
     blocks: list[Block] = []
     if spec is None:
@@ -449,8 +445,10 @@ async def _tab_views(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[B
     if spec.description:
         blocks.append(Note(spec.description, tone="muted", title=spec.label))
     if spec.params:
-        blocks.append(Table(("paramètre", "valeur", ""), tuple(_choice_rows(name, spec, values)),
-                            title="Paramètres de la vue"))
+        blocks.append(Filters(
+            tuple(Param(p.key, p.label, p.kind, p.choices, p.default) for p in spec.params),
+            values=tuple((p.key, _param_text(p.kind, values.get(p.key))) for p in spec.params),
+            keep=(("onglet", "vues"), ("vue", spec.key)), title="Appliquer les filtres"))
     if app is not None and app.broken:
         blocks.append(Note(f"Cette app est cassée ({_clip(app.broken, 200)}) : ses vues ne se rendent plus. "
                            "« Activer » la relance.", tone="warn", title="Cassée"))
@@ -466,7 +464,8 @@ def _secret_set(value: Any) -> bool:
     return bool(value)
 
 
-@FORGE.inspect("reglages", title="Réglages", subject="app", order=30)
+@FORGE.inspect("reglages", title="Réglages", subject="app", order=30,
+               description="Les réglages propres à cette app restent ici. Ils prennent effet lors de son prochain appel.")
 def _tab_settings(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
     got = _subject(s, ctx)
     if isinstance(got, list):
@@ -490,18 +489,20 @@ def _tab_settings(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Bloc
         origin = "réglé par un opérateur" if f.path in current and (f.kind != "secret" or value) else "défaut"
         rows.append(Row((Text(f.label, hint=f.help) if f.help else f.label, f.group or "—", f.kind, shown, default,
                          origin)))
-    blocks: list[Block] = [Table(("réglage", "groupe", "type", "valeur", "défaut du manifeste", "provenance"),
-                                 tuple(rows), title="Ses réglages")]
+    effective = Disclosure("Valeurs effectives et valeurs par défaut", (
+        Table(("réglage", "groupe", "type", "valeur", "défaut du manifeste", "provenance"),
+              tuple(rows), title="Ses réglages"),))
+    blocks: list[Block] = []
     if store is None:
         blocks.append(Note("Les réglages ne sont pas modifiables ici (aucun magasin de réglages).", tone="muted"))
-        return blocks
+        return [*blocks, effective]
     if app is None:
         blocks.append(Note("Cette app n'est pas encore dans sa vie : « Recharger » l'y fait entrer, puis ses réglages "
                            "se règlent ici.", tone="muted"))
-        return blocks
+        return [*blocks, effective]
     initial = tuple((f.path, _initial(f, current[f.path])) for f in fields if f.path in current)
     blocks.append(ActionSlot("forge.regler", initial=initial, title="Régler"))
-    return blocks
+    return [*blocks, effective]
 
 
 def _initial(f: FormField, value: Any) -> str:
@@ -515,7 +516,8 @@ def _initial(f: FormField, value: Any) -> str:
     return "" if value is None else str(value)
 
 
-@FORGE.inspect("code", title="Code", subject="app", order=40)
+@FORGE.inspect("code", title="Code", subject="app", order=40,
+               description="Le manifeste et le code de l'app. Le test d'une fonction affiche son résultat ici.")
 def _tab_code(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
     got = _subject(s, ctx)
     if isinstance(got, list):
@@ -539,7 +541,8 @@ def _tab_code(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
     return blocks
 
 
-@FORGE.inspect("journal", title="Journal", subject="app", order=50)
+@FORGE.inspect("journal", title="Journal", subject="app", order=50,
+               description="Les sorties techniques de l'app, de la ligne la plus récente à la plus ancienne.")
 def _tab_logs(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
     got = _subject(s, ctx)
     if isinstance(got, list):
@@ -553,12 +556,13 @@ def _tab_logs(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
     numbered = [(n, line) for n, line in enumerate(logs, start=1)][::-1]  # la plus récente d'abord
     page, pager = paginate(numbered, ctx.pager(size=LOGS_PAGE))
     return [Table((Column("n°", "num"), "ligne"), tuple((n, Text(line, kind="mono")) for n, line in page),
-                  title=f"Son journal ({len(logs)} ligne(s), la plus récente d'abord ; une donnée)", pager=pager,
+                  title="Journal de l’app", pager=pager,
                   caption=f"L'hôte ne garde que ses {LOGS_READ} dernières lignes." if len(logs) >= LOGS_READ
                   else "")]
 
 
-@FORGE.inspect("vecu", title="Vécu", subject="app", order=60)
+@FORGE.inspect("vecu", title="Vécu", subject="app", order=60,
+               description="Les exécutions, changements d'état et signaux de cette app conservés dans le journal de Mika.")
 def _tab_lived(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
     got = _subject(s, ctx)
     if isinstance(got, list):
@@ -837,7 +841,7 @@ async def _act(s: ForgeState, frame: Frame, data: Any, ctx: ActionContext) -> Do
 
 
 FORGE.action("agir", title="Agir", args=NoArgs, emits=[EMITTED, c.SIGNALED], fields=_act_fields,
-             description="Une action que l'app déclare dans sa vue ; elle s'exécute chez elle (5 s).")(_act)
+             description="Renseigne les champs puis valide pour appliquer cette action dans l'app.")(_act)
 
 
 # ── Régler : ses réglages typés ───────────────────────────────────────────

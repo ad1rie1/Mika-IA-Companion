@@ -33,7 +33,6 @@ from mika.kernel.inspect import (
     Column,
     Disclosure,
     Fields,
-    Grid,
     Head,
     Meter,
     Note,
@@ -48,6 +47,7 @@ from mika.kernel.inspect import (
     Timeline,
     When,
     tone,
+    walk_blocks,
 )
 from mika.plugins.email.console import mail_key
 from mika.plugins.forge import WRITTEN
@@ -62,7 +62,7 @@ from tests.fixtures.mail_servers import Imap, raw_mail, serve
 from tests.fixtures.mika import at_paris, boot, build, reply
 
 #: les vues des sens, et leur place dans la console
-SENSE_VIEWS = {("email", "reception"): ("Boîte", "courrier", 10), ("rss", "flux"): ("Flux", "sens", 20),
+SENSE_VIEWS = {("email", "reception"): ("Réception", "courrier", 10), ("rss", "flux"): ("Flux", "sens", 20),
                ("camera", "camera"): ("Caméra", "sens", 30), ("sensors", "appareils"): ("Appareils", "sens", 40)}
 #: les onglets de la fiche d'un mail
 MAIL_TABS = {("email", "message"): "Message", ("email", "fil"): "Fil", ("email", "remarque"): "Ce qu'elle en sait"}
@@ -102,14 +102,7 @@ def view(kernel, owner, name, subject="", **params):
 
 
 def walk(blocks):
-    """Chaque bloc, y compris ceux qu'un autre contient (sections, replis, détails de lignes)."""
-    for b in blocks:
-        yield b
-        if isinstance(b, Section | Disclosure | Grid):
-            yield from walk(b.items)
-        elif isinstance(b, Table):
-            yield from walk([x for r in b.rows if isinstance(r, Row) for x in r.detail])
-
+    return walk_blocks(blocks)
 
 def row(r):
     return r.cells if isinstance(r, Row) else r
@@ -235,7 +228,7 @@ def test_every_sense_view_is_declared_placed_and_clean_on_a_fresh_kernel_without
         "compte": "hidden", "dossier": "hidden", "etat": "select", "de": "search", "q": "search"}
     assert {p.name for p in declared["rss", "flux"].typed} == {"flux", "q"}
     assert declared["email", "reception"].badge is not None and fiche["badge"] is None  # rien à traiter
-    for key in (("email", "reception"), ("rss", "flux"), ("camera", "camera")):
+    for key in (("rss", "flux"), ("camera", "camera")):
         said = [n for n in notes(shown_[key]) if "non configuré" in n.text]
         assert said and tone(said[0].tone) == "muted", key
     assert "rien signalé" in notes(shown_["sensors", "appareils"])[0].text
@@ -247,10 +240,10 @@ def test_every_sense_view_is_declared_placed_and_clean_on_a_fresh_kernel_without
     assert fiche["head"] is None and fiche["head vide"] is None and fiche["head empreinte"] is None
     assert fiche["recherche"] == []
     # rien encore : des tables et des graphes vides qui le disent
-    assert table(shown_["email", "reception"], "Ce qu'elle a remarqué").rows == ()
+    assert "Ajoute une boîte" in text(shown_["email", "reception"])
     chart = next(b for b in walk(shown_["rss", "flux"]) if isinstance(b, Chart))
     assert chart.kind == "bars" and not [p for s in chart.series for p in s.points]
-    assert stats(shown_["email", "reception"])["dernier mail remarqué"].value == "jamais"
+    assert not stats(shown_["email", "reception"])
     assert next(b for b in walk(shown_["camera", "camera"]) if isinstance(b, Timeline)).entries == ()
 
 
@@ -329,28 +322,20 @@ def test_the_mail_view_filters_pages_and_opens_each_mail_as_a_fiche(tmp_path):
 
     got = live(tmp_path, scenario, start=start, ports={"mail": box}, persona_llm=False)
     mails = clean(got["courrier"])
-    assert [n for n in notes(mails) if n.tone == "ok" and "configurée" in n.text]
-    tiles = stats(mails)
-    assert tiles["non lus"].value == 2 and tiles["non lus"].sub == "dont 1 important(s)"
-    assert tiles["remarqués aujourd'hui"].value == 2 and tiles["dans la boîte"].value == 4
-    assert isinstance(tiles["dernier mail remarqué"].value, When)
+    assert not stats(mails)  # la réception commence par les messages, sans tableau de diagnostic
     # la boîte : chaque ligne mène à la fiche du mail, l'identifiant n'est jamais que la clé de la fiche
     inbox = table(mails, "Réception")
     assert inbox.pager.total == 4 and len(inbox.rows) == 4
     by_subject = {shown(r.cells[0]): r for r in inbox.rows}
     urgent, bob = by_subject["Urgent : ton dossier"], by_subject["Arrivé après le relevé"]
-    assert urgent.href == Ref.subject("mail", "<m1@exemple.fr>", "Urgent : ton dossier")
-    assert (urgent.cells[1].text, urgent.cells[2]) == ("Alice <alice@exemple.fr>", When(start))
-    assert urgent.cells[3] == Badge("important, non lu", "warn") and urgent.cells[4].ratio == 0.8
-    assert bob.cells[3] == Badge("non lu", "info") and bob.cells[4] is None  # pas remarqué : pas de pertinence
+    assert urgent.href.key == "mail/<m1@exemple.fr>" and "retour" in dict(urgent.href.params)
+    assert (urgent.cells[1].text, urgent.cells[2]) == ("Alice", When(start))
+    assert urgent.cells[3] == Badge("important, non lu", "warn")
+    assert bob.cells[3] == Badge("non lu", "info")
     assert by_subject["Un identifiant avec une barre"].href.key == f"mail/{mail_key(SLASHED)}"
     assert mail_key(SLASHED).startswith("#") and "/" not in mail_key(SLASHED)
-    noticed = table(mails, "Ce qu'elle a remarqué")
-    assert len(noticed.rows) == 2 and all(r.cells[-1].kind == "event" for r in noticed.rows)
-    assert {r.href.params for r in noticed.rows} == {(("onglet", "remarque"),)}
-    assert any("Un mail de Alice : « Urgent : ton dossier »" in shown(r.cells[2]) for r in noticed.rows)
-    assert fields(mails, "")["ce qu'elle écrit attend un accord"] == "oui"  # replié, mais montré
-    assert "FIN-DU-MAIL" not in text(mails) and "alert(" not in text(mails)  # la liste ne montre jamais un corps
+    assert urgent.cells[0].secondary and urgent.cells[0].emphasis
+    assert len(urgent.cells[0].secondary) <= 160
     # les filtres et les pages : le total compte tout le cache filtré
     subjects = {k: sorted(shown(r.cells[0]) for r in table(clean(got[k]), "Réception").rows)
                 for k in ("non lus", "remarqués", "bob", "urgent")}
@@ -370,21 +355,21 @@ def test_the_mail_view_filters_pages_and_opens_each_mail_as_a_fiche(tmp_path):
     head = got["head"]
     assert isinstance(head, Head) and head.key == "<m1@exemple.fr>" and head.title == "Urgent : ton dossier"
     assert head.subtitle == "Alice <alice@exemple.fr>" and dict(head.facts)["reçu"] == when(start)
-    assert [b.text for b in head.badges] == ["important, non lu", "remarqué", "pertinence 0.80"]
-    assert [b.text for b in got["head bob"].badges] == ["non lu", "pas remarqué"]
+    assert [b.text for b in head.badges] == ["important, non lu"]
+    assert [b.text for b in got["head bob"].badges] == ["non lu"]
     assert got["head inconnu"] is None
     assert got["head barre"].key == mail_key(SLASHED) and got["head barre"].title == "Un identifiant avec une barre"
     assert got["head barre brute"].key == mail_key(SLASHED)  # l'identifiant brut redirige vers la clé
-    assert "Un identifiant avec une barre" in text(clean(got["barre"]))
+    assert "Rien." in text(clean(got["barre"]))  # l'objet est porté par l'en-tête de fiche
     # la recherche
     assert [(f.key, f.title) for f in got["cherche urgent"]] == [("<m1@exemple.fr>", "Urgent : ton dossier")]
     assert {f.key for f in got["cherche bob"]} == {"<m3@exemple.fr>", mail_key(SLASHED)}
     assert len(got["cherche tout"]) == 4
-    # l'onglet « message » : les en-têtes et le corps entier, replié, en texte
+    # le message est lisible immédiatement ; les en-têtes sont dans un détail
     message = clean(got["message"])
-    assert fields(message, "En-têtes")["objet"] == Text("Urgent : ton dossier")
+    assert fields(message, "")["De"] == Text("Alice <alice@exemple.fr>")
     body = next(b for b in message if isinstance(b, Prose))
-    assert body.text == LONG and body.clamp == 600 and f"{len(LONG)} caractères" in body.title
+    assert body.text == LONG and body.clamp == 0 and body.reading
     assert text(clean(got["ancien lien"])) == text(message)  # l'ancien ?id= mène au même message
     # l'onglet « remarque » : ce qu'elle en a retenu, et le lien vers l'événement
     noticed_tab = clean(got["remarque"])
@@ -519,6 +504,27 @@ def test_the_feeds_view_counts_by_day_filters_by_feed_and_links_articles(tmp_pat
         ["Le cours du pétrole"]
     paged = table(clean(got["page"]), "Derniers articles relevés")
     assert (len(paged.rows), paged.pager.total, paged.pager.number) == (1, 4, 2)
+
+
+def test_articles_older_than_five_hundred_remain_searchable_and_readable(tmp_path):
+    feeds = FakeFeeds()
+
+    async def scenario(kernel):
+        now = kernel.mind.clock.now()
+        for n in range(551):
+            feeds.publish(entry(n, f"Article {n}", now + n,
+                                summary="Premier paragraphe.\n\nUne exposition à retrouver." if n == 0 else "Résumé."))
+        return (view(kernel, "rss", "flux", page="23"), view(kernel, "rss", "flux", q="exposition"))
+
+    last, searched = live(tmp_path, scenario, start=at_paris(2026, 9, 28, 14, 0),
+                          ports={"feeds": feeds}, persona_llm=False)
+    tail = table(clean(last), "Derniers articles relevés")
+    assert tail.pager.total == 551 and len(tail.rows) == 1
+    assert shown(tail.rows[0].cells[0]) == "Article 0"
+    result = table(clean(searched), "Derniers articles relevés")
+    assert result.pager.total == 1 and result.rows == tail.rows
+    body = next(b for b in result.rows[0].detail if isinstance(b, Prose))
+    assert body.reading and "\n\n" in body.text
 
 
 def test_a_followed_feed_never_shows_its_credentials_or_token(tmp_path):

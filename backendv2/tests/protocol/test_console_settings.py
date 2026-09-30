@@ -184,7 +184,7 @@ def test_senses_mail_feeds_transcription_and_a_device_token_shown_once(world):  
                "_retour": "/inspecteur/courrier/comptes"}
     mail = post(client, url, account)
     assert mail.status_code == 200 and CANARY_MAIL not in mail.text
-    assert "/inspecteur/courrier/comptes" in str(mail.url)  # l'enregistrement ramène au courrier
+    assert "/inspecteur/reglages/boites" in str(mail.url)  # ancien onglet redirigé vers la configuration
     saved = client.portal.call(live.settings.email).accounts["perso"]
     assert saved.password == CANARY_MAIL and saved.voice == "proprietaire" and saved.tone == "sobre"
     # modifier sans retaper le mot de passe le garde ; un retour hors de la console est ignoré
@@ -291,6 +291,9 @@ def test_a_new_provider_picks_its_model_from_the_list_before_anything_is_saved(w
     url = f"{BASE}/fournisseurs"
     page = html_of(client.get(f"{url}?enregistrement=backends&cle=&nouveau=1"))
     assert "Charger la liste" in page
+    # le modèle est obligatoire et vide : sans formnovalidate, le navigateur refuse l'envoi et rien ne se charge
+    assert re.search(r'<input name="model"[^>]*required', page)
+    assert re.search(r'<button[^>]*name="_charger" value="model"[^>]*formnovalidate', page)
     loaded = post(client, url, {**backend("neuf", kind="claude", model="", api_key=CANARY_KEY), "_charger": "model"})
     text = html_of(loaded)
     assert loaded.status_code == 200 and "Rien n'est encore enregistré" in text and seen == [CANARY_KEY]

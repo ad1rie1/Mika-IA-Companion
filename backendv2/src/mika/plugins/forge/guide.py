@@ -52,13 +52,15 @@ Déclaration (au plus 8 vues) :
 
 Le code : def view_releves(api, params): … return {"version": 2, "blocks": [...]}
 - params contient chaque paramètre déclaré, déjà vérifié (texte, entier ou None, vrai/faux, choix connu),
-  plus « page » (un entier ≥ 1, pour la pagination) ; les noms page, taille, onglet, vue, fait, avant,
-  q_global et flash sont réservés.
+  plus « page » et les « page_<nom> » présents dans la requête (entiers ≥ 1, pour la pagination) ;
+  les noms page, page_<nom>, taille, onglet, vue, fait, avant,
+  q_global et flash sont réservés. Les paramètres déclarés deviennent des champs de filtre natifs
+  (recherche, liste, nombre, oui/non), au-dessus de la vue. Leur soumission remet les tables à la première page.
 - La vue rend une enveloppe JSON (voir forge_help blocs). Une enveloppe invalide est remplacée par une note qui
   nomme le chemin fautif ; une vue de plus de 3 s ou de plus de 256 Ko n'est pas montrée. Rien de tout ça
   n'est compté contre ton app (le disjoncteur ne regarde que tick et on_event).
 - Un lien vers une autre de tes vues : {"kind": "link", "text": "Lyon", "view": "releves",
-  "params": {"ville": "Lyon"}} (seuls les paramètres déclarés de cette vue passent, et « page »).
+  "params": {"ville": "Lyon"}} (seuls les paramètres déclarés de cette vue passent, ainsi que « page » et « page_<nom> »).
 - Un formulaire d'action en place : {"type": "form", "action": "ajouter", "initial": {"ville": "Lyon"}}.
 - Une ancienne view(api) sans vues déclarées devient la vue « principale ».
 forge_test view_releves {"ville": "Lyon"} rend la vue et te dit si l'enveloppe est valide.
@@ -118,11 +120,16 @@ la vue), au plus 200 blocs, 8 niveaux, 200 lignes, 30 colonnes, 10 000 caractèr
 
 Blocs ("type") :
 - note {text, tone?, title?} — tone : info, ok, warn, danger, muted ;
-- prose {text, title?, clamp?} ; code {text, title?} ;
+- prose {text, title?, clamp?, reading?} (reading: lecture longue avec liens cliquables) ; code {text, title?} ;
+- Pour plusieurs tables paginées côté app : donne à chacune un param distinct (page_releves, page_alertes),
+  lis params.get("page_releves", 1), borne la page puis renvoie ce nom dans pagination.param.
+  Sans pagination explicite, la console découpe automatiquement chaque table, y compris celles des graphiques.
 - fields {items: [{label, value, hint?}], title?, columns? (1 à 3)} ;
 - table {columns, rows, title?, caption?, empty?, pagination?} — columns : ["nom", …] ou
-  [{key, label, align? ("", "num", "fit"), hint?}] ; une ligne : une liste de cellules, ou
-  {cells, tone?, href?, detail?: [blocs]} ; pagination : {page, total, per_page} (la console ajoute
+  [{key, label, align? ("", "num", "fit"), hint?, detail?}] ; detail: true place la colonne
+  dans les informations complémentaires dépliables de la ligne, sans perdre sa valeur.
+  Garde les colonnes essentielles à la lecture quotidienne. Une ligne : une liste de cellules, ou
+  {cells, tone?, href?, detail?: [blocs]} ; pagination : {page, total, per_page, param?} (la console ajoute
   « page » aux paramètres de ta vue) ;
 - stats {items: [{label, value, sub?, tone?, href?, trend?: un bloc chart}], title?} ;
 - timeline {items: [{at, title, text?, meta?, tone?, href?}], title?, empty?} ;
@@ -130,10 +137,13 @@ Blocs ("type") :
   title?, unit? ("", "%", "$"), y? [bas, haut], zero?, since?, until?, empty?, table?} — au plus
   4 séries, 2 000 points, une seule échelle ;
 - grid {items: [blocs], columns?} ; section {title, items, description?} ; disclosure {title, items, open?} ;
-- form {action, initial?, title?, compact?} — une action déclarée de la même vue.
+- workspace {sidebar: [blocs], items: [blocs]} : navigation latérale, contenu ; empilés sur mobile.
+- toolbar {items: [blocs], title?} : actions côte à côte.
+- form {action, initial?, title?, compact?, presentation? (form ou button)} — une action déclarée de la même vue.
+  presentation: button ouvre le formulaire au clic ; sans champ, affiche directement le bouton.
 
 Cellules : un texte, un nombre, vrai/faux, null, ou un objet {"kind": …} :
-- text / mono / num / muted {text, tone?, hint?, clamp?} ; badge {text, tone?} ;
+- text / mono / num / muted {text, tone?, hint?, clamp?, secondary?, emphasis?} ; badge {text, tone?} ;
 - meter {ratio (0 à 1), text?, tone?} ; emotion {key (une des 29 émotions), text?, weight?} ;
 - when {at, relative?} ; link {text, view, params?} (une autre de tes vues) ou {text, url} (http(s)).
 Un instant (at, points d'une courbe) est en microsecondes depuis 1970 : int(time.time() * 1_000_000).

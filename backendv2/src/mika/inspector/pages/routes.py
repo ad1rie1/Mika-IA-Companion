@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -13,13 +13,13 @@ from starlette.routing import Route
 
 from mika.inspector import render
 from mika.inspector.catalog import Builtin, Destination, Panel, builtin_keys, destinations
-from mika.inspector.formview import action_view, slot_key, visible_fields
+from mika.inspector.formview import action_view, visible_fields
 from mika.inspector.pages import accounts, reglages
 from mika.inspector.pages.journal import EPISODE_TABS, episode_head, episode_tab, event_blocks
 from mika.inspector.pages.subjects import Subjects
 from mika.inspector.ui import PREFIX, SESSION_COOKIE, UI, secure
 from mika.kernel.faculty import InspectSpec
-from mika.kernel.inspect import ActionSlot, Disclosure, Grid, Note, Param, Row, Section, Table
+from mika.kernel.inspect import Filters, Note, Param, Section, Workspace, walk_blocks
 from mika.runtime.operations import dynamic_fields, fixed_values, offered, perform
 
 #: les anciennes adresses de l'inspecteur → la console
@@ -32,6 +32,7 @@ MOVED = {"chronologie": "systeme/chronologie", "etat": "systeme/etat", "contribu
 
 #: les anciens onglets qui ont pris leur propre place (la requête suit)
 MOVED_TABS = {("reglages", "apps"): "apps", ("sens", "courrier"): "courrier/reception",
+              ("courrier", "comptes"): "reglages/boites",
               ("reglages", "modeles"): "reglages/fournisseurs", ("reglages", "personnalite"): "reglages/identite",
               ("reglages", "canaux"): "reglages/telegram", ("reglages", "sens"): "reglages/boites",
               ("reglages", "parametres"): "reglages/comportement"}
@@ -58,16 +59,6 @@ def safe_back(target: str) -> str:
 
 def dest_url(key: str) -> str:
     return f"{PREFIX}/" if key == "accueil" else f"{PREFIX}/{key}"
-
-
-def filters_ctx(specs: Sequence[Param], raw: Mapping[str, str]) -> tuple[list[dict[str, Any]], bool]:
-    out, active = [], False
-    for p in specs:
-        value = str(raw.get(p.name, "") or "")
-        active |= bool(value)
-        out.append({"name": p.name, "label": p.label, "kind": p.kind, "choices": p.choices, "value": value,
-                    "placeholder": p.placeholder})
-    return out, active
 
 
 class Pages:
@@ -107,8 +98,8 @@ class Pages:
             if isinstance(got, Panel):
                 return {"blocks": [], "panel": got}
             return {"blocks": list(got or [])}
-        return {"blocks": await self.ui.inspection.arun(item, request.query_params, self.ui.when_long),
-                "filters": item.typed}
+        blocks = await self.ui.inspection.arun(item, request.query_params, self.ui.when_long)
+        return {"blocks": blocks, "filters": () if any(isinstance(b, Filters | Workspace) for b in walk_blocks(blocks)) else item.typed}
 
     def back(self, request: Request) -> str:
         return request.url.path + (f"?{request.url.query}" if request.url.query else "")
@@ -121,18 +112,21 @@ class Pages:
 
         def walk(items: Sequence[Any]) -> None:
             for b in items:
-                if isinstance(b, ActionSlot):
-                    spec = self.ui.inspection.action(b.action)
-                    if spec is not None:
-                        initial = dict(b.initial)
+                if b["t"] == "action":
+                    spec = self.ui.inspection.action(b["key"])
+                    if spec is not None and offered(self.ui.kernel, spec, subject):
+                        initial = b["initial"]
                         dynamic = dynamic_fields(self.ui.kernel, spec, subject, initial) if spec.fields else None
-                        out[slot_key(b.action, b.initial)] = action_view(spec, csrf=csrf, back=back, subject=subject,
-                                                                          initial=initial, dynamic=dynamic,
-                                                                          subjects=self.subject_choices)
-                elif isinstance(b, Grid | Section | Disclosure):
-                    walk(b.items)
-                elif isinstance(b, Table):
-                    walk([x for r in b.rows if isinstance(r, Row) for x in r.detail])
+                        view = action_view(spec, csrf=csrf, back=back, subject=subject,
+                                           initial=initial, dynamic=dynamic, subjects=self.subject_choices)
+                        if b["title"]:
+                            view["title"] = b["title"]
+                            view["button"] = initial.get("_bouton") or b["title"]
+                        out[b["slot"]] = view
+                elif b["t"] in ("grid", "section", "disclosure", "workspace", "toolbar"):
+                    walk(b.get("sidebar", []) + b["items"])
+                elif b["t"] == "table":
+                    walk([x for r in b["rows"] for x in r["detail"]])
 
         walk(blocks)
         return out
@@ -188,16 +182,20 @@ class Pages:
                     status: int = 200, subject: str = "", **ctx: Any) -> Response:
         query = {k: v for k, v in request.query_params.items()}
         env = self.ui.env()
-        fctx, active_filter = filters_ctx(filters, query)
+        fctx, active_filter = render.filters_ctx(filters, query)
         reset = request.url.path + ("?" + urlencode(dict(keep)) if keep else "")
         panel_ctx = dict(panel.context) if panel else {}
+        if panel_ctx.get("page_heading"):
+            ctx["heading"] = panel_ctx.pop("page_heading")
+            title = ctx["heading"] + " · " + title
         flash = self.ui.pop_flash(request.query_params.get("flash", ""))
         if flash:
             ctx["messages"] = [flash, *ctx.get("messages", [])]
+        rendered = render.blocks(blocks, env, query)
         return self.ui.page(request, "page.html", title, active=active, status=status,
-                            blocks=render.blocks(blocks, env, query), filters=fctx, filtered=active_filter,
+                            blocks=rendered, filters=fctx, filtered=active_filter,
                             keep=keep, reset=reset, panel=panel.template if panel else None,
-                            forms=self.slot_forms(request, blocks, subject), **panel_ctx, **ctx)
+                            forms=self.slot_forms(request, rendered, subject), **panel_ctx, **ctx)
 
     # ── destinations ──
     async def destination(self, request: Request, *, key: str = "", tab: str = "",
@@ -231,7 +229,7 @@ class Pages:
                 blocks.append(Section(title, tuple(got["blocks"]),
                                       item.description if isinstance(item, Builtin) else ""))
             return self.render_page(request, title=d.label, active=d.key, blocks=blocks, subtitle=d.description,
-                                    head_actions=self.head_actions(request, section=d.key))
+                                    head_actions=self.head_actions(request, section=d.key) if d.automatic_actions else [])
         slug = tab or request.path_params.get("tab", "") or (tabs[0][0] if tabs else "")
         current = next((t for t in tabs if t[0] == slug), None)
         if current is None:
@@ -246,6 +244,10 @@ class Pages:
                                           if d.key != "accueil" else f"{PREFIX}/accueil/{s}"),
                      "on": s == slug, "badge": self.tab_badge(b),
                      "group": b.group if isinstance(b, Builtin) else ""} for s, t, b in tabs]
+        context = {k: request.query_params[k] for k in d.context if request.query_params.get(k)}
+        if context:
+            for t in tab_list:
+                t["href"] += ("&" if "?" in t["href"] else "?") + urlencode(context)
         if d.layout == "menu":
             # un sous-menu rangé par rubrique : la page porte le titre de la sous-page
             submenu: list[dict[str, Any]] = []
@@ -261,14 +263,16 @@ class Pages:
             description = item.description if isinstance(item, Builtin) else getattr(item, "description", "")
             return self.render_page(request, title=f"{current[1]} · {d.label}", heading=current[1], active=d.key,
                                     subtitle=description or "", submenu=submenu, blocks=got["blocks"],
-                                    head_actions=self.head_actions(request, section=d.key),
+                                    head_actions=self.head_actions(request, section=d.key) if d.automatic_actions else [],
                                     filters=got.get("filters") or (), panel=got.get("panel"),
                                     messages=got.get("messages") or [], crumbs=crumbs, status=status)
-        return self.render_page(request, title=f"{current[1]} · {d.label}", heading=d.label, active=d.key,
-                                subtitle=d.description, tabs=tab_list, blocks=got["blocks"],
-                                head_actions=self.head_actions(request, section=d.key),
+        return self.render_page(request, title=f"{current[1]} · {d.label}", heading=current[1], active=d.key,
+                                eyebrow=d.label if current[1] != d.label else "",
+                                subtitle=item.description or d.description, tabs=tab_list, blocks=got["blocks"],
+                                head_actions=self.head_actions(request, section=d.key) if d.automatic_actions else [],
                                 filters=got.get("filters") or (), panel=got.get("panel"),
-                                messages=got.get("messages") or [], crumbs=got.get("crumbs") or [],
+                                messages=got.get("messages") or [],
+                                crumbs=got.get("crumbs") or [],
                                 status=status)
 
     async def view(self, request: Request) -> Response:
@@ -278,6 +282,11 @@ class Pages:
             return self.render_page(request, title="Vue inconnue", active="", status=404,
                                     blocks=[Note("Cette vue n'existe pas.", "warn")])
         d = self.dests.get(spec.section)
+        if d is not None and not spec.hidden:
+            target = f"{dest_url(d.key)}/{spec.name}"
+            if request.url.query:
+                target += "?" + request.url.query
+            return RedirectResponse(target, status_code=303)
         crumbs = [(d.label, dest_url(d.key))] if d else [("Toutes les vues", f"{PREFIX}/systeme/vues")]
         blocks = await self.ui.inspection.arun(spec, request.query_params, self.ui.when_long)
         return self.render_page(request, title=spec.title, active=d.key if d else "systeme", crumbs=crumbs,
@@ -295,8 +304,16 @@ class Pages:
             slug = "deroule"
         base = f"{PREFIX}/episode/{quote(corr, safe='')}"
         tabs = [{"title": t, "href": f"{base}?onglet={s}", "on": s == slug, "badge": 0} for s, t in EPISODE_TABS]
-        blocks = episode_tab(self.ui, corr, slug, info)
+        blocks = episode_tab(self.ui, corr, slug, info, request.query_params)
         return self.render_page(request, title=f"Épisode · {info['kind']}", heading=f"Un épisode : {info['kind']}",
+                                subtitle=dict(EPISODE_TABS)[slug] + " · " + {
+                                    "deroule": "Les événements de cet épisode dans leur ordre d'exécution.",
+                                    "dit": "Les paroles produites et ce qui a été montré à la personne.",
+                                    "prompt": "Le contexte exact transmis au modèle, avec la provenance de chaque partie.",
+                                    "outils": "Les outils appelés, leurs arguments et leurs résultats.",
+                                    "appels": "Les appels de modèle associés, leur durée et leur coût.",
+                                    "decision": "Le déclencheur de l'épisode et les raisons de la décision.",
+                                }[slug],
                                 active="decisions", crumbs=[("Décisions", f"{PREFIX}/decisions/episodes")],
                                 head_badges=info["badges"], facts=info["facts"], tabs=tabs, blocks=blocks)
 
@@ -305,7 +322,7 @@ class Pages:
             seq = int(request.path_params["seq"])
         except ValueError:
             seq = 0
-        got = event_blocks(self.ui, seq) if seq > 0 else None
+        got = event_blocks(self.ui, seq, request.query_params) if seq > 0 else None
         if got is None:
             return self.render_page(request, title="Événement introuvable", active="systeme", status=404,
                                     blocks=[Note("Aucun événement à ce numéro.", "warn")])

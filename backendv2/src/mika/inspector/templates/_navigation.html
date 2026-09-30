@@ -1,0 +1,37 @@
+{# Navigation des collections et filtres de consultation. #}
+{% macro pager(p) -%}
+{% if p %}
+<nav class="pager" aria-label="Pagination">
+{% if p.cursor %}
+  {% if p.first and p.page and p.page > 2 %}<a href="{{ p.first }}">« Début</a>{% endif %}
+  {% if p.newer %}<a href="{{ p.newer }}" rel="prev">← Plus récents</a>{% endif %}
+  {% if p.page %}<span class="info">Page {{ p.page }} · total non connu</span>{% endif %}
+  {% if p.older %}<a href="{{ p.older }}" rel="next">Plus anciens →</a>{% endif %}
+{% else %}
+  <span class="info">{% if p.total %}{{ p.first }}–{{ p.last }} sur {{ p.total }}{% else %}aucun{% endif %}</span>
+  {% if p.prev %}<a href="{{ p.prev }}" rel="prev">← Précédente</a>{% endif %}
+  {% for l in p.links %}{% if l.gap %}<span class="muted">…</span>{% elif l.current %}<span class="cur" aria-current="page">{{ l.n }}</span>{% else %}<a href="{{ l.href }}">{{ l.n }}</a>{% endif %}{% endfor %}
+  {% if p.next %}<a href="{{ p.next }}" rel="next">Suivante →</a>{% endif %}
+  <span class="info">Page {{ p.page }} sur {{ p.pages }}</span>
+{% endif %}
+</nav>
+{% endif %}
+{%- endmacro %}
+
+{% macro filters_form(fields, keep=(), active=False, reset="?", title="Filtrer") -%}
+{% if fields %}
+<form class="filters" method="get" aria-label="{{ title }}">
+  {% for k, v in keep %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+  {% for f in fields if f.kind == "hidden" %}{% if f.value %}<input type="hidden" name="{{ f.name }}" value="{{ f.value }}">{% endif %}{% endfor %}
+  {% for f in fields if f.kind != "hidden" %}
+  <label>{{ f.label }}
+    {% if f.kind == "select" %}<select name="{{ f.name }}"><option value="">Tous / par défaut</option>{% for v, l in f.choices %}<option value="{{ v }}"{{ ' selected' if v == f.value }}>{{ l }}</option>{% endfor %}</select>
+    {% elif f.kind == "bool" %}<select name="{{ f.name }}"><option value="oui"{{ ' selected' if f.value == 'oui' }}>Oui</option><option value="non"{{ ' selected' if f.value == 'non' }}>Non</option></select>
+    {% else %}<input name="{{ f.name }}" value="{{ f.value }}" type="{{ 'number' if f.kind == 'int' else 'search' }}"{% if f.kind == "int" %}{% if f.lo is not none %} min="{{ f.lo }}"{% endif %}{% if f.hi is not none %} max="{{ f.hi }}"{% endif %}{% endif %} placeholder="{{ f.placeholder or f.label }}">{% endif %}
+  </label>
+  {% endfor %}
+  <button class="btn quiet small">{{ title }}</button>
+  {% if active %}<a class="reset" href="{{ reset }}">Réinitialiser</a>{% endif %}
+</form>
+{% endif %}
+{%- endmacro %}

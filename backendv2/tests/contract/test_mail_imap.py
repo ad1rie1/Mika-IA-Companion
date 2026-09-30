@@ -21,11 +21,15 @@ import asyncio
 import sqlite3
 from dataclasses import replace
 from datetime import UTC, datetime
+from email import policy
+from email.message import EmailMessage
+from email.parser import BytesParser
 
 import pytest
 
 from mika.adapters.mail import ImapSmtpMail, MailAccount, MailConfig, compose, from_stored, utf7
 from mika.adapters.mail.cache import MailCache
+from mika.adapters.mail.parse import attachment_files, parse
 from mika.ports.mail import AccountInfo, Draft, Mail, reply_recipients, split_ref
 from tests.fixtures.mail_servers import Imap, Smtp, raw_mail, serve
 
@@ -261,3 +265,90 @@ def test_a_failing_account_is_noted_and_does_not_stop_the_others(tmp_path, serve
     assert not ok and "lecture : échec" in said.lower()
     ok, said = go(box.test("perso"))
     assert ok and "5 dossier(s)" in said and "envoi : ok" in said.lower()
+
+
+def test_manual_refresh_recovers_html_for_preexisting_messages_without_marking_read(tmp_path, servers):
+    from dataclasses import replace
+
+    Imap.boxes["INBOX"].add(raw_mail(9, "En HTML", "", html=True))
+    box = box_for(tmp_path, ("perso", account(*servers)))
+    go(box.fetch_new(10))
+    rich = next(m for m in box.cached(10) if m.has_html)
+    assert "Bonjour <b>Mika</b>" in rich.html
+    located = box._cache.located(rich.ref)
+    box._cache.store(replace(rich, html=""), located[1])  # cache d'avant la refonte
+    assert go(box.fetch_new(10)) == [] and not box.cached_one(rich.ref).html
+    go(box.sync_folder("perso", "INBOX", 25))
+    assert box.cached_one(rich.ref).html == rich.html and not box.cached_one(rich.ref).seen
+
+
+def test_complete_read_download_forward_and_quote_preserve_text_and_files(tmp_path, servers):
+    text = "Un paragraphe entier.\n" * 6000 + "FIN DU MESSAGE INTÉGRAL"
+    message = EmailMessage()
+    message['From'], message['To'], message['Subject'], message['Message-ID'] = 'alice@exemple.fr', 'mika@exemple.fr', 'Document long', '<long@exemple.fr>'
+    message.set_content(text)
+    message.add_attachment(b'%PDF-test\x00\xffFIN', maintype='application', subtype='pdf', filename='devis été.pdf')
+    nested = EmailMessage()
+    nested['From'], nested['Subject'] = 'bob@exemple.fr', 'Message joint'
+    nested.set_content('CONTENU DU MAIL JOINT')
+    message.add_attachment(nested, filename='courrier.eml')
+    Imap.reset({3: message.as_bytes()})
+    box = box_for(tmp_path, ('pro', account(*servers)), ('perso', account(*servers, address='autre@exemple.fr')))
+    go(box.sync_folder('pro', 'INBOX', 1))
+    m = box.cached_one('pro:<long@exemple.fr>')
+    assert m.complete and m.body.endswith('FIN DU MESSAGE INTÉGRAL') and len(m.body) > 100_000
+    assert [a.name for a in m.attachments] == ['devis été.pdf', 'courrier.eml']
+    assert go(box.file(m.ref, '0')).data == b'%PDF-test\x00\xffFIN'
+    assert b'CONTENU DU MAIL JOINT' in go(box.file(m.ref, '1')).data
+    assert go(box.file(m.ref, 'texte')).data.decode() == text
+    assert go(box.file(m.ref, 'source')).data == message.as_bytes()
+    assert not Imap.boxes['INBOX'].mails[3][0]  # lire et télécharger ne marque pas lu
+    # Cache antérieur : la récupération explicite remplace l'ancien extrait.
+    box._cache.store(replace(m, body=m.body[:20_000], complete=False), 3)
+    assert go(box.document(m.ref)).body == text
+    mid = go(box.forward(m.ref, 'dest@exemple.fr', 'Tr : Document long', 'Pour information.'))
+    sent = box.sent_mail(mid)
+    assert sent.account == 'pro' and text in sent.body and len(sent.attachments) == 2
+    delivered = BytesParser(policy=policy.default).parsebytes(Smtp.received[-1][2])
+    assert 'FIN DU MESSAGE INTÉGRAL' in str(delivered.get_body(preferencelist=('plain',)).get_content())
+    files = attachment_files(Smtp.received[-1][2])
+    assert files[0].data == b'%PDF-test\x00\xffFIN' and b'CONTENU DU MAIL JOINT' in files[1].data
+    assert go(box.file(sent.ref, '0')).data == files[0].data
+    assert box.sent_mail('perso:' + mid) is None
+    mid = go(box.send('alice@exemple.fr', 'Re: Document long', 'Bien reçu.', m.ref, quote=True))
+    assert '> FIN DU MESSAGE INTÉGRAL' in box.sent_mail(mid).body
+    box._cache.close()
+
+
+def test_manual_history_recovers_old_messages_without_noticing_them_or_pruning(tmp_path, servers):
+    Imap.reset({i: raw_mail(i, f'Historique {i}', 'Texte') for i in range(1, 76)})
+    box = box_for(tmp_path, ('pro', account(*servers)))
+    # Le dossier avait été synchronisé à partir des messages récents.
+    for uid in (74, 75):
+        box._cache.store(parse(Imap.boxes['INBOX'].mails[uid][1], str(uid), account='pro', folder='INBOX', complete=True), uid)
+        box._cache.hand('pro', f'<mail-{uid}@exemple.fr>')
+    box._cache.save_folder('pro', 'INBOX', uidvalidity=Imap.boxes['INBOX'].validity, uidnext=76)
+    assert go(box.older('pro', 'INBOX')) == 50
+    assert box._cache.oldest_uid('pro', 'INBOX') == 24
+    assert go(box.older('pro', 'INBOX')) == 23
+    assert go(box.older('pro', 'INBOX')) == 0
+    assert go(box.fetch_new(50)) == []
+    assert all(not flags for flags, _ in Imap.boxes['INBOX'].mails.values())
+    assert not any(c.upper().startswith('UID STORE') for c in Imap.commands)
+    box._cache.close()
+
+
+def test_missing_attachment_refuses_forward_before_smtp_and_changed_uids_are_rejected(tmp_path, servers):
+    box = box_for(tmp_path, ('pro', account(*servers)))
+    m = go(box.fetch_new(1))[0]
+    box._cache.store(replace(m, complete=False), 3)
+    Imap.boxes['INBOX'].validity += 1
+    with pytest.raises(ValueError, match='changé'):
+        go(box.forward(m.ref, 'dest@exemple.fr', 'Tr : Coucou', ''))
+    assert not Smtp.received
+    Imap.boxes['INBOX'].validity -= 1
+    del Imap.boxes['INBOX'].mails[3]
+    with pytest.raises(FileNotFoundError):
+        go(box.file(m.ref, '0'))
+    assert not Smtp.received
+    box._cache.close()

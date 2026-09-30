@@ -15,6 +15,7 @@ opérateurs) ; un contenu oublié s'affiche comme tel.
 from __future__ import annotations
 
 import math
+import re
 import unicodedata
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -23,6 +24,14 @@ from typing import Any
 #: les tons d'une cellule, d'une ligne, d'une note
 TONES = ("", "info", "ok", "warn", "danger", "muted")
 _LEGACY_TONES = {"ko": "danger", "mut": "muted"}
+
+
+@dataclass(frozen=True, slots=True)
+class Download:
+    """Un document natif à télécharger depuis une fiche (jamais un bloc Forge)."""
+
+    name: str
+    data: bytes
 
 
 def tone(value: str) -> str:
@@ -74,6 +83,8 @@ class Text:
     tone: str = ""
     hint: str = ""
     clamp: int = 0
+    secondary: str = ""
+    emphasis: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +133,8 @@ class Column:
     #: ``""`` | ``"num"`` (aligné à droite) | ``"fit"`` (aussi étroit que possible)
     align: str = ""
     hint: str = ""
+    #: Information secondaire : conservée dans le détail de chaque ligne.
+    detail: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,6 +203,9 @@ class Prose:
     text: str
     title: str = ""
     clamp: int = 0
+    reading: bool = False
+    #: source HTML d'un document natif, assainie par le rendu ; jamais acceptée d'une app Forge
+    html: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -270,6 +286,22 @@ class Grid:
 
 
 @dataclass(frozen=True, slots=True)
+class Workspace:
+    """Une navigation latérale et un espace de travail, empilés sur mobile."""
+
+    sidebar: tuple[Any, ...]
+    items: tuple[Any, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Toolbar:
+    """Les actions d'une vue, regroupées sur une ligne."""
+
+    items: tuple[Any, ...]
+    title: str = "Actions"
+
+
+@dataclass(frozen=True, slots=True)
 class Section:
     title: str
     items: tuple[Any, ...]
@@ -292,6 +324,7 @@ class ActionSlot:
     initial: tuple[tuple[str, str], ...] = ()
     title: str = ""
     compact: bool = False
+    presentation: str = "form"
 
 
 @dataclass(frozen=True, slots=True)
@@ -315,10 +348,22 @@ class Nav:
     title: str = ""
 
 
-Block = (Table | Fields | Note | Prose | Code | Stats | Timeline | Chart | Grid | Section | Disclosure
-         | ActionSlot | Nav)
+@dataclass(frozen=True, slots=True)
+class Filters:
+    """Un formulaire de consultation, produit par l'hôte depuis des paramètres
+    déclarés. ``keep`` conserve le contexte (fiche, vue), jamais la pagination.
+    Les apps déclarent ces paramètres dans leur manifeste, sans HTML."""
+
+    params: tuple[Param, ...]
+    values: tuple[tuple[str, str], ...] = ()
+    keep: tuple[tuple[str, str], ...] = ()
+    title: str = "Filtrer"
+
+
+Block = (Table | Fields | Note | Prose | Code | Stats | Timeline | Chart | Grid | Workspace | Toolbar | Section | Disclosure
+         | ActionSlot | Nav | Filters)
 BLOCKS: tuple[type, ...] = (Table, Fields, Note, Prose, Code, Stats, Timeline, Chart, Grid, Section, Disclosure,
-                            ActionSlot, Nav)
+                            ActionSlot, Nav, Filters, Workspace, Toolbar)
 
 
 # ── Paramètres typés d'une vue ────────────────────────────────────────────
@@ -343,6 +388,12 @@ class Param:
 #: réservés à la console (pagination, onglet, retour des actions) ; ``pg<n>`` : les pages
 #: qu'ajoute le rendu à une table qui n'en a pas, ``pile`` : le chemin d'une pagination à curseur
 RESERVED = frozenset({"page", "taille", "onglet", "fait", "avant", "q_global", "pile", "flash"})
+PAGE_PARAM = r"page(?:_[a-z][a-z0-9_]{0,39})?"
+
+
+def is_page_param(name: str) -> bool:
+    """Les pages nommées permettent à plusieurs collections d'une app de coexister."""
+    return re.fullmatch(PAGE_PARAM, name) is not None
 
 
 def _fold(text: str) -> str:
@@ -409,6 +460,11 @@ class Head:
     facts: tuple[tuple[str, Cell], ...] = ()
     #: d'autres clés du même objet (ses poignées) : recherche, oubli
     aliases: tuple[str, ...] = ()
+    back: Ref | None = None
+    automatic_actions: bool = True
+    default_tab: str = ""
+    #: Vide : actions communes ; sinon, seulement sur ces onglets de gestion.
+    action_tabs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -505,3 +561,17 @@ class InspectContext:
 
 def rows(items: Sequence[Sequence[Cell]]) -> tuple[tuple[Cell, ...], ...]:
     return tuple(tuple(r) for r in items)
+
+
+def walk_blocks(blocks: Sequence[Any]):
+    """Parcourt toute composition, y compris navigation latérale et détails de ligne."""
+    for b in blocks:
+        yield b
+        if isinstance(b, Workspace):
+            yield from walk_blocks(b.sidebar)
+        if isinstance(b, Grid | Workspace | Toolbar | Section | Disclosure):
+            yield from walk_blocks(b.items)
+        elif isinstance(b, Table):
+            for row in b.rows:
+                if isinstance(row, Row):
+                    yield from walk_blocks(row.detail)

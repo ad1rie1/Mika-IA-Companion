@@ -301,7 +301,7 @@ def _stance_row(s: AffectState, frame: Frame, ctx: InspectContext, person: str, 
 POSTURE_COLUMNS = (Column("personne"), Column("ressentie envers elle"),
                    Column("chaleur (−1…1)", hint="ce que ses échanges ont installé : > 0 chaleureux, < 0 froid"),
                    Column("hostilité", hint="un écart déplaisant et dominant : la rancune"),
-                   Column("ancre", hint="ce qui s'est installé"), Column("dernière balise"),
+                   Column("ancre", hint="ce qui s'est installé", detail=True), Column("dernière balise", detail=True),
                    Column("quand", "fit"))
 
 

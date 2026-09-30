@@ -40,8 +40,12 @@ from mika.kernel.inspect import (
     Fields,
     InspectContext,
     Meter,
+    Nav,
+    NavItem,
     Note,
+    Pager,
     Param,
+    Prose,
     Ref,
     Row,
     Series,
@@ -252,7 +256,6 @@ async def rss_read(args: ReadArgs, ctx: Any) -> Any:
 # revérifié par la console.
 
 #: la console ne relit pas plus que ceci du cache des flux (filtres, pages)
-CACHE_SHOWN = 500
 PAGE = 25
 #: le graphe : tant de jours, et jamais plus de titres relus que ceci
 DAYS = 14
@@ -347,8 +350,8 @@ def _state(h: dict[str, Any]) -> Badge:
     return Badge("va bien", "ok")
 
 
-def _followed(port: Any, cached: list[Any], s: RssState, health: list[dict[str, Any]]) -> Table:
-    by_feed = Counter(e.feed for e in cached)
+def _followed(port: Any, s: RssState, health: list[dict[str, Any]]) -> Table:
+    by_feed = port.feed_counts()
     noticed = Counter(v.feed for v in s.noticed.values())
     rows = []
     for h in health:  # tous : la console les montre par pages
@@ -373,12 +376,13 @@ def _followed(port: Any, cached: list[Any], s: RssState, health: list[dict[str, 
                          "jetons des adresses ne sont jamais montrés.")
 
 
-def _entries(s: RssState, ctx: InspectContext, cached: list[Any], words: frozenset[str]) -> Table:
+def _entries(s: RssState, ctx: InspectContext, port: Any, words: frozenset[str]) -> Table:
     feed, query = ctx.value("flux") or "", fold(ctx.value("q") or "")
-    kept = [e for e in cached if _matches(feed, e.feed) and (not query or query in fold(e.title))]
-    page, pager = paginate(kept, ctx.pager(size=PAGE))
+    request = ctx.pager(size=PAGE)
+    result = port.entries_page(feed, query, request.number, request.size)
+    pager = Pager(number=result.number, size=result.size, total=result.total)
     rows = []
-    for e in page:
+    for e in result.items:
         seen = s.noticed.get(e.id)
         title = _clip(e.title) or "(sans titre)"
         score = seen.pertinence if seen else pertinence(e.title, e.summary, words)
@@ -387,12 +391,11 @@ def _entries(s: RssState, ctx: InspectContext, cached: list[Any], words: frozens
             When(e.published) if e.published else None,
             Badge("remarqué", "ok") if seen else Badge("laissé passer", "muted"),
             Meter(score, f"{score:.2f}") if seen else Meter(score, f"{score:.2f} (estimée)", tone="muted"),
-        ), tone="" if seen else "muted"))
-    return Table(("titre", "flux", Column("paru", "fit"), Column("remarqué", "fit"), Column("pertinence", "fit")),
+        ), detail=(Prose(e.summary, title="Résumé de l'article", reading=True),) if e.summary else ()))
+    return Table(("titre", "flux", Column("paru", "fit"), Column("remarqué", "fit"), Column("pertinence", "fit", detail=True)),
                  tuple(rows), title="Derniers articles relevés", pager=pager,
                  empty="aucun article ne correspond à ces filtres" if feed or query else "rien de relevé pour l'instant",
-                 caption=f"Seuls les {CACHE_SHOWN} articles les plus récents du cache sont relus ici."
-                 if len(cached) >= CACHE_SHOWN else "")
+                 caption="Ouvre un titre pour lire l'article à sa source, ou déplie son résumé.")
 
 
 def _noticed(s: RssState, ctx: InspectContext, feed: str) -> Table:
@@ -412,7 +415,7 @@ def _noticed(s: RssState, ctx: InspectContext, feed: str) -> Table:
 @RSS.inspect("flux", title="Flux", section="sens", order=20,
              description="Ses flux : ce qui paraît, ce qui la touche, ce qu'elle laisse passer.",
              params=[Param("flux", "Flux", placeholder="titre d'un flux"),
-                     Param("q", "Recherche", placeholder="dans les titres")])
+                     Param("q", "Recherche", placeholder="titre ou résumé")])
 def _inspect(s: RssState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("feeds")
     p = params(frame.env.params_of("rss", frame.root))
@@ -422,24 +425,25 @@ def _inspect(s: RssState, frame: Frame, ctx: InspectContext) -> list[Block]:
     window, cut = _since(ctx, days[0][1], CHART_MAX)
     window = [e for e in window if _matches(feed, e.data.feed)]
     today = days[-1][1]
-    cached = port.cached(CACHE_SHOWN) if port is not None else []
     health = _health(port) if port is not None else []
     broken = sum(1 for h in health if h["error"] and h["failures"])
     last = max((v.at for v in s.noticed.values() if _matches(feed, v.feed)), default=0)
-    passed = sum(1 for e in cached if e.id not in s.noticed and _matches(feed, e.feed))
+    passed = port.entry_count(feed, tuple(s.noticed)) if port is not None else 0
     stats = Stats((
         Stat("flux suivis", len(health) if port is not None else "—",
              sub=f"{broken} en erreur" if broken else "tous répondent" if health else "",
              tone="danger" if broken else ""),
-        Stat("laissés passer", f"{passed}+" if len(cached) >= CACHE_SHOWN else passed,
+        Stat("laissés passer", passed,
              sub="relevés sans la toucher (elle ne marque pas ses lectures)"),
         Stat("remarqués aujourd'hui", sum(1 for e in window if e.at >= today)),
         Stat("dernier titre remarqué", When(last) if last else "jamais"),
     ))
-    blocks: list[Block] = [_feeds_note(port, p), stats, _chart(frame, days, window, cut, feed)]
+    blocks: list[Block] = [Nav((NavItem("Configurer le plugin", Ref("local", "/inspecteur/reglages/flux", "Configurer le plugin")),)), _feeds_note(port, p), stats]
     if port is not None:
-        blocks += [_followed(port, cached, s, health), _entries(s, ctx, cached, words)]
-    blocks.append(_noticed(s, ctx, feed))
+        blocks.append(_entries(s, ctx, port, words))
+        blocks.append(Disclosure("État des abonnements", (_followed(port, s, health),), open=bool(broken)))
+    blocks.append(Disclosure("Activité et articles remarqués", (_chart(frame, days, window, cut, feed),
+                                                               _noticed(s, ctx, feed))))
     blocks.append(Disclosure("Ce qui la touche", (Fields((
         ("titres remarqués (gardés)", len(s.noticed)),
         ("les mots qui la touchent", Text(_clip(", ".join(sorted(words)), 600) or "—")),

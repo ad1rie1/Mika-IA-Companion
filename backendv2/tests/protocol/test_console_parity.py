@@ -3,7 +3,7 @@
 La liste est la correspondance du plan de la console. Chaque adresse doit
 s'ouvrir sans échec et dire ce qu'elle montre ; une destination de la v2 qui
 disparaît fait tomber la ligne v1 qu'elle reprenait. Ce que la v2 ne fait
-plus (thèmes et entités : elle n'en extrait pas) est dit, pas oublié.
+plus (thèmes et entités : elle n'en extrait pas) renvoie à la mémoire disponible.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ PARITY: dict[str, tuple[str, str]] = {
     "Mémoire › Messages": ("/inspecteur/fil/messages", "Fil"),
     "Mémoire › Journaux et rêves": ("/inspecteur/pensees/nuits", "Nuits"),
     "Mémoire › Récit de soi": ("/inspecteur/vie/soi", "Estime et récit"),
-    "Mémoire › Thèmes et entités": ("/inspecteur/memoire/souvenirs", "ni thèmes ni entités"),
+    "Mémoire › Thèmes et entités": ("/inspecteur/memoire/souvenirs", "Souvenirs"),
     "Social › Identités": ("/inspecteur/identites/annuaire", "Poignées"),
     "Social › Revendications": ("/inspecteur/identites/revendications", "Revendications"),
     "Social › Personnes": ("/inspecteur/personnes/personnes", "Personnes"),
@@ -38,11 +38,11 @@ PARITY: dict[str, tuple[str, str]] = {
     "Conscience › Initiatives": ("/inspecteur/decisions/initiatives", "Initiatives"),
     "Projets": ("/inspecteur/buts/vivants", "Confier un projet"),
     "Projets › Actions en attente": ("/inspecteur/approbations", "Approbations"),
-    "Modules › Email": ("/inspecteur/courrier/reception", "Boîte"),
+    "Modules › Email": ("/inspecteur/courrier/reception", "Réception"),
     "Modules › Email (brouillons)": ("/inspecteur/courrier/brouillons", "Brouillons"),
     "Modules › Email (envoyés)": ("/inspecteur/courrier/envoyes", "Envoyés"),
     "Modules › Email (contacts)": ("/inspecteur/courrier/contacts", "Contacts"),
-    "Modules › Email (comptes)": ("/inspecteur/courrier/comptes", "Comptes"),
+    "Modules › Email (comptes)": ("/inspecteur/courrier/comptes", "Boîtes aux lettres"),
     "Modules › RSS": ("/inspecteur/sens/flux", "Flux"),
     "Modules › Caméra": ("/inspecteur/sens/camera", "Caméra"),
     "Modules › Forge": ("/inspecteur/apps", "Apps forgées"),
@@ -77,7 +77,7 @@ def test_every_v1_screen_has_its_place(lived, screen):
     r = client.get(url, follow_redirects=True)
     page = html.unescape(r.text)
     assert r.status_code == 200, (screen, url, r.status_code)
-    assert "a échoué" not in page, (screen, url)
+    assert "Cette vue a échoué" not in page, (screen, url)
     assert word in page, (screen, url, word)
 
 

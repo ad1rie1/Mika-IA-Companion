@@ -84,8 +84,6 @@ STEPS_MATCHED = 1000
 DIFF_SHOWN = 20_000
 #: ce qu'on montre du résultat d'un effet (au-delà, coupé et dit)
 EFFECT_DETAIL = 4000
-#: les enregistrements de l'atelier relus (au-delà, la vue le dit)
-LOG_MAX = 500
 SUMMARY_CLAMP = 280
 FORGOTTEN = "(oublié)"
 #: les approbations, dans la console
@@ -240,12 +238,16 @@ def _search(s: GoalsState, frame: Frame, ctx: InspectContext, text: str, limit: 
     wanted = _fold(text.strip())
     number = wanted.lstrip("#")
     out: list[Found] = []
+    skip = max(0, ctx.int_param("_offset", 0))
     for g in goals:
         title = _text(texts, g.title_ref, "(sans titre)")
         if number.isdigit():
             if str(g.id) != number:
                 continue
         elif wanted and wanted not in _fold(title):
+            continue
+        if skip:
+            skip -= 1
             continue
         st = status(g, frame.now)
         out.append(Found(str(g.id), title, f"#{g.id} · {KIND_FR.get(g.kind, g.kind)} · {STATUS_FR.get(st, st)}"))
@@ -307,9 +309,9 @@ def _pending_goals(frame: Frame) -> set[int]:
 
 
 PROJECT_COLUMNS = (Column("projet"), Column("pour qui"), Column("statut", "fit"), Column("avancement", "fit"),
-                   Column("prochain pas", "fit"), Column("échéance", "fit"), Column("agenda"),
-                   Column("ce qui sort", hint="un mail, une commande avec le réseau : avec ton accord, ou librement"),
-                   Column("consignes", "num"), Column("où elle en est"))
+                   Column("prochain pas", "fit", detail=True), Column("échéance", "fit"), Column("agenda", detail=True),
+                   Column("ce qui sort", hint="un mail, une commande avec le réseau : avec ton accord, ou librement", detail=True),
+                   Column("consignes", "num", detail=True), Column("où elle en est"))
 
 
 @GOALS.inspect("projets", title="Projets", section="buts", order=5, params=[STATE_PARAM, AUTHORITY_PARAM],
@@ -364,9 +366,9 @@ def _projects_view(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Blo
     return blocks
 
 
-LIVE_COLUMNS = (Column("but", "fit"), Column("titre"), Column("sorte"), Column("autorité"), Column("statut"),
-                Column("envie", hint="une exploration : son envie s'use ; un projet : un engagement"),
-                Column("pas", "num"), Column("prochain pas"), Column("échéance"), Column("pour qui"))
+LIVE_COLUMNS = (Column("but", "fit", detail=True), Column("titre"), Column("sorte"), Column("autorité", detail=True), Column("statut"),
+                Column("envie", hint="une exploration : son envie s'use ; un projet : un engagement", detail=True),
+                Column("pas", "num", detail=True), Column("prochain pas", detail=True), Column("échéance"), Column("pour qui"))
 
 
 @GOALS.inspect("vivants", title="Tous les buts vivants", section="buts", order=10, params=[KIND_PARAM, AUTHORITY_PARAM],
@@ -402,7 +404,7 @@ def _live_view(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     ]
 
 
-CLOSED_COLUMNS = (Column("but", "fit"), Column("titre"), Column("sorte"), Column("autorité"), Column("issue"),
+CLOSED_COLUMNS = (Column("but", "fit", detail=True), Column("titre"), Column("sorte", detail=True), Column("autorité", detail=True), Column("issue"),
                   Column("clos"), Column("raison ou résultat"), Column("pour qui"))
 
 
@@ -528,7 +530,8 @@ def _wait_table(g: Goal, frame: Frame) -> Table:
                  empty="elle n'attend rien")
 
 
-@GOALS.inspect("resume", title="Résumé", subject="goal", order=10)
+@GOALS.inspect("resume", title="Résumé", subject="goal", order=10,
+               description="L'objectif, son avancement et ce qui bloque la prochaine étape.")
 def _summary_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     g = _subject_goal(s, ctx)
     if isinstance(g, Note):
@@ -611,7 +614,8 @@ STEP_COLUMNS = (Column("quand", "fit"), Column("verdict"), Column("preuve"), Col
                 Column("outils utilisés"), Column("notable", "num"), Column("", "fit"))
 
 
-@GOALS.inspect("pas", title="Pas", subject="goal", order=20)
+@GOALS.inspect("pas", title="Pas", subject="goal", order=20,
+               description='Les étapes du projet, leur résultat et les comptes rendus de travail.')
 def _steps_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     g = _subject_goal(s, ctx)
     if isinstance(g, Note):
@@ -635,7 +639,8 @@ def _steps_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
 # ── La fiche : carnet ─────────────────────────────────────────────────────
 
 
-@GOALS.inspect("carnet", title="Carnet", subject="goal", order=30)
+@GOALS.inspect("carnet", title="Carnet", subject="goal", order=30,
+               description="Les notes du projet et les informations qu'elle conserve pour la suite.")
 def _notebook_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     g = _subject_goal(s, ctx)
     if isinstance(g, Note):
@@ -682,7 +687,8 @@ EFFECT_COLUMNS = (Column("proposition", "fit"), Column("quand", "fit"), Column("
                   Column("accord"), Column("état"))
 
 
-@GOALS.inspect("effets", title="Effets", subject="goal", order=40)
+@GOALS.inspect("effets", title="Effets", subject="goal", order=40,
+               description="Les actions proposées ou exécutées pour ce projet, avec leur état d'approbation et de livraison.")
 def _effects_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     g = _subject_goal(s, ctx)
     if isinstance(g, Note):
@@ -786,8 +792,8 @@ def _episodes_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Bloc
                          _episode_tab(e.correlation, "outils", "outils"), _episode_tab(e.correlation, "appels", "appels"),
                          _episode_tab(e.correlation, "decision", "décision")),
                         href=Ref("episode", e.correlation, "")))
-    return [Table((Column("quand", "fit"), "épisode", "vers", Column("issue", "fit"), Column("verdict", "fit"),
-                   "résultat", Column("", "fit"), Column("", "fit"), Column("", "fit"), Column("", "fit")),
+    return [Table((Column("quand", "fit"), "épisode", Column("vers", detail=True), Column("issue", "fit"), Column("verdict", "fit"),
+                   "résultat", Column("Prompt", detail=True), Column("Outils", detail=True), Column("Appels", detail=True), Column("Décision", detail=True)),
                   tuple(rows), title="Ses épisodes", empty="aucun épisode encore", pager=pager,
                   caption="« prompt » : ce qu'elle a vraiment reçu (persona, cadre, carnet, fil) et ce qu'elle a "
                           "répondu ; « outils » : chaque appel et son résultat ; « décision » : pourquoi ce pas-là.")]
@@ -861,7 +867,8 @@ def _commit_title(summary: str) -> str:
     return re.sub(r"\s+", " ", summary).strip()[:72]
 
 
-@GOALS.inspect("atelier", title="Atelier", subject="goal", order=60)
+@GOALS.inspect("atelier", title="Atelier", subject="goal", order=60,
+               description='Les fichiers et versions produits pour ce projet.')
 async def _workshop_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     g = _subject_goal(s, ctx)
     if isinstance(g, Note):
@@ -876,7 +883,8 @@ async def _workshop_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> lis
         return [Note("L'atelier n'est pas encore ouvert : aucun pas n'y a encore écrit.", tone="muted")]
     tree = await port.tree(g.id)
     diff = await port.diff(g.id)
-    log = await port.log(g.id, LOG_MAX)
+    offset = max(0, ctx.int_param("avant_commits", 0))
+    log = await port.log(g.id, HISTORY_PAGE + 1, offset=offset)
     files = []
     for line in tree:
         m = _TREE_LINE.match(line)
@@ -888,7 +896,7 @@ async def _workshop_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> lis
             by_title[_commit_title(e.data.summary.text)] = e
     entries = []
     lines = [line.strip() for line in log.splitlines() if line.strip()]
-    for line in lines:
+    for line in lines[:HISTORY_PAGE]:
         sha, _, title = line.partition(" ")
         step = by_title.get(title)
         if step is not None:
@@ -903,9 +911,8 @@ async def _workshop_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> lis
         Code(shown, title="Changements depuis le dernier pas") if diff.strip()
         else Note("Rien de changé depuis le dernier pas : tout est enregistré.", tone="muted"),
         Timeline(tuple(entries), title="Historique (un enregistrement par pas qui a changé quelque chose)",
-                 empty="aucun enregistrement encore"),
-        *([Note(f"Seuls les {LOG_MAX} derniers enregistrements sont relus.", tone="muted")]
-          if len(lines) >= LOG_MAX else []),
+                 empty="aucun enregistrement encore", pager=Pager(param="avant_commits",
+                    older=(("avant_commits", str(offset + HISTORY_PAGE)),) if len(lines) > HISTORY_PAGE else ())),
     ]
 
 

@@ -118,27 +118,28 @@ async def appels(ui: Any, request: Request) -> list[Any]:
                          title="Coût par jour", unit="$"))
 
     def usage_table(rows: list[Any], label: str, title: str) -> Table:
-        return Table((label, Column("appels", "num"), Column("échecs", "num"), Column("entrée", "num"),
-                      Column("sortie", "num"), Column("cache lu", "num"), Column("part du cache", "num"),
+        return Table((label, Column("appels", "num"), Column("échecs", "num"), Column("entrée", "num", detail=True),
+                      Column("sortie", "num", detail=True), Column("cache lu", "num", detail=True), Column("part du cache", "num", detail=True),
                       Column("coût", "num"), Column("durée moy.", "num")), tuple(
             Row((u.key, u.calls, u.failures, u.input_tokens, u.output_tokens, u.cache_read, f"{u.cache_ratio:.0%}",
                  f"{u.cost_usd:.3f} $", f"{u.latency_avg_s:.1f} s"), tone="danger" if u.failures else "")
             for u in rows), title=title, empty="aucun appel")
 
     models = calls.usage(now - 7 * DAY, by="model")
-    out += [usage_table(list(reversed(days)), "jour", "Par jour"), usage_table(roles, "rôle", "Par rôle (7 j)"),
+    breakdown = [usage_table(list(reversed(days)), "jour", "Par jour"), usage_table(roles, "rôle", "Par rôle (7 j)"),
             usage_table(backends, "fournisseur", "Par fournisseur (7 j)"),
             usage_table(models, "fournisseur · modèle", "Par modèle (7 j)")]
     ctx = ui.inspection.context(request.query_params)
     pager = ctx.pager("page", size=PAGE, total=calls.count())
     recent = calls.recent(pager.size, offset=pager.offset)
-    out.append(Table((Column("quand", "fit"), "rôle", "fournisseur", "modèle", Column("attente", "num"),
-                      Column("durée", "num"), Column("jetons", "num"), Column("coût", "num"), "issue"), tuple(
+    out.append(Table((Column("quand", "fit"), "rôle", "fournisseur", Column("modèle", detail=True), Column("attente", "num", detail=True),
+                      Column("durée", "num"), Column("jetons", "num", detail=True), Column("coût", "num"), "issue"), tuple(
         Row((When(t.at), t.role, t.backend, Text(t.model, "mono"), f"{t.wait_us / 1e6:.1f} s",
              f"{t.latency_us / 1e6:.1f} s", f"{t.input_tokens} → {t.output_tokens}", f"{t.cost_usd:.4f} $",
              Badge(t.outcome, "ok" if t.outcome == "ok" else "danger")),
             href=Ref("episode", getattr(t, "correlation", "") or t.call_id.split("#")[0], "")) for t in recent),
         title="Tous les appels, du plus récent", empty="aucun appel", pager=pager))
+    out.append(Disclosure("Répartition des appels et des coûts", tuple(breakdown)))
     return out
 
 
@@ -178,7 +179,7 @@ async def chronologie(ui: Any, request: Request) -> Any:
     rows = tuple(Row((Ref("event", str(e.seq), str(e.seq)), When(e.at), Text(e.type.name, "mono"),
                       Ref("episode", e.correlation, e.correlation[:28]), Text(ui.show(e, 600), "mono", clamp=160)))
                  for e in events)
-    pager = Pager(older=(("avant", str(events[-1].seq)),)) if len(events) == 100 else None
+    pager = Pager(older=(("avant", str(events[-1].seq)),)) if len(events) == 100 else Pager()
     return {"blocks": [Table((Column("seq", "fit"), Column("quand", "fit"), "type", "corrélation", "données"), rows,
                              title="Le journal", empty="Rien ne correspond.", pager=pager)],
             "filters": TIMELINE_PARAMS, "values": values}
@@ -259,7 +260,7 @@ async def operations(ui: Any, request: Request) -> list[Any]:
                       Badge(e.data.outcome, tones.get(e.data.outcome, "")),
                       ", ".join(str(s) for s in e.data.seqs) or "—"), href=Ref("event", str(e.seq), ""))
                  for e in done)
-    pager = Pager(older=(("avant", str(done[-1].seq)),)) if len(done) == 100 else None
+    pager = Pager(older=(("avant", str(done[-1].seq)),)) if len(done) == 100 else Pager()
     return [Table((Column("quand", "fit"), "action", "par", "sur", "issue", "événements"), rows,
                   title="Ce que les opérateurs ont fait", empty="Aucune action d'opérateur encore.", pager=pager)]
 
@@ -322,7 +323,7 @@ async def processus(ui: Any, request: Request) -> list[Any]:
         Row((When(e.at), Text(e.data.process, "mono"), Text(e.data.error, "muted", clamp=240)),
             href=Ref("event", str(e.seq), "")) for e in failed), title="Échecs gardés au journal",
         empty="Aucun échec de processus au journal.",
-        pager=Pager(older=(("avant", str(failed[-1].seq)),)) if len(failed) == PAGE else None)
+        pager=Pager(older=(("avant", str(failed[-1].seq)),)) if len(failed) == PAGE else Pager())
     return [Stats((Stat("Processus", len(sched.specs)), Stat("En cours", len(running), ", ".join(sorted(running))),
                    Stat("En échec d'affilée", len(failing), ", ".join(s.name for s in failing)[:90],
                         "danger" if failing else ""),
@@ -373,16 +374,20 @@ async def sorties(ui: Any, request: Request) -> list[Any]:
     counts = dict(store.query_mind("SELECT status, COUNT(*) FROM outbox GROUP BY status"))
     ctx = ui.inspection.context(request.query_params)
     status = request.query_params.get("etat", "")
-    where, args = ("WHERE status=?", (status,)) if status in counts else ("", ())
+    labels = {"pending": "en attente", "done": "parti", "failed": "échoué", "orphan": "orphelin"}
+    invalid = bool(status and status not in labels)
+    if invalid:
+        status = ""
+    where, args = ("WHERE status=?", (status,)) if status else ("", ())
     total = int(store.query_mind(f"SELECT COUNT(*) FROM outbox {where}", args)[0][0])
     pager = ctx.pager("page", size=PAGE, total=total)
     rows = store.query_mind(f"SELECT key, seq, effect, status, attempts, last_error FROM outbox {where} "
                             f"ORDER BY seq DESC LIMIT ? OFFSET ?", (*args, pager.size, pager.offset))
     tones = {"pending": "info", "done": "ok", "failed": "danger", "orphan": "warn"}
-    labels = {"pending": "en attente", "done": "parti", "failed": "échoué", "orphan": "orphelin"}
     chips = tuple(NavItem(f"{labels.get(k, k)}", Ref("local", f"/inspecteur/systeme/sorties?etat={k}", k), count=n,
                           active=k == status, tone=tones.get(k, "")) for k, n in sorted(counts.items()))
     return [
+        *([Note("État inconnu : affichage de tous les effets.", "warn")] if invalid else []),
         Stats(tuple(Stat(labels.get(k, k).capitalize(), n, "", tones.get(k, "") if k != "done" else "")
                     for k, n in sorted(counts.items())) or (Stat("File", 0, "vide"),)),
         Nav((NavItem("tout", Ref("local", "/inspecteur/systeme/sorties", "tout"), count=sum(counts.values()),

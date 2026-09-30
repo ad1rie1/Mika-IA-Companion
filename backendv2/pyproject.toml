@@ -32,7 +32,7 @@ mika = "mika.app.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"mika.inspector" = ["templates/*.html"]
+"mika.inspector" = ["templates/*.html", "static/*.css", "static/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

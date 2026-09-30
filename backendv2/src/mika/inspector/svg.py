@@ -107,7 +107,8 @@ def chart_svg(chart: Chart, when: Callable[[int], str], stamp: Callable[[int, in
             parts.append(f'<text class="tick" x="{left - 6}" y="{yy + 3:.1f}" text-anchor="end">'
                          f'{escape(_fmt(v, chart.unit))}</text>')
         stamps_all = sorted({at for s in series for at, _ in s.points})
-        marks = stamps_all if chart.kind == "bars" and len(stamps_all) <= 8 else \
+        marks = stamps_all if (chart.kind == "bars" and len(stamps_all) <= 8 or
+                               len(stamps_all) == 1 and chart.since is None and chart.until is None) else \
             [int(x0 + (x1 - x0) * i / 3) for i in range(4)]
         for i, at in enumerate(marks):
             anchor = "middle" if chart.kind == "bars" else "start" if i == 0 else "end" if i == len(marks) - 1 \

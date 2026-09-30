@@ -521,8 +521,8 @@ def test_an_exploration_and_its_step_read_in_the_list_and_the_detail(tmp_path):
     assert first[""] == Ref("episode", step.correlation, "épisode")
     episodes = table(detail, "Ses épisodes")
     assert "pas de travail" in column(episodes, "épisode")
-    assert step.correlation in [r.key for r in column(episodes, "")]
-    assert all(isinstance(r, Ref) and r.kind == "episode" for r in column(episodes, ""))
+    assert step.correlation in [r.key for r in column(episodes, "Prompt")]
+    assert all(isinstance(r, Ref) and r.kind == "episode" for r in column(episodes, "Prompt"))
     assert _cell(field(detail, "statut")) == "abouti"
     # les filtres : par sorte (code ou libellé)
     assert not table(after["vivants"], "Buts vivants").rows
@@ -550,4 +550,3 @@ def test_the_views_never_run_an_episode(tmp_path):
 
     head, after = live(tmp_path, scenario)
     assert head == after
-

@@ -1,0 +1,73 @@
+{# Contrôles et formulaires partagés par la console et la Forge. #}
+{% macro action_form(a, compact=False, button_only=False) -%}
+{% if not a %}<div class="note warn">Action non déclarée ici.</div>
+{% else %}
+<form method="post" action="{{ a.url }}" class="form action-card{{ ' card' if not compact }}"{% if a.confirm %} data-confirm="{{ a.confirm }}"{% endif %}>
+  <input type="hidden" name="csrf" value="{{ a.csrf }}"><input type="hidden" name="_op" value="{{ a.nonce }}">
+  <input type="hidden" name="_retour" value="{{ a.back }}"><input type="hidden" name="_sujet" value="{{ a.subject }}">
+  {% for k, v in a.fixed or [] %}<input type="hidden" name="_fixes" value="{{ k }}"><input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+  {% if a.title and not compact %}<h3>{{ a.title }}</h3>{% endif %}
+  {% if a.description and not button_only %}<p class="muted">{{ a.description }}</p>{% endif %}
+  {% if not compact and a.fields|selectattr("group")|list %}
+    {% set ns = namespace(current=None) %}
+    {% for f in a.fields %}
+      {% if f.group != ns.current %}{% if ns.current is not none %}</fieldset>{% endif %}<fieldset class="group"><legend>{{ f.group or "Autres" }}</legend>{% set ns.current = f.group %}{% endif %}
+      {{ field(f) }}
+    {% endfor %}
+    {% if ns.current is not none %}</fieldset>{% endif %}
+  {% else %}
+  {% for f in a.fields %}{{ field(f) }}{% endfor %}
+  {% endif %}
+  {% if a.retype %}<div class="field{{ ' has-error' if a.errors.get('_confirmer') }}"><label for="{{ a.id }}-confirmer">Retape « {{ a.subject }} » pour confirmer</label><input id="{{ a.id }}-confirmer" name="_confirmer" autocomplete="off" required>{% if a.errors.get('_confirmer') %}<span class="error">{{ a.errors['_confirmer'] }}</span>{% endif %}</div>{% endif %}
+  {% if a.confirm %}<noscript><label class="check"><input type="checkbox" name="_je_confirme" required> je confirme : {{ a.confirm }}</label></noscript>{% endif %}
+  <div class="form-actions-inline"><button class="btn{{ ' danger' if a.danger else ' quiet' if button_only }}">{{ a.button or a.title }}</button>{% if not compact and a.back %} <a class="btn quiet" href="{{ a.back }}">Annuler</a>{% endif %}</div>
+</form>
+{% endif %}
+{%- endmacro %}
+
+{% macro action_button(a) -%}
+{% if a %}
+  {% if a.page %}<a class="btn {{ 'danger' if a.danger else 'quiet' }}" href="{{ a.page }}">{{ a.title }}</a>
+  {% elif not a.fields and not a.retype %}{{ action_form(a, True, True) }}
+  {% else %}<details class="action-pop" data-exclusive>
+    <summary class="btn {{ 'danger' if a.danger else 'quiet' }}">{{ a.title }}</summary>
+    <div class="action-panel"><h3>{{ a.title }}</h3>{{ action_form(a, True) }}</div>
+  </details>{% endif %}
+{% endif %}
+{%- endmacro %}
+
+{% macro described(f) -%}
+{% if f.help or f.error %} aria-describedby="{{ f.id }}{{ '-help' if f.help else '-error' }}{% if f.help and f.error %} {{ f.id }}-error{% endif %}"{% endif %}{% if f.error %} aria-invalid="true"{% endif %}
+{%- endmacro %}
+
+{% macro field(f) -%}
+<div class="field{{ ' has-error' if f.error }}"{% if f.only %} data-only="{{ f.only }}"{% endif %}{% if f.hidden %} hidden{% endif %}>
+  {% if not f.nochamp %}<input type="hidden" name="_champs" value="{{ f.path }}">{% endif %}
+  {% if f.kind == "bool" %}
+    <label class="check"><input type="checkbox" name="{{ f.path }}" id="{{ f.id }}"{{ described(f) }}{{ ' checked' if f.value }}{{ ' disabled' if f.readonly }}> {{ f.label }}</label>
+  {% else %}
+    <label for="{{ f.id }}">{{ f.label }}{% if f.unit %} <span class="muted">({{ f.unit }})</span>{% endif %}</label>
+    {% if f.kind == "select" %}
+      <select name="{{ f.path }}" id="{{ f.id }}"{{ described(f) }}{{ ' disabled' if f.readonly }}{{ ' required' if f.required and not f.readonly }}>
+        {% if not f.required %}<option value="">—</option>{% endif %}
+        {% for v, l in f.choices %}<option value="{{ v }}"{{ ' selected' if v == f.value }}>{{ l }}</option>{% endfor %}
+      </select>
+    {% elif f.kind in ("textarea", "lines", "yaml") %}
+      <textarea name="{{ f.path }}" id="{{ f.id }}"{{ described(f) }} rows="{{ f.rows or 5 }}"{% if f.kind == "yaml" %} class="mono" spellcheck="false"{% endif %}{{ ' readonly' if f.readonly }}{{ ' required' if f.required and not f.readonly }}>{{ f.value }}</textarea>
+    {% elif f.kind == "secret" %}
+      <input type="password" name="{{ f.path }}" id="{{ f.id }}"{{ described(f) }} autocomplete="new-password" placeholder="{{ 'défini — vide : inchangé' if f.has_value else 'non défini' }}"{{ ' readonly' if f.readonly }}>
+    {% elif f.kind == "datetime" %}
+      <input type="datetime-local" name="{{ f.path }}" id="{{ f.id }}"{{ described(f) }} value="{{ f.value }}"{{ ' readonly' if f.readonly }}{{ ' required' if f.required and not f.readonly }}>
+    {% elif f.kind == "slider" %}
+      <span class="slider"><input type="range" name="{{ f.path }}" id="{{ f.id }}"{{ described(f) }} min="{{ f.lo }}" max="{{ f.hi }}" step="{{ f.step or 0.05 }}" value="{{ f.value }}" data-out="{{ f.id }}-out"><output id="{{ f.id }}-out" class="num">{{ f.value }}</output></span>
+    {% else %}
+      <input name="{{ f.path }}" id="{{ f.id }}"{{ described(f) }} value="{{ f.value }}"{% if f.kind in ("int", "float") %} inputmode="decimal"{% endif %}{% if f.placeholder %} placeholder="{{ f.placeholder }}"{% endif %}{% if f.choices %} list="{{ f.id }}-choix" autocomplete="off"{% endif %}{{ ' readonly' if f.readonly }}{{ ' required' if f.required and not f.readonly }}>
+      {% if f.choices %}<datalist id="{{ f.id }}-choix">{% for v, l in f.choices %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</datalist>{% endif %}
+    {% endif %}
+  {% endif %}
+  {% if f.kind == "secret" and f.has_value and not f.readonly %}<label class="check small"><input type="checkbox" name="_effacer" value="{{ f.path }}"> effacer</label>{% endif %}
+  {% if f.load_button %}<button class="btn quiet small" name="_charger" value="{{ f.path }}"{{ ' formnovalidate' if f.load_novalidate }}>{{ f.load_label or "Enregistrer, puis choisir dans la liste" }}</button>{% endif %}
+  {% if f.help %}<span class="help" id="{{ f.id }}-help">{{ f.help }}</span>{% endif %}
+  {% if f.error %}<span class="error" id="{{ f.id }}-error">{{ f.error }}</span>{% endif %}
+</div>
+{%- endmacro %}

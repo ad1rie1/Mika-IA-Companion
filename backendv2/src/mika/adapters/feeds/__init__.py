@@ -17,6 +17,7 @@ import asyncio
 import email.utils
 import hashlib
 import html
+import json
 import re
 import sqlite3
 import time
@@ -30,6 +31,7 @@ from xml.etree import ElementTree
 import httpx
 
 from mika.ports.feeds import Entry
+from mika.ports.paging import Page, fold_text
 
 NS_ATOM = "http://www.w3.org/2005/Atom"
 NS_RSS1 = "http://purl.org/rss/1.0/"
@@ -150,6 +152,7 @@ class HttpFeeds:
         self._timeout = timeout_s
         cache.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(cache), check_same_thread=False)
+        self._db.create_function("fold", 1, lambda s: fold_text(s or ""), deterministic=True)
         self._db.executescript(
             "CREATE TABLE IF NOT EXISTS entries(id TEXT PRIMARY KEY, feed_url TEXT, feed TEXT, title TEXT,"
             " link TEXT, summary TEXT, published INTEGER, handed INTEGER DEFAULT 0, n INTEGER);"
@@ -223,6 +226,25 @@ class HttpFeeds:
         rows = self._db.execute("SELECT id, feed, title, link, summary, published FROM entries "
                                 "ORDER BY published DESC, n DESC LIMIT ?", (limit,)).fetchall()
         return [Entry(*r) for r in rows]
+
+    def cached_count(self) -> int:
+        return self._db.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
+
+    def entries_page(self, feed: str = "", text: str = "", page: int = 1, size: int = 25) -> Page[Entry]:
+        where = "instr(fold(feed),?)>0 AND instr(fold(title || ' ' || summary),?)>0"
+        args = (fold_text(feed), fold_text(text))
+        total = self._db.execute("SELECT COUNT(*) FROM entries WHERE " + where, args).fetchone()[0]
+        page, size, offset = Page.bounds(total, page, size)
+        rows = self._db.execute("SELECT id,feed,title,link,summary,published FROM entries WHERE " + where +
+                                " ORDER BY published DESC,n DESC,id LIMIT ? OFFSET ?", (*args, size, offset))
+        return Page(tuple(Entry(*r) for r in rows), total, page, size)
+
+    def entry_count(self, feed: str = "", exclude: tuple[str, ...] = ()) -> int:
+        return self._db.execute("SELECT COUNT(*) FROM entries WHERE instr(fold(feed),?)>0 "
+                               "AND id NOT IN (SELECT value FROM json_each(?))", (fold_text(feed), json.dumps(exclude))).fetchone()[0]
+
+    def feed_counts(self) -> dict[str, int]:
+        return dict(self._db.execute("SELECT feed,COUNT(*) FROM entries GROUP BY feed"))
 
     def _note(self, url: str, at: int, *, ok: bool = False, items: int = 0, added: int = 0,
               error: str = "") -> None:

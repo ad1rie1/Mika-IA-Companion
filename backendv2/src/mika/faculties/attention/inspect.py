@@ -93,7 +93,7 @@ def _text(texts: dict[str, str], ref: str) -> Text:
 def _cursor(ctx: InspectContext, events: Sequence[Any], size: int) -> Pager | None:
     """La page suivante de l'historique (plus ancienne), s'il y en a une."""
     return Pager(param="avant", size=size, older=(("avant", str(events[-1].seq)),)) if len(events) >= size \
-        else None
+        else Pager(param="avant", size=size)
 
 
 def _before(ctx: InspectContext) -> int | None:
@@ -137,9 +137,9 @@ def _thought_rows(s: AttentionState, frame: Frame, ctx: InspectContext,
     return tuple(rows)
 
 
-THOUGHT_COLUMNS = (Column("n°", "fit"), Column("pensée"), Column("couleur"),
-                   Column("intensité", hint="ce qu'il en reste à l'instant (demi-vie)"), Column("née de"),
-                   Column("concerne"), Column("née", "fit"), Column("ravivée", "fit"))
+THOUGHT_COLUMNS = (Column("n°", "fit", detail=True), Column("pensée"), Column("couleur"),
+                   Column("intensité", hint="ce qu'il en reste à l'instant (demi-vie)"), Column("née de", detail=True),
+                   Column("concerne"), Column("née", "fit"), Column("ravivée", "fit", detail=True))
 
 
 def _history(frame: Frame, ctx: InspectContext) -> Table:
@@ -158,7 +158,7 @@ def _history(frame: Frame, ctx: InspectContext) -> Table:
             When(e.at),
             Badge("vivante", "info") if e.seq in alive else Badge("éteinte", "muted"),
         ), detail=(Prose(text or FORGOTTEN, title="En entier"),) if text and len(text) > CLAMP else ()))
-    return Table((Column("n°", "fit"), Column("pensée"), Column("couleur à la naissance"), Column("née de"),
+    return Table((Column("n°", "fit", detail=True), Column("pensée"), Column("couleur à la naissance", detail=True), Column("née de", detail=True),
                   Column("concerne"), Column("née", "fit"), Column("maintenant", "fit")), tuple(rows),
                  title="Toutes ses pensées, de la plus récente à la plus ancienne",
                  empty="plus rien avant" if _before(ctx) else "pas encore de pensée", pager=_cursor(ctx, events, HISTORY))

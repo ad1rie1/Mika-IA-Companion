@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from mika.ports.paging import Page
+
 
 @dataclass(frozen=True, slots=True)
 class Entry:
@@ -21,6 +23,12 @@ class Entry:
 
 
 class FeedPort(Protocol):
+    def entries_page(self, feed: str = "", text: str = "", page: int = 1, size: int = 25) -> Page[Entry]: ...
+
+    def entry_count(self, feed: str = "", exclude: tuple[str, ...] = ()) -> int: ...
+
+    def feed_counts(self) -> dict[str, int]: ...
+
     def configured(self) -> bool: ...
 
     async def poll(self, limit: int) -> list[Entry]:
@@ -33,6 +41,10 @@ class FeedPort(Protocol):
 
     def cached(self, limit: int) -> list[Entry]:
         """Les derniers articles déjà relevés, sans relever (lecture seule : l'inspecteur)."""
+        ...
+
+    def cached_count(self) -> int:
+        """Nombre d'articles en cache, y compris ceux d'un ancien abonnement."""
         ...
 
     def followed(self) -> list[tuple[str, str]]:

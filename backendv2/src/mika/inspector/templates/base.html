@@ -9,6 +9,7 @@
 <script src="{{ PREFIX }}/static/console.js?v={{ ASSET_VERSION }}"></script>
 </head>
 <body>
+<a class="skip-link" href="#contenu">Aller au contenu</a>
 <input type="checkbox" id="nav-open" class="sr" aria-label="Menu">
 <div class="app">
   <label for="nav-open" class="scrim" aria-hidden="true"></label>
@@ -47,7 +48,7 @@
       <span class="kv-inline" data-vitals-items>{% include "_vitals.html" %}</span>
       <span class="vitals-live" data-vitals-live aria-live="polite"></span>
     </header>
-    <main class="content">
+    <main class="content" id="contenu" tabindex="-1">
     {% block content %}
       <div class="page-head"><div><h1>{{ heading or title }}</h1>{% if subtitle %}<p>{{ subtitle }}</p>{% endif %}</div></div>
       {% if tabs %}<nav class="tabs" aria-label="Onglets">{% for t in tabs %}<a class="tab{{ ' on' if t.on }}" href="{{ t.href }}">{{ t.title }}</a>{% endfor %}</nav>{% endif %}

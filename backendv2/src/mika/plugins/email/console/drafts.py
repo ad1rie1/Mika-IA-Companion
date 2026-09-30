@@ -31,6 +31,7 @@ from mika.kernel.inspect import (
     Head,
     InspectContext,
     Note,
+    Param,
     Prose,
     Ref,
     Row,
@@ -53,17 +54,19 @@ from mika.plugins.email import (
     operator_name,
 )
 from mika.plugins.email.console.common import (
-    FOLD,
     NO_PORT,
     PAGE,
     SECTION,
     VOICE_LABEL,
+    account_scope,
     clip,
     draft_state,
-    fold,
     mail_key,
+    workspace,
 )
+from mika.plugins.email.console.mail import _document
 from mika.ports.mail import TO_FILL
+from mika.ports.paging import page_slice
 from mika.vocab.privacy import Sensitivity
 
 
@@ -81,14 +84,18 @@ def _seen_for(s: EmailState, draft_id: str) -> DraftSeen | None:
 
 
 @EMAIL.inspect("brouillons", title="Brouillons", section=SECTION, order=20, badge=_waiting_count,
-               description="Ce qu'elle a préparé : ça attend ton accord, et tu peux le retoucher.")
+               description="Relis les propositions avant envoi : approuve, modifie ou refuse chaque brouillon.",
+               params=[Param("compte", "Compte", kind="hidden")])
 def _drafts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("mail")
     if port is None:
         return [Note(NO_PORT, tone="muted")]
     labels = {a.key: a for a in port.accounts()}
+    account = account_scope(port, ctx)
     waiting, done = [], []
     for d in sorted(s.drafts.values(), key=lambda d: -d.proposal):
+        if account and d.account != account:
+            continue
         (waiting if d.state == WAITING else done).append(d)
 
     def row(d: DraftSeen) -> Row:
@@ -117,7 +124,7 @@ def _drafts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     page, pager = paginate(done, ctx.pager(size=PAGE))
     blocks.append(Table(columns, tuple(row(d) for d in page), title=f"Déjà décidés ({len(done)})", pager=pager,
                         empty="aucun encore"))
-    return blocks
+    return [workspace(port, ctx, blocks, view="brouillons")]
 
 
 @EMAIL.subject("brouillon", label="Brouillon", plural="Brouillons", icon="✎")
@@ -141,26 +148,25 @@ def _head(s: EmailState, frame: Frame, ctx: InspectContext, key: str) -> Head | 
         facts.append(("proposé", ctx.when(seen.at)))
     return Head(key=key, title=clip(got.subject, 200) if got is not None else "Un brouillon disparu",
                 subtitle=f"à {clip(got.to, 200)}" if got is not None else "", badges=tuple(badges),
-                facts=tuple(facts))
+                facts=tuple(facts), back=Ref("local", "/inspecteur/courrier/brouillons", "Retour aux brouillons",
+                                            (("compte", got.account if got else ""),)))
 
 
 @EMAIL.search("brouillon")
 def _search(s: EmailState, frame: Frame, ctx: InspectContext, text: str, limit: int) -> list[Found]:
     port = ctx.ports.get("mail")
-    query = fold(text)
+    if port is None:
+        return []
     out = []
-    for d in port.drafts(200) if port is not None else ():
-        if query and query not in fold(f"{d.subject} {d.to}"):
-            continue
+    for d in page_slice(lambda page, size: port.drafts_page(text, page, size), ctx.int_param("_offset", 0), limit):
         seen = _seen_for(s, d.id)
         state = draft_state(seen.state if seen is not None else d.state)[0]
         out.append(Found(d.id, clip(d.subject, 120) or "(sans objet)", f"à {clip(d.to, 80)} · {state}"))
-        if len(out) >= limit:
-            break
     return out
 
 
-@EMAIL.inspect("brouillon", title="Brouillon", subject="brouillon", order=10)
+@EMAIL.inspect("brouillon", title="Brouillon", subject="brouillon", order=10,
+               description='Relis le destinataire et le texte avant de modifier, approuver ou abandonner ce brouillon.')
 def _tab_draft(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("mail")
     got = port.draft(ctx.subject) if port is not None else None
@@ -175,8 +181,7 @@ def _tab_draft(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
                               ("objet", Text(shown.subject)),
                               ("en réponse à", Ref.subject("mail", mail_key(answered.ref), clip(answered.subject, 80))
                                if answered is not None else "—")), title="Ce qui partira", columns=2))
-        blocks.append(Prose(shown.text, title="Le texte, tel qu'il partira (signature et citation comprises)",
-                            clamp=FOLD * 4))
+        blocks.extend(_document(ctx, got.id, shown.text, title="Le texte, tel qu'il partira (signature et citation comprises)", kind="brouillon"))
         if shown.blocked:
             blocks.append(Note(f"Il ne peut pas partir tel quel : {shown.blocked}. Retouche-le.", tone="warn"))
     if seen is not None and seen.state == WAITING and got.state == "brouillon":
@@ -200,7 +205,8 @@ def _tab_draft(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     return blocks
 
 
-@EMAIL.inspect("pourquoi", title="Pourquoi", subject="brouillon", order=20)
+@EMAIL.inspect("pourquoi", title="Pourquoi", subject="brouillon", order=20,
+               description="Le message d'origine et les raisons pour lesquelles elle a préparé cette réponse.")
 def _tab_why(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("mail")
     got = port.draft(ctx.subject) if port is not None else None
@@ -229,7 +235,8 @@ def _tab_why(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     return blocks
 
 
-@EMAIL.inspect("historique", title="Historique", subject="brouillon", order=30)
+@EMAIL.inspect("historique", title="Historique", subject="brouillon", order=30,
+               description="Les versions, décisions et tentatives d'envoi de ce brouillon, du plus récent au plus ancien.")
 def _tab_history(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("mail")
     got = port.draft(ctx.subject) if port is not None else None

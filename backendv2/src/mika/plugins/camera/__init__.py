@@ -36,6 +36,8 @@ from mika.kernel.inspect import (
     Disclosure,
     Entry,
     InspectContext,
+    Nav,
+    NavItem,
     Note,
     Pager,
     Ref,
@@ -294,6 +296,9 @@ def _inspect(s: CameraState, frame: Frame, ctx: InspectContext) -> list[Block]:
     blocks: list[Block] = (_devices(port, frame, ctx, p) if port is not None else
                            [Note("Caméra non configurée : aucun appareil ne peut lui envoyer d'images.",
                                  tone="muted")])
+    blocks.insert(0, Nav((
+        NavItem("Connecter une caméra", Ref("local", "/inspecteur/reglages/appareils", "Accès des appareils")),
+        NavItem("Régler les observations", Ref("local", "/inspecteur/reglages/comportement-camera", "Réglages de la caméra")),)))
     views, shown = paginate(frame.get(c.VIEWS), ctx.pager("page_vus", size=PAGE))
     texts = ctx.store.content([v.summary_ref for v in views if v.summary_ref])
     blocks.append(Table(

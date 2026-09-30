@@ -326,3 +326,16 @@ def test_a_claude_code_backend_is_declared_with_its_fallback_and_costs_nothing_o
     assert price_usd("claude-sonnet-5-5", Usage(1_000_000, 0), provider=kind, cache_ttl=ttl) > 0
     broken = LLMConfig(backends={"cc": BackendSpec(kind="claude_code", model="", auth="cle_api", fallback="nulle")})
     assert len(broken.problems()) == 2
+
+
+def test_the_backend_opens_its_sessions_on_the_relay_the_server_mounts():
+    """Le relais monté n'a encore aucune session quand la passerelle est bâtie :
+    vide, donc faux. Un « relay or Relay() » en créait un autre, jamais monté, et
+    chaque connexion de la CLI recevait 404."""
+    from mika.adapters.llm.config import BackendSpec, LLMConfig, build_gateway
+
+    mounted = Relay()
+    assert len(mounted) == 0
+    cfg = LLMConfig(backends={"cc": BackendSpec(kind="claude_code", model="sonnet")}, routes={"reply": "cc"})
+    gateway = build_gateway(cfg, ManualClock(0), relay=mounted, relay_base=lambda: "http://127.0.0.1:1")
+    assert gateway.backends["cc"].relay is mounted

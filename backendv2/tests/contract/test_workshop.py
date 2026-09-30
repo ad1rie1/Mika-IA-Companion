@@ -107,3 +107,5 @@ def test_git_seals_its_start_then_commits_only_what_changed(tmp_path):
     assert go(ws.log(1)).splitlines()[0].endswith("deuxième pas")
     assert [ln.split(" ", 1)[1] for ln in go(ws.log(1)).splitlines()] == ["deuxième pas", "premier pas",
                                                                             "atelier ouvert"]
+    assert go(ws.log(1, 1, offset=1)).splitlines()[0].endswith("premier pas")
+    assert not go(ws.log(1, 1, offset=3)).strip()

@@ -36,6 +36,7 @@ from typing import Any
 import yaml
 
 from mika.kernel import schedule
+from mika.kernel.inspect import is_page_param
 
 TOOL = re.compile(r"^[a-z][a-z0-9_]{1,30}$")
 EVENT = re.compile(r"^[a-z_]+\.[a-z_*]+$")
@@ -245,7 +246,7 @@ def _param(p: _Problems, path: str, raw: Any, seen: set[str]) -> dict[str, Any] 
     if not KEY.match(key):
         p.at(path, "« key » : des minuscules, chiffres et _, commençant par une lettre (24 au plus)")
         return None
-    if key in RESERVED_PARAMS:
+    if key in RESERVED_PARAMS or is_page_param(key):
         p.at(path, f"« {key} » est réservé à la console (« page » est toujours donné à la vue)")
         return None
     if key in seen:

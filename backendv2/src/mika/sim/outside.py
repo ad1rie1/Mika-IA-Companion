@@ -8,10 +8,29 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from email.message import EmailMessage
 
 from mika.adapters.mail import compose
 from mika.ports.feeds import Entry
-from mika.ports.mail import AccountInfo, AccountStatus, Draft, Folder, Mail, Preview, Sent, split_ref
+from mika.ports.mail import (
+    AccountInfo,
+    AccountStatus,
+    Attachment,
+    Contact,
+    Draft,
+    File,
+    Folder,
+    Mail,
+    MailHit,
+    MailQuery,
+    Preview,
+    Sent,
+    addresses,
+    forwarded_text,
+    reference_key,
+    split_ref,
+)
+from mika.ports.paging import Page, fold_text
 
 #: la boîte simulée par défaut : un compte sans clé (les références restent les Message-ID)
 DEFAULT_ACCOUNT = AccountInfo(key="", label="Sa boîte", address="mika@exemple.fr", ready=True, can_send=True)
@@ -40,6 +59,8 @@ class FakeMail:
     read_elsewhere: list[str] = field(default_factory=list)
     #: les actions faites sur le serveur (``("seen", réf)``, ``("move", réf, dossier)``…)
     actions: list[tuple[str, ...]] = field(default_factory=list)
+    files: dict[tuple[str, str], File] = field(default_factory=dict)
+    outgoing_files: dict[str, tuple[File, ...]] = field(default_factory=dict)
 
     # ── comptes ──
     def configured(self) -> bool:
@@ -107,6 +128,120 @@ class FakeMail:
         return [m for m in self.cached(10_000, account=account)
                 if low and low in f"{m.subject} {m.sender} {m.body}".lower()][:limit]
 
+    def messages_page(self, query: MailQuery, page=1, size=25):
+        kept = [m for m in self.inbox if (not query.account or m.account == query.account)
+                and (not query.folder or m.folder == query.folder)
+                and (query.seen is None or m.seen == query.seen)
+                and (query.flagged is None or m.flagged == query.flagged)
+                and (query.refs is None or m.ref in query.refs) and m.ref not in query.exclude
+                and fold_text(query.text) in fold_text(f"{m.subject} {m.sender} {m.body}")
+                and fold_text(query.sender) in fold_text(f"{m.sender} {m.address}")]
+        return Page.of(sorted(kept, key=lambda m: (-m.date, m.ref)), page, size)
+
+    def find_ref(self, key):
+        return next((m.ref for m in (*self.inbox, *self.outgoing)
+                     if key in (reference_key(m.ref), reference_key(m.message_id))), None)
+
+    def _letters(self):
+        letters = {}
+        sent_folders = {(a.key, f.name) for a in self.accounts() for f in self.folders(a.key) if f.role == "sent"}
+        for m in sorted(self.inbox, key=lambda m: (m.folder == "INBOX", m.date)):
+            sent = (m.account, m.folder) in sent_folders or letters.get((m.account, m.message_id), (None, False, False))[2]
+            letters[m.account, m.message_id] = (m, False, sent)
+        for m in self.outgoing:
+            letters[m.account, split_ref(m.message_id)[1]] = (m, True, True)
+        return letters
+
+    def outgoing_page(self, query: MailQuery, page=1, size=25):
+        rows = [(m, local) for m, local, sent in self._letters().values() if sent
+                and (not query.account or m.account == query.account)
+                and fold_text(query.text) in fold_text(f"{m.subject} {m.to} {m.body}")]
+        return Page.of(sorted(rows, key=lambda item: (-item[0].date, item[0].ref)), page, size)
+
+    @staticmethod
+    def _hit(m, sent):
+        return MailHit(m.ref, split_ref(m.message_id)[1], m.account, m.subject, m.date,
+                       f"à {m.to}" if sent else m.sender, sent)
+
+    def search_page(self, text, limit=25, offset=0):
+        rows = [self._hit(m, sent) for m, _, sent in self._letters().values()
+                if fold_text(text) in fold_text(f"{m.subject} {m.to} {getattr(m, 'sender', '')} {m.body}")]
+        return sorted(rows, key=lambda m: (-m.date, m.ref))[offset:offset + limit]
+
+    def search_count(self, text):
+        return sum(fold_text(text) in fold_text(f"{m.subject} {m.to} {getattr(m, 'sender', '')} {m.body}")
+                   for m, _, _ in self._letters().values())
+
+    def thread_page(self, ref, page=1, size=25):
+        selected = self.cached_one(ref) or self.sent_mail(ref)
+        if selected is None:
+            return Page((), 0)
+        letters = {mid: (m, sent) for (account, mid), (m, _, sent) in self._letters().items() if account == selected.account}
+        connected = {split_ref(selected.message_id)[1]}
+        while True:
+            related = {key for mid, (m, _) in letters.items()
+                       for key in (mid, split_ref(m.in_reply_to)[1])
+                       if key and (mid in connected or split_ref(m.in_reply_to)[1] in connected)}
+            if related <= connected:
+                break
+            connected |= related
+        rows = [self._hit(m, sent) for mid, (m, sent) in letters.items() if mid in connected]
+        return Page.of(sorted(rows, key=lambda m: (m.date, m.ref)), page, size)
+
+    def contacts_page(self, account="", text="", page=1, size=25):
+        own = {a.address.lower() for a in self.accounts()}
+        book = {}
+        for m, _, sent in self._letters().values():
+            if account and m.account != account:
+                continue
+            for name, address in addresses(','.join(x for x in (m.to, m.cc) if x)) if sent else addresses(m.sender):
+                if address in own:
+                    continue
+                old = book.get(address, Contact(address, name, 0, 0, 0))
+                book[address] = Contact(address, old.name or name, old.received + int(not sent),
+                                        old.sent + int(sent), max(old.last, m.date))
+        rows = [c for c in book.values() if fold_text(text) in fold_text(c.name + ' ' + c.address)]
+        return Page.of(sorted(rows, key=lambda c: (-c.last, c.address)), page, size)
+
+    def drafts_page(self, text="", page=1, size=25):
+        rows = [d for d in self.kept_drafts.values() if fold_text(text) in fold_text(d.subject + ' ' + d.to)]
+        return Page.of(sorted(rows, key=lambda d: (-d.updated, d.id)), page, size)
+
+    async def document(self, ref):
+        return self.cached_one(ref) or self.sent_mail(ref)
+
+    async def file(self, ref, part):
+        found = self.files.get((ref, part))
+        if found is not None:
+            return found
+        m = self.cached_one(ref) or self.sent_mail(ref)
+        if m is None:
+            raise FileNotFoundError("Ce message n'est plus disponible.")
+        if part == "texte":
+            return File("message.txt", "text/plain", m.body.encode())
+        if part == "source":
+            raw = EmailMessage()
+            raw['Subject'], raw['To'], raw['Message-ID'] = m.subject, m.to, m.message_id
+            raw['From'] = getattr(m, 'sender', '')
+            raw.set_content(m.body)
+            for file in self.outgoing_files.get(m.message_id, ()):
+                maintype, _, subtype = file.mime.partition('/')
+                raw.add_attachment(file.data, maintype=maintype, subtype=subtype, filename=file.name)
+            return File("message.eml", "message/rfc822", raw.as_bytes())
+        if part.isdecimal() and int(part) < len(self.outgoing_files.get(m.message_id, ())):
+            return self.outgoing_files[m.message_id][int(part)]
+        raise FileNotFoundError("Cette pièce jointe n'est plus disponible.")
+
+    async def forward(self, ref, to, subject, body, *, cc="", by="", attachments=True):
+        m = self.cached_one(ref) or self.sent_mail(ref)
+        if m is None:
+            raise ValueError("Ce message n'est plus disponible.")
+        files = tuple([await self.file(ref, str(i)) for i, _ in enumerate(getattr(m, 'attachments', ()))]) if attachments else ()
+        mid = await self.send(to, subject, forwarded_text(m, body), by=by, account=m.account, cc=cc)
+        self.outgoing_files[mid] = files
+        self.outgoing[-1] = replace(self.outgoing[-1], attachments=tuple(Attachment(f.name, f.mime, len(f.data)) for f in files))
+        return mid
+
     # ── dossiers ──
     def folders(self, account: str) -> list[Folder]:
         info = self.account(account)
@@ -120,6 +255,9 @@ class FakeMail:
         return self.folders(account)
 
     async def sync_folder(self, account: str, folder: str, limit: int) -> int:
+        return 0
+
+    async def older(self, account: str, folder: str, limit: int = 50) -> int:
         return 0
 
     async def set_flags(self, ref: str, *, seen: bool | None = None, flagged: bool | None = None) -> None:
@@ -182,8 +320,9 @@ class FakeMail:
         return [m for m in reversed(self.outgoing) if not account or m.account == account][:limit]
 
     def sent_mail(self, message_id: str) -> Sent | None:
-        mid = split_ref(message_id)[1]
-        return next((m for m in self.outgoing if m.message_id in (message_id, mid)), None)
+        account, mid = split_ref(message_id)
+        return next((m for m in self.outgoing if m.message_id in (message_id, mid)
+                     and (not account or m.account == account)), None)
 
     # ── brouillons ──
     def save_draft(self, draft: Draft) -> Draft:
@@ -263,6 +402,23 @@ class FakeFeeds:
 
     def cached(self, limit: int) -> list[Entry]:
         return sorted(self.entries, key=lambda e: -e.published)[:limit]
+
+    def cached_count(self) -> int:
+        return len(self.entries)
+
+    def entries_page(self, feed="", text="", page=1, size=25):
+        rows = [e for e in self.entries if fold_text(feed) in fold_text(e.feed)
+                and fold_text(text) in fold_text(e.title + ' ' + e.summary)]
+        return Page.of(sorted(rows, key=lambda e: -e.published), page, size)
+
+    def entry_count(self, feed="", exclude=()):
+        return sum(fold_text(feed) in fold_text(e.feed) and e.id not in exclude for e in self.entries)
+
+    def feed_counts(self):
+        counts = {}
+        for e in self.entries:
+            counts[e.feed] = counts.get(e.feed, 0) + 1
+        return counts
 
     def followed(self) -> list[tuple[str, str]]:
         return [(feed, "") for feed in sorted({e.feed for e in self.entries})]

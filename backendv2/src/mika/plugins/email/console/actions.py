@@ -28,7 +28,7 @@ from mika.vocab.privacy import Sensitivity
 
 #: « tout lu » marque les mails sur le serveur par lots (entre deux lots, la boucle respire)
 SERVER_BATCH = 50
-NOT_READY = "Aucune boîte ne peut envoyer : elle n'est pas configurée (ajoute ou complète un compte, Courrier › Comptes)."
+NOT_READY = "Aucune boîte ne peut envoyer : elle n'est pas configurée (Configuration › Plugins › Boîtes aux lettres)."
 
 
 class WriteArgs(BaseModel):
@@ -59,6 +59,16 @@ class NoArgs(BaseModel):
     pass
 
 
+class ForwardArgs(BaseModel):
+    original: Annotated[str, Knob(label="Message original", widget="hidden")] = Field(min_length=1, max_length=500)
+    to: Annotated[str, Knob(label="À", advanced=False)] = Field(min_length=3, max_length=300)
+    cc: Annotated[str, Knob(label="Copie", advanced=False)] = Field(default="", max_length=300)
+    subject: Annotated[str, Knob(label="Objet", advanced=False)] = Field(min_length=1, max_length=200)
+    body: Annotated[str, Knob(label="Message d'accompagnement", widget="textarea", advanced=False,
+                              help="Le message original complet est ajouté après ton texte.")] = Field(default="", max_length=20_000)
+    attachments: Annotated[bool, Knob(label="Joindre les pièces jointes du message original", advanced=False)] = True
+
+
 class FolderArgs(BaseModel):
     compte: Annotated[str, Knob(label="Boîte", widget="hidden")] = Field(default="", max_length=40)
     dossier: Annotated[str, Knob(label="Dossier", widget="hidden")] = Field(default="INBOX", max_length=300)
@@ -78,14 +88,18 @@ def _check(to: str, cc: str) -> None:
 
 
 async def _send(frame: Frame, ctx: Any, args: Any, *, account: str = "", reply_to: str = "",
-                quote: bool = False) -> Done:
+                quote: bool = False, original: str = "") -> Done:
     port = ctx.ports.get("mail")
     if not can_send(port):
         raise Refused(NOT_READY)
     _check(args.to, args.cc)
     try:
-        mail_id = await port.send(args.to, args.subject, args.body, reply_to, by=ctx.by, account=account,
-                                  cc=args.cc, quote=quote)
+        if original:
+            mail_id = await port.forward(original, args.to, args.subject, args.body, cc=args.cc,
+                                         by=ctx.by, attachments=args.attachments)
+        else:
+            mail_id = await port.send(args.to, args.subject, args.body, reply_to, by=ctx.by, account=account,
+                                     cc=args.cc, quote=quote)
     except (OSError, RuntimeError, ValueError) as exc:  # une erreur SMTP est une OSError
         raise Refused(f"L'envoi a échoué : {exc}"[:300]) from None
     gone = port.sent_mail(mail_id)
@@ -105,7 +119,7 @@ def _write_fields(s: EmailState, frame: Frame, key: str, fixed: Any, ports: Any 
     port = ports.get("mail") if ports is not None else None
     choices = tuple((a.key, f"{a.name} <{a.address}>") for a in (port.accounts() if port is not None else ())
                     if a.can_send)
-    return [dataclasses.replace(f, choices=choices, nullable=True) if f.path == "account" else f
+    return [dataclasses.replace(f, choices=choices, nullable=False, required=True, default=choices[0][0] if choices else None) if f.path == "account" else f
             for f in forms.describe(WriteArgs)]
 
 
@@ -128,11 +142,18 @@ async def _reply(s: EmailState, frame: Frame, args: ReplyArgs, ctx: Any) -> Done
     return await _send(frame, ctx, args, reply_to=args.reply_to, quote=args.quote and bool(args.reply_to))
 
 
+@EMAIL.action("transferer", title="Transférer", args=ForwardArgs, emits=[c.SENT],
+              description="Envoie le message complet depuis son compte d'origine, avec ses pièces jointes si choisies.",
+              confirm="Transférer ce message aux destinataires indiqués ?")
+async def _forward(s: EmailState, frame: Frame, args: ForwardArgs, ctx: Any) -> Done:
+    return await _send(frame, ctx, args, original=args.original)
+
+
 @EMAIL.action("relever", title="Relever maintenant", args=NoArgs, emits=[POLL_ASKED], section=SECTION, order=20,
               description="Sans attendre la prochaine relève (même si elle dort).")
 def _poll(s: EmailState, frame: Frame, args: NoArgs, ctx: Any) -> Done:
     if not ready(ctx.ports.get("mail")):
-        raise Refused("Aucune boîte n'est prête à relever : la boîte n'est pas configurée (Courrier › Comptes).")
+        raise Refused("Aucune boîte n'est prête à relever : la boîte n'est pas configurée (Configuration › Plugins › Boîtes aux lettres).")
     return Done(drafts=(POLL_ASKED.draft(by=ctx.by),), message="Relève demandée : les nouveaux mails arrivent "
                 "dans quelques secondes.")
 
@@ -182,6 +203,22 @@ async def _reread(s: EmailState, frame: Frame, args: FolderArgs, ctx: Any) -> Do
 
 
 GESTURES = ("lu", "non_lu", "suivre", "ne_plus_suivre", "archiver", "corbeille")
+
+
+@EMAIL.action("historique", title="Charger des messages plus anciens", args=FolderArgs, emits=[],
+              description="Charge jusqu'à 50 messages antérieurs aux messages déjà synchronisés dans ce dossier.")
+async def _older(s: EmailState, frame: Frame, args: FolderArgs, ctx: Any) -> Done:
+    port = ctx.ports.get("mail")
+    info = port.account(args.compte) if port is not None else None
+    if info is None or not info.ready:
+        raise Refused("Ce compte n'est pas prêt à relever.")
+    try:
+        n = await port.older(args.compte, args.dossier, 50)
+    except (OSError, RuntimeError, ValueError):
+        raise Refused("L'historique n'a pas pu être chargé. Actualise le dossier et vérifie la connexion du compte.") from None
+    return Done(message=f"{n} message(s) ancien(s) ajouté(s)." if n else "Tout l'historique disponible de ce dossier est chargé.",
+                go=Ref("local", "/inspecteur/courrier/reception", "Retour au dossier",
+                       (("compte", args.compte), ("dossier", args.dossier))))
 
 
 @EMAIL.action("ranger", title="Ranger", args=TidyArgs, emits=[READ],

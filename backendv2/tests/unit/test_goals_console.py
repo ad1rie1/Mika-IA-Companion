@@ -100,8 +100,9 @@ class Atelier:
     async def diff(self, goal: int) -> str:
         return "".join(f"+++ b/{p}\n+{self.files[goal][p][:40]}\n" for p in self.dirty.get(goal, []))
 
-    async def log(self, goal: int, n: int = 10) -> str:
-        return "\n".join(f"{sha} {title}" for sha, title in reversed(self.commits.get(goal, [])[-n:]))
+    async def log(self, goal: int, n: int = 10, *, offset: int = 0) -> str:
+        rows = list(reversed(self.commits.get(goal, [])))[offset:offset + n]
+        return "\n".join(f"{sha} {title}" for sha, title in rows)
 
 
 # ── Outils ────────────────────────────────────────────────────────────────
@@ -328,6 +329,24 @@ def test_the_workshop_tab_without_workshop_says_so(tmp_path):
 # ── Les actions de l'opérateur ────────────────────────────────────────────
 
 
+def test_workshop_history_reaches_commits_older_than_five_hundred(tmp_path):
+    atelier = Atelier()
+    async def scenario(kernel, llm):
+        await connect(kernel, "user_1", "Adrien", operator=True)
+        result = await perform(kernel, "goals.confier", form(title="Historique de l'atelier", details="Vérifier les versions."),
+                               by="user_1", nonce="long-history")
+        assert result.ok
+        gid = events(kernel, goals_c.GOAL_OPENED)[-1].seq
+        await atelier.write(gid, "notes.txt", "exemple")
+        atelier.commits[gid] = [(f"c{i:06}", f"Version {i}") for i in range(555)]
+        first = await tab(kernel, "atelier", str(gid))
+        last = await tab(kernel, "atelier", str(gid), avant_commits="550")
+        return next(b for b in first if isinstance(b, Timeline)), next(b for b in last if isinstance(b, Timeline))
+    first, last = live(tmp_path, scenario, ports={"workshop": atelier})
+    assert len(first.entries) == 25 and first.pager.older == (("avant_commits", "25"),)
+    assert len(last.entries) == 5 and last.entries[-1].title == "Version 0" and not last.pager.older
+
+
 def test_every_operator_action_goes_through_the_engine(tmp_path):
     async def scenario(kernel, llm):
         await connect(kernel, "user_1", "Adrien", operator=True)
@@ -539,4 +558,3 @@ def test_the_badges_say_what_needs_the_operator(tmp_path):
     assert "attend ton accord" in flat(effects) and "installer requests" in flat(effects)
     approvals = next(b for b in effects if isinstance(b, Fields))
     assert approvals.pairs[0][1].kind == "local" and approvals.pairs[0][1].key == "/inspecteur/approbations"
-

@@ -34,6 +34,9 @@ class Destination:
     order: tuple[str, ...] = ()
     #: les types d'objets dont la fiche « habite » ici (le menu s'y allume, le fil d'Ariane y mène)
     subjects: tuple[str, ...] = ()
+    #: contexte commun conservé lorsqu'on change d'onglet (ex. le compte courrier)
+    context: tuple[str, ...] = ()
+    automatic_actions: bool = True
 
 
 @dataclass(frozen=True, slots=True)

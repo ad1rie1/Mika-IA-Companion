@@ -41,6 +41,7 @@ from typing import Any, NamedTuple, Protocol
 from urllib.parse import urlsplit
 
 from mika.kernel.inspect import (
+    PAGE_PARAM,
     TONES,
     ActionSlot,
     Badge,
@@ -68,7 +69,10 @@ from mika.kernel.inspect import (
     Table,
     Text,
     Timeline,
+    Toolbar,
     When,
+    Workspace,
+    is_page_param,
     tone,
 )
 
@@ -129,21 +133,23 @@ _BLOCKS: dict[str, _Shape] = {
     "table": _shape(("type", "columns", "rows"), ("title", "caption", "empty", "pagination", "filters")),
     "fields": _shape(("type", "items"), ("title", "columns")),
     "note": _shape(("type", "text"), ("tone", "title")),
-    "prose": _shape(("type", "text"), ("title", "clamp")),
+    "prose": _shape(("type", "text"), ("title", "clamp", "reading")),
     "code": _shape(("type", "text"), ("title",)),
     "stats": _shape(("type", "items"), ("title",)),
     "timeline": _shape(("type", "items"), ("title", "empty")),
     "chart": _shape(("type", "series"),
                     ("kind", "title", "unit", "y", "zero", "since", "until", "empty", "table")),
+    "workspace": _shape(("type", "sidebar", "items")),
+    "toolbar": _shape(("type", "items"), ("title",)),
     "grid": _shape(("type", "items"), ("columns",)),
     "section": _shape(("type", "title", "items"), ("description",)),
     "disclosure": _shape(("type", "title", "items"), ("open",)),
-    "form": _shape(("type", "action"), ("initial", "title", "compact")),
+    "form": _shape(("type", "action"), ("initial", "title", "compact", "presentation")),
     "nav": _shape(("type", "items"), ("title",)),
 }
 _TEXT_KINDS = ("text", "mono", "num", "muted")
 _CELLS: dict[str, _Shape] = {
-    **{k: _shape(("kind", "text"), ("tone", "hint", "clamp")) for k in _TEXT_KINDS},
+    **{k: _shape(("kind", "text"), ("tone", "hint", "clamp", "secondary", "emphasis")) for k in _TEXT_KINDS},
     "badge": _shape(("kind", "text"), ("tone",)),
     "meter": _shape(("kind", "ratio"), ("text", "tone")),
     "emotion": _shape(("kind", "key"), ("text", "weight")),
@@ -153,9 +159,9 @@ _CELLS: dict[str, _Shape] = {
 # un lien en position ``href`` (ligne, statistique, entrée) : texte facultatif
 _HREF = _shape(("kind",), ("text", "view", "params", "url"))
 _ENVELOPE = _shape(("version", "blocks"))
-_COLUMN = _shape(("key", "label"), ("align", "hint"))
+_COLUMN = _shape(("key", "label"), ("align", "hint", "detail"))
 _ROW = _shape(("cells",), ("tone", "href", "detail"))
-_PAGER = _shape(("page", "total", "per_page"))
+_PAGER = _shape(("page", "total", "per_page"), ("param",))
 _FIELD = _shape(("label", "value"), ("hint",))
 _STAT = _shape(("label", "value"), ("sub", "tone", "href", "trend"))
 _ENTRY = _shape(("at", "title"), ("text", "meta", "tone", "href"))
@@ -372,7 +378,9 @@ class _Decoder:
             return Text(self.string(d["text"], _at(path, "text")), kind=kind,
                         tone=self.tone(get("tone", ""), _at(path, "tone")),
                         hint=self.string(get("hint", ""), _at(path, "hint")),
-                        clamp=self.integer(get("clamp", 0), _at(path, "clamp"), 0, self.limits.chars))
+                        clamp=self.integer(get("clamp", 0), _at(path, "clamp"), 0, self.limits.chars),
+                        secondary=self.string(get("secondary", ""), _at(path, "secondary")),
+                        emphasis=self.boolean(get("emphasis", False), _at(path, "emphasis")))
         if kind == "badge":
             return Badge(self.string(d["text"], _at(path, "text")),
                          tone=self.tone(get("tone", ""), _at(path, "tone")))
@@ -503,7 +511,8 @@ class _Decoder:
             case "prose":
                 return Prose(self.string(d["text"], _at(path, "text")),
                              title=self.string(d.get("title", ""), _at(path, "title")),
-                             clamp=self.integer(d.get("clamp", 0), _at(path, "clamp"), 0, self.limits.chars))
+                             clamp=self.integer(d.get("clamp", 0), _at(path, "clamp"), 0, self.limits.chars),
+                             reading=self.boolean(d.get("reading", False), _at(path, "reading")))
             case "code":
                 return Code(self.string(d["text"], _at(path, "text")),
                             title=self.string(d.get("title", ""), _at(path, "title")))
@@ -513,6 +522,12 @@ class _Decoder:
                 return self.timeline(d, path)
             case "chart":
                 return self.chart(d, path)
+            case "workspace":
+                return Workspace(self.blocks(d["sidebar"], _at(path, "sidebar"), depth + 1),
+                                 self.blocks(d["items"], _at(path, "items"), depth + 1))
+            case "toolbar":
+                return Toolbar(self.blocks(d["items"], _at(path, "items"), depth + 1),
+                               title=self.string(d.get("title", "Actions"), _at(path, "title")))
             case "grid":
                 return Grid(self.blocks(d["items"], _at(path, "items"), depth + 1),
                             columns=self.integer(d.get("columns", 2), _at(path, "columns"), 1, _GRID_COLUMNS))
@@ -544,7 +559,8 @@ class _Decoder:
                 key = self.string(c["key"], _at(p, "key"))
                 column = Column(self.string(c["label"], _at(p, "label")),
                                 align=self.choice(c.get("align", ""), _at(p, "align"), _ALIGNS, "alignement inconnu"),
-                                hint=self.string(c.get("hint", ""), _at(p, "hint")))
+                                hint=self.string(c.get("hint", ""), _at(p, "hint")),
+                                detail=self.boolean(c.get("detail", False), _at(p, "detail")))
             if not key:
                 raise Invalid(p, "clé de colonne vide")
             if key in keys:
@@ -597,6 +613,9 @@ class _Decoder:
 
     def pager(self, value: Any, path: str, rows: int) -> Pager:
         p = self.obj(value, path, _PAGER)
+        param = self.string(p.get("param", "page"), _at(path, "param"))
+        if not is_page_param(param):
+            raise Invalid(_at(path, "param"), "attendu : page ou page_<nom> (lettres minuscules, chiffres, _)")
         number = self.integer(p["page"], _at(path, "page"), 1)
         total = self.integer(p["total"], _at(path, "total"))
         size = self.integer(p["per_page"], _at(path, "per_page"), 1, self.limits.rows)
@@ -606,7 +625,7 @@ class _Decoder:
         room = min(size, total - (number - 1) * size)
         if rows > room:
             raise Invalid(path, f"{rows} lignes pour une page qui en compte au plus {room}")
-        return Pager(param="page", number=number, size=size, total=total)
+        return Pager(param=param, number=number, size=size, total=total)
 
     def filters(self, value: Any, path: str) -> tuple[str, ...]:
         names: list[str] = []
@@ -737,7 +756,9 @@ class _Decoder:
         initial = tuple((key, self.scalar_text(item, _at(ip, key)))
                         for key, item in self.mapping(d.get("initial", {}), ip, "valeurs initiales"))
         return ActionSlot(action, initial=initial, title=self.string(d.get("title", ""), _at(path, "title")),
-                          compact=self.boolean(d.get("compact", False), _at(path, "compact")))
+                          compact=self.boolean(d.get("compact", False), _at(path, "compact")),
+                          presentation=self.choice(d.get("presentation", "form"), _at(path, "presentation"),
+                                                   ("form", "button"), "présentation inconnue"))
 
     def scalar_text(self, value: Any, path: str) -> str:
         """Une valeur initiale de formulaire, en texte (vrai → ``"1"``, faux et
@@ -792,8 +813,10 @@ def _enc_block(b: Any) -> dict[str, Any]:
             _put(out, b, "tone", "title")
             return out
         case Prose():
+            if b.html:
+                raise ValueError("le HTML natif ne fait pas partie du langage Forge")
             out = {"type": "prose", "text": b.text}
-            _put(out, b, "title", "clamp")
+            _put(out, b, "title", "clamp", "reading")
             return out
         case Code():
             out = {"type": "code", "text": b.text}
@@ -809,6 +832,13 @@ def _enc_block(b: Any) -> dict[str, Any]:
             return out
         case Chart():
             return _enc_chart(b)
+        case Workspace():
+            return {"type": "workspace", "sidebar": [_enc_block(x) for x in b.sidebar],
+                    "items": [_enc_block(x) for x in b.items]}
+        case Toolbar():
+            out = {"type": "toolbar", "items": [_enc_block(x) for x in b.items]}
+            _put(out, b, "title")
+            return out
         case Grid():
             out = {"type": "grid", "items": [_enc_block(x) for x in b.items]}
             _put(out, b, "columns")
@@ -834,7 +864,7 @@ def _enc_block(b: Any) -> dict[str, Any]:
             out = {"type": "form", "action": b.action}
             if b.initial:
                 out["initial"] = dict(b.initial)
-            _put(out, b, "title", "compact")
+            _put(out, b, "title", "compact", "presentation")
             return out
     raise ValueError(f"bloc non exprimable dans l'enveloppe : {type(b).__name__}")
 
@@ -851,15 +881,17 @@ def _enc_table(t: Table) -> dict[str, Any]:
             key += "_"
         used.add(key)
         col = {"key": key, "label": c.label}
-        _put(col, c, "align", "hint")
+        _put(col, c, "align", "hint", "detail")
         columns.append(col)
     out: dict[str, Any] = {"type": "table", "columns": columns, "rows": [_enc_row(r) for r in t.rows]}
     _put(out, t, "title", "caption", "empty")
     if t.pager is not None:
         p = t.pager
-        if p.param != "page" or p.older or p.total is None:
-            raise ValueError("pagination non exprimable dans l'enveloppe (seule « page » avec un total l'est)")
+        if not is_page_param(p.param) or p.older or p.total is None:
+            raise ValueError("pagination non exprimable dans l'enveloppe (page ou page_<nom>, avec un total)")
         out["pagination"] = {"page": p.number, "total": p.total, "per_page": p.size}
+        if p.param != "page":
+            out["pagination"]["param"] = p.param
     if t.filters:
         out["filters"] = list(t.filters)
     return out
@@ -932,7 +964,7 @@ def _enc_cell(c: Any) -> Any:
             return _enc_link(c)
         case Text():
             out = {"kind": c.kind, "text": c.text}
-            _put(out, c, "tone", "hint", "clamp")
+            _put(out, c, "tone", "hint", "clamp", "secondary", "emphasis")
             return out
         case Badge():
             out = {"kind": "badge", "text": c.text}
@@ -1016,7 +1048,7 @@ def schema(*, limits: Limits = Limits()) -> dict[str, Any]:
 
     cell_props = {"text": text, "tone": tones, "hint": text, "clamp": clamp, "ratio": number,
                   "key": {"type": "string", "pattern": _pattern(_WORD)}, "weight": number,
-                  "at": instant, "relative": flag}
+                  "at": instant, "relative": flag, "secondary": text, "emphasis": flag}
     cells: list[Any] = [scalar]
     for kind, shape in _CELLS.items():
         if kind == "link":
@@ -1025,21 +1057,22 @@ def schema(*, limits: Limits = Limits()) -> dict[str, Any]:
             cells.append(_obj(shape, {**cell_props, "kind": {"const": kind}}))
 
     column = _obj(_COLUMN, {"key": {"type": "string", "minLength": 1, "maxLength": limits.chars}, "label": text,
-                            "align": {"enum": list(_ALIGNS)}, "hint": text})
+                            "align": {"enum": list(_ALIGNS)}, "hint": text, "detail": {"type": "boolean"}})
     cell_list = _array(_ref("cell"), limits.columns)
     cell_map = {"type": "object", "maxProperties": limits.columns,
                 "propertyNames": {"minLength": 1, "maxLength": limits.chars}, "additionalProperties": _ref("cell")}
     row = _obj(_ROW, {"cells": {"oneOf": [cell_list, cell_map]}, "tone": tones, "href": _ref("link"),
                       "detail": blocks})
     pager = _obj(_PAGER, {"page": {"type": "integer", "minimum": 1, "maximum": _I64}, "total": instant,
-                          "per_page": {"type": "integer", "minimum": 1, "maximum": limits.rows}})
+                          "per_page": {"type": "integer", "minimum": 1, "maximum": limits.rows},
+                          "param": {"type": "string", "pattern": "^" + PAGE_PARAM + "$"}})
     point = {"type": "array", "prefixItems": [instant, number], "items": False, "minItems": 2}
     series = _obj(_SERIES, {"label": text, "points": _array(point, limits.points),
                             "slot": {"type": "integer", "minimum": 0, "maximum": _SLOTS}})
     columns_1_3 = {"type": "integer", "minimum": 1, "maximum": _GRID_COLUMNS}
 
     common = {"title": text, "caption": text, "empty": text, "text": text, "tone": tones, "description": text,
-              "open": flag, "compact": flag, "clamp": clamp}
+              "open": flag, "reading": flag, "compact": flag, "clamp": clamp, "presentation": {"enum": ["form", "button"]}}
     specific: dict[str, dict[str, Any]] = {
         "table": {"columns": _array({"oneOf": [{"type": "string", "minLength": 1, "maxLength": limits.chars},
                                                _ref("column")]}, limits.columns),
@@ -1058,6 +1091,8 @@ def schema(*, limits: Limits = Limits()) -> dict[str, Any]:
                   "unit": {"enum": list(_UNITS)},
                   "y": {"type": "array", "prefixItems": [number, number], "items": False, "minItems": 2},
                   "zero": number, "since": instant, "until": instant, "table": flag},
+        "workspace": {"items": blocks, "sidebar": blocks},
+        "toolbar": {"items": blocks},
         "grid": {"items": blocks, "columns": columns_1_3},
         "section": {"items": blocks},
         "disclosure": {"items": blocks},

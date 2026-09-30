@@ -231,8 +231,7 @@ def test_on_a_fresh_kernel_every_view_reads_and_says_there_is_nothing(tmp_path):
         assert [(p.name, p.kind) for p in typed] == [("q", "search"), ("status", "select"), ("person", "search")]
     statuses = dict(declared[("memory", "promesses")].typed[1].choices)
     assert statuses == {"pending": "en cours", "honored": "tenue", "dropped": "abandonnée"}
-    # la v2 n'extrait ni thèmes ni entités : dit une fois, sur les souvenirs
-    assert "ni thèmes ni entités" in declared[("memory", "souvenirs")].description
+    assert declared[("memory", "souvenirs")].description
 
     assert table(shown[("memory", "souvenirs")], "Ses souvenirs").rows == ()
     assert table(shown[("memory", "souvenirs")], "Ses souvenirs").pager.total == 0

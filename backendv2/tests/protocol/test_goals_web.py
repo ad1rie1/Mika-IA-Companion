@@ -131,7 +131,7 @@ def test_a_project_is_confided_on_its_own_page_and_read_on_its_fiche(world):  # 
         ws.receive_json(), ws.receive_json()
     listing = html.unescape(client.get("/inspecteur/buts").text)
     assert "Projets en cours" in listing  # l'onglet Projets vient en premier
-    link = re.search(r'<a class="btn quiet small" href="(/inspecteur/action/goals\.confier\?[^"]+)">Confier un projet',
+    link = re.search(r'<a class="[^"]*\bbtn\b[^"]*" href="(/inspecteur/action/goals\.confier\?[^"]+)">Confier un projet',
                      listing)
     assert link, "l'action à plusieurs champs mène à sa page"
     page = html.unescape(client.get(link.group(1).replace("&amp;", "&")).text)

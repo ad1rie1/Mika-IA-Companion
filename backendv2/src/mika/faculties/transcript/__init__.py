@@ -41,6 +41,7 @@ from mika.kernel.inspect import (
     Note,
     Pager,
     Param,
+    Prose,
     Ref,
     Row,
     Stat,
@@ -431,7 +432,7 @@ def _page(store: Any, clauses: Sequence[str], args: Sequence[Any], before: int |
                              (*params, size + 1))
     rows = [dict(zip(_COLUMNS, r, strict=True)) for r in found[:size]]
     more = len(found) > size and rows
-    return rows, Pager(older=(("avant", str(rows[-1]["id"])),)) if more else None
+    return rows, Pager(older=(("avant", str(rows[-1]["id"])),)) if more else Pager()
 
 
 def _episodes(ctx: InspectContext, rows: Sequence[Mapping[str, Any]]) -> dict[int, str]:
@@ -449,8 +450,9 @@ def _episodes(ctx: InspectContext, rows: Sequence[Mapping[str, Any]]) -> dict[in
     return out
 
 
-MESSAGE_COLUMNS = (Column("n°", "fit"), Column("quand", "fit"), "qui parle", "avec", "où", "texte", "émotion",
-                   "réponse", "épisode")
+MESSAGE_COLUMNS = (Column("n°", "fit", detail=True), Column("quand", "fit"), "qui parle", "avec",
+                   Column("où", detail=True), "texte", Column("émotion", detail=True),
+                   "réponse", Column("épisode", detail=True))
 
 
 def _messages(frame: Frame, ctx: InspectContext, rows: Sequence[Mapping[str, Any]]) -> tuple[Row, ...]:
@@ -464,11 +466,12 @@ def _messages(frame: Frame, ctx: InspectContext, rows: Sequence[Mapping[str, Any
             Ref("event", str(r["id"]), str(r["id"])), When(r["at"]),
             Badge("elle", "info") if mine else Badge("la personne"), _who(frame, r["person"]),
             f"salon « {r['room']} »" if r["room"] else "en privé",
-            Text(_clip(r["text"], TEXT_CAP), clamp=INSPECT_CHARS),
+            Text((r["text"] or "")[:TEXT_CAP], clamp=INSPECT_CHARS),
             emotion_cell(r["emotion"], r["emotion_intensity"]) if mine and r["emotion"] else "",
             Badge("en attente", "warn") if r["id"] in pending else "",
             Ref("episode", corr, "épisode") if corr else "—",
-        ), tone="muted" if _internal(r) else ""))
+        ), tone="muted" if _internal(r) else "",
+            detail=(Prose(r["text"] or FORGOTTEN, title="Message", reading=True),)))
     return tuple(out)
 
 
@@ -488,7 +491,7 @@ def _no_store() -> list[Block]:
     return [Note("Le magasin n'est pas disponible : le fil ne peut pas être relu.", tone="muted")]
 
 
-HANDLE = Param("handle", "poignée", placeholder="tg_42, user_7…")
+HANDLE = Param("handle", "Personne ou identifiant", placeholder="Alice, tg_42, user_7…")
 QUERY = Param("q", "texte", placeholder="un mot…")
 ROLE = Param("role", "qui parle", kind="select", choices=ROLES)
 
@@ -501,9 +504,14 @@ def _all_messages(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list
         return _no_store()
     handle, q, role = str(ctx.value("handle") or ""), str(ctx.value("q") or ""), str(ctx.value("role") or "")
     clauses, args = [], []
+    matched = None
     if handle:
-        clauses.append("person=?")
-        args.append(handle)
+        known_handles = sorted({str(r[0]) for r in store.query_mind(f"SELECT DISTINCT person FROM {c.THREAD_TABLE}")} |
+                               set(s.summaries))
+        exact = [h for h in known_handles if h == handle]
+        matched = exact or [h for h in known_handles if handle.casefold() in _who(frame, h).text.casefold()]
+        clauses.append("person IN (" + ",".join("?" for _ in matched) + ")" if matched else "0")
+        args.extend(matched)
     if q:
         clauses.append("text LIKE ? ESCAPE '\\'")
         args.append(_like(q))
@@ -512,22 +520,21 @@ def _all_messages(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list
         args.append(role)
     before = ctx.int_param("avant", 0) or None
     rows, pager = _page(store, clauses, args, before)
-    known = handle in s.last_from or handle in s.last_to or handle in s.summaries
+    known = bool(matched) or handle in s.last_from or handle in s.last_to or handle in s.summaries
     if handle and not rows and not known and not before:
         return [Note(f"Aucun message avec « {handle} ».", tone="muted")]
     awaiting = frame.get(rt.AWAITING)
     scope = f" avec « {handle} »" if handle else ""
     found = f" contenant « {q} »" if q else ""
     blocks: list[Block] = [
-        Stats((Stat("dernier message du fil", Ref("event", str(s.head), f"n° {s.head}") if s.head else "—"),
-               Stat("questions sans réponse", len(awaiting), tone="warn" if awaiting else "",
-                    href=Ref.view("transcript", "questions", "questions")),
-               Stat("fils repliés en résumé", len(s.summaries)))),
         Table(MESSAGE_COLUMNS, _messages(frame, ctx, rows), title=f"Messages{scope}{found}", pager=pager,
               filters=("handle", "q", "role"),
               empty="aucun message ne correspond" if handle or q or role else "aucun message"),
     ]
-    folded = _summaries(store, s, frame, [handle] if handle else None)
+    if awaiting and not (handle or q or role):
+        blocks.insert(0, Stats((Stat("Questions sans réponse", len(awaiting), tone="warn",
+                                     href=Ref.view("transcript", "questions", "questions")),)))
+    folded = _summaries(store, s, frame, matched) if not (q or role) else None
     if folded is not None:
         blocks.append(folded)
     return blocks

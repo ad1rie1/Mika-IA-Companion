@@ -155,7 +155,10 @@ def build_backend(name: str, spec: BackendSpec, *, relay: Any = None, relay_base
         from mika.adapters.llm.claude_code import ClaudeCodeBackend  # noqa: PLC0415
         from mika.adapters.mcp.relay import Relay  # noqa: PLC0415
 
-        return ClaudeCodeBackend(spec.model, relay=relay or Relay(), relay_base=relay_base, name=name,
+        # « is None », pas « or » : un relais sans session est vide, donc faux (``__len__``),
+        # et « or » en créait un autre, jamais monté — la CLI recevait 404 sur le sien
+        return ClaudeCodeBackend(spec.model, relay=relay if relay is not None else Relay(),
+                                 relay_base=relay_base, name=name,
                                  auth=spec.auth, api_key=spec.api_key, claude_bin=spec.claude_bin,
                                  config_dir=spec.config_dir, work_dir=work_dir, quota_ceiling=spec.quota_ceiling)
     if spec.kind == "claude":
