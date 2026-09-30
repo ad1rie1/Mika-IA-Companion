@@ -37,7 +37,7 @@ from mika.adapters.web.accounts import Accounts
 from mika.adapters.web.app import WebConfig, create_app
 from mika.adapters.web.hub import Hub
 from mika.adapters.workshop import BwrapWorkshop
-from mika.app import backup, composition, reglages
+from mika.app import backup, composition, datadir, reglages
 from mika.app.console import FACULTY_LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.delivery import Router
 from mika.app.mindport import KernelPort
@@ -224,6 +224,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
 
     @contextlib.asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
+        datadir.hold(data)  # un seul Mika par dossier : un second processus est refusé, pas mêlé au journal
         await kernel.start(configure=lambda k: composition.configure(k, live.persona(), settings.overrides(),
                                                                      live.inputs()))
         await live.settings.open()
@@ -247,6 +248,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
             await gateway.aclose()
             await live.calls.flush()
             await kernel.stop()
+            datadir.release(data)
 
     async def restart_telegram() -> None:
         await live.stop_telegram()
@@ -285,6 +287,7 @@ def serve(*, host: str = "127.0.0.1", port: int = 8001, data: Path = Path("data/
     import uvicorn  # noqa: PLC0415 — seul le serveur réel en a besoin
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s : %(message)s")
+    datadir.hold(data)  # avant d'ouvrir quoi que ce soit : refusé tout de suite, en le disant
     app, live = build(data, reports=reports)
     live.relay_base = relay_base(host, port)
     # un arrêt (SIGTERM) laisse 20 s aux connexions, puis le cycle de vie arrête le noyau

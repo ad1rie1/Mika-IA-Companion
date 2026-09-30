@@ -36,7 +36,7 @@ from mika.adapters.mcp.relay import Relay
 from mika.adapters.store_sqlite import SqliteStore
 from mika.adapters.system import RandomIdGen, RealClock
 from mika.adapters.web.accounts import Accounts, password_problems
-from mika.app import backup
+from mika.app import backup, datadir
 from mika.app.composition import faculties, for_simulation
 from mika.app.server import serve
 from mika.app.settings import SecretBox, Settings
@@ -54,6 +54,7 @@ from mika.sim.selftest import run as sim_selftest
 
 
 def _mind(data: Path, *, snapshot_every: int = 500) -> Mind:
+    datadir.hold(data)  # le journal ne s'écrit qu'à un seul à la fois (serveur arrêté)
     store = SqliteStore(data / "mind.db", data / "views.db", threaded=False)
     return Mind(Registry([RUNTIME, *faculties()]), store, RealClock(), RandomIdGen(), snapshot_every=snapshot_every)
 
@@ -285,6 +286,14 @@ async def operator_event(data: Path, draft, emitter: str) -> dict[str, object]: 
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        return _run(argv)
+    except datadir.DataDirBusy as exc:  # un autre Mika tient le dossier : refusé, en le disant
+        print(f"Refusé : {exc}", file=sys.stderr)
+        return 3
+
+
+def _run(argv: list[str] | None) -> int:
     p = argparse.ArgumentParser(prog="mika")
     p.add_argument("--data", type=Path, default=Path("data/v2"), help="dossier des bases (mind.db, views.db)")
     sub = p.add_subparsers(dest="cmd", required=True)

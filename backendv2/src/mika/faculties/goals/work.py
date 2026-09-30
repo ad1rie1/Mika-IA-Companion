@@ -20,7 +20,7 @@ from mika.contracts import goals as c
 from mika.contracts import identity as identity_c
 from mika.contracts import presence as presence_c
 from mika.contracts import social as social_c
-from mika.faculties.goals.faculty import GOALS, Goal, GoalsState, desire, live, params, status
+from mika.faculties.goals.faculty import GOALS, Goal, GoalsState, budget, desire, live, params, rank, status
 from mika.kernel import schedule
 from mika.kernel.arbitration import Candidate, Modulation, RowView
 from mika.kernel.clock import HOUR
@@ -42,12 +42,15 @@ def _still(goal: int, wanted: tuple[str, ...]) -> Guard:
 
 
 def next_step_at(g: Goal, s: GoalsState, frame: Frame) -> int | None:
-    """Quand ce but peut avancer d'un pas (``None`` : pas maintenant)."""
+    """Quand ce but peut avancer d'un pas (``None`` : pas maintenant). « Avancer maintenant »
+    (``nudged_at``, tant qu'aucun pas n'est parti depuis) passe avant l'agenda et l'espacement."""
     p = params(frame.env.params_of("goals", frame.root))
     if g.kind not in (c.EXPLORATION, c.PROJECT) or status(g, frame.now) != c.ACTIVE:
         return None if status(g, frame.now) != c.WAITING else g.waiting_until
-    if g.steps >= g.max_steps or any(r.goal == g.id and r.purpose == "step" for r in s.running.values()):
+    if g.steps >= budget(g, p) or any(r.goal == g.id and r.purpose == "step" for r in s.running.values()):
         return None
+    if g.nudged_at > g.last_step_at:
+        return g.nudged_at
     spacing = p.project_spacing_us if g.kind == c.PROJECT else p.step_spacing_us
     at = g.last_step_at + spacing if g.last_step_at else g.opened_at
     if g.kind == c.PROJECT and g.schedule:
@@ -73,13 +76,44 @@ def _work(s: GoalsState, frame: Frame) -> list[Candidate]:
         if g.kind == c.PROJECT:
             evidence = p.project_evidence
         else:
-            evidence = min(12.0, p.work_base + p.work_per_desire * desire(g, frame.now, p))
+            evidence = p.work_base + p.work_per_desire * desire(g, frame.now, p)
+        evidence = max(0.0, min(12.0, evidence + p.priority_step * rank(g)))
         out.append(Candidate(
             Kind.STEP, goal_target(g.id), c.WORK, round(evidence, 4), resources=frozenset({workshop(str(g.id))}),
             # le pas lui-même peut conclure (abouti, bloqué, en attente) : seule une fin venue d'ailleurs le supplante
             guards=(_still(g.id, STEP_MAY_SEE),),
             args=FrozenDict({"bundles": ",".join(g.bundles), "subject": goal_target(g.id)})))
     return out
+
+
+def why_not_now(g: Goal, s: GoalsState, frame: Frame) -> str:
+    """Pourquoi ce but ne fait pas de pas maintenant, en mots (vide : il peut en faire un)."""
+    p = params(frame.env.params_of("goals", frame.root))
+    now = frame.now
+    st = status(g, now)
+    if g.kind == c.REMINDER:
+        return "un rappel ne fait pas de pas : il se dit à l'heure"
+    if st in c.CLOSED_STATUSES:
+        return "il est clos"
+    if st == c.PAUSED:
+        return "il est en pause : reprends-le"
+    if st == c.WAITING:
+        whom = f"la réponse de {_name(frame, g.wait_for) or g.wait_for}" if g.wait_for else "un délai"
+        return f"elle attend {whom}"
+    if any(r.goal == g.id and r.purpose == "step" for r in s.running.values()):
+        return "un pas est en cours"
+    if g.steps >= budget(g, p):
+        return f"au bout de ses pas ({g.steps} sur {budget(g, p)})"
+    if frame.get(body_c.SLEEP) is not body_c.SleepPhase.AWAKE:
+        return "elle dort : aucun pas la nuit"
+    at = next_step_at(g, s, frame)
+    if at is None:
+        return "son agenda ne lui donne plus de créneau"
+    if sum(1 for t in s.steps_at if now - t < HOUR) >= p.steps_per_hour:
+        return f"plafond atteint : {p.steps_per_hour} pas par heure, tous buts confondus"
+    if at > now:
+        return "pas encore : son agenda ou l'espacement des pas le fixe plus tard"
+    return ""
 
 
 @GOALS.modulate(kinds=[Kind.STEP])

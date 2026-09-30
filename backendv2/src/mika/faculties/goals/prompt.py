@@ -41,7 +41,10 @@ def _subject(frame: Frame) -> int | None:
 
 
 def _refs(g: Goal) -> list[str]:
-    return [r for r in (g.title_ref, g.details_ref, g.summary_ref, g.result_ref, *g.notes, *g.instructions) if r]
+    tasks = [r for t in g.tasks for r in (t.text_ref, t.note_ref)]
+    deposits = [note for _, _, note in g.deposits]
+    return [r for r in (g.title_ref, g.details_ref, g.summary_ref, g.result_ref, *g.notes, *g.instructions, *tasks,
+                        *deposits) if r]
 
 
 def _recent(s: GoalsState, now: int) -> list[Goal]:
@@ -88,9 +91,37 @@ def _progress(g: Goal) -> str:
     return f"pas {g.steps} sur {g.max_steps}"
 
 
-STEP_RULES = ("Conclus ce pas par report_step : « continue » (tu reprendras), « done » (seulement si tu as réellement "
-              "fait quelque chose — un outil qui a produit un résultat), « blocked » (tu n'y arrives pas), ou "
-              "« wait » (tu attends quelque chose).")
+TASK_MARKS = {c.TODO: "à faire", c.DOING: "en cours", c.TASK_DONE: "faite", c.TASK_BLOCKED: "bloquée"}
+#: les tâches montrées pendant un pas (les faites d'abord repliées : seules les dernières se disent)
+PLAN_SHOWN = 20
+
+
+def _plan(g: Goal, texts: Mapping[str, str]) -> str:
+    """Son plan de travail : ce qui reste d'abord (les tâches demandées par l'opérateur avant les siennes),
+    puis les dernières faites ; les outils goal_task_add / goal_task_update le tiennent à jour."""
+    if not g.tasks:
+        return ""
+    open_ = [t for t in g.tasks if t.status != c.TASK_DONE]
+    open_.sort(key=lambda t: (t.author != "operator", t.status != c.DOING, t.id))
+    done = [t for t in g.tasks if t.status == c.TASK_DONE][-5:]
+    rows = []
+    for t in [*open_, *done][:PLAN_SHOWN]:
+        note = texts.get(t.note_ref, "") if t.note_ref else ""
+        asked = " (demandée)" if t.author == "operator" else ""
+        rows.append(f"- {t.id}. [{TASK_MARKS.get(t.status, t.status)}]{asked} {texts.get(t.text_ref, '(oubliée)')}"
+                    + (f" — {note}" if note else ""))
+    return ("Ton plan de travail (coche avec goal_task_update, ajoute avec goal_task_add ; les tâches demandées "
+            "passent d'abord) :\n" + "\n".join(rows))
+
+
+def _size(n: int) -> str:
+    return f"{n} o" if n < 1024 else f"{n / 1024:.0f} Ko" if n < 1024 * 1024 else f"{n / 1024 / 1024:.1f} Mo"
+
+
+STEP_RULES = ("Conclus ce pas en appelant l'outil report_step : « continue » (tu reprendras), « done » (seulement si "
+              "tu as réellement fait quelque chose — un outil qui a produit un résultat), « blocked » (tu n'y "
+              "arrives pas), ou « wait » (tu attends quelque chose). Tes outils s'appellent, ils ne s'écrivent "
+              "pas : écrire « report_step » dans ta réponse ne fait rien.")
 
 
 @GOALS.section("step", zone=Zone.VOLATILE, episodes=[Kind.STEP], trim_rank=90, title="CE À QUOI TU TRAVAILLES")
@@ -117,6 +148,15 @@ def _step(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody
         lines.append(f"Où tu en es{f' ({progress})' if progress else ''} : {texts[g.summary_ref]}")
     elif progress:
         lines.append(f"Où tu en es : {progress}.")
+    if g.priority in (c.HIGH, c.URGENT):
+        lines.append("Priorité : " + ("urgente — passe avant le reste." if g.priority == c.URGENT else "haute."))
+    plan = _plan(g, texts)
+    if plan:
+        lines.append(plan)
+    if g.deposits:
+        lines.append("Déposé dans ton atelier par l'opérateur :\n" + "\n".join(
+            f"- {name} ({_size(size)})" + (f" — {texts[note]}" if note and texts.get(note) else "")
+            for name, size, note in g.deposits[-3:]))
     notes = [texts[r] for r in g.notes if texts.get(r)]
     if notes:
         lines.append("Ton carnet :\n" + "\n".join(f"- {n}" for n in notes[-3:]))
@@ -215,7 +255,8 @@ def _live_section(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> Sec
 
 def step_brief(frame: Frame, req: Any) -> str:
     return ("(Personne ne te parle : c'est un moment de travail, pour toi seule — personne ne lit ce que tu écris "
-            "ici.) Avance d'un pas sur ce but avec tes outils, puis conclus par report_step.")
+            "ici ; ni didascalies, ni adresse à quelqu'un.) Avance d'un pas sur ce but en appelant tes outils, puis "
+            "conclus en appelant report_step.")
 
 
 # ── Outil : relire ce qu'elle a en train (même filtre que la section) ──

@@ -46,12 +46,15 @@ CLEARED = "_effacer"
 
 KINDS = frozenset({
     "text", "textarea", "int", "float", "slider", "bool", "select", "lines", "duration", "secret",
-    "subject", "yaml", "group", "records", "mapping", "hidden", "datetime",
+    "subject", "yaml", "group", "records", "mapping", "hidden", "datetime", "file",
 })
 #: ``datetime`` : une date et une heure (un calendrier dans le navigateur) ; ``suggest`` : un texte libre
 #: accompagné de suggestions (``choices``), jamais limité à elles
 WIDGETS = frozenset({"", "slider", "textarea", "lines", "yaml", "password", "select", "duration", "subject",
-                     "hidden", "datetime", "suggest"})
+                     "hidden", "datetime", "suggest", "file"})
+#: ``file`` : un fichier envoyé (champ ``Upload | None``) ; la console le lit borné à ``UPLOAD_MAX`` octets
+UPLOAD_MAX = 5 * 1024 * 1024
+_UNSAFE_NAME = re.compile(r"[\\/\x00-\x1f\x7f]")
 
 # mêmes unités que kernel.clock (le noyau n'importe rien de mika)
 _US, _MS, _SECOND = 1, 1_000, 1_000_000
@@ -105,6 +108,23 @@ class Knob:
     def __post_init__(self) -> None:
         if self.widget not in WIDGETS:
             raise ValueError(f"widget inconnu : « {self.widget} » (attendu : {', '.join(sorted(WIDGETS - {''}))})")
+
+
+class Upload(BaseModel):
+    """Un fichier envoyé par un formulaire : son nom (assaini, sans dossier) et ses octets.
+    ``too_big`` : il dépassait ``UPLOAD_MAX`` (ses octets ne sont pas gardés)."""
+
+    model_config = {"frozen": True}
+
+    name: str
+    data: bytes = b""
+    too_big: bool = False
+
+
+def safe_name(name: str) -> str:
+    """Un nom de fichier sans dossier ni caractère de contrôle, borné (vide s'il ne reste rien)."""
+    base = _UNSAFE_NAME.sub("_", name.replace("\\", "/").rsplit("/", 1)[-1]).strip().strip(".")
+    return base[:120]
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,6 +209,8 @@ def _describe_field(name: str, info: FieldInfo, scope: _Scope) -> list[FormField
         "nullable": nullable,
         "only_any": tuple(_rebase_only(alt, scope.prefix) for alt in knob.only_any),
     }
+    if knob.widget == "file":  # un modèle (``Upload``), mais un seul contrôle : pas un groupe
+        return [_make(kind="file", **common)]
     if _groups(annotation, knob, nullable):
         marker = _make(kind="group", **{**common, "default": None, "only_any": ()})
         child = _Scope(prefix=path + ".", group=label, advanced=marker.advanced, readonly=marker.readonly,
@@ -518,7 +540,7 @@ def _plain(value: Any) -> Any:
 def as_text(field: FormField, value: Any) -> str:
     """La valeur telle qu'elle s'affiche dans son champ (l'inverse de ``parse``).
     Un secret ne s'affiche jamais ; ``mapping`` se rend clé par clé avec ``field.item[0]``."""
-    if field.kind == "secret" or value is None or field.kind in ("group", "records", "mapping"):
+    if field.kind in ("secret", "file") or value is None or field.kind in ("group", "records", "mapping"):
         return ""
     if isinstance(value, enum.Enum):
         value = value.value
@@ -578,6 +600,8 @@ def parse(fields: Sequence[FormField], form: Mapping[str, Any], *, current: Mapp
 
 
 def _read(f: FormField, form: Mapping[str, Any], cleared: set[str], load: Callable[[str], Any]) -> Any:
+    if f.kind == "file":
+        return _read_file(f, form)
     if f.kind == "bool":
         # une case décochée n'est pas envoyée : affichée et absente, elle vaut False
         return bool(_values(form, f.path))
@@ -587,6 +611,23 @@ def _read(f: FormField, form: Mapping[str, Any], cleared: set[str], load: Callab
         raw = _last(form, f.path)
         return _KEEP if not raw.strip() else raw
     return _read_text(f, _last(form, f.path), load)
+
+
+def _read_file(f: FormField, form: Mapping[str, Any]) -> Upload | None:
+    """Le dernier fichier envoyé sous ce chemin (la console l'a lu en ``Upload``) ; lève
+    ``ValueError`` s'il manque alors qu'il est requis, s'il est trop gros ou sans nom."""
+    raw = form.get(f.path)
+    got = raw[-1] if isinstance(raw, list | tuple) and raw else raw
+    if not isinstance(got, Upload) or (not got.name and not got.data):
+        if f.required and not f.nullable:
+            raise ValueError("choisis un fichier")
+        return None
+    if got.too_big:
+        raise ValueError(f"fichier trop gros : {UPLOAD_MAX // (1024 * 1024)} Mo au plus")
+    name = safe_name(got.name)
+    if not name:
+        raise ValueError("nom de fichier illisible")
+    return Upload(name=name, data=got.data)
 
 
 def _read_text(f: FormField, raw: str, load: Callable[[str], Any]) -> Any:

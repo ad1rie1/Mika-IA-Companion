@@ -96,6 +96,10 @@ class GoalsParams(BaseModel):
         label="Preuve d'un pas de projet", group="Preuves", lo=0.0, hi=12.0, step=0.5,
         help="Constante quand le pas d'un projet confié est dû ; au-dessus du seuil des pas (8), il part "
              "vite.")] = 10.0
+    priority_step: Annotated[float, Knob(
+        label="Poids d'un cran de priorité", group="Preuves", lo=0.0, hi=4.0, step=0.25,
+        help="Ce qu'un cran de priorité ajoute à la preuve d'un pas (basse : −1 cran, haute : +1, urgente : "
+             "+2), plafonnée à 12 : entre deux buts dus, le plus prioritaire passe devant.")] = 1.0
     # rappels
     remind_evidence: Annotated[float, Knob(
         label="Preuve d'un rappel", group="Rappels", lo=0.0, hi=17.0, step=0.5,
@@ -180,6 +184,27 @@ def derive(t: Temperament, overrides: Any = None) -> GoalsParams:
     return GoalsParams(**values)
 
 
+#: les tâches d'un plan de travail, au plus
+TASKS_KEPT = 40
+DEPOSITS_KEPT = 5
+#: les crans d'une priorité (``priority_step`` chacun)
+PRIORITY_RANK = {c.LOW: -1, c.NORMAL: 0, c.HIGH: 1, c.URGENT: 2}
+
+
+@dataclass(frozen=True, slots=True)
+class Task:
+    """Une tâche du plan de travail d'un but."""
+
+    id: int
+    text_ref: str
+    status: str = c.TODO
+    #: qui l'a posée : ``operator`` (demandée) ou ``self`` (elle)
+    author: str = "self"
+    #: son résultat, ou pourquoi elle bloque
+    note_ref: str = ""
+    at: int = 0
+
+
 @dataclass(frozen=True, slots=True)
 class Goal:
     id: int
@@ -219,6 +244,14 @@ class Goal:
     paused_at: int = 0
     #: références des consignes d'un opérateur, les plus récentes en dernier
     instructions: tuple[str, ...] = ()
+    priority: str = c.NORMAL
+    #: son plan de travail, et le numéro de la dernière tâche posée
+    tasks: tuple[Task, ...] = ()
+    task_seq: int = 0
+    #: « avancer maintenant » demandé à cet instant (sans effet une fois un pas parti)
+    nudged_at: int = 0
+    #: les fichiers déposés dans son atelier par un opérateur : (nom, octets, référence de la note)
+    deposits: tuple[tuple[str, int, str], ...] = ()
     # les rappels
     delivered: bool = False
     attempts: int = 0
@@ -314,14 +347,130 @@ class Amended(Payload):
     about: tuple[str, ...] = ()
 
 
+class Reframed(Payload):
+    """Un opérateur change le cadre d'un but (un projet confié ; le texte et l'heure d'un rappel ;
+    la priorité de n'importe lequel). Seuls les champs donnés changent."""
+
+    goal: int
+    title: Content | None = None
+    details: Content | None = None
+    #: vider le cadre écrit (``details`` vide)
+    clear_details: bool = False
+    #: changer pour qui (``owner``/``about``/``address`` ci-dessous deviennent ceux du but)
+    set_owner: bool = False
+    address: str | None = None
+    due: int | None = None
+    clear_due: bool = False
+    urgent: bool | None = None
+    schedule: str | None = None
+    max_steps: int | None = None
+    approval: bool | None = None
+    priority: str | None = None
+    by: str = ""
+    #: ceux du but après le changement : le cadre peut les citer (l'oubli l'atteint)
+    owner: str | None = None
+    about: tuple[str, ...] = ()
+
+
+class Reopened(Payload):
+    """Un opérateur rouvre un but clos (bloqué, abandonné, en échec, annulé) avec quelques pas de plus."""
+
+    goal: int
+    extra: int = 4
+    by: str = ""
+    owner: str | None = None
+    about: tuple[str, ...] = ()
+
+
+class Nudged(Payload):
+    """« Avancer maintenant » : le prochain pas n'attend ni l'agenda ni l'espacement."""
+
+    goal: int
+    by: str = ""
+    owner: str | None = None
+    about: tuple[str, ...] = ()
+
+
+class TaskAdded(Payload):
+    goal: int
+    task: int
+    text: Content
+    #: ``operator`` (demandée depuis la console) ou ``self`` (elle, pendant un pas)
+    author: str = "self"
+    by: str = ""
+    owner: str | None = None
+    about: tuple[str, ...] = ()
+
+
+class TaskChanged(Payload):
+    goal: int
+    task: int
+    status: str | None = None
+    text: Content | None = None
+    #: son résultat, ou pourquoi elle bloque
+    note: Content | None = None
+    author: str = "self"
+    by: str = ""
+    owner: str | None = None
+    about: tuple[str, ...] = ()
+
+
+class TaskRemoved(Payload):
+    goal: int
+    task: int
+    author: str = "operator"
+    by: str = ""
+    owner: str | None = None
+    about: tuple[str, ...] = ()
+
+
+class Deposited(Payload):
+    """Un fichier déposé dans l'atelier par un opérateur (elle le lit au pas suivant)."""
+
+    goal: int
+    name: str
+    size: int = 0
+    note: Content | None = None
+    by: str = ""
+    owner: str | None = None
+    about: tuple[str, ...] = ()
+
+
 GOAL_PAUSED = GOALS.event("paused", Paused, subjects=("owner", "about"))
 GOAL_RESUMED = GOALS.event("resumed", Resumed, subjects=("owner", "about"))
 #: les mots de l'opérateur : ses consignes s'oublient avec lui, et avec les personnes du but
 GOAL_AMENDED = GOALS.event("amended", Amended, content=("instruction",), subjects=("owner", "about", "by"))
+GOAL_REFRAMED = GOALS.event("reframed", Reframed, content=("title", "details"), subjects=("owner", "about", "by"))
+GOAL_REOPENED = GOALS.event("reopened", Reopened, subjects=("owner", "about"))
+GOAL_NUDGED = GOALS.event("nudged", Nudged, subjects=("owner", "about"))
+TASK_ADDED = GOALS.event("task_added", TaskAdded, content=("text",), subjects=("owner", "about", "by"))
+TASK_CHANGED = GOALS.event("task_changed", TaskChanged, content=("text", "note"), subjects=("owner", "about", "by"))
+TASK_REMOVED = GOALS.event("task_removed", TaskRemoved, subjects=("owner", "about"))
+GOAL_DEPOSITED = GOALS.event("deposited", Deposited, content=("note",), subjects=("owner", "about", "by"))
+#: ce qu'un opérateur (ou elle, pour le plan) fait d'un but — la chronologie du carnet
+OPERATIONS = (GOAL_PAUSED, GOAL_RESUMED, GOAL_REFRAMED, GOAL_REOPENED, GOAL_NUDGED, TASK_ADDED, TASK_CHANGED,
+              TASK_REMOVED, GOAL_DEPOSITED)
 
 
 def params(p: GoalsParams | None) -> GoalsParams:
     return p if p is not None else GoalsParams()
+
+
+def budget(g: Goal, p: GoalsParams) -> int:
+    """Combien de pas au plus : le sien, sinon la valeur par défaut de sa sorte (un rappel n'en fait pas).
+    Une seule lecture de ``max_steps == 0`` partout (le travail, la clôture, la fiche, le prompt)."""
+    if g.max_steps:
+        return g.max_steps
+    return {c.PROJECT: p.project_steps, c.EXPLORATION: p.exploration_steps}.get(g.kind, 0)
+
+
+def rank(g: Goal) -> int:
+    return PRIORITY_RANK.get(g.priority, 0)
+
+
+def task_at(g: Goal, task: int | str | None) -> Task | None:
+    raw = str(task if task is not None else "").strip().lstrip("#")
+    return next((t for t in g.tasks if str(t.id) == raw), None) if raw.isdigit() else None
 
 
 def subject_key(source: str, about: tuple[str, ...]) -> str:
@@ -401,7 +550,7 @@ def _opened(s: GoalsState, e, cx) -> GoalsState:
         details_ref=d.details.ref or "" if d.details is not None else "", owner=d.owner, address=d.address,
         about=tuple(d.about), sensitivity=d.sensitivity, source=d.source, bundles=tuple(d.bundles),
         max_steps=d.max_steps, due=d.due, urgent=d.urgent, schedule=d.schedule, approval=d.approval,
-        desire=d.desire, desire_at=e.at,
+        desire=d.desire, desire_at=e.at, priority=d.priority if d.priority in c.PRIORITIES else c.NORMAL,
     )
     s = _set(s, g)
     if d.source.startswith("interest:"):
@@ -540,6 +689,115 @@ def _amended(s: GoalsState, e, cx) -> GoalsState:
     return _set(s, replace(g, instructions=(*g.instructions, e.data.instruction.ref)[-INSTRUCTIONS_KEPT:]))
 
 
+@GOALS.reducer(GOAL_REFRAMED)
+def _reframed(s: GoalsState, e, cx) -> GoalsState:
+    d = e.data
+    g = s.goals.get(d.goal)
+    if g is None or g.status in c.CLOSED_STATUSES:
+        return s
+    changes: dict[str, Any] = {}
+    if d.title is not None and d.title.ref:
+        changes["title_ref"] = d.title.ref
+    if d.clear_details:
+        changes["details_ref"] = ""
+    elif d.details is not None and d.details.ref:
+        changes["details_ref"] = d.details.ref
+    if d.set_owner:
+        changes.update(owner=d.owner, about=tuple(d.about), address=d.address)
+    if d.clear_due:
+        changes["due"] = None
+    elif d.due is not None:
+        changes["due"] = d.due
+    if (d.due is not None or d.clear_due) and g.kind == c.REMINDER:
+        changes.update(attempts=0, retry_at=0)  # une nouvelle heure : ses tentatives repartent de zéro
+    if d.urgent is not None:
+        changes["urgent"] = d.urgent
+    if d.schedule is not None:
+        changes["schedule"] = d.schedule
+    if d.max_steps is not None:
+        changes["max_steps"] = d.max_steps
+    if d.approval is not None:
+        changes["approval"] = d.approval
+    if d.priority in c.PRIORITIES:
+        changes["priority"] = d.priority
+    return _set(s, replace(g, **changes)) if changes else s
+
+
+@GOALS.reducer(GOAL_REOPENED)
+def _reopened(s: GoalsState, e, cx) -> GoalsState:
+    g = s.goals.get(e.data.goal)
+    if g is None or g.status not in c.CLOSED_STATUSES or g.status == c.ACHIEVED:
+        return s
+    p = params(cx.params)
+    extra = max(1, e.data.extra)
+    g = replace(g, status=c.ACTIVE, closed_at=0, silent=0, failures=0, unproven=0, waiting_until=0,
+                waiting_since=0, wait_for=None, max_steps=max(budget(g, p), g.steps + extra), notable=0.0,
+                result_ref="", shared=False, share_attempts=0, paused_at=0,
+                # une exploration rouverte repart avec l'envie qu'on lui redonne (sinon elle s'userait aussitôt)
+                desire=max(g.desire, 0.6) if g.kind == c.EXPLORATION else g.desire, desire_at=e.at)
+    s = _set(s, g)
+    key = subject_key(g.source, g.about) if g.source else ""
+    if key and key in s.closed_sources:
+        s = replace(s, closed_sources=s.closed_sources.delete(key))
+    return s
+
+
+@GOALS.reducer(GOAL_NUDGED)
+def _nudged(s: GoalsState, e, cx) -> GoalsState:
+    g = s.goals.get(e.data.goal)
+    if g is None or g.status in c.CLOSED_STATUSES:
+        return s
+    if g.status == c.WAITING:  # « maintenant » l'emporte sur l'attente
+        g = replace(g, status=c.ACTIVE, waiting_until=0, waiting_since=0, wait_for=None)
+    return _set(s, replace(g, nudged_at=e.at))
+
+
+@GOALS.reducer(TASK_ADDED)
+def _task_added(s: GoalsState, e, cx) -> GoalsState:
+    d = e.data
+    g = s.goals.get(d.goal)
+    if g is None or not d.text.ref or len(g.tasks) >= TASKS_KEPT or task_at(g, d.task) is not None:
+        return s
+    task = Task(id=d.task, text_ref=d.text.ref, author=d.author, at=e.at)
+    return _set(s, replace(g, tasks=(*g.tasks, task), task_seq=max(g.task_seq, d.task)))
+
+
+@GOALS.reducer(TASK_CHANGED)
+def _task_changed(s: GoalsState, e, cx) -> GoalsState:
+    d = e.data
+    g = s.goals.get(d.goal)
+    t = task_at(g, d.task) if g is not None else None
+    if g is None or t is None:
+        return s
+    changes: dict[str, Any] = {"at": e.at}
+    if d.status in c.TASK_STATUSES:
+        changes["status"] = d.status
+    if d.text is not None and d.text.ref:
+        changes["text_ref"] = d.text.ref
+    if d.note is not None and d.note.ref:
+        changes["note_ref"] = d.note.ref
+    new = replace(t, **changes)
+    return _set(s, replace(g, tasks=tuple(new if x.id == t.id else x for x in g.tasks)))
+
+
+@GOALS.reducer(TASK_REMOVED)
+def _task_removed(s: GoalsState, e, cx) -> GoalsState:
+    g = s.goals.get(e.data.goal)
+    if g is None or task_at(g, e.data.task) is None:
+        return s
+    return _set(s, replace(g, tasks=tuple(t for t in g.tasks if t.id != e.data.task)))
+
+
+@GOALS.reducer(GOAL_DEPOSITED)
+def _deposited(s: GoalsState, e, cx) -> GoalsState:
+    d = e.data
+    g = s.goals.get(d.goal)
+    if g is None:
+        return s
+    entry = (d.name, d.size, d.note.ref or "" if d.note is not None else "")
+    return _set(s, replace(g, deposits=(*g.deposits, entry)[-DEPOSITS_KEPT:]))
+
+
 @GOALS.reducer(c.GOAL_CLOSED)
 def _closed(s: GoalsState, e, cx) -> GoalsState:
     d = e.data
@@ -596,7 +854,9 @@ def view(g: Goal, now: int) -> c.GoalView:
         id=g.id, kind=g.kind, authority=g.authority, status=status(g, now), title_ref=g.title_ref, owner=g.owner,
         about=g.about, sensitivity=g.sensitivity, opened_at=g.opened_at, steps=g.steps, max_steps=g.max_steps,
         due=g.due, waiting_until=g.waiting_until if status(g, now) == c.WAITING else 0,
-        last_summary_ref=g.summary_ref, schedule=g.schedule,
+        last_summary_ref=g.summary_ref, schedule=g.schedule, priority=g.priority, tasks_total=len(g.tasks),
+        tasks_done=sum(1 for t in g.tasks if t.status == c.TASK_DONE),
+        tasks_blocked=sum(1 for t in g.tasks if t.status == c.TASK_BLOCKED),
     )
 
 

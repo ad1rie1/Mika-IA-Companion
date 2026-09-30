@@ -16,17 +16,24 @@ from mika.kernel.faculty import ActionSpec
 #: les sortes de champ que le gabarit sait rendre ; les autres deviennent du texte
 TEMPLATE_KINDS = {"bool": "bool", "select": "select", "textarea": "textarea", "lines": "lines", "yaml": "yaml",
                   "secret": "secret", "slider": "slider", "int": "int", "float": "float", "duration": "text",
-                  "subject": "text", "text": "text", "datetime": "datetime"}
+                  "subject": "text", "text": "text", "datetime": "datetime", "file": "file"}
+#: ce qu'une case à cocher envoie quand elle l'est (un formulaire remontré relit ces textes)
+_CHECKED = frozenset({"on", "true", "1", "oui"})
+
+
+def checked(value: Any) -> bool:
+    """Une case cochée : ``True``, ou le texte qu'une case cochée poste (« on »)."""
+    return value is True or (isinstance(value, str) and value.strip().lower() in _CHECKED)
 
 
 def field_view(f: forms.FormField, value: Any, *, error: str = "", prefix: str = "f") -> dict[str, Any] | None:
     if f.kind in ("group", "records", "mapping", "hidden"):
         return None
     kind = TEMPLATE_KINDS.get(f.kind, "text")
-    text = forms.as_text(f, value) if value is not None else ""
+    text = forms.as_text(f, value) if value is not None and kind not in ("bool", "file") else ""
     return {
         "path": f.path, "id": f"{prefix}-{f.path.replace('.', '-')}", "label": f.label,
-        "help": f.help, "kind": kind, "value": (value is True) if kind == "bool" else text,
+        "help": f.help, "kind": kind, "value": checked(value) if kind == "bool" else "" if kind == "file" else text,
         "error": error, "unit": f.unit if kind != "slider" else "", "readonly": f.readonly,
         "required": f.required and kind != "bool", "choices": list(f.choices), "lo": f.lo, "hi": f.hi,
         "step": f.step, "has_value": bool(value) if kind == "secret" else False,
@@ -78,7 +85,8 @@ def action_view(spec: ActionSpec, *, csrf: str, back: str, subject: str = "", in
     return {"url": f"/inspecteur/action/{spec.key}", "csrf": csrf, "nonce": _secrets.token_urlsafe(12),
             "back": back, "title": button, "description": spec.description, "fields": views,
             "retype": spec.retype, "subject": subject, "confirm": spec.confirm, "danger": spec.danger,
-            "button": button, "errors": errors, "id": prefix, "key": spec.key, "fixed": fixed}
+            "button": button, "errors": errors, "id": prefix, "key": spec.key, "fixed": fixed,
+            "multipart": any(f.kind == "file" for f in fields)}
 
 
 def _as_choice(f: forms.FormField, choices: Sequence[tuple[str, str]], value: Any) -> forms.FormField:

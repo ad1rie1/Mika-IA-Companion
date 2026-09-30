@@ -6,7 +6,8 @@
 - **Buts** : les vivants (actifs, en attente, en pause) et les clos.
 - **Sur la fiche d'une personne** : les buts qui la concernent.
 
-Lecture seule. Les compteurs et l'envie viennent de la tranche (calculés comme
+Les vues se lisent ; les formulaires qu'elles posent (``ActionSlot`` : modifier, décider, le plan
+de travail, déposer) passent par les actions d'opérateur (``actions.py``). Les compteurs et l'envie viennent de la tranche (calculés comme
 la faculté les calcule) ; l'historique (pas, notes, consignes, effets,
 épisodes, clôtures), du journal — la tranche n'en garde que l'essentiel. Un
 contenu oublié s'affiche « (oublié) ».
@@ -22,33 +23,51 @@ from typing import Any
 from mika.contracts import goals as c
 from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
-from mika.faculties.goals.actions import SCHEDULES
+from mika.faculties.goals.actions import (
+    PRIORITY_CHOICES,
+    SCHEDULES,
+    TASK_STATUS_FR,
+    _confided,
+    _depositable,
+    _plannable,
+    _prioritizable,
+    _reopenable,
+    _reschedulable,
+    pending_of,
+)
 from mika.faculties.goals.faculty import (
     GOAL_AMENDED,
     GOALS,
     NOTED,
+    OPERATIONS,
     Goal,
     GoalsState,
+    budget,
     desire,
     goal_at,
     live,
     params,
+    rank,
     ready_to_undertake,
     status,
 )
-from mika.faculties.goals.work import next_step_at
+from mika.faculties.goals.work import next_step_at, why_not_now
 from mika.kernel.builtin import SELECTED
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.events import Content, Event
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
+    ActionSlot,
     Badge,
     Block,
     Code,
     Column,
+    Disclosure,
+    Download,
     Entry,
     Fields,
     Found,
+    Grid,
     Head,
     InspectContext,
     Meter,
@@ -58,14 +77,17 @@ from mika.kernel.inspect import (
     Prose,
     Ref,
     Row,
+    Section,
     Stat,
     Stats,
     Table,
     Text,
     Timeline,
+    Toolbar,
     When,
     paginate,
 )
+from mika.ports.workshop import OutsideWorkshop
 from mika.vocab.episodes import Kind, goal_of, goal_target
 
 GOALS_PAGE = 50
@@ -220,15 +242,22 @@ def _head(s: GoalsState, frame: Frame, ctx: InspectContext, key: str) -> Head | 
         return None
     texts = _texts(ctx, (g.title_ref,))
     kind, authority = KIND_FR.get(g.kind, g.kind), AUTHORITY_FR.get(g.authority, g.authority)
+    p = params(frame.env.params_of("goals", frame.root))
     # l'en-tête se lit en texte : des instants dits en heure locale
-    facts: list[tuple[str, Any]] = [("envie", _desire(g, frame.now, frame)), ("pas", _steps(g)),
-                                    ("échéance", ctx.when(g.due) if g.due is not None else "—"),
-                                    ("pour qui", _person(frame, g.owner))]
+    facts: list[tuple[str, Any]] = []
+    if g.kind != c.REMINDER:
+        facts += [("avancement", _plan_progress(g, p)), ("prochain pas", _next_words(g, s, frame, ctx))]
+    if g.kind == c.EXPLORATION:
+        facts.append(("envie", _desire(g, frame.now, frame)))
+    facts += [("échéance", ctx.when(g.due) if g.due is not None else "—"), ("pour qui", _person(frame, g.owner))]
     if g.paused_at and g.status not in c.CLOSED_STATUSES:
         facts.append(("en pause depuis", ctx.when(g.paused_at)))
+    badges = [Badge(kind, "info"), Badge(authority), _status(g, frame.now)]
+    if g.priority != c.NORMAL:
+        badges.append(_priority(g))
     return Head(str(g.id), _text(texts, g.title_ref, "(sans titre)"),
-                subtitle=f"But n°{g.id} — {kind}, {authority}",
-                badges=(Badge(kind, "info"), Badge(authority), _status(g, frame.now)), facts=tuple(facts))
+                subtitle=f"But n°{g.id} — {kind}, {authority}", badges=tuple(badges), facts=tuple(facts),
+                default_tab="resume")
 
 
 @GOALS.search("goal")
@@ -294,11 +323,6 @@ def agenda(rule: str) -> str:
     return next((label for value, label in SCHEDULES if value == rule), rule)
 
 
-def _progress(g: Goal, p: Any) -> Meter:
-    most = g.max_steps or (p.project_steps if g.kind == c.PROJECT else p.exploration_steps)
-    return Meter(g.steps / most if most else 0.0, f"{g.steps} / {most}")
-
-
 def _freedom(g: Goal) -> Badge:
     return Badge("sort avec ton accord", "info") if g.approval else Badge("sort librement", "warn")
 
@@ -308,8 +332,9 @@ def _pending_goals(frame: Frame) -> set[int]:
             if n is not None}
 
 
-PROJECT_COLUMNS = (Column("projet"), Column("pour qui"), Column("statut", "fit"), Column("avancement", "fit"),
-                   Column("prochain pas", "fit", detail=True), Column("échéance", "fit"), Column("agenda", detail=True),
+PROJECT_COLUMNS = (Column("projet"), Column("pour qui"), Column("statut", "fit"), Column("priorité", "fit"),
+                   Column("avancement", "fit"), Column("prochain pas"), Column("échéance", "fit"),
+                   Column("agenda", detail=True),
                    Column("ce qui sort", hint="un mail, une commande avec le réseau : avec ton accord, ou librement", detail=True),
                    Column("consignes", "num", detail=True), Column("où elle en est"))
 
@@ -321,7 +346,7 @@ PROJECT_COLUMNS = (Column("projet"), Column("pour qui"), Column("statut", "fit")
 def _projects_view(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     now = frame.now
     p = params(frame.env.params_of("goals", frame.root))
-    projects = sorted((g for g in s.goals.values() if g.kind == c.PROJECT), key=lambda g: -g.id)
+    projects = sorted((g for g in s.goals.values() if g.kind == c.PROJECT), key=lambda g: (-rank(g), -g.id))
     alive = [g for g in projects if live(g, now)]
     closed = [g for g in projects if g.status in c.CLOSED_STATUSES]
     waiting = _pending_goals(frame)
@@ -332,10 +357,9 @@ def _projects_view(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Blo
     texts = _texts(ctx, [r for g in (*page, *closed) for r in (g.title_ref, g.summary_ref, g.result_ref) if r])
     rows = []
     for g in page:
-        nxt = next_step_at(g, s, frame)
         rows.append(Row((
             _link(g, _text(texts, g.title_ref, "(sans titre)")), _person(frame, g.owner), _status(g, now),
-            _progress(g, p), ("dès que possible" if nxt <= now else When(nxt)) if nxt is not None else "—",
+            _priority(g), _plan_progress(g, p), _next_words(g, s, frame, ctx),
             _due(g), agenda(g.schedule), _freedom(g), len(g.instructions),
             Text(_text(texts, g.summary_ref, "pas encore de pas"), clamp=160)),
             href=_link(g), tone="warn" if g.paused_at else "info" if g.id in waiting else ""))
@@ -531,33 +555,211 @@ def _wait_table(g: Goal, frame: Frame) -> Table:
 
 
 @GOALS.inspect("resume", title="Résumé", subject="goal", order=10,
-               description="L'objectif, son avancement et ce qui bloque la prochaine étape.")
+               description="Ce qu'il faut faire, où elle en est, ce qui attend ta décision et son plan de travail. "
+                           "Les actions (modifier, avancer, pause, rouvrir, clore…) sont en haut de la fiche.")
 def _summary_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     g = _subject_goal(s, ctx)
     if isinstance(g, Note):
         return [g]
-    texts = _texts(ctx, (g.title_ref, g.details_ref, g.summary_ref, g.result_ref))
-    blocks: list[Block] = []
+    p = params(frame.env.params_of("goals", frame.root))
+    pending = pending_of(frame, g.id)
+    refs = [g.title_ref, g.details_ref, g.summary_ref, g.result_ref, *(t.text_ref for t in g.tasks),
+            *(t.note_ref for t in g.tasks), *(v.summary_ref for v in pending)]
+    texts = _texts(ctx, refs)
+    key = str(g.id)
+    blocks: list[Block] = [*_state_notes(g, s, frame, ctx, texts)]
+    if g.kind == c.REMINDER:
+        blocks.append(_reminder_card(g, frame, ctx, texts))
+    else:
+        blocks.append(Prose(_text(texts, g.details_ref), title="Ce qu'il faut faire (le cadre)") if g.details_ref
+                      else Note("Aucun cadre écrit : elle ne suit que le titre et les consignes. "
+                                + ("« Modifier le projet » en ajoute un." if _confided(s, frame, key) else ""),
+                                tone="warn" if g.kind == c.PROJECT else "muted"))
+    if pending:
+        blocks.append(_decisions_section(pending, texts))
+    if g.kind != c.REMINDER:
+        blocks.append(_cards(g, s, frame, ctx, p))
+        if g.summary_ref:
+            blocks.append(Prose(_text(texts, g.summary_ref), title="Où elle en est (son dernier pas)", clamp=900))
+        blocks += _plan_blocks(g, s, frame, texts)
+    if g.status == c.WAITING:
+        blocks.append(_wait_table(g, frame))
+    blocks.append(Disclosure("Tout le détail", (_fields(g, s, frame, ctx, texts),)))
+    return blocks
+
+
+PRIORITY_FR = dict(PRIORITY_CHOICES)
+PRIORITY_TONE = {c.LOW: "muted", c.NORMAL: "", c.HIGH: "warn", c.URGENT: "danger"}
+TASK_TONE = {c.TODO: "", c.DOING: "info", c.TASK_DONE: "ok", c.TASK_BLOCKED: "danger"}
+#: l'ordre du plan : ce qui est en cours, à faire, bloqué, puis fait
+TASK_ORDER = {c.DOING: 0, c.TODO: 1, c.TASK_BLOCKED: 2, c.TASK_DONE: 3}
+
+
+def _priority(g: Goal) -> Badge:
+    return Badge(f"priorité {PRIORITY_FR.get(g.priority, g.priority)}", PRIORITY_TONE.get(g.priority, ""))
+
+
+def _plan_progress(g: Goal, p: Any) -> Meter:
+    """L'avancement : son plan de travail s'il en a un, sinon ses pas sur son budget."""
+    if g.tasks:
+        done = sum(1 for t in g.tasks if t.status == c.TASK_DONE)
+        blocked = sum(1 for t in g.tasks if t.status == c.TASK_BLOCKED)
+        label = f"{done} / {len(g.tasks)} tâches" + (f", {blocked} bloquée(s)" if blocked else "")
+        return Meter(done / len(g.tasks), label, "warn" if blocked else "")
+    most = budget(g, p)
+    return Meter(g.steps / most if most else 0.0, f"{g.steps} / {most} pas")
+
+
+def _next_words(g: Goal, s: GoalsState, frame: Frame, ctx: InspectContext) -> str:
+    """Le prochain pas en mots : quand, ou pourquoi pas."""
+    why = why_not_now(g, s, frame)
+    if not why:
+        return "dès que possible"
+    nxt = next_step_at(g, s, frame) if status(g, frame.now) in (c.ACTIVE, c.WAITING) else None
+    if nxt is not None and nxt > frame.now and why.startswith("pas encore"):
+        return f"{ctx.when(nxt)} ({why.split(' : ', 1)[-1]})"
+    return why
+
+
+def _state_notes(g: Goal, s: GoalsState, frame: Frame, ctx: InspectContext, texts: Mapping[str, str]) -> list[Block]:
+    key = str(g.id)
     if g.paused_at and g.status not in c.CLOSED_STATUSES:
-        blocks.append(Note("En pause : ni pas, ni rappel, ni usure de l'envie, jusqu'à ce qu'un opérateur le "
-                           "reprenne.", tone="warn"))
-    return [*blocks, _fields(g, s, frame, ctx, texts), _wait_table(g, frame)]
+        return [Note("En pause : ni pas, ni rappel, ni usure de l'envie, jusqu'à ce que tu le reprennes "
+                     "(« Reprendre », en haut).", tone="warn")]
+    if g.status in c.CLOSED_STATUSES:
+        how = _text(texts, g.result_ref, "") if g.result_ref else ""
+        why = how or "sans résultat écrit"
+        more = " « Rouvrir » (en haut) le remet en route, avec quelques pas de plus." if _reopenable(s, frame, key) \
+            else ""
+        return [Note(f"{STATUS_FR.get(g.status, g.status).capitalize()} le {ctx.when(g.closed_at)} — {why}.{more}",
+                     tone=STATUS_TONE.get(g.status, ""))]
+    return []
+
+
+def _reminder_card(g: Goal, frame: Frame, ctx: InspectContext, texts: Mapping[str, str]) -> Fields:
+    return Fields((
+        ("à rappeler", _text(texts, g.title_ref, "(sans titre)")),
+        ("quand", (ctx.when(g.due) if g.due is not None else "—") + (" (urgent : même la nuit)" if g.urgent else "")),
+        ("à qui", _who(frame, g.address)),
+        ("dit", "oui" if g.delivered else "pas encore"),
+        ("tentatives", g.attempts),
+        ("prochain essai", When(g.retry_at) if g.retry_at > frame.now else "—"),
+    ), title="Le rappel", columns=2)
+
+
+def _decisions_section(pending: Sequence[Any], texts: Mapping[str, str]) -> Section:
+    items: list[Any] = []
+    for v in pending:
+        key = str(v.proposal)
+        items.append(Fields(((f"demande n° {key}", Text(_text(texts, v.summary_ref, "(sans résumé)"), clamp=600)),
+                             ("capacité", v.capability)), columns=1))
+        items.append(Toolbar((ActionSlot("goals.approuver", (("proposal", key),), title="Approuver",
+                                         presentation="button"),
+                              ActionSlot("goals.refuser", (("proposal", key),), title="Refuser", presentation="button")),
+                             title=f"Décider de la demande n° {key}"))
+    return Section(f"À décider ({len(pending)})", tuple(items),
+                   description="Ce qu'elle veut faire sortir de la machine (une commande avec le réseau, un mail) : "
+                               "rien ne part sans ton accord. Ce qui est montré est ce qui partira.")
+
+
+def _cards(g: Goal, s: GoalsState, frame: Frame, ctx: InspectContext, p: Any) -> Grid:
+    most = budget(g, p)
+    blocked = sum(1 for t in g.tasks if t.status == c.TASK_BLOCKED)
+    progress: list[tuple[str, Any]] = [("statut", _status(g, frame.now)), ("priorité", _priority(g)),
+                                       ("avancement", _plan_progress(g, p)), ("pas faits", f"{g.steps} sur {most}")]
+    if blocked:
+        progress.append(("tâches bloquées", Badge(str(blocked), "danger")))
+    if g.kind == c.EXPLORATION:
+        progress.append(("envie", _desire(g, frame.now, frame)))
+    nxt: list[tuple[str, Any]] = [("prochain pas", _next_words(g, s, frame, ctx)),
+                                  ("agenda", agenda(g.schedule) if g.kind == c.PROJECT else "son envie"),
+                                  ("échéance", _due(g)),
+                                  ("dernier pas", When(g.last_step_at) if g.last_step_at else "aucun encore")]
+    guards: list[tuple[str, Any]] = [
+        ("sans verdict d'affilée", _gauge(g.silent, p.silent_before_blocked, "bloqué")),
+        ("pannes d'affilée", _gauge(g.failures, p.failures_before_failed, "en échec")),
+        ("« fini » sans preuve", g.unproven),
+        ("preuves (outils qui ont produit)", g.evidence),
+    ]
+    return Grid((Fields(tuple(progress), title="Avancement"), Fields(tuple(nxt), title="Prochain pas"),
+                 Fields(tuple(guards), title="Garde-fous")), columns=3)
+
+
+def _gauge(n: int, limit: int, then: str) -> Any:
+    text = f"{n} / {limit} (au-delà : {then})"
+    return Badge(text, "danger" if n and n >= limit - 1 else "warn" if n else "") if n else text
+
+
+def _plan_blocks(g: Goal, s: GoalsState, frame: Frame, texts: Mapping[str, str]) -> list[Block]:
+    key = str(g.id)
+    editable = _plannable(s, frame, key)
+    rows = []
+    for t in sorted(g.tasks, key=lambda t: (TASK_ORDER.get(t.status, 9), t.id)):
+        text, note = _text(texts, t.text_ref), _text(texts, t.note_ref, "") if t.note_ref else ""
+        detail: tuple[Any, ...] = ()
+        if editable:
+            detail = (
+                Toolbar(tuple(ActionSlot("goals.tache_statut", (("task", str(t.id)), ("status", st)),
+                                         title=TASK_STATUS_FR[st], presentation="button")
+                              for st in c.TASK_STATUSES if st != t.status), title="Statut"),
+                Disclosure("Modifier la tâche", (ActionSlot("goals.tache_modifier", (
+                    ("task", str(t.id)), ("text", text), ("note", note)), title="Modifier la tâche", compact=True),)),
+                ActionSlot("goals.tache_retirer", (("task", str(t.id)),), title="Retirer la tâche",
+                           presentation="button"),
+            )
+        rows.append(Row((t.id, Text(text, clamp=300), Badge(TASK_STATUS_FR.get(t.status, t.status),
+                                                            TASK_TONE.get(t.status, "")),
+                         "toi" if t.author == "operator" else "elle", Text(note, clamp=200) if note else "—"),
+                        detail=detail, tone="danger" if t.status == c.TASK_BLOCKED else ""))
+    done = sum(1 for t in g.tasks if t.status == c.TASK_DONE)
+    out: list[Block] = [Table(
+        (Column("n°", "fit"), Column("tâche"), Column("statut", "fit"), Column("posée par", "fit"),
+         Column("résultat ou blocage")), tuple(rows),
+        title=f"Plan de travail ({done} / {len(g.tasks)} faites)" if g.tasks else "Plan de travail",
+        empty="aucune tâche écrite : elle avance d'après le cadre. Ajoute des étapes, elle les cochera.",
+        caption="Déplie une tâche pour changer son statut, la modifier ou la retirer. Elle lit ce plan à chaque pas "
+                "(les tâches que tu poses passent d'abord) et le tient à jour.")]
+    if editable:
+        out.append(ActionSlot("goals.tache_ajouter", title="Ajouter une tâche", compact=True))
+    return out
 
 
 # ── La fiche : cadre et politique ─────────────────────────────────────────
 
 
-@GOALS.inspect("politique", title="Cadre et politique", subject="goal", order=15,
-               description="Ce qui encadre son travail : le cadre confié, les consignes, ce qu'elle a le droit de "
-                           "faire, son rythme, quand elle s'arrête, pour qui.")
+@GOALS.inspect("politique", title="Cadre et réglages", subject="goal", order=15,
+               description="Changer ce qui encadre son travail (titre, cadre, pour qui, échéance, agenda, pas, accord, "
+                           "priorité), puis ce qui en découle : ce qu'elle a le droit de faire, son rythme, quand elle "
+                           "s'arrête.")
 def _policy_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     g = _subject_goal(s, ctx)
     if isinstance(g, Note):
         return [g]
+    return [*_edit_blocks(g, s, frame), *_policy_blocks(g, s, frame, ctx)]
+
+
+def _edit_blocks(g: Goal, s: GoalsState, frame: Frame) -> list[Block]:
+    """Le formulaire qui change ce but, pré-rempli de ce qu'il est (selon sa sorte)."""
+    key = str(g.id)
+    if _confided(s, frame, key):
+        return [ActionSlot("goals.modifier", title="Modifier le projet")]
+    if _reschedulable(s, frame, key):
+        return [ActionSlot("goals.reprogrammer", title="Reprogrammer le rappel")]
+    if g.kind == c.EXPLORATION and _prioritizable(s, frame, key):
+        return [Note("Une exploration qu'elle a entreprise d'elle-même se pilote (pause, consigne, priorité, "
+                     "avancer, clore) mais ne se réécrit pas : ni son titre, ni son envie.", "muted"),
+                ActionSlot("goals.priorite", title="Sa priorité", compact=True)]
+    if g.status in c.CLOSED_STATUSES:
+        return [Note("Un but clos ne se modifie plus" + (" : rouvre-le d'abord (en haut)." if _reopenable(
+            s, frame, key) else "."), "muted")]
+    return []
+
+
+def _policy_blocks(g: Goal, s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     now = frame.now
     p = params(frame.env.params_of("goals", frame.root))
     texts = _texts(ctx, (g.details_ref, *g.instructions))
-    most = g.max_steps or (p.project_steps if g.kind == c.PROJECT else p.exploration_steps)
+    most = budget(g, p)
     spacing = p.project_spacing_us if g.kind == c.PROJECT else p.step_spacing_us
     nxt = next_step_at(g, s, frame) if status(g, now) in (c.ACTIVE, c.WAITING) and g.kind != c.REMINDER else None
     waiting = g.id in _pending_goals(frame)
@@ -572,13 +774,32 @@ def _policy_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]
     blocks += [
         Fields((
             ("ce qui sort de la machine", _freedom(g)),
-            ("un accord attend", Ref("local", "/inspecteur/approbations", "oui : ouvrir les approbations")
+            ("un accord attend", Ref.subject("goal", str(g.id), "oui : décider dans le Résumé", "resume")
              if waiting else "non"),
             ("ses outils", ", ".join(g.bundles) or "ceux de l'atelier"),
             ("autorité", f"{AUTHORITY_FR.get(g.authority, g.authority)} — " +
              ("un opérateur l'a confié : elle le mène même sans envie" if g.authority == c.USER else
               "elle l'a entrepris d'elle-même : son envie s'use, elle peut l'abandonner")),
         ), title="Sa liberté", columns=2),
+    ]
+    if g.kind != c.REMINDER:
+        blocks += _rhythm_blocks(g, p, nxt, now, most, spacing)
+    blocks += [
+        Fields((
+            ("pour qui", _person(frame, g.owner)), ("où lui en parler", _who(frame, g.address)),
+            ("concerne", ", ".join(_who(frame, a) for a in g.about) or "—"),
+            ("sensibilité", SENSITIVITY_FR.get(g.sensitivity, str(g.sensitivity))),
+            ("d'où il vient", g.source or "—"),
+        ), title="Pour qui, et ce qu'elle peut en dire", columns=2),
+        Note("Les réglages communs à tous les buts (espacement, pas par heure, pannes avant échec…) se changent "
+             "dans Configuration › Comportement › Buts ; ce but-ci se pilote ici et par les actions en haut de sa "
+             "fiche (avancer, pause, consigne, rouvrir, clore).", "muted"),
+    ]
+    return blocks
+
+
+def _rhythm_blocks(g: Goal, p: Any, nxt: int | None, now: int, most: int, spacing: int) -> list[Block]:
+    return [
         Fields((
             ("agenda", f"{agenda(g.schedule)} ({g.schedule or 'manual'})"),
             ("prochain pas", ("dès que possible" if nxt <= now else When(nxt)) if nxt is not None else "—"),
@@ -594,17 +815,7 @@ def _policy_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]
             ("« fini » sans preuve", g.unproven),
             ("pas au plus", most),
         ), title="Quand elle s'arrête", columns=2),
-        Fields((
-            ("pour qui", _person(frame, g.owner)), ("où lui en parler", _who(frame, g.address)),
-            ("concerne", ", ".join(_who(frame, a) for a in g.about) or "—"),
-            ("sensibilité", SENSITIVITY_FR.get(g.sensitivity, str(g.sensitivity))),
-            ("d'où il vient", g.source or "—"),
-        ), title="Pour qui, et ce qu'elle peut en dire", columns=2),
-        Note("Les réglages communs à tous les buts (espacement, pas au plus, pannes avant échec…) se changent dans "
-             "Configuration › Comportement › Buts ; ce projet-ci se pilote par les actions de sa fiche (pause, "
-             "consigne, clore).", "muted"),
     ]
-    return blocks
 
 
 # ── La fiche : pas ────────────────────────────────────────────────────────
@@ -640,13 +851,15 @@ def _steps_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
 
 
 @GOALS.inspect("carnet", title="Carnet", subject="goal", order=30,
-               description="Les notes du projet et les informations qu'elle conserve pour la suite.")
+               description="Les consignes reçues, les notes qu'elle garde pour la suite, et ce qu'on a fait du but "
+                           "(pause, cadre changé, rouvert, tâches, fichiers déposés).")
 def _notebook_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     g = _subject_goal(s, ctx)
     if isinstance(g, Note):
         return [g]
     orders, orders_pager = _journal_page(ctx, [GOAL_AMENDED], ("goal", g.id))
     notes, notes_pager = _journal_page(ctx, [NOTED], ("goal", g.id), NOTES_CURSOR)
+    done, done_pager = _journal_page(ctx, list(OPERATIONS), ("goal", g.id), OPERATIONS_CURSOR)
     return [
         Timeline(tuple(Entry(e.at, "consigne", _said(e.data.instruction),
                              meta=f"de {_who(frame, e.data.by)}" if e.data.by else "", tone="info",
@@ -654,7 +867,70 @@ def _notebook_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Bloc
                        for e in orders), title="Consignes reçues", empty="aucune consigne", pager=orders_pager),
         Timeline(tuple(Entry(e.at, "note", _said(e.data.text), href=Ref("episode", e.correlation, "note"))
                        for e in notes), title="Son carnet", empty="aucune note", pager=notes_pager),
+        Timeline(tuple(_operation(e, frame) for e in done), title="Ce qu'on en a fait (et son plan)",
+                 empty="rien encore : ni pause, ni cadre changé, ni tâche", pager=done_pager),
     ]
+
+
+OPERATIONS_CURSOR = "avant_ops"
+REFRAMED_FR = (("title", "titre"), ("details", "cadre"), ("clear_details", "cadre effacé"), ("set_owner", "pour qui"),
+               ("due", "échéance"), ("clear_due", "échéance retirée"), ("urgent", "urgent"), ("schedule", "agenda"),
+               ("max_steps", "pas au plus"), ("approval", "accord requis"), ("priority", "priorité"))
+
+
+def _reframed_words(d: Any) -> str:
+    out = []
+    for name, label in REFRAMED_FR:
+        value = getattr(d, name, None)
+        if value is None or value is False or value == "":
+            continue
+        if name == "schedule":
+            out.append(f"agenda : {agenda(value)}")
+        elif name == "max_steps":
+            out.append(f"pas au plus : {value or 'valeur par défaut'}")
+        elif name == "priority":
+            out.append(f"priorité : {PRIORITY_FR.get(value, value)}")
+        elif name == "approval":
+            out.append("ce qui sort attend ton accord" if value else "ce qui sort part librement")
+        elif name == "urgent":
+            out.append("urgent" if value else "plus urgent")
+        elif name in ("title", "details"):
+            out.append(f"{label} : « {_said(value)[:160]} »")
+        else:
+            out.append(label)
+    if d.approval is False:
+        out.append("ce qui sort part librement")
+    if d.urgent is False:
+        out.append("plus urgent")
+    return ", ".join(dict.fromkeys(out)) or "rien"
+
+
+def _operation(e: Event[Any], frame: Frame) -> Entry:
+    d = e.data
+    name = e.type.name.rsplit(".", 1)[-1]
+    by = f"par {_who(frame, d.by)}" if getattr(d, "by", "") else "par elle"
+    if name == "paused":
+        return Entry(e.at, "mis en pause", meta=by, tone="warn")
+    if name == "resumed":
+        return Entry(e.at, "repris", meta=by, tone="ok")
+    if name == "reframed":
+        return Entry(e.at, "cadre modifié", _reframed_words(d), meta=by, tone="info")
+    if name == "reopened":
+        return Entry(e.at, f"rouvert (au moins {d.extra} pas de plus)", meta=by, tone="info")
+    if name == "nudged":
+        return Entry(e.at, "« avancer maintenant »", meta=by)
+    if name == "task_added":
+        return Entry(e.at, f"tâche {d.task} ajoutée", _said(d.text), meta=by)
+    if name == "task_changed":
+        what = TASK_STATUS_FR.get(d.status, "modifiée") if d.status else "modifiée"
+        text = _said(d.note, "") if d.note is not None else (_said(d.text, "") if d.text is not None else "")
+        return Entry(e.at, f"tâche {d.task} : {what}", text, meta=by,
+                     tone="ok" if d.status == c.TASK_DONE else "danger" if d.status == c.TASK_BLOCKED else "")
+    if name == "task_removed":
+        return Entry(e.at, f"tâche {d.task} retirée", meta=by, tone="muted")
+    if name == "deposited":
+        return Entry(e.at, f"fichier déposé : {d.name}", _said(d.note, "") if d.note is not None else "", meta=by)
+    return Entry(e.at, name, meta=by)
 
 
 # ── La fiche : effets ─────────────────────────────────────────────────────
@@ -709,17 +985,24 @@ def _effects_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block
     rows = []
     for e in proposed:
         state, detail = _effect_state(e, e.seq in pending, outcomes.get(e.seq, ()))
+        more: list[Any] = [Code(_cut(detail, EFFECT_DETAIL), title="ce qu'il en est")] if detail else []
+        if e.seq in pending:
+            more.append(Toolbar((ActionSlot("goals.approuver", (("proposal", str(e.seq)),), title="Approuver",
+                                            presentation="button"),
+                                 ActionSlot("goals.refuser", (("proposal", str(e.seq)),), title="Refuser",
+                                            presentation="button")), title="Décider"))
         rows.append(Row((Ref("event", str(e.seq), f"#{e.seq}"), When(e.at), e.data.capability,
                          Text(_said(e.data.summary), clamp=SUMMARY_CLAMP),
                          "requis" if e.data.approval else "non requis", state),
-                        tone="warn" if e.seq in pending else "",
-                        detail=(Code(_cut(detail, EFFECT_DETAIL), title="ce qu'il en est"),) if detail else ()))
+                        tone="warn" if e.seq in pending else "", detail=tuple(more)))
     blocks: list[Block] = []
     if pending:
-        blocks.append(Fields(((f"{len(pending)} demande(s) attendent ton accord", APPROVALS),),
-                             title="À décider"))
+        blocks.append(Note(f"{len(pending)} demande(s) attendent ton accord : déplie une ligne pour l'approuver "
+                           "ou la refuser (ou le Résumé, qui les montre toutes).", "warn"))
+    empty = "aucune demande : tout s'est fait dans l'atelier" if "workshop" in g.bundles else \
+        "aucune demande de faire sortir quelque chose"
     blocks.append(Table(EFFECT_COLUMNS, tuple(rows), title="Ce qu'il a voulu faire sortir de la machine",
-                        empty="aucune demande : tout s'est fait dans l'atelier", pager=pager))
+                        empty=empty, pager=pager))
     return blocks
 
 
@@ -879,8 +1162,11 @@ async def _workshop_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> lis
     port = ctx.ports.get("workshop")
     if port is None:
         return [Note("L'atelier n'est pas disponible ici (aucun port d'atelier).", tone="warn")]
+    deposit = [Disclosure("Déposer un fichier dans son atelier", (
+        ActionSlot("goals.deposer", title="Déposer un fichier", compact=True),))] \
+        if _depositable(s, frame, str(g.id), ctx.ports) else []
     if not port.exists(g.id):
-        return [Note("L'atelier n'est pas encore ouvert : aucun pas n'y a encore écrit.", tone="muted")]
+        return [Note("L'atelier n'est pas encore ouvert : aucun pas n'y a encore écrit.", tone="muted"), *deposit]
     tree = await port.tree(g.id)
     diff = await port.diff(g.id)
     offset = max(0, ctx.int_param("avant_commits", 0))
@@ -888,7 +1174,12 @@ async def _workshop_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> lis
     files = []
     for line in tree:
         m = _TREE_LINE.match(line)
-        files.append((Text(m.group("path"), "mono"), f"{int(m.group('size'))} o") if m else (Text(line, "muted"), ""))
+        if m is None:
+            files.append((Text(line, "muted"), "", ""))
+            continue
+        path = m.group("path")
+        files.append((Ref("subject", f"goal/{g.id}", path, (("onglet", "atelier"), ("fichier", path))),
+                      _size(int(m.group("size"))), _download_link(g.id, path)))
     steps = ctx.events([c.STEP_REPORTED], STEPS_MATCHED, where=("goal", g.id))
     by_title = {}
     for e in reversed(steps):  # le plus récent l'emporte
@@ -905,15 +1196,64 @@ async def _workshop_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> lis
         else:  # l'enregistrement ne dit pas sa date : sans pas pour la porter, il n'en a pas ici
             entries.append(Entry(0, title or "(sans message)", meta=f"{sha} · sans pas associé"))
     shown = _cut(diff, DIFF_SHOWN)
+    opened = await _opened_file(g, port, ctx.param("fichier"))
     return [
-        Table((Column("fichier"), Column("taille", "num")), tuple(files), title="Ses fichiers",
-              empty="le dossier est vide"),
+        *opened,
+        Table((Column("fichier"), Column("taille", "num"), Column("", "fit")), tuple(files), title="Ses fichiers",
+              empty="le dossier est vide", caption="Un nom ouvre le fichier ici ; « télécharger » le rapatrie tel quel."),
+        *deposit,
         Code(shown, title="Changements depuis le dernier pas") if diff.strip()
         else Note("Rien de changé depuis le dernier pas : tout est enregistré.", tone="muted"),
         Timeline(tuple(entries), title="Historique (un enregistrement par pas qui a changé quelque chose)",
                  empty="aucun enregistrement encore", pager=Pager(param="avant_commits",
                     older=(("avant_commits", str(offset + HISTORY_PAGE)),) if len(lines) > HISTORY_PAGE else ())),
     ]
+
+
+#: ce qu'on montre d'un fichier ouvert (au-delà : coupé, et dit ; le téléchargement le donne en entier)
+FILE_SHOWN = 60_000
+#: ce qu'un téléchargement rapatrie au plus
+DOWNLOAD_MAX = 20 * 1024 * 1024
+
+
+def _size(n: int) -> str:
+    return f"{n} o" if n < 1024 else f"{n / 1024:.1f} Ko" if n < 1024 * 1024 else f"{n / 1024 / 1024:.1f} Mo"
+
+
+def _download_link(goal: int, path: str) -> Ref:
+    return Ref("local", f"/inspecteur/telecharger/goal/{goal}", "télécharger", (("fichier", path),))
+
+
+async def _opened_file(g: Goal, port: Any, path: str) -> list[Block]:
+    """Le fichier demandé (``?fichier=``), lu dans l'atelier : son texte, ou une note (binaire, absent, refusé)."""
+    if not path:
+        return []
+    try:
+        text = await port.read(g.id, path)
+    except (OutsideWorkshop, FileNotFoundError, OSError, ValueError) as exc:
+        return [Note(f"« {path} » ne s'ouvre pas : {exc}", "warn")]
+    if "\x00" in text or text.count("\ufffd") > max(8, len(text) // 50):
+        return [Note(f"« {path} » n'est pas un texte : télécharge-le.", "muted"),
+                Fields((("télécharger", _download_link(g.id, path)),))]
+    return [Code(_cut(text, FILE_SHOWN), title=f"{path}"),
+            Fields((("fichier", Text(path, "mono")), ("télécharger", _download_link(g.id, path)),
+                    ("fermer", Ref.subject("goal", str(g.id), "revenir à la liste", "atelier"))), columns=3)]
+
+
+@GOALS.download("goal")
+async def _download(s: GoalsState, frame: Frame, ctx: InspectContext, key: str, name: str) -> Download | Note:
+    """Un fichier de son atelier, tel quel."""
+    g = goal_at(s, key)
+    port = ctx.ports.get("workshop")
+    if g is None or port is None or "workshop" not in g.bundles or not port.exists(g.id):
+        return Note("Ce fichier n'est pas disponible.", tone="warn")
+    try:
+        data = await port.read_bytes(g.id, name, DOWNLOAD_MAX + 1)
+    except (OutsideWorkshop, FileNotFoundError, OSError, ValueError):
+        return Note("Ce fichier n'est pas (ou plus) dans son atelier.", tone="warn")
+    if len(data) > DOWNLOAD_MAX:
+        return Note(f"Trop gros pour la console ({DOWNLOAD_MAX // (1024 * 1024)} Mo au plus).", tone="warn")
+    return Download(name.rsplit("/", 1)[-1], data)
 
 
 # ── Sur la fiche d'une personne ───────────────────────────────────────────

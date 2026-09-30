@@ -153,3 +153,79 @@ def test_a_project_is_confided_on_its_own_page_and_read_on_its_fiche(world):  # 
     assert "toutes les 2 h (interval:2h)" in policy and "0 faits sur 4 au plus" in policy
     projects = html.unescape(client.get("/inspecteur/buts/projets").text)
     assert "Un script de bonjour" in projects and "sort avec ton accord" in projects
+
+
+def test_the_project_fiche_is_driven_over_http(world):  # noqa: F811
+    """La fiche d'un projet se pilote pour de vrai : un formulaire refusé remontre ses cases telles
+    qu'elles étaient ; confier mène à la fiche ; « Modifier » part de ce qu'il est ; le plan se tient en
+    boutons ; un fichier se dépose (multipart) puis se télécharge ; chaque onglet s'ouvre."""
+    import html
+    import re
+
+    client, live, _ = world
+    bootstrap(client)
+    with client.websocket_connect(WS) as ws:
+        ws.receive_json(), ws.receive_json()
+    token = client.cookies.get("csrftoken")
+    fields = ["title", "details", "owner", "due", "schedule", "max_steps", "priority", "approval"]
+
+    def confide(op: str, **values: str):
+        data = {"csrf": token, "_op": op, "_retour": "/inspecteur/buts/projets", "_sujet": "", "schedule": "manual",
+                "max_steps": "0", "priority": "normal", "_champs": fields, **values}
+        return client.post("/inspecteur/action/goals.confier", data=data, follow_redirects=False)
+
+    def box(page: str) -> str:
+        return re.search(r'<input type="checkbox" name="approval"[^>]*>', page).group(0)
+
+    unchecked = confide("c0", title=" ")
+    assert unchecked.status_code == 400 and "checked" not in box(unchecked.text)  # décochée, elle le reste
+    checked = confide("c1", title=" ", approval="on")
+    assert checked.status_code == 400 and "checked" in box(checked.text)  # cochée, elle le reste
+    done = confide("c2", title="Un script de bonjour", details="Écrire bonjour.py.", approval="on")
+    assert done.status_code == 303 and done.headers["location"].startswith("/inspecteur/fiche/goal/")
+    gid = done.headers["location"].split("/fiche/goal/", 1)[1].split("?", 1)[0]
+
+    fiche = html.unescape(client.get(f"/inspecteur/fiche/goal/{gid}").text)
+    assert "Modifier le projet" in fiche and "Avancer maintenant" in fiche and "Ajouter une tâche" in fiche
+    assert "Changer le statut" not in fiche and "Approuver" not in fiche  # une action par ligne n'est pas en tête
+    modify = html.unescape(client.get(f"/inspecteur/action/goals.modifier?sujet={gid}&retour=/inspecteur").text)
+    assert 'value="Un script de bonjour"' in modify and "Écrire bonjour.py." in modify  # pré-rempli
+
+    def act(key: str, op: str, fixed: dict[str, str] | None = None, **values: str):
+        data = {"csrf": token, "_op": op, "_retour": f"/inspecteur/fiche/goal/{gid}", "_sujet": gid,
+                "_champs": list(values), **values}
+        if fixed:
+            data |= {"_fixes": list(fixed), **fixed}
+        return client.post(f"/inspecteur/action/{key}", data=data, follow_redirects=False)
+
+    assert act("goals.pause", "p1").status_code == 303
+    assert act("goals.tache_ajouter", "t1", text="Écrire le test d'abord").status_code == 303
+    plan = html.unescape(client.get(f"/inspecteur/fiche/goal/{gid}?onglet=resume").text)
+    assert "Plan de travail (0 / 1 faites)" in plan and "Écrire le test d'abord" in plan
+    assert act("goals.tache_statut", "s1", {"task": "1", "status": "done"}).status_code == 303
+    plan = html.unescape(client.get(f"/inspecteur/fiche/goal/{gid}?onglet=resume").text)
+    assert "Plan de travail (1 / 1 faites)" in plan
+
+    deposit = client.post("/inspecteur/action/goals.deposer", data={
+        "csrf": token, "_op": "d1", "_retour": f"/inspecteur/fiche/goal/{gid}?onglet=atelier", "_sujet": gid,
+        "folder": "", "note": "Les mesures.", "_champs": ["file", "folder", "note"]},
+        files={"file": ("mesures.csv", b"a,b\n1,2\n", "text/csv")}, follow_redirects=False)
+    assert deposit.status_code == 303, deposit.text[:500]
+    assert (live.data / "ateliers" / f"but-{gid}" / "mesures.csv").read_bytes() == b"a,b\n1,2\n"
+    got = client.get(f"/inspecteur/telecharger/goal/{gid}?fichier=mesures.csv")
+    assert got.status_code == 200 and got.content == b"a,b\n1,2\n"
+    assert client.get(f"/inspecteur/telecharger/goal/{gid}?fichier=../../mind.db").status_code == 404
+    atelier = html.unescape(client.get(f"/inspecteur/fiche/goal/{gid}?onglet=atelier&fichier=mesures.csv").text)
+    assert "1,2" in atelier and 'enctype="multipart/form-data"' in atelier
+
+    for tab in ("resume", "politique", "pas", "carnet", "effets", "decisions", "episodes", "atelier"):
+        r = client.get(f"/inspecteur/fiche/goal/{gid}?onglet={tab}")
+        assert r.status_code == 200 and "a échoué" not in r.text and "Action non déclarée" not in r.text, tab
+    assert act("goals.clore", "x1").status_code == 303
+    closed = html.unescape(client.get(f"/inspecteur/fiche/goal/{gid}").text)
+    assert "Rouvrir" in closed and "Modifier le projet" not in closed
+    assert act("goals.rouvrir", "o1", extra="2", instruction="").status_code == 303
+    for tab in ("resume", "politique", "carnet"):
+        r = client.get(f"/inspecteur/fiche/goal/{gid}?onglet={tab}")
+        assert r.status_code == 200 and "a échoué" not in r.text, tab
+    assert "rouvert" in html.unescape(client.get(f"/inspecteur/fiche/goal/{gid}?onglet=carnet").text)

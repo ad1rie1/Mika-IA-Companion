@@ -256,6 +256,9 @@ class ActionSpec:
     #: plus, si la fonction le déclare : les boîtes d'un compte, ses dossiers) ; l'action
     #: reçoit alors un dictionnaire (champs lus + valeurs fixes), pas un modèle
     fields: Callable[..., Any] | None = None
+    #: les valeurs de départ du formulaire, lues dans l'état : ``initial(tranche, frame, clé) ->
+    #: Mapping[str, Any]`` (modifier un objet part de ce qu'il est, pas des défauts du modèle)
+    initial: Callable[..., Any] | None = None
 
     @property
     def key(self) -> str:
@@ -648,13 +651,13 @@ class Faculty(Generic[S, Pm]):
     def action(self, name: str, *, title: str, args: type[BaseModel], emits: Iterable[EventType[Any] | str],
                subject: str = "", section: str = "", description: str = "", confirm: str = "", danger: bool = False,
                retype: bool = False, available: Callable[..., bool] | None = None, order: int = 100,
-               fields: Callable[..., Any] | None = None):
+               fields: Callable[..., Any] | None = None, initial: Callable[..., Any] | None = None):
         """Une action d'opérateur (voir ``kernel/operate.py``)."""
 
         def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
             self.actions.append(ActionSpec(
                 self.name, name, title, args, fn, frozenset(e if isinstance(e, str) else e.name for e in emits),
-                subject, section, description, confirm, danger, retype, available, order, fields))
+                subject, section, description, confirm, danger, retype, available, order, fields, initial))
             return fn
 
         return deco

@@ -1,8 +1,9 @@
 """Les outils des buts.
 
 Dans un pas (``STEP``) : ``report_step`` (le verdict, qui clôt le pas),
-``goal_note`` (son carnet), ``goal_drop`` (renoncer — seulement à ce qu'elle
-a entrepris d'elle-même). En conversation : ``goal_remind`` (un rappel à
+``goal_note`` (son carnet), ``goal_task_add`` / ``goal_task_update`` (son plan
+de travail, que l'opérateur tient aussi), ``goal_drop`` (renoncer — seulement
+à ce qu'elle a entrepris d'elle-même). En conversation : ``goal_remind`` (un rappel à
 l'heure dite) et ``create_project`` (un travail confié — seulement par sa
 propriétaire).
 """
@@ -16,17 +17,30 @@ from pydantic import BaseModel, Field
 
 from mika.contracts import goals as c
 from mika.contracts import identity as identity_c
-from mika.faculties.goals.faculty import GOALS, NOTED, Goal, GoalsState, params, workable
+from mika.faculties.goals.faculty import (
+    GOALS,
+    NOTED,
+    TASK_ADDED,
+    TASK_CHANGED,
+    TASKS_KEPT,
+    Goal,
+    GoalsState,
+    params,
+    task_at,
+    workable,
+)
 from mika.kernel import schedule
 from mika.kernel.clock import MINUTE, instant, local
 from mika.kernel.events import Content, Draft
+from mika.kernel.faculty import ToolResult
 from mika.kernel.frame import Frame
 from mika.vocab.episodes import Kind, goal_of
 from mika.vocab.privacy import Sensitivity
 
 REPORT, NOTE, DROP = "report_step", "goal_note", "goal_drop"
-#: ce qui n'est pas du travail (dire où on en est, renoncer)
-NOT_WORK = frozenset({REPORT, DROP})
+TASK_ADD, TASK_UPDATE = "goal_task_add", "goal_task_update"
+#: ce qui n'est pas du travail (dire où on en est, renoncer, cocher son plan)
+NOT_WORK = frozenset({REPORT, DROP, TASK_ADD, TASK_UPDATE})
 PROJECT_BUNDLES = ("goals", "memory", "workshop")
 
 
@@ -90,6 +104,10 @@ async def report_step(args: ReportArgs, ctx: Any) -> str:
         drafts.append(closing(ctx, g, c.STUCK, reason=args.summary))
     await ctx.emit(*drafts)
     if proven:
+        left = [t.id for t in g.tasks if t.status not in (c.TASK_DONE,)]
+        if left:
+            return (f"C'est noté : tu l'as mené à bout — mais ton plan avait encore {len(left)} tâche(s) non "
+                    f"cochée(s) ({', '.join(map(str, left[:6]))}).")
         return "C'est noté : tu l'as mené à bout."
     if args.verdict == c.DONE:
         return ("Tu dis avoir fini, mais rien de concret n'a encore été fait dans ce but (aucun outil n'a produit "
@@ -116,6 +134,49 @@ async def goal_note(args: NoteArgs, ctx: Any) -> str:
     await ctx.emit(NOTED.draft(goal=g.id, text=Content.of(args.text.strip(), level=g.sensitivity), owner=g.owner,
                                about=g.about))
     return "Noté dans ton carnet."
+
+
+class TaskAddArgs(BaseModel):
+    text: str = Field(min_length=1, max_length=500, description="une étape à faire, en une phrase")
+
+
+class TaskUpdateArgs(BaseModel):
+    task: int = Field(ge=1, description="le numéro de la tâche (dans ton plan de travail)")
+    status: Literal["todo", "doing", "done", "blocked"] = Field(
+        description="todo : à faire ; doing : en cours ; done : faite ; blocked : tu bloques dessus")
+    note: str = Field(default="", max_length=1000, description="son résultat, ou pourquoi tu bloques")
+
+
+@GOALS.tool(TASK_ADD, description="Ajouter une étape à ton plan de travail pour ce but.", args=TaskAddArgs,
+            bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=5)
+async def goal_task_add(args: TaskAddArgs, ctx: Any) -> Any:
+    g = _goal(ctx)
+    if g is None:
+        return "Ce but n'est plus en cours."
+    if len(g.tasks) >= TASKS_KEPT:
+        return ToolResult(ok=False, content=f"Ton plan a déjà {TASKS_KEPT} tâches : termine ou regroupe-en.")
+    number = g.task_seq + 1
+    await ctx.emit(TASK_ADDED.draft(goal=g.id, task=number, text=Content.of(args.text.strip(), level=g.sensitivity),
+                                    author="self", owner=g.owner, about=g.about))
+    return f"Ajoutée à ton plan : tâche {number}."
+
+
+@GOALS.tool(TASK_UPDATE, description="Mettre à jour une tâche de ton plan de travail (en cours, faite, bloquée…).",
+            args=TaskUpdateArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=8)
+async def goal_task_update(args: TaskUpdateArgs, ctx: Any) -> Any:
+    g = _goal(ctx)
+    if g is None:
+        return "Ce but n'est plus en cours."
+    t = task_at(g, args.task)
+    if t is None:
+        return ToolResult(ok=False, content=f"Il n'y a pas de tâche {args.task} dans ton plan.")
+    note = Content.of(args.note.strip(), level=g.sensitivity) if args.note.strip() else None
+    await ctx.emit(TASK_CHANGED.draft(goal=g.id, task=t.id, status=args.status, note=note, author="self",
+                                      owner=g.owner, about=g.about))
+    return f"Tâche {t.id} : {TASK_WORDS[args.status]}."
+
+
+TASK_WORDS = {c.TODO: "à faire", c.DOING: "en cours", c.TASK_DONE: "faite", c.TASK_BLOCKED: "bloquée"}
 
 
 class DropArgs(BaseModel):
@@ -188,14 +249,15 @@ class ProjectArgs(BaseModel):
 
 
 def project_opened(*, title: str, details: str, owner: str | None, address: str | None, rule: str,
-                   approval: bool, max_steps: int, source: str, level: int, due: int | None = None) -> Draft[Any]:
+                   approval: bool, max_steps: int, source: str, level: int, due: int | None = None,
+                   priority: str = c.NORMAL) -> Draft[Any]:
     """L'ouverture d'un projet confié (par sa propriétaire en conversation, ou
     par un opérateur depuis la console) : un cadre, un atelier, des pas."""
     return c.GOAL_OPENED.draft(
         kind=c.PROJECT, authority=c.USER, title=Content.of(title.strip(), level=level),
         details=Content.of(details.strip(), level=level) if details.strip() else None, owner=owner,
         address=address, about=(owner,) if owner else (), due=due, bundles=PROJECT_BUNDLES, max_steps=max_steps,
-        schedule=rule.strip(), approval=approval, source=source, sensitivity=level)
+        schedule=rule.strip(), approval=approval, source=source, sensitivity=level, priority=priority)
 
 
 @GOALS.tool("create_project", description="Accepter un projet que ta propriétaire te confie : il aura son "

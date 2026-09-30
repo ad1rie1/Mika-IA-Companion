@@ -20,7 +20,9 @@ bloqué, abandonné (l'envie s'est usée), en échec (un rappel qui n'a pas pu
 
 Un opérateur peut **suspendre** un but vivant (``paused``) : il ne fait plus
 de pas, son rappel ne se dit pas, son envie ne s'use pas, jusqu'à ce qu'il
-le reprenne.
+le reprenne. Il peut aussi en changer le cadre (un projet confié), le rouvrir,
+le faire avancer tout de suite, lui donner une **priorité** et tenir avec elle
+son **plan de travail** (des tâches : à faire, en cours, faites, bloquées).
 """
 
 from __future__ import annotations
@@ -46,6 +48,14 @@ ACTIVE, WAITING, PAUSED = "active", "waiting", "paused"
 LIVE_STATUSES = (ACTIVE, WAITING, PAUSED)
 ACHIEVED, STUCK, ABANDONED, FAILED, CANCELLED = "done", "blocked", "abandoned", "failed", "cancelled"
 CLOSED_STATUSES = (ACHIEVED, STUCK, ABANDONED, FAILED, CANCELLED)
+
+# priorités (le vocabulaire du panneau du frontend) : elles déplacent la preuve d'un pas
+LOW, NORMAL, HIGH, URGENT = "low", "normal", "high", "urgent"
+PRIORITIES = (LOW, NORMAL, HIGH, URGENT)
+
+# le plan de travail d'un but : ses tâches
+TODO, DOING, TASK_DONE, TASK_BLOCKED = "todo", "doing", "done", "blocked"
+TASK_STATUSES = (TODO, DOING, TASK_DONE, TASK_BLOCKED)
 
 # raisons de preuve (arbitrage)
 #: avancer d'un pas (épisode STEP, cible ``goal:<id>``)
@@ -83,6 +93,8 @@ class GoalOpened(Payload):
     sensitivity: int = 1
     #: explorations : l'envie de départ (0–1), qui s'use
     desire: float = 0.0
+    #: ``low`` | ``normal`` | ``high`` | ``urgent``
+    priority: str = NORMAL
 
 
 class StepReported(Payload):
@@ -148,6 +160,11 @@ class GoalView:
     last_summary_ref: str = ""
     schedule: str = ""
     next_step_at: int | None = None
+    priority: str = NORMAL
+    #: son plan de travail (des tâches ; zéro : elle avance sans plan écrit)
+    tasks_total: int = 0
+    tasks_done: int = 0
+    tasks_blocked: int = 0
 
 
 #: Les buts vivants (actifs ou en attente), du plus ancien au plus récent.

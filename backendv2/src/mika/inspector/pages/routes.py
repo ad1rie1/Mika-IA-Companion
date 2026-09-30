@@ -19,8 +19,9 @@ from mika.inspector.pages.journal import EPISODE_TABS, episode_head, episode_tab
 from mika.inspector.pages.subjects import Subjects
 from mika.inspector.ui import PREFIX, SESSION_COOKIE, UI, secure
 from mika.kernel.faculty import InspectSpec
+from mika.kernel.forms import RENDERED, describe
 from mika.kernel.inspect import Filters, Note, Param, Section, Workspace, walk_blocks
-from mika.runtime.operations import dynamic_fields, fixed_values, offered, perform
+from mika.runtime.operations import dynamic_fields, fixed_values, initial_values, offered, perform
 
 #: les anciennes adresses de l'inspecteur → la console
 MOVED = {"chronologie": "systeme/chronologie", "etat": "systeme/etat", "contributions": "systeme/contributions",
@@ -40,6 +41,14 @@ MOVED_TABS = {("reglages", "apps"): "apps", ("sens", "courrier"): "courrier/rece
 
 #: une action à plus de champs s'ouvre sur sa propre page, pas en panneau
 PANEL_FIELDS_MAX = 2
+
+
+def per_row(spec: Any) -> bool:
+    """Une action qui porte sur une ligne précise (une tâche, une demande) : un champ caché requis que
+    seule la vue qui la pose sait remplir. Elle ne se propose pas en tête de page."""
+    if spec.fields is not None:
+        return False
+    return any(f.kind == "hidden" and f.required for f in describe(spec.args))
 #: un champ « sujet » propose au plus tant d'objets connus
 SUBJECT_CHOICES = 300
 
@@ -117,8 +126,10 @@ class Pages:
                     if spec is not None and offered(self.ui.kernel, spec, subject):
                         initial = b["initial"]
                         dynamic = dynamic_fields(self.ui.kernel, spec, subject, initial) if spec.fields else None
+                        # l'état d'abord, puis ce que la vue pose (une tâche précise, un statut visé)
                         view = action_view(spec, csrf=csrf, back=back, subject=subject,
-                                           initial=initial, dynamic=dynamic, subjects=self.subject_choices)
+                                           initial={**initial_values(self.ui.kernel, spec, subject), **initial},
+                                           dynamic=dynamic, subjects=self.subject_choices)
                         if b["title"]:
                             view["title"] = b["title"]
                             view["button"] = initial.get("_bouton") or b["title"]
@@ -144,9 +155,10 @@ class Pages:
         csrf, back = self.ui.csrf(request), self.back(request)
         out = []
         for a in specs:
-            if not offered(self.ui.kernel, a, subject):
+            if per_row(a) or not offered(self.ui.kernel, a, subject):
                 continue
-            view = action_view(a, csrf=csrf, back=back, subject=subject, subjects=self.subject_choices)
+            view = action_view(a, csrf=csrf, back=back, subject=subject, subjects=self.subject_choices,
+                               values=initial_values(self.ui.kernel, a, subject))
             if visible_fields(view) > PANEL_FIELDS_MAX:
                 view["page"] = f"{PREFIX}/action/{quote(a.key, safe='')}?" + urlencode(
                     {"retour": back, **({"sujet": subject} if subject else {})})
@@ -168,7 +180,7 @@ class Pages:
                                                  "warn")])
         dynamic = dynamic_fields(self.ui.kernel, spec, subject, {}) if spec.fields else None
         form = action_view(spec, csrf=self.ui.csrf(request), back=back, subject=subject, dynamic=dynamic,
-                           subjects=self.subject_choices)
+                           subjects=self.subject_choices, values=initial_values(self.ui.kernel, spec, subject))
         form["description"] = ""  # dite en sous-titre de la page
         home = self.dests.get(spec.section) if spec.section else next(
             (d for d in self.dests.values() if spec.subject and spec.subject in d.subjects), None)
@@ -383,9 +395,11 @@ class Pages:
         if not outcome.ok and outcome.errors:
             fixed = fixed_values(lists)
             dynamic = dynamic_fields(self.ui.kernel, spec, subject, fixed) if spec.fields else None
+            values = {k: v for k, v in single.items() if not k.startswith("_") and k not in fixed}
+            # un champ affiché mais absent de l'envoi est une case décochée : vide, pas son défaut
+            values.update({path: "" for path in lists.get(RENDERED, []) if path not in values and path not in fixed})
             form = action_view(spec, csrf=self.ui.csrf(request), back=back, subject=subject, initial=fixed,
-                               values={k: v for k, v in single.items() if not k.startswith("_") and k not in fixed},
-                               errors=outcome.errors, dynamic=dynamic, subjects=self.subject_choices)
+                               values=values, errors=outcome.errors, dynamic=dynamic, subjects=self.subject_choices)
             return self.render_page(request, title=spec.title, active="", status=400, crumbs=[("Retour", back)],
                                     blocks=[], head_actions=[], messages=[("danger", outcome.message)],
                                     panel=Panel("_action_page.html", {"form": form}))

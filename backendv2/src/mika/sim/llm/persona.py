@@ -67,6 +67,8 @@ def appraise(message: str) -> Tone:
 
 PARIS = ZoneInfo("Europe/Paris")
 _QUOTED = re.compile(r"« ([^»]+) »")
+#: la première tâche ouverte (à faire ou en cours) du plan montré pendant un pas
+_PLAN_OPEN = re.compile(r"^- (\d+)\. \[(?:à faire|en cours)\]", re.M)
 PROJECT_CODE = 'def bonjour(nom):\n    return f"Bonjour, {nom} !"\n'
 PROJECT_TEST = ('from bonjour import bonjour\n\nassert bonjour("Adrien") == "Bonjour, Adrien !"\n'
                 'print("tests : ok")\n')
@@ -113,7 +115,8 @@ class PersonaSimLLM:
         self.fail: dict[str, int] = {}
         #: comment elle travaille : « honest » (fait, puis dit fini), « liar » (dit fini sans
         #: rien faire), « stuck » (dit qu'elle bloque), « waits » (attend d'abord la réponse
-        #: de la personne concernée, puis travaille)
+        #: de la personne concernée, puis travaille), « plan » (coche la première tâche ouverte
+        #: de son plan, y ajoute une vérification, puis dit qu'elle continue)
         self.step_mode = "honest"
 
     def _rng(self, req: LLMRequest) -> random.Random:
@@ -206,6 +209,15 @@ class PersonaSimLLM:
             return self._call(req, ("report_step", {"verdict": "wait", "until_they_answer": True,
                                                    "wait_minutes": 1440,
                                                    "summary": "J'attends sa réponse avant d'aller plus loin."}))
+        if self.step_mode == "plan":
+            if done:
+                return self._call(req, ("report_step", {"verdict": "continue", "summary": "Une étape de plus."}))
+            first = _PLAN_OPEN.search(work)
+            calls = [("goal_task_add", {"text": "vérifier le résultat"})]
+            if first:
+                calls.insert(0, ("goal_task_update", {"task": int(first.group(1)), "status": "done",
+                                                      "note": "fait pendant ce pas"}))
+            return self._call(req, *calls)
         if self.step_mode == "stuck":
             return self._call(req, ("report_step", {"verdict": "blocked",
                                                    "summary": "Je n'y arrive pas : il me manque quelque chose."}))

@@ -142,10 +142,12 @@ class KernelPort:
             nxt = goals_work.next_step_at(goals[g.id], frame.state("goals"), frame) if g.id in goals else None
             projects.append({
                 "id": g.id, "title": texts.get(g.title_ref, ""), "status": "paused" if g.status in (goals_c.WAITING, goals_c.PAUSED)
-                else "active", "priority": "normal", "origin": "user" if g.authority == goals_c.USER else "self",
+                else "active", "priority": g.priority, "origin": "user" if g.authority == goals_c.USER else "self",
                 "emotion_policy": "off", "schedule_rule": g.schedule or "manual",
-                "next_run_at": local(nxt, tz).isoformat() if nxt else None, "tasks_total": g.max_steps,
-                "tasks_done": g.steps, "tasks_blocked": 0})
+                "next_run_at": local(nxt, tz).isoformat() if nxt else None,
+                # son plan de travail ; sans tâches écrites, ses pas (faits sur le budget) en tiennent lieu
+                "tasks_total": g.tasks_total or g.max_steps, "tasks_done": g.tasks_done if g.tasks_total else g.steps,
+                "tasks_blocked": g.tasks_blocked})
         actions = []
         for e in pending:
             gid = goal_of(e.context)

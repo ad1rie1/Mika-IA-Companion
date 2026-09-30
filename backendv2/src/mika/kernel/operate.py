@@ -83,3 +83,6 @@ class Done:
     go: Ref | None = None
     show: tuple[Any, ...] = ()
     decide: tuple[Decision, ...] = ()
+    #: aller sur la fiche de ce qui vient d'être créé : le type d'objet dont la clé est le
+    #: numéro du premier événement journalisé (« goal » : le projet qu'on vient de confier)
+    go_created: str = ""

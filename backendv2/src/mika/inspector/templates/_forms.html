@@ -2,7 +2,7 @@
 {% macro action_form(a, compact=False, button_only=False) -%}
 {% if not a %}<div class="note warn">Action non déclarée ici.</div>
 {% else %}
-<form method="post" action="{{ a.url }}" class="form action-card{{ ' card' if not compact }}"{% if a.confirm %} data-confirm="{{ a.confirm }}"{% endif %}>
+<form method="post" action="{{ a.url }}" class="form action-card{{ ' card' if not compact }}"{% if a.multipart %} enctype="multipart/form-data"{% endif %}{% if a.confirm %} data-confirm="{{ a.confirm }}"{% endif %}>
   <input type="hidden" name="csrf" value="{{ a.csrf }}"><input type="hidden" name="_op" value="{{ a.nonce }}">
   <input type="hidden" name="_retour" value="{{ a.back }}"><input type="hidden" name="_sujet" value="{{ a.subject }}">
   {% for k, v in a.fixed or [] %}<input type="hidden" name="_fixes" value="{{ k }}"><input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
@@ -56,6 +56,8 @@
       <textarea name="{{ f.path }}" id="{{ f.id }}"{{ described(f) }} rows="{{ f.rows or 5 }}"{% if f.kind == "yaml" %} class="mono" spellcheck="false"{% endif %}{{ ' readonly' if f.readonly }}{{ ' required' if f.required and not f.readonly }}>{{ f.value }}</textarea>
     {% elif f.kind == "secret" %}
       <input type="password" name="{{ f.path }}" id="{{ f.id }}"{{ described(f) }} autocomplete="new-password" placeholder="{{ 'défini — vide : inchangé' if f.has_value else 'non défini' }}"{{ ' readonly' if f.readonly }}>
+    {% elif f.kind == "file" %}
+      <input type="file" name="{{ f.path }}" id="{{ f.id }}"{{ described(f) }}{{ ' disabled' if f.readonly }}{{ ' required' if f.required and not f.readonly }}>
     {% elif f.kind == "datetime" %}
       <input type="datetime-local" name="{{ f.path }}" id="{{ f.id }}"{{ described(f) }} value="{{ f.value }}"{{ ' readonly' if f.readonly }}{{ ' required' if f.required and not f.readonly }}>
     {% elif f.kind == "slider" %}

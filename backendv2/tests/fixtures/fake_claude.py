@@ -11,6 +11,9 @@ est filtré par l'adaptateur) : une ligne ``SCENARIO: {json}``. Clés :
 - ``quota`` : l'utilisation d'abonnement annoncée (``rate_limit_event``) ;
 - ``report`` : ajouter au texte final ce que la CLI a reçu (argv, clés
   d'environnement, outils de chaque serveur).
+
+Comme la vraie CLI, un serveur MCP injoignable est annoncé « failed » dans
+``init`` (``mcp_servers``) et la session continue sans lui.
 """
 
 import json
@@ -53,21 +56,26 @@ def main():
     servers = {}
     if arg("--mcp-config"):
         servers = json.load(open(arg("--mcp-config"), encoding="utf-8"))["mcpServers"]
-    listed = {}
+    listed, states = {}, []
     for name, server in servers.items():
-        rpc(server, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
-                                   "clientInfo": {"name": "fake", "version": "0"}})
-        rpc(server, "notifications/initialized", mid=None)
-        listed[name] = [t["name"] for t in rpc(server, "tools/list")["result"]["tools"]]
+        # comme la vraie CLI : un serveur qu'elle ne joint pas est « failed », et elle continue sans lui
+        try:
+            rpc(server, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
+                                       "clientInfo": {"name": "fake", "version": "0"}})
+            rpc(server, "notifications/initialized", mid=None)
+            listed[name] = [t["name"] for t in rpc(server, "tools/list")["result"]["tools"]]
+            states.append({"name": name, "status": "connected"})
+        except (OSError, ValueError, KeyError):
+            states.append({"name": name, "status": "failed"})
     out({"type": "system", "subtype": "init", "tools": [f"mcp__{s}__{t}" for s, ts in listed.items() for t in ts],
-         "apiKeySource": "none"})
+         "mcp_servers": states, "apiKeySource": "none"})
     if "quota" in scenario:
         out({"type": "rate_limit_event", "rate_limit_info": {
             "status": "allowed", "unifiedWindows": {"five_hour": {"utilization": scenario["quota"], "resetsAt": 1}}}})
     if scenario.get("sleep"):
         time.sleep(scenario["sleep"])
     results = []
-    for batch in scenario.get("calls", []):
+    for batch in ([] if len(listed) < len(servers) else scenario.get("calls", [])):  # sans ses outils : rien à appeler
         out({"type": "assistant", "message": {"model": "fake-cc", "content": [{"type": "text", "text": "Je regarde."}]}})
         with ThreadPoolExecutor(len(batch)) as pool:
             replies = list(pool.map(

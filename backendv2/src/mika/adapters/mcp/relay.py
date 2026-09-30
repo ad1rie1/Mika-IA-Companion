@@ -118,6 +118,11 @@ class Relay:
     def __len__(self) -> int:
         return len(self._sessions)
 
+    def __bool__(self) -> bool:
+        # un relais sans session reste un relais : sans ceci, ``__len__`` le rendait faux et
+        # « relay or Relay() » en créait un autre, jamais monté (la CLI recevait 404)
+        return True
+
     @staticmethod
     def url(base: str, session: RelaySession, part: str) -> str:
         return f"{base.rstrip('/')}{PREFIX}/{session.id}/{part}"

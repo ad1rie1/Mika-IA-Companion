@@ -67,6 +67,14 @@ class Workshop(Protocol):
 
     async def write(self, goal: int, path: str, content: str) -> str: ...
 
+    async def write_bytes(self, goal: int, path: str, data: bytes) -> str:
+        """Un fichier tel quel (un dépôt de l'opérateur : une image, un tableau) ; rend son chemin relatif."""
+        ...
+
+    async def read_bytes(self, goal: int, path: str, limit: int) -> bytes:
+        """Les octets d'un fichier, au plus ``limit`` (un téléchargement depuis la console)."""
+        ...
+
     async def edit(self, goal: int, path: str, old: str, new: str) -> str: ...
 
     async def run(self, goal: int, argv: Sequence[str], *, timeout_s: float | None = None,

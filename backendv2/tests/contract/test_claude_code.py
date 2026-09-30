@@ -24,6 +24,7 @@ import json
 import os
 import stat
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -40,7 +41,7 @@ from mika.adapters.mcp.protocol import Tool
 from mika.adapters.mcp.relay import PREFIX, Relay
 from mika.kernel.clock import ManualClock
 from mika.kernel.faculty import ToolSpec
-from mika.ports.llm import LLMRequest, LLMResponse, Message, ToolDecl
+from mika.ports.llm import LLMRequest, LLMResponse, Message, PersonaRender, ToolDecl
 from mika.runtime.tools import ToolResult, declare, run_tool_loop
 
 FAKE = Path(__file__).resolve().parents[1] / "fixtures" / "fake_claude.py"
@@ -251,6 +252,56 @@ async def test_a_cli_that_is_not_logged_in_fails_and_the_gateway_falls_back(tmp_
         resp = await gateway.call(req)
     assert resp.text == "réponse de repli"
     assert [(t.backend, t.outcome) for t in gateway.traces] == [("cc", "error:ClaudeCodeError"), ("spare", "ok")]
+
+
+async def test_a_cli_that_cannot_reach_its_tools_fails_loudly_and_the_gateway_falls_back(tmp_path, cli):
+    """La vraie CLI continue sans un serveur MCP qui répond 404 : le modèle n'avait plus aucun outil et
+    racontait « report_step: continue » au lieu de l'appeler (un pas de projet, sans verdict, qui bloquait le
+    projet au troisième). Désormais l'appel échoue — le pas rend son crédit — ou passe au repli."""
+    mounted, stray = Relay(), Relay()  # la CLI reçoit une session d'un relais que le serveur ne monte pas
+    async with serving(mounted) as base:
+        be = backend(stray, base, cli, tmp_path)
+        req = LLMRequest(role="step", call_id="st-1#0", system_stable=scenario(calls=[[["mika", "t", {}]]], say="fini"),
+                         messages=(Message("user", "Avance d'un pas."),), tools=(ToolDecl("t", "t", {"type": "object"}),))
+        with pytest.raises(ClaudeCodeError, match="outils de Mika.*mika : failed"):
+            await be.complete(req)
+        gateway = Gateway({"cc": be, "spare": Spare()}, {"step": "cc"}, clock=ManualClock(0),
+                          backend_fallbacks={"cc": "spare"})
+        resp = await gateway.call(replace(req, call_id="st-2#0"))
+    assert resp.text == "réponse de repli"
+    assert len(stray) == 0 and not be._runs  # la session est refermée
+
+
+async def test_a_work_step_built_by_the_gateway_calls_its_tools_on_the_mounted_relay(tmp_path, cli):
+    """De bout en bout comme le serveur la bâtit : la passerelle (``build_gateway``) sur le relais monté, une
+    requête en forme de pas — ``report_step`` offert, appelé, exécuté par la boucle du runtime."""
+    from mika.adapters.llm.config import BackendSpec, LLMConfig, build_gateway
+
+    class ReportArgs(BaseModel):
+        verdict: str
+        summary: str
+
+    seen: list[tuple[str, str]] = []
+
+    async def report_step(args: ReportArgs, ctx: Any) -> str:
+        seen.append((args.verdict, args.summary))
+        return "C'est noté."
+
+    spec = ToolSpec(owner="goals", name="report_step", description="Conclure ce pas.", args=ReportArgs,
+                    handler=report_step, bundle="goals", episodes=frozenset({"STEP"}), max_calls_per_episode=1)
+    mounted = Relay()
+    async with serving(mounted) as base:
+        cfg = LLMConfig(backends={"cc": BackendSpec(kind="claude_code", model="", claude_bin=cli)},
+                        routes={"step": "cc"})
+        gateway = build_gateway(cfg, ManualClock(0), relay=mounted, relay_base=lambda: base, work_dir=tmp_path / "cc")
+        steps = [[["mika", "report_step", {"verdict": "continue", "summary": "le squelette est écrit"}]]]
+        req = LLMRequest(role="step", call_id="st-3#0", system_stable=scenario(calls=steps, say="{results}"),
+                         messages=(Message("user", "Avance d'un pas."),), tools=declare([spec]),
+                         persona=PersonaRender("Tu es Mika.", "persona-test", "compact"))
+        loop = await run_tool_loop(gateway, req, {spec.name: spec},
+                                   lambda s, call_id: SimpleNamespace(call_id=call_id), max_turns=4)
+    assert seen == [("continue", "le squelette est écrit")]  # appelé pour de vrai, pas raconté
+    assert loop.calls == [("report_step", True)] and "report_step=C'est noté." in loop.text
 
 
 async def test_a_worn_subscription_holds_background_calls_but_never_the_conversation(tmp_path, cli):

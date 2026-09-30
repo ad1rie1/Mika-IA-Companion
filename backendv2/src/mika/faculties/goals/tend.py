@@ -42,6 +42,7 @@ from mika.faculties.goals.faculty import (
     GOALS,
     Goal,
     GoalsState,
+    budget,
     desire,
     live,
     params,
@@ -198,7 +199,7 @@ def closures(s: GoalsState, frame: Frame) -> list[tuple[Goal, str, str]]:
             out.append((g, c.FAILED, "le modèle ne répond pas"))
         elif g.silent >= p.silent_before_blocked:
             out.append((g, c.STUCK, f"{g.silent} pas de suite sans rien conclure"))
-        elif g.max_steps and g.steps >= g.max_steps:
+        elif g.steps >= budget(g, p):
             out.append((g, c.STUCK, "à bout de pas sans en venir à bout"))
         elif g.kind == c.EXPLORATION and desire(g, now, p) < p.abandon_below:
             out.append((g, c.ABANDONED, "l'envie s'est usée"))

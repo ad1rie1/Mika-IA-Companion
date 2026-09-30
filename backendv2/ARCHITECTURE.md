@@ -51,7 +51,7 @@ Vérifié à chaque test (`lint-imports`) : une couche n'importe que celles d'en
 | `expression` | la balise d'émotion, le style, le murmure, la livraison |
 | `social` | rythmes de contact, profils, proximité ; saluer, relancer, se confier (ADR 0013, 0018) |
 | `agency` | le budget d'initiatives, la période réfractaire |
-| `goals` | rappels, explorations, projets : autorité, pas prouvés, attentes, carnets, atelier (ADR 0020) |
+| `goals` | rappels, explorations, projets : autorité, pas prouvés, attentes, carnets, atelier (ADR 0020) ; plan de travail, priorité, pilotage par l'opérateur (ADR 0030) |
 
 Les **plugins** ont la même forme et une confiance restreinte — des signaux, des preuves, des sections citées, jamais la parole forcée ; leur monde vit hors du journal : `email` (plusieurs boîtes IMAP/SMTP et leurs dossiers, sa voix par boîte, des brouillons qu'un opérateur lit et peut retoucher avant de les approuver, ADR 0027), `rss`, `camera`, `forge` (ses apps, hors processus, ADR 0023), `sensors` (`POST /api/perceptions`). Les pièces jointes sont perçues au bord (port `preprocess`).
 

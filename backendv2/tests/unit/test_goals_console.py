@@ -31,21 +31,27 @@ from mika.faculties.goals.faculty import GOAL_AMENDED, GOAL_PAUSED, GOAL_RESUMED
 from mika.kernel.clock import HOUR, MINUTE, US, instant, local
 from mika.kernel.events import Content, Origin
 from mika.kernel.inspect import (
+    ActionSlot,
     Badge,
     Block,
     Code,
+    Disclosure,
     Fields,
     Found,
+    Grid,
     Head,
     Meter,
     Note,
+    Prose,
     Ref,
     Row,
+    Section,
     Table,
     Text,
     Timeline,
+    Toolbar,
 )
-from mika.ports.workshop import RunResult
+from mika.ports.workshop import OutsideWorkshop, RunResult
 from mika.runtime.effects import with_content
 from mika.runtime.inspection import Inspection
 from mika.runtime.operations import offered, perform
@@ -86,6 +92,14 @@ class Atelier:
     async def edit(self, goal: int, path: str, old: str, new: str) -> str:
         return await self.write(goal, path, self.files[goal][path].replace(old, new))
 
+    async def write_bytes(self, goal: int, path: str, data: bytes) -> str:
+        if ".." in path.split("/") or path.startswith("/"):
+            raise OutsideWorkshop(f"hors de l'atelier : {path}")
+        return await self.write(goal, path, data.decode("latin-1"))
+
+    async def read_bytes(self, goal: int, path: str, limit: int) -> bytes:
+        return self.files[goal][path].encode("latin-1")[:limit]
+
     async def run(self, goal: int, argv, *, timeout_s=None, network: bool = False) -> RunResult:
         return RunResult(tuple(argv), 0, stdout="tests : ok\n")
 
@@ -119,6 +133,16 @@ def events(kernel, *types) -> list:
     return [with_content(mind, mind.decode(e)) for e in mind.store.read() if e.type in names]
 
 
+def nested(blocks) -> list:
+    """Les blocs, et ceux qu'ils contiennent (cartes, sections, détails dépliables), dans l'ordre."""
+    out: list = []
+    for b in blocks:
+        out.append(b)
+        if isinstance(b, (Grid, Section, Disclosure, Toolbar)):
+            out += nested(b.items)
+    return out
+
+
 def flat(blocks: list[Block]) -> str:
     out: list[str] = []
 
@@ -127,7 +151,7 @@ def flat(blocks: list[Block]) -> str:
             return v.text
         return "" if v is None else str(v)
 
-    for b in blocks:
+    for b in nested(blocks):
         if isinstance(b, Table):
             out += [b.title, *(cell(v) for r in b.rows for v in (r.cells if isinstance(r, Row) else r))]
             if not b.rows:
@@ -138,13 +162,15 @@ def flat(blocks: list[Block]) -> str:
             out += [b.title, *(f"{e.title} · {e.text} · {e.meta}" for e in b.entries)]
             if not b.entries:
                 out.append(b.empty)
-        elif isinstance(b, (Note, Code)):
+        elif isinstance(b, (Note, Code, Prose)):
             out.append(b.text)
+        elif isinstance(b, (Section, Disclosure)):
+            out.append(b.title)
     return "\n".join(out)
 
 
 def field(blocks: list[Block], name: str):
-    for b in blocks:
+    for b in nested(blocks):
         if isinstance(b, Fields):
             for k, v in b.pairs:
                 if k == name:
@@ -265,8 +291,10 @@ def test_the_goal_fiche_fresh_then_after_a_project_lived_a_step(tmp_path):
     assert isinstance(head, Head) and head.key == gid and head.title == "Un script de bonjour"
     assert [b.text for b in head.badges] == ["projet", "confié", "en cours"]
     facts = dict(head.facts)
-    assert facts["pas"] == f"0 / {params(None).project_steps}" and facts["envie"].startswith("engagement")
+    assert facts["avancement"].text == f"0 / {params(None).project_steps} pas" and "envie" not in facts
+    assert facts["prochain pas"] == "dès que possible"  # confié à l'instant, sans agenda : il peut partir
     assert isinstance(facts["pour qui"], Ref) and facts["pour qui"].key == "person/user_1"
+    assert head.default_tab == "resume"
     row = table(opened["vivants"], "Buts vivants").rows[0]
     assert isinstance(row, Row) and row.href == Ref.subject("goal", gid, f"#{gid}")
     assert [f.key for f in opened["by_number"]] == [gid] and [f.key for f in opened["by_title"]] == [gid]
@@ -275,10 +303,12 @@ def test_the_goal_fiche_fresh_then_after_a_project_lived_a_step(tmp_path):
     # la liste des projets : son état, son avancement, son agenda, ce qu'il a le droit de faire sortir
     project = table(opened["projets"], "Projets en cours").rows[0]
     assert project.href == Ref.subject("goal", gid, f"#{gid}") and project.cells[0].text == "Un script de bonjour"
-    assert project.cells[2].text == "en cours" and project.cells[3].text == f"0 / {params(None).project_steps}"
-    assert project.cells[6] == "dès qu'elle peut (manuel)" and project.cells[7].text == "sort avec ton accord"
-    # son cadre et sa politique : le cadre confié en entier, sa liberté, son rythme
+    assert project.cells[2].text == "en cours" and project.cells[3].text == "priorité normale"
+    assert project.cells[4].text == f"0 / {params(None).project_steps} pas" and project.cells[5] == "dès que possible"
+    assert project.cells[7] == "dès qu'elle peut (manuel)" and project.cells[8].text == "sort avec ton accord"
+    # son cadre et ses réglages : le formulaire qui le change d'abord, puis le cadre en entier, sa liberté, son rythme
     policy = opened["politique"]
+    assert isinstance(policy[0], ActionSlot) and policy[0].action == "goals.modifier"
     frame_text = next(b for b in policy if type(b).__name__ == "Prose")
     assert frame_text.text == "Écrire bonjour.py et le tester." and "sort avec ton accord" in flat(policy)
     assert "Son rythme" in flat(policy) and "Quand elle s'arrête" in flat(policy)
@@ -556,5 +586,8 @@ def test_the_badges_say_what_needs_the_operator(tmp_path):
     assert names == ["projets", "vivants", "clos"]
     assert waiting == (1, "attendent ton accord") and stuck == (1, "confiés : bloqués ou en échec")
     assert "attend ton accord" in flat(effects) and "installer requests" in flat(effects)
-    approvals = next(b for b in effects if isinstance(b, Fields))
-    assert approvals.pairs[0][1].kind == "local" and approvals.pairs[0][1].key == "/inspecteur/approbations"
+    # on décide sur place : la ligne en attente porte ses deux boutons, pour cette demande-là
+    row = table(effects, "Ce qu'il a voulu faire sortir de la machine").rows[0]
+    slots = [b for b in nested(row.detail) if isinstance(b, ActionSlot)]
+    assert [(b.action, dict(b.initial)["proposal"]) for b in slots] == [
+        ("goals.approuver", row.cells[0].key), ("goals.refuser", row.cells[0].key)]

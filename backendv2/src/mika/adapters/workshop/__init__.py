@@ -134,6 +134,20 @@ class BwrapWorkshop:
         target.write_text(str(content), encoding="utf-8")
         return self._rel(goal, target)
 
+    async def write_bytes(self, goal: int, path: str, data: bytes) -> str:
+        target = self.path(goal, path, write=True)
+        await self._init(goal)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(bytes(data))
+        return self._rel(goal, target)
+
+    async def read_bytes(self, goal: int, path: str, limit: int) -> bytes:
+        target = self.path(goal, path)
+        if not target.is_file():
+            raise FileNotFoundError(f"{path} n'existe pas dans l'atelier")
+        with target.open("rb") as f:
+            return f.read(max(0, limit))
+
     async def edit(self, goal: int, path: str, old: str, new: str) -> str:
         """Remplacement exact et unique : une édition « à peu près » donne un
         fichier plausible et faux."""

@@ -15,6 +15,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from starlette.datastructures import UploadFile
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 
@@ -22,6 +23,7 @@ from mika.adapters.web.accounts import Account, Accounts
 from mika.contracts import runtime as rt
 from mika.inspector import render
 from mika.inspector.catalog import Builtin, Destination, NavGroup, SettingsSection, SettingsTab, builtin_keys
+from mika.kernel import forms
 from mika.kernel.clock import US
 from mika.kernel.inspect import Vital
 from mika.runtime import health
@@ -257,21 +259,21 @@ class UI:
         acc = self.deps.accounts.session(request.cookies.get(SESSION_COOKIE))
         return acc if acc is not None and acc.operator else None
 
-    async def form(self, request: Request) -> dict[str, str] | None:
+    async def form(self, request: Request) -> dict[str, Any] | None:
         """Le formulaire, si son jeton correspond au cookie ; sinon ``None``."""
         got = await self.form_lists(request)
         return None if got is None else got[0]
 
-    async def form_lists(self, request: Request) -> tuple[dict[str, str], dict[str, list[str]]] | None:
-        """Comme ``form``, avec les champs répétés (cases à cocher)."""
+    async def form_lists(self, request: Request) -> tuple[dict[str, Any], dict[str, list[Any]]] | None:
+        """Comme ``form``, avec les champs répétés (cases à cocher) ; un fichier envoyé arrive en ``Upload``."""
         data = await request.form()
         token = str(data.get("csrf") or "")
         cookie = request.cookies.get(CSRF_COOKIE, "")
         if not cookie or not secrets.compare_digest(token, cookie):
             return None
-        lists: dict[str, list[str]] = {}
+        lists: dict[str, list[Any]] = {}
         for k, v in data.multi_items():
-            lists.setdefault(k, []).append(str(v))
+            lists.setdefault(k, []).append(await _upload(v) if isinstance(v, UploadFile) else str(v))
         return {k: vs[-1] for k, vs in lists.items()}, lists
 
     def guarded(self, fn: Callable[[Request], Awaitable[Response]]) -> Callable[[Request], Awaitable[Response]]:
@@ -297,3 +299,12 @@ def secure(response: Response) -> Response:
     for k, v in SECURITY_HEADERS.items():
         response.headers.setdefault(k, v)
     return response
+
+
+async def _upload(file: UploadFile) -> forms.Upload:
+    """Un fichier envoyé, lu au plus ``UPLOAD_MAX`` octets (au-delà : marqué trop gros, pas gardé)."""
+    data = await file.read(forms.UPLOAD_MAX + 1)
+    await file.close()
+    if len(data) > forms.UPLOAD_MAX:
+        return forms.Upload(name=file.filename or "", too_big=True)
+    return forms.Upload(name=file.filename or "", data=data)

@@ -73,7 +73,7 @@ class Subjects:
         title = head.title if isinstance(head, Head) else key
         home = next((d for d in self.pages.dests.values() if kind in d.subjects), None)
         crumbs = ([(home.label, f"{PREFIX}/{home.key}")] if home else []) + \
-            [(spec.plural, f"{PREFIX}/recherche?sorte={quote(kind)}")]
+            ([] if home and home.label == spec.plural else [(spec.plural, f"{PREFIX}/recherche?sorte={quote(kind)}")])
         if isinstance(head, Head) and head.back:
             crumbs = [(head.back.text or "Retour", render.href(head.back))]
         back = request.query_params.get("retour", "")

@@ -57,7 +57,7 @@ from tests.fixtures.mika import PARIS, at_paris, befriend, boot, build, connect,
 VIEWS = {("affect", "humeur"): "Humeur", ("affect", "postures"): "Postures", ("body", "rythme"): "Rythme",
          ("needs", "needs"): "Besoins", ("agency", "initiatives"): "Initiatives", ("goals", "vivants"): "Tous les buts vivants",
          ("goals", "clos"): "Clos", ("goals", "resume"): "Résumé", ("goals", "projets"): "Projets",
-         ("goals", "politique"): "Cadre et politique", ("goals", "decisions"): "Décisions"}
+         ("goals", "politique"): "Cadre et réglages", ("goals", "decisions"): "Décisions"}
 SERIES = {"affect.valence": (-1.0, 1.0), "affect.eveil": (-1.0, 1.0), "body.energie": (0.0, 1.0),
           "body.pression": (0.0, 1.0), "needs.social": (0.0, 1.0), "needs.expression": (0.0, 1.0),
           "needs.curiosite": (0.0, 1.0)}

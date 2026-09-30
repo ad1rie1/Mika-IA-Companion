@@ -75,6 +75,18 @@ def fixed_values(form: Mapping[str, Sequence[str]]) -> dict[str, str]:
             if k and not k.startswith("_")}
 
 
+def initial_values(kernel: Kernel, spec: ActionSpec, subject: str) -> dict[str, Any]:
+    """Les valeurs de départ d'un formulaire, lues dans l'état (``ActionSpec.initial``, qui reçoit
+    ``ports=`` s'il le déclare : un texte gardé hors de la tranche) ; rien si l'action n'en déclare
+    pas ou si la lecture échoue."""
+    if spec.initial is None:
+        return {}
+    frame = kernel.mind.frame()
+    fn = functools.partial(spec.initial, ports=kernel.ports) if _wants_ports(spec.initial) else spec.initial
+    got = call(fn, frame.state(spec.owner), frame, subject, label=f"valeurs de {spec.key}")
+    return dict(got) if isinstance(got, Mapping) else {}
+
+
 def dynamic_fields(kernel: Kernel, spec: ActionSpec, subject: str, fixed: Mapping[str, str]) -> tuple[Any, ...]:
     frame = kernel.mind.frame()
     fn = functools.partial(spec.fields, ports=kernel.ports) if _wants_ports(spec.fields) else spec.fields
@@ -179,10 +191,13 @@ async def perform(kernel: Kernel, key: str, form: Mapping[str, Sequence[str]], *
             await _audit(kernel, spec, by, subject, seqs, "superseded", correlation, nonce)
             return Outcome(False, decisions.MESSAGES[decisions.UNKNOWN], "warn")
         seqs += tuple(decided.seqs)
+    go = done.go
+    if go is None and done.go_created and seqs:
+        go = Ref.subject(done.go_created, str(seqs[0]), "")
     if deduped:
-        return Outcome(True, "Déjà fait.", "info", seqs=seqs, deduped=True, go=done.go)
+        return Outcome(True, "Déjà fait.", "info", seqs=seqs, deduped=True, go=go)
     await _audit(kernel, spec, by, subject, seqs, "done", correlation, nonce)
-    return Outcome(True, done.message or "Fait.", done.tone, seqs=seqs, go=done.go, show=done.show)
+    return Outcome(True, done.message or "Fait.", done.tone, seqs=seqs, go=go, show=done.show)
 
 
 #: les jetons de formulaire déjà servis, par noyau (le journal garde les autres : leur audit)

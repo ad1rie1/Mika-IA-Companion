@@ -88,6 +88,8 @@ class _Run:
     stderr: str = ""
     reaper: asyncio.TimerHandle | None = None
     tasks: list[asyncio.Task[Any]] = field(default_factory=list)
+    #: les serveurs MCP donnés à la CLI (``mcp.json``) : chacun doit être connecté
+    servers: tuple[str, ...] = ()
 
     def on_call(self, p: Pending) -> None:
         self.events.put_nowait(("call", p))
@@ -240,7 +242,9 @@ class ClaudeCodeBackend:
         _write_private(run.workdir / "system.txt", "\n\n".join(p for p in (req.system_stable, req.system_volatile)
                                                                   if p.strip()))
         if run.session is not None:
-            _write_private(run.workdir / "mcp.json", json.dumps(self.mcp_config(run.session, str(base))))
+            config = self.mcp_config(run.session, str(base))
+            run.servers = tuple(config["mcpServers"])
+            _write_private(run.workdir / "mcp.json", json.dumps(config))
         (run.workdir / "cwd").mkdir()
         self._runs[req.call_id] = run
         run.proc = await asyncio.create_subprocess_exec(
@@ -283,6 +287,9 @@ class ClaudeCodeBackend:
         self._schedule_stop(call_id)
         if kind == "exit":
             raise ClaudeCodeError(f"la CLI s'est arrêtée sans réponse (code {value}) : {run.stderr[-300:]}".strip())
+        if kind == "mcp":
+            raise ClaudeCodeError(f"la CLI n'a pas pu joindre les outils de Mika ({value}) : elle aurait répondu "
+                                  "sans ses mains")
         d: Mapping[str, Any] = value
         if d.get("is_error") or d.get("subtype") != "success":
             detail = d.get("result") or ", ".join(map(str, d.get("errors") or ())) or d.get("subtype")
@@ -306,7 +313,13 @@ class ClaudeCodeBackend:
             except ValueError:
                 continue
             kind = d.get("type")
-            if kind == "assistant":
+            if kind == "system" and d.get("subtype") == "init":
+                broken = _unreachable(d, run.servers)
+                if broken:
+                    # la vraie CLI continue sans un serveur MCP qui a échoué : le modèle
+                    # n'aurait alors aucun outil et raconterait ses appels au lieu de les faire
+                    run.events.put_nowait(("mcp", broken))
+            elif kind == "assistant":
                 message = d.get("message") or {}
                 run.model = message.get("model") or run.model
                 for block in message.get("content") or ():
@@ -396,6 +409,21 @@ def _trailing_results(messages: Sequence[Message]) -> list[Message]:
             break
         out.append(m)
     return out[::-1]
+
+
+#: ce qu'un serveur MCP peut encore devenir (la CLI peut annoncer l'état avant la fin de la poignée de main)
+REACHABLE = frozenset({"connected", "pending"})
+
+
+def _unreachable(init: Mapping[str, Any], servers: Sequence[str]) -> str:
+    """Les serveurs donnés à la CLI qu'elle n'a pas pu joindre, en mots (vide : tous
+    joints). Sans liste d'états dans ``init`` (une CLI qui ne la donne pas), rien à dire."""
+    listed = init.get("mcp_servers")
+    if not servers or not isinstance(listed, list):
+        return ""
+    states = {str(s.get("name")): str(s.get("status") or "") for s in listed if isinstance(s, Mapping)}
+    broken = [f"{name} : {states.get(name) or 'absent'}" for name in servers if states.get(name) not in REACHABLE]
+    return ", ".join(broken)
 
 
 def _write_private(path: Path, text: str) -> None:
