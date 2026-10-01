@@ -12,9 +12,9 @@ from mika.kernel.facts import FactFamily, FactKey
 
 OWNER = "transcript"
 
-#: Instant du dernier message reçu de cette poignée (0 si jamais).
+#: Instant du dernier message reçu de cette adresse (0 si jamais).
 LAST_FROM = FactFamily("transcript.last_from", arg=str, type=int)
-#: Instant du dernier message qu'elle a adressé à cette poignée (0 si jamais).
+#: Instant du dernier message qu'elle a envoyé à cette adresse (0 si jamais).
 LAST_TO = FactFamily("transcript.last_to", arg=str, type=int)
 #: Identifiant du dernier message du fil.
 HEAD = FactKey("transcript.head", type=int)

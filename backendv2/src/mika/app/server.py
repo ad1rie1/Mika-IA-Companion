@@ -43,14 +43,17 @@ from mika.app.delivery import Router
 from mika.app.mindport import KernelPort
 from mika.app.paths import PERSONA
 from mika.app.settings import SecretBox, Settings
+from mika.contracts import identity as identity_c
 from mika.contracts.self_ import PersonaDoc
 from mika.faculties.self import load
 from mika.inspector.app import routes
 from mika.inspector.mcp import PREFIX as CONSOLE_MCP_PREFIX
 from mika.inspector.mcp import console_app
 from mika.inspector.ui import InspectorDeps
+from mika.kernel.events import Origin
 from mika.kernel.prompt import Budget
 from mika.runtime.bootstrap import Kernel
+from mika.vocab.people import clean_display_name
 
 log = logging.getLogger("mika.server")
 
@@ -229,6 +232,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                                                                      live.inputs()))
         await live.settings.open()
         await live.accounts.open()
+        await register_accounts(kernel, live.accounts)  # ceux d'avant, et ceux créés hors ligne (mika account)
+        live.accounts.on_change = lambda: register_accounts(kernel, live.accounts)
         await live.calls.open()
         problems = await live.reload_llm()
         if not gateway.configured and not problems:
@@ -269,6 +274,25 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     return create_app(port, live.accounts, hub, web, lifespan=lifespan,
                       extra_routes=[*inspector, relay, console_mcp],
                       preprocess=preprocess, camera=camera, sensor_token=settings.sensors_token), live
+
+
+async def register_accounts(kernel: Kernel, accounts: Accounts) -> int:
+    """Chaque compte du système existe comme personne, sous son nom, dès sa création :
+    un ``identity.registered`` pour ceux dont l'identité diffère du compte (nouveau, renommé,
+    promu, désactivé) — comparer d'abord rend l'appel idempotent, et un renommage aller-retour
+    s'écrit quand même (une clé de dédoublonnage l'aurait avalé). Rend le nombre écrit."""
+    frame = kernel.mind.frame()
+    drafts = []
+    for a in accounts.all():
+        view = frame.get(identity_c.IDENTITY(a.handle))
+        name = clean_display_name(a.display_name)
+        operator = a.operator and a.active
+        if view.known and view.authenticated and view.name == name and view.operator == operator:
+            continue
+        drafts.append(identity_c.REGISTERED.draft(handle=a.handle, name=name, operator=a.operator, active=a.active))
+    if drafts:
+        await kernel.mind.append(drafts, emitter=identity_c.OWNER, correlation="comptes", origin=Origin.EXTERNAL)
+    return len(drafts)
 
 
 def relay_base(host: str, port: int) -> str:

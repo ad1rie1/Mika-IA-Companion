@@ -481,7 +481,7 @@ def test_an_exploration_and_its_step_read_in_the_list_and_the_detail(tmp_path):
             step = reported()[0]
             await kernel.lanes.join()
             gid = str(step.data.goal)
-            detail = [*show(kernel, "goals", "resume", subject=gid), *show(kernel, "goals", "pas", subject=gid),
+            detail = [*show(kernel, "goals", "resume", subject=gid), *show(kernel, "goals", "seances", subject=gid),
                       *show(kernel, "goals", "episodes", subject=gid)]
             after = {
                 "vivants": show(kernel, "goals", "vivants"),
@@ -489,7 +489,7 @@ def test_an_exploration_and_its_step_read_in_the_list_and_the_detail(tmp_path):
                 "rappel": show(kernel, "goals", "clos", sorte="rappel")}
             await kernel.forget("user_1")
             forgotten = [*show(kernel, "goals", "resume", subject=f"#{gid}"),
-                         *show(kernel, "goals", "pas", subject=gid)]
+                         *show(kernel, "goals", "seances", subject=gid)]
             return step, opened, detail, after, forgotten
         finally:
             await kernel.stop()
@@ -509,10 +509,10 @@ def test_an_exploration_and_its_step_read_in_the_list_and_the_detail(tmp_path):
     assert field(opened, "vivants") == 1
     # le détail : ses champs, ses pas, ses épisodes
     assert field(detail, "sorte") == "exploration" and "examen" in field(detail, "titre")
-    assert _cell(field(detail, "personne concernée")) == "« Adrien » (user_1)"
+    assert _cell(field(detail, "personne concernée")) == "Adrien"  # son nom, pas sa clé
     opening = field(detail, "ouvert")
     assert isinstance(opening, Ref) and opening.kind == "event" and opening.key == str(gid)
-    steps = table(detail, "Ses pas")
+    steps = table(detail, "Ses séances")
     first = dict(zip([c.label for c in steps.columns], _cells(steps.rows[-1]), strict=True))
     verdict = {"continue": "continuer", "done": "fini", "blocked": "bloquée", "wait": "attendre"}[step.data.verdict]
     assert _cell(first["verdict"]).startswith(verdict)
@@ -520,7 +520,7 @@ def test_an_exploration_and_its_step_read_in_the_list_and_the_detail(tmp_path):
     assert set(step.data.tools) == set(first["outils utilisés"].split(", ")) and "memory_search" in step.data.tools
     assert first[""] == Ref("episode", step.correlation, "épisode")
     episodes = table(detail, "Ses épisodes")
-    assert "pas de travail" in column(episodes, "épisode")
+    assert "séance de travail" in column(episodes, "épisode")
     assert step.correlation in [r.key for r in column(episodes, "Prompt")]
     assert all(isinstance(r, Ref) and r.kind == "episode" for r in column(episodes, "Prompt"))
     assert _cell(field(detail, "statut")) == "abouti"
@@ -533,7 +533,7 @@ def test_an_exploration_and_its_step_read_in_the_list_and_the_detail(tmp_path):
     assert field(forgotten, "titre") == "(oublié)" and field(forgotten, "résultat") == "(oublié)"
     assert field(detail, "titre") != "(oublié)"
     # le résumé du pas pouvait citer ses mots : l'oubli l'atteint aussi
-    summaries = column(table(forgotten, "Ses pas"), "résumé")
+    summaries = column(table(forgotten, "Ses séances"), "résumé")
     assert summaries and all(_cell(s) == "(oublié)" for s in summaries)
     assert "examen" not in flat(forgotten)
 

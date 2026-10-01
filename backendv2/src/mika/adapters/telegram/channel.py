@@ -1,7 +1,7 @@
 """Telegram : traduire des messages en perceptions, et livrer ce qu'elle dit.
 
 - **La liste blanche passe avant toute écriture** : un salon non autorisé
-  ne laisse aucune trace (ni perception, ni poignée) ; on le lui dit, une
+  ne laisse aucune trace (ni perception, ni adresse) ; on le lui dit, une
   fois de temps en temps, plutôt que de se taire.
 - **Une limite par compte** : le nom d'un robot se découvre, et chaque
   message coûte un tour complet. Au-delà, on le dit.
@@ -168,7 +168,7 @@ class TelegramChannel:
             return "ignored"
         if self.config.allowed_chats and m.chat_id not in self.config.allowed_chats:
             await self._say_once(m.chat_id, "refused", REFUSED)
-            return "refused"  # rien n'est écrit : ni perception, ni poignée
+            return "refused"  # rien n'est écrit : ni perception, ni adresse
         private = m.chat_type == "private"
         addressed = self.addressed(m)
         handle = handle_of(m.user_id)

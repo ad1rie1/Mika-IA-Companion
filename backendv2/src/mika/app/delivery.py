@@ -1,4 +1,4 @@
-"""Où part ce qu'elle dit : chaque énoncé vers le transport de sa poignée."""
+"""Où part ce qu'elle dit : chaque énoncé vers le transport de son adresse."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from mika.ports.delivery import Delivery
 
 
 class Router:
-    """Telegram pour ses poignées et ses salons ; le web pour le reste (y
+    """Telegram pour ses adresses et ses salons ; le web pour le reste (y
     compris les pensées à voix haute, adressées à personne)."""
 
     def __init__(self, web: Any, telegram: Any = None) -> None:

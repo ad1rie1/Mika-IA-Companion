@@ -171,7 +171,7 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
             rows = store.query_mind(f"SELECT id, at, user_text, reply_text FROM {c.CHUNKS_TABLE} "
                                     f"WHERE id IN ({marks}) AND room=?", (*chunk_ids, room))
         else:
-            # en privé : ses échanges privés — sur ses autres poignées seulement si sa fiche est ouverte
+            # en privé : ses échanges privés — sur ses autres adresses seulement si sa fiche est ouverte
             handles = tuple(frame.get(identity_c.HANDLES(person))) if aud.private_ok else ()
             handles = tuple(sorted({ep.target, *handles}))
             hmarks = ",".join("?" * len(handles))

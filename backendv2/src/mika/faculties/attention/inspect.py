@@ -335,7 +335,7 @@ def _person(s: AttentionState, frame: Frame, ctx: InspectContext) -> list[Block]
     keys = person_keys(frame, ctx.subject)
     before = _before(ctx)
     merged: list[Any] = []
-    for key in sorted(keys):  # une lecture par poignée, fusionnées : une page de 25, un curseur commun
+    for key in sorted(keys):  # une lecture par adresse, fusionnées : une page de 25, un curseur commun
         merged += ctx.events([c.EXPECTATION_MET, c.EXPECTATION_MISSED], HISTORY + 1, where=("person", key),
                              before=before)
     merged = sorted({e.seq: e for e in merged}.values(), key=lambda e: -e.seq)

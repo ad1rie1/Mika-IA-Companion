@@ -1,11 +1,11 @@
-"""``identity`` : qui est derrière chaque poignée, et ce que ça ouvre.
+"""``identity`` : qui est derrière chaque adresse, et ce que ça ouvre.
 
-- Une poignée parle **pour elle-même** : sur un transport qui prouve le
+- Une adresse parle **pour elle-même** : sur un transport qui prouve le
   compte (session, message privé Telegram), elle est sûre de sa continuité ;
   sur un transport qui ne prouve rien (navigateur sans compte), de rien.
 - Quelqu'un peut **dire être** une autre personne qu'elle connaît (« moi c'est
   Alice », sur un nouveau compte) : c'est une revendication, notée, qui
-  n'ouvre rien. Elle devient une **liaison** quand ce que la poignée dit
+  n'ouvre rien. Elle devient une **liaison** quand ce que l'adresse dit
   recoupe ce que seule Alice pouvait savoir (``corroboration``), ou quand un
   opérateur les relie. Une affirmation seule ne franchit jamais la barre.
 - Un **démenti** (« je ne suis pas Alice ») s'applique tout de suite ; il ne

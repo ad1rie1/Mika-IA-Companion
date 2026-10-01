@@ -62,7 +62,7 @@ async def page(ui: Any, request: Request, state: Mapping[str, Any]) -> dict[str,
     window, pager = paginate(accounts, ctx.pager(size=25))
     rows = tuple(Row((
         Ref("local", _account_url(compte=str(a.id)), a.username), a.full_name or Text("—", "muted"),
-        Ref.subject("person", a.handle, a.handle),
+        Ref.subject("person", a.handle, a.display_name),
         Badge("opérateur", "ok") if a.operator else Text("frontend seulement", "muted"),
         Badge("actif", "ok") if a.active else Badge("désactivé", "muted")),
         href=Ref("local", _account_url(compte=str(a.id)), ""), tone="" if a.active else "muted") for a in window)
@@ -73,7 +73,7 @@ async def page(ui: Any, request: Request, state: Mapping[str, Any]) -> dict[str,
                Stat("Créer un compte", "＋", href=Ref("local", _account_url(nouveau="1"), "créer")))),
         Table((Column("identifiant"), "nom affiché", Column("personne", "fit"), "rôle", "état"), rows,
               title=f"Comptes ({len(accounts)})", pager=pager, empty="Aucun compte.",
-              caption="La personne d'un compte (user_<n>) est celle qu'elle reconnaît quand ce compte lui parle ; "
+              caption="Chaque compte est une personne qu'elle connaît dès sa création, sous son nom affiché ; "
                       "sa fiche réunit tout ce qu'elle en sait.")]}
 
 
@@ -105,7 +105,8 @@ async def post(ui: Any, request: Request) -> tuple[Response | None, dict[str, An
     except ValueError:
         account_id = 0
     refused = await deps.accounts.update(account_id, operator=data.get("operator") == "on",
-                                         active=data.get("active") == "on", password=data.get("password") or None)
+                                         active=data.get("active") == "on", password=data.get("password") or None,
+                                         full_name=data.get("full_name") if "full_name" in data else None)
     if refused:
         return None, {"editing": str(account_id), "messages": [("danger", refused)]}, 400
     await operations.audit(ui.kernel, "console.comptes.modifier", by=account.handle, subject_kind="compte",

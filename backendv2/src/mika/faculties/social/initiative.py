@@ -55,7 +55,7 @@ def _silence_words(days: float) -> str:
 
 
 def _address(frame: Frame, person: str) -> str | None:
-    """Où lui écrire : une poignée présente d'abord, sinon une conversation
+    """Où lui écrire : une adresse présente d'abord, sinon une conversation
     privée où l'on peut lui écrire d'elle-même."""
     handles = frame.get(identity_c.HANDLES(person))
     present = [h for h in frame.get(presence_c.PRESENT) if h in handles]
@@ -66,7 +66,7 @@ def _address(frame: Frame, person: str) -> str | None:
 
 
 def _guard(frame: Frame, person: str) -> Guard:
-    """Si la personne écrit entre-temps (sur n'importe laquelle de ses poignées),
+    """Si la personne écrit entre-temps (sur n'importe laquelle de ses adresses),
     l'initiative est devancée : on lui répond, on ne la relance pas."""
     handles = frame.get(identity_c.HANDLES(person)) or (person,)
     return Guard("silence", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))

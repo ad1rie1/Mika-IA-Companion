@@ -9,7 +9,7 @@
   dans la tête, ce qu'elle a remarqué (habituation comprise), son récit et
   ses nuits — et les filtres réduisent vraiment ce qui est montré ;
 - l'onglet d'une personne ne montre que ce qui la concerne (toutes ses
-  poignées, jamais celles d'un autre) ;
+  adresses, jamais celles d'un autre) ;
 - l'estime est une série mesurée ;
 - l'oubli s'y voit : le souvenir d'une personne oubliée n'y est plus, une
   pensée ou un journal dont le texte a été effacé se lit « (oublié) ».
@@ -420,7 +420,7 @@ def test_person_tabs_show_only_what_concerns_that_person_on_all_her_handles(tmp_
     async def scenario(kernel):
         await connect(kernel, "user_2", "Alice")
         await connect(kernel, "user_3", "Bob")
-        # une poignée Telegram reliée à Alice par un opérateur
+        # une adresse Telegram reliée à Alice par un opérateur
         await kernel.mind.append([identity_c.LINKED.draft(handle="tg_42", person="user_2")], emitter="identity",
                                  correlation="op", origin=Origin.EXTERNAL)
         await remember(kernel, ("Alice aime les crêpes CANARI-A", ("user_2",)),
@@ -449,14 +449,14 @@ def test_person_tabs_show_only_what_concerns_that_person_on_all_her_handles(tmp_
 
     alice_mem, alice_att = shown["user_2"]
     text = text_of(alice_mem)
-    assert "CANARI-A" in text and "CANARI-TG" in text, "toutes ses poignées"
+    assert "CANARI-A" in text and "CANARI-TG" in text, "toutes ses adresses"
     assert "Alice est infirmière" in text and "Envoyer la recette à Alice" in text
     assert "CANARI-B" not in text and "pompier" not in text and "Rappeler Bob" not in text, "jamais un autre"
     assert "Il pleut" not in text
     assert table(alice_mem, "Ses souvenirs").title == "Ses souvenirs (2)"
     assert table(alice_mem, "Ses croyances").title == "Ses croyances (1)"
     assert table(alice_mem, "Ses promesses").title == "Ses promesses (1)"
-    # la poignée reliée lit la même personne
+    # l'adresse reliée lit la même personne
     assert text_of(shown["tg_42"][0]) == text
 
     thoughts = text_of(alice_att)

@@ -227,7 +227,7 @@ class Consolidate:
     @staticmethod
     def _sources(rows: list[tuple[Any, ...]], person_of: dict[str, str]) -> Any:
         """Les messages d'où vient un élément : ceux des personnes qu'il
-        concerne (toutes leurs poignées), sinon toute la fenêtre."""
+        concerne (toutes leurs adresses), sinon toute la fenêtre."""
         by_person: dict[str, list[int]] = {}
         for seq, _at, _role, handle, _text in rows:
             by_person.setdefault(person_of.get(handle, handle), []).append(int(seq))

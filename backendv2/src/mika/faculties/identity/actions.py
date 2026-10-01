@@ -1,5 +1,5 @@
 """Ce qu'un opérateur peut faire des identités depuis la console : relier une
-poignée à une personne, la délier, verser une preuve au registre.
+adresse à une personne, la délier, verser une preuve au registre.
 
 Chaque action rend des brouillons d'événements d'``identity`` (le moteur les
 journalise comme venant de l'extérieur, avec l'audit qui nomme l'opérateur) ;
@@ -47,7 +47,7 @@ class LinkArgs(BaseModel):
 
 
 def _resolve(s: IdentityState, frame: Frame, text: str) -> str:
-    """La personne que l'opérateur désigne : une clé connue (ou une poignée,
+    """La personne que l'opérateur désigne : une clé connue (ou une adresse,
     ramenée à sa personne), sinon un nom qu'une seule personne porte."""
     text = text.strip()
     known = people(s, frame)
@@ -75,23 +75,23 @@ def _can_link(s: IdentityState, frame: Frame, key: str) -> bool:
 
 
 @IDENTITY.action("relier", title="Relier à une personne", args=LinkArgs, emits=[c.LINKED], subject="handle",
-                 description="Cette poignée parlera pour la personne choisie (certitude « liée ») : sa mémoire, "
+                 description="Cette adresse parlera pour la personne choisie (certitude « liée ») : sa mémoire, "
                              "ses liens et sa fiche s'y attachent.",
                  available=_can_link, order=10)
 def _link(s: IdentityState, frame: Frame, args: LinkArgs, ctx: ActionContext) -> Done:
     handle = ctx.subject
     h = _handle(s, handle)
     if h is None:
-        raise Refused("Poignée inconnue.")
+        raise Refused("Adresse inconnue.")
     person = _resolve(s, frame, args.person)
     if person == handle:
         raise Refused("C'est elle-même.", {"person": "C'est déjà elle-même : choisis une autre personne."})
     if h.person == person:
-        raise Refused("Déjà reliée.", {"person": f"Cette poignée parle déjà pour {known_as(s, person)}."})
+        raise Refused("Déjà reliée.", {"person": f"Cette adresse parle déjà pour {known_as(s, person)}."})
     followers = sorted(k for k, o in s.handles.items() if o.person == handle)
     if followers:
-        raise Refused("D'autres poignées parlent pour elle.", {"person": (
-            f"D'autres poignées parlent pour elle ({', '.join(followers[:5])}) : relie-les d'abord à "
+        raise Refused("D'autres adresses parlent pour elle.", {"person": (
+            f"D'autres adresses parlent pour elle ({', '.join(followers[:5])}) : relie-les d'abord à "
             f"{known_as(s, person)}, ou délie-les.")})
     return Done(drafts=(c.LINKED.draft(handle=handle, person=person, by="operator"),),
                 message=f"« {handle} » parle désormais pour {known_as(s, person)}.")
@@ -110,15 +110,15 @@ def _can_unlink(s: IdentityState, frame: Frame, key: str) -> bool:
 
 
 @IDENTITY.action("delier", title="Délier", args=NoArgs, emits=[c.LINKED], subject="handle",
-                 description="Cette poignée ne parlera plus que pour elle-même ; sa revendication éventuelle "
+                 description="Cette adresse ne parlera plus que pour elle-même ; sa revendication éventuelle "
                              "tombe aussi.",
-                 confirm="Délier cette poignée ? Ce que la personne lui avait confié se referme.",
+                 confirm="Délier cette adresse ? Ce que la personne lui avait confié se referme.",
                  available=_can_unlink, order=20)
 def _unlink(s: IdentityState, frame: Frame, args: NoArgs, ctx: ActionContext) -> Done:
     handle = ctx.subject
     h = _handle(s, handle)
     if h is None or not h.person:
-        raise Refused("Cette poignée n'est reliée à personne d'autre qu'elle-même.")
+        raise Refused("Cette adresse n'est reliée à personne d'autre qu'elle-même.")
     return Done(drafts=(c.LINKED.draft(handle=handle, person=None, by="operator"),),
                 message=f"« {handle} » ne parle plus pour {known_as(s, h.person)}.")
 
@@ -173,8 +173,8 @@ def _check(s: IdentityState, h: Handle, handle: str, args: EvidenceArgs, now: in
     names = [n for n in (h.name, h.claim.name if h.claim else "") if n]
     if not any(same_name(name, n) for n in names):
         known = ", ".join(f"« {n} »" for n in names) or "aucun nom"
-        raise Refused("Nom inconnu pour cette poignée.", {"name": (
-            f"Elle ne connaît pas cette poignée sous ce nom ({known}) : un démenti n'y changerait rien.")})
+        raise Refused("Nom inconnu pour cette adresse.", {"name": (
+            f"Elle ne connaît pas cette adresse sous ce nom ({known}) : un démenti n'y changerait rien.")})
     return name
 
 
@@ -204,7 +204,7 @@ def _testify(s: IdentityState, frame: Frame, args: EvidenceArgs, ctx: ActionCont
     handle = ctx.subject
     h = _handle(s, handle)
     if h is None:
-        raise Refused("Poignée inconnue.")
+        raise Refused("Adresse inconnue.")
     if h.authenticated:
         raise Refused("Une session authentifiée prouve déjà qui écrit : aucune preuve n'y change rien.")
     name = _check(s, h, handle, args, frame.now)

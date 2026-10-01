@@ -76,7 +76,7 @@ class GoalOpened(Payload):
     #: la personne concernée au premier chef (qui a demandé le rappel, confié
     #: le projet, ou de qui parle la pensée d'où il vient)
     owner: str | None = None
-    #: où lui parler (la poignée d'où venait la demande)
+    #: où lui parler (l'adresse d'où venait la demande)
     address: str | None = None
     about: tuple[str, ...] = ()
     due: int | None = None

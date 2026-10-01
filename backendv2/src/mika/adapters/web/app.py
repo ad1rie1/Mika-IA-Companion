@@ -291,7 +291,7 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
 
 
 class _Session:
-    """Une connexion WebSocket : sa poignée, ses limites, son dialogue."""
+    """Une connexion WebSocket : son adresse, ses limites, son dialogue."""
 
     def __init__(self, websocket: WebSocket, port: MindPort, hub: Hub, account: Account | None,
                  preprocess: Preprocessor | None = None) -> None:

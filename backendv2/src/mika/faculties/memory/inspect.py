@@ -72,7 +72,7 @@ SENSITIVITY_TONE = {int(Sensitivity.NONE): "muted", int(Sensitivity.ANODYNE): ""
                     int(Sensitivity.PERSONAL): "info", int(Sensitivity.CONFIDENCE): "warn"}
 
 SEARCH = Param("q", "recherche", placeholder="un mot du texte")
-PERSON = Param("person", "personne", placeholder="un nom ou une poignée")
+PERSON = Param("person", "personne", placeholder="un nom ou une adresse")
 
 
 def number(value: float | None) -> str:
@@ -139,14 +139,14 @@ def _about_clause(keys: Sequence[str]) -> str:
 
 def person_keys(frame: Frame, key: str) -> set[str]:
     """Toutes les clés sous lesquelles cette personne peut figurer : la clé
-    donnée, la personne pour laquelle elle parle, et ses poignées."""
+    donnée, la personne pour laquelle elle parle, et ses adresses."""
     person = frame.get(identity_c.PERSON(key)) or key
     return {key, person, *frame.get(identity_c.HANDLES(person)), *frame.get(identity_c.HANDLES(key))}
 
 
 def _matching(frame: Frame, store: Any, text: str) -> list[str]:
     """Les personnes de sa mémoire qui répondent à ce qui a été tapé (une clé,
-    une poignée, un nom ou un morceau de nom)."""
+    une adresse, un nom ou un morceau de nom)."""
     known = [str(r[0]) for r in store.query_mind(
         f"SELECT DISTINCT json_each.value FROM {c.ITEMS_TABLE}, json_each({c.ITEMS_TABLE}.about)")]
     exact = person_keys(frame, text)
@@ -438,7 +438,7 @@ PERSON_KIND = "person"
 
 @MEMORY.inspect("memoire", title="Mémoire", subject=PERSON_KIND, hidden=not PERSON_KIND, order=50, params=[SEARCH],
                 description="Ce qu'elle garde de cette personne : souvenirs, croyances et promesses qui la "
-                            "concernent, sous l'une de ses poignées.")
+                            "concernent, sous l'une de ses adresses.")
 def _person(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
     if not ctx.subject:
         return [Note("Choisissez une personne : cet onglet se lit sur sa fiche.", tone="muted")]

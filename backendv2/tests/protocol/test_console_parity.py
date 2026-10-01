@@ -27,7 +27,7 @@ PARITY: dict[str, tuple[str, str]] = {
     "Mémoire › Journaux et rêves": ("/inspecteur/pensees/nuits", "Nuits"),
     "Mémoire › Récit de soi": ("/inspecteur/vie/soi", "Estime et récit"),
     "Mémoire › Thèmes et entités": ("/inspecteur/memoire/souvenirs", "Souvenirs"),
-    "Social › Identités": ("/inspecteur/identites/annuaire", "Poignées"),
+    "Social › Identités": ("/inspecteur/identites/annuaire", "Adresses"),
     "Social › Revendications": ("/inspecteur/identites/revendications", "Revendications"),
     "Social › Personnes": ("/inspecteur/personnes/personnes", "Personnes"),
     "Social › Engagements": ("/inspecteur/memoire/promesses", "Promesses"),
@@ -93,5 +93,5 @@ def test_the_person_fiche_gathers_what_v1_scattered(lived):
     assert fiche.status_code == 200
     tabs = client.portal.call(lambda: [v.owner for v in live.kernel.registry.inspectors if v.subject == "person"])
     assert len(set(tabs)) >= 6  # au moins six propriétaires y contribuent
-    for title in ("Synthèse", "Poignées", "Lien", "Échanges", "Mémoire", "Affect", "Buts", "Pensées"):
+    for title in ("Synthèse", "Adresses", "Lien", "Échanges", "Mémoire", "Affect", "Buts", "Pensées"):
         assert title in page, title

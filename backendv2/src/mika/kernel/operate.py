@@ -7,7 +7,7 @@ que le runtime ajoute au journal avec l'origine « extérieure », sous garde,
 dédoublonnés, suivis d'un événement d'audit. Refuser se dit par
 ``Refused(message, champs)``.
 
-Ce sont des actions d'exploitation (lier une poignée, confier un projet,
+Ce sont des actions d'exploitation (lier une adresse, confier un projet,
 recharger une app) — jamais une réécriture de ses souvenirs, de ses pensées ou
 de son humeur : une règle d'architecture fige la liste.
 """
@@ -36,7 +36,7 @@ class Refused(Exception):
 class ActionContext:
     """Ce que reçoit une action : qui agit, sur quel objet, et de quoi lire."""
 
-    #: la poignée de l'opérateur (``user_1``)
+    #: l'adresse de l'opérateur (``user_1``)
     by: str
     #: la clé de l'objet, sur une fiche (``""`` sinon)
     subject: str

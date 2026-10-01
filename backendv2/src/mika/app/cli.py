@@ -366,7 +366,7 @@ def _run(argv: list[str] | None) -> int:
     td.add_argument("chats", nargs="+", type=int)
     to = tsub.add_parser("owner", help="comptes Telegram propriétaires (identifiants d'utilisateur)")
     to.add_argument("users", nargs="+", type=int)
-    idp = sub.add_parser("identity", help="relier une poignée à une personne (serveur arrêté)")
+    idp = sub.add_parser("identity", help="relier une adresse à une personne (serveur arrêté)")
     isub = idp.add_subparsers(dest="id_cmd", required=True)
     il = isub.add_parser("link")
     il.add_argument("handle")

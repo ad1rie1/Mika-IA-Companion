@@ -76,7 +76,7 @@ def deviation(s: affect_c.StanceReading) -> float:
 
 
 def prompts_to(driver: Driver, handle: str) -> list[str]:
-    """Tout ce qui a été montré au modèle pour parler à cette poignée."""
+    """Tout ce qui a été montré au modèle pour parler à cette adresse."""
     return [r.system_stable + "\n".join(m.content for m in r.messages) for r in driver.llm.calls  # type: ignore[attr-defined]
             if r.role in ("reply", "initiative") and r.meta.get("target") == handle]
 
@@ -113,7 +113,7 @@ def day_of(driver: Driver, events: list[Any]) -> list[str]:
         elif e.type.name == "goals.opened":
             lines.append(f"{t}  · but ouvert ({e.data.kind}, {e.data.source}) : {e.data.title.text}")
         elif e.type.name == "goals.step_reported":
-            lines.append(f"{t}  · pas du but #{e.data.goal} : {e.data.verdict}"
+            lines.append(f"{t}  · séance du but #{e.data.goal} : {e.data.verdict}"
                          + (" (sans preuve)" if e.data.verdict == "done" and not e.data.proven else "")
                          + f" — {(e.data.summary.text or '')[:80]}")
         elif e.type.name == "goals.closed":

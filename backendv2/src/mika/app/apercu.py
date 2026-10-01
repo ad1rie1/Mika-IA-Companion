@@ -110,7 +110,7 @@ def export(out: Path) -> list[str]:
                     elif d.layout == "menu":  # un sous-menu : chacune de ses pages
                         page = client.get(base, follow_redirects=True).text
                         urls += re.findall(rf'class="submenu-item[^"]*" href="({re.escape(base)}/[\w-]+)"', page)
-            for kind in ("person", "handle"):  # la première personne connectée, et sa poignée
+            for kind in ("person", "handle"):  # la première personne connectée, et son adresse
                 urls += [f"/inspecteur/fiche/{kind}/user_1?onglet={quote(v.name)}"
                          for v in live.kernel.registry.inspectors if v.subject == kind]
             ended = client.portal.call(lambda: live.kernel.mind.store.latest(["episode.ended"], 1))

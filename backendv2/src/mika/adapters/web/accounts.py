@@ -12,6 +12,7 @@ import hmac
 import os
 import secrets
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -74,6 +75,12 @@ class Accounts:
 
     def __init__(self, store: Any) -> None:
         self.store = store
+        #: prévenu après chaque création ou modification (l'application en fait une personne)
+        self.on_change: Callable[[], Awaitable[Any]] | None = None
+
+    async def _changed(self) -> None:
+        if self.on_change is not None:
+            await self.on_change()
 
     async def open(self) -> None:
         def create(sql: Any) -> None:
@@ -113,6 +120,7 @@ class Accounts:
         await self.store.run_mind(insert)
         found = self.by_name(username)
         assert found is not None
+        await self._changed()
         return found[0]
 
     async def bootstrap(self, username: str, password: str) -> Account | None:
@@ -132,6 +140,7 @@ class Accounts:
         if not created:
             return None
         found = self.by_name(username)
+        await self._changed()
         return found[0] if found else None
 
     def authenticate(self, username: str, password: str) -> Account | None:
@@ -163,7 +172,7 @@ class Accounts:
         return [a for a in (self._account(r) for r in rows) if a is not None]
 
     async def update(self, account_id: int, *, operator: bool | None = None, active: bool | None = None,
-                     password: str | None = None) -> str | None:
+                     password: str | None = None, full_name: str | None = None) -> str | None:
         """Modifie un compte ; rend un refus en français, ou ``None``. Jamais de
         verrouillage : on ne retire pas le dernier opérateur actif."""
         target = next((a for a in self.all() if a.id == account_id), None)
@@ -180,16 +189,18 @@ class Accounts:
             if problems:
                 return " ".join(problems)
         hashed = hash_password(password) if password is not None else None
+        after_name = target.full_name if full_name is None else " ".join(full_name.split())[:120]
 
         def write(sql: Any) -> None:
-            sql.execute("UPDATE accounts SET operator=?, active=? WHERE id=?",
-                        (int(after_operator), int(after_active), account_id))
+            sql.execute("UPDATE accounts SET operator=?, active=?, full_name=? WHERE id=?",
+                        (int(after_operator), int(after_active), after_name, account_id))
             if hashed is not None:
                 sql.execute("UPDATE accounts SET password=? WHERE id=?", (hashed, account_id))
             if not after_active or hashed is not None:
                 sql.execute("DELETE FROM sessions WHERE account=?", (account_id,))
 
         await self.store.run_mind(write)
+        await self._changed()
         return None
 
     def session(self, key: str | None) -> Account | None:

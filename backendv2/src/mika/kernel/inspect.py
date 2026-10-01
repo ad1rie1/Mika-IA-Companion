@@ -451,14 +451,14 @@ def paginate(items: Sequence[Any], pager: Pager) -> tuple[Sequence[Any], Pager]:
 @dataclass(frozen=True, slots=True)
 class Head:
     """L'en-tête de la fiche d'un objet. ``key`` est la clé canonique (une
-    poignée rend la clé de sa personne : la console y redirige)."""
+    adresse rend la clé de sa personne : la console y redirige)."""
 
     key: str
     title: str
     subtitle: str = ""
     badges: tuple[Badge, ...] = ()
     facts: tuple[tuple[str, Cell], ...] = ()
-    #: d'autres clés du même objet (ses poignées) : recherche, oubli
+    #: d'autres clés du même objet (ses adresses) : recherche, oubli
     aliases: tuple[str, ...] = ()
     back: Ref | None = None
     automatic_actions: bool = True

@@ -26,7 +26,7 @@ Trois règles tiennent toute la console :
 | Elle | **Pensées et nuits** | « À quoi pense-t-elle ? » | pensées vivantes, ce qu'elle a remarqué, ce qu'elle attend, ses nuits (journal, rêves) |
 | Elle | **Mémoire** | « Que retient-elle ? » | souvenirs, croyances, promesses, relecture (consolidation) |
 | Ses relations | **Personnes** | « Qui connaît-elle ? » | personnes, liens (rythme, manque), présents |
-| Ses relations | **Identités** | « Qui parle derrière chaque poignée ? » | poignées, revendications, politique de confiance |
+| Ses relations | **Identités** | « Qui parle derrière chaque adresse ? » | adresses, revendications, politique de confiance |
 | Ses relations | **Conversations** | « Qu'a-t-on dit ? » | messages, questions sans réponse |
 | Son activité | **Décisions** | « Pourquoi parle-t-elle ou se tait-elle ? » | table de l'arbitre maintenant, ce qui tourne en ce moment, budget d'initiatives, ses choix, épisodes, échéances |
 | Son activité | **Buts** | « Qu'a-t-elle entrepris ? » | buts vivants, buts clos |

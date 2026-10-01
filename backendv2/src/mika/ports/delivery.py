@@ -25,7 +25,7 @@ class EmotionView:
 @dataclass(frozen=True, slots=True)
 class Delivery:
     key: str
-    target: str | None  # poignée ; None = personne en particulier (groupe commun)
+    target: str | None  # adresse ; None = personne en particulier (groupe commun)
     channel: str | None
     room: str | None
     text: str  # jetons prosodiques compris : la voix en a besoin

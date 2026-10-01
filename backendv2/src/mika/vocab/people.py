@@ -1,6 +1,6 @@
-"""Qui est une personne : identifiants réservés, poignées éphémères, noms.
+"""Qui est une personne : identifiants réservés, adresses éphémères, noms.
 
-Une poignée (``handle``) est l'adresse de transport de quelqu'un : ``user_7``
+Une adresse (``handle``) est ce par quoi quelqu'un lui écrit : ``user_7``
 (compte web authentifié), ``web_…`` (navigateur identifié sans compte),
 ``anon_…`` (une connexion, jetable), ``tg_…`` (Telegram). Une personne peut
 en avoir plusieurs ; la faculté ``identity`` les relie.
@@ -34,7 +34,7 @@ def is_ephemeral(handle: str | None) -> bool:
 
 
 def is_identifiable(handle: str | None) -> bool:
-    """Vaut-il la peine d'attacher une mémoire durable à cette poignée ?"""
+    """Vaut-il la peine d'attacher une mémoire durable à cette adresse ?"""
     return not is_internal(handle) and not is_ephemeral(handle)
 
 
@@ -43,7 +43,7 @@ def account_handle(account_id: int) -> str:
 
 
 def client_claim_allowed(handle: str | None) -> bool:
-    """Une poignée qu'un navigateur peut annoncer lui-même (``identify``)."""
+    """Une adresse qu'un navigateur peut annoncer lui-même (``identify``)."""
     if not handle or not _CLIENT_ID.match(handle):
         return False
     if handle in INTERNAL_IDS:

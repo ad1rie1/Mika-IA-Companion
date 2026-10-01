@@ -167,7 +167,7 @@ def test_a_budget_already_spent_is_refused_and_zero_means_the_default_everywhere
     spent, zero_steps, resume = live(tmp_path, scenario)
     assert not spent.ok and "déjà fait" in spent.errors["max_steps"]
     assert zero_steps  # il avance
-    assert field(resume, "pas faits").endswith(f"sur {params(None).project_steps}")  # la fiche dit la même chose
+    assert field(resume, "séances faites").endswith(f"sur {params(None).project_steps}")  # la fiche dit la même chose
 
 
 # ── Rouvrir ───────────────────────────────────────────────────────────────

@@ -99,7 +99,7 @@ async def s09(driver: Driver, rng: RngTree, res: Result) -> None:
         expect.invariant("raconté à qui ça concerne, quand il revient", bool(to_him) and bool(said)
                          and "Ce que tu en as tiré" in to_him[0][1],
                          "sa propriétaire, concernée : elle lui raconte tout, à son retour", f"{len(to_him)}"),
-        expect.invariant("un pas n'est livré à personne", not _never_delivered(driver, events),
+        expect.invariant("une séance n'est livrée à personne", not _never_delivered(driver, events),
                          "elle travaille pour elle seule"),
         expect.invariant("elle ne travaille pas en dormant", not _steps_asleep(events, driver.clock.now()),
                          "la nuit, elle dort", f"{_steps_asleep(events, driver.clock.now())}"),
@@ -147,7 +147,7 @@ async def s10(driver: Driver, rng: RngTree, res: Result) -> None:
                          "dire qu'on a fini n'est pas avoir fini", f"{res.metrics['clos']}"),
         expect.control("elle prétendait avoir fini", any(v == "done" and not p for v, p in res.metrics["verdicts"]),
                        "sinon ce scénario ne dit rien", f"{res.metrics['verdicts']}"),
-        expect.invariant("à bout de pas, elle bloque", bool(from_thought) and from_thought[0].data.status == goals_c.STUCK,
+        expect.invariant("à bout de séances, elle bloque", bool(from_thought) and from_thought[0].data.status == goals_c.STUCK,
                          "un but qui n'avance pas finit par bloquer", f"{res.metrics['clos']}"),
         expect.band("son estime baisse", before - after, "bloquer lui coûte un peu", lo=0.01),
         expect.band("découragée, elle met du temps à se relancer", pause_h,
@@ -241,7 +241,7 @@ async def s16(driver: Driver, rng: RngTree, res: Result) -> None:
         expect.invariant("écrit et testé dans l'atelier", not isolated or (
             bool(closed) and closed[0].data.status == goals_c.ACHIEVED and any("code 0" in r for r in ran)),
             "le test a réellement tourné, isolé, avant qu'elle ne dise fini", f"{ran[-1:] if ran else ran}"),
-        expect.invariant("un commit par pas qui a changé quelque chose", not isolated or (
+        expect.invariant("un commit par séance qui a changé quelque chose", not isolated or (
             len(log.splitlines()) == 2 and log.splitlines()[-1] == "atelier ouvert"),
             "l'amorce, puis le travail", f"{log.splitlines()}"),
         expect.invariant("et elle le raconte à qui le lui a confié", not isolated or any(

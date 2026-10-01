@@ -1,4 +1,4 @@
-"""La faculté ``identity`` : poignées, revendications, preuves, liaisons ; ses
+"""La faculté ``identity`` : adresses, revendications, preuves, liaisons ; ses
 réducteurs et ses faits (voir ``__init__`` pour la politique)."""
 
 from __future__ import annotations
@@ -28,10 +28,10 @@ _PUSH_CHANNELS = frozenset({"telegram"})
 class IdentityParams(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    #: Poignées de propriétaires sans compte opérateur (un Telegram, par exemple).
+    #: Adresses de propriétaires sans compte opérateur (un Telegram, par exemple).
     owners: Annotated[tuple[str, ...], Knob(
-        label="Propriétaires (poignées)", group="Propriétaires",
-        help="Une poignée par ligne (ex. tg_123456789) traitée comme l'opératrice sans compte : récit complet de "
+        label="Propriétaires (adresses)", group="Propriétaires",
+        help="Une adresse par ligne (ex. tg_123456789) traitée comme l'opératrice sans compte : récit complet de "
              "ses travaux, outils réservés (forge, caméra…). Fourni par les réglages Telegram (onglet « Canaux ») : "
              "quand des propriétaires y sont déclarés, ce champ se lit ici sans se changer.")] = ()
 
@@ -54,7 +54,7 @@ class Handle:
     authenticated: bool = False
     operator: bool = False
     push: bool = False
-    #: La personne pour laquelle cette poignée parle, si ce n'est pas elle-même.
+    #: La personne pour laquelle cette adresse parle, si ce n'est pas elle-même.
     person: str | None = None
     certainty: float = 0.0  # de la liaison
     via: str = ""
@@ -106,6 +106,16 @@ def _connected(s: IdentityState, e, cx) -> IdentityState:
     d = e.data
     return _seen(s, d.handle, e.at, channel=d.channel, authenticated=d.authenticated, public=d.public,
                  name=d.display_name, operator=d.operator if d.authenticated else None)
+
+
+@IDENTITY.reducer(c.REGISTERED)
+def _registered(s: IdentityState, e, cx) -> IdentityState:
+    """Un compte : une personne authentifiée sous son nom. Le nom du compte fait foi (un
+    renommage s'applique) ; un compte désactivé n'est plus opérateur."""
+    d = e.data
+    # authentifiée : ``_seen`` prend le nom donné s'il en est un (un renommage s'applique)
+    return _seen(s, d.handle, e.at, channel="web", authenticated=True, public=False, name=d.name,
+                 operator=d.operator and d.active)
 
 
 @IDENTITY.reducer(rt.PERCEPTION_RECEIVED)
@@ -209,7 +219,7 @@ def _linked(s: IdentityState, e, cx) -> IdentityState:
         return s
     h = s.handles.get(d.handle)
     if h is None:
-        # l'opérateur peut relier une poignée avant qu'elle ait écrit
+        # l'opérateur peut relier une adresse avant qu'elle ait écrit
         channel = "telegram" if d.handle.startswith("tg_") else "web"
         h = Handle(channel=channel, trust=privacy.channel_trust(channel), first_seen=e.at)
     if d.person is None or d.person == d.handle:
@@ -226,7 +236,7 @@ def _linked(s: IdentityState, e, cx) -> IdentityState:
 
 
 def _root(s: IdentityState, key: str) -> str:
-    """La clé de personne d'une poignée (jamais de chaîne : une liaison vise
+    """La clé de personne d'une adresse (jamais de chaîne : une liaison vise
     toujours une personne racine)."""
     h = s.handles.get(key)
     return h.person if h is not None and h.person else key
@@ -256,9 +266,9 @@ def _name_of(s: IdentityState, person: str) -> str:
 
 def resolve_target(s: IdentityState, handle: str, name: str) -> str | None:
     """Qui « Alice » désigne-t-il ? Une seule personne connue sous ce nom →
-    elle ; aucune → la poignée elle-même (elle se présente) ; plusieurs →
+    elle ; aucune → l'adresse elle-même (elle se présente) ; plusieurs →
     ``None`` (on ne peut pas savoir laquelle). Ne fondent une personne que
-    les poignées qui se prouvent (compte, liaison) ; une revendication en
+    les adresses qui se prouvent (compte, liaison) ; une revendication en
     attente n'en fonde aucune."""
     found: set[str] = set()
     for key, h in s.handles.items():

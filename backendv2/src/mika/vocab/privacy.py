@@ -8,7 +8,7 @@ Deux notions orthogonales :
   même compte est revenu ; un salon public ne prouve rien). Elle donne un
   plancher et impose un **plafond** : aucune conversation ne rend une
   affirmation faite en public aussi sûre qu'une connexion ;
-- la **certitude** est une propriété du lien poignée → personne ; elle bouge
+- la **certitude** est une propriété du lien adresse → personne ; elle bouge
   avec les preuves, bornée par le plafond du canal.
 
 La **divulgation** est graduée : chaque contenu sur autrui porte une

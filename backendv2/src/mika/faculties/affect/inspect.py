@@ -102,7 +102,7 @@ def _who_text(frame: Frame, handle: str) -> str:
 
 
 def _who(frame: Frame, handle: str, tab: str = "") -> Cell:
-    """La personne derrière une poignée, en lien vers sa fiche (si c'est une personne)."""
+    """La personne derrière une adresse, en lien vers sa fiche (si c'est une personne)."""
     person = frame.get(identity_c.PERSON(handle)) if handle else ""
     if not is_identifiable(person):
         return Text(_who_text(frame, handle), kind="muted")
@@ -157,14 +157,14 @@ def _arousal(s: AffectState, frame: Frame) -> float:
 # ── Humeur ────────────────────────────────────────────────────────────────
 
 
-#: une balise lue dans le fil : (n° du message, instant, poignée, émotion, intensité, sorte, texte)
+#: une balise lue dans le fil : (n° du message, instant, adresse, émotion, intensité, sorte, texte)
 Tag = tuple[int, int, str, str, float, str, str | None]
 
 
 def _declared_rows(ctx: InspectContext, handles: tuple[str, ...] | None = None, limit: int = DECLARED_PAGE,
                    before: int | None = None) -> list[Tag]:
     """Ses balises, lues dans le fil (ce qu'elle a vraiment écrit), de la plus
-    récente à la plus ancienne ; ``handles`` : envers ces poignées seulement ;
+    récente à la plus ancienne ; ``handles`` : envers ces adresses seulement ;
     ``before`` : avant ce message."""
     if ctx.store is None:
         return []
@@ -326,7 +326,7 @@ PERSON_KIND = "person"
 
 
 @AFFECT.inspect("affect", title="Affect", subject=PERSON_KIND, order=60,
-                description="Ce qu'elle ressent envers cette personne, sur toutes ses poignées.")
+                description="Ce qu'elle ressent envers cette personne, sur toutes ses adresses.")
 def _person_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Block]:
     person = ctx.subject
     if not person:
@@ -335,7 +335,7 @@ def _person_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Bloc
     cw = _clockwork(frame)
     common = ph.common_home(frame.now, p, cw)
     handles = tuple(sorted({person, *frame.get(identity_c.HANDLES(person))}))
-    # la posture vit sous la clé de la personne ; une poignée liée après coup a pu en garder une à son nom
+    # la posture vit sous la clé de la personne ; une adresse liée après coup a pu en garder une à son nom
     keys = [person, *(h for h in handles if h != person and h in s.stances)]
     blocks: list[Block] = []
     for key in keys:
@@ -357,7 +357,7 @@ def _person_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Bloc
                      sub="bien ancrée" if r.anchored else "pas encore ancrée" if r.anchor is not None else ""),
                 Stat("dernière balise", _swatch(last.emotion, last.intensity) if last else "—",
                      sub=ctx.when(stored.declared_at) if stored.declared_at else ""),
-            ), title="Envers elle" if key == person else f"Envers la poignée {key} (avant d'être reliée)"),
+            ), title="Envers elle" if key == person else f"Envers l'adresse {key} (avant d'être reliée)"),
             Note(prose.stance(r, common, p) or "Rien de particulier envers cette personne."),
         ]
     tags, pager = _declared_page(ctx, handles)
@@ -367,7 +367,7 @@ def _person_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Bloc
 
 
 def _tag_entry(at: int, handle: str, name: str, intensity: float, kind: str, text: str | None) -> Entry:
-    """Une balise envers quelqu'un : l'émotion, ce qu'elle a dit, sur quelle poignée."""
+    """Une balise envers quelqu'un : l'émotion, ce qu'elle a dit, sur quelle adresse."""
     emotion = A.emotion_of(name)
     if emotion is None:
         return Entry(at, name, _excerpt(text), meta=f"{_how(kind)} · {handle}")

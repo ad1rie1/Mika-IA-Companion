@@ -88,7 +88,7 @@ def _progress(g: Goal) -> str:
         return "tu commences à peine"
     if left <= 1:
         return "tu arrives au bout de ce que tu t'étais donné"
-    return f"pas {g.steps} sur {g.max_steps}"
+    return f"séance {g.steps} sur {g.max_steps}"
 
 
 TASK_MARKS = {c.TODO: "à faire", c.DOING: "en cours", c.TASK_DONE: "faite", c.TASK_BLOCKED: "bloquée"}
@@ -118,7 +118,7 @@ def _size(n: int) -> str:
     return f"{n} o" if n < 1024 else f"{n / 1024:.0f} Ko" if n < 1024 * 1024 else f"{n / 1024 / 1024:.1f} Mo"
 
 
-STEP_RULES = ("Conclus ce pas en appelant l'outil report_step : « continue » (tu reprendras), « done » (seulement si "
+STEP_RULES = ("Conclus cette séance en appelant l'outil report_step : « continue » (tu reprendras), « done » (seulement si "
               "tu as réellement fait quelque chose — un outil qui a produit un résultat), « blocked » (tu n'y "
               "arrives pas), ou « wait » (tu attends quelque chose). Tes outils s'appellent, ils ne s'écrivent "
               "pas : écrire « report_step » dans ta réponse ne fait rien.")

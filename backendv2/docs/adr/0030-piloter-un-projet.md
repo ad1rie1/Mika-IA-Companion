@@ -86,3 +86,20 @@ et un formulaire refusé remontrait ses cases à cocher inversées.
 
 Le simulateur gagne un mode de travail « plan ». L'onglet « Cadre et politique » s'appelle « Cadre et réglages » et
 garde sa clé (`politique`). Après la correction du relais, un serveur lancé avant doit être **redémarré**.
+
+**Complément — un compte est une personne.** Un projet confié depuis la console par un opérateur qui n'avait jamais
+parlé par le chat restait « user_1 » partout, et « Modifier le projet » était refusé à chaque envoi : la personne
+pré-remplie (lui-même) était « inconnue », faute de poignée. Désormais :
+- un événement `identity.registered` (poignée, nom, opérateur, actif) fait de chaque compte une personne
+  authentifiée, sous son nom affiché (nom complet, sinon identifiant) ;
+- l'application l'écrit au démarrage pour les comptes dont l'identité diffère (les anciens, ceux créés hors ligne par
+  `mika account`), puis après chaque création, amorce ou modification (`Accounts.on_change`). Comparer d'abord rend
+  l'appel idempotent, et un renommage aller-retour s'écrit quand même ;
+- un compte désactivé n'est plus propriétaire ;
+- le nom affiché se modifie dans Comptes ;
+- la recherche de personnes décrit par où on la connaît (« compte opérateur », « telegram ») au lieu de montrer des
+  poignées brutes ;
+- la fiche d'un but nomme la personne sans sa clé ;
+- une personne que le but a déjà, ou l'opérateur lui-même, ne se revalide pas.
+
+Tests : `tests/protocol/test_accounts_identity.py`.

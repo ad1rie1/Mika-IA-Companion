@@ -248,7 +248,7 @@ def test_the_goal_fiche_fresh_then_after_a_project_lived_a_step(tmp_path):
         fresh = {
             "head": ins.head("goal", "1"), "search": ins.search("goal", ""),
             "tabs": [v.name for v in ins.tabs("goal")], "person_tabs": [v.name for v in ins.tabs("person")],
-            "unknown": await tab(kernel, "resume", "999"), "nowhere": await tab(kernel, "pas", ""),
+            "unknown": await tab(kernel, "resume", "999"), "nowhere": await tab(kernel, "seances", ""),
             "atelier": await tab(kernel, "atelier", "12"),
             "vivants": await tab(kernel, "vivants", ""), "clos": await tab(kernel, "clos", ""),
             "projets": await tab(kernel, "projets", ""),
@@ -268,7 +268,7 @@ def test_the_goal_fiche_fresh_then_after_a_project_lived_a_step(tmp_path):
                 break
             await asyncio.sleep(MINUTE / US)
         await kernel.lanes.join()
-        after = {name: await tab(kernel, name, gid) for name in ("resume", "pas", "carnet", "effets", "episodes",
+        after = {name: await tab(kernel, name, gid) for name in ("resume", "seances", "carnet", "effets", "episodes",
                                                                "atelier", "decisions", "projets")}
         after["head"] = ins.head("goal", f"#{gid}")
         after["clos"] = await tab(kernel, "clos", "")
@@ -280,7 +280,7 @@ def test_the_goal_fiche_fresh_then_after_a_project_lived_a_step(tmp_path):
     fresh, opened, after, gid, reported, tz = live(tmp_path, scenario, mode="honest", ports={"workshop": atelier})
     # neuve : rien, et le dit
     assert fresh["head"] is None and fresh["search"] == []
-    assert fresh["tabs"] == ["resume", "politique", "pas", "carnet", "effets", "decisions", "episodes", "atelier"]
+    assert fresh["tabs"] == ["resume", "politique", "seances", "carnet", "effets", "decisions", "episodes", "atelier"]
     assert "aucun projet en cours" in flat(fresh["projets"])
     assert "buts" in fresh["person_tabs"]
     assert "Aucun but « 999 »" in flat(fresh["unknown"]) and fresh["unknown"][0].tone == "warn"
@@ -292,7 +292,7 @@ def test_the_goal_fiche_fresh_then_after_a_project_lived_a_step(tmp_path):
     assert [b.text for b in head.badges] == ["projet", "confié", "en cours"]
     facts = dict(head.facts)
     assert facts["avancement"].text == f"0 / {params(None).project_steps} pas" and "envie" not in facts
-    assert facts["prochain pas"] == "dès que possible"  # confié à l'instant, sans agenda : il peut partir
+    assert facts["prochaine séance"] == "dès que possible"  # confié à l'instant, sans agenda : il peut partir
     assert isinstance(facts["pour qui"], Ref) and facts["pour qui"].key == "person/user_1"
     assert head.default_tab == "resume"
     row = table(opened["vivants"], "Buts vivants").rows[0]
@@ -319,12 +319,12 @@ def test_the_goal_fiche_fresh_then_after_a_project_lived_a_step(tmp_path):
     assert field(resume, "titre") == "Un script de bonjour" and field(resume, "statut").text == "abouti"
     assert field(resume, "échéance").at == instant(datetime(2026, 10, 2, 18, 0, tzinfo=tz))  # en heure locale
     assert field(resume, "d'où il vient") == "operator"
-    pas = table(after["pas"], "Ses pas")
+    pas = table(after["seances"], "Ses séances")
     assert [c.text for c in pas.rows[0].cells[1:3]] == ["fini", "prouvé"]
     assert "ws_write" in pas.rows[0].cells[4] and pas.rows[0].cells[6].kind == "episode"
     assert "aucune consigne" in flat(after["carnet"])
     assert "aucune demande" in flat(after["effets"])
-    assert "pas de travail" in flat(after["episodes"])
+    assert "séance de travail" in flat(after["episodes"])
     # chaque épisode mène à son prompt exact, ses outils, ses appels, sa décision ; son pas y dit son résultat
     episode = table(after["episodes"], "Ses épisodes").rows[-1]
     assert episode.cells[6].params == (("onglet", "prompt"),) and episode.cells[9].params == (("onglet", "decision"),)
@@ -341,7 +341,7 @@ def test_the_goal_fiche_fresh_then_after_a_project_lived_a_step(tmp_path):
     assert [e.meta for e in history.entries] == ["c000001", "a000000 · sans pas associé"]
     assert history.entries[0].at == reported[0].at and history.entries[0].href.kind == "episode"
     assert history.entries[1].title == "atelier ouvert" and history.entries[1].at == 0
-    assert "Rien de changé depuis le dernier pas" in flat(atelier_tab)
+    assert "Rien de changé depuis la dernière séance" in flat(atelier_tab)
     closed = table(after["clos"], "Buts clos")
     assert closed.rows[0].cells[0] == Ref.subject("goal", gid, f"#{gid}") and closed.rows[0].cells[4].text == "abouti"
     assert "Un script de bonjour" in flat(after["person"]) and "pour elle ou lui" in flat(after["person"])
@@ -460,7 +460,7 @@ def test_every_operator_action_goes_through_the_engine(tmp_path):
             ("goals.reprendre", "done"), ("goals.consigne", "done"), ("goals.clore", "done")} <= audit
     assert all(e.data.by == "user_1" for e in ev[rt.OPERATED.name])
     assert all(e.data.subject == out["gid"] for e in ev[rt.OPERATED.name] if e.data.action == "goals.pause")
-    assert "Classe-les par date." in flat(out["carnet"]) and "« Adrien » (user_1)" in flat(out["carnet"])
+    assert "Classe-les par date." in flat(out["carnet"]) and "de Adrien" in flat(out["carnet"])
     assert field(out["resume_tab"], "statut").text == "annulé" and field(out["resume_tab"], "consignes reçues") == 1
 
 

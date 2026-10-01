@@ -57,7 +57,7 @@ TEMPERAMENT_FR = {
     "optimism": ("optimisme", "la valence du repos, les seuils d'ennui et de détresse"),
     "sociability": ("sociabilité", "l'horizon du besoin social, le rythme des relances"),
     "curiosity": ("curiosité", "l'horizon de la curiosité, le seuil d'ouverture d'une exploration"),
-    "perseverance": ("persévérance", "le budget de pas, la demi-vie de l'envie, les échecs avant blocage"),
+    "perseverance": ("persévérance", "le budget de séances, la demi-vie de l'envie, les échecs avant blocage"),
     "chronotype": ("chronotype", "le décalage du rythme circadien (0 = lève-tôt, 1 = oiseau de nuit)"),
 }
 DREAM_FR = {c.NIGHTMARE: "cauchemar", c.PLEASANT: "doux", c.ASSOCIATIVE: "étrange", c.MUNDANE: "banal"}

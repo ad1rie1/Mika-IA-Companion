@@ -223,7 +223,7 @@ def after(store: Any, person: str, after_id: int, limit: int) -> tuple[list[dict
 
 
 def thread_of(store: Any, person: str, limit: int, before: int | None = None, after: int = 0) -> list[dict[str, Any]]:
-    """Le fil avec une poignée, entre ``after`` et ``before`` (le message en
+    """Le fil avec une adresse, entre ``after`` et ``before`` (le message en
     cours de réponse n'y est pas : il arrive comme dernier tour)."""
     bound = before if before is not None else 2**62
     rows = store.query_mind(
@@ -234,7 +234,7 @@ def thread_of(store: Any, person: str, limit: int, before: int | None = None, af
 
 
 def oldest_after(store: Any, person: str, after: int, limit: int) -> list[dict[str, Any]]:
-    """Les ``limit`` plus anciens messages du fil d'une poignée après ``after``,
+    """Les ``limit`` plus anciens messages du fil d'une adresse après ``after``,
     dans l'ordre : ce qu'un résumé replie en premier."""
     rows = store.query_mind(
         f"SELECT {','.join(_COLUMNS)} FROM {c.THREAD_TABLE} WHERE person=? AND id>? ORDER BY id LIMIT ?",
@@ -250,7 +250,7 @@ def count_after(store: Any, person: str, after: int) -> int:
 
 def private_thread(store: Any, handles: Sequence[str], limit: int, before: int | None = None,
                    after: int = 0) -> list[dict[str, Any]]:
-    """Le fil privé avec une personne, toutes ses poignées confondues (ce
+    """Le fil privé avec une personne, toutes ses adresses confondues (ce
     qu'elle a dit dans un salon n'y est pas : hors de son contexte)."""
     bound = before if before is not None else 2**62
     marks = ",".join("?" * len(handles))
@@ -279,7 +279,7 @@ async def _thread(s: TranscriptState, frame: Frame, ports: Mapping[str, Any]) ->
     """Le fil avec l'interlocuteur. Ce que les autres lui ont dit en privé n'y
     est pas : cela passe par la mémoire, filtrée par la divulgation (un fil
     partagé verbatim ferait lire à Bob ce qu'Alice a écrit en privé). Dans un
-    salon, le fil du salon — tout le monde l'a lu. En privé, ses poignées
+    salon, le fil du salon — tout le monde l'a lu. En privé, ses adresses
     reliées s'ajoutent seulement si sa fiche est ouverte."""
     store = ports.get("store")
     ep = frame.episode
@@ -315,7 +315,7 @@ le ton de la relation. N'invente rien. Réponds seulement par le résumé."""
 
 def _turn(r: Mapping[str, Any], target: str) -> ChatTurn:
     """Un tour du fil d'un salon : ce que disent les autres est cité avec leur
-    nom d'affichage (poignée), pour qu'elle sache qui parle."""
+    nom d'affichage (adresse), pour qu'elle sache qui parle."""
     if r["role"] == "assistant":
         return ChatTurn("assistant", r["text"], id=r["id"])
     if r["person"] == target:
@@ -412,7 +412,7 @@ def _internal(r: Mapping[str, Any]) -> bool:
 
 
 def _who(frame: Frame, handle: str) -> Cell:
-    """La personne derrière une poignée, en lien vers sa fiche."""
+    """La personne derrière une adresse, en lien vers sa fiche."""
     if not handle or is_internal(handle):
         return Text("personne", "muted")
     person = frame.get(identity_c.PERSON(handle))
@@ -580,7 +580,7 @@ def _stats(store: Any, handles: Sequence[str]) -> Stats:
 
 
 @TRANSCRIPT.inspect("echanges", title="Échanges", subject="person", order=40,
-                    description="Ce qu'ils se sont dit, toutes ses poignées confondues, du plus récent au plus ancien.")
+                    description="Ce qu'ils se sont dit, toutes ses adresses confondues, du plus récent au plus ancien.")
 def _exchanges(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Block]:
     person = ctx.subject
     if not person:
@@ -603,11 +603,11 @@ def _exchanges(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Bl
 
 
 @TRANSCRIPT.inspect("fil", title="Fil", subject="handle", subject_param="handle", order=50,
-                    description="Les messages de cette poignée seulement.")
+                    description="Les messages de cette adresse seulement.")
 def _handle_thread(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Block]:
     handle = ctx.subject or ctx.param("handle")
     if not handle:
-        return [Note("Ouvre la fiche d'une poignée : Identités, puis la poignée.", tone="muted")]
+        return [Note("Ouvre la fiche d'une adresse : Identités, puis l'adresse.", tone="muted")]
     store = ctx.store
     if store is None:
         return _no_store()

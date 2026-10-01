@@ -1,7 +1,7 @@
 """La console en MCP : lire Mika depuis un agent (le Claude Code de sa propriétaire).
 
 Lecture seule, comme la console : les vues que les facultés déclarent
-(``@f.inspect``), les fiches d'objets (personne, poignée, but, app, mail…) et
+(``@f.inspect``), les fiches d'objets (personne, adresse, but, app, mail…) et
 la recherche. Aucune action d'opérateur ici (elles passent par la console, avec
 leur jeton à usage unique). Servie sous ``/mcp/console``, sur la boucle locale
 seulement, derrière un jeton d'opérateur (``mika mcp token``) ; sans jeton
@@ -41,7 +41,7 @@ TOOLS = (
     Tool("vue", "Lire une vue de la console, par sa clé (ex. « memory/souvenirs » avec {\"q\": \"chat\"}).",
          {"type": "object", "properties": {"cle": {"type": "string"}, "params": PARAMS}, "required": ["cle"]},
          read_only=True),
-    Tool("chercher", "Chercher un objet (personne, poignée, but, app, mail…) par un mot : rend les fiches trouvées.",
+    Tool("chercher", "Chercher un objet (personne, adresse, but, app, mail…) par un mot : rend les fiches trouvées.",
          {"type": "object", "properties": {"texte": {"type": "string"}, "sorte": {"type": "string"}},
           "required": ["texte"]}, read_only=True),
     Tool("fiche", "Lire la fiche d'un objet : son en-tête, ses onglets, et un onglet (le premier par défaut).",

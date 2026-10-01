@@ -58,7 +58,7 @@ class BodyParams(BaseModel):
     #: fatigue : sous ce niveau d'énergie, prendre la parole d'elle-même se fait plus rare
     tired_below: Annotated[float, Knob(
         label="Fatiguée sous (énergie)", group="Fatigue", lo=0, hi=1, step=0.05,
-        help="Sous ce niveau d'énergie, ses initiatives et ses pas de travail reculent de (seuil − énergie) × "
+        help="Sous ce niveau d'énergie, ses initiatives et ses séances de travail reculent de (seuil − énergie) × "
              "recul par unité.")] = 0.35
     tired_shift_per_unit: Annotated[float, Knob(
         label="Recul par unité de fatigue", group="Fatigue", lo=0, hi=50, step=0.5,
@@ -68,7 +68,7 @@ class BodyParams(BaseModel):
     #: rien la première demi-heure, puis une retenue qui s'efface en une demi-heure
     inertia_veto_us: Annotated[int, Knob(
         label="Au réveil : rien pendant", group="Réveil", lo=0, hi=3 * HOUR,
-        help="Après un réveil naturel, ni initiative ni pas de travail pendant cette durée — sauf une raison "
+        help="Après un réveil naturel, ni initiative ni séance de travail pendant cette durée — sauf une raison "
              "assez forte pour passer la barre de réveil (un rappel urgent).")] = 30 * 60 * 1_000_000
     inertia_us: Annotated[int, Knob(
         label="Au réveil : retenue pendant", group="Réveil", lo=0, hi=3 * HOUR,

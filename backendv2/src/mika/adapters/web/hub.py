@@ -1,8 +1,8 @@
 """Le concentrateur des connexions WebSocket, et la livraison vers elles.
 
-Une connexion appartient à une poignée ; une poignée peut avoir plusieurs
+Une connexion appartient à une adresse ; une adresse peut avoir plusieurs
 onglets. Ce qu'elle dit à quelqu'un ne part qu'aux connexions de cette
-poignée — une personne absente rattrape par l'historique, jamais par une
+adresse — une personne absente rattrape par l'historique, jamais par une
 diffusion à tout le monde. Seul ce qui n'est adressé à personne (une pensée
 à voix haute) part à tous.
 """

@@ -38,8 +38,8 @@ class Link:
 
 @dataclass(frozen=True, slots=True)
 class PresenceState:
-    links: FrozenDict[str, Link] = field(default_factory=FrozenDict)  # connexion → poignée
-    since: FrozenDict[str, int] = field(default_factory=FrozenDict)  # poignée → début de présence
+    links: FrozenDict[str, Link] = field(default_factory=FrozenDict)  # connexion → adresse
+    since: FrozenDict[str, int] = field(default_factory=FrozenDict)  # adresse → début de présence
 
 
 PRESENCE = Faculty("presence", state=PresenceState, init=lambda p: PresenceState(), volatile=True)
@@ -99,7 +99,7 @@ def _audience(link: Link, trust: ChannelTrust) -> Badge:
 
 
 def _who(frame: Frame, handle: str) -> tuple[str, Ref]:
-    """Le nom affiché, et le lien vers la fiche de la personne derrière la poignée."""
+    """Le nom affiché, et le lien vers la fiche de la personne derrière l'adresse."""
     view = frame.get(identity_c.IDENTITY(handle))
     person = frame.get(identity_c.PERSON(handle))
     name = frame.get(identity_c.IDENTITY(person)).name if person != handle else view.name
@@ -120,8 +120,8 @@ def _inspect(s: PresenceState, frame: Frame, ctx: InspectContext) -> list[Block]
                          link.channel or "—", Text(connection, "mono"), When(since) if since else "—",
                          _audience(link, view.trust)), href=person))
     return [
-        Stats((Stat("connexions vivantes", len(s.links)), Stat("poignées présentes", len(_handles(s))))),
-        Table(("personne", "poignée", "nom", "canal", "connexion", "présente depuis", "audience"), tuple(rows),
+        Stats((Stat("connexions vivantes", len(s.links)), Stat("adresses présentes", len(_handles(s))))),
+        Table(("personne", "adresse", "nom", "canal", "connexion", "présente depuis", "audience"), tuple(rows),
               title="Présents", pager=pager, empty="personne n'est connecté"),
     ]
 

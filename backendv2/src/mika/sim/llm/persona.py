@@ -201,7 +201,7 @@ class PersonaSimLLM:
         work = _section(req, "CE À QUOI TU TRAVAILLES")
         title = next((ln[len("But : "):] for ln in work.splitlines() if ln.startswith("But : ")), "ce but")
         if results and any("report_step" == m.name for m in req.messages if m.role == "tool"):
-            return self._out(req, "Voilà pour ce pas.")
+            return self._out(req, "Voilà pour cette séance.")
         if self.step_mode == "liar":
             return self._call(req, ("report_step", {"verdict": "done", "summary": "C'est fini, tout est réglé.",
                                                    "notable": 0.8}))
@@ -216,7 +216,7 @@ class PersonaSimLLM:
             calls = [("goal_task_add", {"text": "vérifier le résultat"})]
             if first:
                 calls.insert(0, ("goal_task_update", {"task": int(first.group(1)), "status": "done",
-                                                      "note": "fait pendant ce pas"}))
+                                                      "note": "fait pendant cette séance"}))
             return self._call(req, *calls)
         if self.step_mode == "stuck":
             return self._call(req, ("report_step", {"verdict": "blocked",

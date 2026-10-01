@@ -133,7 +133,7 @@ async def ws_run(args: RunArgs, ctx: Any) -> Any:
     return ToolResult(ok=result.ok, content=describe(result))
 
 
-@GOALS.tool("ws_diff", description="Relire ce qui a changé depuis le dernier pas.", args=PathArgs, bundle=BUNDLE,
+@GOALS.tool("ws_diff", description="Relire ce qui a changé depuis la dernière séance.", args=PathArgs, bundle=BUNDLE,
             episodes=[Kind.STEP])
 async def ws_diff(args: PathArgs, ctx: Any) -> str:
     got = _atelier(ctx)
@@ -142,7 +142,7 @@ async def ws_diff(args: PathArgs, ctx: Any) -> str:
     g, port = got
     diff = await port.diff(g.id)
     history = await port.log(g.id, 5)
-    return (diff or "(rien de changé depuis le dernier pas)") + ("\n\nHistorique :\n" + history if history else "")
+    return (diff or "(rien de changé depuis la dernière séance)") + ("\n\nHistorique :\n" + history if history else "")
 
 
 @GOALS.tool("ws_network", description="Proposer une commande qui a besoin du réseau (installer une dépendance, "
@@ -158,8 +158,8 @@ async def ws_network(args: NetworkArgs, ctx: Any) -> str:
         summary=Content.of(summary[:600], level=0), approval=g.approval, context=f"goal:{g.id}",
         about=tuple(x for x in (g.owner, *g.about) if x)))
     if g.approval:
-        return "Proposé : un opérateur doit l'approuver. Tu verras le résultat à un prochain pas."
-    return "Lancé : tu verras le résultat à un prochain pas."
+        return "Proposé : un opérateur doit l'approuver. Tu verras le résultat à une prochaine séance."
+    return "Lancé : tu verras le résultat à une prochaine séance."
 
 
 @GOALS.capability("networked", description="Lancer une commande avec le réseau dans l'atelier d'un but.")

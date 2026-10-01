@@ -185,7 +185,7 @@ class File:
 @dataclass(frozen=True, slots=True)
 class Sent:
     """Un mail parti de sa boîte : par elle (``by`` vide, après accord) ou par un
-    opérateur depuis la console (``by`` = sa poignée) — elle le sait (``email.sent``)."""
+    opérateur depuis la console (``by`` = son adresse) — elle le sait (``email.sent``)."""
 
     message_id: str
     to: str

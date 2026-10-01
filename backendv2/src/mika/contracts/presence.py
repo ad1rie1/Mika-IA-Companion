@@ -2,7 +2,7 @@
 
 Les connexions ne survivent pas à un redémarrage : la tranche repart vide et
 se remplit quand les clients se reconnectent. Les événements restent au
-journal pour les autres (``identity`` y apprend les poignées).
+journal pour les autres (``identity`` y apprend les adresses).
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ CONNECTED = event_type("presence.connected", OWNER, Connected, public=True, subj
 DISCONNECTED = event_type("presence.disconnected", OWNER, Disconnected, public=True, subjects=("handle",))
 ALL = (CONNECTED, DISCONNECTED)
 
-#: Les poignées connectées, triées.
-PRESENT = FactKey("presence.present", type=tuple, doc="poignées avec au moins une connexion vivante")
-#: Depuis quand cette poignée est là (début de la présence en cours), ou None.
+#: Les adresses connectées, triées.
+PRESENT = FactKey("presence.present", type=tuple, doc="adresses avec au moins une connexion vivante")
+#: Depuis quand cette adresse est là (début de la présence en cours), ou None.
 SINCE = FactFamily("presence.since", arg=str, type=int)

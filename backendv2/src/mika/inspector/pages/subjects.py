@@ -1,4 +1,4 @@
-"""Les fiches d'objets : une personne, une poignée, un but, une app… L'en-tête
+"""Les fiches d'objets : une personne, une adresse, un but, une app… L'en-tête
 vient de la faculté qui déclare le type d'objet ; chaque onglet, de la
 faculté qui l'y ajoute — la console n'en connaît aucune. Et la recherche, et
 l'oubli d'un objet qui est un sujet de contenus."""

@@ -24,6 +24,12 @@
   <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="update">
   <input type="hidden" name="account" value="{{ account.id }}">
   <fieldset class="group">
+    <legend>Qui c'est</legend>
+    <div class="field"><label for="acc-edit-full-name">Nom affiché (prénom, nom)</label>
+      <input id="acc-edit-full-name" name="full_name" value="{{ account.full_name }}" maxlength="80">
+      <span class="help">Le nom sous lequel elle connaît cette personne, partout dans la console et dans ce qu'elle dit (vide : l'identifiant, « {{ account.username }} »).</span></div>
+  </fieldset>
+  <fieldset class="group">
     <legend>Droits</legend>
     <div class="field"><label class="check"><input type="checkbox" name="operator"{{ ' checked' if account.operator }}> Opérateur</label>
       <span class="help">Ouvre la console et décide de ce qui sort de la machine.{% if account.operator and operators <= 1 %} C'est le dernier opérateur actif : il ne peut pas perdre ce droit.{% endif %}</span></div>

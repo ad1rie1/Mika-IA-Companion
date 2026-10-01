@@ -6,7 +6,7 @@ Ne comptent que des souvenirs et croyances :
 - sur la personne revendiquée, au moins **personnels** (l'anodin, tout le
   monde peut le savoir) ;
 - appris **d'elle, en privé** : chaque message source vient d'une de ses
-  poignées, hors d'un salon (un fait cité en groupe ne prouve rien) ;
+  adresses, hors d'un salon (un fait cité en groupe ne prouve rien) ;
 - que Mika **n'a répété à personne d'autre** (sinon d'autres le savent) ;
 - pas déjà utilisés comme preuve pour cette revendication.
 

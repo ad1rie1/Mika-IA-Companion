@@ -58,7 +58,7 @@ def _restraint_fr(frame: Frame) -> str:
 
 def _spoken(ctx: InspectContext) -> tuple[list[tuple[int, str, str | None, int]], Pager]:
     """Une page de ce qu'elle a dit d'elle-même (salutations et rappels compris),
-    et quand la personne lui a écrit depuis (0 : pas encore) : (instant, poignée,
+    et quand la personne lui a écrit depuis (0 : pas encore) : (instant, adresse,
     texte, réponse) ; ``?avant=`` : la suite, plus ancienne."""
     pager = Pager(param="avant", size=SPOKEN_PAGE)
     if ctx.store is None:

@@ -105,10 +105,10 @@ def parse_due(text: str, tz: ZoneInfo, now: int) -> int:
 
 
 def _known_person(frame: Frame, key: str, *also: str | None) -> str | None:
-    """La clé de personne de ``key`` si l'identité la connaît (une poignée vue, une
+    """La clé de personne de ``key`` si l'identité la connaît (une adresse vue, une
     propriétaire déclarée) ou si c'est l'une de ``also`` (l'opérateur lui-même, la
     personne que le but a déjà : un opérateur qui n'a jamais parlé par le chat n'a pas
-    de poignée, et n'en reste pas moins quelqu'un), sinon rien."""
+    d'adresse, et n'en reste pas moins quelqu'un), sinon rien."""
     person = frame.get(identity_c.PERSON(key))
     if frame.get(identity_c.HANDLES(person)) or person in frame.get(identity_c.OWNERS):
         return person
@@ -127,7 +127,7 @@ def _still(goal: int, wanted: tuple[str, ...]) -> Guard:
 
 PRIORITY_CHOICES = ((c.LOW, "basse"), (c.NORMAL, "normale"), (c.HIGH, "haute"), (c.URGENT, "urgente"))
 PRIORITY_HELP = ("Entre deux buts qui peuvent avancer, le plus prioritaire passe devant. Elle ne contourne ni "
-                 "le plafond de pas par heure, ni le sommeil.")
+                 "le plafond de séances par heure, ni le sommeil.")
 
 #: des agendas courants (proposés ; une autre règle se tape)
 SCHEDULES = (("manual", "dès qu'elle peut (manuel)"), ("interval:30m", "toutes les 30 min"),
@@ -143,7 +143,7 @@ class ConfideArgs(BaseModel):
                      Field(max_length=120)]
     details: Annotated[str, Knob(label="Le cadre", widget="textarea", group="Le projet", advanced=False, order=20,
                                  help="Ce qu'il faut faire, comment, et ce qui est hors sujet. Elle le lit à chaque "
-                                      "pas et ne le modifiera jamais ; tu pourras ajouter des consignes ensuite."),
+                                      "séance et ne le modifiera jamais ; tu pourras ajouter des consignes ensuite."),
                        Field(max_length=2000)] = ""
     owner: Annotated[str, Knob(label="Pour qui", widget="subject", subject="person", group="Le projet",
                                advanced=False, order=30,
@@ -159,8 +159,8 @@ class ConfideArgs(BaseModel):
                                   help="Quand elle y avance : « manual » dès qu'elle peut, « interval:2h » toutes "
                                        "les deux heures, « cron:0 9 * * MON-FRI » les jours ouvrés à 9 h."),
                         Field(max_length=120)] = "manual"
-    max_steps: Annotated[int, Knob(label="Pas au plus", group="Son rythme", advanced=False, order=60,
-                                   help="Combien de pas de travail au plus avant de s'arrêter. 0 : la valeur par "
+    max_steps: Annotated[int, Knob(label="Séances au plus", group="Son rythme", advanced=False, order=60,
+                                   help="Combien de séances de travail au plus avant de s'arrêter. 0 : la valeur par "
                                         "défaut (Configuration › Comportement › Buts)."),
                          Field(ge=0, le=50)] = 0
     approval: Annotated[bool, Knob(label="Ce qui sort de la machine attend ton accord", group="Sa liberté",
@@ -172,7 +172,7 @@ class ConfideArgs(BaseModel):
 
 
 @GOALS.action("confier", title="Confier un projet", args=ConfideArgs, emits=[c.GOAL_OPENED], section="buts",
-              order=10, description="Un travail qu'elle mènera par pas, dans son atelier, avec ce cadre.")
+              order=10, description="Un travail qu'elle mènera par séances, dans son atelier, avec ce cadre.")
 def _confide(s: GoalsState, frame: Frame, args: ConfideArgs, ctx: ActionContext) -> Done:
     errors: dict[str, str] = {}
     if not args.title.strip():
@@ -202,7 +202,7 @@ def _confide(s: GoalsState, frame: Frame, args: ConfideArgs, ctx: ActionContext)
         title=args.title, details=args.details, owner=owner, address=ctx.by if owner == me and ctx.by else None,
         rule=rule, approval=args.approval, max_steps=args.max_steps or p.project_steps, source="operator",
         level=level, due=due, priority=args.priority)
-    return Done(drafts=(draft,), message="Projet confié : elle y avancera par pas, dans son atelier.",
+    return Done(drafts=(draft,), message="Projet confié : elle y avancera par séances, dans son atelier.",
                 go_created="goal")
 
 
@@ -252,7 +252,7 @@ def _resume(s: GoalsState, frame: Frame, args: NoArgs, ctx: ActionContext) -> Do
 
 class InstructionArgs(BaseModel):
     instruction: Annotated[str, Knob(label="Consigne", widget="textarea",
-                                     help="elle la lira à son prochain pas ; la plus récente prime"),
+                                     help="elle la lira à sa prochaine séance ; la plus récente prime"),
                            Field(min_length=1, max_length=2000)]
 
 
@@ -271,7 +271,7 @@ def _amend(s: GoalsState, frame: Frame, args: InstructionArgs, ctx: ActionContex
         raise Refused("La consigne est vide.", {"instruction": "valeur requise"})
     draft = GOAL_AMENDED.draft(goal=g.id, instruction=Content.of(text, level=g.sensitivity), by=ctx.by,
                                owner=g.owner, about=g.about)
-    return Done(drafts=(draft,), message="Consigne ajoutée : elle la lira à son prochain pas.",
+    return Done(drafts=(draft,), message="Consigne ajoutée : elle la lira à sa prochaine séance.",
                 guard=_still(g.id, c.LIVE_STATUSES))
 
 
@@ -286,7 +286,7 @@ def _closable(s: GoalsState, frame: Frame, key: str) -> bool:
 @GOALS.action("clore", title="Clore", args=NoArgs, emits=[c.GOAL_CLOSED], subject="goal", order=90,
               available=_closable, danger=True,
               confirm="Clore ce but ? Elle n'y travaillera plus (il sera « annulé », sans qu'elle en soit affectée).",
-              description="Le but est annulé : plus de pas, plus de rappel. Elle n'en tire ni fierté ni frustration.")
+              description="Le but est annulé : plus de séance, plus de rappel. Elle n'en tire ni fierté ni frustration.")
 def _close(s: GoalsState, frame: Frame, args: NoArgs, ctx: ActionContext) -> Done:
     g = _target(s, ctx)
     return Done(drafts=(closing(ctx, g, c.CANCELLED, reason=CANCELLED_REASON),), message="But clos (annulé).",
@@ -319,7 +319,7 @@ class ModifyArgs(BaseModel):
                                help="Ce qu'elle doit mener à bout, en quelques mots.")] = Field(max_length=120)
     details: Annotated[str, Knob(label="Le cadre", widget="textarea", group="Le projet", advanced=False, order=20,
                                  help="Ce qu'il faut faire, comment, et ce qui est hors sujet. Elle relit le cadre à "
-                                      "chaque pas ; elle ne le change jamais elle-même.")] = Field(default="",
+                                      "chaque séance ; elle ne le change jamais elle-même.")] = Field(default="",
                                                                                                   max_length=2000)
     owner: Annotated[str, Knob(label="Pour qui", widget="subject", subject="person", group="Le projet",
                                advanced=False, order=30, help="La personne pour qui elle travaille. Vide : pour toi.")
@@ -330,7 +330,7 @@ class ModifyArgs(BaseModel):
                                   advanced=False, order=50,
                                   help="« manual » dès qu'elle peut, « interval:2h », « cron:0 9 * * MON-FRI ».")
                         ] = Field(default="manual", max_length=120)
-    max_steps: Annotated[int, Knob(label="Pas au plus", group="Son rythme", advanced=False, order=60,
+    max_steps: Annotated[int, Knob(label="Séances au plus", group="Son rythme", advanced=False, order=60,
                                    help="Plus que ceux qu'elle a déjà faits. 0 : la valeur par défaut.")
                          ] = Field(default=0, ge=0, le=200)
     priority: Annotated[str, Knob(label="Priorité", choices=PRIORITY_CHOICES, group="Son rythme", advanced=False,
@@ -366,8 +366,8 @@ def _steps_left(g: Goal, max_steps: int, p: Any) -> str:
 
 @GOALS.action("modifier", title="Modifier le projet", args=ModifyArgs, emits=[GOAL_REFRAMED], subject="goal",
               order=5, available=_confided, initial=_modify_initial,
-              description="Son titre, son cadre, pour qui, son rythme et sa liberté. Elle lira le nouveau cadre à son "
-                          "prochain pas ; ce qu'elle a déjà fait reste.")
+              description="Son titre, son cadre, pour qui, son rythme et sa liberté. Elle lira le nouveau cadre à sa "
+                          "prochaine séance ; ce qu'elle a déjà fait reste.")
 def _modify(s: GoalsState, frame: Frame, args: ModifyArgs, ctx: ActionContext) -> Done:
     g = _target(s, ctx)
     ports = ctx.ports or {}
@@ -427,7 +427,7 @@ def _modify(s: GoalsState, frame: Frame, args: ModifyArgs, ctx: ActionContext) -
     new_owner = owner if changes.get("set_owner") else g.owner
     about = (new_owner,) if changes.get("set_owner") and new_owner else g.about
     draft = GOAL_REFRAMED.draft(goal=g.id, by=ctx.by, owner=new_owner, about=about, **changes)
-    return Done(drafts=(draft,), message="Projet modifié : elle lira son nouveau cadre à son prochain pas.",
+    return Done(drafts=(draft,), message="Projet modifié : elle lira son nouveau cadre à sa prochaine séance.",
                 guard=_still(g.id, c.LIVE_STATUSES))
 
 
@@ -526,8 +526,8 @@ def _advanceable(s: GoalsState, frame: Frame, key: str) -> bool:
 
 @GOALS.action("avancer", title="Avancer maintenant", args=NoArgs, emits=[GOAL_NUDGED], subject="goal", order=8,
               available=_advanceable,
-              description="Son prochain pas n'attend ni son agenda ni l'espacement (ni une attente en cours) ; il "
-                          "reste sous le plafond de pas par heure, et jamais pendant son sommeil.")
+              description="Sa prochaine séance n'attend ni son agenda ni l'espacement (ni une attente en cours) ; elle "
+                          "reste sous le plafond de séances par heure, et jamais pendant son sommeil.")
 def _advance(s: GoalsState, frame: Frame, args: NoArgs, ctx: ActionContext) -> Done:
     g = _target(s, ctx)
     draft = GOAL_NUDGED.draft(goal=g.id, by=ctx.by, owner=g.owner, about=g.about)
@@ -538,11 +538,11 @@ def _advance(s: GoalsState, frame: Frame, args: NoArgs, ctx: ActionContext) -> D
 
 
 class ReopenArgs(BaseModel):
-    extra: Annotated[int, Knob(label="Pas de plus", advanced=False, order=10,
-                               help="Combien de pas elle a encore, au moins, à partir d'où elle en est.")
+    extra: Annotated[int, Knob(label="Séances de plus", advanced=False, order=10,
+                               help="Combien de séances elle a encore, au moins, à partir d'où elle en est.")
                      ] = Field(default=4, ge=1, le=50)
     instruction: Annotated[str, Knob(label="Consigne (facultative)", widget="textarea", advanced=False, order=20,
-                                     help="Ce qu'elle doit faire autrement cette fois ; elle la lira au prochain pas.")
+                                     help="Ce qu'elle doit faire autrement cette fois ; elle la lira à la prochaine séance.")
                            ] = Field(default="", max_length=2000)
 
 
@@ -553,7 +553,7 @@ def _reopenable(s: GoalsState, frame: Frame, key: str) -> bool:
 
 @GOALS.action("rouvrir", title="Rouvrir", args=ReopenArgs, emits=[GOAL_REOPENED, GOAL_AMENDED], subject="goal",
               order=12, available=_reopenable,
-              description="Il reprend là où il s'était arrêté, avec quelques pas de plus. Elle n'en ressent rien : ni "
+              description="Il reprend là où il s'était arrêté, avec quelques séances de plus. Elle n'en ressent rien : ni "
                           "fierté, ni frustration.")
 def _reopen(s: GoalsState, frame: Frame, args: ReopenArgs, ctx: ActionContext) -> Done:
     g = _target(s, ctx)
@@ -570,7 +570,7 @@ def _reopen(s: GoalsState, frame: Frame, args: ReopenArgs, ctx: ActionContext) -
 
 class TaskAddArgs(BaseModel):
     text: Annotated[str, Knob(label="Tâche", widget="textarea", advanced=False,
-                              help="Une étape à faire, en une phrase ; elle la lira à son prochain pas et la cochera "
+                              help="Une étape à faire, en une phrase ; elle la lira à sa prochaine séance et la cochera "
                                    "quand elle sera faite.")] = Field(min_length=1, max_length=500)
 
 
@@ -609,7 +609,7 @@ def _task_common(g: Goal, ctx: ActionContext) -> dict[str, Any]:
 
 @GOALS.action("tache_ajouter", title="Ajouter une tâche", args=TaskAddArgs, emits=[TASK_ADDED], subject="goal",
               order=40, available=_plannable,
-              description="Une étape de son plan de travail : elle la voit à chaque pas, marquée « demandée ».")
+              description="Une étape de son plan de travail : elle la voit à chaque séance, marquée « demandée ».")
 def _task_add(s: GoalsState, frame: Frame, args: TaskAddArgs, ctx: ActionContext) -> Done:
     g = _target(s, ctx)
     if len(g.tasks) >= TASKS_KEPT:
@@ -673,7 +673,7 @@ class ApproveArgs(BaseModel):
 class RefuseArgs(BaseModel):
     proposal: Annotated[str, Knob(label="Demande", widget="hidden")] = Field(min_length=1, max_length=20)
     note: Annotated[str, Knob(label="Pourquoi", widget="textarea", advanced=False,
-                              help="Facultatif : elle le lira à son prochain pas.")] = Field(default="",
+                              help="Facultatif : elle le lira à sa prochaine séance.")] = Field(default="",
                                                                                               max_length=500)
 
 
@@ -721,7 +721,7 @@ class DepositArgs(BaseModel):
                                 help="Facultatif (« donnees/ ») ; vide : à la racine de l'atelier.")
                       ] = Field(default="", max_length=200)
     note: Annotated[str, Knob(label="Ce qu'il faut en faire", widget="textarea", advanced=False, order=30,
-                              help="Facultatif : elle le lira à son prochain pas.")] = Field(default="",
+                              help="Facultatif : elle le lira à sa prochaine séance.")] = Field(default="",
                                                                                               max_length=1000)
 
 

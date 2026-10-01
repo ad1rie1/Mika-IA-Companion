@@ -35,7 +35,7 @@ from mika.runtime import health
 OUTCOMES = {"done": ("répondu", "ok"), "abstained": ("s'est tue", "muted"), "superseded": ("supplanté", "warn"),
             "timeout": ("trop long", "danger"), "failed": ("échec", "danger"), "preempted": ("interrompu", "warn"),
             "interrupted": ("interrompu", "warn"), "cancelled": ("annulé", "muted")}
-KINDS = {"REPLY": "réponse", "INITIATIVE": "initiative", "STEP": "pas de travail", "MURMUR": "murmure",
+KINDS = {"REPLY": "réponse", "INITIATIVE": "initiative", "STEP": "séance de travail", "MURMUR": "murmure",
          "JOURNAL": "journal", "DREAM": "rêve", "NARRATIVE": "récit"}
 #: les derniers épisodes, par page
 EPISODES_PAGE = 20

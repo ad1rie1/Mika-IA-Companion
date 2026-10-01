@@ -198,9 +198,9 @@ def closures(s: GoalsState, frame: Frame) -> list[tuple[Goal, str, str]]:
         if g.failures >= p.failures_before_failed:
             out.append((g, c.FAILED, "le modèle ne répond pas"))
         elif g.silent >= p.silent_before_blocked:
-            out.append((g, c.STUCK, f"{g.silent} pas de suite sans rien conclure"))
+            out.append((g, c.STUCK, f"{g.silent} séances de suite sans rien conclure"))
         elif g.steps >= budget(g, p):
-            out.append((g, c.STUCK, "à bout de pas sans en venir à bout"))
+            out.append((g, c.STUCK, "à bout de séances sans en venir à bout"))
         elif g.kind == c.EXPLORATION and desire(g, now, p) < p.abandon_below:
             out.append((g, c.ABANDONED, "l'envie s'est usée"))
     return out

@@ -28,7 +28,7 @@ MENTION = "mail_mention"
 #: raison de preuve : préparer un brouillon de réponse (une tâche silencieuse)
 DRAFT = "mail_draft"
 SEND = "email.send"
-#: la poignée d'une adresse de courrier : ce qui concerne quelqu'un qu'on ne connaît que par son adresse
+#: l'adresse (au sens d'identity) d'un courriel : ce qui concerne quelqu'un qu'on ne connaît que par son courriel
 HANDLE_PREFIX = "mail:"
 
 
@@ -57,7 +57,7 @@ class MailSent(Signal):
     mail: str  # Message-ID du mail parti
     to: str
     address: str
-    by: str  # la poignée de l'opérateur
+    by: str  # l'adresse de l'opérateur
     in_reply_to: str = ""
     account: str = ""
     #: le brouillon d'où il vient (vide : écrit directement par l'opérateur)

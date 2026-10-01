@@ -116,7 +116,7 @@ def _when(at: int, never: str = "jamais") -> Cell:
 
 def settable(frame: Frame, person: str) -> bool:
     """Peut-on déclarer la proximité de cette clé ? Une personne durable, par sa
-    clé canonique, qui a au moins une poignée."""
+    clé canonique, qui a au moins une adresse."""
     if not is_identifiable(person) or person.startswith("name:"):
         return False
     return frame.get(identity_c.PERSON(person)) == person and bool(frame.get(identity_c.HANDLES(person)))

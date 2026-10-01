@@ -127,7 +127,7 @@ def test_a_project_is_confided_on_its_own_page_and_read_on_its_fiche(world):  # 
 
     client, live, _ = world
     bootstrap(client)
-    with client.websocket_connect(WS) as ws:  # qu'elle la connaisse : sa poignée, sa personne
+    with client.websocket_connect(WS) as ws:  # qu'elle la connaisse : son adresse, sa personne
         ws.receive_json(), ws.receive_json()
     listing = html.unescape(client.get("/inspecteur/buts").text)
     assert "Projets en cours" in listing  # l'onglet Projets vient en premier

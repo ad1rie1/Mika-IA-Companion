@@ -87,12 +87,12 @@ def _work(s: GoalsState, frame: Frame) -> list[Candidate]:
 
 
 def why_not_now(g: Goal, s: GoalsState, frame: Frame) -> str:
-    """Pourquoi ce but ne fait pas de pas maintenant, en mots (vide : il peut en faire un)."""
+    """Pourquoi ce but n'a pas de séance maintenant, en mots (vide : il peut en avoir une)."""
     p = params(frame.env.params_of("goals", frame.root))
     now = frame.now
     st = status(g, now)
     if g.kind == c.REMINDER:
-        return "un rappel ne fait pas de pas : il se dit à l'heure"
+        return "un rappel n'a pas de séance de travail : il se dit à l'heure"
     if st in c.CLOSED_STATUSES:
         return "il est clos"
     if st == c.PAUSED:
@@ -101,18 +101,18 @@ def why_not_now(g: Goal, s: GoalsState, frame: Frame) -> str:
         whom = f"la réponse de {_name(frame, g.wait_for) or g.wait_for}" if g.wait_for else "un délai"
         return f"elle attend {whom}"
     if any(r.goal == g.id and r.purpose == "step" for r in s.running.values()):
-        return "un pas est en cours"
+        return "une séance est en cours"
     if g.steps >= budget(g, p):
-        return f"au bout de ses pas ({g.steps} sur {budget(g, p)})"
+        return f"au bout de ses séances ({g.steps} sur {budget(g, p)})"
     if frame.get(body_c.SLEEP) is not body_c.SleepPhase.AWAKE:
-        return "elle dort : aucun pas la nuit"
+        return "elle dort : aucune séance la nuit"
     at = next_step_at(g, s, frame)
     if at is None:
         return "son agenda ne lui donne plus de créneau"
     if sum(1 for t in s.steps_at if now - t < HOUR) >= p.steps_per_hour:
-        return f"plafond atteint : {p.steps_per_hour} pas par heure, tous buts confondus"
+        return f"plafond atteint : {p.steps_per_hour} séances par heure, tous buts confondus"
     if at > now:
-        return "pas encore : son agenda ou l'espacement des pas le fixe plus tard"
+        return "pas encore : son agenda ou l'espacement des séances la fixe plus tard"
     return ""
 
 
@@ -163,7 +163,7 @@ def _remind(s: GoalsState, frame: Frame) -> list[Candidate]:
 
 
 def confidant(g: Goal, frame: Frame) -> tuple[str, str, str] | None:
-    """(personne, poignée, niveau de récit) — ou personne. La personne que ça
+    """(personne, adresse, niveau de récit) — ou personne. La personne que ça
     concerne d'abord (si elle est amie, proche ou propriétaire), sinon une
     propriétaire joignable ; jamais quelqu'un qui n'est ni l'un ni l'autre."""
     candidates: list[str] = []

@@ -107,7 +107,7 @@ class Driver:
     online: set[str] = field(default_factory=set)
     connections: dict[str, str] = field(default_factory=dict)
     names: dict[str, str] = field(default_factory=dict)
-    #: les poignées d'opératrices (ses propriétaires, connectées avec leur compte)
+    #: les adresses d'opératrices (ses propriétaires, connectées avec leur compte)
     operators: set[str] = field(default_factory=set)
     transport: Transport | None = None
     #: le monde extérieur (il survit aux redémarrages du noyau)

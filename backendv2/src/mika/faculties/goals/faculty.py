@@ -53,52 +53,52 @@ class GoalsParams(BaseModel):
              "renoncer n'est pas un échec.")] = 0.15
     # les pas
     step_spacing_us: Annotated[int, Knob(
-        label="Espacement des pas (exploration)", group="Les pas", lo=MINUTE, hi=DAY,
-        help="Entre deux pas d'une même exploration, au moins ce délai.")] = 30 * MINUTE
+        label="Espacement des séances (exploration)", group="Les séances", lo=MINUTE, hi=DAY,
+        help="Entre deux séances d'une même exploration, au moins ce délai.")] = 30 * MINUTE
     project_spacing_us: Annotated[int, Knob(
-        label="Espacement des pas (projet)", group="Les pas", lo=MINUTE, hi=DAY,
-        help="Entre deux pas d'un même projet confié, au moins ce délai (plus si son agenda le dit).")] = 10 * MINUTE
+        label="Espacement des séances (projet)", group="Les séances", lo=MINUTE, hi=DAY,
+        help="Entre deux séances d'un même projet confié, au moins ce délai (plus si son agenda le dit).")] = 10 * MINUTE
     steps_per_hour: Annotated[int, Knob(
-        label="Pas par heure au plus", group="Les pas", lo=0, hi=30,
-        help="Tous buts confondus : chaque pas est une boucle d'outils du modèle, silencieuse, hors du budget "
+        label="Séances par heure au plus", group="Les séances", lo=0, hi=30,
+        help="Tous buts confondus : chaque séance est une boucle d'outils du modèle, silencieuse, hors du budget "
              "d'initiatives (0 : plus aucun travail).")] = 4
     exploration_steps: Annotated[int, Knob(
-        label="Pas par exploration", group="Les pas", lo=1, hi=20,
-        help="Le budget de pas d'une exploration qu'elle ouvre d'elle-même ; à bout de pas sans conclure, elle "
+        label="Séances par exploration", group="Les séances", lo=1, hi=20,
+        help="Le budget de séances d'une exploration qu'elle ouvre d'elle-même ; à bout de séances sans conclure, elle "
              "bloque. Le tempérament le dérive de la persévérance.")] = 4
     project_steps: Annotated[int, Knob(
-        label="Pas par projet (par défaut)", group="Les pas", lo=1, hi=50,
-        help="Le budget de pas d'un projet confié quand sa création n'en précise pas.")] = 12
+        label="Séances par projet (par défaut)", group="Les séances", lo=1, hi=50,
+        help="Le budget de séances d'un projet confié quand sa création n'en précise pas.")] = 12
     silent_before_blocked: Annotated[int, Knob(
-        label="Pas sans verdict avant blocage", group="Les pas", lo=1, hi=10,
-        help="Après autant de pas de suite où le modèle a travaillé sans rien conclure, le but est bloqué.")] = 3
+        label="Séances sans verdict avant blocage", group="Les séances", lo=1, hi=10,
+        help="Après autant de séances de suite où le modèle a travaillé sans rien conclure, le but est bloqué.")] = 3
     failures_before_failed: Annotated[int, Knob(
-        label="Pannes avant échec", group="Les pas", lo=1, hi=20,
-        help="Un pas dont l'appel au modèle échoue (panne, délai) rend son crédit ; après autant de pannes "
+        label="Pannes avant échec", group="Les séances", lo=1, hi=20,
+        help="Une séance dont l'appel au modèle échoue (panne, délai) rend son crédit ; après autant de pannes "
              "d'affilée, le but est clos en échec.")] = 5
     wait_min_us: Annotated[int, Knob(
-        label="Attente minimale", group="Les pas", lo=MINUTE, hi=DAY,
-        help="Quand un pas conclut « attendre », le délai qu'il demande est ramené au moins à cette "
+        label="Attente minimale", group="Les séances", lo=MINUTE, hi=DAY,
+        help="Quand une séance conclut « attendre », le délai qu'elle demande est ramené au moins à cette "
              "durée.")] = 10 * MINUTE
     wait_max_us: Annotated[int, Knob(
-        label="Attente maximale", group="Les pas", lo=HOUR, hi=30 * DAY,
+        label="Attente maximale", group="Les séances", lo=HOUR, hi=30 * DAY,
         help="…et au plus à celle-ci ; une réponse de la personne attendue la libère plus tôt.")] = DAY
     # preuves (log-odds) : de l'envie au pas ; un projet confié, constant quand il est dû
     work_base: Annotated[float, Knob(
-        label="Preuve de base d'un pas", group="Preuves", lo=0.0, hi=12.0, step=0.5,
-        help="La preuve (log-odds) d'un pas d'exploration : cette base plus l'envie × le poids ci-dessous, "
-             "plafonnée à 12, face au seuil des pas (8).")] = 4.0
+        label="Preuve de base d'une séance", group="Preuves", lo=0.0, hi=12.0, step=0.5,
+        help="La preuve (log-odds) d'une séance d'exploration : cette base plus l'envie × le poids ci-dessous, "
+             "plafonnée à 12, face au seuil des séances (8).")] = 4.0
     work_per_desire: Annotated[float, Knob(
         label="Poids de l'envie", group="Preuves", lo=0.0, hi=12.0, step=0.5,
-        help="Ce que vaut une envie pleine (1) en preuve d'un pas ; par défaut, une envie à moitié usée amène "
+        help="Ce que vaut une envie pleine (1) en preuve d'une séance ; par défaut, une envie à moitié usée amène "
              "juste au seuil.")] = 8.0
     project_evidence: Annotated[float, Knob(
-        label="Preuve d'un pas de projet", group="Preuves", lo=0.0, hi=12.0, step=0.5,
-        help="Constante quand le pas d'un projet confié est dû ; au-dessus du seuil des pas (8), il part "
+        label="Preuve d'une séance de projet", group="Preuves", lo=0.0, hi=12.0, step=0.5,
+        help="Constante quand la séance d'un projet confié est due ; au-dessus du seuil des séances (8), elle part "
              "vite.")] = 10.0
     priority_step: Annotated[float, Knob(
         label="Poids d'un cran de priorité", group="Preuves", lo=0.0, hi=4.0, step=0.25,
-        help="Ce qu'un cran de priorité ajoute à la preuve d'un pas (basse : −1 cran, haute : +1, urgente : "
+        help="Ce qu'un cran de priorité ajoute à la preuve d'une séance (basse : −1 cran, haute : +1, urgente : "
              "+2), plafonnée à 12 : entre deux buts dus, le plus prioritaire passe devant.")] = 1.0
     # rappels
     remind_evidence: Annotated[float, Knob(
@@ -158,7 +158,7 @@ class GoalsParams(BaseModel):
     # raconter ce qu'elle a mené à bout
     share_notable_from: Annotated[float, Knob(
         label="Notable à partir de", group="Raconter", lo=0.0, hi=1.0, step=0.05,
-        help="Un but abouti que son dernier pas juge au moins aussi notable se raconte à quelqu'un ; à qui et "
+        help="Un but abouti que sa dernière séance juge au moins aussi notable se raconte à quelqu'un ; à qui et "
              "combien dépend du lien.")] = 0.4
     share_within_us: Annotated[int, Knob(
         label="Raconter dans les", group="Raconter", lo=HOUR, hi=7 * DAY,
@@ -321,7 +321,7 @@ class Paused(Payload):
     """Un opérateur suspend ce but : ni pas, ni rappel, ni usure, jusqu'à reprise."""
 
     goal: int
-    #: la poignée de l'opérateur
+    #: l'adresse de l'opérateur
     by: str = ""
     owner: str | None = None
     about: tuple[str, ...] = ()

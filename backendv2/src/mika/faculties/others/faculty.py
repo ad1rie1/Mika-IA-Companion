@@ -465,7 +465,7 @@ def _receptive(s: OthersState, frame: Frame, row: RowView) -> Modulation:
 
 
 def _address(frame: Frame, person: str) -> str | None:
-    """Où lui écrire : une poignée présente d'abord, sinon une conversation
+    """Où lui écrire : une adresse présente d'abord, sinon une conversation
     privée où l'on peut lui écrire d'elle-même."""
     handles = frame.get(identity_c.HANDLES(person))
     present = [h for h in frame.get(presence_c.PRESENT) if h in handles]

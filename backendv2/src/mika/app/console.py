@@ -30,7 +30,7 @@ NAVIGATION: tuple[NavGroup, ...] = (
     NavGroup("Ses relations", (
         Destination("personnes", "Personnes", "☺", "Les gens qu'elle connaît et ce qui les lie.",
                     subjects=("person",)),
-        Destination("identites", "Identités", "◎", "Qui parle derrière chaque poignée, et ce que ça ouvre.",
+        Destination("identites", "Identités", "◎", "Qui parle derrière chaque adresse, et ce que ça ouvre.",
                     subjects=("handle",)),
         Destination("fil", "Conversations", "❝", "Ce qui a été dit, avec qui, et les questions qui attendent."),
     )),

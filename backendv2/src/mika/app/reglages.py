@@ -343,7 +343,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                         pages=(SettingsPage("telegram", "Telegram", description=(
                             "Le robot qui la relie à Telegram : son jeton, qui peut lui écrire, et qui elle traite "
                             "comme toi. L'enregistrer redémarre le robot. Les identifiants se lisent dans "
-                            "Identités › Poignées (tg_<nombre>).")),)),
+                            "Identités › Adresses (tg_<nombre>).")),)),
         SettingsSection("courrier", "Courrier", "sens", MailConfig, settings.email, save_mail,
                         description="Ses boîtes aux lettres (IMAP pour lire et ranger, SMTP pour envoyer) et, pour "
                                     "chacune, sa façon d'y écrire. Relues à chaque relève.", order=10,

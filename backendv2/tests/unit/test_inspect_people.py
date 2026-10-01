@@ -1,12 +1,12 @@
 """La console des gens, par ses intentions.
 
-- les personnes et les poignées ont leur fiche : une poignée reliée renvoie à
-  sa personne (clé canonique), la fiche d'une personne réunit ses poignées ;
-  la recherche trouve par nom et par poignée ;
+- les personnes et les adresses ont leur fiche : une adresse reliée renvoie à
+  sa personne (clé canonique), la fiche d'une personne réunit ses adresses ;
+  la recherche trouve par nom et par adresse ;
 - chaque vue et chaque onglet se déclarent, s'ouvrent sur un noyau neuf sans
   lever, et répondent à une clé inconnue par une note, jamais par une erreur ;
 - le verdict d'identité s'explique pas à pas, et l'explication suit la
-  politique : une opératrice authentifiée et une poignée anonyme n'obtiennent
+  politique : une opératrice authentifiée et une adresse anonyme n'obtiennent
   ni le même niveau ni la même raison ; une audience publique n'obtient
   jamais rien de privé ;
 - les actions d'opérateur (relier, délier, preuve, proximité) journalisent
@@ -57,10 +57,10 @@ from tests.fixtures.mika import befriend, boot, build, connect, said
 #: (propriétaire, nom) → (titre, paramètres, destination)
 OWN_VIEWS = {
     ("identity", "personnes"): ("Personnes", ("q",), "personnes"),
-    ("identity", "annuaire"): ("Poignées", ("q", "confiance"), "identites"),
+    ("identity", "annuaire"): ("Adresses", ("q", "confiance"), "identites"),
     ("identity", "revendications"): ("Revendications", (), "identites"),
     ("identity", "politique"): ("Politique", (), "identites"),
-    ("identity", "personne"): ("Une poignée (ancienne page)", ("handle",), ""),
+    ("identity", "personne"): ("Une adresse (ancienne page)", ("handle",), ""),
     ("social", "liens"): ("Liens", ("q", "proximite", "person"), "personnes"),
     ("presence", "presents"): ("Présents", (), "personnes"),
     ("transcript", "messages"): ("Messages", ("handle", "q", "role"), "fil"),
@@ -68,7 +68,7 @@ OWN_VIEWS = {
 }
 #: les facultés de ce fichier (les autres ajoutent leurs onglets en parallèle, testés ailleurs)
 MINE = frozenset({"identity", "social", "presence", "transcript"})
-PERSON_TABS = [("identity", "synthese"), ("identity", "poignees"), ("social", "lien"), ("transcript", "echanges")]
+PERSON_TABS = [("identity", "synthese"), ("identity", "adresses"), ("social", "lien"), ("transcript", "echanges")]
 HANDLE_TABS = [("identity", "verdict"), ("identity", "revendication"), ("identity", "preuves"),
                ("identity", "autres"), ("transcript", "fil")]
 LEVEL_FR = {Sensitivity.NONE: "rien sur autrui", Sensitivity.ANODYNE: "anodin", Sensitivity.PERSONAL: "personnel",
@@ -193,7 +193,7 @@ async def say(kernel, p):
 
 
 async def live(kernel):
-    """Une opératrice authentifiée et proche, et une poignée anonyme qui se
+    """Une opératrice authentifiée et proche, et une adresse anonyme qui se
     dit Alice ; quelques messages ; un profil."""
     await connect(kernel, "user_1", "Alice", operator=True)
     await befriend(kernel, "user_1", "close")
@@ -238,7 +238,7 @@ def test_each_view_and_tab_is_declared_in_its_place(tmp_path):
     assert person_tabs[:2] == PERSON_TABS[:2]
     assert handle_tabs == HANDLE_TABS
     assert (person.label, person.plural, person.forgettable) == ("Personne", "Personnes", True)
-    assert (handle.label, handle.plural, handle.forgettable) == ("Poignée", "Poignées", False)
+    assert (handle.label, handle.plural, handle.forgettable) == ("Adresse", "Adresses", False)
     assert person.search is not None and handle.search is not None
 
 
@@ -268,13 +268,13 @@ def test_every_view_and_tab_opens_on_a_fresh_kernel(tmp_path):
     got, heads, searches = run(tmp_path, scenario)
     for key, blocks in got.items():
         assert blocks and not failed(blocks), (key, blocks)
-    assert table(got[("identity", "annuaire")], "poignée").rows == ()
+    assert table(got[("identity", "annuaire")], "adresse").rows == ()
     assert table(got[("identity", "personnes")], "personne").rows == ()
     assert table(got[("presence", "presents")], "personne").rows == ()
     assert table(got[("social", "liens")], "personne").rows == ()
     assert titled(got[("identity", "politique")], "Les canaux").rows
-    assert "Choisissez une poignée" in text(got[("identity", "personne")])
-    assert "Poignée inconnue : « tg_404 »" in text(got["personne inconnue"])
+    assert "Choisissez une adresse" in text(got[("identity", "personne")])
+    assert "Adresse inconnue : « tg_404 »" in text(got["personne inconnue"])
     assert "Aucun lien avec « user_404 »" in text(got["lien inconnu"])
     assert "Aucun message avec « web_404 »" in text(got["fil inconnu"])
     assert table(got["recherche piégée"], "n°").rows == ()
@@ -304,34 +304,34 @@ def test_a_person_has_a_fiche_that_gathers_her_handles(tmp_path):
     assert anon_before.key == ANON  # pas encore reliée : elle parle pour elle-même
     assert {b.text for b in alice_before.badges} >= {"propriétaire", "non liée", "en privé : confidences"}
     assert alice_before.subtitle.startswith("Une proche, et sa propriétaire")
-    assert len(alice_before.facts) <= 6 and dict(alice_before.facts)["poignées"] == 1
+    assert len(alice_before.facts) <= 6 and dict(alice_before.facts)["adresses"] == 1
     assert alice_before.aliases == ("user_1",)
 
     assert linked.ok
-    # une poignée reliée renvoie à sa personne (la console y redirige)
+    # une adresse reliée renvoie à sa personne (la console y redirige)
     assert after[ANON].key == "user_1" and after["user_1"].key == "user_1"
     assert after["user_1"].aliases == tuple(sorted(("user_1", ANON)))
-    assert "liée · 2 poignées" in {b.text for b in after["user_1"].badges}
+    assert "liée · 2 adresses" in {b.text for b in after["user_1"].badges}
     assert isinstance(handle, Head) and handle.key == ANON and "Parle pour Alice" in handle.subtitle
     assert {b.text for b in handle.badges} >= {"publique", "liée"}
 
     assert [f.key for f in found["ali"]] == ["user_1"] and isinstance(found["ali"][0], Found)
-    assert [f.key for f in found["4F2A"]] == ["user_1"]  # par une de ses poignées
+    assert [f.key for f in found["4F2A"]] == ["user_1"]  # par une de ses adresses
     assert found["zorro"] == []
     assert [f.key for f in found_handles] == [ANON]
 
     for key, blocks in tabs.items():
         assert blocks and not failed(blocks), key
     synthese = tabs[("person", "identity", "synthese")]
-    handles = titled(tabs[("person", "identity", "poignees")], "Ses poignées")  # la table vit dans son onglet
+    handles = titled(tabs[("person", "identity", "adresses")], "Ses adresses")  # la table vit dans son onglet
     assert {row_cells(r)[0].key for r in handles.rows} == {"handle/user_1", f"handle/{ANON}"}
     assert all(isinstance(r, Row) and r.href.kind == "subject" for r in handles.rows)
-    pointer = next(b for b in synthese if isinstance(b, Fields) and b.title == "Ses poignées")
-    assert pointer.pairs[0][1].params == (("onglet", "poignees"),)  # la synthèse y renvoie, sans la répéter
-    assert not any(isinstance(b, Table) and b.title == "Ses poignées" for b in synthese)
+    pointer = next(b for b in synthese if isinstance(b, Fields) and b.title == "Ses adresses")
+    assert pointer.pairs[0][1].params == (("onglet", "adresses"),)  # la synthèse y renvoie, sans la répéter
+    assert not any(isinstance(b, Table) and b.title == "Ses adresses" for b in synthese)
     assert row_of(titled(synthese, "Ce que ça ouvre"), "en privé")["sur autrui"] == "confidences"
     others = tabs[("handle", "identity", "autres")]
-    assert [row_cells(r)[0].key for r in titled(others, "Les autres poignées").rows] == ["handle/user_1"]
+    assert [row_cells(r)[0].key for r in titled(others, "Les autres adresses").rows] == ["handle/user_1"]
 
 
 def test_the_verdict_is_explained_and_differs_between_an_operator_and_an_anonymous_handle(tmp_path):
@@ -380,7 +380,7 @@ def test_the_verdict_is_explained_and_differs_between_an_operator_and_an_anonymo
     assert plain(entry["sorte"]) == "revendication" and "vise Alice" in entry["détail"]
     assert isinstance(entry["message"], Ref) and isinstance(entry["quand"], When)
     assert titled(ledger_alice, "Registre des preuves").rows == ()
-    # l'ancienne page d'une poignée mène aux fiches
+    # l'ancienne page d'une adresse mène aux fiches
     refs = [c for b in legacy if isinstance(b, Fields) for _k, c in b.pairs if isinstance(c, Ref)]
     assert Ref.subject("handle", ANON, ANON).key in {r.key for r in refs}
     assert any(r.key == f"person/{ANON}" for r in refs)
@@ -399,13 +399,16 @@ def test_the_lists_say_who_is_who_and_what_each_would_hear(tmp_path):
     directory, accounts, listing, searched, policy, facts = run(tmp_path, scenario)
     for blocks in (directory, accounts, listing, searched, policy):
         assert not failed(blocks)
-    handles = table(directory, "poignée")
+    handles = table(directory, "adresse")
     alice, anon = row_of(handles, "user_1"), row_of(handles, ANON)
-    assert alice["nom"] == "Alice" and plain(alice["confiance du canal"]).startswith("authentifiée")
+    # le nom et par où, pas la clé : elle reste en détail
+    assert plain(alice["adresse"]) == "Alice · compte opérateur" and plain(alice["clé"]) == "user_1"
+    assert plain(anon["adresse"]) == "web, sans nom" and plain(anon["clé"]) == ANON
+    assert plain(alice["confiance du canal"]).startswith("authentifiée")
     assert alice["certitude"] == "1,00 (vérifiée)" and alice["propriétaire"] == "oui"
     assert plain(anon["confiance du canal"]).startswith("publique") and anon["certitude"] == "0,00 (inconnue)"
     assert anon["propriétaire"] == "non" and anon["revendique"] == "« Alice »"
-    assert anon["parle pour"] == "elle-même"  # une affirmation seule ne lie rien
+    assert anon["parle pour"].key == f"person/{ANON}"  # une affirmation seule ne lie rien
     for handle, row in (("user_1", alice), (ANON, anon)):
         private, public = facts[handle]
         assert row["divulgation en privé"].startswith(LEVEL_FR[private.level])
@@ -414,8 +417,9 @@ def test_the_lists_say_who_is_who_and_what_each_would_hear(tmp_path):
     assert anon["divulgation en privé"] == "anodin · sa fiche fermée"
     for row in handles.rows:  # une audience publique n'obtient jamais rien de privé
         assert as_dict(handles, row)["divulgation en public"] == "anodin · sa fiche fermée"
-    assert all(isinstance(r, Row) and r.href.key == f"handle/{plain(r.cells[0])}" for r in handles.rows)
-    assert table(accounts, "poignée").rows == ()  # aucune poignée de compte
+    assert all(isinstance(r, Row) and r.href.key == f"handle/{plain(as_dict(handles, r)['clé'])}"
+               for r in handles.rows)
+    assert table(accounts, "adresse").rows == ()  # aucune adresse de compte
 
     people = table(listing, "personne")
     assert {row_cells(r)[0].key for r in people.rows} == {"person/user_1", f"person/{ANON}"}
@@ -444,7 +448,7 @@ def test_the_claims_badge_counts_pending_claims(tmp_path):
 
     counts, blocks = run(tmp_path, scenario)
     assert counts == [None, (1, ""), (2, ""), (1, "")]
-    claims = table(blocks, "poignée")
+    claims = table(blocks, "adresse")
     assert len(claims.rows) == 1 and row_cells(claims.rows[0])[0].key == f"handle/{ANON}"
     assert claims.rows[0].href.params == (("onglet", "revendication"),)
 
@@ -497,7 +501,7 @@ def test_linking_and_unlinking_a_handle_is_journaled_and_audited(tmp_path):
     assert ("identity.delier", "done", "user_1", ANON) in audit
     done = next(e for e in out["audit"] if e.data.action == "identity.relier" and e.data.outcome == "done")
     assert done.data.seqs == (linked[0].seq,)
-    # le registre de la poignée nomme l'opératrice
+    # le registre de l'adresse nomme l'opératrice
     ledger = titled(out["ledger"], "Registre des preuves")
     by = [as_dict(ledger, r)["par"] for r in ledger.rows if plain(as_dict(ledger, r)["sorte"]) == "liaison"]
     assert by == ["un opérateur (user_1)", "un opérateur (user_1)"]
@@ -523,7 +527,7 @@ def test_operator_evidence_is_weighed_like_any_other(tmp_path):
         out["deny"] = await perform(kernel, "identity.preuve", form(kind=identity_c.DENIED, name="alice"),
                                     by="user_1", subject=ANON, nonce="g")
         out["denied view"] = kernel.mind.frame().get(identity_c.IDENTITY(ANON))
-        # sur un compte (Telegram), affirmation + garantie atteignent la barre : la poignée est reliée
+        # sur un compte (Telegram), affirmation + garantie atteignent la barre : l'adresse est reliée
         await say(kernel, said("tg_5", "moi c'est Alice", channel="telegram"))
         out["tg vouch"] = await perform(kernel, "identity.preuve", form(kind=identity_c.VOUCHED), by="user_1",
                                         subject="tg_5", nonce="h")
@@ -539,7 +543,7 @@ def test_operator_evidence_is_weighed_like_any_other(tmp_path):
     # une garantie pèse ce que dit la politique : en public, elle ne franchit pas la barre seule
     assert not out["view"].bound and 0.5 < out["view"].claim_certainty < 0.7
     assert not out["vouch again"].ok and "qu'une fois" in out["vouch again"].errors["kind"]
-    assert not out["deny other"].ok and "ne connaît pas cette poignée sous ce nom" in out["deny other"].errors["name"]
+    assert not out["deny other"].ok and "ne connaît pas cette adresse sous ce nom" in out["deny other"].errors["name"]
     assert not out["deny nameless"].ok and out["deny nameless"].errors["name"] == "Indique le nom démenti."
     assert out["deny"].ok and not out["denied view"].claim
     assert out["tg vouch"].ok and "confirmée : elle parle désormais pour Alice" in out["tg vouch"].message
@@ -567,7 +571,7 @@ def test_the_operator_sets_closeness_from_the_person_fiche(tmp_path):
                                     subject="user_1", nonce="d")
         out["lived"] = kernel.mind.frame().get(social_c.CLOSENESS("user_1"))
         await perform(kernel, "identity.relier", form(person="user_1"), by="user_1", subject=ANON, nonce="e")
-        out["offered bound"] = offered(kernel, spec, ANON)  # une poignée reliée n'est plus une personne à part
+        out["offered bound"] = offered(kernel, spec, ANON)  # une adresse reliée n'est plus une personne à part
         out["set"] = events(kernel, social_c.CLOSENESS_SET.name)
         out["audit"] = events(kernel, rt.OPERATED.name)
         return out
@@ -729,11 +733,11 @@ def test_views_stay_bounded_in_a_crowd(tmp_path):
         blocks = got[key]
         assert not failed(blocks), key
         assert all(len(t.rows) <= 50 for t in tables(blocks)), key
-    for key, first in ((("identity", "annuaire"), "poignée"), (("identity", "personnes"), "personne"),
+    for key, first in ((("identity", "annuaire"), "adresse"), (("identity", "personnes"), "personne"),
                        (("presence", "presents"), "personne"), (("social", "liens"), "personne")):
         t = table(got[key], first)
         assert len(t.rows) == 50 and t.pager is not None and t.pager.total == 210, key
-    assert len(table(got["page 5"], "poignée").rows) == 10
+    assert len(table(got["page 5"], "adresse").rows) == 10
     fil = table(got[("transcript", "messages")], "n°")
     assert len(fil.rows) == 50 and fil.pager is not None and fil.pager.older
     assert len(table(got[("transcript", "questions")], "n°").rows) == 50
