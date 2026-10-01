@@ -146,7 +146,7 @@ class Subjects:
 
     async def download(self, request: Request) -> Response:
         kind, key = request.path_params["kind"], request.path_params["key"]
-        result = await self.ui.inspection.download(kind, key, request.query_params.get("fichier", "source")[:100])
+        result = await self.ui.inspection.download(kind, key, request.query_params.get("fichier", "source")[:300])
         if not isinstance(result, Download):
             return self.pages.render_page(request, title="Téléchargement indisponible", active="",
                 status=404, blocks=[result if isinstance(result, Note) else Note("Ce document n'est plus disponible.", "warn")],

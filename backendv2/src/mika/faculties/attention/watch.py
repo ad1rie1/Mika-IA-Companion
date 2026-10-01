@@ -18,6 +18,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import others as others_c
 from mika.contracts import presence as presence_c
+from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
@@ -58,7 +59,8 @@ def met(state: AttentionState, frame: Frame) -> list[str]:
 
 @ATTENTION.process("attention.watch", wake_on=[rt.PERCEPTION_RECEIVED, rt.UTTERANCE, rt.EPISODE_STARTED,
                                                memory_c.BELIEVED, memory_c.PROMISE_NOTICED,
-                                               memory_c.PROMISE_RESOLVED, goals_c.GOAL_CLOSED, others_c.READ,
+                                               memory_c.PROMISE_RESOLVED, goals_c.GOAL_CLOSED,
+                                               projects_c.OBJECTIVE_CLOSED, others_c.READ,
                                                *c.ALL, *body_c.ALL],
                    wake_on_shapes=[c.Signal],
                    lane="background", catch_up=CatchUp.ONCE, max_quantum_s=1800, priority=30)

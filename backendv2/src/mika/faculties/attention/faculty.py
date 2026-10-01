@@ -34,6 +34,7 @@ from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import others as others_c
+from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.kernel.clock import DAY, HOUR, MINUTE
@@ -449,6 +450,19 @@ def _goal_closed(s: AttentionState, e, cx) -> AttentionState:
         s = replace(s, thoughts=s.thoughts.delete(source))
     if d.status != goals_c.STUCK or d.kind == goals_c.REMINDER:
         return s
+    pending = Pending(e.seq, c.BLOCKED, d.owner, Emotion.FRUSTRATED.value, p.blocked_intensity, e.at,
+                      ref=d.title.ref or "", about=tuple(d.about), sensitivity=d.sensitivity)
+    return replace(s, pending=(*s.pending, pending))
+
+
+@ATTENTION.reducer(projects_c.OBJECTIVE_CLOSED)
+def _project_blocked(s: AttentionState, e, cx) -> AttentionState:
+    """Bloquer sur un objectif d'un projet où c'est elle qui travaille devient une pensée (« Je bloque
+    sur… ») ; en mode impersonnel, ce n'est pas elle : rien (ADR 0031)."""
+    d = e.data
+    if d.mode != projects_c.PERSONA or d.status != projects_c.BLOCKED:
+        return s
+    p = params(cx.params)
     pending = Pending(e.seq, c.BLOCKED, d.owner, Emotion.FRUSTRATED.value, p.blocked_intensity, e.at,
                       ref=d.title.ref or "", about=tuple(d.about), sensitivity=d.sensitivity)
     return replace(s, pending=(*s.pending, pending))

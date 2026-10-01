@@ -287,7 +287,7 @@ class Registry:
         rec = ks.params.get(owner)
         if rec is None:
             return _default_params(f)
-        return _decode_params(f.params, rec.data)
+        return _decode_params(f.params, rec.data, f.retired_params)
 
     def tz_of(self, root: Root) -> ZoneInfo:
         params: KernelParams = self.params_of("kernel", root)
@@ -400,12 +400,21 @@ class Registry:
 
 
 @lru_cache(maxsize=256)
-def _decode_params_cached(model: type[BaseModel], data: str) -> BaseModel:
-    return model.model_validate(json.loads(data))
+def _decode_params_cached(model: type[BaseModel], data: str, retired: tuple[str, ...] = ()) -> BaseModel:
+    """Des paramètres journalisés, relus par le modèle d'aujourd'hui : un paramètre que la faculté déclare retiré
+    (``Faculty.retired_params``) est ignoré, jamais une raison de ne plus pouvoir rejouer ; toute autre clé
+    inconnue reste une erreur."""
+    return model.model_validate(drop_retired(json.loads(data), retired))
 
 
-def _decode_params(model: type[BaseModel], data: str) -> BaseModel:
-    return _decode_params_cached(model, data)
+def drop_retired(raw: Any, retired: tuple[str, ...]) -> Any:
+    if isinstance(raw, dict) and retired:
+        return {k: v for k, v in raw.items() if k not in retired}
+    return raw
+
+
+def _decode_params(model: type[BaseModel], data: str, retired: tuple[str, ...] = ()) -> BaseModel:
+    return _decode_params_cached(model, data, retired)
 
 
 @lru_cache(maxsize=64)

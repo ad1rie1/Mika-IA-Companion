@@ -52,7 +52,7 @@ from mika.kernel.inspect import (
 from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
 from mika.ports.llm import Image, LLMRequest, Message
-from mika.vocab.episodes import CONVERSATIONAL, Kind
+from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind
 from mika.vocab.privacy import Sensitivity
 
 BUNDLE = "camera"
@@ -192,7 +192,7 @@ def _for_owner(frame: Frame) -> bool:
     ep = frame.episode
     if ep is None:
         return False
-    if ep.kind == Kind.STEP:
+    if ep.kind in WORKING:
         return True
     return bool(ep.target) and bool(frame.get(identity_c.IS_OWNER(frame.get(identity_c.PERSON(ep.target)))))
 
@@ -222,7 +222,7 @@ class LookArgs(BaseModel):
 
 
 @CAMERA.tool("camera_look", description="Regarder maintenant par la caméra.", args=LookArgs, bundle=BUNDLE,
-             episodes=[Kind.REPLY, Kind.STEP], max_calls_per_episode=2, owner_only=True)
+             episodes=[Kind.REPLY, *WORKING], max_calls_per_episode=2, owner_only=True)
 async def camera_look(args: LookArgs, ctx: Any) -> Any:
     port, llm = ctx.ports.get("camera"), ctx.ports.get("llm")
     if not _for_owner(ctx.frame):

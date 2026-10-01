@@ -5,10 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from mika.contracts import attention as attention_c
-from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import presence as presence_c
+from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.contracts import sensors as sensors_c
@@ -17,8 +17,8 @@ from mika.contracts.entry import Admission, HistoryRow
 from mika.contracts.runtime import PerceptionReceived
 from mika.faculties import transcript
 from mika.faculties.attention import prompt as attention_prompt
-from mika.faculties.goals import work as goals_work
 from mika.faculties.identity import describe
+from mika.faculties.projects import work as projects_work
 from mika.faculties.self import night
 from mika.kernel.clock import local
 from mika.kernel.events import Content, Origin
@@ -27,7 +27,7 @@ from mika.kernel.operate import Preview
 from mika.runtime import decisions, health
 from mika.runtime.bootstrap import Kernel, ReadOnlyStore
 from mika.vocab.affect import emotion_of
-from mika.vocab.episodes import goal_of
+from mika.vocab.episodes import project_of
 
 
 def _row(r: dict) -> HistoryRow:
@@ -131,28 +131,32 @@ class KernelPort:
 
     def _work(self, frame: Any) -> dict[str, Any]:
         """Ses projets et ce qui attend un accord — pour une propriétaire."""
-        live = [g for g in frame.get(goals_c.LIVE) if g.kind == goals_c.PROJECT]
+        live = frame.get(projects_c.LIVE)
         pending = frame.get(rt.PENDING_EFFECTS)
-        refs = [g.title_ref for g in live] + [e.summary_ref for e in pending]
+        refs = [p.title_ref for p in live] + [e.summary_ref for e in pending]
         texts = self._store.content([r for r in refs if r])
-        goals = frame.state("goals").goals
+        state = frame.state("projects")
         tz = frame.env.tz_of(frame.root)
         projects = []
-        for g in live:
-            nxt = goals_work.next_step_at(goals[g.id], frame.state("goals"), frame) if g.id in goals else None
+        for v in live:
+            p = state.projects.get(v.id)
+            nxt = projects_work.next_run_at(p, state, frame) if p is not None else None
             projects.append({
-                "id": g.id, "title": texts.get(g.title_ref, ""), "status": "paused" if g.status in (goals_c.WAITING, goals_c.PAUSED)
-                else "active", "priority": g.priority, "origin": "user" if g.authority == goals_c.USER else "self",
-                "emotion_policy": "off", "schedule_rule": g.schedule or "manual",
+                "id": v.id, "title": texts.get(v.title_ref, ""),
+                "status": "active" if v.status == projects_c.ACTIVE else "paused", "priority": v.priority,
+                "origin": "user" if v.authority == projects_c.USER else "self",
+                "emotion_policy": "full" if v.mode == projects_c.PERSONA else "off",
+                "schedule_rule": v.schedule or "manual",
                 "next_run_at": local(nxt, tz).isoformat() if nxt else None,
-                # son plan de travail ; sans tâches écrites, ses pas (faits sur le budget) en tiennent lieu
-                "tasks_total": g.tasks_total or g.max_steps, "tasks_done": g.tasks_done if g.tasks_total else g.steps,
-                "tasks_blocked": g.tasks_blocked})
+                # ses objectifs ponctuels : faits sur tous (les constants n'ont pas de fin)
+                "tasks_total": v.open_once + v.done_once + v.blocked_once, "tasks_done": v.done_once,
+                "tasks_blocked": v.blocked_once})
         actions = []
         for e in pending:
-            gid = goal_of(e.context)
-            title = texts.get(goals[gid].title_ref, "") if gid in goals else ""
-            actions.append({"id": e.proposal, "project_id": gid or 0, "project_title": title or e.owner,
+            pid = project_of(e.context)
+            p = state.projects.get(pid) if pid is not None else None
+            title = self._store.content([p.title_ref]).get(p.title_ref, "") if p is not None else ""
+            actions.append({"id": e.proposal, "project_id": pid or 0, "project_title": title or e.owner,
                             "proposal": texts.get(e.summary_ref, ""), "payload_kind": e.capability,
                             "created_at": local(e.at, tz).isoformat()})
         return {"projects": projects, "pending_project_actions": actions}

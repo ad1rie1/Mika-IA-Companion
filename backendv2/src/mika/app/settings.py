@@ -25,6 +25,8 @@ TELEGRAM_KEY = "telegram"
 EMAIL_KEY = "email"
 FEEDS_KEY = "feeds"
 STT_KEY = "stt"
+#: le jeton des dépôts git distants des projets (GitHub ou un autre hôte https), scellé
+GIT_KEY = "git"
 SENSORS_KEY = "sensors"
 #: le jeton du point MCP de la console (le Claude Code d'une opératrice), scellé
 CONSOLE_MCP_KEY = "console_mcp"
@@ -187,6 +189,17 @@ class Settings:
     async def save_stt(self, base_url: str, api_key: str, model: str = "whisper-1") -> None:
         await self._put(STT_KEY, {"base_url": base_url.strip(), "model": model,
                                   "api_key_sealed": self.box.seal(api_key.strip())})
+
+    # ── Dépôts git (ses projets poussent vers un dépôt distant) ──
+    def git(self) -> dict[str, str]:
+        """``{"token": …, "user": …}`` (jeton déchiffré) : ce que l'atelier passe à git, et à lui seul."""
+        data = dict(self._get(GIT_KEY) or {})
+        return {"token": self.box.open(data.get("token_sealed", "")), "user": data.get("user", "") or "x-access-token",
+                "hosts": list(data.get("hosts") or ["github.com"])}
+
+    async def save_git(self, token: str, user: str = "", hosts: list[str] | None = None) -> None:
+        clean = sorted({h.strip().lower() for h in (hosts or []) if h.strip()}) or ["github.com"]
+        await self._put(GIT_KEY, {"token_sealed": self.box.seal(token.strip()), "user": user.strip(), "hosts": clean})
 
     # ── Appareils (``POST /api/perceptions``) ──
     def sensors_token(self) -> str:

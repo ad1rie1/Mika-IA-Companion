@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import pytest
 
-from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
+from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.kernel.events import Content, Origin
 from mika.kernel.frame import Audience, EpisodeRef, Frame
@@ -24,7 +24,7 @@ from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
 from mika.runtime.effects import with_content
 from mika.runtime.tools import CATALOGUE_HEADER, ToolContext, run_tool_loop
 from mika.sim.clock import run_virtual
-from mika.vocab.episodes import Kind, goal_target
+from mika.vocab.episodes import Kind, project_target
 from tests.fixtures.mika import at_paris, befriend, boot, build, connect, said
 
 RESERVED = {"forge_write", "forge_list", "forge_call", "camera_look", "create_project"}
@@ -75,24 +75,19 @@ class _Once:
         return LLMResponse("", (self.tool,), stop="tool_use")
 
 
-def _project(kernel) -> int:
-    live = kernel.mind.frame().get(goals_c.LIVE)
-    return next(g.id for g in live if g.kind == goals_c.PROJECT)
-
-
 async def _open_project(kernel, *, approval: bool) -> int:
-    await kernel.mind.append([goals_c.GOAL_OPENED.draft(
-        kind=goals_c.PROJECT, authority=goals_c.USER, title=Content.of("Un site", level=2), owner="user_1",
-        about=("user_1",), bundles=("goals", "memory", "workshop"), max_steps=3, source="operator", sensitivity=2,
-        approval=approval)], emitter="goals", correlation="genese", origin=Origin.GENESIS)
-    return _project(kernel)
+    commit = await kernel.mind.append([projects_c.PROJECT_CREATED.draft(
+        title=Content.of("Un site", level=2), authority=projects_c.USER, owner="user_1", about=("user_1",),
+        source="operator", sensitivity=2, approval=approval)], emitter="projects", correlation="genese",
+        origin=Origin.GENESIS)
+    return commit.seqs[-1]
 
 
-def _context(kernel, name: str, goal: int, episode: str) -> ToolContext:
+def _context(kernel, name: str, project: int, episode: str) -> ToolContext:
     mind = kernel.mind
     base = mind.frame()
     frame = Frame(base.root, mind.clock.now(), mind.registry, Audience(owner=True),
-                  EpisodeRef(episode, Kind.STEP, target=goal_target(goal)))
+                  EpisodeRef(episode, Kind.WORK, target=project_target(project)))
     return ToolContext(mind, mind.registry.tools[name], "appel-1", episode, frame)
 
 
@@ -102,24 +97,25 @@ def test_a_workshop_command_needing_the_network_is_proposed_through_the_tool_loo
     async def main():
         await boot(kernel)
         try:
-            goal = await _open_project(kernel, approval=True)
+            project = await _open_project(kernel, approval=True)
             call = ToolCall("t1", "ws_network", {"argv": ["npm", "install"], "why": "installer les dépendances"})
             loop = await run_tool_loop(
-                _Once(call), LLMRequest(role="step", call_id="ep-1#0", system_stable="", messages=()),
+                _Once(call), LLMRequest(role="project", call_id="ep-1#0", system_stable="", messages=()),
                 {"ws_network": kernel.mind.registry.tools["ws_network"]},
-                lambda spec, cid: _context(kernel, spec.name, goal, "ep-1"), max_turns=3)
+                lambda spec, cid: _context(kernel, spec.name, project, "ep-1"), max_turns=3)
             evs = [with_content(kernel.mind, kernel.mind.decode(e)) for e in kernel.mind.store.read()]
-            return loop, evs
+            return loop, evs, project
         finally:
             await kernel.stop()
 
-    loop, evs = run_virtual(clock, main)
+    loop, evs, project = run_virtual(clock, main)
     assert loop.calls == [("ws_network", True)], loop.records
     proposed = [e for e in evs if e.type.name == rt.EFFECT_PROPOSED.name]
     assert len(proposed) == 1
     p = proposed[0]
     assert p.type.owner == rt.OWNER and p.correlation == "ep-1" and p.origin == Origin.TOOL
-    assert p.data.capability == "goals.networked" and p.data.approval is True
+    assert p.data.capability == "projects.networked" and p.data.approval is True
+    assert p.data.context == project_target(project)
     assert kernel.mind.frame().get(rt.PENDING_EFFECTS)  # elle attend l'accord d'un opérateur
 
 
@@ -129,15 +125,15 @@ def test_a_tool_can_only_propose_the_capabilities_of_its_own_faculty(tmp_path):
     async def main():
         await boot(kernel)
         try:
-            goal = await _open_project(kernel, approval=True)
-            ctx = _context(kernel, "ws_network", goal, "ep-2")
+            project = await _open_project(kernel, approval=True)
+            ctx = _context(kernel, "ws_network", project, "ep-2")
             foreign = rt.EFFECT_PROPOSED.draft(capability="email.send", owner="email", args_json="{}",
                                                summary=Content.of("un mail", level=0), approval=True)
             with pytest.raises(PermissionError):
                 await ctx.propose(foreign)
             with pytest.raises(TypeError):
                 await ctx.propose(rt.EFFECT_EXECUTED.draft(proposal=1, ok=True, result="x"))
-            own = rt.EFFECT_PROPOSED.draft(capability="goals.networked", owner="goals", args_json="{}",
+            own = rt.EFFECT_PROPOSED.draft(capability="projects.networked", owner="projects", args_json="{}",
                                            summary=Content.of("réseau", level=0), approval=True)
             with pytest.raises(PermissionError):  # ce que faisaient les outils : émettre au nom du runtime
                 await ctx.emit(own)

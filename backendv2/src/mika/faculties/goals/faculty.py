@@ -6,8 +6,7 @@
   modèle ait répondu (panne, délai, supplantation) **rend son crédit**.
 - **Un pas sans verdict** compte : trois de suite, et le but est bloqué.
 - **« Fini » sans preuve** n'est pas fini : il est noté, le but continue.
-- **L'envie** d'une exploration s'use (demi-vie de six heures) ; celle d'un
-  projet confié ne s'use pas — c'est un engagement.
+- **L'envie** d'une exploration s'use (demi-vie de six heures).
 - **Un rappel** qui n'a pas pu être dit est retenté, espacé (5 min × n), au
   plus trois fois.
 - **Suspendu** par un opérateur (``goals.paused``), un but est figé : aucun
@@ -45,8 +44,8 @@ class GoalsParams(BaseModel):
     # l'envie d'une exploration
     desire_half_life_us: Annotated[int, Knob(
         label="Demi-vie de l'envie", group="L'envie d'une exploration", lo=HOUR, hi=3 * DAY,
-        help="L'envie d'une exploration perd la moitié de sa force en ce temps (pas pendant une pause) ; celle "
-             "d'un projet confié ne s'use pas. Le tempérament la dérive de la persévérance.")] = 6 * HOUR
+        help="L'envie d'une exploration perd la moitié de sa force en ce temps (pas pendant une pause). Le "
+             "tempérament la dérive de la persévérance.")] = 6 * HOUR
     abandon_below: Annotated[float, Knob(
         label="Abandon sous", group="L'envie d'une exploration", lo=0.0, hi=0.9, step=0.01,
         help="Quand l'envie d'une exploration passe sous ce seuil, elle y renonce (« l'envie s'est usée ») : "
@@ -55,9 +54,6 @@ class GoalsParams(BaseModel):
     step_spacing_us: Annotated[int, Knob(
         label="Espacement des séances (exploration)", group="Les séances", lo=MINUTE, hi=DAY,
         help="Entre deux séances d'une même exploration, au moins ce délai.")] = 30 * MINUTE
-    project_spacing_us: Annotated[int, Knob(
-        label="Espacement des séances (projet)", group="Les séances", lo=MINUTE, hi=DAY,
-        help="Entre deux séances d'un même projet confié, au moins ce délai (plus si son agenda le dit).")] = 10 * MINUTE
     steps_per_hour: Annotated[int, Knob(
         label="Séances par heure au plus", group="Les séances", lo=0, hi=30,
         help="Tous buts confondus : chaque séance est une boucle d'outils du modèle, silencieuse, hors du budget "
@@ -66,9 +62,6 @@ class GoalsParams(BaseModel):
         label="Séances par exploration", group="Les séances", lo=1, hi=20,
         help="Le budget de séances d'une exploration qu'elle ouvre d'elle-même ; à bout de séances sans conclure, elle "
              "bloque. Le tempérament le dérive de la persévérance.")] = 4
-    project_steps: Annotated[int, Knob(
-        label="Séances par projet (par défaut)", group="Les séances", lo=1, hi=50,
-        help="Le budget de séances d'un projet confié quand sa création n'en précise pas.")] = 12
     silent_before_blocked: Annotated[int, Knob(
         label="Séances sans verdict avant blocage", group="Les séances", lo=1, hi=10,
         help="Après autant de séances de suite où le modèle a travaillé sans rien conclure, le but est bloqué.")] = 3
@@ -83,7 +76,7 @@ class GoalsParams(BaseModel):
     wait_max_us: Annotated[int, Knob(
         label="Attente maximale", group="Les séances", lo=HOUR, hi=30 * DAY,
         help="…et au plus à celle-ci ; une réponse de la personne attendue la libère plus tôt.")] = DAY
-    # preuves (log-odds) : de l'envie au pas ; un projet confié, constant quand il est dû
+    # preuves (log-odds) : de l'envie au pas
     work_base: Annotated[float, Knob(
         label="Preuve de base d'une séance", group="Preuves", lo=0.0, hi=12.0, step=0.5,
         help="La preuve (log-odds) d'une séance d'exploration : cette base plus l'envie × le poids ci-dessous, "
@@ -92,10 +85,6 @@ class GoalsParams(BaseModel):
         label="Poids de l'envie", group="Preuves", lo=0.0, hi=12.0, step=0.5,
         help="Ce que vaut une envie pleine (1) en preuve d'une séance ; par défaut, une envie à moitié usée amène "
              "juste au seuil.")] = 8.0
-    project_evidence: Annotated[float, Knob(
-        label="Preuve d'une séance de projet", group="Preuves", lo=0.0, hi=12.0, step=0.5,
-        help="Constante quand la séance d'un projet confié est due ; au-dessus du seuil des séances (8), elle part "
-             "vite.")] = 10.0
     priority_step: Annotated[float, Knob(
         label="Poids d'un cran de priorité", group="Preuves", lo=0.0, hi=4.0, step=0.25,
         help="Ce qu'un cran de priorité ajoute à la preuve d'une séance (basse : −1 cran, haute : +1, urgente : "
@@ -290,7 +279,9 @@ class GoalsState:
     self_stuck_at: int = 0
 
 
-GOALS = Faculty("goals", state=GoalsState, init=lambda p: GoalsState(), params=GoalsParams, derive=derive)
+GOALS = Faculty("goals", state=GoalsState, init=lambda p: GoalsState(), params=GoalsParams, derive=derive,
+                # les réglages des projets, quand ils étaient des buts (ADR 0031) : d'anciens journaux les portent
+                retired_params=("project_spacing_us", "project_steps", "project_evidence"))
 GOALS.declare(*c.ALL)
 
 
@@ -348,8 +339,8 @@ class Amended(Payload):
 
 
 class Reframed(Payload):
-    """Un opérateur change le cadre d'un but (un projet confié ; le texte et l'heure d'un rappel ;
-    la priorité de n'importe lequel). Seuls les champs donnés changent."""
+    """Un opérateur change le cadre d'un but (le texte et l'heure d'un rappel ; la priorité de n'importe lequel ;
+    les anciens projets, avant l'ADR 0031, changeaient aussi leur cadre). Seuls les champs donnés changent."""
 
     goal: int
     title: Content | None = None
@@ -457,11 +448,12 @@ def params(p: GoalsParams | None) -> GoalsParams:
 
 
 def budget(g: Goal, p: GoalsParams) -> int:
-    """Combien de pas au plus : le sien, sinon la valeur par défaut de sa sorte (un rappel n'en fait pas).
-    Une seule lecture de ``max_steps == 0`` partout (le travail, la clôture, la fiche, le prompt)."""
+    """Combien de pas au plus : le sien, sinon la valeur par défaut de sa sorte (un rappel n'en fait pas ; un
+    ancien projet, relu au rejeu, compte comme une exploration). Une seule lecture de ``max_steps == 0`` partout
+    (le travail, la clôture, la fiche, le prompt)."""
     if g.max_steps:
         return g.max_steps
-    return {c.PROJECT: p.project_steps, c.EXPLORATION: p.exploration_steps}.get(g.kind, 0)
+    return p.exploration_steps if g.kind in (c.EXPLORATION, c.PROJECT) else 0
 
 
 def rank(g: Goal) -> int:

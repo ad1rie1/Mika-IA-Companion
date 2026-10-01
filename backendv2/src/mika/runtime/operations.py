@@ -153,7 +153,12 @@ async def perform(kernel: Kernel, key: str, form: Mapping[str, Sequence[str]], *
         await _audit(kernel, spec, by, subject, (), "failed", correlation, nonce)
         return Outcome(False, f"L'action a échoué : {got.error!r}"[:400], "danger")
     done: Done = got if isinstance(got, Done) else Done(message=str(got or ""))
-    stray = sorted({d.type.name for d in done.drafts} - spec.emits)
+    # la suite est vérifiée avant le premier ajout (sur des numéros fictifs) : rien ne s'écrit à moitié pour un
+    # type non déclaré
+    probe = call(lambda: list(done.then(tuple(range(1, len(done.drafts) + 1)))) if done.then is not None else [],
+                 label=f"suite de {spec.key}")
+    planned = [] if isinstance(probe, Failed) else probe
+    stray = sorted({d.type.name for d in [*done.drafts, *planned]} - spec.emits)
     if stray:
         await _audit(kernel, spec, by, subject, (), "refused", correlation, nonce)
         return Outcome(False, f"Action refusée : elle émettrait {', '.join(stray)} sans l'avoir déclaré.", "danger")
@@ -179,6 +184,15 @@ async def perform(kernel: Kernel, key: str, form: Mapping[str, Sequence[str]], *
             await _audit(kernel, spec, by, subject, (), "superseded", correlation, nonce)
             return Outcome(False, "La situation a changé depuis l'ouverture de la page : rien n'a été fait.", "warn")
         seqs, deduped = tuple(commit.seqs), bool(commit.deduped)
+        if done.then is not None and seqs:
+            # même après un dédoublonnage (un renvoi après une panne) : ses clés rendent la suite rejouable
+            more = await _follow(mind, spec, done, seqs, correlation, nonce)
+            if isinstance(more, Failed):
+                await _audit(kernel, spec, by, subject, seqs, "failed", correlation, nonce)
+                go = Ref.subject(done.go_created, str(seqs[0]), "") if done.go_created else done.go
+                return Outcome(False, "C'est créé, mais la suite n'a pas pu s'écrire : complète depuis sa fiche.",
+                               "warn", seqs=seqs, go=go)
+            seqs += more
     for proposal, draft in resolutions:
         keyed_ = replace(draft, dedupe_key=f"décision:{proposal}")
         try:
@@ -198,6 +212,22 @@ async def perform(kernel: Kernel, key: str, form: Mapping[str, Sequence[str]], *
         return Outcome(True, "Déjà fait.", "info", seqs=seqs, deduped=True, go=go)
     await _audit(kernel, spec, by, subject, seqs, "done", correlation, nonce)
     return Outcome(True, done.message or "Fait.", done.tone, seqs=seqs, go=go, show=done.show)
+
+
+async def _follow(mind: Any, spec: ActionSpec, done: Done, seqs: tuple[int, ...], correlation: str,
+                  nonce: str) -> tuple[int, ...] | Failed:
+    """La suite d'une action (``Done.then``), journalisée après ce qu'elle suit ; une panne est rendue, jamais levée."""
+    assert done.then is not None
+    follow = call(lambda: list(done.then(seqs)), label=f"suite de {spec.key}")  # type: ignore[misc]
+    if isinstance(follow, Failed):
+        return follow
+    if not follow:
+        return ()
+    keyed = [replace(d, dedupe_key=d.dedupe_key or f"op:{nonce}:suite:{i}") if nonce else d
+             for i, d in enumerate(follow)]
+    more = await acall(lambda: mind.append(keyed, emitter=spec.owner, correlation=correlation,
+                                           origin=Origin.EXTERNAL), label=f"suite de {spec.key}")
+    return more if isinstance(more, Failed) else tuple(more.seqs)
 
 
 #: les jetons de formulaire déjà servis, par noyau (le journal garde les autres : leur audit)

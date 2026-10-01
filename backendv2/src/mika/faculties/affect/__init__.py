@@ -201,7 +201,8 @@ def _face(s: AffectState, cx, person: str) -> c.Face:
 # ── Prompt ────────────────────────────────────────────────────────────────
 
 
-@AFFECT.section("mood", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, tags=[Tag.AFFECTIVE], trim_rank=70,
+# son humeur la suit aussi quand elle travaille sur un projet dans son mode à elle (ADR 0031)
+@AFFECT.section("mood", zone=Zone.VOLATILE, episodes=[*CONVERSATIONAL, Kind.WORK], tags=[Tag.AFFECTIVE], trim_rank=70,
                 floor_chars=200, title="TON ÉTAT ÉMOTIONNEL ACTUEL", reads=[c.MOOD])
 def _mood_section(s: AffectState, frame: Frame, enrich: Any) -> str:
     p = _params(frame.env.params_of("affect", frame.root))

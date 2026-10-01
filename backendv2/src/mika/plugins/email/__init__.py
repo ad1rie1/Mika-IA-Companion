@@ -40,7 +40,7 @@ from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
 from mika.ports.mail import split_ref
-from mika.vocab.episodes import Kind, task_of
+from mika.vocab.episodes import PROJECT_KINDS, WORKING, Kind, task_of
 
 KEEP = 100
 BUNDLE = "email"
@@ -350,7 +350,10 @@ def for_owner(frame: Frame) -> bool:
     ep = frame.episode
     if ep is None:
         return False
-    if ep.kind in (Kind.STEP, Kind.TASK):
+    if ep.kind in PROJECT_KINDS:  # une exécution de projet : seulement si le projet a sa boîte dans ses outils
+        args = ep.attrs.get("args") or {}
+        return BUNDLE in {b.strip() for b in str(args.get("bundles") or "").split(",")}
+    if ep.kind in WORKING or ep.kind == Kind.TASK:
         return True  # elle travaille : c'est sa boîte
     if not ep.target:
         return False

@@ -24,7 +24,7 @@ from mika.contracts import runtime as rt
 from mika.kernel.events import Draft, Origin
 from mika.kernel.faculty import ToolResult, ToolSpec
 from mika.kernel.frame import Frame
-from mika.kernel.guards import Guard
+from mika.kernel.guards import Guard, combine
 from mika.ports.llm import LLMGateway, LLMRequest, LLMResponse, Message, ToolCall, ToolDecl
 from mika.runtime.boundary import Failed, acall
 
@@ -62,8 +62,10 @@ class ToolContext:
     def state(self) -> Any:
         return self.frame.state(self.spec.owner)
 
-    async def emit(self, *drafts: Draft[Any]) -> Commit:
-        return await self._append(drafts, emitter=self.spec.owner)
+    async def emit(self, *drafts: Draft[Any], guard: Guard | None = None) -> Commit:
+        """Écrire au nom de la faculté de l'outil. ``guard`` s'ajoute à la garde de l'épisode : ce que
+        l'écriture suppose encore vrai au moment du commit (sinon ``Superseded``, et rien n'est écrit)."""
+        return await self._append(drafts, emitter=self.spec.owner, guard=guard)
 
     async def propose(self, draft: Draft[Any]) -> Commit:
         """Proposer un effet extérieur : une capacité de la faculté de l'outil.
@@ -81,7 +83,7 @@ class ToolContext:
                                   f"(pas {draft.data.capability})")
         return await self._append((draft,), emitter=rt.OWNER)
 
-    async def _append(self, drafts: Sequence[Draft[Any]], *, emitter: str) -> Commit:
+    async def _append(self, drafts: Sequence[Draft[Any]], *, emitter: str, guard: Guard | None = None) -> Commit:
         keyed = []
         for d in drafts:
             key = d.dedupe_key or f"{self.call_id}:{self._emitted}"
@@ -89,7 +91,8 @@ class ToolContext:
             keyed.append(replace(d, dedupe_key=key))
         commit = await self.mind.append(
             keyed, emitter=emitter, correlation=self.episode_id, origin=Origin.TOOL,
-            causation=None, basis=self.frame.root, guard=self.guard, holder=self.episode_id,
+            causation=None, basis=self.frame.root, guard=combine(self.guard, guard) if guard else self.guard,
+            holder=self.episode_id,
         )
         self.frame = Frame(commit.root, self.mind.clock.now(), self.mind.registry,
                            self.frame.audience, self.frame.episode)

@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel
 
 from mika.kernel import forms
+from mika.kernel.registry import drop_retired
 from mika.vocab.temperament import Temperament
 
 if TYPE_CHECKING:
@@ -211,7 +212,7 @@ class Parameters:
         if fac is None or fac.params is None or record is None:
             return None
         try:
-            return fac.params.model_validate(json.loads(record.data))
+            return fac.params.model_validate(drop_retired(json.loads(record.data), fac.retired_params))
         except ValueError:
             return None
 

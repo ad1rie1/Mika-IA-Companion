@@ -293,6 +293,13 @@ table.tbl { border-collapse: separate; border-spacing: 0; width: 100%; font-size
 
 .prose { white-space: pre-wrap; overflow-wrap: anywhere; }
 .code { background: var(--sunken); border-radius: var(--radius-sm); padding: 12px; overflow-x: auto; }
+.code.diff { padding: 8px 0; }
+.code.diff .d-line { display: block; padding: 0 12px; min-height: 1.4em; white-space: pre; width: max-content;
+  min-width: 100%; box-sizing: border-box; }
+.code.diff .d-add { background: var(--ok-bg); color: var(--ok); }
+.code.diff .d-del { background: var(--danger-bg); color: var(--danger); }
+.code.diff .d-hunk { background: var(--info-bg); color: var(--info); }
+.code.diff .d-meta { color: var(--text-2); font-weight: 600; }
 details.more > summary { cursor: pointer; color: var(--accent); list-style: none; margin-top: 4px; font-size: 12.5px; }
 details.more[open] > summary { display: none; }
 details.more > summary::-webkit-details-marker { display: none; }

@@ -58,7 +58,7 @@ from mika.kernel.inspect import (
 )
 from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
-from mika.vocab.episodes import CONVERSATIONAL, Kind
+from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind
 
 KEEP = 50
 BUNDLE = "rss"
@@ -216,7 +216,7 @@ class ReadArgs(BaseModel):
     entry: str = Field(min_length=1, max_length=64, description="l'identifiant de l'article (entre crochets)")
 
 
-EPISODES = [Kind.REPLY, Kind.INITIATIVE, Kind.STEP]
+EPISODES = [Kind.REPLY, Kind.INITIATIVE, *WORKING]
 
 
 @RSS.tool("rss_list", description="Les derniers titres de tes flux.", args=ListArgs, bundle=BUNDLE,

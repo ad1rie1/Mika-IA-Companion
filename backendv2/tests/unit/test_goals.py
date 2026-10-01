@@ -9,8 +9,6 @@
 - un rappel ordinaire attend son réveil ; un rappel urgent la réveille à
   l'heure, puis elle se rendort ; un rappel que le modèle ne peut pas dire est
   retenté trois fois, espacé, puis abandonné ;
-- seule sa propriétaire lui confie un projet ; elle y écrit et y teste un
-  programme dans son atelier, un commit par pas ;
 - elle ne travaille pas en dormant ; un pas n'est jamais livré à personne ;
 - rejouer la vie redonne exactement le même état.
 """
@@ -19,7 +17,6 @@ from __future__ import annotations
 
 import asyncio
 import shutil
-import subprocess
 
 import pytest
 
@@ -238,41 +235,6 @@ def test_a_reminder_the_model_cannot_say_is_tried_three_times_spaced_then_droppe
 
 # ── Les projets ───────────────────────────────────────────────────────────
 
-CONFIDE = "je te confie un projet : Un script de bonjour. Écrire bonjour.py avec une fonction bonjour(nom), et la tester."
-
-
-def test_only_her_owner_can_confide_a_project(tmp_path):
-    async def scenario(kernel, llm):
-        await connect(kernel, "user_5", "Inconnu")
-        await (await kernel.perceive(said("user_5", CONFIDE))).reply
-        await connect(kernel, "user_1", "Adrien", operator=True)
-        await (await kernel.perceive(said("user_1", CONFIDE))).reply
-
-    r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 15, 0))
-    projects = [o.data for o in r.of(goals_c.GOAL_OPENED) if o.data.kind == goals_c.PROJECT]
-    assert len(projects) == 1 and projects[0].address == "user_1" and projects[0].authority == goals_c.USER
-    assert projects[0].title.text == "Un script de bonjour"
-
-
-@needs_bwrap
-def test_a_confided_project_is_written_and_tested_in_its_workshop(tmp_path):
-    async def scenario(kernel, llm):
-        await connect(kernel, "user_1", "Adrien", operator=True)
-        await (await kernel.perceive(said("user_1", CONFIDE))).reply
-        await asyncio.sleep(HOUR / US)
-
-    r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 15, 0), workshop=True)
-    closed = [e.data for e in r.of(goals_c.GOAL_CLOSED)]
-    assert [c.status for c in closed] == [goals_c.ACHIEVED]
-    folder = tmp_path / "ateliers" / f"but-{closed[0].goal}"
-    assert (folder / "bonjour.py").is_file() and (folder / "test_bonjour.py").is_file()
-    log = subprocess.run(["git", "-C", str(folder), "log", "--format=%s"], capture_output=True, text=True).stdout
-    assert "atelier ouvert" in log and "testé" in log  # l'amorce, puis le pas qui a changé quelque chose
-    ran = [m.content for c in r.llm.calls if c.role == "step" for m in c.messages if m.role == "tool"]
-    assert any("code 0" in x and "tests : ok" in x for x in ran)  # le test a vraiment tourné, isolé
-    assert _shares(r.llm) and _shares(r.llm)[0][0] == "user_1"  # et elle le raconte à qui l'a confié
-
-
 # ── Le sommeil, le rejeu, l'agenda ────────────────────────────────────────
 
 
@@ -355,8 +317,9 @@ def test_two_decisions_on_one_action_only_one_counts(tmp_path):
         opened = await kernel.mind.append([_explore("Explorer : un projet")], emitter="goals", correlation="g",
                                           origin=Origin.GENESIS)
         proposed = await kernel.mind.append([rt.EFFECT_PROPOSED.draft(
-            capability="goals.networked", owner="goals", args_json="{}", summary=Content.of("réseau"),
-            approval=True, context=f"goal:{opened.seqs[-1]}")], emitter="runtime", correlation="g", origin=Origin.TOOL)
+            capability="projects.networked", owner="projects", args_json="{}", summary=Content.of("réseau"),
+            approval=True, context=f"project:{opened.seqs[-1]}")], emitter="runtime", correlation="g",
+            origin=Origin.TOOL)
         n = proposed.seqs[-1]
         both = await asyncio.gather(port.resolve_effect(n, True, by="user_1"),
                                     port.resolve_effect(n, False, by="user_9", note="non"))
@@ -383,7 +346,7 @@ def test_a_goal_opened_by_hand_needs_its_owner_frame(tmp_path):
     """Un cadre confié (autorité de la personne) ne s'abandonne pas d'elle-même."""
     async def scenario(kernel, llm):
         await kernel.mind.append([goals_c.GOAL_OPENED.draft(
-            kind=goals_c.PROJECT, authority=goals_c.USER, title=Content.of("Ranger les notes", level=2),
+            kind=goals_c.EXPLORATION, authority=goals_c.USER, title=Content.of("Ranger les notes", level=2),
             owner="user_1", about=("user_1",), bundles=("goals",), max_steps=3, source="operator", sensitivity=2)],
             emitter="goals", correlation="genese", origin=Origin.GENESIS)
         return kernel.mind.frame().get(goals_c.LIVE)

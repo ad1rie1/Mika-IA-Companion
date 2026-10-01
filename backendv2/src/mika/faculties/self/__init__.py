@@ -30,6 +30,7 @@ from pydantic import BaseModel, ConfigDict
 from mika.contracts import attention as attention_c
 from mika.contracts import goals as goals_c
 from mika.contracts import memory as memory_c
+from mika.contracts import projects as projects_c
 from mika.contracts import self_ as c
 from mika.faculties.self.records import Dream, Journal
 from mika.kernel.clock import DAY, HOUR
@@ -169,6 +170,17 @@ def _goal_closed(s: SelfState, e, cx) -> SelfState:
         return s
     p = params(cx.params)
     return _knock(s, p.achieved_knock if d.status == goals_c.ACHIEVED else p.stuck_knock, e.at, p)
+
+
+@SELF.reducer(projects_c.OBJECTIVE_CLOSED)
+def _project_objective_closed(s: SelfState, e, cx) -> SelfState:
+    """Un objectif de projet mené à bout dans son mode à elle redonne confiance, bloquer en retire un peu ;
+    en mode impersonnel, ce n'est pas elle qui y travaille : rien (ADR 0031)."""
+    d = e.data
+    if d.mode != projects_c.PERSONA or d.status not in (projects_c.DONE, projects_c.BLOCKED):
+        return s
+    p = params(cx.params)
+    return _knock(s, p.achieved_knock if d.status == projects_c.DONE else p.stuck_knock, e.at, p)
 
 
 @SELF.fact(c.ESTEEM)

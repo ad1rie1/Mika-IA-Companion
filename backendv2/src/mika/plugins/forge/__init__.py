@@ -52,7 +52,7 @@ from mika.plugins.forge.views import (
     view_params,
 )
 from mika.ports.forge import AppInfo, ForgeRefused
-from mika.vocab.episodes import CONVERSATIONAL, Kind
+from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind
 
 BUNDLE, APPS_BUNDLE = "forge", "forge_apps"
 
@@ -427,7 +427,7 @@ def _may_build(ctx: Any) -> bool:
     ep = ctx.frame.episode
     if ep is None:
         return False
-    if ep.kind == Kind.STEP:
+    if ep.kind in WORKING:
         return True
     return bool(ep.target) and bool(ctx.frame.get(identity_c.IS_OWNER(ctx.frame.get(identity_c.PERSON(ep.target)))))
 
@@ -479,7 +479,7 @@ class CallArgs(BaseModel):
     args: dict[str, Any] = Field(default_factory=dict)
 
 
-BUILD = [Kind.REPLY, Kind.STEP]
+BUILD = [Kind.REPLY, *WORKING]
 
 
 def _port(ctx: Any) -> Any:
@@ -631,7 +631,7 @@ async def forge_command(args: CommandArgs, ctx: Any) -> Any:
 
 
 @FORGE.tool("forge_call", description="Utiliser un outil d'une de tes apps.", args=CallArgs, bundle=APPS_BUNDLE,
-            episodes=[Kind.REPLY, Kind.INITIATIVE, Kind.STEP], max_calls_per_episode=3,
+            episodes=[Kind.REPLY, Kind.INITIATIVE, *WORKING], max_calls_per_episode=3,
             owner_only=True)
 async def forge_call(args: CallArgs, ctx: Any) -> Any:
     port = _port(ctx)
@@ -642,7 +642,7 @@ async def forge_call(args: CallArgs, ctx: Any) -> Any:
     if not _may_build(ctx):
         # une app peut sortir ce qu'on lui passe vers ses domaines : pas devant n'importe qui
         return ToolResult(ok=False, content="Tu n'utilises tes apps que pour tes propriétaires.")
-    if not app.promoted and (ep is None or ep.kind != Kind.STEP):
+    if not app.promoted and (ep is None or ep.kind not in WORKING):
         return ToolResult(ok=False, content="Les outils de cette app ne servent que quand tu travailles "
                                             "(un opérateur peut les promouvoir).")
     info = port.info(args.app)

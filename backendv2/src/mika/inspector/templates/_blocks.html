@@ -45,7 +45,7 @@
   {% if b.clamp %}<details class="more"><summary><span class="prose">{{ b.short }}…</span> lire la suite</summary><div class="prose">{{ b.text }}</div></details>{% else %}<div class="prose">{{ b.text }}</div>{% endif %}</div>
   {% endif %}
 {% elif b.t == "code" %}
-  <div class="card">{% if b.title %}<h3>{{ b.title }}</h3>{% endif %}<pre class="code">{{ b.text }}</pre></div>
+  <div class="card">{% if b.title %}<h3>{{ b.title }}</h3>{% endif %}{% if b.lines %}<pre class="code diff">{% for l in b.lines %}<span class="d-line{{ ' d-' ~ l.k if l.k }}">{{ l.text }}</span>{% endfor %}</pre>{% else %}<pre class="code">{{ b.text }}</pre>{% endif %}</div>
 {% elif b.t == "stats" %}
   <div>{% if b.title %}<h3 class="block-title">{{ b.title }}</h3>{% endif %}
   <div class="stats">{% for s in b["items"] %}

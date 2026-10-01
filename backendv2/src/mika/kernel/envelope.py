@@ -123,6 +123,10 @@ class _Shape(NamedTuple):
     allowed: frozenset[str]
 
 
+#: les langues d'un bloc ``code`` : un diff unifié se colore ligne à ligne
+CODE_LANGS = ("diff",)
+
+
 def _shape(required: tuple[str, ...], optional: tuple[str, ...] = ()) -> _Shape:
     return _Shape(required, optional, frozenset((*required, *optional)))
 
@@ -134,7 +138,7 @@ _BLOCKS: dict[str, _Shape] = {
     "fields": _shape(("type", "items"), ("title", "columns")),
     "note": _shape(("type", "text"), ("tone", "title")),
     "prose": _shape(("type", "text"), ("title", "clamp", "reading")),
-    "code": _shape(("type", "text"), ("title",)),
+    "code": _shape(("type", "text"), ("title", "lang")),
     "stats": _shape(("type", "items"), ("title",)),
     "timeline": _shape(("type", "items"), ("title", "empty")),
     "chart": _shape(("type", "series"),
@@ -514,8 +518,10 @@ class _Decoder:
                              clamp=self.integer(d.get("clamp", 0), _at(path, "clamp"), 0, self.limits.chars),
                              reading=self.boolean(d.get("reading", False), _at(path, "reading")))
             case "code":
+                lang = self.choice(d["lang"], _at(path, "lang"), ("", *CODE_LANGS), "langue inconnue") \
+                    if "lang" in d else ""
                 return Code(self.string(d["text"], _at(path, "text")),
-                            title=self.string(d.get("title", ""), _at(path, "title")))
+                            title=self.string(d.get("title", ""), _at(path, "title")), lang=lang)
             case "stats":
                 return self.stats(d, path, depth)
             case "timeline":
@@ -820,7 +826,7 @@ def _enc_block(b: Any) -> dict[str, Any]:
             return out
         case Code():
             out = {"type": "code", "text": b.text}
-            _put(out, b, "title")
+            _put(out, b, "title", "lang")
             return out
         case Stats():
             out = {"type": "stats", "items": [_enc_stat(s) for s in b.items]}
@@ -1082,7 +1088,7 @@ def schema(*, limits: Limits = Limits()) -> dict[str, Any]:
         "fields": {"items": _array(_obj(_FIELD, {"label": text, "value": _ref("cell"), "hint": text}),
                                    limits.items),
                    "columns": columns_1_3},
-        "note": {}, "prose": {}, "code": {},
+        "note": {}, "prose": {}, "code": {"lang": {"enum": ["", *CODE_LANGS]}},
         "stats": {"items": _array(_obj(_STAT, {"label": text, "value": _ref("cell"), "sub": text, "tone": tones,
                                                "href": _ref("link"), "trend": _ref("chart")}), limits.items)},
         "timeline": {"items": _array(_obj(_ENTRY, {"at": instant, "title": text, "text": text, "meta": text,

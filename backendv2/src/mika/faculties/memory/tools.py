@@ -14,7 +14,7 @@ from mika.faculties.memory.recall import Recall, items_by_id, names_of, promises
 from mika.faculties.memory.recall import _promises as promises_section
 from mika.faculties.memory.salience import admissible, age_words, tag
 from mika.kernel.prompt import readable
-from mika.vocab.episodes import CONVERSATIONAL, Kind
+from mika.vocab.episodes import CONVERSATIONAL, WORKING
 
 
 class SearchArgs(BaseModel):
@@ -31,7 +31,7 @@ MEMORY.bundle("memory", "fouiller tes souvenirs et ce que tu sais ; dire qu'une 
 
 
 @MEMORY.tool("memory_search", description="Chercher dans ta mémoire (souvenirs, ce que tu sais), même ce qui ne te "
-             "revient plus tout seul.", args=SearchArgs, bundle="memory", episodes=[*CONVERSATIONAL, Kind.STEP])
+             "revient plus tout seul.", args=SearchArgs, bundle="memory", episodes=[*CONVERSATIONAL, *WORKING])
 async def memory_search(args: SearchArgs, ctx: Any) -> str:
     vectors, store = ctx.ports.get("vectors"), ctx.ports.get("store")
     frame, aud = ctx.frame, ctx.frame.audience

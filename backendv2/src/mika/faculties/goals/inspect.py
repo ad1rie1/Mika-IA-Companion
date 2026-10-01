@@ -1,13 +1,14 @@
 """Ce que les buts montrent à un opérateur.
 
 - **La fiche d'un but** (type d'objet ``goal``, clé = son numéro) : son
-  résumé, ses séances et leurs verdicts, son carnet et les consignes reçues, ce
-  qu'il a voulu faire sortir de la machine, ses épisodes, son atelier.
-- **Buts** : les vivants (actifs, en attente, en pause) et les clos.
+  résumé, ses séances et leurs verdicts, son carnet et les consignes reçues,
+  ses épisodes et ce que l'arbitre en a pensé.
+- **Buts** : les vivants (actifs, en attente, en pause) et les clos. Les
+  projets ont leur menu à eux (``projects``, ADR 0031).
 - **Sur la fiche d'une personne** : les buts qui la concernent.
 
-Les vues se lisent ; les formulaires qu'elles posent (``ActionSlot`` : modifier, décider, le plan
-de travail, déposer) passent par les actions d'opérateur (``actions.py``). Les compteurs et l'envie viennent de la tranche (calculés comme
+Les vues se lisent ; les formulaires qu'elles posent (``ActionSlot`` : reprogrammer, la priorité, le
+plan de travail) passent par les actions d'opérateur (``actions.py``). Les compteurs et l'envie viennent de la tranche (calculés comme
 la faculté les calcule) ; l'historique (séances, notes, consignes, effets,
 épisodes, clôtures), du journal — la tranche n'en garde que l'essentiel. Un
 contenu oublié s'affiche « (oublié) ».
@@ -15,7 +16,6 @@ contenu oublié s'affiche « (oublié) ».
 
 from __future__ import annotations
 
-import re
 import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
@@ -25,15 +25,11 @@ from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
 from mika.faculties.goals.actions import (
     PRIORITY_CHOICES,
-    SCHEDULES,
     TASK_STATUS_FR,
-    _confided,
-    _depositable,
     _plannable,
     _prioritizable,
     _reopenable,
     _reschedulable,
-    pending_of,
 )
 from mika.faculties.goals.faculty import (
     GOAL_AMENDED,
@@ -47,7 +43,6 @@ from mika.faculties.goals.faculty import (
     goal_at,
     live,
     params,
-    rank,
     ready_to_undertake,
     status,
 )
@@ -60,10 +55,8 @@ from mika.kernel.inspect import (
     ActionSlot,
     Badge,
     Block,
-    Code,
     Column,
     Disclosure,
-    Download,
     Entry,
     Fields,
     Found,
@@ -77,9 +70,6 @@ from mika.kernel.inspect import (
     Prose,
     Ref,
     Row,
-    Section,
-    Stat,
-    Stats,
     Table,
     Text,
     Timeline,
@@ -87,8 +77,7 @@ from mika.kernel.inspect import (
     When,
     paginate,
 )
-from mika.ports.workshop import OutsideWorkshop
-from mika.vocab.episodes import Kind, goal_of, goal_target
+from mika.vocab.episodes import Kind, goal_target
 
 GOALS_PAGE = 50
 #: l'historique d'un but (pas, consignes, notes, effets, épisodes), par page : tout le journal, du plus récent
@@ -111,7 +100,8 @@ FORGOTTEN = "(oublié)"
 #: les approbations, dans la console
 APPROVALS = Ref("local", "/inspecteur/approbations", "ouvrir les approbations")
 
-KIND_FR = {c.REMINDER: "rappel", c.EXPLORATION: "exploration", c.PROJECT: "projet"}
+#: ``project`` : un ancien projet, d'avant les projets à part (ADR 0031), relu au rejeu
+KIND_FR = {c.REMINDER: "rappel", c.EXPLORATION: "exploration", c.PROJECT: "ancien projet"}
 AUTHORITY_FR = {c.USER: "confié", c.SELF: "à elle"}
 STATUS_FR = {c.ACTIVE: "en cours", c.WAITING: "en attente", c.PAUSED: "en pause", c.ACHIEVED: "abouti",
              c.STUCK: "bloqué", c.ABANDONED: "abandonné", c.FAILED: "en échec", c.CANCELLED: "annulé"}
@@ -181,8 +171,6 @@ def _status(g: Goal, now: int) -> Badge:
 
 
 def _desire(g: Goal, now: int, frame: Frame) -> Meter | str:
-    if g.kind == c.PROJECT:
-        return "engagement (ne s'use pas)"
     if g.kind != c.EXPLORATION or g.status in c.CLOSED_STATUSES:
         return "—"
     value = desire(g, now, params(frame.env.params_of("goals", frame.root)))
@@ -293,13 +281,6 @@ def _filtered(goals: Iterable[Goal], ctx: InspectContext) -> list[Goal]:
     return [g for g in goals if (not kind or g.kind == kind) and (not authority or g.authority == authority)]
 
 
-def _awaiting_approval(s: GoalsState, frame: Frame) -> tuple[int, str]:
-    """Les buts vivants arrêtés sur un accord de l'opérateur."""
-    waiting = {goal_of(v.context) for v in frame.get(rt.PENDING_EFFECTS) if v.owner == c.OWNER}
-    n = sum(1 for g in s.goals.values() if g.id in waiting and live(g, frame.now))
-    return n, "attendent ton accord"
-
-
 def _stuck_recently(s: GoalsState, frame: Frame) -> tuple[int, str]:
     """Ce qu'on lui avait confié et qui a bloqué (ou échoué) depuis un jour."""
     n = sum(1 for g in s.goals.values() if g.authority == c.USER and g.status in (c.STUCK, c.FAILED)
@@ -307,96 +288,20 @@ def _stuck_recently(s: GoalsState, frame: Frame) -> tuple[int, str]:
     return n, "confiés : bloqués ou en échec"
 
 
-# ── Buts : les projets ────────────────────────────────────────────────────
-
 #: une décision de l'arbitre se cherche par lots de tant de sélections, au plus tant de lots par page
 SELECTED_SCAN = 200
 SELECTED_SCAN_BATCHES = 10
-STATE_PARAM = Param("etat", "État", kind="select", choices=((c.ACTIVE, "en cours"), (c.WAITING, "en attente"),
-                                                              (c.PAUSED, "en pause")))
 SENSITIVITY_FR = {0: "rien d'autrui", 1: "anodin", 2: "personnel", 3: "confidence"}
 
 
-def agenda(rule: str) -> str:
-    """Un agenda en mots (« toutes les 2 h ») ; une règle inconnue telle quelle."""
-    rule = rule or "manual"
-    return next((label for value, label in SCHEDULES if value == rule), rule)
-
-
-def _freedom(g: Goal) -> Badge:
-    return Badge("sort avec ton accord", "info") if g.approval else Badge("sort librement", "warn")
-
-
-def _pending_goals(frame: Frame) -> set[int]:
-    return {n for n in (goal_of(v.context) for v in frame.get(rt.PENDING_EFFECTS) if v.owner == c.OWNER)
-            if n is not None}
-
-
-PROJECT_COLUMNS = (Column("projet"), Column("pour qui"), Column("statut", "fit"), Column("priorité", "fit"),
-                   Column("avancement", "fit"), Column("prochaine séance"), Column("échéance", "fit"),
-                   Column("agenda", detail=True),
-                   Column("ce qui sort", hint="un mail, une commande avec le réseau : avec ton accord, ou librement", detail=True),
-                   Column("consignes", "num", detail=True), Column("où elle en est"))
-
-
-@GOALS.inspect("projets", title="Projets", section="buts", order=5, params=[STATE_PARAM, AUTHORITY_PARAM],
-               description="Les projets qu'elle mène : leur état, leur avancement, leur agenda et ce qu'ils ont le "
-                           "droit de faire. Une ligne ouvre le projet : son cadre, ses séances, ses décisions, ses "
-                           "prompts, son atelier.")
-def _projects_view(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    now = frame.now
-    p = params(frame.env.params_of("goals", frame.root))
-    projects = sorted((g for g in s.goals.values() if g.kind == c.PROJECT), key=lambda g: (-rank(g), -g.id))
-    alive = [g for g in projects if live(g, now)]
-    closed = [g for g in projects if g.status in c.CLOSED_STATUSES]
-    waiting = _pending_goals(frame)
-    wanted, authority = str(ctx.value("etat") or ""), str(ctx.value("autorite") or "")
-    shown = [g for g in alive if (not wanted or status(g, now) == wanted or (wanted == c.PAUSED and g.paused_at))
-             and (not authority or g.authority == authority)]
-    page, pager = paginate(shown, ctx.pager(size=GOALS_PAGE, total=len(shown)))
-    texts = _texts(ctx, [r for g in (*page, *closed) for r in (g.title_ref, g.summary_ref, g.result_ref) if r])
-    rows = []
-    for g in page:
-        rows.append(Row((
-            _link(g, _text(texts, g.title_ref, "(sans titre)")), _person(frame, g.owner), _status(g, now),
-            _priority(g), _plan_progress(g, p), _next_words(g, s, frame, ctx),
-            _due(g), agenda(g.schedule), _freedom(g), len(g.instructions),
-            Text(_text(texts, g.summary_ref, "aucune séance encore"), clamp=160)),
-            href=_link(g), tone="warn" if g.paused_at else "info" if g.id in waiting else ""))
-    done = [g for g in closed if g.status == c.ACHIEVED]
-    blocks: list[Block] = [
-        Stats((Stat("En cours", sum(1 for g in alive if status(g, now) == c.ACTIVE and not g.paused_at)),
-               Stat("En attente", sum(1 for g in alive if status(g, now) == c.WAITING), "d'une réponse ou d'un délai"),
-               Stat("En pause", sum(1 for g in alive if g.paused_at), "par un opérateur",
-                    "warn" if any(g.paused_at for g in alive) else ""),
-               Stat("Attendent ton accord", sum(1 for g in alive if g.id in waiting), "pour faire sortir quelque chose",
-                    "warn" if any(g.id in waiting for g in alive) else "", APPROVALS),
-               Stat("Clos (7 jours)", len(closed), f"{len(done)} abouti(s), {len(closed) - len(done)} arrêté(s)"))),
-        Table(PROJECT_COLUMNS, tuple(rows), title="Projets en cours", pager=pager,
-              empty="aucun projet avec ces filtres" if wanted or authority else
-              "aucun projet en cours : « Confier un projet » en ouvre un",
-              caption=f"Un projet a une séance de travail au plus toutes les {p.project_spacing_us // MINUTE} min, "
-                      f"{p.steps_per_hour} séances par heure au plus pour tous ses buts (Configuration › Comportement "
-                      "› Buts)."),
-    ]
-    if closed:
-        blocks.append(Table((Column("projet"), Column("pour qui"), Column("issue", "fit"), Column("clos", "fit"),
-                             Column("séances", "num"), Column("résultat")), tuple(
-            Row((_link(g, _text(texts, g.title_ref, "(sans titre)")), _person(frame, g.owner), _status(g, now),
-                 When(g.closed_at), g.steps, Text(_text(texts, g.result_ref), clamp=200)), href=_link(g))
-            for g in sorted(closed, key=lambda g: -g.closed_at)),
-            title="Projets clos ces sept derniers jours",
-            caption="Plus anciens : l'onglet Clos (filtre « projet »), lu dans le journal."))
-    return blocks
-
-
 LIVE_COLUMNS = (Column("but", "fit", detail=True), Column("titre"), Column("sorte"), Column("autorité", detail=True), Column("statut"),
-                Column("envie", hint="une exploration : son envie s'use ; un projet : un engagement", detail=True),
+                Column("envie", hint="une exploration : son envie s'use", detail=True),
                 Column("séances", "num", detail=True), Column("prochaine séance", detail=True), Column("échéance"), Column("pour qui"))
 
 
-@GOALS.inspect("vivants", title="Tous les buts vivants", section="buts", order=10, params=[KIND_PARAM, AUTHORITY_PARAM],
-               badge=_awaiting_approval, description="Ce qu'elle a en train : actif, en attente, ou en pause.")
+@GOALS.inspect("vivants", title="Buts vivants", section="buts", order=10, params=[KIND_PARAM, AUTHORITY_PARAM],
+               description="Ce qu'elle se propose de faire ensuite : ses explorations et ses rappels, actifs, en "
+                           "attente ou en pause. Ses projets ont leur menu à eux (Projets).")
 def _live_view(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     now = frame.now
     p = params(frame.env.params_of("goals", frame.root))
@@ -531,9 +436,6 @@ def _fields(g: Goal, s: GoalsState, frame: Frame, ctx: InspectContext, texts: Ma
             ("preuves (outils qui ont produit)", g.evidence),
             ("où elle en est", Text(_text(texts, g.summary_ref), clamp=600)),
         ]
-        if g.kind == c.PROJECT:
-            pairs += [("échéance", _due(g)), ("agenda", g.schedule or "manuel"),
-                      ("accord requis pour sortir", "oui" if g.approval else "non")]
     if g.status in c.CLOSED_STATUSES:
         pairs += [
             ("clos", When(g.closed_at)),
@@ -555,28 +457,24 @@ def _wait_table(g: Goal, frame: Frame) -> Table:
 
 
 @GOALS.inspect("resume", title="Résumé", subject="goal", order=10,
-               description="Ce qu'il faut faire, où elle en est, ce qui attend ta décision et son plan de travail. "
-                           "Les actions (modifier, avancer, pause, rouvrir, clore…) sont en haut de la fiche.")
+               description="Ce qu'elle s'est proposé, où elle en est et son plan de travail. Les actions (avancer, "
+                           "pause, consigne, rouvrir, clore…) sont en haut de la fiche.")
 def _summary_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     g = _subject_goal(s, ctx)
     if isinstance(g, Note):
         return [g]
     p = params(frame.env.params_of("goals", frame.root))
-    pending = pending_of(frame, g.id)
     refs = [g.title_ref, g.details_ref, g.summary_ref, g.result_ref, *(t.text_ref for t in g.tasks),
-            *(t.note_ref for t in g.tasks), *(v.summary_ref for v in pending)]
+            *(t.note_ref for t in g.tasks)]
     texts = _texts(ctx, refs)
-    key = str(g.id)
     blocks: list[Block] = [*_state_notes(g, s, frame, ctx, texts)]
     if g.kind == c.REMINDER:
         blocks.append(_reminder_card(g, frame, ctx, texts))
-    else:
-        blocks.append(Prose(_text(texts, g.details_ref), title="Ce qu'il faut faire (le cadre)") if g.details_ref
-                      else Note("Aucun cadre écrit : elle ne suit que le titre et les consignes. "
-                                + ("« Modifier le projet » en ajoute un." if _confided(s, frame, key) else ""),
-                                tone="warn" if g.kind == c.PROJECT else "muted"))
-    if pending:
-        blocks.append(_decisions_section(pending, texts))
+    elif g.kind == c.PROJECT:
+        blocks.append(Note("Un ancien projet, d'avant les projets à part (ADR 0031) : il ne fait plus de séance. "
+                           "Les projets se mènent désormais dans le menu Projets.", tone="muted"))
+    elif g.details_ref:
+        blocks.append(Prose(_text(texts, g.details_ref), title="Ce qu'elle cherche"))
     if g.kind != c.REMINDER:
         blocks.append(_cards(g, s, frame, ctx, p))
         if g.summary_ref:
@@ -647,21 +545,6 @@ def _reminder_card(g: Goal, frame: Frame, ctx: InspectContext, texts: Mapping[st
     ), title="Le rappel", columns=2)
 
 
-def _decisions_section(pending: Sequence[Any], texts: Mapping[str, str]) -> Section:
-    items: list[Any] = []
-    for v in pending:
-        key = str(v.proposal)
-        items.append(Fields(((f"demande n° {key}", Text(_text(texts, v.summary_ref, "(sans résumé)"), clamp=600)),
-                             ("capacité", v.capability)), columns=1))
-        items.append(Toolbar((ActionSlot("goals.approuver", (("proposal", key),), title="Approuver",
-                                         presentation="button"),
-                              ActionSlot("goals.refuser", (("proposal", key),), title="Refuser", presentation="button")),
-                             title=f"Décider de la demande n° {key}"))
-    return Section(f"À décider ({len(pending)})", tuple(items),
-                   description="Ce qu'elle veut faire sortir de la machine (une commande avec le réseau, un mail) : "
-                               "rien ne part sans ton accord. Ce qui est montré est ce qui partira.")
-
-
 def _cards(g: Goal, s: GoalsState, frame: Frame, ctx: InspectContext, p: Any) -> Grid:
     most = budget(g, p)
     blocked = sum(1 for t in g.tasks if t.status == c.TASK_BLOCKED)
@@ -672,7 +555,7 @@ def _cards(g: Goal, s: GoalsState, frame: Frame, ctx: InspectContext, p: Any) ->
     if g.kind == c.EXPLORATION:
         progress.append(("envie", _desire(g, frame.now, frame)))
     nxt: list[tuple[str, Any]] = [("prochaine séance", _next_words(g, s, frame, ctx)),
-                                  ("agenda", agenda(g.schedule) if g.kind == c.PROJECT else "son envie"),
+                                  ("ce qui la porte", "son envie (elle s'use)"),
                                   ("échéance", _due(g)),
                                   ("dernière séance", When(g.last_step_at) if g.last_step_at else "aucun encore")]
     guards: list[tuple[str, Any]] = [
@@ -728,9 +611,8 @@ def _plan_blocks(g: Goal, s: GoalsState, frame: Frame, texts: Mapping[str, str])
 
 
 @GOALS.inspect("politique", title="Cadre et réglages", subject="goal", order=15,
-               description="Changer ce qui encadre son travail (titre, cadre, pour qui, échéance, agenda, séances, accord, "
-                           "priorité), puis ce qui en découle : ce qu'elle a le droit de faire, son rythme, quand elle "
-                           "s'arrête.")
+               description="Ce qu'on peut changer de ce but (l'heure d'un rappel, la priorité d'une exploration), puis "
+                           "ce qui en découle : son rythme, quand elle s'arrête, pour qui.")
 def _policy_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     g = _subject_goal(s, ctx)
     if isinstance(g, Note):
@@ -741,8 +623,6 @@ def _policy_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]
 def _edit_blocks(g: Goal, s: GoalsState, frame: Frame) -> list[Block]:
     """Le formulaire qui change ce but, pré-rempli de ce qu'il est (selon sa sorte)."""
     key = str(g.id)
-    if _confided(s, frame, key):
-        return [ActionSlot("goals.modifier", title="Modifier le projet")]
     if _reschedulable(s, frame, key):
         return [ActionSlot("goals.reprogrammer", title="Reprogrammer le rappel")]
     if g.kind == c.EXPLORATION and _prioritizable(s, frame, key):
@@ -760,29 +640,22 @@ def _policy_blocks(g: Goal, s: GoalsState, frame: Frame, ctx: InspectContext) ->
     p = params(frame.env.params_of("goals", frame.root))
     texts = _texts(ctx, (g.details_ref, *g.instructions))
     most = budget(g, p)
-    spacing = p.project_spacing_us if g.kind == c.PROJECT else p.step_spacing_us
+    spacing = p.step_spacing_us
     nxt = next_step_at(g, s, frame) if status(g, now) in (c.ACTIVE, c.WAITING) and g.kind != c.REMINDER else None
-    waiting = g.id in _pending_goals(frame)
-    blocks: list[Block] = [
-        Prose(_text(texts, g.details_ref), title="Le cadre (elle le lit à chaque séance, ne le change jamais)")
-        if g.details_ref else Note("Aucun cadre écrit : elle suit le titre, et les consignes s'il y en a.", "muted"),
-    ]
+    blocks: list[Block] = [Prose(_text(texts, g.details_ref), title="Ce qu'elle cherche")] if g.details_ref else []
     if g.instructions:
         blocks.append(Table((Column("n°", "fit"), Column("consigne")), tuple(
             (i + 1, Text(_text(texts, ref), clamp=400)) for i, ref in enumerate(reversed(g.instructions))),
             title=f"Consignes reçues ({len(g.instructions)}, la plus récente d'abord — elle prime)"))
     blocks += [
         Fields((
-            ("ce qui sort de la machine", _freedom(g)),
-            ("un accord attend", Ref.subject("goal", str(g.id), "oui : décider dans le Résumé", "resume")
-             if waiting else "non"),
-            ("ses outils", ", ".join(g.bundles) or "ceux de l'atelier"),
+            ("ses outils", ", ".join(g.bundles) or "—"),
             ("autorité", f"{AUTHORITY_FR.get(g.authority, g.authority)} — " +
-             ("un opérateur l'a confié : elle le mène même sans envie" if g.authority == c.USER else
+             ("quelqu'un le lui a demandé : elle ne l'abandonne pas d'elle-même" if g.authority == c.USER else
               "elle l'a entrepris d'elle-même : son envie s'use, elle peut l'abandonner")),
-        ), title="Sa liberté", columns=2),
+        ), title="Ce qui la porte", columns=2),
     ]
-    if g.kind != c.REMINDER:
+    if g.kind == c.EXPLORATION:
         blocks += _rhythm_blocks(g, p, nxt, now, most, spacing)
     blocks += [
         Fields((
@@ -801,7 +674,6 @@ def _policy_blocks(g: Goal, s: GoalsState, frame: Frame, ctx: InspectContext) ->
 def _rhythm_blocks(g: Goal, p: Any, nxt: int | None, now: int, most: int, spacing: int) -> list[Block]:
     return [
         Fields((
-            ("agenda", f"{agenda(g.schedule)} ({g.schedule or 'manual'})"),
             ("prochaine séance", ("dès que possible" if nxt <= now else When(nxt)) if nxt is not None else "—"),
             ("échéance", _due(g)),
             ("séances", f"{g.steps} faites sur {most} au plus" + ("" if g.max_steps else " (valeur par défaut)")),
@@ -885,7 +757,7 @@ def _reframed_words(d: Any) -> str:
         if value is None or value is False or value == "":
             continue
         if name == "schedule":
-            out.append(f"agenda : {agenda(value)}")
+            out.append(f"agenda : {value or 'manual'}")
         elif name == "max_steps":
             out.append(f"séances au plus : {value or 'valeur par défaut'}")
         elif name == "priority":
@@ -931,79 +803,6 @@ def _operation(e: Event[Any], frame: Frame) -> Entry:
     if name == "deposited":
         return Entry(e.at, f"fichier déposé : {d.name}", _said(d.note, "") if d.note is not None else "", meta=by)
     return Entry(e.at, name, meta=by)
-
-
-# ── La fiche : effets ─────────────────────────────────────────────────────
-
-
-def _effect_state(proposal: Event[Any], pending: bool, outcomes: Sequence[Event[Any]]) -> tuple[Badge, str]:
-    """Ce qu'est devenue une proposition : (état, détail)."""
-    if pending:
-        return Badge("attend ton accord", "warn"), ""
-    executed = next((o for o in outcomes if o.type.name == rt.EFFECT_EXECUTED.name), None)
-    resolved = next((o for o in outcomes if o.type.name == rt.EFFECT_RESOLVED.name), None)
-    if executed is not None:
-        return (Badge("fait", "ok") if executed.data.ok else Badge("échoué", "danger")), executed.data.result
-    if resolved is not None and not resolved.data.approved:
-        note = f" : « {resolved.data.note} »" if resolved.data.note else ""
-        return Badge("refusé", "muted"), f"par {resolved.data.by or 'un opérateur'}{note}"
-    if resolved is not None:
-        return Badge("approuvé, en cours", "info"), f"par {resolved.data.by or 'un opérateur'}"
-    if not proposal.data.approval:
-        return Badge("lancé sans accord", "info"), ""
-    return Badge("inconnu", "muted"), "aucune décision n'est enregistrée pour cette demande"
-
-
-def _cut(text: str, n: int) -> str:
-    """Un texte borné, qui dit qu'il l'est."""
-    return text if len(text) <= n else text[:n] + f"\n[… coupé à {n} caractères …]"
-
-
-EFFECT_COLUMNS = (Column("proposition", "fit"), Column("quand", "fit"), Column("capacité"), Column("résumé"),
-                  Column("accord"), Column("état"))
-
-
-@GOALS.inspect("effets", title="Effets", subject="goal", order=40,
-               description="Les actions proposées ou exécutées pour ce projet, avec leur état d'approbation et de livraison.")
-def _effects_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    g = _subject_goal(s, ctx)
-    if isinstance(g, Note):
-        return [g]
-    pending = {v.proposal for v in frame.get(rt.PENDING_EFFECTS) if v.owner == c.OWNER and goal_of(v.context) == g.id}
-    proposed, pager = _journal_page(ctx, [rt.EFFECT_PROPOSED], ("context", goal_target(g.id)))
-    wanted = {e.seq for e in proposed}
-    outcomes: dict[int, list[Event[Any]]] = {}
-    if wanted:
-        for e in ctx.events([rt.EFFECT_RESOLVED, rt.EFFECT_EXECUTED], OUTCOMES_SCANNED):
-            if e.data.proposal in wanted:
-                outcomes.setdefault(e.data.proposal, []).append(e)
-        # une demande plus ancienne que ces décisions : son issue, relue pour elle seule
-        for seq in sorted(wanted - outcomes.keys() - pending):
-            found = ctx.events([rt.EFFECT_RESOLVED, rt.EFFECT_EXECUTED], 4, where=("proposal", seq))
-            if found:
-                outcomes[seq] = found
-    rows = []
-    for e in proposed:
-        state, detail = _effect_state(e, e.seq in pending, outcomes.get(e.seq, ()))
-        more: list[Any] = [Code(_cut(detail, EFFECT_DETAIL), title="ce qu'il en est")] if detail else []
-        if e.seq in pending:
-            more.append(Toolbar((ActionSlot("goals.approuver", (("proposal", str(e.seq)),), title="Approuver",
-                                            presentation="button"),
-                                 ActionSlot("goals.refuser", (("proposal", str(e.seq)),), title="Refuser",
-                                            presentation="button")), title="Décider"))
-        rows.append(Row((Ref("event", str(e.seq), f"#{e.seq}"), When(e.at), e.data.capability,
-                         Text(_said(e.data.summary), clamp=SUMMARY_CLAMP),
-                         "requis" if e.data.approval else "non requis", state),
-                        tone="warn" if e.seq in pending else "", detail=tuple(more)))
-    blocks: list[Block] = []
-    if pending:
-        blocks.append(Note(f"{len(pending)} demande(s) attendent ton accord : déplie une ligne pour l'approuver "
-                           "ou la refuser (ou le Résumé, qui les montre toutes).", "warn"))
-    empty = "aucune demande : tout s'est fait dans l'atelier" if "workshop" in g.bundles else \
-        "aucune demande de faire sortir quelque chose"
-    blocks.append(Table(EFFECT_COLUMNS, tuple(rows), title="Ce qu'il a voulu faire sortir de la machine",
-                        empty=empty, pager=pager))
-    return blocks
 
 
 # ── La fiche : épisodes ───────────────────────────────────────────────────
@@ -1137,123 +936,6 @@ def _decisions_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Blo
                                                           "sélections gardées au journal)",
                   caption="Une ligne par tirage où ce but était parmi les premiers en lice : « choisi » a donné une "
                           "séance de travail (ou un rappel, un récit). La table complète du moment : Décisions › Ses choix.")]
-
-
-# ── La fiche : atelier ────────────────────────────────────────────────────
-
-
-_TREE_LINE = re.compile(r"^(?P<path>.+) \((?P<size>\d+) o\)$")
-
-
-def _commit_title(summary: str) -> str:
-    """Le titre du commit qu'une séance a laissé (comme l'atelier le forme)."""
-    return re.sub(r"\s+", " ", summary).strip()[:72]
-
-
-@GOALS.inspect("atelier", title="Atelier", subject="goal", order=60,
-               description='Les fichiers et versions produits pour ce projet.')
-async def _workshop_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    g = _subject_goal(s, ctx)
-    if isinstance(g, Note):
-        return [g]
-    if "workshop" not in g.bundles:
-        return [Note("Ce but n'a pas d'atelier : seuls les projets confiés en ont un (un dossier, des programmes "
-                     "isolés).", tone="muted")]
-    port = ctx.ports.get("workshop")
-    if port is None:
-        return [Note("L'atelier n'est pas disponible ici (aucun port d'atelier).", tone="warn")]
-    deposit = [Disclosure("Déposer un fichier dans son atelier", (
-        ActionSlot("goals.deposer", title="Déposer un fichier", compact=True),))] \
-        if _depositable(s, frame, str(g.id), ctx.ports) else []
-    if not port.exists(g.id):
-        return [Note("L'atelier n'est pas encore ouvert : aucune séance n'y a encore écrit.", tone="muted"), *deposit]
-    tree = await port.tree(g.id)
-    diff = await port.diff(g.id)
-    offset = max(0, ctx.int_param("avant_commits", 0))
-    log = await port.log(g.id, HISTORY_PAGE + 1, offset=offset)
-    files = []
-    for line in tree:
-        m = _TREE_LINE.match(line)
-        if m is None:
-            files.append((Text(line, "muted"), "", ""))
-            continue
-        path = m.group("path")
-        files.append((Ref("subject", f"goal/{g.id}", path, (("onglet", "atelier"), ("fichier", path))),
-                      _size(int(m.group("size"))), _download_link(g.id, path)))
-    steps = ctx.events([c.STEP_REPORTED], STEPS_MATCHED, where=("goal", g.id))
-    by_title = {}
-    for e in reversed(steps):  # le plus récent l'emporte
-        if e.data.summary.text is not None:
-            by_title[_commit_title(e.data.summary.text)] = e
-    entries = []
-    lines = [line.strip() for line in log.splitlines() if line.strip()]
-    for line in lines[:HISTORY_PAGE]:
-        sha, _, title = line.partition(" ")
-        step = by_title.get(title)
-        if step is not None:
-            entries.append(Entry(step.at, title or "(sans message)", meta=sha,
-                                 href=Ref("episode", step.correlation, title)))
-        else:  # l'enregistrement ne dit pas sa date : sans séance pour la porter, il n'en a pas ici
-            entries.append(Entry(0, title or "(sans message)", meta=f"{sha} · sans séance associée"))
-    shown = _cut(diff, DIFF_SHOWN)
-    opened = await _opened_file(g, port, ctx.param("fichier"))
-    return [
-        *opened,
-        Table((Column("fichier"), Column("taille", "num"), Column("", "fit")), tuple(files), title="Ses fichiers",
-              empty="le dossier est vide", caption="Un nom ouvre le fichier ici ; « télécharger » le rapatrie tel quel."),
-        *deposit,
-        Code(shown, title="Changements depuis la dernière séance") if diff.strip()
-        else Note("Rien de changé depuis la dernière séance : tout est enregistré.", tone="muted"),
-        Timeline(tuple(entries), title="Historique (un enregistrement par séance qui a changé quelque chose)",
-                 empty="aucun enregistrement encore", pager=Pager(param="avant_commits",
-                    older=(("avant_commits", str(offset + HISTORY_PAGE)),) if len(lines) > HISTORY_PAGE else ())),
-    ]
-
-
-#: ce qu'on montre d'un fichier ouvert (au-delà : coupé, et dit ; le téléchargement le donne en entier)
-FILE_SHOWN = 60_000
-#: ce qu'un téléchargement rapatrie au plus
-DOWNLOAD_MAX = 20 * 1024 * 1024
-
-
-def _size(n: int) -> str:
-    return f"{n} o" if n < 1024 else f"{n / 1024:.1f} Ko" if n < 1024 * 1024 else f"{n / 1024 / 1024:.1f} Mo"
-
-
-def _download_link(goal: int, path: str) -> Ref:
-    return Ref("local", f"/inspecteur/telecharger/goal/{goal}", "télécharger", (("fichier", path),))
-
-
-async def _opened_file(g: Goal, port: Any, path: str) -> list[Block]:
-    """Le fichier demandé (``?fichier=``), lu dans l'atelier : son texte, ou une note (binaire, absent, refusé)."""
-    if not path:
-        return []
-    try:
-        text = await port.read(g.id, path)
-    except (OutsideWorkshop, FileNotFoundError, OSError, ValueError) as exc:
-        return [Note(f"« {path} » ne s'ouvre pas : {exc}", "warn")]
-    if "\x00" in text or text.count("\ufffd") > max(8, len(text) // 50):
-        return [Note(f"« {path} » n'est pas un texte : télécharge-le.", "muted"),
-                Fields((("télécharger", _download_link(g.id, path)),))]
-    return [Code(_cut(text, FILE_SHOWN), title=f"{path}"),
-            Fields((("fichier", Text(path, "mono")), ("télécharger", _download_link(g.id, path)),
-                    ("fermer", Ref.subject("goal", str(g.id), "revenir à la liste", "atelier"))), columns=3)]
-
-
-@GOALS.download("goal")
-async def _download(s: GoalsState, frame: Frame, ctx: InspectContext, key: str, name: str) -> Download | Note:
-    """Un fichier de son atelier, tel quel."""
-    g = goal_at(s, key)
-    port = ctx.ports.get("workshop")
-    if g is None or port is None or "workshop" not in g.bundles or not port.exists(g.id):
-        return Note("Ce fichier n'est pas disponible.", tone="warn")
-    try:
-        data = await port.read_bytes(g.id, name, DOWNLOAD_MAX + 1)
-    except (OutsideWorkshop, FileNotFoundError, OSError, ValueError):
-        return Note("Ce fichier n'est pas (ou plus) dans son atelier.", tone="warn")
-    if len(data) > DOWNLOAD_MAX:
-        return Note(f"Trop gros pour la console ({DOWNLOAD_MAX // (1024 * 1024)} Mo au plus).", tone="warn")
-    return Download(name.rsplit("/", 1)[-1], data)
 
 
 # ── Sur la fiche d'une personne ───────────────────────────────────────────

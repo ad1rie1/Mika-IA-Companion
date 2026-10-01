@@ -263,7 +263,7 @@ async def _show(ev: Any, ports: Mapping[str, Any]) -> None:
 # ── Arbitrage ─────────────────────────────────────────────────────────────
 
 
-@BODY.modulate(kinds=[Kind.INITIATIVE, Kind.STEP, Kind.TASK], reads=[c.SLEEP, c.ENERGY, c.AWAKE_SINCE])
+@BODY.modulate(kinds=[Kind.INITIATIVE, Kind.STEP, Kind.TASK, Kind.WORK], reads=[c.SLEEP, c.ENERGY, c.AWAKE_SINCE])
 def _night(s: BodyState, frame: Frame, row: RowView) -> Modulation:
     """Elle ne prend pas la parole ni ne travaille en dormant ; tirée du
     sommeil en pleine nuit, pas davantage (elle va se rendormir) ; juste
@@ -315,7 +315,7 @@ FOG = (
 )
 
 
-@BODY.section("fog", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["rhythm"], trim_rank=45,
+@BODY.section("fog", zone=Zone.VOLATILE, episodes=[*CONVERSATIONAL, Kind.WORK], after=["rhythm"], trim_rank=45,
               tags=[Tag.AFFECTIVE], title="ÉTAT COGNITIF", reads=[c.ENERGY])
 def _fog(s: BodyState, frame: Frame, enrich: Any) -> str | None:
     e = frame.get(c.ENERGY)

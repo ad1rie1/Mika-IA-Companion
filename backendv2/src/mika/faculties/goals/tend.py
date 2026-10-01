@@ -62,7 +62,8 @@ SEEDING_ORIGINS = frozenset({attention_c.EXCHANGE, attention_c.REVISION, attenti
 #: d'y voir clair ; une insulte (la colère, le dégoût), non
 SEEDING_EMOTIONS = frozenset({"sad", "anxious", "scared", "confused", "lonely", "melancholic", "thinking",
                               "surprised", "curious", "nostalgic", "frustrated"})
-EXPLORE_BUNDLES = ("goals", "memory")
+#: une exploration peut devenir un projet à elle (``start_project``) quand elle s'avère plus grosse qu'une envie
+EXPLORE_BUNDLES = ("goals", "memory", "projects")
 
 
 def _busy(s: GoalsState, g: Goal) -> bool:
@@ -183,6 +184,9 @@ def closures(s: GoalsState, frame: Frame) -> list[tuple[Goal, str, str]]:
     now = frame.now
     out: list[tuple[Goal, str, str]] = []
     for g in sorted(s.goals.values(), key=lambda g: g.id):
+        if g.kind == c.PROJECT and live(g, now):  # même suspendu : il n'a plus de faculté pour le reprendre
+            out.append((g, c.CANCELLED, "les projets ont désormais leur faculté à part (ADR 0031)"))
+            continue
         if not workable(g, now):
             continue
         if g.kind == c.REMINDER:
@@ -244,6 +248,8 @@ class Tend:
             return
         drafts = [closing(ctx, g, status, reason=reason) for g, status, reason in todo]
         drafts = [replace(d, dedupe_key=f"clôture:{d.data.goal}") for d in drafts]
-        live_now = tuple(g.id for g, _, _ in todo)
+        # un ancien projet se clôt même suspendu ; les autres, tant qu'ils sont actifs ou en attente
+        live_now = tuple((g.id, c.LIVE_STATUSES if g.kind == c.PROJECT else (c.ACTIVE, c.WAITING))
+                         for g, _, _ in todo)
         await ctx.emit(*drafts, guard=Guard("buts vivants", predicate=lambda view, ids=live_now: all(
-            view.get(c.STATUS(i)) in (c.ACTIVE, c.WAITING) for i in ids)))
+            view.get(c.STATUS(i)) in allowed for i, allowed in ids)))

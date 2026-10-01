@@ -29,6 +29,7 @@ from mika.adapters.web.app import WebConfig
 from mika.app.console import NAVIGATION
 from mika.app.server import build
 from mika.ports.llm import LLMRequest, LLMResponse
+from mika.runtime.operations import perform
 from mika.sim.llm.scripted import ScriptedLLM
 from mika.vocab.episodes import VOICE_ROLES
 
@@ -46,6 +47,19 @@ CONVERSATIONS = (
     ("adrien", ["salut ! moi c'est Adrien", "je bosse sur un jeu en ce moment", "tu aimes le café ?"]),
     ("bea", ["coucou Mika, c'est Béa", "je suis un peu fatiguée aujourd'hui", "à demain !"]),
 )
+
+
+async def _project(kernel) -> str:
+    """Un projet fictif, créé comme un opérateur le ferait : des objectifs ponctuels et un constant."""
+    got = await perform(kernel, "projects.creer", {
+        "_champs": ["title", "description", "objectives", "constants", "mode", "schedule", "days", "start", "end",
+                    "cadence_hours", "runs_per_day", "priority", "branch", "tool_memory"],
+        "title": ["Outils réseau"], "description": ["Un petit outillage d'administration, propre et testé."],
+        "objectives": ["Créer un module RDP\nÉcrire sa documentation"], "constants": ["Améliorer la sécurité"],
+        "mode": ["persona"], "schedule": ["manual"], "days": ["weekdays"], "start": ["9:00"], "end": ["18:00"],
+        "cadence_hours": ["24"], "runs_per_day": ["0"], "priority": ["normal"], "branch": ["main"],
+        "tool_memory": ["on"]}, by="user_1", nonce="apercu-projet")
+    return got.go.key.split("/", 1)[1] if got.ok and got.go is not None else ""
 
 
 def _respond(req: LLMRequest) -> LLMResponse:
@@ -113,6 +127,10 @@ def export(out: Path) -> list[str]:
             for kind in ("person", "handle"):  # la première personne connectée, et son adresse
                 urls += [f"/inspecteur/fiche/{kind}/user_1?onglet={quote(v.name)}"
                          for v in live.kernel.registry.inspectors if v.subject == kind]
+            project = client.portal.call(lambda: _project(live.kernel))  # un projet, et chaque onglet de sa fiche
+            if project:
+                urls += [f"/inspecteur/fiche/project/{project}?onglet={quote(v.name)}"
+                         for v in live.kernel.registry.inspectors if v.subject == "project"]
             ended = client.portal.call(lambda: live.kernel.mind.store.latest(["episode.ended"], 1))
             if ended:
                 corr = quote(ended[0].correlation, safe="")
@@ -121,7 +139,7 @@ def export(out: Path) -> list[str]:
             urls += ["/inspecteur/reglages/fournisseurs?enregistrement=backends&cle=",
                      "/inspecteur/reglages/comportement-affect?groupe=repos-et-ancre",
                      "/inspecteur/reglages/comptes?nouveau=1", "/inspecteur/recherche?q=a",
-                     "/inspecteur/action/goals.confier?retour=/inspecteur/buts"]
+                     "/inspecteur/action/projects.creer?retour=/inspecteur/projets"]
             for url in dict.fromkeys(u for u in urls if u):
                 r = client.get(url, follow_redirects=True)
                 name = _name(url)

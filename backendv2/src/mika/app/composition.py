@@ -27,6 +27,7 @@ from mika.faculties.memory import MEMORY
 from mika.faculties.needs import NEEDS
 from mika.faculties.others import OTHERS
 from mika.faculties.presence import PRESENCE
+from mika.faculties.projects import PROJECTS, job_brief, work_brief
 from mika.faculties.self import SELF, load, persona_for
 from mika.faculties.social import SOCIAL
 from mika.faculties.transcript import TRANSCRIPT
@@ -44,7 +45,7 @@ from mika.plugins.sensors import SENSORS
 from mika.runtime import params
 from mika.runtime.bootstrap import Kernel, KernelDeps
 from mika.sim.world import Composition
-from mika.vocab.episodes import VOICE_ROLES, Kind, Role
+from mika.vocab.episodes import VOICE_ROLES, Kind, Role, Tag
 
 log = logging.getLogger("mika.composition")
 
@@ -52,7 +53,7 @@ log = logging.getLogger("mika.composition")
 def faculties() -> list[Faculty[Any, Any]]:
     """Les facultés de Mika, puis ses plugins (M7)."""
     return [PRESENCE, IDENTITY, TRANSCRIPT, MEMORY, BODY, AFFECT, NEEDS, OTHERS, ATTENTION, SELF, EXPRESSION,
-            SOCIAL, AGENCY, GOALS, EMAIL, RSS, CAMERA, FORGE, SENSORS]
+            SOCIAL, AGENCY, GOALS, PROJECTS, EMAIL, RSS, CAMERA, FORGE, SENSORS]
 
 
 def _reply_guard(frame: Frame, target: str | None, audience: Audience | None) -> Guard | None:
@@ -63,12 +64,17 @@ def _reply_guard(frame: Frame, target: str | None, audience: Audience | None) ->
     return Guard("divulgation", reads=(identity_c.DISCLOSURE((target, audience.channel, audience.public)),))
 
 
+#: les lots qu'un projet peut avoir (chaque projet choisit les siens parmi eux)
+PROJECT_TOOLS = frozenset({"projects", "workshop", "memory", "email", "rss", "camera", "forge", "forge_apps"})
+
+
 def policies() -> dict[str, EpisodePolicy]:
     return {
         Kind.REPLY: EpisodePolicy(kind=Kind.REPLY, role=Role.REPLY, priority=0, lane="conversation",
                                   guard=_reply_guard, max_tokens=1024, deadline_s=180.0,
-                                  tool_bundles=frozenset({"memory", "identity", "goals", "email", "rss", "camera",
-                                                          "forge", "forge_apps", "self", "attention", "social"}),
+                                  tool_bundles=frozenset({"memory", "identity", "goals", "projects", "email", "rss",
+                                                          "camera", "forge", "forge_apps", "self", "attention",
+                                                          "social"}),
                                   core_bundles=frozenset({"memory", "identity", "goals"})),
         Kind.INITIATIVE: EpisodePolicy(kind=Kind.INITIATIVE, role=Role.INITIATIVE, priority=1, lane="conversation",
                                        brief=initiative_brief, max_tokens=600, deadline_s=180.0,
@@ -79,8 +85,18 @@ def policies() -> dict[str, EpisodePolicy]:
         Kind.STEP: EpisodePolicy(kind=Kind.STEP, role=Role.STEP, priority=2, lane="background",
                                  persona_depth="compact", visible=False, delivered=False, brief=step_brief,
                                  max_tool_turns=12, max_tokens=2048, deadline_s=300.0,
-                                 tool_bundles=frozenset({"goals", "memory", "workshop", "email", "rss",
+                                 tool_bundles=frozenset({"goals", "memory", "projects", "email", "rss",
                                                          "camera", "forge", "forge_apps"})),
+        # une exécution sur un projet, dans son mode à elle : sa voix (compacte), son humeur, ses avis — pour
+        # elle seule, ni fil ni livraison ; ses outils, ceux du projet (``bundles`` du candidat)
+        Kind.WORK: EpisodePolicy(kind=Kind.WORK, role=Role.PROJECT, priority=2, lane="background",
+                                 persona_depth="compact", visible=False, delivered=False, brief=work_brief,
+                                 max_tool_turns=16, max_tokens=4096, deadline_s=600.0, tool_bundles=PROJECT_TOOLS),
+        # une exécution impersonnelle : aucune persona, aucune section affective
+        Kind.JOB: EpisodePolicy(kind=Kind.JOB, role=Role.JOB, voice=False, priority=2, lane="background",
+                                visible=False, delivered=False, brief=job_brief, max_tool_turns=16, max_tokens=4096,
+                                deadline_s=600.0, tool_bundles=PROJECT_TOOLS,
+                                muted_tags=frozenset({Tag.AFFECTIVE, Tag.INNER})),
         # une tâche qu'une faculté lui confie (préparer un brouillon de réponse) : sa voix, pour elle seule
         Kind.TASK: EpisodePolicy(kind=Kind.TASK, role=Role.STEP, priority=2, lane="background",
                                  persona_depth="compact", visible=False, delivered=False, brief=task_brief,
@@ -99,9 +115,10 @@ def arbitration() -> ArbitrationPolicy:
     travail, en quelques minutes quand l'envie est là ; rarement quand elle
     s'use."""
     return ArbitrationPolicy(
-        thresholds={Kind.INITIATIVE: 9.0, Kind.STEP: 8.0, Kind.TASK: 8.0},
-        max_rates={Kind.INITIATIVE: 0.1, Kind.STEP: 1 / 120, Kind.TASK: 1 / 300},
-        aging_per_hour={Kind.INITIATIVE: 0.0, Kind.STEP: 0.0, Kind.TASK: 0.0},
+        thresholds={Kind.INITIATIVE: 9.0, Kind.STEP: 8.0, Kind.TASK: 8.0, Kind.WORK: 8.0, Kind.JOB: 8.0},
+        max_rates={Kind.INITIATIVE: 0.1, Kind.STEP: 1 / 120, Kind.TASK: 1 / 300, Kind.WORK: 1 / 120,
+                   Kind.JOB: 1 / 120},
+        aging_per_hour={Kind.INITIATIVE: 0.0, Kind.STEP: 0.0, Kind.TASK: 0.0, Kind.WORK: 0.0, Kind.JOB: 0.0},
     )
 
 

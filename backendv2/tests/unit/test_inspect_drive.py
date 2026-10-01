@@ -55,9 +55,11 @@ from mika.sim.llm.persona import PersonaSimLLM
 from tests.fixtures.mika import PARIS, at_paris, befriend, boot, build, connect, said
 
 VIEWS = {("affect", "humeur"): "Humeur", ("affect", "postures"): "Postures", ("body", "rythme"): "Rythme",
-         ("needs", "needs"): "Besoins", ("agency", "initiatives"): "Initiatives", ("goals", "vivants"): "Tous les buts vivants",
-         ("goals", "clos"): "Clos", ("goals", "resume"): "Résumé", ("goals", "projets"): "Projets",
-         ("goals", "politique"): "Cadre et réglages", ("goals", "decisions"): "Décisions"}
+         ("needs", "needs"): "Besoins", ("agency", "initiatives"): "Initiatives", ("goals", "vivants"): "Buts vivants",
+         ("goals", "clos"): "Clos", ("goals", "resume"): "Résumé",
+         ("goals", "politique"): "Cadre et réglages", ("goals", "decisions"): "Décisions",
+         ("projects", "tous"): "Ses projets", ("projects", "toutes_executions"): "Exécutions",
+         ("projects", "toutes_decisions"): "Décisions techniques", ("projects", "apercu"): "Vue d'ensemble"}
 SERIES = {"affect.valence": (-1.0, 1.0), "affect.eveil": (-1.0, 1.0), "body.energie": (0.0, 1.0),
           "body.pression": (0.0, 1.0), "needs.social": (0.0, 1.0), "needs.expression": (0.0, 1.0),
           "needs.curiosite": (0.0, 1.0)}
@@ -219,7 +221,8 @@ def test_every_view_reads_a_fresh_kernel(tmp_path):
             "inconnu": show(kernel, "goals", "resume", subject="999"),
             "illisible": show(kernel, "goals", "resume", subject="douze"),
             "sorte": show(kernel, "goals", "vivants", sorte="bidule"),
-            "vivants": show(kernel, "goals", "vivants", sorte="projet"),
+            "vivants": show(kernel, "goals", "vivants", sorte="exploration"),
+            "projet": show(kernel, "projects", "apercu", subject="999"),
             "periode": show(kernel, "affect", "humeur", periode="un siècle"),
         }
 
@@ -263,6 +266,10 @@ def test_every_view_reads_a_fresh_kernel(tmp_path):
     assert "Aucun but « douze »" in flat(odd["illisible"])
     assert "« bidule » inconnu" in flat(odd["sorte"]) and "aucun but en cours" in flat(odd["sorte"])
     assert "aucun but avec ces filtres" in flat(odd["vivants"])
+    # les projets : une liste vide qui dit comment commencer, une fiche inconnue qui le dit
+    assert "aucun projet" in flat(fresh[("projects", "tous")]) and "Créer un projet" in flat(fresh[("projects", "tous")])
+    assert "aucune exécution encore" in flat(fresh[("projects", "toutes_executions")])
+    assert "Aucun projet « 999 »" in flat(odd["projet"]) and odd["projet"][0].tone == "warn"
     assert "Période" in odd["periode"][0].text and odd["periode"][0].tone == "warn"
     assert chart(odd["periode"]).until - chart(odd["periode"]).since == DAY  # retombe sur 24 h
 

@@ -150,9 +150,14 @@ def pool(
         hazard = 0.0 if vetoes else rate * sigmoid(score)
         resources: frozenset[str] = frozenset().union(*(c.resources for c in cands)) if cands else frozenset()
         guards = tuple(g for c in cands for g in c.guards)
+        # un épisode porte sur un seul sujet : quand plusieurs candidats en ont un (deux buts, un projet,
+        # sur la même adresse), seuls les arguments du plus fort passent ; les autres reviendront
+        subjects = [c for c in cands if c.args.get("subject")]
+        chosen = max(subjects, key=lambda c: (c.evidence, str(c.args["subject"]))) if subjects else None
         args: dict[str, Any] = {}
         for c in cands:
-            args.update(c.args.to_dict())
+            if c is chosen or not c.args.get("subject"):
+                args.update(c.args.to_dict())
         deadlines = [c.deadline for c in cands if c.deadline is not None]
         rows.append(
             Row(kind, target, tuple(sorted(ps)), shift, tuple(sorted(vetoes)), score, hazard,

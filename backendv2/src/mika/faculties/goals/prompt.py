@@ -1,8 +1,7 @@
 """Ce que les buts mettent dans le prompt.
 
-- **Pendant un pas** : ce à quoi elle travaille — le but, son cadre (un
-  projet confié), les consignes reçues depuis (la plus récente prime), où
-  elle en est, son carnet, ce que sont devenues ses demandes, l'atelier.
+- **Pendant un pas** : ce à quoi elle travaille — le but, les consignes
+  reçues depuis (la plus récente prime), où elle en est, son plan, son carnet.
 - **Un rappel, un récit** : le texte du rappel, ou ce qu'elle a mené à bout —
   selon le lien avec qui l'écoute (tout, l'essentiel, ou le titre).
 - **En conversation** : ce qu'elle a en train (« tu fais quoi en ce
@@ -67,12 +66,7 @@ async def _texts(s: GoalsState, frame: Frame, ports: Mapping[str, Any]) -> dict[
     if ep is not None and ep.kind in CONVERSATIONAL:
         ids |= {g.id for g in _recent(s, frame.now)[-SHOWN * 2:]}
     refs = [r for gid in sorted(ids) if gid in s.goals for r in _refs(s.goals[gid])]
-    out: dict[str, Any] = {"texts": store.content(refs) if refs else {}}
-    atelier = ports.get("workshop")
-    g = s.goals.get(subject) if subject is not None else None
-    if ep is not None and ep.kind == Kind.STEP and g is not None and "workshop" in g.bundles and atelier is not None:
-        out["tree"] = await atelier.tree(g.id) if atelier.exists(g.id) else []
-    return out
+    return {"texts": store.content(refs) if refs else {}}
 
 
 def _who(frame: Frame, key: str | None) -> str:
@@ -114,10 +108,6 @@ def _plan(g: Goal, texts: Mapping[str, str]) -> str:
             "passent d'abord) :\n" + "\n".join(rows))
 
 
-def _size(n: int) -> str:
-    return f"{n} o" if n < 1024 else f"{n / 1024:.0f} Ko" if n < 1024 * 1024 else f"{n / 1024 / 1024:.1f} Mo"
-
-
 STEP_RULES = ("Conclus cette séance en appelant l'outil report_step : « continue » (tu reprendras), « done » (seulement si "
               "tu as réellement fait quelque chose — un outil qui a produit un résultat), « blocked » (tu n'y "
               "arrives pas), ou « wait » (tu attends quelque chose). Tes outils s'appellent, ils ne s'écrivent "
@@ -132,13 +122,10 @@ def _step(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody
         return None
     data = enrich.get("goals") or {}
     texts: Mapping[str, str] = data.get("texts") or {}
-    kind = {c.EXPLORATION: "une exploration que tu as entreprise de toi-même",
-            c.PROJECT: f"un projet que {_who(frame, g.address or g.owner)} t'a confié"}.get(g.kind, g.kind)
+    kind = {c.EXPLORATION: "une exploration que tu as entreprise de toi-même"}.get(g.kind, g.kind)
     lines = [f"Sorte : {kind}.", f"But : {texts.get(g.title_ref, '(titre oublié)')}"]
     if g.details_ref and texts.get(g.details_ref):
-        lines.append(f"Cadre (confié, tu ne le changes pas) : {texts[g.details_ref]}")
-    if g.kind == c.PROJECT and g.due is not None:
-        lines.append(f"À rendre pour le {local(g.due, frame.env.tz_of(frame.root)):%d/%m à %H:%M}.")
+        lines.append(f"Cadre : {texts[g.details_ref]}")
     instructions = [texts[r] for r in g.instructions if texts.get(r)]
     if instructions:
         lines.append("Consignes reçues depuis (à suivre ; la plus récente prime) :\n"
@@ -153,19 +140,9 @@ def _step(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody
     plan = _plan(g, texts)
     if plan:
         lines.append(plan)
-    if g.deposits:
-        lines.append("Déposé dans ton atelier par l'opérateur :\n" + "\n".join(
-            f"- {name} ({_size(size)})" + (f" — {texts[note]}" if note and texts.get(note) else "")
-            for name, size, note in g.deposits[-3:]))
     notes = [texts[r] for r in g.notes if texts.get(r)]
     if notes:
         lines.append("Ton carnet :\n" + "\n".join(f"- {n}" for n in notes[-3:]))
-    if g.effects:
-        lines.append("Tes demandes (ce qui sort de la machine) :\n" + "\n".join(f"- {e}" for e in g.effects[-3:]))
-    if "workshop" in g.bundles:
-        tree = data.get("tree")
-        lines.append("L'atelier (ton dossier) :\n" + ("\n".join(f"- {f}" for f in tree[:40]) if tree
-                                                        else "- (vide pour l'instant)"))
     lines.append(STEP_RULES)
     return SectionBody("\n".join(lines), level=g.sensitivity, provenance=(f"goal:{g.id}",))
 
@@ -235,8 +212,6 @@ def _live_section(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> Sec
         elif g.kind == c.REMINDER:
             when = f"{local(g.due, tz):%d/%m à %H:%M}" if g.due else "bientôt"
             lines.append(f"- un rappel promis à {_who(frame, g.address)} pour le {when} : {title}")
-        elif g.kind == c.PROJECT:
-            lines.append(f"- un projet pour {_who(frame, g.address or g.owner)} : {title} ({_progress(g) or 'en cours'})")
         else:
             waiting = ""
             if g.status == c.WAITING:
@@ -266,7 +241,7 @@ class NoArgs(BaseModel):
     pass
 
 
-@GOALS.tool("goals_list", description="Relire ce que tu as en train : tes projets, tes explorations, tes rappels.",
+@GOALS.tool("goals_list", description="Relire ce que tu as en train : tes explorations, tes rappels.",
             args=NoArgs, bundle="goals", episodes=CONVERSATIONAL)
 async def goals_list(args: NoArgs, ctx: Any) -> str:
     enrich = {"goals": await _texts(ctx.state, ctx.frame, ctx.ports) or {}}

@@ -1,4 +1,4 @@
-"""Les scénarios de M6 : ce qu'elle entreprend.
+"""Les scénarios de M6 : ce qu'elle entreprend (ses projets : ``sim/projects.py``).
 
 - **S09** une exploration : une inquiétude de sa propriétaire devient un but ;
   elle y avance seule, le mène à bout avec une preuve, en est fière, son
@@ -9,14 +9,10 @@
 - **S11** des rappels pendant son sommeil : l'ordinaire attend son réveil,
   l'urgent la réveille à l'heure puis elle se rendort ; un rappel que le
   modèle ne peut pas dire est retenté trois fois au plus, espacé ;
-- **S16** un projet confié : elle écrit et teste un programme dans son
-  atelier (isolé), un commit par pas, et le raconte à qui le lui a confié.
 """
 
 from __future__ import annotations
 
-import shutil
-import subprocess
 from datetime import datetime
 from typing import Any
 
@@ -209,49 +205,8 @@ async def s11(driver: Driver, rng: RngTree, res: Result) -> None:
     ]
 
 
-# ── S16 : un projet confié ────────────────────────────────────────────────
-
-CONFIDE = ("je te confie un projet : Un script de bonjour. Écrire bonjour.py avec une fonction bonjour(nom), "
-           "et la tester.")
-
-
-async def s16(driver: Driver, rng: RngTree, res: Result) -> None:
-    driver.operators.add("user_1")
-    day0 = at_paris(2026, 9, 28, 0, 0)
-    await until(driver, day0 + 15 * HOUR)
-    await driver.connect("user_1", "Adrien")
-    await driver.say("user_1", CONFIDE)
-    await until(driver, day0 + 17 * HOUR)
-    events = driver.read_events()
-    projects = [e for e in _of(events, goals_c.GOAL_OPENED.name) if e.data.kind == goals_c.PROJECT]
-    closed = [e for e in _of(events, goals_c.GOAL_CLOSED.name) if projects and e.data.goal == projects[0].seq]
-    ran = [m.content for c in driver.llm.calls if c.role == "step"  # type: ignore[attr-defined]
-           for m in c.messages if m.role == "tool" and "python3" in m.content]
-    isolated = shutil.which("bwrap") is not None
-    log = ""
-    if projects:
-        folder = driver.root / "ateliers" / f"but-{projects[0].seq}"
-        if (folder / ".git").exists():
-            log = subprocess.run(["git", "-C", str(folder), "log", "--format=%s"], capture_output=True,
-                                 text=True, check=False).stdout
-    res.metrics.update({"projets": len(projects), "commits": log.splitlines(), "isolé": isolated})
-    res.checks += [
-        expect.invariant("un projet confié par sa propriétaire", len(projects) == 1
-                         and projects[0].data.authority == goals_c.USER, "elle accepte le cadre qu'on lui confie"),
-        expect.invariant("écrit et testé dans l'atelier", not isolated or (
-            bool(closed) and closed[0].data.status == goals_c.ACHIEVED and any("code 0" in r for r in ran)),
-            "le test a réellement tourné, isolé, avant qu'elle ne dise fini", f"{ran[-1:] if ran else ran}"),
-        expect.invariant("un commit par séance qui a changé quelque chose", not isolated or (
-            len(log.splitlines()) == 2 and log.splitlines()[-1] == "atelier ouvert"),
-            "l'amorce, puis le travail", f"{log.splitlines()}"),
-        expect.invariant("et elle le raconte à qui le lui a confié", not isolated or any(
-            who == "user_1" for who, _ in _shares(driver)), "un travail confié se rend"),
-    ]
-
-
 GOALS: tuple[Plan, ...] = (
     Plan("S09 une exploration", s09, persona_llm, at_paris(2026, 9, 28, 8, 0)),
     Plan("S10 un but bloqué", s10, persona_llm, at_paris(2026, 9, 28, 9, 0)),
     Plan("S11 rappels pendant son sommeil", s11, persona_llm, at_paris(2026, 9, 28, 20, 0)),
-    Plan("S16 un projet confié", s16, persona_llm, at_paris(2026, 9, 28, 14, 0)),
 )

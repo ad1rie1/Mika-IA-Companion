@@ -216,7 +216,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     forge = forge_settings.host = ForgeHost(data / "forge", config=forge_settings.values)
     world = {"mail": ImapSmtpMail(settings.email, data / "mail.db"),
              "feeds": HttpFeeds(settings.feeds, data / "feeds.db"),
-             "workshop": BwrapWorkshop(data / "ateliers"), "camera": camera,
+             "workshop": BwrapWorkshop(data / "ateliers", credentials=settings.git), "camera": camera,
              "forge": forge, "forge_settings": forge_settings}
     kernel = Kernel(composition.deps(store=store, clock=clock, ids=RandomIdGen(), gateway=gateway,
                                      ports={"delivery": router, "vectors": vectors, **world}, **deps))

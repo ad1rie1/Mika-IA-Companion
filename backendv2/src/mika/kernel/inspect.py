@@ -212,6 +212,8 @@ class Prose:
 class Code:
     text: str
     title: str = ""
+    #: ``""`` | ``"diff"`` : un diff unifié, que le rendu colore ligne à ligne (ajouts, retraits, blocs)
+    lang: str = ""
 
 
 @dataclass(frozen=True, slots=True)

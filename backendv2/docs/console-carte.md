@@ -29,7 +29,8 @@ Trois règles tiennent toute la console :
 | Ses relations | **Identités** | « Qui parle derrière chaque adresse ? » | adresses, revendications, politique de confiance |
 | Ses relations | **Conversations** | « Qu'a-t-on dit ? » | messages, questions sans réponse |
 | Son activité | **Décisions** | « Pourquoi parle-t-elle ou se tait-elle ? » | table de l'arbitre maintenant, ce qui tourne en ce moment, budget d'initiatives, ses choix, épisodes, échéances |
-| Son activité | **Buts** | « Qu'a-t-elle entrepris ? » | buts vivants, buts clos |
+| Son activité | **Buts** | « Que se propose-t-elle de faire ensuite ? » | buts vivants (rappels, explorations), buts clos |
+| Son activité | **Projets** | « Que mène-t-elle comme travail ? » | ses projets (cartes et liste), toutes les exécutions, toutes les décisions techniques ; une fiche par projet |
 | Son activité | **Approbations** | « Que veut-elle faire sortir ? » | en attente (décider), historique |
 | Ses canaux | **Courrier** | « Lire et traiter les messages de quelle boîte ? » | comptes et dossiers en navigation, réception, brouillons de Mika, envoyés, contacts ; gestion des comptes dans Configuration |
 | Ses canaux | **Flux et capteurs** | « Ce qu'elle perçoit du monde » | flux RSS, caméra, appareils |
@@ -55,6 +56,32 @@ la table de l'arbitre.
   (les trois), valence et éveil, estime.
 - **Aujourd'hui** (cadres) : épisodes par issue, coût des modèles.
 - **Derniers épisodes** (table paginée).
+
+### Projets (ADR 0031)
+Un projet est une boîte noire qu'on pilote, distincte d'un but.
+- **Ses projets** : cadres (actifs, en pause, objectifs ouverts, exécutions sur
+  24 h, accords en attente, archivés), puis la liste — mode (Mika ou
+  impersonnel), pour qui, état, objectifs, prochaine exécution, dernier compte
+  rendu ; en détail : priorité, plage de travail, agenda, outils, dépôt distant,
+  ce qui sort. « Créer un projet » a sa page : le projet, ses objectifs (un par
+  ligne, ponctuels et constants), son mode et ses outils, son rythme et sa plage,
+  sa liberté, son dépôt distant.
+- **Exécutions** : toutes, filtrables par projet et par verdict ; chacune mène à
+  son épisode (prompt, outils, appels, décision) et à son commit.
+- **Décisions techniques** : toutes, filtrables par projet et par statut.
+- **La fiche** gouverne, onglet par onglet : *Vue d'ensemble* (ce qui attend ta
+  décision, trois cartes, le cadre, les objectifs, les dernières exécutions, les
+  décisions en vigueur) · *Objectifs* (chaque ligne se lance, se coche, se
+  modifie, se retire ; un constant ne se coche pas) · *Exécutions* (issue,
+  verdict, preuve, commit, durée) · *Décisions* (contexte, options, raison ;
+  remplacer, retirer) · *Fichiers* (dossiers à parcourir, lire, télécharger,
+  déposer) · *Dépôt git* (historique paginé, un commit en diff coloré, ce qui
+  n'est pas enregistré, le dépôt distant : pousser, récupérer, régler) ·
+  *Comportement et outils* (modifier le projet, ce que veut dire son mode, son
+  rythme, ses outils et leurs noms) · *Carnet* (consignes, ses notes, ce qu'on en
+  a fait, ce qui sort de la machine). En tête : lancer maintenant, pause,
+  reprendre, consigne, archiver, restaurer — les formulaires d'onglet
+  (`inline`) et les actions de ligne n'y sont jamais.
 
 ### Humeur et corps · Pensées et nuits · Mémoire · Personnes · Identités · Conversations · Buts · Courrier · Flux et capteurs · Apps forgées
 Ces pages sont **déclarées par les facultés** (`@f.inspect`) : leur contenu
@@ -89,6 +116,7 @@ corrige les défauts relevés (le compte « dans la boîte », les commits daté
 | | Tempérament | les huit curseurs, l'humeur de fond, ce que pilote chaque curseur |
 | | Import / export | le document YAML, revenir au fichier, l'historique des révisions |
 | Canaux | Telegram | robot, conversations autorisées, propriétaires |
+| | Dépôts git | le jeton avec lequel ses projets poussent vers leur dépôt distant (jamais réaffiché, jamais dans le journal) |
 | Plugins | Vue d’ensemble des plugins | accès aux connexions et aux comportements ; lien vers les vues d’utilisation ; les réglages des apps restent dans la Forge |
 | | Boîtes aux lettres | liste ; chaque boîte a sa page (lire, envoyer, sa voix, initiative) |
 | | Flux RSS | adresses suivies |

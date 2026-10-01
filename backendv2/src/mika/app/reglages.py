@@ -41,7 +41,7 @@ TABS = (SettingsTab("intelligence", "Intelligence"), SettingsTab("personnage", "
 #: la famille de chaque rôle (la page « Qui sert quoi »)
 ROLE_FAMILIES = {**{str(r): "voix" for r in VOICE_ROLES}, "extract": "mémoire", "validate": "mémoire",
                  "compact": "mémoire", "profile": "compréhension", "interpret": "compréhension",
-                 "triage": "sens", "caption": "sens", "plan": "travail"}
+                 "triage": "sens", "caption": "sens", "plan": "travail", "job": "travail"}
 
 
 @cache
@@ -88,6 +88,21 @@ class SttSettings(BaseModel):
                                               "OpenAI).", advanced=False, order=20)] = "whisper-1"
     api_key: Annotated[str, Knob(label="Clé d'API", help="Chiffrée, jamais réaffichée. Vide : inchangée.",
                                  secret=True, advanced=False, order=30)] = ""
+
+
+class GitSettings(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    token: Annotated[str, Knob(label="Jeton", help="Un jeton d'accès personnel (GitHub : « fine-grained », droits "
+                                                   "« Contents : Read and write » sur les dépôts de ses projets). "
+                               "Chiffré, jamais réaffiché, jamais dans le journal ni dans ce qu'elle lit. Vide : "
+                               "inchangé.", secret=True, advanced=False, order=10)] = ""
+    hosts: Annotated[tuple[str, ...], Knob(
+        label="Hôtes autorisés", help="Un hôte par ligne (github.com). Le jeton n'est montré qu'à eux : un projet "
+                                      "réglé sur un autre hôte ne l'envoie pas.", advanced=False, order=15)] = \
+        ("github.com",)
+    user: Annotated[str, Knob(label="Utilisateur", help="Le nom qui accompagne le jeton ; « x-access-token » convient "
+                                                        "à GitHub.", order=20)] = "x-access-token"
 
 
 def _dump(doc: PersonaDoc) -> str:
@@ -264,6 +279,14 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         await settings.save_stt(cfg.base_url, cfg.api_key, cfg.model or "whisper-1")
         return []
 
+    def git() -> GitSettings:
+        got = settings.git()
+        return GitSettings(token=got["token"], user=got["user"], hosts=tuple(got["hosts"]))
+
+    async def save_git(cfg: GitSettings, by: str) -> list[str]:
+        await settings.save_git(cfg.token, cfg.user, list(cfg.hosts))
+        return []
+
     async def new_token(by: str) -> tuple[str, str]:
         token = await settings.new_sensors_token()
         return "ok", f"Jeton neuf (l'ancien ne vaut plus ; montré une seule fois) : {token}"
@@ -344,6 +367,14 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "Le robot qui la relie à Telegram : son jeton, qui peut lui écrire, et qui elle traite "
                             "comme toi. L'enregistrer redémarre le robot. Les identifiants se lisent dans "
                             "Identités › Adresses (tg_<nombre>).")),)),
+        SettingsSection("depots", "Dépôts git", "canaux", GitSettings, git, save_git,
+                        description="Le jeton avec lequel ses projets poussent vers leur dépôt distant.",
+                        facts=lambda: [("Jeton", "défini" if settings.git()["token"] else "aucun")],
+                        pages=(SettingsPage("depots", "Dépôts git", description=(
+                            "Le jeton avec lequel l'atelier d'un projet pousse vers son dépôt distant (GitHub ou un "
+                            "autre hôte https) et en récupère l'histoire. L'adresse de chaque dépôt se règle sur la "
+                            "fiche du projet (Projets › un projet › Dépôt git). Le jeton ne passe que par "
+                            "l'environnement de git, limité à l'hôte du dépôt.")),)),
         SettingsSection("courrier", "Courrier", "sens", MailConfig, settings.email, save_mail,
                         description="Ses boîtes aux lettres (IMAP pour lire et ranger, SMTP pour envoyer) et, pour "
                                     "chacune, sa façon d'y écrire. Relues à chaque relève.", order=10,

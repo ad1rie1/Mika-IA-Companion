@@ -103,3 +103,5 @@ pré-remplie (lui-même) était « inconnue », faute de poignée. Désormais :
 - une personne que le but a déjà, ou l'opérateur lui-même, ne se revalide pas.
 
 Tests : `tests/protocol/test_accounts_identity.py`.
+
+**Révisé par l'ADR 0031** : ce pilotage vaut désormais pour les explorations (côté buts) ; les projets ont leur faculté, leur menu et leur fiche à eux (objectifs, exécutions, décisions techniques, fichiers, dépôt git, mode et outils).

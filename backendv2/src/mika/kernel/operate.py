@@ -14,7 +14,7 @@ de son humeur : une règle d'architecture fige la liste.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -84,5 +84,9 @@ class Done:
     show: tuple[Any, ...] = ()
     decide: tuple[Decision, ...] = ()
     #: aller sur la fiche de ce qui vient d'être créé : le type d'objet dont la clé est le
-    #: numéro du premier événement journalisé (« goal » : le projet qu'on vient de confier)
+    #: numéro du premier événement journalisé (« project » : le projet qu'on vient de créer)
     go_created: str = ""
+    #: une suite qui dépend des numéros que l'ajout vient de donner (les objectifs d'un projet qu'on vient
+    #: de créer portent son numéro) : ``then(numéros) -> brouillons``, journalisés aussitôt après, sous la même
+    #: corrélation et avec les mêmes règles (les siens seulement)
+    then: Callable[[tuple[int, ...]], Sequence[Draft[Any]]] | None = None

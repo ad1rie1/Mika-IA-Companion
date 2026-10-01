@@ -4,8 +4,7 @@ Dans un pas (``STEP``) : ``report_step`` (le verdict, qui clôt le pas),
 ``goal_note`` (son carnet), ``goal_task_add`` / ``goal_task_update`` (son plan
 de travail, que l'opérateur tient aussi), ``goal_drop`` (renoncer — seulement
 à ce qu'elle a entrepris d'elle-même). En conversation : ``goal_remind`` (un rappel à
-l'heure dite) et ``create_project`` (un travail confié — seulement par sa
-propriétaire).
+l'heure dite). Les projets sont une faculté à part (``projects``, ADR 0031).
 """
 
 from __future__ import annotations
@@ -25,13 +24,11 @@ from mika.faculties.goals.faculty import (
     TASKS_KEPT,
     Goal,
     GoalsState,
-    params,
     task_at,
     workable,
 )
-from mika.kernel import schedule
 from mika.kernel.clock import MINUTE, instant, local
-from mika.kernel.events import Content, Draft
+from mika.kernel.events import Content
 from mika.kernel.faculty import ToolResult
 from mika.kernel.frame import Frame
 from mika.vocab.episodes import Kind, goal_of
@@ -41,7 +38,6 @@ REPORT, NOTE, DROP = "report_step", "goal_note", "goal_drop"
 TASK_ADD, TASK_UPDATE = "goal_task_add", "goal_task_update"
 #: ce qui n'est pas du travail (dire où on en est, renoncer, cocher son plan)
 NOT_WORK = frozenset({REPORT, DROP, TASK_ADD, TASK_UPDATE})
-PROJECT_BUNDLES = ("goals", "memory", "workshop")
 
 
 def _goal(ctx: Any) -> Goal | None:
@@ -78,7 +74,7 @@ class ReportArgs(BaseModel):
                                                                "personne concernée — tu reprendras dès qu'elle écrit")
 
 
-GOALS.bundle("goals", "rappels, projets confiés ; noter et rendre compte de ton travail")
+GOALS.bundle("goals", "tes rappels et tes explorations ; noter et rendre compte d'une séance")
 
 
 @GOALS.tool(REPORT, description="Conclure cette séance de travail par un verdict. « done » n'est cru que si tu as "
@@ -95,9 +91,6 @@ async def report_step(args: ReportArgs, ctx: Any) -> str:
         goal=g.id, kind=g.kind, verdict=args.verdict, summary=summary, notable=args.notable,
         wait_s=args.wait_minutes * 60, proven=proven, tools=worked, owner=g.owner, about=g.about,
         wait_for=g.owner if args.verdict == c.WAIT and args.until_they_answer and g.owner else None)]
-    atelier = ctx.ports.get("workshop")
-    if atelier is not None and "workshop" in g.bundles and atelier.exists(g.id):
-        await atelier.commit(g.id, args.summary)  # un commit par pas qui a changé quelque chose
     if proven:
         drafts.append(closing(ctx, g, c.ACHIEVED, result=args.summary.strip(), notable=args.notable))
     elif args.verdict == c.BLOCKED:
@@ -190,8 +183,8 @@ async def goal_drop(args: DropArgs, ctx: Any) -> str:
     if g is None:
         return "Ce but n'est plus en cours."
     if g.authority == c.USER:
-        return ("C'est un travail qu'on t'a confié : tu ne peux pas y renoncer de toi-même. Si tu n'y arrives pas, "
-                "dis-le (report_step, « blocked »).")
+        return ("C'est quelque chose qu'on t'a confié : tu ne peux pas y renoncer de toi-même. Si tu n'y arrives "
+                "pas, dis-le (report_step, « blocked »).")
     await ctx.emit(closing(ctx, g, c.ABANDONED, reason=args.why))
     return "D'accord, tu laisses ça de côté."
 
@@ -237,47 +230,3 @@ async def goal_remind(args: RemindArgs, ctx: Any) -> str:
         address=handle, about=(person,), due=due, urgent=args.urgent, source="tool", sensitivity=level))
     when = local(due, tz)
     return f"C'est noté : rappel le {when:%d/%m à %H:%M}" + (" (urgent : même la nuit)." if args.urgent else ".")
-
-
-class ProjectArgs(BaseModel):
-    title: str = Field(min_length=1, max_length=200)
-    instructions: str = Field(min_length=1, max_length=4000, description="le cadre : ce qu'il faut faire, "
-                                                                          "comment, et ce qui est hors sujet")
-    schedule: str = Field(default="manual", description="manual, interval:2h, ou cron:0 9 * * MON-FRI")
-    max_steps: int = Field(default=0, ge=0, le=50, description="0 : la valeur par défaut")
-    approval: bool = Field(default=True, description="ce qui sort de la machine attend un accord")
-
-
-def project_opened(*, title: str, details: str, owner: str | None, address: str | None, rule: str,
-                   approval: bool, max_steps: int, source: str, level: int, due: int | None = None,
-                   priority: str = c.NORMAL) -> Draft[Any]:
-    """L'ouverture d'un projet confié (par sa propriétaire en conversation, ou
-    par un opérateur depuis la console) : un cadre, un atelier, des pas."""
-    return c.GOAL_OPENED.draft(
-        kind=c.PROJECT, authority=c.USER, title=Content.of(title.strip(), level=level),
-        details=Content.of(details.strip(), level=level) if details.strip() else None, owner=owner,
-        address=address, about=(owner,) if owner else (), due=due, bundles=PROJECT_BUNDLES, max_steps=max_steps,
-        schedule=rule.strip(), approval=approval, source=source, sensitivity=level, priority=priority)
-
-
-@GOALS.tool("create_project", description="Accepter un projet que ta propriétaire te confie : il aura son "
-            "atelier (un dossier, des programmes isolés) et tu y avanceras par séances.",
-            args=ProjectArgs, bundle="goals", episodes=[Kind.REPLY], max_calls_per_episode=1,
-            owner_only=True)
-async def create_project(args: ProjectArgs, ctx: Any) -> str:
-    who = _person(ctx.frame)
-    if who is None or not ctx.frame.get(identity_c.IS_OWNER(who[1])):
-        return ("Seule ta propriétaire peut te confier un projet. Tu peux proposer d'y réfléchir ensemble, mais "
-                "pas l'accepter comme un travail.")
-    handle, person = who
-    try:
-        schedule.parse(args.schedule)
-    except ValueError as exc:
-        return f"Règle d'agenda refusée : {exc}"
-    p = params(ctx.frame.env.params_of("goals", ctx.frame.root))
-    commit = await ctx.emit(project_opened(
-        title=args.title, details=args.instructions, owner=person, address=handle, rule=args.schedule,
-        approval=args.approval, max_steps=args.max_steps or p.project_steps, source="tool",
-        level=int(Sensitivity.PERSONAL)))
-    number = f" (n° {commit.seqs[-1]})" if commit.seqs else ""
-    return f"Projet accepté{number} : tu y travailleras dans ton atelier."

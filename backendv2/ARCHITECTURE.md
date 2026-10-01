@@ -24,7 +24,7 @@ Vérifié à chaque test (`lint-imports`) : une couche n'importe que celles d'en
 - **Faits** (`kernel/facts.py`) : le seul canal de lecture entre facultés. Un fournisseur par clé ou famille, graphe acyclique, lectures déclarées, forme close quand ça varie avec le temps.
 - **Concurrence.** `Mind.append` est le seul point d'écriture : dédoublonnage → validation → **garde** → estampille → une transaction qui va au bout (ADR 0021) → publication. Un épisode écrit sous garde (faits lus inchangés, prédicat, **baux**) ou est `Superseded`. Les effets visibles partent après le commit, par la file de sortie ; ce qui sort de la machine est une **capacité**, proposée puis exécutée tout de suite ou après accord.
 - **Ordonnanceur** : chaque processus déclare sa prochaine échéance ; un retard donne une exécution avec `missed`.
-- **Arbitrage** : des preuves en log-odds par (type d'épisode, cible), cumulées ; des modulations additives ou des vetos ; un déclenchement de Poisson `λ_max · σ(score)` indépendant de la cadence (ADR 0015).
+- **Arbitrage** : des preuves en log-odds par (type d'épisode, cible), cumulées ; des modulations additives ou des vetos ; un déclenchement de Poisson `λ_max · σ(score)` indépendant de la cadence (ADR 0015). Un épisode porte sur un seul **sujet** (`subject` : un but, un objectif de projet) : quand plusieurs candidats d'une ligne en ont un, leurs preuves se cumulent mais seuls les arguments du plus fort passent — les autres reviennent plus tard au lieu de voir leur sujet écrasé.
 - **Épisodes** (`runtime/pipeline.py`) : admission → baux → départ gardé → enrichissements → composition → appel (boucle d'outils unique) → analyse → commit gardé → règlement (ADR 0009).
 - **Prompt** (`kernel/prompt.py`) : des sections déclarées (zones stable / historique / volatile, ancres, rang de coupe) ; filtrées par la divulgation, budgétées, historique coupé avec hystérésis pour garder le cache. Ce qui vient d'ailleurs est **cité** et coupé en premier (ADR 0022).
 - **Autres contributions** : évaluations (ce qu'un événement fait ressentir, ADR 0017), préludes, interprètes (ADR 0014), formes de signal (`shapes=`), outils, projections, **vues d'inspection** (`@f.inspect`, ADR 0024).
@@ -39,7 +39,7 @@ Vérifié à chaque test (`lint-imports`) : une couche n'importe que celles d'en
 | Faculté | Ce qu'elle tient |
 |---|---|
 | `presence` | les connexions vivantes (volatile) |
-| `identity` | poignées, confiance du transport, revendications, preuves, liaisons ; la divulgation (ADR 0012) |
+| `identity` | adresses, confiance du transport, revendications, preuves, liaisons ; la divulgation (ADR 0012) |
 | `transcript` | le fil (id d'un message = son `seq`), les résumés des fils longs |
 | `memory` | souvenirs, croyances, promesses, échanges ; consolidation, index, rappel filtré (ADR 0010) |
 | `body` | rythme circadien, sommeil à deux processus (ADR 0016) |
@@ -51,15 +51,16 @@ Vérifié à chaque test (`lint-imports`) : une couche n'importe que celles d'en
 | `expression` | la balise d'émotion, le style, le murmure, la livraison |
 | `social` | rythmes de contact, profils, proximité ; saluer, relancer, se confier (ADR 0013, 0018) |
 | `agency` | le budget d'initiatives, la période réfractaire |
-| `goals` | rappels, explorations, projets : autorité, pas prouvés, attentes, carnets, atelier (ADR 0020) ; plan de travail, priorité, pilotage par l'opérateur (ADR 0030) |
+| `goals` | ce qu'elle se propose de faire ensuite : rappels et explorations — autorité, pas prouvés, attentes, carnets (ADR 0020) ; plan de travail, priorité, pilotage par l'opérateur (ADR 0030) |
+| `projects` | ses projets, des boîtes noires qu'on pilote : objectifs ponctuels ou constants, exécutions (`WORK` dans son mode à elle, `JOB` impersonnel) prouvées, décisions techniques, atelier et dépôt git (distant compris), outils, plage de travail ; elle en ouvre aussi d'elle-même (ADR 0031) |
 
 Les **plugins** ont la même forme et une confiance restreinte — des signaux, des preuves, des sections citées, jamais la parole forcée ; leur monde vit hors du journal : `email` (plusieurs boîtes IMAP/SMTP et leurs dossiers, sa voix par boîte, des brouillons qu'un opérateur lit et peut retoucher avant de les approuver, ADR 0027), `rss`, `camera`, `forge` (ses apps, hors processus, ADR 0023), `sensors` (`POST /api/perceptions`). Les pièces jointes sont perçues au bord (port `preprocess`).
 
 ## Autour du noyau
 
 - **Web** : le protocole du frontend (inchangé), comptes et sessions, CSRF, CORS ; une réponse ne part qu'aux connexions de sa personne. **Telegram** : liste blanche avant toute écriture, salons publics, réponse au salon d'origine.
-- **Atelier** et **Forge** : bubblewrap sans repli, environnement reconstruit, réseau coupé sauf capacité approuvée ; délais tenus en tuant le processus.
-- **Console** (`/inspecteur/`, opérateurs, ADR 0025, refondue ADR 0029 ; carte : `docs/console-carte.md`) : un back-office que **les facultés déclarent** — vues rangées par destination (`@f.inspect(section=…)`), fiches d'objets auxquelles chacune ajoute ses onglets (personne, poignée, but, mail, app), actions d'opérateur journalisées (`@f.action`, origine extérieure, garde, audit `runtime.operated`), vitaux, badges « à traiter », courbes (`@f.series`, `views.db`). La carte est dans `app/console.py` : des menus qui répondent à des questions, des sous-menus par rubrique pour Configuration et Système ; toute table est paginée (le rendu découpe ce qu'une vue oublie). Les réglages sont dans `app/reglages.py` : des modèles pydantic annotés (`Knob`) découpés en sous-pages d'un seul sujet, un champ ne se montrant que s'il sert (`only`, `only_any`), un choix limité en sélecteur, secrets jamais réaffichés. Les paramètres internes ont une page par faculté et disent d'où vient chaque valeur (défaut ← tempérament ← réglage ← surcharge, `runtime/params.py`). Pour « pourquoi a-t-elle dit ça ? » : le prompt exact, les outils et la décision de chaque épisode (`runtime/traces.py`, 14 jours).
+- **Atelier** (un dossier par projet, son dépôt git) et **Forge** : bubblewrap sans repli, environnement reconstruit, réseau coupé sauf capacité approuvée ; délais tenus en tuant le processus. Pousser vers un dépôt distant et en récupérer sont des capacités ; le jeton (Configuration › Canaux › Dépôts git) ne passe que par l'environnement de git.
+- **Console** (`/inspecteur/`, opérateurs, ADR 0025, refondue ADR 0029 ; carte : `docs/console-carte.md`) : un back-office que **les facultés déclarent** — vues rangées par destination (`@f.inspect(section=…)`), fiches d'objets auxquelles chacune ajoute ses onglets (personne, adresse, but, mail, app), actions d'opérateur journalisées (`@f.action`, origine extérieure, garde, audit `runtime.operated`), vitaux, badges « à traiter », courbes (`@f.series`, `views.db`). La carte est dans `app/console.py` : des menus qui répondent à des questions, des sous-menus par rubrique pour Configuration et Système ; toute table est paginée (le rendu découpe ce qu'une vue oublie). Les réglages sont dans `app/reglages.py` : des modèles pydantic annotés (`Knob`) découpés en sous-pages d'un seul sujet, un champ ne se montrant que s'il sert (`only`, `only_any`), un choix limité en sélecteur, secrets jamais réaffichés. Les paramètres internes ont une page par faculté et disent d'où vient chaque valeur (défaut ← tempérament ← réglage ← surcharge, `runtime/params.py`). Pour « pourquoi a-t-elle dit ça ? » : le prompt exact, les outils et la décision de chaque épisode (`runtime/traces.py`, 14 jours).
 - **Santé** (`/health`, public) : noms et états seulement ; 503 tant qu'elle n'est pas prête.
 - **Simulateur** (`sim/`) : le vrai noyau sur temps virtuel, des interlocuteurs, un modèle factice qui répète tout secret qu'on lui montre, des pannes, des mesures. Voie rapide S01–S19. On valide par cibles d'intention (ADR 0007) et on casse exprès ce qu'un test garde pour vérifier qu'il n'est pas vide.
 
@@ -79,7 +80,7 @@ Les **plugins** ont la même forme et une confiance restreinte — des signaux, 
 
 ## Glossaire
 
-tranche = *slice* · bail = *lease* · supplanté = *superseded* · divulgation = *disclosure* · posture = *stance* · poignée = *handle* · revendication = *claim* · liaison = *binding* · proximité = *closeness* · salon = *room* · but = *goal* · pas = *step* · atelier = *workshop* · capacité = *capability* · citation = *untrusted section* · pensée = *thought* · souvenir = *episode memory* · croyance = *belief* · murmure = *murmur* · vue = *inspection view*
+tranche = *slice* · bail = *lease* · supplanté = *superseded* · divulgation = *disclosure* · posture = *stance* · adresse = *handle* · revendication = *claim* · liaison = *binding* · proximité = *closeness* · salon = *room* · but = *goal* · pas = *step* · projet = *project* · objectif = *objective* · exécution = *run* · atelier = *workshop* · capacité = *capability* · citation = *untrusted section* · pensée = *thought* · souvenir = *episode memory* · croyance = *belief* · murmure = *murmur* · vue = *inspection view*
 
 ## Commandes
 

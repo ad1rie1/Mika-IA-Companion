@@ -22,10 +22,18 @@ class Kind(enum.StrEnum):
     DECISION = "DECISION"
     #: une tâche silencieuse qu'une faculté lui confie (préparer un brouillon de réponse) : pour elle seule
     TASK = "TASK"
+    #: une exécution de travail sur un projet, dans son mode à elle (sa voix, son humeur, ses avis)
+    WORK = "WORK"
+    #: une exécution de travail sur un projet en mode impersonnel (sans persona, sans affect)
+    JOB = "JOB"
 
 
 #: Les épisodes où elle s'adresse à quelqu'un, dans le fil de conversation.
 CONVERSATIONAL = frozenset({Kind.REPLY, Kind.INITIATIVE})
+#: Les épisodes de travail, que personne n'écoute : une séance sur un but, une exécution sur un projet.
+WORKING = frozenset({Kind.STEP, Kind.WORK, Kind.JOB})
+#: Les exécutions d'un projet (ses deux modes).
+PROJECT_KINDS = frozenset({Kind.WORK, Kind.JOB})
 
 #: La cible d'un épisode qui ne s'adresse à personne mais porte sur un but
 #: (un pas de travail) : ``goal:12``. Personne ne l'écoute.
@@ -54,8 +62,8 @@ def task_of(target: str | None) -> tuple[str, str] | None:
 
 
 def is_work_target(target: str | None) -> bool:
-    """Un but ou une tâche : une cible qui n'est pas quelqu'un."""
-    return goal_of(target) is not None or task_of(target) is not None
+    """Un but, un projet ou une tâche : une cible qui n'est pas quelqu'un."""
+    return goal_of(target) is not None or project_of(target) is not None or task_of(target) is not None
 
 
 def goal_of(target: str | None) -> int | None:
@@ -63,6 +71,23 @@ def goal_of(target: str | None) -> int | None:
         return None
     try:
         return int(target[len(GOAL_PREFIX):])
+    except ValueError:
+        return None
+
+
+#: La cible d'une exécution sur un projet : ``project:7``. Personne ne l'écoute.
+PROJECT_PREFIX = "project:"
+
+
+def project_target(project: int) -> str:
+    return f"{PROJECT_PREFIX}{project}"
+
+
+def project_of(target: str | None) -> int | None:
+    if not target or not target.startswith(PROJECT_PREFIX):
+        return None
+    try:
+        return int(target[len(PROJECT_PREFIX):])
     except ValueError:
         return None
 
@@ -76,7 +101,11 @@ class Role(enum.StrEnum):
     JOURNAL = "journal"
     DREAM = "dream"
     NARRATIVE = "narrative"
+    #: travailler sur un projet, dans son mode à elle
+    PROJECT = "project"
     # utilitaires
+    #: travailler sur un projet en mode impersonnel (sans persona)
+    JOB = "job"
     EXTRACT = "extract"
     VALIDATE = "validate"
     PROFILE = "profile"
@@ -88,12 +117,14 @@ class Role(enum.StrEnum):
 
 
 VOICE_ROLES = frozenset({Role.REPLY, Role.INITIATIVE, Role.STEP, Role.MURMUR, Role.JOURNAL, Role.DREAM,
-                         Role.NARRATIVE})
+                         Role.NARRATIVE, Role.PROJECT})
 #: Replis quand un rôle n'a pas de modèle : tout ce qui parle retombe sur la
 #: réponse (le seul rôle qu'une installation neuve configure forcément).
 FALLBACKS = {
     Role.INITIATIVE: Role.REPLY, Role.STEP: Role.REPLY, Role.MURMUR: Role.REPLY, Role.JOURNAL: Role.REPLY,
     Role.DREAM: Role.REPLY, Role.NARRATIVE: Role.REPLY,
+    # un projet travaille d'abord avec le modèle de ses séances ; l'impersonnel, avec celui de ses projets
+    Role.PROJECT: Role.STEP, Role.JOB: Role.PROJECT,
     Role.VALIDATE: Role.EXTRACT, Role.PROFILE: Role.EXTRACT, Role.INTERPRET: Role.EXTRACT,
     Role.TRIAGE: Role.EXTRACT, Role.COMPACT: Role.EXTRACT, Role.PLAN: Role.EXTRACT,
     # un seul modèle déclaré suffit : les utilitaires retombent sur celui qui répond

@@ -71,6 +71,37 @@ def safe_url(href: str) -> str:
     return href
 
 
+_DIFF_META = ("diff --git", "index ", "--- ", "+++ ", "new file", "deleted file", "similarity", "rename ",
+              "old mode", "new mode", "Binary files")
+
+
+def diff_kinds(lines: list[str]) -> list[str]:
+    """La sorte de chaque ligne d'un diff unifié (ou d'un ``git show``), lue dans l'ordre : l'en-tête d'un fichier
+    jusqu'à son premier bloc, puis ajouts, retraits et contexte — une ligne retirée qui commence par « -- » reste
+    un retrait, un message de commit n'est pas un diff."""
+    out, in_hunk = [], False
+    for line in lines:
+        if line.startswith("diff --git"):
+            in_hunk = False
+            out.append("meta")
+        elif line.startswith("@@"):
+            in_hunk = True
+            out.append("hunk")
+        elif in_hunk and line.startswith("+"):
+            out.append("add")
+        elif in_hunk and line.startswith("-"):
+            out.append("del")
+        elif in_hunk and (line.startswith((" ", "\\")) or not line):
+            out.append("")
+        elif line.startswith(_DIFF_META):
+            in_hunk = False
+            out.append("meta")
+        else:
+            in_hunk = False
+            out.append("")
+    return out
+
+
 def href(ref: Ref) -> str:
     """L'adresse d'un lien de la console (clés encodées, jamais d'autre hôte)."""
     if ref.kind == "url":
@@ -265,7 +296,10 @@ def block(b: Any, env: Env, query: Mapping[str, str], depth: int = 0, counter: l
                 "reading": b.reading, "html": readable_html(b.html) if b.html else readable_text(text) if b.reading else "",
                 "rich": bool(b.html)}
     if isinstance(b, Code):
-        return {"t": "code", "text": b.text[:TEXT_MAX], "title": b.title}
+        text = b.text[:TEXT_MAX]
+        split = text.split("\n") if b.lang == "diff" else []
+        lines = [{"k": k, "text": line} for line, k in zip(split, diff_kinds(split), strict=True)]
+        return {"t": "code", "text": text, "title": b.title, "lines": lines}
     if isinstance(b, Stats):
         return {"t": "stats", "title": b.title, "items": [
             {"label": s.label, "value": cell(s.value, env), "sub": s.sub, "tone": tone(s.tone),

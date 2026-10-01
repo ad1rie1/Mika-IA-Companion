@@ -240,173 +240,99 @@ def test_a_due_date_is_read_the_french_way_and_refused_when_unreadable():
 # ── La fiche d'un but ─────────────────────────────────────────────────────
 
 
-def test_the_goal_fiche_fresh_then_after_a_project_lived_a_step(tmp_path):
-    atelier = Atelier()
-
+def test_the_goal_fiche_fresh_then_after_an_exploration_lived_a_step(tmp_path):
     async def scenario(kernel, llm):
         ins = Inspection(kernel)
         fresh = {
             "head": ins.head("goal", "1"), "search": ins.search("goal", ""),
             "tabs": [v.name for v in ins.tabs("goal")], "person_tabs": [v.name for v in ins.tabs("person")],
             "unknown": await tab(kernel, "resume", "999"), "nowhere": await tab(kernel, "seances", ""),
-            "atelier": await tab(kernel, "atelier", "12"),
             "vivants": await tab(kernel, "vivants", ""), "clos": await tab(kernel, "clos", ""),
-            "projets": await tab(kernel, "projets", ""),
         }
         await connect(kernel, "user_1", "Adrien", operator=True)
-        got = await perform(kernel, "goals.confier", form(title="Un script de bonjour",
-                                                          details="Écrire bonjour.py et le tester.",
-                                                          due="2026-10-02 18:00"), by="user_1", nonce="c1")
-        assert got.ok, got
-        gid = str(events(kernel, goals_c.GOAL_OPENED)[-1].seq)
+        gid = str(await explore(kernel, "Explorer : les jeux rétro"))
         opened = {"head": ins.head("goal", gid), "vivants": await tab(kernel, "vivants", ""),
-                  "projets": await tab(kernel, "projets", ""), "politique": await tab(kernel, "politique", gid),
-                  "by_number": ins.search("goal", f"#{gid}"), "by_title": ins.search("goal", "BONJOUR"),
-                  "none": ins.search("goal", "tricot")}
+                  "politique": await tab(kernel, "politique", gid), "by_number": ins.search("goal", f"#{gid}"),
+                  "by_title": ins.search("goal", "RÉTRO"), "none": ins.search("goal", "tricot")}
         for _ in range(3 * 60):
             if events(kernel, goals_c.STEP_REPORTED):
                 break
             await asyncio.sleep(MINUTE / US)
         await kernel.lanes.join()
-        after = {name: await tab(kernel, name, gid) for name in ("resume", "seances", "carnet", "effets", "episodes",
-                                                               "atelier", "decisions", "projets")}
+        after = {name: await tab(kernel, name, gid) for name in ("resume", "seances", "carnet", "episodes",
+                                                               "decisions")}
         after["head"] = ins.head("goal", f"#{gid}")
         after["clos"] = await tab(kernel, "clos", "")
-        after["person"] = await ins.arun(next(v for v in ins.tabs("person") if v.owner == "goals"), {},
-                                         subject="user_1")
-        frame = kernel.mind.frame()
-        return fresh, opened, after, gid, events(kernel, goals_c.STEP_REPORTED), frame.env.tz_of(frame.root)
+        return fresh, opened, after, gid, events(kernel, goals_c.STEP_REPORTED)
 
-    fresh, opened, after, gid, reported, tz = live(tmp_path, scenario, mode="honest", ports={"workshop": atelier})
+    fresh, opened, after, gid, reported = live(tmp_path, scenario, mode="honest")
     # neuve : rien, et le dit
     assert fresh["head"] is None and fresh["search"] == []
-    assert fresh["tabs"] == ["resume", "politique", "seances", "carnet", "effets", "decisions", "episodes", "atelier"]
-    assert "aucun projet en cours" in flat(fresh["projets"])
-    assert "buts" in fresh["person_tabs"]
+    assert fresh["tabs"] == ["resume", "politique", "seances", "carnet", "decisions", "episodes"]
+    assert "buts" in fresh["person_tabs"] and "projets" in fresh["person_tabs"]
     assert "Aucun but « 999 »" in flat(fresh["unknown"]) and fresh["unknown"][0].tone == "warn"
-    assert "fiche d'un but" in flat(fresh["nowhere"]) and "Aucun but « 12 »" in flat(fresh["atelier"])
+    assert "fiche d'un but" in flat(fresh["nowhere"])
     assert "aucun but en cours" in flat(fresh["vivants"]) and "aucun but clos" in flat(fresh["clos"])
-    # ouvert par l'opérateur : son en-tête, la liste des vivants, la recherche
+    # ouverte d'elle-même : son en-tête, la liste des vivants, la recherche
     head = opened["head"]
-    assert isinstance(head, Head) and head.key == gid and head.title == "Un script de bonjour"
-    assert [b.text for b in head.badges] == ["projet", "confié", "en cours"]
+    assert isinstance(head, Head) and head.key == gid and head.title == "Explorer : les jeux rétro"
+    assert [b.text for b in head.badges] == ["exploration", "à elle", "en cours"]
     facts = dict(head.facts)
-    assert facts["avancement"].text == f"0 / {params(None).project_steps} pas" and "envie" not in facts
-    assert facts["prochaine séance"] == "dès que possible"  # confié à l'instant, sans agenda : il peut partir
-    assert isinstance(facts["pour qui"], Ref) and facts["pour qui"].key == "person/user_1"
+    assert facts["avancement"].text == "0 / 8 séances" and isinstance(facts["envie"], Meter)
+    assert facts["prochaine séance"] == "dès que possible"
     assert head.default_tab == "resume"
     row = table(opened["vivants"], "Buts vivants").rows[0]
     assert isinstance(row, Row) and row.href == Ref.subject("goal", gid, f"#{gid}")
     assert [f.key for f in opened["by_number"]] == [gid] and [f.key for f in opened["by_title"]] == [gid]
-    assert isinstance(opened["by_title"][0], Found) and "projet" in opened["by_title"][0].subtitle
+    assert isinstance(opened["by_title"][0], Found) and "exploration" in opened["by_title"][0].subtitle
     assert opened["none"] == []
-    # la liste des projets : son état, son avancement, son agenda, ce qu'il a le droit de faire sortir
-    project = table(opened["projets"], "Projets en cours").rows[0]
-    assert project.href == Ref.subject("goal", gid, f"#{gid}") and project.cells[0].text == "Un script de bonjour"
-    assert project.cells[2].text == "en cours" and project.cells[3].text == "priorité normale"
-    assert project.cells[4].text == f"0 / {params(None).project_steps} pas" and project.cells[5] == "dès que possible"
-    assert project.cells[7] == "dès qu'elle peut (manuel)" and project.cells[8].text == "sort avec ton accord"
-    # son cadre et ses réglages : le formulaire qui le change d'abord, puis le cadre en entier, sa liberté, son rythme
+    # ses réglages : on la pilote (sa priorité), on ne la réécrit pas
     policy = opened["politique"]
-    assert isinstance(policy[0], ActionSlot) and policy[0].action == "goals.modifier"
-    frame_text = next(b for b in policy if type(b).__name__ == "Prose")
-    assert frame_text.text == "Écrire bonjour.py et le tester." and "sort avec ton accord" in flat(policy)
+    assert "ne se réécrit pas" in flat(policy) and any(isinstance(b, ActionSlot) and b.action == "goals.priorite"
+                                                       for b in policy)
     assert "Son rythme" in flat(policy) and "Quand elle s'arrête" in flat(policy)
-    # après un pas (écrit, lancé, fini avec preuve) : chaque onglet le dit
+    # après une séance (cherchée, notée, finie avec preuve) : chaque onglet le dit
     assert reported and reported[0].data.proven
     assert after["head"].key == gid  # « #12 » : la fiche canonique
     resume = after["resume"]
-    assert field(resume, "titre") == "Un script de bonjour" and field(resume, "statut").text == "abouti"
-    assert field(resume, "échéance").at == instant(datetime(2026, 10, 2, 18, 0, tzinfo=tz))  # en heure locale
-    assert field(resume, "d'où il vient") == "operator"
+    assert field(resume, "titre") == "Explorer : les jeux rétro" and field(resume, "statut").text == "abouti"
+    assert field(resume, "d'où il vient") == "genese"
     pas = table(after["seances"], "Ses séances")
     assert [c.text for c in pas.rows[0].cells[1:3]] == ["fini", "prouvé"]
-    assert "ws_write" in pas.rows[0].cells[4] and pas.rows[0].cells[6].kind == "episode"
-    assert "aucune consigne" in flat(after["carnet"])
-    assert "aucune demande" in flat(after["effets"])
+    assert "goal_note" in pas.rows[0].cells[4] and pas.rows[0].cells[6].kind == "episode"
+    assert "En y repensant" in flat(after["carnet"])
     assert "séance de travail" in flat(after["episodes"])
-    # chaque épisode mène à son prompt exact, ses outils, ses appels, sa décision ; son pas y dit son résultat
     episode = table(after["episodes"], "Ses épisodes").rows[-1]
     assert episode.cells[6].params == (("onglet", "prompt"),) and episode.cells[9].params == (("onglet", "decision"),)
     assert episode.cells[4].text == "fini"
-    # l'arbitre l'a pesé : le tirage qui a donné ce pas, ses preuves
     decided = table(after["decisions"], "Ce que l'arbitre en a pensé").rows
     assert decided and any(r.cells[1].text == "choisi" for r in decided) and decided[0].detail
-    assert "abouti" in flat(after["projets"]) and "Projets clos" in flat(after["projets"])
-    atelier_tab = after["atelier"]
-    files = table(atelier_tab, "Ses fichiers")
-    assert [r[0].text for r in files.rows] == ["bonjour.py", "test_bonjour.py"]
-    history = next(b for b in atelier_tab if isinstance(b, Timeline))
-    # le plus récent d'abord ; un enregistrement sans pas le dit (il n'a pas de date à lui)
-    assert [e.meta for e in history.entries] == ["c000001", "a000000 · sans pas associé"]
-    assert history.entries[0].at == reported[0].at and history.entries[0].href.kind == "episode"
-    assert history.entries[1].title == "atelier ouvert" and history.entries[1].at == 0
-    assert "Rien de changé depuis la dernière séance" in flat(atelier_tab)
     closed = table(after["clos"], "Buts clos")
     assert closed.rows[0].cells[0] == Ref.subject("goal", gid, f"#{gid}") and closed.rows[0].cells[4].text == "abouti"
-    assert "Un script de bonjour" in flat(after["person"]) and "pour elle ou lui" in flat(after["person"])
-
-
-def test_the_workshop_tab_without_workshop_says_so(tmp_path):
-    async def scenario(kernel, llm):
-        gid = await explore(kernel)
-        return await tab(kernel, "atelier", str(gid))
-
-    blocks = live(tmp_path, scenario)
-    assert "seuls les projets confiés" in flat(blocks)
 
 
 # ── Les actions de l'opérateur ────────────────────────────────────────────
 
 
-def test_workshop_history_reaches_commits_older_than_five_hundred(tmp_path):
-    atelier = Atelier()
-    async def scenario(kernel, llm):
-        await connect(kernel, "user_1", "Adrien", operator=True)
-        result = await perform(kernel, "goals.confier", form(title="Historique de l'atelier", details="Vérifier les versions."),
-                               by="user_1", nonce="long-history")
-        assert result.ok
-        gid = events(kernel, goals_c.GOAL_OPENED)[-1].seq
-        await atelier.write(gid, "notes.txt", "exemple")
-        atelier.commits[gid] = [(f"c{i:06}", f"Version {i}") for i in range(555)]
-        first = await tab(kernel, "atelier", str(gid))
-        last = await tab(kernel, "atelier", str(gid), avant_commits="550")
-        return next(b for b in first if isinstance(b, Timeline)), next(b for b in last if isinstance(b, Timeline))
-    first, last = live(tmp_path, scenario, ports={"workshop": atelier})
-    assert len(first.entries) == 25 and first.pager.older == (("avant_commits", "25"),)
-    assert len(last.entries) == 5 and last.entries[-1].title == "Version 0" and not last.pager.older
-
-
 def test_every_operator_action_goes_through_the_engine(tmp_path):
     async def scenario(kernel, llm):
         await connect(kernel, "user_1", "Adrien", operator=True)
-        await connect(kernel, "user_2", "Bea")
         out = {}
-        out["bad"] = await perform(kernel, "goals.confier", form(title="  ", due="lundi prochain",
-                                                                 schedule="tous les jours", owner="personne_x"),
-                                   by="user_1", nonce="n1")
-        out["too_long"] = await perform(kernel, "goals.confier", form(title="x" * 121, max_steps="99"),
-                                        by="user_1", nonce="n2")
-        out["ok"] = await perform(kernel, "goals.confier", form(("approval",), title="Ranger les notes de Bea",
-                                                                schedule="cron:0 9 * * MON", owner="user_2"),
-                                  by="user_1", nonce="n3")
-        out["again"] = await perform(kernel, "goals.confier", form(("approval",), title="Ranger les notes de Bea",
-                                                                   schedule="cron:0 9 * * MON", owner="user_2"),
-                                     by="user_1", nonce="n3")
-        gid = str(events(kernel, goals_c.GOAL_OPENED)[-1].seq)
+        gid = str(await explore(kernel, "Explorer : les jeux rétro"))
         spec = kernel.registry.actions
         out["offered_active"] = {k: offered(kernel, spec[f"goals.{k}"], gid)
                                  for k in ("pause", "reprendre", "consigne", "clore")}
         out["resume_active"] = await perform(kernel, "goals.reprendre", form(), by="user_1", subject=gid, nonce="n4")
         out["no_subject"] = await perform(kernel, "goals.pause", form(), by="user_1", nonce="n5")
         out["pause"] = await perform(kernel, "goals.pause", form(), by="user_1", subject=gid, nonce="n6")
+        out["again"] = await perform(kernel, "goals.pause", form(), by="user_1", subject=gid, nonce="n6")
         out["offered_paused"] = {k: offered(kernel, spec[f"goals.{k}"], gid)
                                  for k in ("pause", "reprendre", "consigne", "clore")}
         out["status_paused"] = kernel.mind.frame().get(goals_c.STATUS(int(gid)))
         out["live_paused"] = [g.status for g in kernel.mind.frame().get(goals_c.LIVE)]
         out["empty_order"] = await perform(kernel, "goals.consigne", form(instruction="   "), by="user_1",
                                            subject=gid, nonce="n7")
-        out["order"] = await perform(kernel, "goals.consigne", form(instruction="Classe-les par date."),
+        out["order"] = await perform(kernel, "goals.consigne", form(instruction="Ne regarde que les années 90."),
                                      by="user_1", subject=gid, nonce="n8")
         out["resume"] = await perform(kernel, "goals.reprendre", form(), by="user_1", subject=gid, nonce="n9")
         esteem = kernel.mind.frame().get(self_c.ESTEEM)
@@ -415,32 +341,20 @@ def test_every_operator_action_goes_through_the_engine(tmp_path):
         out["offered_closed"] = {k: offered(kernel, spec[f"goals.{k}"], gid)
                                  for k in ("pause", "reprendre", "consigne", "clore")}
         out["unknown"] = offered(kernel, spec["goals.pause"], "999") or offered(kernel, spec["goals.pause"], "abc")
-        out["events"] = {t.name: events(kernel, t) for t in (goals_c.GOAL_OPENED, GOAL_PAUSED, GOAL_RESUMED,
-                                                              GOAL_AMENDED, goals_c.GOAL_CLOSED, rt.OPERATED)}
+        out["events"] = {t.name: events(kernel, t) for t in (GOAL_PAUSED, GOAL_RESUMED, GOAL_AMENDED,
+                                                              goals_c.GOAL_CLOSED, rt.OPERATED)}
         out["carnet"] = await tab(kernel, "carnet", gid)
         out["resume_tab"] = await tab(kernel, "resume", gid)
         out["gid"] = gid
         return out
 
     out = live(tmp_path, scenario)
-    bad = out["bad"]
-    assert not bad.ok and set(bad.errors) == {"title", "due", "schedule", "owner"}  # chaque champ dit ce qui ne va pas
-    assert "illisible" in bad.errors["due"] and "règle refusée" in bad.errors["schedule"]
-    assert "personne inconnue" in bad.errors["owner"]
-    assert set(out["too_long"].errors) == {"title", "max_steps"} and "120" in out["too_long"].errors["title"]
-    assert out["ok"].ok and out["again"].deduped  # un double envoi ne refait rien
     ev = out["events"]
-    [opened] = ev[goals_c.GOAL_OPENED.name]
-    assert opened.origin is Origin.EXTERNAL and opened.correlation.startswith("opérateur:goals.confier")
-    d = opened.data
-    assert (d.kind, d.authority, d.source, d.owner, d.about) == (goals_c.PROJECT, goals_c.USER, "operator", "user_2",
-                                                                 ("user_2",))
-    assert d.approval is False and d.schedule == "cron:0 9 * * MON" and "workshop" in d.bundles  # case décochée
-    assert d.address is None  # confié pour Bea par l'opérateur : on ne lui parle pas au nom de Bea
     assert out["offered_active"] == {"pause": True, "reprendre": False, "consigne": True, "clore": True}
     assert not out["resume_active"].ok and "pas possible" in out["resume_active"].message
     assert not out["no_subject"].ok
-    assert out["pause"].ok and out["status_paused"] == goals_c.PAUSED and out["live_paused"] == [goals_c.PAUSED]
+    assert out["pause"].ok and not out["again"].ok  # déjà en pause : le second envoi ne refait rien
+    assert out["status_paused"] == goals_c.PAUSED and out["live_paused"] == [goals_c.PAUSED]
     assert out["offered_paused"] == {"pause": False, "reprendre": True, "consigne": True, "clore": True}
     assert not out["empty_order"].ok and "instruction" in out["empty_order"].errors
     assert out["order"].ok and out["resume"].ok and out["close"].ok
@@ -450,17 +364,17 @@ def test_every_operator_action_goes_through_the_engine(tmp_path):
         [e] = ev[t.name]
         assert e.origin is Origin.EXTERNAL and e.correlation.startswith("opérateur:goals.")
         assert e.data.goal == int(out["gid"])
-    assert ev[GOAL_AMENDED.name][0].data.instruction.text == "Classe-les par date."
+    assert ev[GOAL_AMENDED.name][0].data.instruction.text == "Ne regarde que les années 90."
     assert ev[GOAL_AMENDED.name][0].data.by == "user_1" and ev[GOAL_PAUSED.name][0].data.by == "user_1"
     closed = ev[goals_c.GOAL_CLOSED.name][0].data
     assert closed.status == goals_c.CANCELLED and "opérateur" in closed.reason
     assert out["esteem"][0] == out["esteem"][1]  # annuler ne lui fait rien ressentir
     audit = {(e.data.action, e.data.outcome) for e in ev[rt.OPERATED.name]}
-    assert {("goals.confier", "done"), ("goals.confier", "refused"), ("goals.pause", "done"),
-            ("goals.reprendre", "done"), ("goals.consigne", "done"), ("goals.clore", "done")} <= audit
+    assert {("goals.pause", "done"), ("goals.reprendre", "done"), ("goals.consigne", "done"),
+            ("goals.clore", "done")} <= audit
     assert all(e.data.by == "user_1" for e in ev[rt.OPERATED.name])
     assert all(e.data.subject == out["gid"] for e in ev[rt.OPERATED.name] if e.data.action == "goals.pause")
-    assert "Classe-les par date." in flat(out["carnet"]) and "de Adrien" in flat(out["carnet"])
+    assert "Ne regarde que les années 90." in flat(out["carnet"]) and "de Adrien" in flat(out["carnet"])
     assert field(out["resume_tab"], "statut").text == "annulé" and field(out["resume_tab"], "consignes reçues") == 1
 
 
@@ -548,46 +462,21 @@ def test_an_instruction_reaches_the_next_step_prompt(tmp_path):
         in text
 
 
-def test_a_confided_project_is_due_in_local_time(tmp_path):
-    async def scenario(kernel, llm):
-        got = await perform(kernel, "goals.confier", form(title="Préparer l'exposé", due="02/10/2026 à 18h"),
-                            by="user_1", nonce="d1")
-        assert got.ok, got
-        frame = kernel.mind.frame()
-        [opened] = events(kernel, goals_c.GOAL_OPENED)
-        return opened.data, frame.env.tz_of(frame.root)
-
-    d, tz = live(tmp_path, scenario)
-    assert d.due == instant(datetime(2026, 10, 2, 18, 0, tzinfo=tz))
-    assert d.owner == "user_1" and d.address == "user_1"  # sans « pour qui » : pour l'opérateur, qui l'a demandé
-    assert d.details is None and d.schedule == "manual" and d.approval is True
-
-
 def test_the_badges_say_what_needs_the_operator(tmp_path):
     async def scenario(kernel, llm):
         ins = Inspection(kernel)
         views = {v.name: v for v in ins.in_section("buts")}
         await connect(kernel, "user_1", "Adrien", operator=True)
-        await perform(kernel, "goals.confier", form(title="Un script", schedule="cron:0 9 * * MON"), by="user_1",
-                      nonce="b1")
-        gid = events(kernel, goals_c.GOAL_OPENED)[-1].seq
-        await kernel.mind.append([rt.EFFECT_PROPOSED.draft(
-            capability="goals.networked", owner="goals", args_json="{}", summary=Content.of("installer requests"),
-            approval=True, context=f"goal:{gid}")], emitter="runtime", correlation="t", origin=Origin.TOOL)
-        waiting = ins.badge(views["vivants"])
-        effects = await tab(kernel, "effets", str(gid))
+        remind = await kernel.mind.append([goals_c.GOAL_OPENED.draft(
+            kind=goals_c.REMINDER, authority=goals_c.USER, title=Content.of("sortir le linge", level=2),
+            owner="user_1", address="user_1", about=("user_1",), due=kernel.mind.clock.now() + 20 * MINUTE,
+            source="tool", sensitivity=2)], emitter="goals", correlation="t", origin=Origin.GENESIS)
         await kernel.mind.append([goals_c.GOAL_CLOSED.draft(
-            goal=gid, status=goals_c.STUCK, kind=goals_c.PROJECT, authority=goals_c.USER,
-            title=Content.of("Un script"), reason="bloquée")], emitter="goals", correlation="t",
+            goal=remind.seqs[-1], status=goals_c.FAILED, kind=goals_c.REMINDER, authority=goals_c.USER,
+            title=Content.of("sortir le linge"), reason="pas pu le dire")], emitter="goals", correlation="t",
             origin=Origin.GENESIS)
-        return [v for v in views], waiting, ins.badge(views["clos"]), effects
+        return list(views), ins.badge(views["clos"])
 
-    names, waiting, stuck, effects = live(tmp_path, scenario)
-    assert names == ["projets", "vivants", "clos"]
-    assert waiting == (1, "attendent ton accord") and stuck == (1, "confiés : bloqués ou en échec")
-    assert "attend ton accord" in flat(effects) and "installer requests" in flat(effects)
-    # on décide sur place : la ligne en attente porte ses deux boutons, pour cette demande-là
-    row = table(effects, "Ce qu'il a voulu faire sortir de la machine").rows[0]
-    slots = [b for b in nested(row.detail) if isinstance(b, ActionSlot)]
-    assert [(b.action, dict(b.initial)["proposal"]) for b in slots] == [
-        ("goals.approuver", row.cells[0].key), ("goals.refuser", row.cells[0].key)]
+    names, stuck = live(tmp_path, scenario)
+    assert names == ["vivants", "clos"]  # ses projets ont leur menu à eux
+    assert stuck == (1, "confiés : bloqués ou en échec")

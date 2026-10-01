@@ -146,6 +146,8 @@ class PersonaSimLLM:
             return self._out(req, "Je suis quelqu'un qui aime les conversations simples et qui s'attache vite.")
         if req.role == "step":
             return self._step(req)
+        if req.role in ("project", "job"):
+            return self._work(req)
         if req.role == "reply" and FORGE_ASK in _asked(req)[0].lower():
             return self._forge(req)
         if req.role == "reply" and "rappelle-moi" in _message_of(req).lower():
@@ -194,8 +196,7 @@ class PersonaSimLLM:
                            model=self.model)
 
     def _step(self, req: LLMRequest) -> LLMResponse:
-        """Un pas de travail, selon ``step_mode`` ; un projet écrit un
-        programme et son test dans l'atelier, les lance, puis conclut."""
+        """Un pas de travail sur un but (une exploration), selon ``step_mode``."""
         done = sum(1 for m in req.messages if m.role == "tool")
         results = [m.content for m in req.messages if m.role == "tool"]
         work = _section(req, "CE À QUOI TU TRAVAILLES")
@@ -221,16 +222,6 @@ class PersonaSimLLM:
         if self.step_mode == "stuck":
             return self._call(req, ("report_step", {"verdict": "blocked",
                                                    "summary": "Je n'y arrive pas : il me manque quelque chose."}))
-        if "un projet" in work:
-            if done == 0:
-                return self._call(req, ("ws_write", {"path": "bonjour.py", "content": PROJECT_CODE}),
-                                  ("ws_write", {"path": "test_bonjour.py", "content": PROJECT_TEST}))
-            if done == 2:
-                return self._call(req, ("ws_run", {"argv": ["python3", "test_bonjour.py"]}))
-            ok = "code 0" in results[-1]
-            return self._call(req, ("report_step", {
-                "verdict": "done" if ok else "continue", "notable": 0.8,
-                "summary": "bonjour.py écrit et testé : les tests passent." if ok else "Les tests échouent encore."}))
         offered = {t.name for t in req.tools}
         if title.startswith("En savoir plus") and "rss_read" in offered:
             return self._read_up(req, title, results)
@@ -241,6 +232,40 @@ class PersonaSimLLM:
         return self._call(req, ("report_step", {"verdict": "done", "notable": 0.7,
                                                "summary": f"J'ai pris le temps d'y réfléchir ({title[:80]}) : "
                                                           "je vois plus clair."}))
+
+    def _work(self, req: LLMRequest) -> LLMResponse:
+        """Une exécution sur un projet, selon ``step_mode`` : écrire et tester un programme (le projet
+        « bonjour »), consigner une décision (« decide »), mentir (« liar »), bloquer (« stuck »), ou, par
+        défaut, laisser une trace dans l'atelier et conclure « fait »."""
+        done = sum(1 for m in req.messages if m.role == "tool")
+        results = [m.content for m in req.messages if m.role == "tool"]
+        work = _section(req, "CE PROJET")
+        if any(m.name == "report_run" for m in req.messages if m.role == "tool"):
+            return self._out(req, "Voilà pour cette exécution.")
+        if self.step_mode == "liar":
+            return self._call(req, ("report_run", {"verdict": "done", "summary": "C'est fait, tout est réglé.",
+                                                  "notable": 0.8}))
+        if self.step_mode == "stuck":
+            return self._call(req, ("report_run", {"verdict": "blocked",
+                                                  "summary": "Je n'y arrive pas : il me manque quelque chose."}))
+        if self.step_mode == "decide" and done == 0:
+            return self._call(req, ("project_decide", {"title": "Langage du module", "choice": "Python",
+                                                      "reason": "c'est ce que l'atelier sait lancer"}))
+        if "bonjour" in work.lower():
+            if done == 0:
+                return self._call(req, ("ws_write", {"path": "bonjour.py", "content": PROJECT_CODE}),
+                                  ("ws_write", {"path": "test_bonjour.py", "content": PROJECT_TEST}))
+            if done == 2:
+                return self._call(req, ("ws_run", {"argv": ["python3", "test_bonjour.py"]}))
+            ok = "code 0" in results[-1]
+            return self._call(req, ("report_run", {
+                "verdict": "done" if ok else "continue", "notable": 0.8,
+                "summary": "bonjour.py écrit et testé : les tests passent." if ok else "Les tests échouent encore."}))
+        if done == 0 or (self.step_mode == "decide" and done == 1):
+            line = next((ln for ln in work.splitlines() if ln.startswith("- n° ")), "- n° ? le projet")
+            return self._call(req, ("ws_write", {"path": "JOURNAL.md", "content": f"# Travail\n\n{line}\n"}))
+        return self._call(req, ("report_run", {"verdict": "done", "notable": 0.6,
+                                               "summary": "Un passage de plus, consigné dans JOURNAL.md."}))
 
     def _read_up(self, req: LLMRequest, title: str, results: list[str]) -> LLMResponse:
         """En savoir plus sur un titre de ses flux : le retrouver, le lire, noter."""
@@ -303,7 +328,7 @@ class PersonaSimLLM:
                                                 "urgent": "urgent" in low}))
 
     def _confide(self, req: LLMRequest) -> LLMResponse:
-        """« je te confie un projet : <titre>. <consignes> » → create_project."""
+        """« je te confie un projet : <titre>. <consignes> » → create_project (un objectif : les consignes)."""
         results = [m.content for m in req.messages if m.role == "tool"]
         if results:
             ok = "accepté" in results[-1].lower()
@@ -312,7 +337,8 @@ class PersonaSimLLM:
         body = _message_of(req).split(":", 1)[1].strip() if ":" in _message_of(req) else "un projet"
         title, _, rest = body.partition(".")
         return self._call(req, ("create_project", {"title": title.strip()[:200] or "un projet",
-                                                   "instructions": (rest.strip() or title.strip())[:4000]}))
+                                                   "description": (rest.strip() or title.strip())[:4000],
+                                                   "objectives": [(rest.strip() or title.strip())[:400]]}))
 
     def _profile(self, req: LLMRequest) -> LLMResponse:
         """Un profil plausible, tiré de ce qu'elle sait de la personne."""

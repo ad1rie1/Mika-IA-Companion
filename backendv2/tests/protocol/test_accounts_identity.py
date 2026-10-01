@@ -79,23 +79,26 @@ def test_a_confided_project_names_its_person_and_can_be_modified_by_an_operator_
     bootstrap(client)
     client.portal.call(lambda: live.accounts.update(1, operator=True, active=True, full_name="Adrien Dupont"))
     token = client.cookies.get("csrftoken")
-    fields = ["title", "details", "owner", "due", "schedule", "max_steps", "priority", "approval"]
-    done = client.post("/inspecteur/action/goals.confier", data={
-        "csrf": token, "_op": "c1", "_retour": "/inspecteur/buts/projets", "_sujet": "", "title": "Un projet",
-        "details": "", "owner": "", "due": "", "schedule": "manual", "max_steps": "0", "priority": "normal",
-        "approval": "on", "_champs": fields}, follow_redirects=False)
-    gid = done.headers["location"].split("/fiche/goal/", 1)[1].split("?", 1)[0]
-    policy = html.unescape(client.get(f"/inspecteur/fiche/goal/{gid}?onglet=politique").text)
-    assert "Adrien Dupont" in policy and "user_1" not in re.sub(r'(value|href|name)="[^"]*"', "", policy)
-    form = policy[policy.find('action="/inspecteur/action/goals.modifier"') - 200:]
+    fields = ["title", "description", "owner", "objectives", "constants", "cadence_hours", "mode", "schedule", "days",
+              "start", "end", "runs_per_day", "priority", "approval", "remote", "branch"]
+    done = client.post("/inspecteur/action/projects.creer", data={
+        "csrf": token, "_op": "c1", "_retour": "/inspecteur/projets", "_sujet": "", "title": "Un projet",
+        "description": "", "owner": "", "objectives": "Le premier pas", "constants": "", "cadence_hours": "0",
+        "mode": "persona", "schedule": "manual", "days": "all", "start": "", "end": "", "runs_per_day": "0",
+        "priority": "normal", "approval": "on", "remote": "", "branch": "main", "_champs": fields},
+        follow_redirects=False)
+    pid = done.headers["location"].split("/fiche/project/", 1)[1].split("?", 1)[0]
+    behaviour = html.unescape(client.get(f"/inspecteur/fiche/project/{pid}?onglet=comportement").text)
+    assert "Adrien Dupont" in behaviour and "user_1" not in re.sub(r'(value|href|name)="[^"]*"', "", behaviour)
+    form = behaviour[behaviour.find('action="/inspecteur/action/projects.modifier"') - 200:]
     form = form[:form.find("</form>")]
     posted: dict[str, list[str]] = {}
     for m in re.finditer(r'<input type="hidden" name="([^"]+)" value="([^"]*)"', form):
         posted.setdefault(m.group(1), []).append(m.group(2))
-    posted |= {"csrf": [token], "title": ["Un projet mieux nommé"], "details": ["Le faire bien."],
-               "owner": ["user_1"], "due": [""], "schedule": ["manual"], "max_steps": ["0"], "priority": ["high"],
-               "approval": ["on"]}
-    saved = client.post("/inspecteur/action/goals.modifier", data=posted, follow_redirects=False)
+    posted |= {"csrf": [token], "title": ["Un projet mieux nommé"], "description": ["Le faire bien."],
+               "owner": ["user_1"], "mode": ["persona"], "schedule": ["manual"], "days": ["all"], "start": [""],
+               "end": [""], "runs_per_day": ["0"], "priority": ["high"], "approval": ["on"]}
+    saved = client.post("/inspecteur/action/projects.modifier", data=posted, follow_redirects=False)
     assert saved.status_code == 303, re.findall(r'class="error"[^>]*>([^<]+)', saved.text)
-    resume = html.unescape(client.get(f"/inspecteur/fiche/goal/{gid}").text)
-    assert "Un projet mieux nommé" in resume and "Le faire bien." in resume
+    overview = html.unescape(client.get(f"/inspecteur/fiche/project/{pid}").text)
+    assert "Un projet mieux nommé" in overview and "Le faire bien." in overview

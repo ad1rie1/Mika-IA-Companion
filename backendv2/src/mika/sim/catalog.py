@@ -9,11 +9,12 @@ from mika.sim.inner import INNER
 from mika.sim.lane import Plan, Result, run_plan
 from mika.sim.lane import run_lane as _run_lane
 from mika.sim.others import OTHERS
+from mika.sim.projects import PROJECTS
 from mika.sim.scenarios import BASE
 from mika.sim.senses import SENSES
 from mika.sim.world import Composition
 
-QUICK: tuple[Plan, ...] = BASE + OTHERS + INNER + GOALS + SENSES
+QUICK: tuple[Plan, ...] = BASE + OTHERS + INNER + GOALS + PROJECTS + SENSES
 
 
 def run_lane(composition: Composition, root: Path, plans: tuple[Plan, ...] = QUICK) -> list[Result]:

@@ -35,15 +35,15 @@ from mika.plugins.email import (
     task_mail,
 )
 from mika.ports.mail import AccountInfo, Mail, split_ref
-from mika.vocab.episodes import CONVERSATIONAL, Kind
+from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind
 from mika.vocab.privacy import Sensitivity
 
 #: ce que dit une voix au plus (le ton, les consignes)
 VOICE_MAX = 1500
 THREAD_MAX = 3
 OUTCOMES_SHOWN = 4
-TALK = [*CONVERSATIONAL, Kind.STEP]
-ALL = [*CONVERSATIONAL, Kind.STEP, Kind.TASK]
+TALK = [*CONVERSATIONAL, *WORKING]
+ALL = [*CONVERSATIONAL, *WORKING, Kind.TASK]
 
 
 def voice_text(info: AccountInfo, *, owner_fallback: str = "ton opérateur") -> str:

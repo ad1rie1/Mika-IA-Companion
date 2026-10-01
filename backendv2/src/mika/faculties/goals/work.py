@@ -2,9 +2,9 @@
 rappel à l'heure, raconter ce qu'elle a mené à bout.
 
 - **Un pas** (``STEP``, cible ``goal:<id>``) : l'envie d'une exploration le
-  porte (elle s'use) ; un projet confié, son agenda. Un pas à la fois par but
-  (bail de l'atelier), espacés, au plus quatre dans l'heure. Aucun pour un but
-  suspendu (et un pas en cours est supplanté : sa garde voit « en pause »).
+  porte (elle s'use). Un pas à la fois par but, espacés, au plus quatre dans
+  l'heure. Aucun pour un but suspendu (et un pas en cours est supplanté : sa
+  garde voit « en pause »). Les projets ont leurs exécutions à eux (``projects``).
 - **Un rappel** se dit à l'heure : l'ordinaire reste sous la barre de réveil
   (il attend qu'elle se réveille), l'urgent la passe ; suspendu, il se tait.
 - **Raconter** : à qui, et combien, dépend du lien — jamais d'un appel au
@@ -21,13 +21,12 @@ from mika.contracts import identity as identity_c
 from mika.contracts import presence as presence_c
 from mika.contracts import social as social_c
 from mika.faculties.goals.faculty import GOALS, Goal, GoalsState, budget, desire, live, params, rank, status
-from mika.kernel import schedule
 from mika.kernel.arbitration import Candidate, Modulation, RowView
 from mika.kernel.clock import HOUR
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard, floor, workshop
 from mika.kernel.state import FrozenDict
-from mika.vocab.episodes import Kind, goal_target
+from mika.vocab.episodes import Kind, goal_of, goal_target
 
 #: au-dessus de la barre de réveil : un rappel urgent la réveille
 URGENT_EVIDENCE = body_c.WAKE_BAR + 2.0
@@ -43,24 +42,15 @@ def _still(goal: int, wanted: tuple[str, ...]) -> Guard:
 
 def next_step_at(g: Goal, s: GoalsState, frame: Frame) -> int | None:
     """Quand ce but peut avancer d'un pas (``None`` : pas maintenant). « Avancer maintenant »
-    (``nudged_at``, tant qu'aucun pas n'est parti depuis) passe avant l'agenda et l'espacement."""
+    (``nudged_at``, tant qu'aucun pas n'est parti depuis) passe avant l'espacement."""
     p = params(frame.env.params_of("goals", frame.root))
-    if g.kind not in (c.EXPLORATION, c.PROJECT) or status(g, frame.now) != c.ACTIVE:
-        return None if status(g, frame.now) != c.WAITING else g.waiting_until
+    if g.kind != c.EXPLORATION or status(g, frame.now) != c.ACTIVE:
+        return None if g.kind != c.EXPLORATION or status(g, frame.now) != c.WAITING else g.waiting_until
     if g.steps >= budget(g, p) or any(r.goal == g.id and r.purpose == "step" for r in s.running.values()):
         return None
     if g.nudged_at > g.last_step_at:
         return g.nudged_at
-    spacing = p.project_spacing_us if g.kind == c.PROJECT else p.step_spacing_us
-    at = g.last_step_at + spacing if g.last_step_at else g.opened_at
-    if g.kind == c.PROJECT and g.schedule:
-        rule = schedule.read(g.schedule)
-        if rule.kind != "manual":
-            due = schedule.next_after(rule, g.last_step_at or g.opened_at, frame.env.tz_of(frame.root))
-            if due is None:
-                return None
-            at = max(at, due)
-    return at
+    return g.last_step_at + p.step_spacing_us if g.last_step_at else g.opened_at
 
 
 @GOALS.propose(kinds=[Kind.STEP], reasons={c.WORK: (0.0, 12.0)}, reads=[c.STATUS])
@@ -73,10 +63,7 @@ def _work(s: GoalsState, frame: Frame) -> list[Candidate]:
         at = next_step_at(g, s, frame)
         if at is None or at > frame.now:
             continue
-        if g.kind == c.PROJECT:
-            evidence = p.project_evidence
-        else:
-            evidence = p.work_base + p.work_per_desire * desire(g, frame.now, p)
+        evidence = p.work_base + p.work_per_desire * desire(g, frame.now, p)
         evidence = max(0.0, min(12.0, evidence + p.priority_step * rank(g)))
         out.append(Candidate(
             Kind.STEP, goal_target(g.id), c.WORK, round(evidence, 4), resources=frozenset({workshop(str(g.id))}),
@@ -93,6 +80,8 @@ def why_not_now(g: Goal, s: GoalsState, frame: Frame) -> str:
     st = status(g, now)
     if g.kind == c.REMINDER:
         return "un rappel n'a pas de séance de travail : il se dit à l'heure"
+    if g.kind != c.EXPLORATION:
+        return "un ancien projet (avant les projets à part) : il n'a plus de séance"
     if st in c.CLOSED_STATUSES:
         return "il est clos"
     if st == c.PAUSED:
@@ -108,11 +97,11 @@ def why_not_now(g: Goal, s: GoalsState, frame: Frame) -> str:
         return "elle dort : aucune séance la nuit"
     at = next_step_at(g, s, frame)
     if at is None:
-        return "son agenda ne lui donne plus de créneau"
+        return "plus de créneau"
     if sum(1 for t in s.steps_at if now - t < HOUR) >= p.steps_per_hour:
         return f"plafond atteint : {p.steps_per_hour} séances par heure, tous buts confondus"
     if at > now:
-        return "pas encore : son agenda ou l'espacement des séances la fixe plus tard"
+        return "pas encore : l'espacement des séances la fixe plus tard"
     return ""
 
 
@@ -120,7 +109,9 @@ def why_not_now(g: Goal, s: GoalsState, frame: Frame) -> str:
 def _hourly(s: GoalsState, frame: Frame, row: RowView) -> Modulation:
     """Au plus quelques pas dans l'heure, tous buts confondus : le travail
     silencieux coûte des appels au modèle, et ne passe pas par le budget
-    d'initiatives."""
+    d'initiatives. (Les exécutions des projets ont leur propre plafond.)"""
+    if goal_of(row.target) is None:
+        return Modulation()
     p = params(frame.env.params_of("goals", frame.root))
     recent = sum(1 for t in s.steps_at if frame.now - t < HOUR)
     return Modulation(veto=c.STEP_CAP) if recent >= p.steps_per_hour else Modulation()
@@ -170,7 +161,7 @@ def confidant(g: Goal, frame: Frame) -> tuple[str, str, str] | None:
     if g.owner:
         candidates.append(g.owner)
     candidates += [a for a in g.about if a not in candidates]
-    if not g.about or g.kind == c.PROJECT:
+    if not g.about:
         candidates += [o for o in frame.get(identity_c.OWNERS) if o not in candidates]
     for person in candidates:
         concerned = person == g.owner or person in g.about

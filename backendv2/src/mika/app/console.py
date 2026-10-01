@@ -4,9 +4,9 @@ fournit elle-même. Les facultés, elles, y rangent leurs vues par ``section``.
 
 La carte répond à des questions d'opérateur, dans cet ordre : que dois-je
 faire (tableau de bord) ; comment va-t-elle (Elle) ; qui connaît-elle (Ses
-relations) ; que fait-elle et pourquoi (Son activité) ; par où perçoit-elle et
-agit-elle (Ses canaux) ; que décide-t-on, la machine tient-elle
-(Exploitation). ``docs/console-carte.md`` détaille chaque menu.
+relations) ; que fait-elle et pourquoi (Son activité : ses décisions, ses
+buts, ses projets) ; par où perçoit-elle et agit-elle (Ses canaux) ; que
+décide-t-on, la machine tient-elle (Exploitation). ``docs/console-carte.md`` détaille chaque menu.
 """
 
 from __future__ import annotations
@@ -40,8 +40,11 @@ NAVIGATION: tuple[NavGroup, ...] = (
                     builtin=("decisions.maintenant", "decisions.en_cours", "decisions.selections",
                              "decisions.episodes", "decisions.echeances"),
                     order=("maintenant", "en_cours", "initiatives", "selections", "episodes", "echeances")),
-        Destination("buts", "Buts", "➤", "Ses rappels, explorations et projets : où ils en sont.",
-                    subjects=("goal",)),
+        Destination("buts", "Buts", "➤", "Ce qu'elle se propose de faire ensuite : ses rappels et ses "
+                    "explorations, où ils en sont.", subjects=("goal",)),
+        Destination("projets", "Projets", "▦", "Ses projets : des espaces de travail qu'on pilote — objectifs, "
+                    "exécutions, décisions techniques, fichiers, dépôt git, mode et outils.",
+                    subjects=("project",)),
         Destination("approbations", "Approbations", "✓", "Ce qu'elle voudrait faire sortir de la machine, et ce "
                     "qui en a été décidé.", builtin=("approbations.en_attente", "approbations.historique")),
     )),
@@ -70,7 +73,7 @@ PARAM_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Émotions", ("affect", "needs", "body", "self")),
     ("Esprit", ("attention", "memory", "transcript")),
     ("Relations", ("social", "others", "identity")),
-    ("Action", ("agency", "goals")),
+    ("Action", ("agency", "goals", "projects")),
     ("Canaux", ("email", "rss", "camera", "forge")),
     ("Noyau", ("kernel",)),
 )
@@ -78,6 +81,6 @@ FACULTY_LABELS: dict[str, str] = {
     "affect": "Humeur et postures", "needs": "Besoins", "body": "Corps et sommeil", "self": "Estime et récit",
     "attention": "Attention et pensées", "memory": "Mémoire", "transcript": "Fil des conversations",
     "social": "Liens", "others": "Ce qu'elle devine des autres", "identity": "Identités",
-    "agency": "Initiatives", "goals": "Buts", "email": "Courrier", "rss": "Flux RSS", "camera": "Caméra",
+    "agency": "Initiatives", "goals": "Buts", "projects": "Projets", "email": "Courrier", "rss": "Flux RSS", "camera": "Caméra",
     "forge": "Moteur de la Forge", "kernel": "Noyau",
 }

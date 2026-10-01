@@ -1,9 +1,8 @@
-"""``goals`` : ce qu'elle a entrepris — rappels, explorations, projets.
+"""``goals`` : ce qu'elle se propose de faire ensuite — rappels et explorations (les projets : ``projects``).
 Voir ``contracts/goals.py``."""
 
 from mika.faculties.goals import (  # noqa: F401 — contributions
     actions,
-    atelier,
     inspect,
     prompt,
     tend,
