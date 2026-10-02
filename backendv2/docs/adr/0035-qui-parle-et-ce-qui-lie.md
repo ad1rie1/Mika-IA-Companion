@@ -32,3 +32,14 @@
 - *La propriétaire en groupe.* Le courrier ordinaire est passé à l'arrière-plan d'une réponse (ADR 0037) : le contrôle positif du test (en privé, si) porte sur ses outils réservés et un mail important, le contrôle de sécurité (rien en groupe) ne change pas.
 - *Ce qui n'a plus de lecteur.* `social.ignored_shift` est retiré (`retired_params` : d'anciens réglages se relisent sans lui) ; `social.UNANSWERED` aussi. Ne pas harceler quelqu'un qui ne répond pas est la retenue d'`agency`.
 - *Question ouverte : la propriétaire d'une installation neuve.* Pour `social`, elle est d'abord une inconnue (rien ne la distingue avant qu'elles aient vécu quelque chose), donc la nuit ses messages attendent le matin (ADR 0036). Recommandation, non appliquée (une question de produit) : un plancher « amie » pour une personne dont une adresse prouve la propriété (`IS_OWNER`), jamais « proche » sans l'avoir vécu.
+
+## Décision (2026-10-02) — sa propriétaire est une amie d'office
+
+Sur une installation neuve, sa propriétaire n'avait aucune histoire avec elle : une inconnue pour `social`, donc ses
+messages de nuit attendaient le matin (ADR 0036 : seule une amie ou une proche la réveille). Décidé avec
+l'utilisateur : `social.owner_floor` (défaut « amitié ») — la proximité lue d'une personne propriétaire
+(`identity.is_owner`) ne descend pas sous ce plancher. **Jamais « proche » d'office** (le réglage n'offre pas ce
+niveau, et une valeur hors liste ne relève rien) : ça se vit. Une proximité fixée par un opérateur l'emporte ; une
+rancune lourde (`grudge_demote`) lève le plancher, comme elle défait une amitié. La console l'écrit (« vécue, plancher
+« propriétaire » »). Effet assumé sur la divulgation : le « personnel » d'autrui s'ouvre à elle en privé, ce que la
+console lui montre déjà.

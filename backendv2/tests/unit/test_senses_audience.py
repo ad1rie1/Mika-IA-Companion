@@ -207,7 +207,8 @@ def test_an_important_mail_shows_in_a_light_reply_but_not_to_someone_who_is_hurt
     light = "\n".join(m.content for m in calls[0].messages)
     heavy = "\n".join(m.content for m in calls[-1].messages)
     assert "TES MAILS NON LUS — de l'arrière-plan" in light and "le toit fuit" in light
-    assert "TES MAILS" not in heavy and "toit" not in heavy.split("TROTTE")[0]
+    # à quelqu'un qui va mal, le mail ne s'invite pas : ni sa section, ni hors de ce qu'elle-même en pense
+    assert "TES MAILS" not in heavy and "toit" not in _outside_her_own_life(heavy.split(CONTEXT_FOOTER)[0])
 
 
 # ── Ce qu'un mail a choisi reste cité (CON-4, EDG-9) ──────────────────────

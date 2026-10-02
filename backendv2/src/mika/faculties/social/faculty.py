@@ -97,6 +97,13 @@ class SocialParams(BaseModel):
         help="L'attachement (affect : nourri par ses déclarations chaleureuses ou tendres, lent, demi-vie de deux "
              "mois) qui suffit, à lui seul, pour être proche : une mauvaise passe qui assombrit le regard du moment "
              "n'éloigne pas quelqu'un à qui elle tient. Le mois d'histoire reste exigé.")] = 0.15
+    #: la personne qui l'a installée : au moins ce niveau d'office (jamais « proche » : ça se vit)
+    owner_floor: Annotated[str, Knob(
+        label="Propriétaire : au moins", group="Proximité vécue",
+        choices=((c.STRANGER, "comme tout le monde"), (c.ACQUAINTANCE, "connaissance"), (c.FRIEND, "amitié")),
+        help="Sa propriétaire reconnue a d'office au moins ce niveau de proximité — dès l'amitié, son message de "
+             "nuit la réveille (corps). Jamais « proche » d'office : ça se vit. Une proximité fixée par un "
+             "opérateur l'emporte ; une rancune lourde lève ce plancher, comme elle défait une amitié.")] = c.FRIEND
     close_long_days: Annotated[int, Knob(
         label="Proche : longue histoire (jours)", group="Proximité vécue", lo=1, hi=365,
         help="Au-delà de tant de jours de contact, on devient proche même sans chaleur installée : un chagrin "
@@ -470,6 +477,19 @@ def lived(ct: Contact | None, regard: float, p: SocialParams, hostility: float =
     return c.CLOSENESS_LEVELS[max(_RANK[c.STRANGER], window, everything - 1)]
 
 
+#: au plus l'amitié d'office : « proche » se vit
+_OWNER_FLOORS = (c.STRANGER, c.ACQUAINTANCE, c.FRIEND)
+
+
+def owner_floored(level: str, p: SocialParams, hostility: float = 0.0) -> str:
+    """Sa propriétaire reconnue : au moins ``owner_floor`` (une amitié d'office
+    au plus), sauf rancune lourde — celle qui défait une amitié installée."""
+    floor = p.owner_floor if p.owner_floor in _OWNER_FLOORS else c.STRANGER
+    if estranged(hostility, p, settled=True) or _RANK.get(level, 0) >= _RANK[floor]:
+        return level
+    return floor
+
+
 def closeness(s: SocialState, person: str, regard: float, p: SocialParams, hostility: float = 0.0,
               now_day: int | None = None, bond: float = 0.0) -> str:
     """Déclarée par un opérateur, sinon vécue."""
@@ -513,11 +533,14 @@ def _greeted(s: SocialState, cx, person: str) -> int:
     return s.greeted.get(person, 0)
 
 
-@SOCIAL.fact(c.CLOSENESS, reads=[affect_c.REGARD, affect_c.HOSTILITY, affect_c.BOND])
+@SOCIAL.fact(c.CLOSENESS, reads=[affect_c.REGARD, affect_c.HOSTILITY, affect_c.BOND, identity_c.IS_OWNER])
 def _closeness(s: SocialState, cx, person: str) -> str:
-    return closeness(s, person, cx.facts.get(affect_c.REGARD(person)), params(cx.params),
-                     cx.facts.get(affect_c.HOSTILITY(person)), cx.local(cx.now).date().toordinal(),
-                     cx.facts.get(affect_c.BOND(person)))
+    p, hostility = params(cx.params), cx.facts.get(affect_c.HOSTILITY(person))
+    level = closeness(s, person, cx.facts.get(affect_c.REGARD(person)), p, hostility,
+                      cx.local(cx.now).date().toordinal(), cx.facts.get(affect_c.BOND(person)))
+    if person not in s.declared and cx.facts.get(identity_c.IS_OWNER(person)):
+        return owner_floored(level, p, hostility)
+    return level
 
 
 @SOCIAL.fact(c.CONTACT, reads=[c.CLOSENESS])

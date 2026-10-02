@@ -19,7 +19,7 @@ import pytest
 from mika.contracts import memory as memory_c
 from mika.contracts import social as social_c
 from mika.faculties.others.tone import read_tone
-from mika.faculties.social.faculty import Contact, SocialParams, lived, rhythm
+from mika.faculties.social.faculty import Contact, SocialParams, lived, owner_floored, rhythm
 from mika.kernel.clock import DAY, HOUR, US, local
 from mika.kernel.events import Content, Origin
 from mika.ports.llm import LLMResponse
@@ -95,6 +95,18 @@ def test_an_installed_attachment_makes_a_close_friend_after_a_month(days, messag
     assert lived(ct, regard, P, 0.0, bond=bond) == expected, why
     # un réglage à zéro ne fait pas une proche de quelqu'un à qui elle ne tient pas du tout
     assert lived(ct, regard, SocialParams(close_bond=0.0), 0.0, bond=0.0) == lived(ct, regard, P, 0.0)
+
+
+@pytest.mark.parametrize("lived_level, floor, hostility, expected, why", [
+    (social_c.STRANGER, social_c.FRIEND, 0.0, social_c.FRIEND, "installation neuve : sa propriétaire est une amie d'office"),
+    (social_c.ACQUAINTANCE, social_c.FRIEND, 0.0, social_c.FRIEND, "le plancher relève"),
+    (social_c.CLOSE, social_c.FRIEND, 0.0, social_c.CLOSE, "il ne rabaisse jamais ce qui a été vécu"),
+    (social_c.STRANGER, social_c.ACQUAINTANCE, 0.0, social_c.ACQUAINTANCE, "le plancher se règle"),
+    (social_c.STRANGER, social_c.CLOSE, 0.0, social_c.STRANGER, "jamais « proche » d'office : ça se vit"),
+    (social_c.STRANGER, social_c.FRIEND, 0.9, social_c.STRANGER, "une rancune lourde lève le plancher"),
+])
+def test_her_owner_is_at_least_a_friend_never_close_by_right(lived_level, floor, hostility, expected, why):
+    assert owner_floored(lived_level, SocialParams(owner_floor=floor), hostility) == expected, why
 
 
 def test_a_retired_setting_still_replays():

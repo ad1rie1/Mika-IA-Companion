@@ -68,7 +68,9 @@ def _ref(frame: Frame, person: str, tab: str = "") -> Ref:
 def _closeness_text(s: SocialState, frame: Frame, person: str) -> str:
     level = frame.get(c.CLOSENESS(person))
     text = CLOSENESS_FR.get(level, level)
-    return f"{text} (déclarée)" if person in s.declared else f"{text} (vécue)"
+    if person in s.declared:
+        return f"{text} (déclarée)"
+    return f"{text} (vécue, plancher « propriétaire »)" if frame.get(identity_c.IS_OWNER(person)) else f"{text} (vécue)"
 
 
 def _closeness(s: SocialState, frame: Frame, person: str) -> Badge:

@@ -19,7 +19,9 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from mika.contracts import body as body_c
+from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
+from mika.contracts import social as social_c
 from mika.faculties.body import FOG, BodyParams, BodyState, energy
 from mika.faculties.body import sleep as sl
 from mika.kernel.clock import DAY, HOUR, MINUTE, US, instant, local
@@ -169,6 +171,26 @@ def test_at_three_a_stranger_waits_for_morning_a_close_friend_wakes_her(tmp_path
     assert len(to_bob) == 1 and woke and to_bob[0] >= woke[-1] and _hm(to_bob[0]) < 12  # au réveil, elle lui répond
     morning = replies_to(llm, "user_2")[0].messages[-1].content
     assert "pendant que tu dormais" in morning  # et elle sait qu'elle dormait
+
+
+def test_on_a_fresh_install_her_owner_wakes_her_at_three_a_stranger_waits(tmp_path):
+    """Sa propriétaire n'a encore aucune histoire avec elle : une amie d'office (``social.owner_floor``), donc
+    son message de 3 h la réveille ; un inconnu, lui, attend le matin. Pas « proche » pour autant."""
+    async def scenario(kernel):
+        await connect(kernel, "user_9", "Adrien", operator=True)
+        await until(kernel, at_paris(2026, 9, 29, 3, 0))
+        held = await kernel.perceive(said("user_2", "tu dors ?"))
+        await asyncio.sleep(10 * MINUTE / US)
+        p = await kernel.perceive(said("user_9", "tu dors ?"))
+        answered = p.reply is not None and bool(await p.reply)
+        frame = kernel.mind.frame()
+        owner = frame.get(identity_c.PERSON("user_9"))
+        return held.reply, answered, frame.get(social_c.CLOSENESS(owner)), of(kernel, body_c.ROUSED)
+
+    (held, answered, level, roused), _ = run(tmp_path, scenario)
+    assert held is None  # l'inconnu attend son réveil
+    assert answered and [r.data.handle for r in roused] == ["user_9"]  # sa propriétaire la réveille
+    assert level == social_c.FRIEND  # une amie d'office, pas une proche
 
 
 def test_something_urgent_wakes_her_whoever_writes(tmp_path):

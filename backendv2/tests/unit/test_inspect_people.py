@@ -591,7 +591,8 @@ def test_the_operator_sets_closeness_from_the_person_fiche(tmp_path):
     assert not out["bad"].ok and "choix inconnu" in out["bad"].errors["closeness"]
     assert not out["same"].ok and "déjà déclarée" in out["same"].errors["closeness"]
     assert out["friend"].ok and out["level"] == social_c.FRIEND
-    assert out["auto"].ok and out["lived"] == social_c.STRANGER  # une seule journée : leur histoire commence
+    # une seule journée : leur histoire commence — mais c'est sa propriétaire, une amie d'office (ADR 0035)
+    assert out["auto"].ok and out["lived"] == social_c.FRIEND
     assert out["offered bound"] is False
     operator_set = [e for e in out["set"] if e.origin is Origin.EXTERNAL]
     assert [(e.data.person, e.data.closeness, e.data.by) for e in operator_set] == [
