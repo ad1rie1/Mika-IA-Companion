@@ -13,12 +13,15 @@ due, et raconter ce qu'elle a mené à bout (mode Mika seulement).
 
 from __future__ import annotations
 
+from typing import Any
+
 from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
 from mika.contracts import presence as presence_c
 from mika.contracts import projects as c
 from mika.contracts import social as social_c
 from mika.faculties.projects.faculty import (
+    ON_DEMAND,
     PROJECTS,
     Objective,
     Project,
@@ -28,6 +31,7 @@ from mika.faculties.projects.faculty import (
     in_window,
     next_due,
     nudged,
+    outgoing,
     params,
     pick,
     rank,
@@ -61,7 +65,9 @@ def next_run_at(p: Project, s: ProjectsState, frame: Frame) -> int | None:
     """Quand ce projet peut avoir sa prochaine exécution (``None`` : pas en vue)."""
     pm = params(frame.env.params_of("projects", frame.root))
     now = frame.now
-    if p.status != c.ACTIVE or busy(s, p.id) or not p.objectives:
+    if p.status != c.ACTIVE or busy(s, p.id) or not p.objectives or outgoing(p, now):
+        return None
+    if p.schedule == ON_DEMAND and not nudged(p):  # « sur demande » : il ne part que quand on le lance
         return None
     target = pick(p, now, pm)
     if target is None:
@@ -77,7 +83,7 @@ def next_run_at(p: Project, s: ProjectsState, frame: Frame) -> int | None:
     if nudged(p) and target is not None:
         return max(p.nudged_at, at, spaced if p.tried_at > p.nudged_at else 0)
     at = max(at, spaced)
-    if p.schedule:
+    if p.schedule and p.schedule != ON_DEMAND:
         rule = schedule.read(p.schedule)
         if rule.kind != "manual":
             due = schedule.next_after(rule, p.last_run_at or p.created_at, frame.env.tz_of(frame.root))
@@ -132,8 +138,12 @@ def why_not_now(p: Project, s: ProjectsState, frame: Frame) -> str:
         return f"il est en pause{f' ({p.pause_reason})' if p.pause_reason else ''} : reprends-le"
     if busy(s, p.id):
         return "une exécution est en cours"
+    if outgoing(p, now):
+        return "une commande, un envoi ou une récupération sont en route : l'atelier les attend"
     if not p.objectives or not any(o.status == c.OPEN for o in p.objectives):
         return "aucun objectif ouvert : ajoutes-en un"
+    if p.schedule == ON_DEMAND and not nudged(p):
+        return "il avance sur demande : « Lancer maintenant »"
     if pick(p, now, pm) is None:
         due = next_due(p, pm)
         return "rien n'est dû : ses objectifs constants attendent leur cadence" + \
@@ -190,15 +200,48 @@ def confidant(p: Project, frame: Frame) -> tuple[str, str, str] | None:
 
 
 def _shareable(o: Objective, p: Project, now: int, pm) -> bool:
-    return (p.mode == c.PERSONA and o.kind == c.ONCE and o.status == c.DONE and not o.shared
+    return (o.kind == c.ONCE and o.status == c.DONE and not o.shared
             and o.share_attempts < pm.share_attempts and o.notable >= pm.share_notable_from
             and now - o.closed_at <= pm.share_within_us)
+
+
+def _reader(p: Project, frame: Frame) -> tuple[str, str] | None:
+    """À qui rendre compte d'un projet impersonnel, ou dire qu'on a besoin d'aide : qui l'a confié (s'il s'occupe
+    d'elle), sinon quelqu'un qui s'occupe d'elle — jamais une amie : c'est un travail."""
+    candidates = [p.owner] if p.owner else []
+    candidates += [o for o in frame.get(identity_c.OWNERS) if o not in candidates]
+    for person in candidates:
+        if frame.get(identity_c.IS_OWNER(person)) or (person == p.owner and p.authority == c.USER):
+            address = _address(frame, person)
+            if address is not None:
+                return person, address
+    return None
+
+
+def _who_words(frame: Frame, person: str, address: str) -> str:
+    name = _name(frame, person) or _name(frame, address)
+    return f"« {name} »" if name else "cette personne"
+
+
+#: ce qu'elle se dit avant de raconter : rien du contenu (le murmure s'entend), aucune référence à une section
+SHARE_BRIEFS = {
+    FULL: "Tu as mené à bout quelque chose dans un de tes projets : raconte-le à {who}, simplement.",
+    SUMMARY: "Tu as fini quelque chose dans un de tes projets : dis-le en deux mots à {who}.",
+    MENTION: "Tu as fini quelque chose dans un de tes projets : tu peux le mentionner à {who} en passant, sans "
+             "entrer dans le détail.",
+}
+REPORT_BRIEF = ("Un objectif d'un projet qu'on t'a confié est atteint : fais-en un compte rendu factuel à {who}, en une "
+                "ou deux phrases — c'est un travail, pas une fierté.")
+NEED_BRIEF = ("Un projet qu'on t'a confié n'avance plus sans un coup de main de {who} : dis-le-lui simplement — ce qui "
+              "bloque, et ce qu'il te faudrait.")
 
 
 @PROJECTS.propose(kinds=[Kind.INITIATIVE], reasons={c.SHARE: (0.0, 10.0)},
                   reads=[identity_c.OWNERS, identity_c.IS_OWNER, social_c.CLOSENESS, identity_c.HANDLES,
                          identity_c.REACHABLE, presence_c.PRESENT, identity_c.IDENTITY])
 def _share(s: ProjectsState, frame: Frame) -> list[Candidate]:
+    """Raconter ce qu'elle a mené à bout (mode Mika, à la mesure du lien) ; en mode impersonnel, un compte rendu
+    factuel à qui l'a confié."""
     pm = params(frame.env.params_of("projects", frame.root))
     out = []
     for p in sorted(s.projects.values(), key=lambda p: p.id):
@@ -207,21 +250,53 @@ def _share(s: ProjectsState, frame: Frame) -> list[Candidate]:
         for o in p.objectives:
             if not _shareable(o, p, frame.now, pm):
                 continue
-            chosen = confidant(p, frame)
-            if chosen is None:
-                continue
-            person, address, level = chosen
-            name = _name(frame, person) or _name(frame, address)
-            who = f"« {name} »" if name else "cette personne"
-            brief = {
-                FULL: f"Tu as mené à bout un objectif de ton projet (« CE QUE TU AS MENÉ À BOUT », plus haut) : "
-                      f"raconte-le à {who}, simplement.",
-                SUMMARY: f"Tu as fini quelque chose dans un de tes projets : dis-le en deux mots à {who}.",
-                MENTION: f"Tu as fini quelque chose dans un de tes projets : tu peux le mentionner à {who} en "
-                         "passant, sans entrer dans le détail.",
-            }[level]
+            if p.mode == c.PERSONA:
+                chosen = confidant(p, frame)
+                if chosen is None:
+                    continue
+                person, address, level = chosen
+                brief = SHARE_BRIEFS[level].format(who=_who_words(frame, person, address))
+            else:
+                reader = _reader(p, frame)
+                if reader is None:
+                    continue
+                person, address = reader
+                level = FULL
+                brief = REPORT_BRIEF.format(who=_who_words(frame, person, address))
             out.append(Candidate(
                 Kind.INITIATIVE, address, c.SHARE, pm.share_evidence, resources=frozenset({floor(address)}),
                 args=FrozenDict({"brief:projects": brief, "subject": subject_of(p.id, o.id), "share": level})))
             break  # un récit à la fois par projet
+    return out
+
+
+def _needy(o: Objective, now: int, pm: Any) -> bool:
+    """Un objectif pour lequel il lui faut quelqu'un : bloqué depuis peu, ou ouvert avec un besoin dit."""
+    if o.asked or o.ask_attempts >= pm.share_attempts:
+        return False
+    if o.status == c.BLOCKED and o.kind == c.ONCE:
+        return now - o.closed_at <= pm.share_within_us
+    return o.status == c.OPEN and bool(o.need_ref)
+
+
+@PROJECTS.propose(kinds=[Kind.INITIATIVE], reasons={c.NEED: (0.0, 10.0)},
+                  reads=[identity_c.OWNERS, identity_c.IS_OWNER, identity_c.HANDLES, identity_c.REACHABLE,
+                         presence_c.PRESENT, identity_c.IDENTITY])
+def _need(s: ProjectsState, frame: Frame) -> list[Candidate]:
+    """« J'ai besoin de toi pour… » : un objectif d'un projet confié bloque, ou attend quelque chose de qui l'a
+    confié — elle le lui dit (une fois, quelques tentatives au plus), dans les deux modes."""
+    pm = params(frame.env.params_of("projects", frame.root))
+    out = []
+    for p in sorted(s.projects.values(), key=lambda p: p.id):
+        if p.status != c.ACTIVE or p.authority != c.USER:
+            continue
+        o = next((x for x in p.objectives if _needy(x, frame.now, pm)), None)
+        reader = _reader(p, frame) if o is not None else None
+        if o is None or reader is None:
+            continue
+        person, address = reader
+        out.append(Candidate(
+            Kind.INITIATIVE, address, c.NEED, pm.need_evidence, resources=frozenset({floor(address)}),
+            args=FrozenDict({"brief:projects": NEED_BRIEF.format(who=_who_words(frame, person, address)),
+                             "subject": subject_of(p.id, o.id), "share": FULL})))
     return out

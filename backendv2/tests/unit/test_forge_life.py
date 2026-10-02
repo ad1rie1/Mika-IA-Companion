@@ -121,8 +121,10 @@ def test_five_failures_open_the_breaker_and_she_notices(tmp_path):
     assert broken and "ne marche plus" in broken[0].data.summary.text
     thoughts = [t for t in of(evs, attention_c.THOUGHT_BORN) if t.data.origin == attention_c.SIGNAL]
     assert thoughts and thoughts[0].data.bundle == "forge"  # une envie de la réparer, avec ses outils
-    repairs = [o for o in of(evs, goals_c.GOAL_OPENED) if "ne marche plus" in o.data.title.text]
-    assert repairs and "forge" in repairs[0].data.bundles
+    # le titre est le sien ; ce que l'app a dit est gardé à part (cité au travail), jamais donné comme le but
+    repairs = [o for o in of(evs, goals_c.GOAL_OPENED) if "ne marche plus" in (o.data.details.text or "")]
+    assert repairs and "forge" in repairs[0].data.bundles and "forge_apps" not in repairs[0].data.bundles
+    assert "ne marche plus" not in repairs[0].data.title.text
 
 
 def test_writing_an_app_is_for_her_owner_and_app_tools_need_promotion(tmp_path):

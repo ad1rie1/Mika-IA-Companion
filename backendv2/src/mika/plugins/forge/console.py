@@ -73,6 +73,7 @@ from mika.plugins.forge import (
     outcomes,
     params,
     stale,
+    trusted,
     written_draft,
 )
 from mika.plugins.forge.views import (
@@ -203,6 +204,9 @@ def _about(name: str, app: App | None, info: AppInfo | None, port: Any, frame: F
     if app is not None:
         pairs += [
             ("promue (ses outils servent en conversation)", "oui" if app.promoted else "non"),
+            ("version validée (ses secrets lui sont lisibles)",
+             "oui" if trusted(app) else "non — « Faire confiance à cette version » après l'avoir lue"),
+            ("arrêtée par un opérateur", "oui" if app.held else "non"),
             ("en vigueur depuis", ctx.when(app.since) if app.since else "—"),
             ("dernier tour", _last_tick(name, ctx)),
             ("échecs d'affilée", app.failures),
@@ -453,7 +457,7 @@ async def _tab_views(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[B
         blocks.append(Note(f"Cette app est cassée ({_clip(app.broken, 200)}) : ses vues ne se rendent plus. "
                            "« Activer » la relance.", tone="warn", title="Cassée"))
         return blocks
-    return blocks + await render(port, name, info, spec, values)
+    return blocks + await render(port, name, info, spec, values, secrets=trusted(app))
 
 
 def _fiche_view(name: str, v: AppViewSpec) -> Ref:
@@ -592,13 +596,35 @@ def _info(ctx: ActionContext, name: str) -> AppInfo:
     return info
 
 
-def _switch(state: str, message: str):
+def _switch(state: str, message: str, *, vouch: bool = False):
     def act(s: ForgeState, frame: Frame, args: Any, ctx: ActionContext) -> Done:
         if ctx.subject not in s.apps:
             raise Refused("Cette app n'est pas (encore) dans sa vie : « Recharger » l'y fait entrer.")
-        return Done(drafts=(SWITCHED.draft(app=ctx.subject, state=state, reason="opérateur"),), message=message)
+        drafts = [SWITCHED.draft(app=ctx.subject, state=state, reason="opérateur")]
+        if vouch:  # un opérateur qui promeut a lu la version qu'il promeut
+            drafts.append(_vouch(s, ctx))
+        return Done(drafts=tuple(drafts), message=message)
 
     return act
+
+
+def _vouch(s: ForgeState, ctx: ActionContext) -> Any:
+    """« Cette version, je la valide » : ses secrets lui deviennent lisibles (jusqu'à la prochaine version)."""
+    app = s.apps.get(ctx.subject)
+    return SWITCHED.draft(app=ctx.subject, state="trusted", reason="opérateur",
+                          fingerprint=app.fingerprint if app is not None else "")
+
+
+@FORGE.action("valider", title="Faire confiance à cette version", args=NoArgs, emits=[SWITCHED], subject="app",
+              order=12, description="Ses réglages secrets ne se lisent que par une version qu'un opérateur a "
+              "validée : celle-ci, après l'avoir lue (onglet Code).",
+              available=lambda s, frame, key: (a := _in_life(s, key)) is not None and not trusted(a),
+              confirm="Faire confiance à cette version de l'app ? Elle lira ses réglages secrets et pourra les "
+                      "envoyer vers ses domaines.")
+def _validate(s: ForgeState, frame: Frame, args: Any, ctx: ActionContext) -> Done:
+    if ctx.subject not in s.apps:
+        raise Refused("Cette app n'est pas (encore) dans sa vie : « Recharger » l'y fait entrer.")
+    return Done(drafts=(_vouch(s, ctx),), message="Validée : cette version lit ses réglages secrets.")
 
 
 FORGE.action("activer", title="Activer", args=NoArgs, emits=[SWITCHED], subject="app", order=10,
@@ -610,9 +636,12 @@ FORGE.action("arreter", title="Arrêter", args=NoArgs, emits=[SWITCHED], subject
              available=lambda s, frame, key: (a := _in_life(s, key)) is not None and a.enabled and not a.broken,
              )(_switch("disabled", "Arrêtée."))
 FORGE.action("promouvoir", title="Promouvoir", args=NoArgs, emits=[SWITCHED], subject="app", order=20,
-             description="Ses outils servent aussi en conversation, pas seulement quand elle travaille.",
+             description="Ses outils servent aussi en conversation, pas seulement quand elle travaille (cette "
+                         "version seulement : une nouvelle version la fait retomber).",
              available=lambda s, frame, key: (a := _in_life(s, key)) is not None and not a.promoted,
-             )(_switch("promoted", "Promue : ses outils servent en conversation."))
+             confirm="Promouvoir cette version ? Ses outils serviront en conversation, et ses secrets lui seront "
+                     "lisibles.",
+             )(_switch("promoted", "Promue : ses outils servent en conversation.", vouch=True))
 FORGE.action("retrograder", title="Rétrograder", args=NoArgs, emits=[SWITCHED], subject="app", order=21,
              description="Ses outils ne servent plus que quand elle travaille.",
              available=lambda s, frame, key: (a := _in_life(s, key)) is not None and a.promoted,
@@ -625,7 +654,7 @@ async def _reload(s: ForgeState, frame: Frame, args: Any, ctx: ActionContext) ->
     name = ctx.subject
     info = _info(ctx, name)
     await _port(ctx).reload(name)
-    drafts = (written_draft(info),) if stale(s.apps.get(name), info) else ()
+    drafts = (written_draft(info, vouched=True),) if stale(s.apps.get(name), info) else ()
     return Done(drafts=drafts, message="Rechargée : le prochain appel repart du disque."
                 + (f" La version {info.version} est dans sa vie." if drafts else ""))
 
@@ -641,7 +670,8 @@ async def _rollback(s: ForgeState, frame: Frame, args: Any, ctx: ActionContext) 
     except (ForgeRefused, OSError) as exc:
         raise Refused(f"Impossible : {exc}") from exc
     info = port.info(name)
-    draft = written_draft(info) if info is not None else WRITTEN.draft(app=name, version=version, title=name)
+    draft = written_draft(info, vouched=True) if info is not None else \
+        WRITTEN.draft(app=name, version=version, title=name)
     return Done(drafts=(draft,), message=f"Revenue à la version précédente (désormais version {version}).")
 
 
@@ -713,7 +743,7 @@ async def _test(s: ForgeState, frame: Frame, data: Any, ctx: ActionContext) -> D
     if spec is not None:
         values, _ = view_params(spec, {k: str(v) for k, v in args.items()})
         r = await port.call(name, fn, {} if fn == "view" else values, timeout_s=VIEW_TIMEOUT_S,
-                            max_result=VIEW_MAX_BYTES)
+                            max_result=VIEW_MAX_BYTES, secrets=trusted(s.apps.get(name)))
         if not r.ok:
             return Done(message=f"{fn} : échec en {r.duration_ms} ms", tone="danger",
                         show=(_facts(r), failure_note(spec.label, r), *_logs(r)))
@@ -722,7 +752,7 @@ async def _test(s: ForgeState, frame: Frame, data: Any, ctx: ActionContext) -> D
         return Done(message=f"{fn} : {verdict} ({r.duration_ms} ms)", tone="danger" if _invalid(blocks) else "ok",
                     show=(_facts(r), *without_forms(blocks), *_logs(r)))
     call_args = {"name": args.get("name", ""), "args": args.get("args", {})} if fn == "action" else args
-    r = await port.call(name, fn, call_args, timeout_s=ACTION_TIMEOUT_S)
+    r = await port.call(name, fn, call_args, timeout_s=ACTION_TIMEOUT_S, secrets=trusted(s.apps.get(name)))
     shown: list[Block] = [_facts(r)]
     if r.ok:
         shown.append(Code(json.dumps(r.value, ensure_ascii=False, indent=2, default=str)[:20_000], title="Ce qu'elle rend"))
@@ -828,7 +858,7 @@ async def _act(s: ForgeState, frame: Frame, data: Any, ctx: ActionContext) -> Do
     payload, errors = _check(action, data)
     if errors:
         raise Refused("Le formulaire a des erreurs.", errors)
-    r = await _port(ctx).call(name, action.function, payload, timeout_s=ACTION_TIMEOUT_S)
+    r = await _port(ctx).call(name, action.function, payload, timeout_s=ACTION_TIMEOUT_S, secrets=trusted(app))
     p = params(frame.env.params_of("forge", frame.root))
     drafts = tuple(outcomes(name, app, [r], ctx.now, p, breaker=False))  # jamais compté contre l'app
     if not r.ok:
@@ -902,9 +932,13 @@ async def _settle(s: ForgeState, frame: Frame, data: Any, ctx: ActionContext) ->
     if not changed:
         return Done(message="Rien n'a changé.", tone="info")
     labels = ", ".join(fields[k].label for k in changed if k in fields)
-    return Done(message=f"Réglages enregistrés ({labels}) : lus au prochain appel de l'app.")
+    secret = any(fields[k].kind == "secret" for k in changed if k in fields)
+    app = s.apps.get(name)
+    drafts = (_vouch(s, ctx),) if secret and app is not None and not trusted(app) else ()
+    return Done(drafts=drafts, message=f"Réglages enregistrés ({labels}) : lus au prochain appel de l'app."
+                + (" Ses secrets sont confiés à cette version." if drafts else ""))
 
 
-FORGE.action("regler", title="Enregistrer les réglages", args=NoArgs, emits=[], fields=_settings_fields,
+FORGE.action("regler", title="Enregistrer les réglages", args=NoArgs, emits=[SWITCHED], fields=_settings_fields,
              description="Les secrets laissés vides restent inchangés ; un champ vidé revient au défaut du "
                          "manifeste.")(_settle)

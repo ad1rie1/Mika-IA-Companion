@@ -36,6 +36,8 @@ OWNER = "goals"
 
 # sortes et autorités
 REMINDER, EXPLORATION, PROJECT = "reminder", "exploration", "project"
+# d'où vient une exploration
+FROM_EXCHANGE, FROM_REVISION, FROM_SIGNAL, FROM_INTEREST = "exchange", "revision", "signal", "interest"
 KINDS = (REMINDER, EXPLORATION, PROJECT)
 USER, SELF = "user", "self"
 
@@ -95,6 +97,11 @@ class GoalOpened(Payload):
     desire: float = 0.0
     #: ``low`` | ``normal`` | ``high`` | ``urgent``
     priority: str = NORMAL
+    #: explorations : ce qui l'a fait naître — ``exchange`` (ce qu'on lui a confié), ``revision`` (une croyance
+    #: revue), ``signal`` (un titre, un mail…), ``interest`` (un de ses centres d'intérêt) ; vide : un ancien journal
+    origin: str = ""
+    #: …et quand (la pensée d'où il vient est née à cet instant ; 0 : inconnu)
+    origin_at: int = 0
 
 
 class StepReported(Payload):

@@ -75,6 +75,11 @@ def appraise(message: str) -> Tone:
 
 PARIS = ZoneInfo("Europe/Paris")
 _QUOTED = re.compile(r"« ([^»]+) »")
+#: la section citée d'un pas : ce qui a fait naître le but (un titre d'article, ce qu'on lui a confié)
+ORIGIN_SECTION = "CE QUI L'A FAIT NAÎTRE"
+#: ce qu'elle écrit d'une réflexion (``goal_reflect``) : quelques phrases à elle, pas une redite
+REFLECTION = ("En y repensant ({title}) : ce qui pourrait aider, c'est de prendre les choses une par une, de "
+              "respirer un peu et de savoir qu'on n'est pas seul. Je prendrai de ses nouvelles bientôt.")
 #: la première tâche ouverte (à faire ou en cours) du plan montré pendant un pas
 _PLAN_OPEN = re.compile(r"^- (\d+)\. \[(?:à faire|en cours)\]", re.M)
 PROJECT_CODE = 'def bonjour(nom):\n    return f"Bonjour, {nom} !"\n'
@@ -255,10 +260,14 @@ class PersonaSimLLM:
             return self._call(req, ("report_step", {"verdict": "blocked",
                                                    "summary": "Je n'y arrive pas : il me manque quelque chose."}))
         offered = {t.name for t in req.tools}
-        if title.startswith("En savoir plus") and "rss_read" in offered:
-            return self._read_up(req, title, results)
+        if title.startswith(("En savoir plus", "Fouiller")) and "rss_read" in offered:
+            # ce qui l'a fait naître (un titre d'article) est cité à part, jamais dans le but
+            return self._read_up(req, f"{title} {_section(req, ORIGIN_SECTION)}", results)
         if done == 0:
             words = " ".join(title.replace("«", " ").replace("»", " ").split()[:6])
+            if "goal_reflect" in offered and "goal_reflect" in work:  # une réflexion : le prompt le lui dit
+                return self._call(req, ("memory_search", {"query": words or "souvenirs"}),
+                                  ("goal_reflect", {"text": REFLECTION.format(title=title[:120])}))
             return self._call(req, ("memory_search", {"query": words or "souvenirs"}),
                               ("goal_note", {"text": f"En y repensant : {title[:120]}. Ça va aller."}))
         return self._call(req, ("report_step", {"verdict": "done", "notable": 0.7,
@@ -305,8 +314,8 @@ class PersonaSimLLM:
         wanted = quoted.group(1) if quoted else title
         if not results:
             return self._call(req, ("rss_list", {"limit": 20}))
-        if len(results) == 1:
-            found = re.search(r"\[([^\]]+)\] « " + re.escape(wanted[:40]), results[0])
+        if len(results) == 1:  # le titre cité, sinon (une curiosité sans titre) le premier article
+            found = re.search(r"\[([^\]]+)\] « " + (re.escape(wanted[:40]) if quoted else ""), results[0])
             if found:
                 return self._call(req, ("rss_read", {"entry": found.group(1)}))
             return self._call(req, ("report_step", {"verdict": "blocked", "summary": "Je ne retrouve pas l'article."}))

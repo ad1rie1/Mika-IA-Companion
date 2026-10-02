@@ -10,6 +10,13 @@ Tout chemin est **résolu puis vérifié** : ``../..`` comme le lien symbolique
 qui sort du dossier sont refusés. Rien ne lève vers l'appelant pour une
 commande qui échoue : c'est une information à rendre au modèle.
 
+Un programme est **borné en ressources** (mémoire, temps de calcul, taille d'un
+fichier, processus, descripteurs) et sa sortie passe par un tube plafonné : au
+dépassement, il est tué. Un atelier trop gros refuse d'écrire ou de lancer
+quoi que ce soit d'autre que du ménage. Le réseau, quand une commande approuvée
+en a besoin, est **à part** : Internet seulement, jamais la machine hôte ni le
+réseau local.
+
 Le dépôt git de l'atelier se lit (historique, un commit, l'état) et peut
 **pousser** vers un dépôt distant ou en **récupérer** l'histoire : ces deux-là
 ont besoin du réseau et d'un jeton, que l'adaptateur tient lui-même (jamais
@@ -25,6 +32,10 @@ from typing import Protocol
 
 class OutsideWorkshop(ValueError):
     """Le chemin demandé sort de l'atelier, ou touche à ses organes (``.git``)."""
+
+
+class WorkshopFull(ValueError):
+    """L'atelier dépasse sa taille : il faut faire de la place avant d'écrire."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,12 +66,23 @@ def describe(r: RunResult, limit: int = 6000) -> str:
     """Ce qu'une commande a donné, racontable au modèle."""
     if r.refused:
         return f"Refusé : {r.refused}"
-    parts = [r.summary()]
+    parts = [r.summary(), *r.notes]
     if r.stdout.strip():
         parts.append("sortie :\n" + r.stdout[-limit:])
     if r.stderr.strip():
         parts.append("erreurs :\n" + r.stderr[-limit:])
     return "\n".join(parts)
+
+
+def argv_lines(argv: Sequence[str]) -> str:
+    """Une commande montrée à qui l'approuve : **entière et exacte**, un argument par ligne. Un argument qui
+    contient un espace, une fin de ligne ou un caractère de contrôle est montré tel que Python l'écrit (entre
+    guillemets, échappé) : rien ne s'y cache, rien n'est coupé."""
+    out = []
+    for i, a in enumerate(str(x) for x in argv):
+        plain = a and a.isprintable() and not any(ch.isspace() for ch in a)
+        out.append(f"{i:>2}. {a if plain else repr(a)}")
+    return "\n".join(out) or "(commande vide)"
 
 
 @dataclass(frozen=True, slots=True)

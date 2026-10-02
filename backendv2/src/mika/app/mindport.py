@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from mika.contracts import attention as attention_c
@@ -25,6 +26,7 @@ from mika.kernel.clock import local
 from mika.kernel.events import Content, Origin
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.operate import Preview
+from mika.ports.workshop import argv_lines
 from mika.runtime import decisions, health
 from mika.runtime.bootstrap import Kernel, ReadOnlyStore
 from mika.vocab.affect import emotion_of
@@ -36,6 +38,20 @@ def _row(r: dict) -> HistoryRow:
         id=r["id"], at=r["at"], role=r["role"], text=r["text"], source=r["source"] or "",
         emotion=r["emotion"], emotion_intensity=r["emotion_intensity"], attachments=r["attachments"] or "[]",
     )
+
+
+def _proposal_text(summary: str, capability: str, effect: Any) -> str:
+    """Ce qu'on montre d'une demande qui attend un accord. Une commande réseau se montre **entière et exacte**, un
+    argument par ligne (lue dans ce qui partira, pas dans un résumé qu'on aurait pu couper) ; ses raisons restent ses
+    mots à elle."""
+    if capability != f"{projects_c.OWNER}.networked" or effect is None:
+        return summary
+    try:
+        argv = json.loads(effect.args_json).get("argv") or []
+    except (ValueError, AttributeError):
+        return summary
+    exact = argv_lines([str(a) for a in argv])
+    return summary if exact in summary else f"{summary}\n\nLa commande exacte, un argument par ligne :\n{exact}"
 
 
 class KernelPort:
@@ -159,13 +175,15 @@ class KernelPort:
                 "tasks_total": v.open_once + v.done_once + v.blocked_once, "tasks_done": v.done_once,
                 "tasks_blocked": v.blocked_once})
         actions = []
+        effects = frame.state("runtime").effects
         for e in pending:
             pid = project_of(e.context)
             p = state.projects.get(pid) if pid is not None else None
             title = self._store.content([p.title_ref]).get(p.title_ref, "") if p is not None else ""
             actions.append({"id": e.proposal, "project_id": pid or 0, "project_title": title or e.owner,
-                            "proposal": texts.get(e.summary_ref, ""), "payload_kind": e.capability,
-                            "created_at": local(e.at, tz).isoformat()})
+                            "proposal": _proposal_text(texts.get(e.summary_ref, ""), e.capability,
+                                                       effects.get(e.proposal)),
+                            "payload_kind": e.capability, "created_at": local(e.at, tz).isoformat()})
         return {"projects": projects, "pending_project_actions": actions}
 
     def person_panel(self, handle: str) -> dict[str, Any] | None:

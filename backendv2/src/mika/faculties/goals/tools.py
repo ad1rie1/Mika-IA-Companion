@@ -1,14 +1,24 @@
 """Les outils des buts.
 
 Dans un pas (``STEP``) : ``report_step`` (le verdict, qui clôt le pas),
-``goal_note`` (son carnet), ``goal_task_add`` / ``goal_task_update`` (son plan
-de travail, que l'opérateur tient aussi), ``goal_drop`` (renoncer — seulement
-à ce qu'elle a entrepris d'elle-même). En conversation : ``goal_remind`` (un rappel à
-l'heure dite). Les projets sont une faculté à part (``projects``, ADR 0031).
+``goal_note`` (son carnet), ``goal_reflect`` (ce qu'une réflexion lui a
+apporté), ``goal_task_add`` / ``goal_task_update`` (son plan de travail, que
+l'opérateur tient aussi), ``goal_drop`` (renoncer — seulement à ce qu'elle a
+entrepris d'elle-même). En conversation : ``goal_remind`` (un rappel à l'heure
+dite). Les projets sont une faculté à part (``projects``, ADR 0031).
+
+**« Fini » se prouve** par ce qui touche autre chose que sa tête : lire un
+article de ses flux, écrire dans un atelier… Noter, chercher dans sa mémoire,
+tenir son plan ou ouvrir un projet ne prouvent rien. Une réflexion sur ce qu'on
+lui a confié se prouve en l'écrivant vraiment (``goal_reflect`` : quelques
+phrases à elle, pas la redite de ce qu'on lui a dit). Un « fini » non prouvé est
+noté mais **n'est pas un verdict** : le pas peut encore conclure. Un refus est
+toujours un refus (``ToolResult(ok=False)``), jamais une réussite.
 """
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any, Literal
 
@@ -34,10 +44,38 @@ from mika.kernel.frame import Frame
 from mika.vocab.episodes import Kind, goal_of
 from mika.vocab.privacy import Sensitivity
 
-REPORT, NOTE, DROP = "report_step", "goal_note", "goal_drop"
+REPORT, NOTE, DROP, REFLECT = "report_step", "goal_note", "goal_drop", "goal_reflect"
 TASK_ADD, TASK_UPDATE = "goal_task_add", "goal_task_update"
-#: ce qui n'est pas du travail (dire où on en est, renoncer, cocher son plan)
-NOT_WORK = frozenset({REPORT, DROP, TASK_ADD, TASK_UPDATE})
+#: ce qui n'est pas du travail : dire où on en est, renoncer, tenir son plan, noter, fouiller sa mémoire, ouvrir
+#: un projet (l'exploration continue alors là-bas)
+NOT_WORK = frozenset({REPORT, DROP, TASK_ADD, TASK_UPDATE, NOTE, REFLECT, "memory_search", "start_project"})
+#: les lots qui ne touchent que sa tête (sa mémoire, ce qu'elle sait des autres, ses buts et ses projets) : ce
+#: qu'ils font ne prouve pas qu'elle a mené quelque chose à bout
+INNER_BUNDLES = frozenset({"goals", "memory", "identity", "self", "attention", "social", "projects"})
+#: une réflexion se prouve par quelques phrases à elle
+REFLECT_MIN_WORDS = 15
+_WORD = re.compile(r"[\wÀ-ÿ']+")
+
+
+def proves(ctx: Any, name: str) -> bool:
+    """Ce que fait cet outil prouve-t-il un travail (il touche autre chose que sa tête) ?"""
+    if name in NOT_WORK:
+        return False
+    spec = ctx.mind.registry.tools.get(name) if getattr(ctx, "mind", None) is not None else None
+    return spec is not None and spec.bundle not in INNER_BUNDLES
+
+
+def musing(g: Goal) -> bool:
+    """Une curiosité sans source où chercher du neuf : une rêverie."""
+    return g.origin == c.FROM_INTEREST and not set(g.bundles) - INNER_BUNDLES
+
+
+def reflective(g: Goal) -> bool:
+    """Une exploration née de ce qu'on lui a confié, d'une croyance revue, ou une rêverie : son travail, c'est d'y
+    repenser — et de l'écrire."""
+    if g.origin:
+        return g.origin in (c.FROM_EXCHANGE, c.FROM_REVISION) or musing(g)
+    return g.kind == c.EXPLORATION and g.source.startswith("thought:")
 
 
 def _goal(ctx: Any) -> Goal | None:
@@ -78,13 +116,17 @@ GOALS.bundle("goals", "tes rappels et tes explorations ; noter et rendre compte 
 
 
 @GOALS.tool(REPORT, description="Conclure cette séance de travail par un verdict. « done » n'est cru que si tu as "
-            "réellement fait quelque chose (un outil qui a produit un résultat) pendant ce but.",
-            args=ReportArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=1)
-async def report_step(args: ReportArgs, ctx: Any) -> str:
+            "réellement fait quelque chose pendant ce but (lu, écrit, cherché ailleurs que dans ta mémoire ; pour une "
+            "réflexion, l'avoir écrite avec goal_reflect) ; sinon il est noté, refusé, et tu peux conclure autrement.",
+            args=ReportArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=3)
+async def report_step(args: ReportArgs, ctx: Any) -> Any:
     g = _goal(ctx)
     if g is None:
-        return "Ce but n'est plus en cours."
-    worked = tuple(sorted({name for name, ok in ctx.calls if ok and name not in NOT_WORK}))
+        return ToolResult(ok=False, content="Ce but n'est plus en cours.")
+    if any(name == REPORT and ok for name, ok in ctx.calls):
+        return ToolResult(ok=False, content="Tu as déjà conclu cette séance : arrête-toi là.")
+    worked = tuple(sorted({name for name, ok in ctx.calls if ok and (proves(ctx, name) or
+                                                                       (name == REFLECT and reflective(g)))}))
     proven = args.verdict == c.DONE and (g.evidence + len(worked)) > 0
     summary = Content.of(args.summary.strip(), level=g.sensitivity)
     drafts: list[Any] = [c.STEP_REPORTED.draft(
@@ -92,7 +134,8 @@ async def report_step(args: ReportArgs, ctx: Any) -> str:
         wait_s=args.wait_minutes * 60, proven=proven, tools=worked, owner=g.owner, about=g.about,
         wait_for=g.owner if args.verdict == c.WAIT and args.until_they_answer and g.owner else None)]
     if proven:
-        drafts.append(closing(ctx, g, c.ACHIEVED, result=args.summary.strip(), notable=args.notable))
+        drafts.append(closing(ctx, g, c.ACHIEVED, result=args.summary.strip(), notable=args.notable,
+                              reason="rêverie" if musing(g) else ""))
     elif args.verdict == c.BLOCKED:
         drafts.append(closing(ctx, g, c.STUCK, reason=args.summary))
     await ctx.emit(*drafts)
@@ -102,9 +145,13 @@ async def report_step(args: ReportArgs, ctx: Any) -> str:
             return (f"C'est noté : tu l'as mené à bout — mais ton plan avait encore {len(left)} tâche(s) non "
                     f"cochée(s) ({', '.join(map(str, left[:6]))}).")
         return "C'est noté : tu l'as mené à bout."
-    if args.verdict == c.DONE:
-        return ("Tu dis avoir fini, mais rien de concret n'a encore été fait dans ce but (aucun outil n'a produit "
-                "de résultat) : ce n'est pas fini. Fais-le, ou dis honnêtement où tu en es.")
+    if args.verdict == c.DONE:  # noté, mais pas un verdict : la séance peut encore conclure
+        how = ("écris ce que ta réflexion t'a apporté (goal_reflect)" if reflective(g) else
+               "va lire, chercher ou faire quelque chose ailleurs que dans ta mémoire")
+        return ToolResult(ok=False, content=(
+            f"Pas encore : rien de concret n'a été fait pour ce but (noter ou fouiller ta mémoire ne suffit pas). "
+            f"Pour en venir à bout, {how} ; sinon dis honnêtement où tu en es (« continue », « blocked », "
+            "« wait »)."))
     if args.verdict == c.BLOCKED:
         return "C'est noté : tu bloques là-dessus."
     if args.verdict == c.WAIT:
@@ -120,13 +167,47 @@ class NoteArgs(BaseModel):
 
 @GOALS.tool(NOTE, description="Écrire dans le carnet de ce but (ce que tu as trouvé, compris, décidé).",
             args=NoteArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=4)
-async def goal_note(args: NoteArgs, ctx: Any) -> str:
+async def goal_note(args: NoteArgs, ctx: Any) -> Any:
     g = _goal(ctx)
     if g is None:
-        return "Ce but n'est plus en cours."
+        return ToolResult(ok=False, content="Ce but n'est plus en cours.")
     await ctx.emit(NOTED.draft(goal=g.id, text=Content.of(args.text.strip(), level=g.sensitivity), owner=g.owner,
                                about=g.about))
     return "Noté dans ton carnet."
+
+
+class ReflectArgs(BaseModel):
+    text: str = Field(min_length=1, max_length=2000,
+                      description="ce que ta réflexion t'a apporté, en quelques phrases à toi : ce que tu comprends "
+                                  "mieux, ce qui pourrait aider, ce que tu aimerais lui dire ou lui demander")
+
+
+def _words(text: str) -> set[str]:
+    return {w.lower().strip("'") for w in _WORD.findall(text) if len(w.strip("'")) > 2}
+
+
+@GOALS.tool(REFLECT, description="Écrire ce qu'une réflexion t'a apporté (seulement quand tu repenses à ce qu'on "
+            "t'a confié, ou à ce que tu croyais) : quelques phrases à toi, pas la redite de ce qu'on t'a dit.",
+            args=ReflectArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=2)
+async def goal_reflect(args: ReflectArgs, ctx: Any) -> Any:
+    g = _goal(ctx)
+    if g is None:
+        return ToolResult(ok=False, content="Ce but n'est plus en cours.")
+    if not reflective(g):
+        return ToolResult(ok=False, content="Ce but n'est pas une réflexion : avance-le en allant chercher ailleurs "
+                                            "(tes outils), et garde tes notes avec goal_note.")
+    text = args.text.strip()
+    mine = _words(text)
+    if len(_WORD.findall(text)) < REFLECT_MIN_WORDS:
+        return ToolResult(ok=False, content="Un peu court pour une réflexion : dis ce que tu en penses vraiment, en "
+                                            "quelques phrases.")
+    store = ctx.ports.get("store")
+    given = store.content([r for r in (g.title_ref, g.details_ref) if r]) if store is not None else {}
+    said = _words(" ".join(given.values()))
+    if mine and len(mine & said) / len(mine) > 0.6:
+        return ToolResult(ok=False, content="Tu redis surtout ce qu'on t'a dit : écris ce que toi, tu en penses.")
+    await ctx.emit(NOTED.draft(goal=g.id, text=Content.of(text, level=g.sensitivity), owner=g.owner, about=g.about))
+    return "Gardé : c'est ta réflexion."
 
 
 class TaskAddArgs(BaseModel):
@@ -145,7 +226,7 @@ class TaskUpdateArgs(BaseModel):
 async def goal_task_add(args: TaskAddArgs, ctx: Any) -> Any:
     g = _goal(ctx)
     if g is None:
-        return "Ce but n'est plus en cours."
+        return ToolResult(ok=False, content="Ce but n'est plus en cours.")
     if len(g.tasks) >= TASKS_KEPT:
         return ToolResult(ok=False, content=f"Ton plan a déjà {TASKS_KEPT} tâches : termine ou regroupe-en.")
     number = g.task_seq + 1
@@ -159,7 +240,7 @@ async def goal_task_add(args: TaskAddArgs, ctx: Any) -> Any:
 async def goal_task_update(args: TaskUpdateArgs, ctx: Any) -> Any:
     g = _goal(ctx)
     if g is None:
-        return "Ce but n'est plus en cours."
+        return ToolResult(ok=False, content="Ce but n'est plus en cours.")
     t = task_at(g, args.task)
     if t is None:
         return ToolResult(ok=False, content=f"Il n'y a pas de tâche {args.task} dans ton plan.")
@@ -178,13 +259,14 @@ class DropArgs(BaseModel):
 
 @GOALS.tool(DROP, description="Renoncer à ce but (seulement à ce que tu as entrepris de toi-même).",
             args=DropArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=1)
-async def goal_drop(args: DropArgs, ctx: Any) -> str:
+async def goal_drop(args: DropArgs, ctx: Any) -> Any:
     g = _goal(ctx)
     if g is None:
-        return "Ce but n'est plus en cours."
+        return ToolResult(ok=False, content="Ce but n'est plus en cours.")
     if g.authority == c.USER:
-        return ("C'est quelque chose qu'on t'a confié : tu ne peux pas y renoncer de toi-même. Si tu n'y arrives "
-                "pas, dis-le (report_step, « blocked »).")
+        return ToolResult(ok=False, content=(
+            "C'est quelque chose qu'on t'a confié : tu ne peux pas y renoncer de toi-même. Si tu n'y arrives pas, "
+            "dis-le (report_step, « blocked »)."))
     await ctx.emit(closing(ctx, g, c.ABANDONED, reason=args.why))
     return "D'accord, tu laisses ça de côté."
 
@@ -208,22 +290,22 @@ class RemindArgs(BaseModel):
 
 @GOALS.tool("goal_remind", description="Promettre un rappel à la personne à qui tu parles, à une heure dite.",
             args=RemindArgs, bundle="goals", episodes=[Kind.REPLY], max_calls_per_episode=3)
-async def goal_remind(args: RemindArgs, ctx: Any) -> str:
+async def goal_remind(args: RemindArgs, ctx: Any) -> Any:
     who = _person(ctx.frame)
     if who is None:
-        return "Il n'y a personne à qui faire ce rappel."
+        return ToolResult(ok=False, content="Il n'y a personne à qui faire ce rappel.")
     handle, person = who
     tz = ctx.frame.env.tz_of(ctx.frame.root)
     try:
         dt = datetime.fromisoformat(args.when.strip())
     except ValueError:
-        return "Je ne lis pas cette date : écris-la AAAA-MM-JJTHH:MM, en heure locale."
+        return ToolResult(ok=False, content="Je ne lis pas cette date : écris-la AAAA-MM-JJTHH:MM, en heure locale.")
     due = instant(dt if dt.tzinfo is not None else dt.replace(tzinfo=tz))
     now = ctx.frame.now
     if due <= now + MINUTE // 2:
-        return "Cette heure est déjà passée : donne une date à venir."
+        return ToolResult(ok=False, content="Cette heure est déjà passée : donne une date à venir.")
     if due > now + 366 * 24 * 60 * MINUTE:
-        return "C'est trop loin : un rappel dans l'année, pas au-delà."
+        return ToolResult(ok=False, content="C'est trop loin : un rappel dans l'année, pas au-delà.")
     level = int(Sensitivity.PERSONAL)
     await ctx.emit(c.GOAL_OPENED.draft(
         kind=c.REMINDER, authority=c.USER, title=Content.of(args.what.strip(), level=level), owner=person,

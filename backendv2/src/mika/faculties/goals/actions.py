@@ -56,6 +56,9 @@ from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
 from mika.kernel.operate import ActionContext, Done, Refused
 
+#: ce que la fiche montre d'un texte oublié (jamais un texte à réécrire)
+FORGOTTEN = "(oublié)"
+
 #: une échéance au-delà est sans doute une faute de frappe
 DUE_HORIZON = 3 * 366 * DAY
 #: une date sans heure : en fin de journée
@@ -415,10 +418,14 @@ def _task_edit(s: GoalsState, frame: Frame, args: TaskEditArgs, ctx: ActionConte
     t = _task_of(g, args.task)
     texts = _texts(ctx.ports or {}, (t.text_ref, t.note_ref))
     changes: dict[str, Any] = {}
-    if args.text.strip() != texts.get(t.text_ref, ""):
-        changes["text"] = Content.of(args.text.strip(), level=g.sensitivity)
-    if args.note.strip() and args.note.strip() != texts.get(t.note_ref, ""):
-        changes["note"] = Content.of(args.note.strip(), level=g.sensitivity)
+    text, note = args.text.strip(), args.note.strip()
+    # la mention d'un texte oublié n'est pas un texte : la renvoyer telle quelle ne change rien
+    if text != texts.get(t.text_ref, "") and text != FORGOTTEN:
+        changes["text"] = Content.of(text, level=g.sensitivity)
+    if note and note != texts.get(t.note_ref, "") and note != FORGOTTEN:
+        changes["note"] = Content.of(note, level=g.sensitivity)
+    elif not note and t.note_ref:  # un champ vidé efface la note
+        changes["clear_note"] = True
     if not changes:
         raise Refused("Rien n'a changé.")
     draft = TASK_CHANGED.draft(task=t.id, **changes, **_task_common(g, ctx))

@@ -7,10 +7,15 @@ rappel à l'heure, raconter ce qu'elle a mené à bout.
   garde voit « en pause »). Les projets ont leurs exécutions à eux (``projects``).
 - **Un rappel** se dit à l'heure : l'ordinaire reste sous la barre de réveil
   (il attend qu'elle se réveille), l'urgent la passe ; suspendu, il se tait.
+  Il part **là où la personne est à l'échéance** (connectée, sinon joignable),
+  pas à l'adresse figée au moment de la demande.
 - **Raconter** : à qui, et combien, dépend du lien — jamais d'un appel au
   modèle. La personne que ça concerne si elle est amie ou proche, sinon sa
   propriétaire ; à la propriétaire tout, à une proche l'essentiel, à une amie
-  une simple mention ; à personne d'autre.
+  une simple mention ; à personne d'autre. Une inquiétude pour quelqu'un n'est
+  pas une bonne nouvelle : à cette personne-là, elle prend de ses nouvelles. La
+  consigne ne renvoie à aucune section (le murmure qui précède l'entend aussi)
+  et ne dit rien du contenu.
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import presence as presence_c
 from mika.contracts import social as social_c
 from mika.faculties.goals.faculty import GOALS, Goal, GoalsState, budget, desire, live, params, rank, status
+from mika.faculties.goals.tools import musing
 from mika.kernel.arbitration import Candidate, Modulation, RowView
 from mika.kernel.clock import HOUR
 from mika.kernel.frame import Frame
@@ -132,23 +138,33 @@ def _address(frame: Frame, person: str) -> str | None:
     return reachable[0] if reachable else None
 
 
-@GOALS.propose(kinds=[Kind.INITIATIVE], reasons={c.REMIND: (0.0, URGENT_EVIDENCE)}, reads=[c.STATUS])
+def remind_address(g: Goal, frame: Frame) -> str | None:
+    """Où dire un rappel à l'échéance : là où la personne est maintenant (connectée, sinon joignable), sinon
+    l'adresse d'où venait la demande."""
+    return (_address(frame, g.owner) if g.owner else None) or g.address
+
+
+@GOALS.propose(kinds=[Kind.INITIATIVE], reasons={c.REMIND: (0.0, URGENT_EVIDENCE)},
+               reads=[c.STATUS, identity_c.HANDLES, identity_c.REACHABLE, presence_c.PRESENT, identity_c.IDENTITY])
 def _remind(s: GoalsState, frame: Frame) -> list[Candidate]:
     p = params(frame.env.params_of("goals", frame.root))
     out = []
     for g in sorted(s.goals.values(), key=lambda g: g.id):
-        if g.kind != c.REMINDER or status(g, frame.now) != c.ACTIVE or g.delivered or not g.address:
+        if g.kind != c.REMINDER or status(g, frame.now) != c.ACTIVE or g.delivered:
             continue
         if g.due is None or g.due > frame.now or g.retry_at > frame.now or g.attempts >= p.remind_attempts:
             continue
         if frame.now - g.due > p.remind_too_late_us:
             continue
-        who = _name(frame, g.address)
-        brief = (f"C'est l'heure du rappel que {f'« {who} »' if who else 'cette personne'} t'a demandé (le détail "
-                 "est plus haut, « LE RAPPEL ») : rappelle-le-lui, simplement, à ta façon.")
+        address = remind_address(g, frame)
+        if not address:
+            continue
+        who = _name(frame, g.owner) or _name(frame, address)
+        brief = (f"C'est l'heure du rappel que {f'« {who} »' if who else 'cette personne'} t'a demandé : "
+                 "rappelle-le-lui, simplement, à ta façon.")
         out.append(Candidate(
-            Kind.INITIATIVE, g.address, c.REMIND, URGENT_EVIDENCE if g.urgent else p.remind_evidence,
-            resources=frozenset({floor(g.address)}), guards=(_still(g.id, (c.ACTIVE,)),),
+            Kind.INITIATIVE, address, c.REMIND, URGENT_EVIDENCE if g.urgent else p.remind_evidence,
+            resources=frozenset({floor(address)}), guards=(_still(g.id, (c.ACTIVE,)),),
             args=FrozenDict({"brief:goals": brief, "subject": goal_target(g.id)})))
     return out
 
@@ -178,6 +194,26 @@ def confidant(g: Goal, frame: Frame) -> tuple[str, str, str] | None:
     return None
 
 
+def share_brief(g: Goal, person: str, address: str, level: str, frame: Frame) -> str:
+    """Ce qu'elle se dit avant de raconter, selon d'où venait le but : une inquiétude pour quelqu'un n'est pas un
+    résultat à annoncer à cette personne-là (elle prend de ses nouvelles). La consigne ne renvoie à aucune section
+    et ne dit rien du contenu (le murmure qui la précède s'entend)."""
+    name = _name(frame, person) or _name(frame, address)
+    who = f"« {name} »" if name else "cette personne"
+    concerned = person == g.owner or person in g.about
+    worry = g.origin == c.FROM_EXCHANGE or (not g.origin and g.source.startswith("thought:"))
+    if concerned and worry:
+        return (f"Tu as beaucoup repensé à ce que {who} t'avait confié. Ce n'est pas un résultat à annoncer : prends "
+                "de ses nouvelles, et si ta réflexion t'a apporté quelque chose d'utile, glisse-le simplement.")
+    return {
+        FULL: f"Tu as mené à bout quelque chose qui te tenait à cœur : raconte-le à {who}, simplement.",
+        SUMMARY: f"Tu as mené à bout quelque chose qui te tenait à cœur : dis-le en deux mots à {who}, sans entrer "
+                 "dans tous les détails.",
+        MENTION: f"Tu as fini quelque chose qui te tenait à cœur : tu peux le mentionner à {who} en passant, sans "
+                 "entrer dans le détail.",
+    }[level]
+
+
 @GOALS.propose(kinds=[Kind.INITIATIVE], reasons={c.SHARE: (0.0, 10.0)},
                reads=[identity_c.OWNERS, identity_c.IS_OWNER, social_c.CLOSENESS, identity_c.HANDLES,
                       identity_c.REACHABLE, presence_c.PRESENT, identity_c.IDENTITY])
@@ -189,20 +225,13 @@ def _share(s: GoalsState, frame: Frame) -> list[Candidate]:
             continue
         if g.notable < p.share_notable_from or frame.now - g.closed_at > p.share_within_us:
             continue
+        if musing(g):  # une rêverie n'est pas une nouvelle : rien de neuf n'est arrivé
+            continue
         chosen = confidant(g, frame)
         if chosen is None:
             continue
         person, address, level = chosen
-        who = f"« {_name(frame, person) or _name(frame, address)} »" if (_name(frame, person) or _name(frame, address)) \
-            else "cette personne"
-        brief = {
-            FULL: f"Tu as mené à bout quelque chose (« CE QUE TU AS MENÉ À BOUT », plus haut) : raconte-le à {who}, "
-                  "simplement, comme on partage une bonne nouvelle.",
-            SUMMARY: f"Tu as mené à bout quelque chose qui te tenait à cœur : dis-le en deux mots à {who}, sans "
-                     "entrer dans tous les détails.",
-            MENTION: f"Tu as fini quelque chose qui te tenait à cœur : tu peux le mentionner à {who} en passant, "
-                     "sans entrer dans le détail.",
-        }[level]
+        brief = share_brief(g, person, address, level, frame)
         out.append(Candidate(
             Kind.INITIATIVE, address, c.SHARE, p.share_evidence, resources=frozenset({floor(address)}),
             guards=(_still(g.id, (c.ACHIEVED,)),),

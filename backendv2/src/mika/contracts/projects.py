@@ -58,8 +58,10 @@ DECISION_STATUSES = (IN_FORCE, SUPERSEDED, WITHDRAWN)
 # raisons de preuve (arbitrage)
 #: une exécution (épisode WORK ou JOB, cible ``project:<id>``)
 RUN = "run"
-#: raconter un objectif mené à bout (INITIATIVE, mode ``persona`` seulement)
+#: raconter un objectif mené à bout (INITIATIVE ; en mode impersonnel, un compte rendu factuel)
 SHARE = "project_share"
+#: « j'ai besoin de toi pour… » : un objectif confié bloque ou attend quelque chose de qui l'a confié
+NEED = "project_need"
 #: décalage : trop d'exécutions dans l'heure, tous projets confondus
 RUN_CAP = "run_cap"
 
@@ -123,8 +125,13 @@ class RunReported(Payload):
     mode: str = PERSONA
     #: « fait » avec une preuve (un outil qui a produit quelque chose pendant ce projet)
     proven: bool = False
-    #: ce qu'elle a réellement fait pendant cette exécution (outils réussis)
+    #: ce qu'elle a réellement fait pendant cette exécution (outils réussis qui changent quelque chose)
     tools: tuple[str, ...] = ()
+    #: ce qui prouve que cette exécution a produit : ``commit`` (un commit non vide), ``outil`` (un brouillon,
+    #: une app), ``""`` (rien) ; ``None`` : un ancien journal (chaque outil réussi comptait)
+    proof: str | None = None
+    #: « j'ai besoin de toi pour… » : ce qu'il lui faudrait de qui lui a confié le projet (rien : elle avance seule)
+    need: Content | None = None
     #: le commit laissé dans l'atelier (vide : rien de changé)
     commit: str = ""
     wait_s: int = 0
@@ -136,7 +143,7 @@ PROJECT_CREATED = event_type("projects.created", OWNER, ProjectCreated, public=T
                              content=("title", "description"), subjects=("owner", "about"))
 OBJECTIVE_CLOSED = event_type("projects.objective_closed", OWNER, ObjectiveClosed, public=True,
                               content=("title", "result"), subjects=("owner", "about"))
-RUN_REPORTED = event_type("projects.run_reported", OWNER, RunReported, public=True, content=("summary",),
+RUN_REPORTED = event_type("projects.run_reported", OWNER, RunReported, public=True, content=("summary", "need"),
                           subjects=("owner", "about"))
 ALL = (PROJECT_CREATED, OBJECTIVE_CLOSED, RUN_REPORTED)
 

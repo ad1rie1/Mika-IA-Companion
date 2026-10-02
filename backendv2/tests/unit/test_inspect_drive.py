@@ -510,12 +510,14 @@ def test_an_exploration_and_its_step_read_in_the_list_and_the_detail(tmp_path):
     link = row["but"]
     assert isinstance(link, Ref) and link.kind == "subject" and link.key == f"goal/{gid}"  # la fiche du but
     assert goals.rows[0].href == link
-    assert "examen" in row["titre"] and row["autorité"] == "à elle" and row["sorte"] == "exploration"
+    # son titre à elle (ce qu'Adrien lui a dit est gardé à part, cité au travail)
+    assert row["titre"] == "Repenser à ce que « Adrien » m'a confié" and row["autorité"] == "à elle"
+    assert row["sorte"] == "exploration"
     assert _cell(row["statut"]) == "en cours"
     assert isinstance(row["envie"], Meter) and 0.5 <= row["envie"].ratio <= 1  # l'envie de départ, à peine usée
     assert field(opened, "vivants") == 1
     # le détail : ses champs, ses pas, ses épisodes
-    assert field(detail, "sorte") == "exploration" and "examen" in field(detail, "titre")
+    assert field(detail, "sorte") == "exploration" and "Adrien" in field(detail, "titre")
     assert _cell(field(detail, "personne concernée")) == "Adrien"  # son nom, pas sa clé
     opening = field(detail, "ouvert")
     assert isinstance(opening, Ref) and opening.kind == "event" and opening.key == str(gid)
@@ -524,7 +526,7 @@ def test_an_exploration_and_its_step_read_in_the_list_and_the_detail(tmp_path):
     verdict = {"continue": "continuer", "done": "fini", "blocked": "bloquée", "wait": "attendre"}[step.data.verdict]
     assert _cell(first["verdict"]).startswith(verdict)
     assert _cell(first["résumé"]) == step.data.summary.text
-    assert set(step.data.tools) == set(first["outils utilisés"].split(", ")) and "memory_search" in step.data.tools
+    assert set(step.data.tools) == set(first["outils utilisés"].split(", ")) and step.data.tools == ("goal_reflect",)
     assert first[""] == Ref("episode", step.correlation, "épisode")
     episodes = table(detail, "Ses épisodes")
     assert "séance de travail" in column(episodes, "épisode")

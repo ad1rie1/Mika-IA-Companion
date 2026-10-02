@@ -6,8 +6,14 @@ ses événements font ressentir (ADR 0031).
   **rend son crédit** ; trois pannes de suite mettent le projet en pause.
 - **Une exécution sans verdict** compte pour son objectif : trois de suite, et
   il bloque (``tend.py``).
-- **« Fait » sans preuve** n'est pas fait pour un objectif ponctuel ; pour un
-  constant, « fait » clôt le passage, et le suivant revient après la cadence.
+- **« Fait » sans preuve** n'est pas fait pour un objectif ponctuel : la preuve
+  est un commit non vide pendant l'objectif (ou un brouillon de mail, une app
+  forgée) — lancer ``ls`` ou noter ne prouve rien ; pour un constant, « fait »
+  clôt le passage, et le suivant revient après la cadence.
+- **Ce qui sort de l'atelier ne le dispute pas à une exécution** : une commande
+  réseau sans accord attend la fin de l'exécution en cours, et aucune
+  exécution ne part pendant qu'une commande réseau, un envoi ou une
+  récupération sont en route (``outgoing``).
 - **Le mode** décide de ce qu'elle en ressent : en mode ``persona``, un
   ponctuel abouti rend fière, un ponctuel bloqué frustre ; en mode ``plain``,
   rien.
@@ -25,6 +31,7 @@ from pydantic import BaseModel, ConfigDict
 
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
+from mika.kernel import schedule
 from mika.kernel.clock import DAY, HOUR, MINUTE, instant, local
 from mika.kernel.events import Content, Payload
 from mika.kernel.faculty import Faculty
@@ -50,6 +57,25 @@ EXTRA_BUNDLES = ("memory", "email", "rss", "forge", "forge_apps", "camera")
 #: les lots d'un projet qui n'en dit rien
 DEFAULT_BUNDLES = (*BASE_BUNDLES, "memory")
 PRIORITY_RANK = {c.LOW: -1, c.NORMAL: 0, c.HIGH: 1, c.URGENT: 2}
+#: l'agenda « dès que possible » (gardé sous son ancien nom, ``manual`` : les journaux le portent) et le vrai
+#: « sur demande » : il ne part que quand on le lance
+ASAP, ON_DEMAND = "manual", "demand"
+#: une commande qui sort de la machine et dont on n'a pas de nouvelles depuis ce délai ne retient plus le projet
+OUTGOING_STALE = 30 * MINUTE
+#: ce qu'une exécution garde de ce que le réseau lui a rendu (une donnée, citée dans le prompt)
+NETWORK_OUT_KEPT = 2000
+
+
+def check_schedule(text: str) -> str:
+    """Une règle d'agenda acceptable, normalisée (« asap » → ``manual``, « sur demande » → ``demand``), ou
+    ``ValueError``."""
+    raw = (text or "").strip()
+    if raw.lower() in ("", "manual", "asap", "dès que possible"):
+        return ASAP
+    if raw.lower() in ("demand", "on_demand", "sur demande"):
+        return ON_DEMAND
+    schedule.parse(raw)
+    return raw
 
 
 class ProjectsParams(BaseModel):
@@ -112,6 +138,19 @@ class ProjectsParams(BaseModel):
     share_attempts: Annotated[int, Knob(
         label="Tentatives de raconter", group="Raconter", lo=1, hi=10,
         help="Après autant de tentatives qui n'ont pas abouti, elle n'essaie plus.")] = 2
+    run_programs_us: Annotated[int, Knob(
+        label="Temps des programmes par exécution", group="Les exécutions", lo=MINUTE, hi=30 * MINUTE,
+        help="Les programmes qu'elle lance pendant une exécution (ws_run) ont au plus ce temps à eux tous. À garder "
+             "en deçà du délai d'une exécution (10 min) : un programme lent finit en « délai dépassé » qu'elle lit, "
+             "jamais en exécution coupée qu'on prendrait pour une panne du modèle.")] = 7 * MINUTE
+    wrap_up_after: Annotated[int, Knob(
+        label="Rappel de conclure après", group="Les exécutions", lo=2, hi=40,
+        help="Après autant d'appels d'outils dans une exécution, chaque résultat lui rappelle de conclure par "
+             "report_run (une exécution qui s'arrête sans verdict ne compte pas comme du travail).")] = 10
+    need_evidence: Annotated[float, Knob(
+        label="Envie de demander de l'aide", group="Raconter", lo=0.0, hi=10.0, step=0.5,
+        help="La preuve (log-odds) de l'initiative de dire à qui lui a confié le projet qu'un objectif bloque ou "
+             "attend quelque chose de lui, face au seuil d'initiative (9).")] = 9.5
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +184,11 @@ class Objective:
     result_ref: str = ""
     shared: bool = False
     share_attempts: int = 0
+    #: « j'ai besoin de toi pour… » : ce qu'il lui faudrait (sa dernière exécution l'a dit), et si elle l'a dit
+    #: (ou tenté de le dire) à qui l'a confié
+    need_ref: str = ""
+    asked: bool = False
+    ask_attempts: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,13 +264,20 @@ class Project:
     remote_line: str = ""
     #: une demande de l'opérateur (pousser, récupérer) pas encore proposée : (événement, sorte)
     requests: tuple[tuple[int, str], ...] = ()
+    #: ses commandes réseau sans accord, qui attendent la fin de l'exécution : (événement, argv, réf. de « pourquoi »)
+    network: tuple[tuple[int, tuple[str, ...], str], ...] = ()
+    #: ce qui est en route hors de la machine (proposition, depuis) : aucune exécution ne part pendant ce temps
+    outgoing: tuple[tuple[int, int], ...] = ()
+    #: ce que le réseau a rendu à sa dernière commande (une donnée : citée dans le prompt, jamais une consigne)
+    network_out: str = ""
+    network_out_at: int = 0
 
 
 @dataclass(frozen=True, slots=True)
 class Run:
     project: int
     objective: int
-    purpose: str  # "run" | "share"
+    purpose: str  # "run" | "share" | "need"
     reported: bool = False
     #: son départ, et la dernière exécution d'avant (du projet, de l'objectif) : ce qu'un crédit rendu restaure
     started: int = 0
@@ -242,9 +293,12 @@ class ProjectsState:
     runs_at: tuple[int, ...] = ()
     #: proposition d'effet → (projet, capacité)
     proposals: FrozenDict[int, tuple[int, str]] = field(default_factory=FrozenDict)
+    #: ce qu'une proposition qui attend un accord ferait (ses arguments) : la fiche en montre l'aperçu exact
+    awaiting: FrozenDict[int, str] = field(default_factory=FrozenDict)
 
 
-PROJECTS = Faculty("projects", state=ProjectsState, init=lambda p: ProjectsState(), params=ProjectsParams)
+PROJECTS = Faculty("projects", state=ProjectsState, init=lambda p: ProjectsState(), params=ProjectsParams,
+                   state_version=2)
 PROJECTS.declare(*c.ALL)
 
 
@@ -339,6 +393,9 @@ class StateChanged(Payload):
     project: int
     reason: str = ""
     by: str = ""
+    #: elle clôt elle-même un projet à elle : ``done`` (il a fait son temps : un soulagement) ou ``dropped``
+    #: (elle y renonce : une mélancolie) ; vide : un opérateur, ou une panne
+    ending: str = ""
     owner: str | None = None
     about: tuple[str, ...] = ()
 
@@ -382,6 +439,17 @@ class Deposited(Payload):
     about: tuple[str, ...] = ()
 
 
+class NetworkQueued(Payload):
+    """Une commande réseau qu'elle propose sur un projet sans accord : elle partira à la fin de l'exécution, pas
+    pendant (elle ne dispute pas l'atelier à son propre travail)."""
+
+    project: int
+    argv: tuple[str, ...]
+    why: Content
+    owner: str | None = None
+    about: tuple[str, ...] = ()
+
+
 class RemoteRequested(Payload):
     """L'opérateur demande de pousser (``push``) ou de récupérer (``pull``) maintenant."""
 
@@ -410,6 +478,7 @@ NOTED = PROJECTS.event("noted", Noted, content=("text",), subjects=("owner", "ab
 AMENDED = PROJECTS.event("amended", Amended, content=("instruction",), subjects=("owner", "about", "by"))
 DEPOSITED = PROJECTS.event("deposited", Deposited, content=("note",), subjects=("owner", "about", "by"))
 REMOTE_REQUESTED = PROJECTS.event("remote_requested", RemoteRequested, subjects=("owner", "about"))
+NETWORK_QUEUED = PROJECTS.event("network_queued", NetworkQueued, content=("why",), subjects=("owner", "about"))
 #: ce qu'un opérateur (ou elle) fait d'un projet — la chronologie du carnet
 OPERATIONS = (REFRAMED, PAUSED, RESUMED, ARCHIVED, RESTORED, NUDGED, OBJECTIVE_ADDED, OBJECTIVE_CHANGED,
               DECISION_CHANGED, DEPOSITED, REMOTE_REQUESTED)
@@ -642,7 +711,7 @@ def _objective_changed(s: ProjectsState, e, cx) -> ProjectsState:
         changes["status"] = d.status
         if d.status == c.OPEN:  # rouvert : il repart de rien (ni dette, ni preuve, ni résultat d'avant)
             changes.update(silent=0, unproven=0, waiting_until=0, closed_at=0, runs=0, evidence=0, notable=0.0,
-                           result_ref="", shared=False, share_attempts=0)
+                           result_ref="", shared=False, share_attempts=0, need_ref="", asked=False, ask_attempts=0)
         else:
             changes["closed_at"] = e.at
             if d.status == c.DONE:  # coché par quelqu'un d'autre : ce n'est pas elle qui l'a mené à bout
@@ -747,7 +816,8 @@ def _archived(s: ProjectsState, e, cx) -> ProjectsState:
     if p is None or p.status == c.ARCHIVED:
         return s
     # archivé, il ne pousse ni ne récupère plus rien : ses demandes en file tombent
-    return _set(s, replace(p, status=c.ARCHIVED, archived_at=e.at, pause_reason=e.data.reason[:300], requests=()))
+    return _set(s, replace(p, status=c.ARCHIVED, archived_at=e.at, pause_reason=e.data.reason[:300], requests=(),
+                           network=()))
 
 
 @PROJECTS.reducer(RESTORED)
@@ -755,8 +825,9 @@ def _restored(s: ProjectsState, e, cx) -> ProjectsState:
     p = s.projects.get(e.data.project)
     if p is None or p.status != c.ARCHIVED:
         return s
-    # restauré, il repart en pause : on le relance quand on veut
-    return _set(s, replace(p, status=c.PAUSED, archived_at=0, paused_at=e.at, pause_reason="restauré", failures=0))
+    # restauré, il repart en pause : on le relance quand on veut ; rien de ce qui attendait avant ne repart seul
+    return _set(s, replace(p, status=c.PAUSED, archived_at=0, paused_at=e.at, pause_reason="restauré", failures=0,
+                           requests=(), network=(), outgoing=()))
 
 
 @PROJECTS.reducer(NUDGED)
@@ -800,9 +871,19 @@ def _deposited(s: ProjectsState, e, cx) -> ProjectsState:
 @PROJECTS.reducer(REMOTE_REQUESTED)
 def _remote_requested(s: ProjectsState, e, cx) -> ProjectsState:
     p = s.projects.get(e.data.project)
-    if p is None or e.data.what not in ("push", "pull"):
+    # un projet archivé ne pousse ni ne récupère : la demande tombe (elle ne repartira pas à la restauration)
+    if p is None or e.data.what not in ("push", "pull") or p.status == c.ARCHIVED:
         return s
     return _set(s, replace(p, requests=(*p.requests, (e.seq, e.data.what))[-4:]))
+
+
+@PROJECTS.reducer(NETWORK_QUEUED)
+def _network_queued(s: ProjectsState, e, cx) -> ProjectsState:
+    p = s.projects.get(e.data.project)
+    if p is None or p.status == c.ARCHIVED or not e.data.argv:
+        return s
+    entry = (e.seq, tuple(str(a) for a in e.data.argv), e.data.why.ref or "")
+    return _set(s, replace(p, network=(*p.network, entry)[-4:]))
 
 
 def subject_of(project: int, objective: int) -> str:
@@ -839,19 +920,23 @@ def _started(s: ProjectsState, e, cx) -> ProjectsState:
             p = _objective(p, replace(o, runs=o.runs + 1, last_run_at=e.at))
         return _set(s, p)
     got = objective_of(d.subject)
-    if d.kind != Kind.INITIATIVE or got is None or got[0] not in s.projects or c.SHARE not in d.reason.split(","):
+    reasons = d.reason.split(",")
+    if d.kind != Kind.INITIATIVE or got is None or got[0] not in s.projects:
         return s
-    return replace(s, running=s.running.set(e.correlation, Run(got[0], got[1], "share")))
+    purpose = "share" if c.SHARE in reasons else "need" if c.NEED in reasons else ""
+    return replace(s, running=s.running.set(e.correlation, Run(got[0], got[1], purpose))) if purpose else s
 
 
 @PROJECTS.reducer(rt.UTTERANCE)
 def _uttered(s: ProjectsState, e, cx) -> ProjectsState:
     run = s.running.get(e.correlation)
-    if run is None or run.purpose != "share" or run.project not in s.projects:
+    if run is None or run.purpose not in ("share", "need") or run.project not in s.projects:
         return s
     p = s.projects[run.project]
     o = objective_at(p, run.objective)
-    return _set(s, _objective(p, replace(o, shared=True))) if o is not None else s
+    if o is None:
+        return s
+    return _set(s, _objective(p, replace(o, shared=True) if run.purpose == "share" else replace(o, asked=True)))
 
 
 #: Ce qui ne dit rien de l'exécution : elle n'a pas eu lieu, son crédit est rendu.
@@ -874,6 +959,10 @@ def _ended(s: ProjectsState, e, cx) -> ProjectsState:
     if run.purpose == "share":
         if o is not None and not o.shared:
             p = _objective(p, replace(o, share_attempts=o.share_attempts + 1))
+        return _set(s, p)
+    if run.purpose == "need":
+        if o is not None and not o.asked:
+            p = _objective(p, replace(o, ask_attempts=o.ask_attempts + 1))
         return _set(s, p)
     if run.reported:
         return s
@@ -908,8 +997,16 @@ def _reported(s: ProjectsState, e, cx) -> ProjectsState:
     p = replace(p, failures=0, summary_ref=d.summary.ref or p.summary_ref, last_commit=d.commit or p.last_commit)
     o = objective_at(p, d.objective)
     if o is not None:
-        o = replace(o, silent=0, evidence=o.evidence + len(d.tools), note_ref=d.summary.ref or o.note_ref,
+        # la preuve : un ancien journal comptait chaque outil réussi ; désormais une exécution qui a produit
+        # (un commit, un brouillon, une app) compte une fois
+        gained = len(d.tools) if d.proof is None else int(bool(d.proof))
+        o = replace(o, silent=0, evidence=o.evidence + gained, note_ref=d.summary.ref or o.note_ref,
                     waiting_until=0)
+        needed = d.need.ref if d.need is not None and d.need.ref else ""
+        if needed and needed != o.need_ref:  # un nouveau besoin : elle le dira
+            o = replace(o, need_ref=needed, asked=False, ask_attempts=0)
+        elif not needed and d.verdict in (c.CONTINUE, c.DONE):  # elle avance seule à nouveau
+            o = replace(o, need_ref="")
         if d.verdict == c.WAIT:
             o = replace(o, waiting_until=e.at + max(pm.wait_min_us, min(pm.wait_max_us, d.wait_s * 1_000_000)))
         elif d.verdict in (c.DONE, c.BLOCKED) and o.kind == c.CONSTANT:  # un passage fini (ou buté) : il reviendra
@@ -944,10 +1041,14 @@ def _proposed(s: ProjectsState, e, cx) -> ProjectsState:
     p = s.projects[pid]
     line = f"#{e.seq} {EFFECT_WORDS.get(e.data.capability, 'commande avec le réseau')}" + \
         (" — en attente d'accord" if e.data.approval else "")
-    # une demande de l'opérateur, maintenant proposée, n'est plus à proposer
+    # une demande (de l'opérateur, ou sa commande réseau mise en file), maintenant proposée, n'est plus à proposer
     asked = _request_of(e.data.args_json)
-    p = replace(_effect_line(p, line), requests=tuple(r for r in p.requests if r[0] != asked))
-    return replace(_set(s, p), proposals=s.proposals.set(e.seq, (pid, e.data.capability)))
+    p = replace(_effect_line(p, line), requests=tuple(r for r in p.requests if r[0] != asked),
+                network=tuple(r for r in p.network if r[0] != asked))
+    if not e.data.approval:  # elle part aussitôt : l'atelier est occupé jusqu'à ce qu'elle revienne
+        p = replace(p, outgoing=(*p.outgoing, (e.seq, e.at))[-8:])
+    awaiting = s.awaiting.set(e.seq, e.data.args_json) if e.data.approval else s.awaiting
+    return replace(_set(s, p), proposals=s.proposals.set(e.seq, (pid, e.data.capability)), awaiting=awaiting)
 
 
 PUSH, PULL, NETWORKED = f"{c.OWNER}.push", f"{c.OWNER}.pull", f"{c.OWNER}.networked"
@@ -968,10 +1069,15 @@ def _request_of(args_json: str) -> int:
 @PROJECTS.reducer(rt.EFFECT_RESOLVED)
 def _resolved(s: ProjectsState, e, cx) -> ProjectsState:
     got = s.proposals.get(e.data.proposal)
-    if got is None or got[0] not in s.projects or e.data.approved:
+    if e.data.proposal in s.awaiting:
+        s = replace(s, awaiting=s.awaiting.delete(e.data.proposal))
+    if got is None or got[0] not in s.projects:
         return s
+    p = s.projects[got[0]]
+    if e.data.approved:  # elle part : l'atelier est occupé jusqu'à ce qu'elle revienne
+        return _set(s, replace(p, outgoing=(*p.outgoing, (e.data.proposal, e.at))[-8:]))
     note = f" : « {e.data.note[:200]} »" if e.data.note else ""
-    return _set(s, _effect_line(s.projects[got[0]], f"#{e.data.proposal} refusé{note}"))
+    return _set(s, _effect_line(p, f"#{e.data.proposal} refusé{note}"))
 
 
 @PROJECTS.reducer(rt.EFFECT_EXECUTED)
@@ -981,10 +1087,35 @@ def _executed(s: ProjectsState, e, cx) -> ProjectsState:
         return s
     p = s.projects[got[0]]
     result = e.data.result
-    p = _effect_line(p, f"#{e.data.proposal} {'fait' if e.data.ok else 'échoué'} : {result[:300]}")
+    p = replace(p, outgoing=tuple(x for x in p.outgoing if x[0] != e.data.proposal))
+    # l'état seulement (fait, échoué, son code) : ce que le réseau a rendu est une donnée, citée à part
+    p = _effect_line(p, f"#{e.data.proposal} {EFFECT_WORDS.get(got[1], 'commande')} — "
+                        f"{'fait' if e.data.ok else 'échoué'}{_code_of(result)}")
+    if got[1] == NETWORKED:
+        p = replace(p, network_out=result[:NETWORK_OUT_KEPT], network_out_at=e.at)
     if got[1] in (PUSH, PULL):
         p = replace(p, remote_at=e.at, remote_ok=e.data.ok, remote_line=f"{EFFECT_WORDS[got[1]]} : {result[:400]}")
     return _set(s, p)
+
+
+def _code_of(result: str) -> str:
+    """Le code de sortie d'une commande, s'il se lit dans son résultat (« — code 0 »)."""
+    head = result.split("\n", 1)[0]
+    at = head.rfind("— code ")
+    if at >= 0:
+        code = head[at + len("— code "):].split(" ", 1)[0]
+        if code.lstrip("-").isdigit():
+            return f" (code {code})"
+    if "délai dépassé" in head:
+        return " (délai dépassé)"
+    if head.startswith("Refusé") or head.startswith("refusé"):
+        return " (refusé)"
+    return ""
+
+
+def outgoing(p: Project, now: int) -> bool:
+    """Quelque chose est-il en route hors de la machine pour ce projet (une commande, un envoi) ?"""
+    return any(now - at < OUTGOING_STALE for _, at in p.outgoing)
 
 
 # ── Faits ─────────────────────────────────────────────────────────────────
@@ -1022,6 +1153,17 @@ def _objective_status(s: ProjectsState, cx, key: tuple) -> str:
 
 
 # ── Ce que ses événements font ressentir ──────────────────────────────────
+
+
+@PROJECTS.appraisal(ARCHIVED)
+def _ended_felt(e, cx) -> Appraisal | None:
+    """Elle clôt elle-même un projet à elle : soulagée s'il a fait son temps, un peu mélancolique si elle y
+    renonce. Un opérateur qui archive ne lui fait rien ressentir."""
+    if e.data.ending == "done":
+        return Appraisal(Emotion.RELIEVED, 0.2, reason="projet clos : il a fait son temps")
+    if e.data.ending == "dropped":
+        return Appraisal(Emotion.MELANCHOLIC, 0.2, reason="projet abandonné")
+    return None
 
 
 @PROJECTS.appraisal(c.OBJECTIVE_CLOSED)

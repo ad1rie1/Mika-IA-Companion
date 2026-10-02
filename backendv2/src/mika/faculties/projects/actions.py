@@ -29,6 +29,7 @@ from mika.contracts import runtime as rt
 from mika.faculties.projects.faculty import (
     AMENDED,
     ARCHIVED,
+    ASAP,
     BASE_BUNDLES,
     DECIDED,
     DECISION_CHANGED,
@@ -49,22 +50,25 @@ from mika.faculties.projects.faculty import (
     Project,
     ProjectsState,
     busy,
+    check_schedule,
     decision_at,
     in_force,
     living,
     nudged,
     objective_at,
+    outgoing,
+    params,
+    pick,
     project_at,
 )
 from mika.faculties.projects.tools import objectives_of, opened
-from mika.kernel import schedule
 from mika.kernel.clock import HOUR
 from mika.kernel.events import Content
 from mika.kernel.forms import UPLOAD_MAX, Knob, Upload
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
 from mika.kernel.operate import ActionContext, Decision, Done, Refused
-from mika.ports.workshop import OutsideWorkshop
+from mika.ports.workshop import OutsideWorkshop, WorkshopFull
 from mika.vocab.episodes import project_of
 from mika.vocab.privacy import Sensitivity
 
@@ -78,7 +82,8 @@ PRIORITY_HELP = "Entre deux projets qui peuvent avancer, le plus prioritaire pas
 DAYS_CHOICES = ((c.EVERY_DAY, "tous les jours"), (c.WEEKDAYS, "les jours ouvrés (lundi–vendredi)"),
                 (c.WEEKEND, "le week-end"))
 KIND_CHOICES = ((c.ONCE, "ponctuel — à faire une fois"), (c.CONSTANT, "constant — à entretenir, il revient"))
-SCHEDULES = (("manual", "dès que possible"), ("interval:30m", "toutes les 30 min"),
+SCHEDULES = (("manual", "dès que possible"), ("demand", "sur demande (seulement quand on le lance)"),
+             ("interval:30m", "toutes les 30 min"),
              ("interval:2h", "toutes les 2 h"), ("interval:6h", "toutes les 6 h"),
              ("cron:0 9 * * *", "chaque jour à 9 h"), ("cron:0 9 * * MON-FRI", "les jours ouvrés à 9 h"),
              ("cron:0 18 * * SUN", "le dimanche à 18 h"))
@@ -169,9 +174,9 @@ def _bundles(args: Any) -> tuple[str, ...]:
 
 
 def _rhythm(args: Any, errors: dict[str, str]) -> tuple[str, int, int]:
-    rule = args.schedule.strip() or "manual"
+    rule = args.schedule.strip() or ASAP
     try:
-        schedule.parse(rule)
+        rule = check_schedule(rule)
     except ValueError as exc:
         errors["schedule"] = f"règle refusée : {exc}"
     start = end = 0
@@ -510,13 +515,27 @@ def _remote_ready(s: ProjectsState, frame: Frame, key: str, ports: Mapping[str, 
     return p is not None and p.status != c.ARCHIVED and bool(p.remote) and ports.get("workshop") is not None
 
 
+def _pushable(s: ProjectsState, frame: Frame, key: str, ports: Mapping[str, Any]) -> bool:
+    """Pousser : seulement un atelier qui existe (l'action vérifie qu'il a plus que son commit d'amorce)."""
+    p = project_at(s, key)
+    port = ports.get("workshop")
+    return _remote_ready(s, frame, key, ports) and p is not None and port is not None and port.exists(p.id)
+
+
 @PROJECTS.action("pousser", title="Pousser maintenant", args=NoArgs, emits=[REMOTE_REQUESTED], subject="project",
-                 order=63, available=_remote_ready, inline=True,
+                 order=63, available=_pushable, inline=True, danger=True,
+                 confirm="Envoyer maintenant le dernier enregistrement de l'atelier vers le dépôt distant ? Il sort "
+                         "de la machine, sans autre accord.",
                  description="Envoyer ce qui est enregistré dans l'atelier vers le dépôt distant, tout de suite.")
-def _push(s: ProjectsState, frame: Frame, args: NoArgs, ctx: ActionContext) -> Done:
+async def _push(s: ProjectsState, frame: Frame, args: NoArgs, ctx: ActionContext) -> Done:
     p = _target(s, ctx)
+    if p.status == c.ARCHIVED or not p.remote:
+        raise Refused("Ce projet n'a plus de dépôt distant, ou il est archivé : rien ne part.")
+    port = (ctx.ports or {}).get("workshop")
+    if port is None or not port.exists(p.id) or await port.count(p.id) <= 1:
+        raise Refused("L'atelier n'a encore rien enregistré à envoyer (seulement son amorce).")
     return Done(drafts=(REMOTE_REQUESTED.draft(project=p.id, what="push", by=ctx.by, owner=p.owner, about=p.about),),
-                message="Envoi demandé : il part dans un instant. Son résultat s'affiche ici.")
+                message="Envoi demandé : il part dans un instant. Son résultat s'affiche ici.", guard=_still(p.id, LIVE))
 
 
 def _pullable(s: ProjectsState, frame: Frame, key: str, ports: Mapping[str, Any]) -> bool:
@@ -531,17 +550,24 @@ def _pullable(s: ProjectsState, frame: Frame, key: str, ports: Mapping[str, Any]
                              "toute son histoire.")
 def _pull(s: ProjectsState, frame: Frame, args: NoArgs, ctx: ActionContext) -> Done:
     p = _target(s, ctx)
+    if p.status == c.ARCHIVED or not p.remote:
+        raise Refused("Ce projet n'a plus de dépôt distant, ou il est archivé : rien ne se récupère.")
     return Done(drafts=(REMOTE_REQUESTED.draft(project=p.id, what="pull", by=ctx.by, owner=p.owner, about=p.about),),
-                message="Récupération demandée : elle part dans un instant.")
+                message="Récupération demandée : elle part dans un instant.", guard=_still(p.id, LIVE))
 
 
 # ── Le piloter ────────────────────────────────────────────────────────────
 
 
 def _runnable(s: ProjectsState, frame: Frame, key: str) -> bool:
+    """« Lancer maintenant » : seulement si une exécution peut vraiment partir (un objectif qu'elle viserait, rien
+    en route hors de la machine)."""
     p = project_at(s, key)
-    return p is not None and p.status == c.ACTIVE and not busy(s, p.id) and \
-        any(o.status == c.OPEN for o in p.objectives) and not nudged(p)
+    if p is None or p.status != c.ACTIVE or busy(s, p.id) or nudged(p) or outgoing(p, frame.now):
+        return False
+    pm = params(frame.env.params_of("projects", frame.root))
+    return pick(p, frame.now, pm) is not None or any(o.status == c.OPEN and o.kind == c.CONSTANT
+                                                     for o in p.objectives)
 
 
 @PROJECTS.action("lancer", title="Lancer maintenant", args=NoArgs, emits=[NUDGED], subject="project", order=5,
@@ -701,7 +727,7 @@ def _objective_status(s: ProjectsState, frame: Frame, args: ObjectiveStatusArgs,
         raise Refused("L'objectif a déjà ce statut.")
     if o.kind == c.CONSTANT and args.status == c.DONE:
         raise Refused("Un objectif constant ne se coche pas : il revient. Retire-le s'il n'a plus lieu d'être.")
-    if args.status == c.OPEN and o.status in (c.DONE, c.DROPPED) and living(p) >= OBJECTIVES_KEPT:
+    if args.status in (c.OPEN, c.BLOCKED) and o.status in (c.DONE, c.DROPPED) and living(p) >= OBJECTIVES_KEPT:
         raise Refused(f"Ce projet a déjà {OBJECTIVES_KEPT} objectifs ouverts ou bloqués : retires-en avant d'en "
                       "rouvrir un.")
     draft = OBJECTIVE_CHANGED.draft(project=p.id, objective=o.id, status=args.status, by=ctx.by, owner=p.owner,
@@ -729,6 +755,8 @@ def _objective_edit(s: ProjectsState, frame: Frame, args: ObjectiveEditArgs, ctx
     if args.text.strip() != text:
         changes["text"] = Content.of(args.text.strip(), level=p.sensitivity)
     if args.kind in c.OBJECTIVE_KINDS and args.kind != o.kind:
+        if args.kind == c.CONSTANT and o.status == c.DONE:
+            raise Refused("Un objectif fait ne devient pas constant : rouvre-le d'abord, ou ajoutes-en un.")
         changes["kind"] = args.kind
     cadence = args.cadence_hours * HOUR if (changes.get("kind") or o.kind) == c.CONSTANT else 0
     if cadence != o.cadence_us:
@@ -844,23 +872,31 @@ async def _deposit(s: ProjectsState, frame: Frame, args: DepositArgs, ctx: Actio
     port = (ctx.ports or {}).get("workshop")
     if port is None:
         raise Refused("L'atelier n'est pas disponible ici.")
-    if p.status not in LIVE:
+    # l'état d'abord (rien ne s'écrit dans l'atelier d'un projet que l'opérateur ne voit plus tel qu'il était)
+    if p.status not in LIVE or frame.get(c.STATUS(p.id)) not in LIVE:
         raise Refused("Ce projet est archivé : restaure-le d'abord.")
     folder = args.folder.strip().strip("/")
     path = f"{folder}/{args.file.name}" if folder else args.file.name
     try:
-        if not args.replace and port.exists(p.id) and await port.tree(p.id, path):
+        existing = await port.tree(p.id, path) if port.exists(p.id) else []
+        if existing and not existing[0].startswith(f"{path.strip('/')} ("):
+            raise Refused(f"« {path} » est un dossier dans l'atelier : choisis un autre nom.", {"folder": "un dossier"})
+        if existing and not args.replace:
             raise Refused(f"« {path} » existe déjà dans l'atelier : coche « Remplacer » pour l'écraser.",
                           {"replace": "le fichier existe déjà"})
         rel = await port.write_bytes(p.id, path, args.file.data)
-    except OutsideWorkshop as exc:
+    except (OutsideWorkshop, WorkshopFull) as exc:
         raise Refused(f"Refusé : {exc}", {"folder": str(exc)}) from None
+    except OSError as exc:  # un dossier pris pour un fichier, un disque plein : dit en français, jamais brut
+        raise Refused(f"Le fichier n'a pas pu être écrit dans l'atelier ({exc.strerror or exc}).") from None
     # ce fichier seulement : le travail en cours d'une exécution reste à elle (elle l'enregistrera)
-    await port.commit(p.id, f"apport de l'opérateur : {rel}", paths=(rel,))
+    sha = await port.commit(p.id, f"apport de l'opérateur : {rel}", paths=(rel,))
     note = Content.of(args.note.strip(), level=p.sensitivity) if args.note.strip() else None
+    said = f"Déposé dans l'atelier : {rel} (enregistré : {sha})." if sha else \
+        f"Déposé dans l'atelier : {rel} — mais pas enregistré dans son dépôt (identique, ou git indisponible)."
     return Done(drafts=(DEPOSITED.draft(project=p.id, name=rel, size=len(args.file.data), note=note, by=ctx.by,
                                         owner=p.owner, about=p.about),),
-                message=f"Déposé dans l'atelier : {rel}.", guard=_still(p.id, LIVE))
+                message=said, tone="ok" if sha else "warn", guard=_still(p.id, LIVE))
 
 
 # ── Décider de ce qui sort de la machine ──────────────────────────────────
@@ -902,7 +938,8 @@ def _proposal_of(frame: Frame, p: Project, raw: str) -> int:
 
 
 @PROJECTS.action("approuver", title="Approuver", args=ApproveArgs, emits=[], subject="project", order=70,
-                 available=_approvable, confirm="Approuver cette demande ? Elle part aussitôt.")
+                 available=_approvable, danger=True,
+                 confirm="Approuver cette demande ? Ce que montre son aperçu sort aussitôt de la machine.")
 def _approve(s: ProjectsState, frame: Frame, args: ApproveArgs, ctx: ActionContext) -> Done:
     p = _target(s, ctx)
     proposal = _proposal_of(frame, p, args.proposal)
@@ -910,7 +947,7 @@ def _approve(s: ProjectsState, frame: Frame, args: ApproveArgs, ctx: ActionConte
 
 
 @PROJECTS.action("refuser", title="Refuser", args=RefuseArgs, emits=[], subject="project", order=71,
-                 available=_decidable, danger=True)
+                 available=_decidable)
 def _refuse(s: ProjectsState, frame: Frame, args: RefuseArgs, ctx: ActionContext) -> Done:
     p = _target(s, ctx)
     proposal = _proposal_of(frame, p, args.proposal)

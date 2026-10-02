@@ -3,10 +3,17 @@
 Pendant une exécution (``WORK`` ou ``JOB``) : ``report_run`` (le verdict, qui la
 clôt), ``project_note`` (son carnet), ``project_decide`` (une décision
 technique, qui peut en remplacer une autre), ``project_objective_add`` (un
-objectif de plus). En conversation : ``create_project`` (un projet que sa
-propriétaire lui confie) et ``start_project`` (un projet à elle — aussi pendant
-une exploration qui s'avère plus grosse qu'une envie), ``projects_list``
-(``prompt.py``).
+objectif de plus). En conversation : ``create_project`` (un projet qu'on lui
+confie — seulement quelqu'un qui s'occupe d'elle) et ``start_project`` (un
+projet à elle — aussi pendant une exploration qui s'avère plus grosse qu'une
+envie). Partout : ``project_close`` (clore un projet à elle).
+
+**« Fait » se prouve** : pour un objectif ponctuel, un commit non vide pendant
+l'objectif (ce qu'elle a écrit dans l'atelier), ou un brouillon de mail, une
+app forgée. Lancer ``ls``, lire, noter ou décider ne prouvent rien. Un « fait »
+qui ne se prouve pas **n'est pas un verdict** : il est refusé sans rien écrire,
+et elle peut encore conclure honnêtement (``report_run`` admet trois appels,
+un seul verdict).
 """
 
 from __future__ import annotations
@@ -21,6 +28,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.faculties.projects.faculty import (
+    ARCHIVED,
     DECIDED,
     DECISIONS_KEPT,
     DEFAULT_BUNDLES,
@@ -33,6 +41,7 @@ from mika.faculties.projects.faculty import (
     Project,
     ProjectsState,
     cadence,
+    check_schedule,
     decision_at,
     in_force,
     live,
@@ -41,7 +50,6 @@ from mika.faculties.projects.faculty import (
     objective_of,
     params,
 )
-from mika.kernel import schedule
 from mika.kernel.clock import HOUR
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import ToolResult
@@ -51,14 +59,17 @@ from mika.vocab.episodes import PROJECT_KINDS, Kind, goal_of, project_of, projec
 from mika.vocab.privacy import Sensitivity
 
 REPORT, NOTE, DECIDE, OBJECTIVE_ADD = "report_run", "project_note", "project_decide", "project_objective_add"
-#: ce qui produit quelque chose (la preuve d'un « fait ») : écrire, modifier, lancer un programme qui réussit,
-#: écrire un brouillon de mail, forger ou faire tourner une app. Lire, chercher, noter, décider ou proposer
-#: (le réseau, un envoi) n'en est pas une.
-PRODUCING = frozenset({"ws_write", "ws_edit", "ws_run", "email_draft", "forge_write", "forge_command", "forge_test",
-                       "forge_call"})
+#: ce qui change quelque chose (le compte rendu le dit) : écrire, modifier, un programme qui a réussi, un
+#: brouillon, une app forgée
+CHANGING = frozenset({"ws_write", "ws_edit", "ws_run", "email_draft", "forge_write"})
+#: …et ce qui, hors de l'atelier, **prouve** qu'une exécution a produit (dans l'atelier, c'est le commit)
+PRODUCING = frozenset({"email_draft", "forge_write"})
 RUNS = list(PROJECT_KINDS)
+#: le nom de l'opérateur ou de la propriétaire, ou ces mots quand on ne le sait pas
+CARETAKER = "la personne qui s'occupe de toi"
 
-PROJECTS.bundle("projects", "tes projets : conclure une exécution, ton carnet, tes décisions techniques, tes objectifs")
+PROJECTS.bundle("projects", "tes projets : en ouvrir un, en accepter un qu'on te confie, en clore un à toi ; pendant "
+                            "une exécution, la conclure, ton carnet, tes décisions techniques, tes objectifs")
 
 
 def current(ctx: Any) -> tuple[Project, Objective | None] | None:
@@ -80,6 +91,12 @@ def text_of(ctx: Any, ref: str, level: int, empty: str) -> Content:
     return Content.of(text or empty, level=level)
 
 
+def caretaker(frame: Frame) -> str:
+    """Qui s'occupe d'elle, par son prénom (jamais « ta propriétaire »)."""
+    names = [n for n in (frame.get(identity_c.IDENTITY(o)).name for o in frame.get(identity_c.OWNERS)) if n]
+    return f"« {names[0]} »" if len(names) == 1 else CARETAKER
+
+
 GONE = "Ce projet n'est plus actif (en pause ou archivé) : arrête-toi là."
 
 
@@ -87,6 +104,19 @@ def written(p: Project) -> int:
     """Le niveau de ce qu'elle écrit pendant une exécution (compte rendu, carnet, décisions, résultat) : elle y
     voit toute sa mémoire, ce qui en sort est au moins personnel."""
     return max(p.sensitivity, int(Sensitivity.PERSONAL))
+
+
+def wrap_up(ctx: Any, out: Any) -> Any:
+    """Au-delà de quelques appels, chaque résultat lui rappelle de conclure : une exécution qui s'arrête sans
+    verdict ne compte pas comme du travail (et le délai d'une exécution est court)."""
+    pm = params(ctx.frame.env.params_of("projects", ctx.frame.root))
+    done = any(name == REPORT and ok for name, ok in ctx.calls)
+    if done or len(ctx.calls) + 1 < pm.wrap_up_after:
+        return out
+    note = "\n(Ton exécution touche à sa fin : conclus maintenant par report_run — « continue » si ce n'est pas fini.)"
+    if isinstance(out, ToolResult):
+        return ToolResult(ok=out.ok, content=out.content + note)
+    return f"{out}{note}"
 
 
 def still_open(project: int, objective: int) -> Guard:
@@ -104,28 +134,56 @@ class ReportArgs(BaseModel):
     notable: float = Field(default=0.5, ge=0.0, le=1.0,
                            description="à quel point ce résultat compte (0 : ordinaire, 1 : à raconter)")
     wait_minutes: int = Field(default=0, ge=0, le=1440)
+    needs_you: str = Field(default="", max_length=600,
+                           description="ce qu'il te faudrait de qui t'a confié ce projet pour avancer (une réponse, "
+                                       "un accès, une décision) ; vide : rien — sinon tu le lui diras")
+
+
+def _proof(ctx: Any, sha: str) -> str:
+    """Ce qui prouve que cette exécution a produit : un commit non vide, sinon un brouillon ou une app réussis."""
+    if sha:
+        return "commit"
+    return "outil" if any(ok and name in PRODUCING for name, ok in ctx.calls) else ""
+
+
+def commit_message(p: Project, o: Objective | None) -> str:
+    """Un message de commit neutre : il part peut-être vers un dépôt distant, il ne nomme personne et ne raconte
+    rien (le compte rendu, lui, reste dans sa vie, là où l'oubli l'atteint)."""
+    return f"exécution {p.runs} · objectif n° {o.id}" if o is not None else f"exécution {p.runs}"
 
 
 @PROJECTS.tool(REPORT, description="Conclure cette exécution par un verdict sur l'objectif visé. « done » n'est cru, "
-               "pour un objectif ponctuel, que si tu as réellement fait quelque chose (un outil qui a produit un "
-               "résultat) pour lui.", args=ReportArgs, bundle="projects", episodes=RUNS, max_calls_per_episode=1)
-async def report_run(args: ReportArgs, ctx: Any) -> str:
+               "pour un objectif ponctuel, que si quelque chose a été produit pour lui (un fichier écrit dans "
+               "l'atelier, un brouillon, une app) ; sinon il est refusé et tu peux conclure autrement.",
+               args=ReportArgs, bundle="projects", episodes=RUNS, max_calls_per_episode=3)
+async def report_run(args: ReportArgs, ctx: Any) -> Any:
     got = current(ctx)
     if got is None:
         return GONE
+    if any(name == REPORT and ok for name, ok in ctx.calls):
+        return ToolResult(ok=False, content="Tu as déjà conclu cette exécution : arrête-toi là.")
     p, o = got
-    worked = tuple(sorted({name for name, ok in ctx.calls if ok and name in PRODUCING}))
+    worked = tuple(sorted({name for name, ok in ctx.calls if ok and name in CHANGING}))
     summary = args.summary.strip()
     port = ctx.ports.get("workshop")
     sha = ""
     if port is not None and port.exists(p.id):
-        sha = await port.commit(p.id, summary)  # un commit par exécution qui a changé quelque chose
+        sha = await port.commit(p.id, commit_message(p, o))  # un commit par exécution qui a changé quelque chose
+    proof = _proof(ctx, sha)
     gone = o is not None and o.status != c.OPEN  # retiré ou clos pendant qu'elle y travaillait
-    proven = args.verdict == c.DONE and o is not None and not gone and (o.evidence + len(worked) + bool(sha)) > 0
+    proven = args.verdict == c.DONE and o is not None and not gone and (bool(proof) or o.evidence > 0)
+    if args.verdict == c.DONE and o is not None and not gone and o.kind == c.ONCE and not proven:
+        # pas un verdict : rien ne s'écrit, elle peut encore conclure honnêtement
+        return ToolResult(ok=False, content=(
+            "Pas encore : rien n'a été produit pour cet objectif (aucun fichier écrit dans l'atelier, aucun brouillon, "
+            "aucune app). Lancer une commande, lire ou noter ne suffit pas. Fais-le, ou conclus honnêtement avec "
+            "« continue », « blocked » ou « wait »."))
+    need = args.needs_you.strip()
     report = c.RUN_REPORTED.draft(
         project=p.id, objective=o.id if o is not None else 0, verdict=args.verdict,
         summary=Content.of(summary, level=written(p)), notable=args.notable, mode=p.mode, proven=proven,
-        tools=worked, commit=sha, wait_s=args.wait_minutes * 60, owner=p.owner, about=p.about)
+        tools=worked, commit=sha, proof=proof, wait_s=args.wait_minutes * 60, owner=p.owner, about=p.about,
+        need=Content.of(need, level=written(p)) if need else None)
     if o is not None and not gone and o.kind == c.ONCE and (proven or args.verdict == c.BLOCKED):
         try:
             await ctx.emit(report, closing(ctx, p, o, c.DONE if proven else c.BLOCKED, summary, args.notable),
@@ -138,30 +196,31 @@ async def report_run(args: ReportArgs, ctx: Any) -> str:
     else:
         await ctx.emit(report)
     pushed = ""
-    if sha and p.auto_push and p.remote and await propose_push(ctx, p, "après l'exécution"):
-        pushed = " L'envoi au dépôt distant est " + ("proposé (il attend un accord)." if p.approval else "parti.")
+    if sha and p.auto_push and p.remote:
+        pushed = {"proposed": " L'envoi au dépôt distant est proposé (il attend un accord).",
+                  "sent": " L'envoi au dépôt distant est parti.",
+                  "pending": " Un envoi au dépôt distant attend déjà un accord : celui-ci suivra."}.get(
+            await propose_push(ctx, p, "après l'exécution"), "")
     kept = f" Enregistré dans l'atelier ({sha})." if sha else ""
+    asked = " Tu le diras à qui t'a confié ce projet." if need else ""
     if gone:
         return ("C'est noté, mais cet objectif n'est plus ouvert (il a été retiré ou clos pendant que tu y "
                 "travaillais) : ton compte rendu reste, rien n'est coché." + kept + pushed)
     if o is None:
-        return "C'est noté." + kept + pushed
+        return "C'est noté." + kept + pushed + asked
     if o.kind == c.CONSTANT:
         if args.verdict in (c.DONE, c.BLOCKED):
             pm = params(ctx.frame.env.params_of("projects", ctx.frame.root))
             hours = max(1, round(cadence(o, pm) / HOUR))
-            return f"Passage noté : cet objectif constant reviendra dans {hours} h environ.{kept}{pushed}"
-        return "C'est noté : tu reprendras cet objectif à une prochaine exécution." + kept + pushed
+            return f"Passage noté : cet objectif constant reviendra dans {hours} h environ.{kept}{pushed}{asked}"
+        return "C'est noté : tu reprendras cet objectif à une prochaine exécution." + kept + pushed + asked
     if proven:
         return f"C'est noté : l'objectif n° {o.id} est atteint.{kept}{pushed}"
-    if args.verdict == c.DONE:
-        return ("Tu dis avoir fini, mais rien de concret n'a encore été fait pour cet objectif (aucun outil n'a "
-                "produit de résultat) : ce n'est pas fini. Fais-le, ou dis honnêtement où tu en es." + kept)
     if args.verdict == c.BLOCKED:
-        return f"C'est noté : tu bloques sur l'objectif n° {o.id}.{kept}"
+        return f"C'est noté : tu bloques sur l'objectif n° {o.id}.{kept}{asked}"
     if args.verdict == c.WAIT:
-        return f"D'accord : tu y reviendras dans {max(10, args.wait_minutes)} minutes au plus tôt.{kept}"
-    return "C'est noté : tu reprendras à une prochaine exécution." + kept + pushed
+        return f"D'accord : tu y reviendras dans {max(10, args.wait_minutes)} minutes au plus tôt.{kept}{asked}"
+    return "C'est noté : tu reprendras à une prochaine exécution." + kept + pushed + asked
 
 
 def closing(ctx: Any, p: Project, o: Objective, status: str, result: str, notable: float) -> Draft[Any]:
@@ -183,18 +242,26 @@ def push_summary(p: Project, sha: str, title: str, why: str) -> str:
     return (f"Pousser le commit {sha[:12]} (« {title[:120]} ») vers {p.remote}, branche {p.branch} — {why}")[:600]
 
 
-async def propose_push(ctx: Any, p: Project, why: str) -> bool:
+def pending_push(frame: Frame, project: int) -> bool:
+    """Un envoi de ce projet attend-il déjà un accord ?"""
+    return any(v.capability == PUSH and project_of(v.context) == project for v in frame.get(rt.PENDING_EFFECTS))
+
+
+async def propose_push(ctx: Any, p: Project, why: str) -> str:
     """Proposer d'envoyer l'atelier au dépôt distant (exécuté tout de suite ou après accord, selon le projet) :
     le commit est épinglé au moment de proposer — l'accord vaut pour ce qui a été montré, pas pour ce que
-    l'atelier deviendra d'ici là. Rend ``False`` s'il n'y a rien à envoyer."""
+    l'atelier deviendra d'ici là. Un seul envoi attend un accord à la fois : les suivants le suivront (rien ne
+    s'empile). Rend ``proposed``, ``sent``, ``pending`` (un envoi attend déjà) ou ``nothing``."""
+    if p.approval and pending_push(ctx.frame, p.id):
+        return "pending"
     sha, title = await pinned(ctx.ports.get("workshop"), p.id)
     if not sha:
-        return False
+        return "nothing"
     await ctx.propose(rt.EFFECT_PROPOSED.draft(
         capability=PUSH, owner=PROJECTS.name, context=project_target(p.id), approval=p.approval,
         args_json=json.dumps({"project": p.id, "url": p.remote, "branch": p.branch, "sha": sha}),
         summary=Content.of(push_summary(p, sha, title, why), level=0), about=tuple(x for x in (p.owner, *p.about) if x)))
-    return True
+    return "proposed" if p.approval else "sent"
 
 
 class NoteArgs(BaseModel):
@@ -203,14 +270,14 @@ class NoteArgs(BaseModel):
 
 @PROJECTS.tool(NOTE, description="Écrire dans le carnet de ce projet (ce que tu as trouvé, compris, ce qui reste).",
                args=NoteArgs, bundle="projects", episodes=RUNS, max_calls_per_episode=4)
-async def project_note(args: NoteArgs, ctx: Any) -> str:
+async def project_note(args: NoteArgs, ctx: Any) -> Any:
     got = current(ctx)
     if got is None:
         return GONE
     p, _ = got
     await ctx.emit(NOTED.draft(project=p.id, text=Content.of(args.text.strip(), level=written(p)), owner=p.owner,
                                about=p.about))
-    return "Noté dans le carnet du projet."
+    return wrap_up(ctx, "Noté dans le carnet du projet.")
 
 
 class DecideArgs(BaseModel):
@@ -251,7 +318,7 @@ async def project_decide(args: DecideArgs, ctx: Any) -> Any:
         reason=opt(args.reason), replaces=args.replaces, objective=o.id if o is not None else 0, author="self",
         owner=p.owner, about=p.about))
     more = f" (elle remplace la décision n° {args.replaces})" if args.replaces else ""
-    return f"Décision n° {_attributed(ctx, p.id, commit, 'title', 'decisions', number)} consignée{more}."
+    return wrap_up(ctx, f"Décision n° {_attributed(ctx, p.id, commit, 'title', 'decisions', number)} consignée{more}.")
 
 
 class ObjectiveArgs(BaseModel):
@@ -277,7 +344,7 @@ async def project_objective_add(args: ObjectiveArgs, ctx: Any) -> Any:
         project=p.id, objective=number, text=Content.of(args.text.strip(), level=written(p)), kind=args.kind,
         cadence_us=args.cadence_hours * HOUR, author="self", owner=p.owner, about=p.about))
     number = _attributed(ctx, p.id, commit, "text", "objectives", number)
-    return f"Objectif n° {number} ajouté ({'constant' if args.kind == c.CONSTANT else 'ponctuel'})."
+    return wrap_up(ctx, f"Objectif n° {number} ajouté ({'constant' if args.kind == c.CONSTANT else 'ponctuel'}).")
 
 
 def _attributed(ctx: Any, project: int, commit: Any, field: str, kind: str, asked: int) -> int:
@@ -340,29 +407,31 @@ class CreateArgs(BaseModel):
     mode: Literal["persona", "plain"] = Field(default="persona", description="persona : tu y travailles toi-même, "
                                                                              "avec ton humeur et tes avis ; plain : "
                                                                              "un travail impersonnel")
-    schedule: str = Field(default="manual", description="manual, interval:2h, ou cron:0 9 * * MON-FRI")
+    schedule: str = Field(default="asap", description="asap : dès que possible ; demand : seulement quand on le "
+                                                      "lance ; interval:2h ; cron:0 9 * * MON-FRI")
 
 
-@PROJECTS.tool("create_project", description="Accepter un projet que ta propriétaire te confie : il aura son atelier "
-               "(un dossier, son dépôt git), ses objectifs et ses décisions, et tu y avanceras par exécutions.",
+@PROJECTS.tool("create_project", description="Accepter un projet qu'on te confie (seulement quelqu'un qui s'occupe de "
+               "toi) : il aura son atelier (un dossier, son dépôt git), ses objectifs et ses décisions, et tu y "
+               "avanceras par exécutions.",
                args=CreateArgs, bundle="projects", episodes=[Kind.REPLY], max_calls_per_episode=1, owner_only=True)
-async def create_project(args: CreateArgs, ctx: Any) -> str:
+async def create_project(args: CreateArgs, ctx: Any) -> Any:
     who = _person(ctx.frame)
     if who is None or not ctx.frame.get(identity_c.IS_OWNER(who[1])):
-        return ("Seule ta propriétaire peut te confier un projet. Si l'idée te plaît, tu peux en ouvrir un à toi "
-                "(start_project).")
+        return ToolResult(ok=False, content=f"Seul(e) {caretaker(ctx.frame)} peut te confier un projet. Si l'idée te "
+                                            "plaît, tu peux en ouvrir un à toi (start_project).")
     handle, person = who
     try:
-        schedule.parse(args.schedule)
+        rule = check_schedule(args.schedule)
     except ValueError as exc:
-        return f"Règle d'agenda refusée : {exc}"
+        return ToolResult(ok=False, content=f"Règle d'agenda refusée : {exc}")
     level = int(Sensitivity.PERSONAL)
     commit = await ctx.emit(opened(
         title=args.title, description=args.description, authority=c.USER, mode=args.mode, owner=person,
-        address=handle, about=(person,), level=level, source="tool", schedule_rule=args.schedule))
+        address=handle, about=(person,), level=level, source="tool", schedule_rule=rule))
     pid = commit.seqs[-1] if commit.seqs else None
     if pid is None:
-        return "Le projet n'a pas pu être créé."
+        return ToolResult(ok=False, content="Le projet n'a pas pu être créé.")
     goals = args.objectives or ([] if args.constants else [args.title])
     await ctx.emit(*objectives_of(pid, goals, args.constants, author="owner", owner=person, about=(person,),
                                   level=level))
@@ -377,30 +446,46 @@ class StartArgs(BaseModel):
 
 
 def _own_live(s: ProjectsState) -> int:
-    return sum(1 for p in s.projects.values() if live(p) and p.authority == c.SELF)
+    """Ses projets à elle qui l'occupent encore : vivants **et** avec un objectif ouvert (un projet dont tout est
+    fait ne l'empêche pas d'en ouvrir un autre)."""
+    return sum(1 for p in s.projects.values() if live(p) and p.authority == c.SELF
+               and any(o.status == c.OPEN for o in p.objectives))
+
+
+def _talking_to_owner(frame: Frame) -> bool:
+    """En conversation, elle ne s'engage (ou ne se dégage) que devant quelqu'un qui s'occupe d'elle."""
+    ep = frame.episode
+    if ep is None or ep.kind != Kind.REPLY:
+        return True
+    who = _person(frame)
+    return who is not None and bool(frame.get(identity_c.IS_OWNER(who[1])))
 
 
 @PROJECTS.tool("start_project", description="Ouvrir un projet à toi : un vrai travail suivi (un dossier, son dépôt git, "
                "des objectifs), plus gros qu'une envie passagère. Tu y travailleras par exécutions ; ce qui sortirait "
                "de la machine attendra un accord.", args=StartArgs, bundle="projects",
                episodes=[Kind.REPLY, Kind.STEP], max_calls_per_episode=1, owner_only=True)
-async def start_project(args: StartArgs, ctx: Any) -> str:
+async def start_project(args: StartArgs, ctx: Any) -> Any:
     frame: Frame = ctx.frame
     s: ProjectsState = frame.state("projects")
     pm = params(frame.env.params_of("projects", frame.root))
     ep = frame.episode
     who = _person(frame)
-    # en conversation, seulement avec une propriétaire : un inconnu ne fixe pas le travail de ses heures creuses
-    if ep is not None and ep.kind == Kind.REPLY and (who is None or not frame.get(identity_c.IS_OWNER(who[1]))):
-        return "Tu n'ouvres pas de projet sur la demande de quelqu'un que tu ne connais pas assez."
+    # en conversation, seulement avec quelqu'un qui s'occupe d'elle : un inconnu ne fixe pas le travail de ses
+    # heures creuses
+    if not _talking_to_owner(frame):
+        return ToolResult(ok=False, content="Tu n'ouvres pas de projet sur la demande de quelqu'un que tu ne connais "
+                                            "pas assez.")
     if _own_live(s) >= pm.live_self_max:
-        return (f"Tu as déjà {_own_live(s)} projet(s) à toi en cours (au plus {pm.live_self_max}) : mène-les ou "
-                "archive-en un avant d'en ouvrir un autre.")
+        return ToolResult(ok=False, content=(
+            f"Tu as déjà {_own_live(s)} projet(s) à toi en cours (au plus {pm.live_self_max}) : mènes-en un à bout, "
+            "ou clos-en un (project_close) avant d'en ouvrir un autre."))
     gid = goal_of(ep.target) if ep is not None else None
     source = f"goal:{gid}" if gid is not None else "conversation"
     twin = next((p for p in s.projects.values() if live(p) and gid is not None and p.source == source), None)
     if twin is not None:
-        return f"Tu as déjà ouvert un projet depuis cette envie (n° {twin.id}) : travailles-y plutôt."
+        return ToolResult(ok=False, content=f"Tu as déjà ouvert un projet depuis cette envie (n° {twin.id}) : "
+                                            "travailles-y plutôt.")
     about: tuple[str, ...] = (who[1],) if who is not None else ()
     level = int(Sensitivity.PERSONAL) if about else int(Sensitivity.NONE)
     if gid is not None:
@@ -413,7 +498,41 @@ async def start_project(args: StartArgs, ctx: Any) -> str:
         about=about, level=level, source=source))
     pid = commit.seqs[-1] if commit.seqs else None
     if pid is None:
-        return "Le projet n'a pas pu être ouvert."
+        return ToolResult(ok=False, content="Le projet n'a pas pu être ouvert.")
     goals = args.objectives or ([] if args.constants else [args.title])
     await ctx.emit(*objectives_of(pid, goals, args.constants, author="self", owner=None, about=about, level=level))
-    return f"Projet ouvert (n° {pid}) : il est à toi. Tu y avanceras par exécutions, dans son atelier."
+    more = " L'exploration d'où il vient s'arrête là : c'est devenu un projet." if gid is not None else ""
+    return f"Projet ouvert (n° {pid}) : il est à toi. Tu y avanceras par exécutions, dans son atelier.{more}"
+
+
+class CloseArgs(BaseModel):
+    project: int = Field(ge=1, description="le numéro de ton projet")
+    ending: Literal["done", "dropped"] = Field(description="done : il a fait son temps, tu en as fini ; dropped : tu "
+                                                           "y renonces")
+    why: str = Field(min_length=1, max_length=600, description="pourquoi, en une ou deux phrases (dans son carnet)")
+
+
+ENDING_REASON = {"done": "clos par elle : il a fait son temps", "dropped": "clos par elle : elle y renonce"}
+
+
+@PROJECTS.tool("project_close", description="Clore un de tes projets à toi (pas un projet qu'on t'a confié) : il a "
+               "fait son temps, ou tu y renonces. Son dossier et son histoire restent ; un opérateur peut le "
+               "restaurer.", args=CloseArgs, bundle="projects", episodes=[Kind.REPLY, Kind.STEP, *RUNS],
+               max_calls_per_episode=1, owner_only=True)
+async def project_close(args: CloseArgs, ctx: Any) -> Any:
+    frame: Frame = ctx.frame
+    p = frame.state("projects").projects.get(args.project)
+    if p is None or not live(p):
+        return ToolResult(ok=False, content=f"Tu n'as pas de projet vivant n° {args.project}.")
+    if p.authority != c.SELF:
+        return ToolResult(ok=False, content="Ce projet t'a été confié : ce n'est pas à toi de le clore. Si tu n'y "
+                                            "arrives pas, dis-le (report_run « blocked », et ce qu'il te faudrait).")
+    if not _talking_to_owner(frame):
+        return ToolResult(ok=False, content="Pas sur la demande de quelqu'un que tu ne connais pas assez.")
+    level = written(p)
+    # sa raison va dans son carnet (un contenu, que l'oubli atteint) ; l'archivage n'en garde qu'une étiquette
+    await ctx.emit(NOTED.draft(project=p.id, text=Content.of(f"Clos : {args.why.strip()}", level=level),
+                               owner=p.owner, about=p.about),
+                   ARCHIVED.draft(project=p.id, reason=ENDING_REASON[args.ending], by="self", ending=args.ending,
+                                  owner=p.owner, about=p.about))
+    return "C'est fait : ce projet est clos." if args.ending == "done" else "C'est fait : tu le laisses de côté."

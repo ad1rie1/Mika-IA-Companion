@@ -16,6 +16,7 @@ du port de l'atelier. Un contenu oublié s'affiche « (oublié) ».
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
@@ -40,6 +41,7 @@ from mika.faculties.projects.actions import (
 from mika.faculties.projects.faculty import (
     AMENDED,
     EXTRA_BUNDLES,
+    NETWORKED,
     NOTED,
     OPERATIONS,
     PROJECTS,
@@ -94,7 +96,7 @@ from mika.kernel.inspect import (
     When,
     paginate,
 )
-from mika.ports.workshop import OutsideWorkshop
+from mika.ports.workshop import OutsideWorkshop, argv_lines
 from mika.vocab.episodes import Kind, project_target
 
 PAGE = 25
@@ -538,24 +540,49 @@ def _state_notes(p: Project, s: ProjectsState, frame: Frame, ctx: InspectContext
     return out
 
 
-def _approvals(p: Project, frame: Frame, texts: Mapping[str, str]) -> Section | None:
+def exact(s: ProjectsState, proposal: int) -> str:
+    """Une commande réseau qui attend un accord, telle qu'elle partira : entière, un argument par ligne (vide :
+    ce n'en est pas une). L'aperçu complet (avec l'état de l'atelier, épinglé par l'accord) est sur la page
+    Approbations."""
+    raw = s.awaiting.get(proposal)
+    got = s.proposals.get(proposal)
+    if raw is None or got is None or got[1] != NETWORKED:
+        return ""
+    try:
+        argv = json.loads(raw).get("argv") or []
+    except (ValueError, AttributeError):
+        return ""
+    return argv_lines([str(a) for a in argv])
+
+
+def decide_bar(key: str, argv: str) -> list[Any]:
+    """Les boutons d'une demande : la commande exacte d'abord (quand c'en est une), puis approuver ou refuser."""
+    out: list[Any] = [Code(argv, title="La commande, entière, un argument par ligne")] if argv else []
+    out.append(Toolbar((ActionSlot("projects.approuver", (("proposal", key),), title="Approuver",
+                                   presentation="button"),
+                        ActionSlot("projects.refuser", (("proposal", key),), title="Refuser", presentation="button")),
+                       title=f"Décider de la demande n° {key}"))
+    return out
+
+
+def _approvals(p: Project, s: ProjectsState, frame: Frame, texts: Mapping[str, str]) -> Section | None:
     pending = pending_of(frame, p.id)
     if not pending:
         return None
     items: list[Any] = []
     for v in pending:
         key = str(v.proposal)
-        items.append(Fields(((f"demande n° {key}", Text(_text(texts, v.summary_ref, "(sans résumé)"), clamp=600)),
+        argv = exact(s, v.proposal)
+        summary = _text(texts, v.summary_ref, "(sans résumé)")
+        items.append(Fields(((f"demande n° {key}", Text(summary) if argv else Text(summary, clamp=600)),
                              ("ce que c'est", {f"{c.OWNER}.push": "pousser vers le dépôt distant",
                                                f"{c.OWNER}.pull": "récupérer du dépôt distant"}.get(
                                  v.capability, "une commande avec le réseau"))), columns=1))
-        items.append(Toolbar((ActionSlot("projects.approuver", (("proposal", key),), title="Approuver",
-                                         presentation="button"),
-                              ActionSlot("projects.refuser", (("proposal", key),), title="Refuser",
-                                         presentation="button")), title=f"Décider de la demande n° {key}"))
+        items += decide_bar(key, argv)
     return Section(f"À décider ({len(pending)})", tuple(items),
                    description="Ce qu'elle veut faire sortir de la machine : rien ne part sans ton accord. Ce qui est "
-                               "montré est ce qui partira.")
+                               "montré est ce qui partira ; ses raisons sont ses mots, pas une description de la "
+                               "commande.")
 
 
 @PROJECTS.inspect("apercu", title="Vue d'ensemble", subject="project", order=10,
@@ -572,7 +599,7 @@ def _overview(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block
                          *(r for d in decisions for r in (d.title_ref, d.choice_ref)),
                          *(v.summary_ref for v in pending)])
     blocks: list[Block] = [*_state_notes(p, s, frame, ctx)]
-    approvals = _approvals(p, frame, texts)
+    approvals = _approvals(p, s, frame, texts)
     if approvals is not None:
         blocks.append(approvals)
     target = pick(p, frame.now, pm) if p.status == c.ACTIVE else None
@@ -1162,10 +1189,7 @@ def _notebook_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[B
         state, detail = _effect_state(e, e.seq in pending, outcomes.get(e.seq, ()))
         more: list[Any] = [Code(_cut(detail, 4000), title="ce qu'il en est")] if detail else []
         if e.seq in pending:
-            more.append(Toolbar((ActionSlot("projects.approuver", (("proposal", str(e.seq)),), title="Approuver",
-                                            presentation="button"),
-                                 ActionSlot("projects.refuser", (("proposal", str(e.seq)),), title="Refuser",
-                                            presentation="button")), title="Décider"))
+            more += decide_bar(str(e.seq), exact(s, e.seq))
         effect_rows.append(Row((When(e.at), Text(_said(e.data.summary), clamp=SUMMARY_CLAMP),
                                 "requis" if e.data.approval else "non requis", state),
                                tone="warn" if e.seq in pending else "", detail=tuple(more)))

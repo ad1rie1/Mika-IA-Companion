@@ -131,6 +131,19 @@ class AppInfo:
     ui: str = ""
     #: les fonctions que l'hôte accepte d'appeler
     callable: tuple[str, ...] = ()
+    #: l'empreinte de cette version (son manifeste et son code) : ses secrets et sa promotion y sont liés
+    fingerprint: str = ""
+    #: les domaines que cette version peut appeler (``allowed_domains``)
+    domains: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class StagedVersion:
+    """Une version relue mais pas installée : elle attend l'accord d'un opérateur."""
+
+    manifest: str
+    code: str
+    domains: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +176,20 @@ class ForgePort(Protocol):
 
     async def rollback(self, app: str) -> int: ...
 
+    async def stage(self, app: str, manifest: str, code: str) -> str:
+        """Relit une version **sans l'installer** (elle attend un accord) ; rend son empreinte. Lève
+        ``ForgeRefused`` comme ``write``."""
+        ...
+
+    def staged(self, app: str, fingerprint: str) -> StagedVersion | None:
+        """Une version mise de côté (si son contenu a toujours cette empreinte), ou ``None``."""
+        ...
+
+    async def install(self, app: str, fingerprint: str) -> int:
+        """Installe la version mise de côté (en archivant l'actuelle) ; rend son numéro. ``ForgeRefused`` si elle
+        n'existe plus."""
+        ...
+
     async def erase(self, app: str) -> str: ...
 
     async def reset_storage(self, app: str) -> int: ...
@@ -172,9 +199,12 @@ class ForgePort(Protocol):
         ...
 
     async def call(self, app: str, method: str, args: dict[str, Any] | None = None, *,
-                   timeout_s: float = 5.0, max_result: int = 64_000, cache_s: float = 0.0) -> CallResult:
+                   timeout_s: float = 5.0, max_result: int = 64_000, cache_s: float = 0.0,
+                   secrets: bool = True) -> CallResult:
         """Appelle une fonction **déclarée** (ou fixe) de l'app. ``cache_s`` : une vue
-        déjà rendue avec les mêmes paramètres et réglages depuis moins que ça est resservie."""
+        déjà rendue avec les mêmes paramètres et réglages depuis moins que ça est resservie.
+        ``secrets`` : l'app lit-elle ses réglages secrets (faux : ``api.config`` les rend vides) — l'appelant
+        le décide d'après la version qu'un opérateur a validée."""
         ...
 
     def logs(self, app: str, n: int = 20) -> list[str]: ...

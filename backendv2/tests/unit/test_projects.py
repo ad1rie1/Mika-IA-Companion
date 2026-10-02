@@ -126,22 +126,63 @@ def test_a_constant_objective_comes_back_after_its_cadence_and_never_finishes(tm
     assert o.status == c.OPEN and o.passes == len(passes) and o.kind == c.CONSTANT
 
 
-def test_a_once_objective_said_done_without_proof_stays_open(tmp_path):
+def test_a_once_objective_said_done_without_proof_is_not_a_verdict(tmp_path):
+    """« Fait » sans rien produire n'écrit rien : ni compte rendu « fait », ni coche, ni fierté. À force de ne
+    rien conclure, l'objectif bloque — jamais il ne se coche."""
     async def scenario(kernel, llm):
         before = kernel.mind.frame().get(self_c.ESTEEM)
         pid = await create(kernel, "p1", title="Un module", objectives="Créer un module RDP")
         await wait(30)
         await kernel.lanes.join()
         state = kernel.mind.frame().state("projects").projects[pid]
+        answers = [m.content for r in llm.calls if r.role == "project" for m in r.messages
+                   if m.role == "tool" and m.name == "report_run"]
         return events(kernel, c.RUN_REPORTED), events(kernel, c.OBJECTIVE_CLOSED), state, \
-            (before, kernel.mind.frame().get(self_c.ESTEEM))
+            (before, kernel.mind.frame().get(self_c.ESTEEM)), answers
 
-    reports, closed, project, esteem = live(tmp_path, scenario, mode="liar")
-    assert reports and all(e.data.verdict == c.DONE and not e.data.proven for e in reports)
-    assert closed == []
+    reports, closed, project, esteem, answers = live(tmp_path, scenario, mode="liar")
+    assert not [e for e in reports if e.data.verdict == c.DONE]  # pas un verdict : rien d'écrit
+    assert answers and all(a.startswith("Pas encore") for a in answers)
+    assert all(e.data.status == c.BLOCKED for e in closed)  # au pire, il bloque ; jamais coché
     [o] = project.objectives
-    assert o.status == c.OPEN and o.unproven >= 1
-    assert esteem[0] == esteem[1]  # se vanter n'est pas mener à bout
+    assert o.status in (c.OPEN, c.BLOCKED) and o.evidence == 0
+    assert esteem[1] <= esteem[0]  # se vanter n'est pas mener à bout
+
+
+def test_a_refused_done_leaves_her_free_to_work_then_conclude_in_the_same_run(tmp_path):
+    """Le contre-exemple de l'ancien plafond : un « fait » refusé ne consomme pas le compte rendu — elle écrit le
+    module, puis conclut, dans la même exécution. Lancer ``ls`` ne prouvait rien."""
+    from mika.ports.llm import LLMResponse
+
+    def lazy_then_work(req):
+        tools = [m for m in req.messages if m.role == "tool"]
+        if not tools:
+            return llm_call(req, ("ws_run", {"argv": ["ls"]}), ("report_run", {"verdict": "done", "summary": "Fini."}))
+        if len(tools) == 2:
+            return llm_call(req, ("ws_write", {"path": "rdp.py", "content": "print('rdp')\n"}))
+        if len(tools) == 3:
+            return llm_call(req, ("report_run", {"verdict": "done", "summary": "Le module est écrit.",
+                                                 "notable": 0.6}))
+        return LLMResponse("fin")
+
+    async def scenario(kernel, llm):
+        llm._work = lazy_then_work
+        pid = await create(kernel, "p1", title="Un module", objectives="Créer un module RDP")
+        await wait(12)
+        await kernel.lanes.join()
+        return events(kernel, c.RUN_REPORTED), events(kernel, c.OBJECTIVE_CLOSED), pid
+
+    reports, closed, pid = live(tmp_path, scenario)
+    [report] = [e for e in reports if e.data.project == pid][:1]
+    assert report.data.verdict == c.DONE and report.data.proven and report.data.proof == "commit"
+    assert [e.data.status for e in closed] == [c.DONE]
+
+
+def llm_call(req, *calls):
+    from mika.ports.llm import LLMResponse, ToolCall, Usage
+
+    tools = tuple(ToolCall(f"{req.call_id}:{len(req.messages)}:{i}", n, a) for i, (n, a) in enumerate(calls))
+    return LLMResponse("", tool_calls=tools, stop="tool_use", usage=Usage(input_tokens=10, output_tokens=10))
 
 
 def test_a_proven_objective_is_checked_and_in_her_mode_makes_her_proud(tmp_path):
@@ -252,8 +293,9 @@ def test_she_opens_her_own_projects_but_not_one_too_many(tmp_path):
     assert all(e.data.authority == c.SELF and e.data.mode == c.PERSONA and e.data.approval for e in created)
     assert created[0].data.source.startswith("goal:")  # né d'une exploration plus grosse qu'une envie
     assert created[0].data.source != created[1].data.source
-    assert "Projet ouvert" in said[0] and "déjà ouvert un projet depuis cette envie" in said[1]
-    assert "Projet ouvert" in said[2] and "au plus 2" in said[3]
+    assert "Projet ouvert" in said[0] and "déjà ouvert un projet depuis cette envie" in said[1].content
+    assert not said[1].ok and not said[3].ok  # un refus est un refus (pas une réussite racontée)
+    assert "Projet ouvert" in said[2] and "au plus 2" in said[3].content and "project_close" in said[3].content
     assert [p.open_once for p in alive] == [1, 1]
 
 
@@ -269,7 +311,8 @@ def test_only_her_owner_confides_a_project(tmp_path):
             events(kernel, c.PROJECT_CREATED), events(kernel, OBJECTIVE_ADDED)
 
     refused, accepted, created, objectives = live(tmp_path, scenario)
-    assert "Seule ta propriétaire" in refused and "Projet accepté" in accepted
+    assert not refused.ok and "peut te confier un projet" in refused.content and "« Adrien »" in refused.content
+    assert "propriétaire" not in refused.content and "Projet accepté" in accepted
     [p] = created
     assert p.data.authority == c.USER and p.data.owner == "user_1"
     assert [(o.data.kind, o.data.text.text) for o in objectives] == [(c.ONCE, "Une page d'accueil"),
@@ -329,6 +372,7 @@ def test_pushing_from_the_console_goes_at_once_and_hers_waits_for_approval(tmp_p
         pid = await create(kernel, "p1", title="Outils", objectives="Écrire l'outil", approval="on",
                            remote="https://github.com/moi/outils.git", branch="dev")
         await atelier.write(pid, "outil.py", "print(1)\n")
+        await atelier.commit(pid, "première version")
         pushed = await perform(kernel, "projects.pousser", form(), by="user_1", subject=str(pid), nonce="u1")
         await wait(2)
         operator = list(atelier.pushed)
@@ -348,6 +392,8 @@ def test_pushing_without_a_token_fails_saying_so(tmp_path):
     async def scenario(kernel, llm):
         pid = await create(kernel, "p1", title="Outils", objectives="Écrire l'outil",
                            remote="https://github.com/moi/outils.git")
+        await kernel.ports["workshop"].write(pid, "outil.py", "print(1)\n")
+        await kernel.ports["workshop"].commit(pid, "première version")
         await perform(kernel, "projects.pousser", form(), by="user_1", subject=str(pid), nonce="u1")
         await wait(2)
         return events(kernel, rt.EFFECT_EXECUTED), kernel.mind.frame().state("projects").projects[pid]
@@ -433,7 +479,8 @@ def test_a_confided_project_is_written_and_tested_in_its_real_workshop(tmp_path)
     folder = tmp_path / "ateliers" / f"projet-{done.data.project}"
     assert (folder / "bonjour.py").is_file() and (folder / "test_bonjour.py").is_file()
     log = subprocess.run(["git", "-C", str(folder), "log", "--format=%s"], capture_output=True, text=True).stdout
-    assert log.splitlines() == ["bonjour.py écrit et testé : les tests passent.", "atelier ouvert"]
+    # un message de commit neutre : il peut partir vers un dépôt distant, il ne raconte rien de sa vie
+    assert log.splitlines() == ["exécution 1 · objectif n° 1", "atelier ouvert"]
     assert any("code 0" in x and "tests : ok" in x for x in ran)  # le test a vraiment tourné, isolé
 
 
@@ -697,7 +744,8 @@ def test_done_needs_work_that_produces_something_and_new_work_after_a_reopening(
         pid = await create(kernel, "p1", title="Le module", objectives="Écrire le module", start="3:00", end="4:00")
         done = ReportArgs(verdict="done", summary="Fini.", notable=0.6)
         searched = await report_run(done, _run_context(kernel, pid, 1, (("memory_search", True),
-                                                                        ("ws_network", True))))
+                                                                        ("ws_network", True), ("ws_run", True))))
+        await kernel.ports["workshop"].write(pid, "module.py", "x = 1\n")  # ce que ws_write a vraiment fait
         written = await report_run(done, _run_context(kernel, pid, 1, (("ws_write", True),)))
         await _status(kernel, pid, 1, c.OPEN, "r1")
         o = kernel.mind.frame().state("projects").projects[pid].objectives[0]
@@ -705,10 +753,11 @@ def test_done_needs_work_that_produces_something_and_new_work_after_a_reopening(
         return searched, written, again, o, events(kernel, c.OBJECTIVE_CLOSED)
 
     searched, written, again, reopened, closed = live(tmp_path, scenario)
-    assert "pas fini" in searched  # chercher ou proposer n'est pas produire
+    # chercher, proposer ou lancer une commande n'est pas produire : refusé, sans rien écrire
+    assert not searched.ok and searched.content.startswith("Pas encore")
     assert "atteint" in written
     assert (reopened.evidence, reopened.notable, reopened.result_ref) == (0, 0.0, "")
-    assert "pas fini" in again and [e.data.status for e in closed] == [c.DONE]  # une seule clôture
+    assert not again.ok and [e.data.status for e in closed] == [c.DONE]  # une seule clôture
 
 
 class _DroppingAtelier(Atelier):
@@ -785,7 +834,7 @@ def test_a_stranger_cannot_have_her_open_a_project_and_a_goal_keeps_its_privacy(
 
     refused, created, spec = live(tmp_path, scenario)
     assert spec.owner_only  # pas même offert à quelqu'un d'autre en conversation
-    assert "connais pas assez" in refused
+    assert not refused.ok and "connais pas assez" in refused.content
     [p] = created
     assert p.data.about == ("user_1",) and p.data.sensitivity == 3  # né d'une confidence, il en reste une
 

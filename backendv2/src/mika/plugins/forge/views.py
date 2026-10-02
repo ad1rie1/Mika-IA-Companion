@@ -171,11 +171,11 @@ def decode_view(value: Any, app: str, info: AppInfo, spec: AppViewSpec) -> list[
 
 
 async def render(port: Any, app: str, info: AppInfo, spec: AppViewSpec, values: Mapping[str, Any], *,
-                 cache_s: float = VIEW_CACHE_S) -> list[Block]:
-    """Appelle la vue (3 s, 256 Ko) et la décode."""
+                 cache_s: float = VIEW_CACHE_S, secrets: bool = False) -> list[Block]:
+    """Appelle la vue (3 s, 256 Ko) et la décode (``secrets`` : seulement pour une version validée)."""
     args = {} if spec.function == "view" else dict(values)
     r: CallResult = await port.call(app, spec.function, args, timeout_s=VIEW_TIMEOUT_S, max_result=VIEW_MAX_BYTES,
-                                    cache_s=cache_s)
+                                    cache_s=cache_s, secrets=secrets)
     if not r.ok:
         return [failure_note(spec.label, r)]
     return decode_view(r.value, app, info, spec)

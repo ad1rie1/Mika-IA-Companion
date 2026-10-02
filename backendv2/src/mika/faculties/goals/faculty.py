@@ -5,7 +5,12 @@
   processus n'est pas rejoué à l'infini ; un pas qui échoue sans que le
   modèle ait répondu (panne, délai, supplantation) **rend son crédit**.
 - **Un pas sans verdict** compte : trois de suite, et le but est bloqué.
-- **« Fini » sans preuve** n'est pas fini : il est noté, le but continue.
+- **« Fini » sans preuve** n'est pas fini : il est noté, le but continue (et le
+  pas peut encore conclure). Noter ou chercher dans sa mémoire ne prouve rien ;
+  une réflexion sur ce qu'on lui a confié se prouve en l'écrivant
+  (``goal_reflect``), une curiosité en allant lire ailleurs.
+- **Devenue un projet** (``projects.created`` qui en vient), une exploration se
+  clôt sans émotion : elle continue là-bas.
 - **L'envie** d'une exploration s'use (demi-vie de six heures).
 - **Un rappel** qui n'a pas pu être dit est retenté, espacé (5 min × n), au
   plus trois fois.
@@ -23,6 +28,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, ConfigDict
 
 from mika.contracts import goals as c
+from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.events import Content, Payload
@@ -136,6 +142,11 @@ class GoalsParams(BaseModel):
         label="Fin de la journée", group="Entreprendre d'elle-même", lo=0, hi=24 * 60,
         help="L'heure locale (depuis minuit) après laquelle elle n'ouvre plus d'exploration d'un centre "
              "d'intérêt. Avant le début, la plage passe minuit.")] = 21 * 60
+    seed_jitter_min: Annotated[int, Knob(
+        label="Flottement du début de journée", group="Entreprendre d'elle-même", lo=0, hi=120,
+        help="Le début de sa journée d'exploration varie d'un jour à l'autre, jusqu'à ce nombre de minutes avant "
+             "ou après (le même jour donne toujours le même décalage : on peut le rejouer). Personne ne commence "
+             "ses journées à la minute près.")] = 20
     no_reopen_us: Annotated[int, Knob(
         label="Ne pas rouvrir avant", group="Entreprendre d'elle-même", lo=HOUR, hi=30 * DAY,
         help="Un sujet qu'elle vient de clore (la même pensée, la même personne) ne se rouvre pas avant ce "
@@ -251,6 +262,11 @@ class Goal:
     result_ref: str = ""
     shared: bool = False
     share_attempts: int = 0
+    #: une exploration : ce qui l'a fait naître (``exchange``, ``revision``, ``signal``, ``interest``) et quand
+    origin: str = ""
+    origin_at: int = 0
+    #: le projet qu'elle est devenue (0 : aucun)
+    became: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,6 +296,7 @@ class GoalsState:
 
 
 GOALS = Faculty("goals", state=GoalsState, init=lambda p: GoalsState(), params=GoalsParams, derive=derive,
+                state_version=2,
                 # les réglages des projets, quand ils étaient des buts (ADR 0031) : d'anciens journaux les portent
                 retired_params=("project_spacing_us", "project_steps", "project_evidence"))
 GOALS.declare(*c.ALL)
@@ -400,6 +417,8 @@ class TaskChanged(Payload):
     text: Content | None = None
     #: son résultat, ou pourquoi elle bloque
     note: Content | None = None
+    #: effacer la note (un champ vidé dans la console)
+    clear_note: bool = False
     author: str = "self"
     by: str = ""
     owner: str | None = None
@@ -543,6 +562,7 @@ def _opened(s: GoalsState, e, cx) -> GoalsState:
         about=tuple(d.about), sensitivity=d.sensitivity, source=d.source, bundles=tuple(d.bundles),
         max_steps=d.max_steps, due=d.due, urgent=d.urgent, schedule=d.schedule, approval=d.approval,
         desire=d.desire, desire_at=e.at, priority=d.priority if d.priority in c.PRIORITIES else c.NORMAL,
+        origin=d.origin, origin_at=d.origin_at,
     )
     s = _set(s, g)
     if d.source.startswith("interest:"):
@@ -766,7 +786,9 @@ def _task_changed(s: GoalsState, e, cx) -> GoalsState:
         changes["status"] = d.status
     if d.text is not None and d.text.ref:
         changes["text_ref"] = d.text.ref
-    if d.note is not None and d.note.ref:
+    if d.clear_note:
+        changes["note_ref"] = ""
+    elif d.note is not None and d.note.ref:
         changes["note_ref"] = d.note.ref
     new = replace(t, **changes)
     return _set(s, replace(g, tasks=tuple(new if x.id == t.id else x for x in g.tasks)))
@@ -788,6 +810,18 @@ def _deposited(s: GoalsState, e, cx) -> GoalsState:
         return s
     entry = (d.name, d.size, d.note.ref or "" if d.note is not None else "")
     return _set(s, replace(g, deposits=(*g.deposits, entry)[-DEPOSITS_KEPT:]))
+
+
+@GOALS.reducer(projects_c.PROJECT_CREATED)
+def _became_project(s: GoalsState, e, cx) -> GoalsState:
+    """Une exploration qui s'avère plus grosse qu'une envie devient un projet (``start_project`` pendant une de
+    ses séances) : elle continue là-bas, et se clôt ici (``goals.tend``)."""
+    source = e.data.source or ""
+    gid = int(source[len("goal:"):]) if source.startswith("goal:") and source[len("goal:"):].isdigit() else None
+    g = s.goals.get(gid) if gid is not None else None
+    if g is None or g.kind != c.EXPLORATION or g.status in c.CLOSED_STATUSES:
+        return s
+    return _set(s, replace(g, became=e.seq))
 
 
 @GOALS.reducer(c.GOAL_CLOSED)
@@ -879,6 +913,8 @@ def _closed_felt(e, cx) -> Appraisal | None:
     d = e.data
     if d.kind == c.REMINDER:
         return None
+    if d.status == c.ACHIEVED and d.source.startswith("interest:") and d.reason == "rêverie":
+        return Appraisal(Emotion.DREAMY, 0.2, reason="une rêverie écrite")
     if d.status == c.ACHIEVED:
         return Appraisal(Emotion.PROUD, 0.4, reason="abouti")
     if d.status == c.STUCK:

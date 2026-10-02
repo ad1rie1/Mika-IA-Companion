@@ -25,6 +25,7 @@ celles que le manifeste déclare (``view_<vue>``, ``action_<vue>_<action>``,
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import ipaddress
 import json
 import os
@@ -42,14 +43,23 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
 from mika.adapters.forge.manifest import HANDLERS, coherence, lint, read_manifest, signatures
-from mika.ports.forge import AppInfo, AppTool, CallResult, ForgeRefused, config_form, ui_dump, view_specs
+from mika.ports.forge import (
+    AppInfo,
+    AppTool,
+    CallResult,
+    ForgeRefused,
+    StagedVersion,
+    config_form,
+    ui_dump,
+    view_specs,
+)
 
-__all__ = ["ForgeHost", "Limits", "lint", "read_manifest", "real_http_get"]
+__all__ = ["ForgeHost", "Limits", "fingerprint", "lint", "read_manifest", "real_http_get"]
 
 WORKER = Path(__file__).with_name("worker.py")
 NAME = re.compile(r"^[a-z][a-z0-9_]{1,30}$")
@@ -103,26 +113,80 @@ class _Call:
     logs: list[str] = field(default_factory=list)
     signals: list[tuple[str, float, str]] = field(default_factory=list)
     emits: list[tuple[str, str]] = field(default_factory=list)
+    #: l'échéance de l'appel (``time.monotonic``) : un service ne la dépasse pas
+    deadline: float = 0.0
+    #: l'app lit-elle ses réglages secrets (une version validée par un opérateur)
+    secrets: bool = True
+
+
+#: le préfixe NAT64 bien connu : l'adresse IPv4 qu'il porte compte, pas lui
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
+#: une requête de l'app ne dure jamais plus que ça, même si son appel en laisse davantage
+HTTP_TIMEOUT_S = 10.0
+
+
+def is_global(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Une adresse joignable d'Internet et rien d'autre : ni la machine, ni le réseau local, ni l'espace partagé
+    d'un opérateur (100.64/10), ni une adresse IPv4 privée déguisée en IPv6 (correspondance, 6to4, Teredo,
+    NAT64)."""
+    if ip.is_multicast or not ip.is_global:
+        return False
+    if isinstance(ip, ipaddress.IPv6Address):
+        embedded = ip.ipv4_mapped or ip.sixtofour or (ip.teredo[1] if ip.teredo else None)
+        if embedded is None and ip in _NAT64:
+            embedded = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+        if embedded is not None:
+            return is_global(embedded)
+    return True
+
+
+def resolve_public(host: str, port: int = 443) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    """Résout ``host`` **une fois** : toutes ses adresses doivent être publiques (sinon ``ValueError``). On se
+    connecte ensuite à l'une d'elles, jamais à une seconde résolution (qui pourrait répondre autre chose)."""
+    try:
+        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise ValueError(f"« {host} » ne se résout pas") from exc
+    ips = list(dict.fromkeys(ipaddress.ip_address(info[4][0].split("%", 1)[0]) for info in infos))
+    if not ips or not all(is_global(ip) for ip in ips):
+        raise ValueError(f"« {host} » est une adresse privée : refusée")
+    return ips
 
 
 def _is_public(host: str) -> bool:
     try:
-        infos = socket.getaddrinfo(host, None)
-    except OSError:
+        resolve_public(host)
+    except ValueError:
         return False
-    for info in infos:
-        ip = ipaddress.ip_address(info[4][0])
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast \
-                or ip.is_unspecified:
-            return False
-    return bool(infos)
+    return True
 
 
-def real_http_get(url: str) -> str:
-    with httpx.Client(follow_redirects=False, timeout=10.0,
-                      headers={"User-Agent": "Mika-Forge/2"}) as client, client.stream("GET", url) as resp:
+def real_http_get(url: str, deadline: float | None = None) -> str:
+    """Un GET vers une adresse publique, résolue une seule fois (la connexion part vers l'adresse vérifiée, le nom
+    ne sert qu'à l'en-tête ``Host`` et au certificat), sans redirection, borné en taille et **en durée totale**
+    (``deadline``, sur ``time.monotonic``)."""
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    if parts.username or parts.password:
+        raise ValueError("pas d'identifiants dans l'adresse")
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    ip = resolve_public(host, port)[0]
+    netloc = f"[{ip}]:{port}" if ip.version == 6 else f"{ip}:{port}"
+    target = urlunsplit((parts.scheme, netloc, parts.path or "/", parts.query, ""))
+    end = deadline if deadline is not None else time.monotonic() + HTTP_TIMEOUT_S
+
+    def left() -> float:
+        remaining = end - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError("délai dépassé")
+        return min(remaining, HTTP_TIMEOUT_S)
+
+    headers = {"User-Agent": "Mika-Forge/2", "Host": host if parts.port is None else f"{host}:{parts.port}"}
+    with httpx.Client(follow_redirects=False, timeout=left(), trust_env=False) as client, \
+            client.stream("GET", target, headers=headers, extensions={"sni_hostname": host}) as resp:
         chunks, size = [], 0
         for chunk in resp.iter_bytes():
+            left()  # la durée totale, pas seulement chaque lecture
             size += len(chunk)
             if size > HTTP_MAX:
                 break
@@ -132,9 +196,14 @@ def real_http_get(url: str) -> str:
         return b"".join(chunks).decode("utf-8", "replace")
 
 
+def fingerprint(manifest: str, code: str) -> str:
+    """L'empreinte d'une version : son manifeste et son code, rien d'autre."""
+    return hashlib.sha256(manifest.encode() + b"\x00" + code.encode()).hexdigest()[:16]
+
+
 class ForgeHost:
     def __init__(self, root: Path, *, limits: Limits = Limits(), bwrap: str | None = None,
-                 http_get: Callable[[str], str] = real_http_get, public: Callable[[str], bool] = _is_public,
+                 http_get: Callable[[str], str] | None = None, public: Callable[[str], bool] | None = None,
                  config: Callable[[str], Mapping[str, Any]] | None = None,
                  which: Callable[[str], str | None] = shutil.which) -> None:
         self.root = Path(root)
@@ -223,7 +292,8 @@ class ForgeHost:
             events=tuple(manifest.get("events", [])) if "on_event" in functions else (),
             config=tuple(manifest.get("config", {}).items()),
             views=view_specs(views), config_fields=config_form(config),
-            ui=ui_dump(views, config, tools, callable_), callable=tuple(callable_))
+            ui=ui_dump(views, config, tools, callable_), callable=tuple(callable_), fingerprint=fingerprint(text, code),
+            domains=tuple(manifest.get("allowed_domains", [])))
 
     def source(self, app: str) -> tuple[str, str] | None:
         d = self._dir(app)
@@ -232,8 +302,8 @@ class ForgeHost:
         manifest = (d / "manifest.yaml").read_text(encoding="utf-8") if (d / "manifest.yaml").exists() else ""
         return manifest, (d / "main.py").read_text(encoding="utf-8")
 
-    async def write(self, app: str, manifest: str, code: str) -> tuple[int, list[str]]:
-        d = self._dir(app)
+    @staticmethod
+    def _check(manifest: str, code: str) -> None:
         data, problems = read_manifest(manifest)
         code_problems, functions = signatures(code)
         problems += code_problems
@@ -241,6 +311,44 @@ class ForgeHost:
             problems += coherence(data, functions)
         if problems:
             raise ForgeRefused(" ; ".join(problems))
+
+    def _stage_dir(self, app: str, print_: str) -> Path:
+        if not re.fullmatch(r"[0-9a-f]{16}", print_ or ""):
+            raise ForgeRefused("version mise de côté inconnue")
+        return self.root / "_attente" / app / print_
+
+    async def stage(self, app: str, manifest: str, code: str) -> str:
+        self._dir(app)
+        self._check(manifest, code)
+        print_ = fingerprint(manifest, code)
+        d = self._stage_dir(app, print_)
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "manifest.yaml").write_text(manifest, encoding="utf-8")
+        (d / "main.py").write_text(code, encoding="utf-8")
+        return print_
+
+    def staged(self, app: str, print_: str) -> StagedVersion | None:
+        try:
+            d = self._stage_dir(app, print_)
+            manifest, code = (d / "manifest.yaml").read_text(encoding="utf-8"), (d / "main.py").read_text(encoding="utf-8")
+        except (OSError, ForgeRefused):
+            return None
+        if fingerprint(manifest, code) != print_:
+            return None
+        data, _ = read_manifest(manifest)
+        return StagedVersion(manifest, code, tuple(data.get("allowed_domains", [])))
+
+    async def install(self, app: str, print_: str) -> int:
+        got = self.staged(app, print_)
+        if got is None:
+            raise ForgeRefused("cette version mise de côté n'existe plus")
+        version, _ = await self.write(app, got.manifest, got.code)
+        shutil.rmtree(self._stage_dir(app, print_), ignore_errors=True)
+        return version
+
+    async def write(self, app: str, manifest: str, code: str) -> tuple[int, list[str]]:
+        d = self._dir(app)
+        self._check(manifest, code)
         version = self._version(app) + 1
         if (d / "main.py").exists():
             archive = d / "_versions" / str(version - 1)
@@ -315,10 +423,11 @@ class ForgeHost:
 
     # ── l'exécution ──
     async def call(self, app: str, method: str, args: dict[str, Any] | None = None, *,
-                   timeout_s: float = 5.0, max_result: int = MAX_RESULT, cache_s: float = 0.0) -> CallResult:
+                   timeout_s: float = 5.0, max_result: int = MAX_RESULT, cache_s: float = 0.0,
+                   secrets: bool = True) -> CallResult:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._call_sync, app, method, dict(args or {}), timeout_s,
-                                          max_result, cache_s)
+                                          max_result, cache_s, secrets)
 
     def _lock(self, app: str) -> threading.Lock:
         return self._locks.setdefault(app, threading.Lock())
@@ -418,9 +527,9 @@ class ForgeHost:
             return False
 
     def _call_sync(self, app: str, method: str, args: dict[str, Any], timeout_s: float,
-                   max_result: int = MAX_RESULT, cache_s: float = 0.0) -> CallResult:
+                   max_result: int = MAX_RESULT, cache_s: float = 0.0, secrets: bool = True) -> CallResult:
         started = time.monotonic()
-        call = _Call()
+        call = _Call(secrets=secrets)
 
         def done(ok: bool, value: Any = None, error: str = "", killed: bool = False) -> CallResult:
             return CallResult(ok, value, error[:1000], killed, int((time.monotonic() - started) * 1000),
@@ -437,7 +546,7 @@ class ForgeHost:
             known = ", ".join(info.callable) or "aucune"
             return done(False, error=f"« {method[:60]} » n'est pas une fonction déclarée de cette app "
                                      f"(appelables : {known})")
-        key = self._cache_key(app, info, method, args) if cache_s > 0 else None
+        key = self._cache_key(app, info, method, args, secrets) if cache_s > 0 else None
         if key is not None:
             with self._cachelock:
                 hit = self._cache.get(key)
@@ -453,52 +562,63 @@ class ForgeHost:
                 self._cache[key] = (time.monotonic(), result)
         return result
 
-    def _cache_key(self, app: str, info: AppInfo, method: str, args: Mapping[str, Any]) -> tuple[Any, ...] | None:
+    def _cache_key(self, app: str, info: AppInfo, method: str, args: Mapping[str, Any],
+                   secrets: bool = True) -> tuple[Any, ...] | None:
         try:
             config = json.dumps(dict(self._config(app) if self._config else {}), sort_keys=True, default=str)
-            return (app, info.version, method, json.dumps(args, sort_keys=True, default=str), config)
+            return (app, info.version, info.fingerprint, method, json.dumps(args, sort_keys=True, default=str),
+                    config, secrets)
         except (TypeError, ValueError):
             return None
 
     def _run(self, app: str, info: AppInfo, method: str, args: dict[str, Any], timeout_s: float, max_result: int,
              call: _Call, done: Callable[..., CallResult]) -> CallResult:
-        with self._lock(app):
-            w = self._workers.get(app)
-            if w is None or w.version != info.version or w.proc.poll() is not None:
-                if w is not None:
-                    self._stop(app)
-                got = self._start(app, info.version)
-                if isinstance(got, str):
-                    self._log(app, got)
-                    return done(False, error=got, killed=True)
-                w = self._workers[app] = got
-            deadline = time.monotonic() + timeout_s
-            if not self._send(w, {"call": method, "args": args}):
+        lock = self._lock(app)
+        if not lock.acquire(timeout=max(0.0, timeout_s)):  # jamais une attente sans fin derrière un autre appel
+            return done(False, error="l'app est occupée par un autre appel : réessaie plus tard")
+        try:
+            return self._run_locked(app, info, method, args, timeout_s, max_result, call, done)
+        finally:
+            lock.release()
+
+    def _run_locked(self, app: str, info: AppInfo, method: str, args: dict[str, Any], timeout_s: float,
+                    max_result: int, call: _Call, done: Callable[..., CallResult]) -> CallResult:
+        w = self._workers.get(app)
+        if w is None or w.version != info.version or w.proc.poll() is not None:
+            if w is not None:
                 self._stop(app)
-                return done(False, error="le processus de l'app ne répond plus", killed=True)
-            while True:
-                msg = self._read(w, deadline)
-                if msg is None or isinstance(msg, str):
+            got = self._start(app, info.version)
+            if isinstance(got, str):
+                self._log(app, got)
+                return done(False, error=got, killed=True)
+            w = self._workers[app] = got
+        deadline = call.deadline = time.monotonic() + timeout_s
+        if not self._send(w, {"call": method, "args": args}):
+            self._stop(app)
+            return done(False, error="le processus de l'app ne répond plus", killed=True)
+        while True:
+            msg = self._read(w, deadline)
+            if msg is None or isinstance(msg, str):
+                self._stop(app)
+                reason = msg or f"délai de {timeout_s:g} s dépassé : tuée"
+                self._log(app, f"{method} : {reason}")
+                return done(False, error=reason, killed=True)
+            if "host" in msg:
+                reply = self._serve(app, info, str(msg.get("host")), msg.get("params") or {}, call)
+                if not self._send(w, reply):
                     self._stop(app)
-                    reason = msg or f"délai de {timeout_s:g} s dépassé : tuée"
-                    self._log(app, f"{method} : {reason}")
-                    return done(False, error=reason, killed=True)
-                if "host" in msg:
-                    reply = self._serve(app, info, str(msg.get("host")), msg.get("params") or {}, call)
-                    if not self._send(w, reply):
-                        self._stop(app)
-                        return done(False, error="le processus de l'app ne répond plus", killed=True)
-                    continue
-                if "error" in msg:
-                    self._log(app, f"{method} : {msg['error']}")
-                    return done(False, error=str(msg["error"]))
-                value = msg.get("result")
-                size = len(json.dumps(value, ensure_ascii=False, default=str))
-                if size > max_result:
-                    self._log(app, f"{method} : résultat trop gros ({size // 1000} Ko)")
-                    return done(False, error=f"résultat trop gros ({size // 1000} Ko ; au plus "
-                                             f"{max_result // 1000} Ko)")
-                return done(True, value)
+                    return done(False, error="le processus de l'app ne répond plus", killed=True)
+                continue
+            if "error" in msg:
+                self._log(app, f"{method} : {msg['error']}")
+                return done(False, error=str(msg["error"]))
+            value = msg.get("result")
+            size = len(json.dumps(value, ensure_ascii=False, default=str))
+            if size > max_result:
+                self._log(app, f"{method} : résultat trop gros ({size // 1000} Ko)")
+                return done(False, error=f"résultat trop gros ({size // 1000} Ko ; au plus "
+                                         f"{max_result // 1000} Ko)")
+            return done(True, value)
 
     # ── les services de l'hôte ──
     def _log(self, app: str, line: str) -> None:
@@ -552,7 +672,11 @@ class ForgeHost:
             defaults = {**dict(info.config), **{f.path: f.default for f in info.config_fields
                                                 if f.default is not None}} if info is not None else {}
             values = {**defaults, **dict((self._config(app) if self._config else {}) or {})}
-            return values.get(str(p.get("key")), p.get("default"))
+            key = str(p.get("key"))
+            secret = info is not None and any(f.path == key and f.kind == "secret" for f in info.config_fields)
+            if secret and not call.secrets:  # une version qu'aucun opérateur n'a validée ne lit pas les secrets
+                return p.get("default")
+            return values.get(key, p.get("default"))
         if name == "emit":
             if len(call.emits) >= 5:
                 raise ValueError("trop d'émissions pour un appel (5)")
@@ -568,10 +692,10 @@ class ForgeHost:
                                  str(p.get("emotion") or "")[:20]))
             return True
         if name == "http_get":
-            return self._http(app, str(p.get("url") or ""))
+            return self._http(app, str(p.get("url") or ""), call.deadline)
         raise ValueError(f"service inconnu : {name}")
 
-    def _http(self, app: str, url: str) -> str:
+    def _http(self, app: str, url: str, deadline: float = 0.0) -> str:
         parts = urlsplit(url)
         manifest, _ = read_manifest(self.source(app)[0] if self.source(app) else "")
         host = (parts.hostname or "").lower()
@@ -579,6 +703,8 @@ class ForgeHost:
             raise ValueError("une adresse http(s) complète")
         if host not in manifest.get("allowed_domains", []):
             raise ValueError(f"« {host} » n'est pas dans allowed_domains")
-        if not self._public(host):
+        if self._http_get is None:  # le vrai : une seule résolution, vérifiée, et la durée qui reste à l'appel
+            return real_http_get(url, deadline or None)[:HTTP_MAX]
+        if not (self._public or _is_public)(host):
             raise ValueError(f"« {host} » est une adresse privée : refusée")
         return self._http_get(url)[:HTTP_MAX]

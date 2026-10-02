@@ -585,8 +585,10 @@ def _plan_blocks(g: Goal, s: GoalsState, frame: Frame, texts: Mapping[str, str])
                 Toolbar(tuple(ActionSlot("goals.tache_statut", (("task", str(t.id)), ("status", st)),
                                          title=TASK_STATUS_FR[st], presentation="button")
                               for st in c.TASK_STATUSES if st != t.status), title="Statut"),
+                # pré-rempli du vrai texte, jamais de la mention « (oublié) » qu'on réécrirait comme du texte
                 Disclosure("Modifier la tâche", (ActionSlot("goals.tache_modifier", (
-                    ("task", str(t.id)), ("text", text), ("note", note)), title="Modifier la tâche", compact=True),)),
+                    ("task", str(t.id)), ("text", texts.get(t.text_ref, "")), ("note", texts.get(t.note_ref, ""))),
+                    title="Modifier la tâche", compact=True),)),
                 ActionSlot("goals.tache_retirer", (("task", str(t.id)),), title="Retirer la tâche",
                            presentation="button"),
             )

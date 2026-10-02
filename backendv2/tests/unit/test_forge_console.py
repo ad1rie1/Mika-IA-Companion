@@ -498,13 +498,16 @@ def test_the_commands_switch_roll_back_reset_reload_and_erase_with_retyping(tmp_
     assert got["rechargé"].ok and "version 2 est dans sa vie" in got["rechargé"].message
     assert got["revenu"].ok and "version 3" in got["revenu"].message
     state = got["état"]
-    assert state.version == 3 and state.title == "Carnet météo" and state.enabled and state.promoted
+    # arrêtée par l'opérateur, elle le reste à travers deux nouvelles versions ; la promotion, elle, retombe
+    # dès la version suivante ; l'opérateur qui recharge ou remet une version la valide
+    assert state.version == 3 and state.title == "Carnet météo" and not state.enabled and state.held
+    assert not state.promoted and state.trusted == state.fingerprint != ""
     assert got["sans retaper"].errors == {"_confirmer": "Retape « meteo » pour confirmer."}
     assert not got["mal retapé"].ok and got["encore là"]
     assert got["effacé"].ok and got["effacé"].go == Ref("view", "forge/apps", "Apps forgées")
     assert got["après"] == (None, False)
     states = [e.data.state for e in got["évts"] if e.type.name == SWITCHED.name]
-    assert states == ["disabled", "promoted", "reset", "erased"]
+    assert states == ["disabled", "promoted", "trusted", "reset", "erased"]
     versions = [e.data.version for e in got["évts"] if e.type.name == WRITTEN.name]
     assert versions[-2:] == [2, 3] and set(versions) == {1, 2, 3}  # (la découverte au démarrage peut redire la 1)
     assert all(e.origin is Origin.EXTERNAL for e in got["évts"] if e.correlation.startswith("opérateur"))

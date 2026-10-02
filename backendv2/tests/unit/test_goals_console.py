@@ -209,10 +209,11 @@ def live(tmp_path, scenario, *, mode: str = "liar", start: int = MONDAY, ports=N
 
 
 async def explore(kernel, title: str = "Explorer : les jeux rétro", *, desire_: float = 1.0) -> int:
+    # une réflexion (ce qu'on lui a confié) : une séance s'y prouve en écrivant ce qu'elle en pense
     commit = await kernel.mind.append([goals_c.GOAL_OPENED.draft(
         kind=goals_c.EXPLORATION, authority=goals_c.SELF, title=Content.of(title, level=0), bundles=("goals",),
-        max_steps=8, source="genese", sensitivity=0, desire=desire_)], emitter="goals", correlation="genese",
-        origin=Origin.GENESIS)
+        max_steps=8, source="genese", sensitivity=0, desire=desire_, origin=goals_c.FROM_EXCHANGE)],
+        emitter="goals", correlation="genese", origin=Origin.GENESIS)
     return commit.seqs[-1]
 
 
@@ -299,7 +300,7 @@ def test_the_goal_fiche_fresh_then_after_an_exploration_lived_a_step(tmp_path):
     assert field(resume, "d'où il vient") == "genese"
     pas = table(after["seances"], "Ses séances")
     assert [c.text for c in pas.rows[0].cells[1:3]] == ["fini", "prouvé"]
-    assert "goal_note" in pas.rows[0].cells[4] and pas.rows[0].cells[6].kind == "episode"
+    assert "goal_reflect" in pas.rows[0].cells[4] and pas.rows[0].cells[6].kind == "episode"  # ce qui a prouvé
     assert "En y repensant" in flat(after["carnet"])
     assert "séance de travail" in flat(after["episodes"])
     episode = table(after["episodes"], "Ses épisodes").rows[-1]

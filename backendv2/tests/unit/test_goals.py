@@ -130,10 +130,14 @@ def test_a_worry_becomes_a_goal_then_pride_then_she_tells_the_person_it_concerns
     esteem0, esteem1 = r.result
     opened, closed = r.of(goals_c.GOAL_OPENED), r.of(goals_c.GOAL_CLOSED)
     assert len(opened) == 1 and opened[0].data.source.startswith("thought:")
-    assert opened[0].data.kind == goals_c.EXPLORATION and "examen" in opened[0].data.title.text
+    # le titre est le sien ; ce qu'il lui a dit est gardé à part (et cité au travail), jamais donné comme le but
+    assert opened[0].data.kind == goals_c.EXPLORATION and opened[0].data.origin == goals_c.FROM_EXCHANGE
+    assert opened[0].data.title.text == "Repenser à ce que « Adrien » m'a confié"
+    assert "examen" in opened[0].data.details.text and "examen" not in opened[0].data.title.text
     assert [c.data.status for c in closed] == [goals_c.ACHIEVED]
     steps = r.of(goals_c.STEP_REPORTED)
-    assert steps and steps[-1].data.proven and "memory_search" in steps[-1].data.tools
+    # noter ou fouiller sa mémoire ne prouve rien : c'est la réflexion écrite qui prouve
+    assert steps and steps[-1].data.proven and steps[-1].data.tools == ("goal_reflect",)
     assert esteem1 > esteem0 + 0.01  # elle a mené quelque chose à bout (une séance : un peu, ADR 0036)
     # un pas n'est jamais livré à personne, ni écrit dans le fil
     step_utterances = [e for e in r.of(rt.UTTERANCE) if e.data.kind == "STEP"]
@@ -142,6 +146,8 @@ def test_a_worry_becomes_a_goal_then_pride_then_she_tells_the_person_it_concerns
     # elle le raconte à Adrien : il est concerné, et c'est son propriétaire — tout
     shares = _shares(r.llm)
     assert shares and shares[0][0] == "user_1" and "Ce que tu en as tiré" in shares[0][1]
+    # …mais une inquiétude n'est pas une bonne nouvelle : à lui, elle prend de ses nouvelles
+    assert "prends de ses nouvelles" in shares[0][1] and "bonne nouvelle" not in shares[0][1]
     # la pensée d'où c'était venu s'est apaisée : elle a fait la chose
     source = int(opened[0].data.source.split(":")[1])
     assert source not in {t.id for t in r.frame.get(attention_c.THOUGHTS)}
@@ -287,7 +293,10 @@ def test_after_a_failure_a_new_worry_waits_before_becoming_a_goal(tmp_path):
         assert await when(kernel, closed_now)
         await connect(kernel, "user_1", "Adrien")
         await (await kernel.perceive(said("user_1", "j'ai peur, je stresse pour mon oral"))).reply
-        await asyncio.sleep(10 * HOUR / US)
+        await asyncio.sleep(5 * HOUR / US)
+        # l'inquiétude revient : découragée, elle ne s'y met qu'une fois son élan revenu
+        await (await kernel.perceive(said("user_1", "j'ai encore peur, je stresse vraiment pour mon oral"))).reply
+        await asyncio.sleep(5 * HOUR / US)
         return opened.seqs[-1]
 
     r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 9, 0), mode="liar")

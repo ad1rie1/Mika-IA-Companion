@@ -5,9 +5,11 @@ exécutions de suite bloque ; un ponctuel à bout d'exécutions aussi ; un proje
 dont le modèle ne répond plus trois fois d'affilée se met en pause (« en
 panne ») — sans reproche, et rien ne le relance avant qu'on le reprenne.
 
-**Le dépôt distant** (``projects.remote``) : ce qu'un opérateur demande depuis
-la console (pousser, récupérer) devient une proposition d'effet, exécutée
-tout de suite par le runtime (c'est lui qui l'a demandé).
+**Ce qui sort** (``projects.remote``) : ce qu'un opérateur demande depuis la
+console (pousser, récupérer) devient une proposition d'effet, exécutée tout de
+suite par le runtime (c'est lui qui l'a demandé) ; une commande réseau qu'elle a
+demandée sur un projet sans accord part quand l'exécution qui l'a demandée a
+fini. Un projet archivé n'a plus rien en file : rien ne tourne en boucle.
 """
 
 from __future__ import annotations
@@ -17,8 +19,9 @@ from typing import Any
 
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
-from mika.faculties.projects.atelier import remote_proposal
+from mika.faculties.projects.atelier import network_proposal, remote_proposal
 from mika.faculties.projects.faculty import (
+    NETWORK_QUEUED,
     OBJECTIVE_CHANGED,
     PAUSED,
     PROJECTS,
@@ -103,16 +106,42 @@ class Tend:
                                             and all(view.get(c.OBJECTIVE_STATUS(k)) == c.OPEN for k in keys)))
 
 
-@PROJECTS.process("projects.remote", wake_on=[REMOTE_REQUESTED, rt.EFFECT_PROPOSED], lane="background",
-                  catch_up=CatchUp.ONCE, max_quantum_s=60, priority=40)
+def waiting(s: ProjectsState) -> list[tuple[Project, str, int, Any]]:
+    """Ce qui est prêt à sortir : (projet, sorte, demande, détail) — les demandes de l'opérateur (pousser,
+    récupérer) d'un projet qui a un dépôt distant, et ses commandes réseau en file d'un projet actif dont aucune
+    exécution n'occupe l'atelier. Le même filtre décide de l'échéance et de ce qui part : jamais une échéance
+    sans rien à faire."""
+    out: list[tuple[Project, str, int, Any]] = []
+    for p in sorted(s.projects.values(), key=lambda p: p.id):
+        if p.status == c.ARCHIVED:
+            continue
+        if p.remote:
+            out += [(p, what, seq, None) for seq, what in p.requests]
+        if p.status == c.ACTIVE and not busy(s, p.id):
+            out += [(p, "network", seq, (argv, why)) for seq, argv, why in p.network]
+    return out
+
+
+@PROJECTS.process("projects.remote", wake_on=[REMOTE_REQUESTED, NETWORK_QUEUED, rt.EFFECT_PROPOSED, rt.EPISODE_ENDED,
+                                              *c.ALL], lane="background", catch_up=CatchUp.ONCE, max_quantum_s=60,
+                  priority=40)
 class Remote:
     def next_due(self, s: ProjectsState, frame: Frame, last_run: int | None) -> int | None:
-        return frame.now if any(p.requests and p.remote for p in s.projects.values()) else None
+        if not waiting(s):
+            return None
+        # une passe qui n'a rien pu écrire (dédoublonnée) ne repart pas aussitôt : au pire une minute, jamais une boucle
+        return frame.now if last_run is None else max(frame.now, last_run + RETRY_US)
 
     async def run(self, ctx: Any) -> None:
         s: ProjectsState = ctx.state
-        port = ctx.ports.get("workshop")
-        drafts = [await remote_proposal(p, what, seq, port) for p in sorted(s.projects.values(), key=lambda p: p.id)
-                  if p.remote and p.status != c.ARCHIVED for seq, what in p.requests]
+        port, store = ctx.ports.get("workshop"), ctx.ports.get("store")
+        drafts = []
+        for p, what, seq, detail in waiting(s):
+            if what == "network":
+                argv, why_ref = detail
+                why = store.content([why_ref]).get(why_ref, "") if store is not None and why_ref else ""
+                drafts.append(network_proposal(p, seq, argv, why))
+            else:
+                drafts.append(await remote_proposal(p, what, seq, port))
         if drafts:
             await ctx.emit(*drafts, emitter=rt.OWNER)
