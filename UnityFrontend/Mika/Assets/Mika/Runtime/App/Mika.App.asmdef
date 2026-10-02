@@ -9,7 +9,8 @@
         "Mika.World.Engine",
         "Mika.Player",
         "Mika.UI",
-        "Unity.InputSystem"
+        "Unity.InputSystem",
+        "Mika.Avatar"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

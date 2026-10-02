@@ -221,3 +221,4 @@ MonoBehaviour:
     prefab: {fileID: 6905365074789950019, guid: 0126010d763c02c1ea138fb9a6bedd68, type: 3}
   - key: props/waste_bin
     prefab: {fileID: 4431396906709699632, guid: a31e9844d682847dca681254d1964355, type: 3}
+  humanoidController: {fileID: 9100000, guid: 251d1d4e5a3c3340e84f3c5d44340dfd, type: 2}

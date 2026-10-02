@@ -40,7 +40,6 @@ namespace Mika.App
         ChatSession _chat;
         float _startedAt;
         bool _preview;
-        float _talkingUntil;
 
         public WorldSession World => _world;
         public ChatSession Chat => _chat;
@@ -49,6 +48,10 @@ namespace Mika.App
         public event System.Action<SpeechFrame> MikaSpoke;
         public event System.Action<EmotionUpdateFrame> MikaMoodDrifted;
         public event System.Action<InnerStateFrame> InnerStateChanged;
+        /// <summary>L'accusé d'un message de la joueuse (accepté : une réponse se compose).</summary>
+        public event System.Action<AckFrame> MessageAcknowledged;
+        /// <summary>Les sessions viennent d'être (re)créées.</summary>
+        public event System.Action Connected;
 
         void Start()
         {
@@ -77,9 +80,10 @@ namespace Mika.App
             interactor?.Bind(_world, stage);
             hud?.Bind(_world, _chat);
 
-            _chat.Speech += OnSpeech;
+            _chat.Speech += s => MikaSpoke?.Invoke(s);
             _chat.EmotionUpdate += u => MikaMoodDrifted?.Invoke(u);
-            _chat.InnerState += OnInnerState;
+            _chat.InnerState += s => InnerStateChanged?.Invoke(s);
+            _chat.Ack += a => MessageAcknowledged?.Invoke(a);
             _world.Welcomed += _ =>
             {
                 _preview = false;
@@ -90,6 +94,7 @@ namespace Mika.App
             _startedAt = Time.unscaledTime;
             _world.Connect();
             _chat.Connect();
+            Connected?.Invoke();
         }
 
         void Update()
@@ -99,11 +104,6 @@ namespace Mika.App
             _chat?.Tick(now);
             if (_world != null && !_preview && !_world.Mirror.Ready && Time.unscaledTime - _startedAt > offlineAfter)
                 StartPreview();
-            if (_talkingUntil > 0 && Time.unscaledTime > _talkingUntil)
-            {
-                _talkingUntil = 0;
-                stage.Actor(mikaActor)?.SetTalking(false);
-            }
         }
 
         void StartPreview()
@@ -130,26 +130,6 @@ namespace Mika.App
                 Debug.LogWarning("[Mika] aperçu hors ligne impossible : " + e.Message);
                 return null;
             }
-        }
-
-        void OnSpeech(SpeechFrame s)
-        {
-            MikaSpoke?.Invoke(s);
-            if (string.IsNullOrEmpty(s.Text)) return;
-            var body = stage.Actor(mikaActor);
-            if (body == null) return;
-            if (!s.Inner) body.SetTalking(true);
-            var text = WorldHud.StripCues(s.Text);
-            _talkingUntil = Time.unscaledTime + Mathf.Clamp(text.Length * 0.06f / Mathf.Max(0.5f, s.VoiceProfile?.Rate ?? 1f), 1.2f, 20f);
-            // Elle regarde la personne à qui elle parle (la caméra de ce poste, quand c'est à nous).
-            if (!s.Inner && player != null && player.view != null) body.LookAt(player.view.transform.position);
-        }
-
-        void OnInnerState(InnerStateFrame s)
-        {
-            InnerStateChanged?.Invoke(s);
-            var body = stage.Actor(mikaActor);
-            if (body != null && s.SleepPhase != null) body.SetAsleep(s.SleepPhase != "awake");
         }
 
         void OnDestroy()

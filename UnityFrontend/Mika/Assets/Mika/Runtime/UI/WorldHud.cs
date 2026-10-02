@@ -28,12 +28,14 @@ namespace Mika.UI
         ChatSession _chat;
         VisualElement _root;
         Label _worldPill, _chatPill, _hostPill, _focusLabel, _focusHint, _subtitle, _requestText;
-        VisualElement _focus, _menu, _toasts, _request, _chatLog, _subtitleBox, _settings;
+        VisualElement _focus, _menu, _toasts, _request, _chatLog, _chatBox, _subtitleBox, _settings;
         TextField _chatInput, _urlField, _tokenField;
         Toggle _hostToggle;
         Request _pendingRequest;
         float _subtitleUntil;
         bool _chatOpen;
+        // Les messages déjà montrés (par identifiant du journal) : un rattrapage ne les remontre pas.
+        readonly System.Collections.Generic.HashSet<long> _shown = new System.Collections.Generic.HashSet<long>();
         bool _interactorBound;
 
         /// <summary>Les réglages de connexion ont changé (adresse, jeton, hôte) : l'application se reconnecte.</summary>
@@ -107,13 +109,15 @@ namespace Mika.UI
             _subtitleBox.Add(_subtitle);
             _subtitleBox.AddToClassList("hidden");
 
-            var chat = Add(hud, "chat");
-            _chatLog = Add(chat, "chat-log");
+            _chatBox = Add(hud, "chat");
+            _chatLog = Add(_chatBox, "chat-log");
             _chatInput = new TextField { maxLength = 2000 };
+            _chatInput.textEdition.placeholder = "Écris à Mika…  (Entrée : envoyer · Échap : fermer)";
+            _chatInput.textEdition.hidePlaceholderOnFocus = false;
             _chatInput.AddToClassList("chat-input");
             _chatInput.AddToClassList("hidden");
             _chatInput.RegisterCallback<KeyDownEvent>(OnChatKey, TrickleDown.TrickleDown);
-            chat.Add(_chatInput);
+            _chatBox.Add(_chatInput);
 
             BuildSettings(hud);
         }
@@ -280,7 +284,8 @@ namespace Mika.UI
         }
 
         // --- conversation ------------------------------------------------------------------------------------------
-        void OpenChat()
+        /// <summary>Ouvre la saisie (touche T ou Entrée).</summary>
+        public void OpenChat()
         {
             _chatOpen = true;
             _chatInput.RemoveFromClassList("hidden");
@@ -289,7 +294,7 @@ namespace Mika.UI
             _chatInput.schedule.Execute(() => _chatInput.Focus());
         }
 
-        void CloseChat()
+        public void CloseChat()
         {
             _chatOpen = false;
             _chatInput.value = "";
@@ -322,6 +327,7 @@ namespace Mika.UI
         {
             if (string.IsNullOrEmpty(s.Text)) return;
             var text = StripCues(s.Text);
+            if (s.MessageId is long id && !_shown.Add(id)) return;
             AddLine(s.Inner ? $"({text})" : text, mika: true);
             _subtitle.text = s.Inner ? $"« {text} »" : text;
             _subtitleBox.RemoveFromClassList("hidden");
@@ -331,7 +337,8 @@ namespace Mika.UI
         void OnHistory(HistoryFrame h)
         {
             foreach (var m in h.Messages.Skip(Math.Max(0, h.Messages.Count - 8)))
-                AddLine(StripCues(m.Text), mika: m.Role == "assistant");
+                if (_shown.Add(m.Id))
+                    AddLine(StripCues(m.Text), mika: m.Role == "assistant");
         }
 
         void AddLine(string text, bool mika)

@@ -235,7 +235,7 @@ namespace Mika.Editor.Creator
         /// <summary>Un objet de la scène devient un objet du monde (avec son rendu prêt à vivre).</summary>
         public static ObjectAuthoring MakeWorldObject(GameObject go, ArchetypeAsset archetype)
         {
-            var oa = go.GetComponent<ObjectAuthoring>() ?? Undo.AddComponent<ObjectAuthoring>(go);
+            var oa = go.TryGetComponent<ObjectAuthoring>(out var existing) ? existing : Undo.AddComponent<ObjectAuthoring>(go);
             if (string.IsNullOrEmpty(oa.id)) oa.id = Slug(go.name);
             oa.archetype = archetype;
             if (go.GetComponent<WorldObject>() == null) Undo.AddComponent<WorldObject>(go).id = oa.id;
@@ -297,7 +297,7 @@ namespace Mika.Editor.Creator
             copy.name = id;
             copy.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
             foreach (var oa in copy.GetComponentsInChildren<ObjectAuthoring>(true)) DestroyImmediate(oa);
-            var wo = copy.GetComponent<WorldObject>() ?? copy.AddComponent<WorldObject>();
+            var wo = copy.GetOrAdd<WorldObject>();
             wo.id = "";
             var prefab = PrefabUtility.SaveAsPrefabAsset(copy, $"{prefabDir}/{id}.prefab");
             DestroyImmediate(copy);

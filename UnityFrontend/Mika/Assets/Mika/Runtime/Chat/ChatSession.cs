@@ -94,8 +94,9 @@ namespace Mika.Chat
                         _backoff = 1;
                         _lastPing = _now;
                         _lastReceived = _now;
-                        // Rattraper ce qui a été dit pendant la coupure (ou le début du fil, au premier passage).
-                        _ = _channel.SendAsync(ChatJson.Sync(Cursor));
+                        // Le serveur envoie de lui-même le début du fil à la connexion ; après une coupure, on
+                        // redemande seulement ce qui a suivi le dernier message montré.
+                        if (Cursor > 0) _ = _channel.SendAsync(ChatJson.Sync(Cursor));
                         break;
                     case WsEventKind.Message:
                         _lastReceived = _now;

@@ -458,6 +458,10 @@ namespace Mika.Editor.Import
             app.presence = presence;
             app.interactor = interactor;
             app.hud = hud;
+            var presenter = appGo.AddComponent<MikaPresenter>();
+            presenter.app = app;
+            presenter.stage = stage;
+            presenter.player = controller;
             return appGo;
         }
 

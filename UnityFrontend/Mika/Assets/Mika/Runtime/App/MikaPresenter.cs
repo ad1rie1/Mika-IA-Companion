@@ -1,0 +1,138 @@
+using System.Collections.Generic;
+using System.Linq;
+using Mika.Avatar;
+using Mika.Chat;
+using Mika.Player;
+using Mika.World.Engine;
+using UnityEngine;
+
+namespace Mika.App
+{
+    /// <summary>
+    /// Ce que la conversation fait au corps de Mika : sa parole anime ses lèvres et son visage, sa dérive d'humeur
+    /// colore son visage entre deux répliques, son sommeil ferme ses yeux, et sa tête suit son attention (vers la
+    /// personne qui lui parle, ailleurs quand elle réfléchit ou rêvasse). Équivalent du <c>SpeechPresenter</c> du
+    /// client web, avec la même règle : la balise <c>[EMOTION:]</c> d'une réplique est la vérité du tour.
+    /// </summary>
+    [DisallowMultipleComponent]
+    [AddComponentMenu("Mika/Présentation de Mika")]
+    public sealed class MikaPresenter : MonoBehaviour
+    {
+        public MikaApp app;
+        public WorldStage stage;
+        public PlayerController player;
+        public string mikaActor = "mika";
+
+        ActorBody _body;
+        MikaFace _face;
+        // Le dernier état intérieur reçu : il peut arriver avant que la scène ait fait apparaître le corps.
+        string _sleepPhase;
+        float? _energy;
+
+        void OnEnable()
+        {
+            if (app == null) return;
+            app.MikaSpoke += OnSpeech;
+            app.MikaMoodDrifted += OnDrift;
+            app.InnerStateChanged += OnInnerState;
+            app.MessageAcknowledged += OnAck;
+        }
+
+        void OnDisable()
+        {
+            if (app == null) return;
+            app.MikaSpoke -= OnSpeech;
+            app.MikaMoodDrifted -= OnDrift;
+            app.InnerStateChanged -= OnInnerState;
+            app.MessageAcknowledged -= OnAck;
+        }
+
+        /// <summary>Le corps de Mika peut être recréé (une nouvelle définition) : on se relie à celui qui est là.</summary>
+        bool Bind()
+        {
+            var body = stage != null ? stage.Actor(mikaActor) : null;
+            if (body == _body && (_body == null || _face != null || body.GetComponentInChildren<MikaFace>() == null))
+                return _body != null;
+            _body = body;
+            _face = body != null ? body.GetComponentInChildren<MikaFace>() : null;
+            if (_face != null)
+            {
+                _face.SpeechEnded += () =>
+                {
+                    if (_body != null) _body.SetTalking(false);
+                };
+                if (player != null && player.view != null) _face.LookAt(player.view.transform);
+            }
+            ApplyInnerState();
+            return _body != null;
+        }
+
+        void Update()
+        {
+            if (!Bind() || _face == null) return;
+            _face.Walking = _body.Speed > 0.15f;
+            // La tête suit l'attention : vers la personne quand elle la regarde, devant elle sinon (les yeux, eux,
+            // vont où l'attention les mène — MikaFace s'en charge).
+            var lookingAtYou = _face.Attention == AttentionState.Contact || _face.Attention == AttentionState.Avert;
+            _body.LookAt(lookingAtYou && player != null && player.view != null ? player.view.transform.position : (Vector3?)null);
+        }
+
+        void OnSpeech(SpeechFrame s)
+        {
+            if (!Bind()) return;
+            if (_face == null)
+            {
+                // Pas de visage (silhouette) : le corps parle quand même, le temps de la phrase.
+                if (!string.IsNullOrEmpty(s.Text) && !s.Inner) _body.SetTalking(true);
+                return;
+            }
+            _face.SetReplyPending(false);
+            _face.ShowEmotion(s.Emotion, s.EmotionIntensity, Blend(s.EmotionBlend), ambient: false);
+            if (string.IsNullOrEmpty(s.Text)) return;
+            _face.InnerVoice = s.Inner;
+            // « speak: false » : on montre le texte sans articuler (un autre écran parle, ou elle est muette ici).
+            if (!s.Speak) return;
+            var duration = _face.Speak(s.Text, s.VoiceProfile?.Rate ?? 1f);
+            if (duration > 0 && !s.Inner) _body.SetTalking(true);
+        }
+
+        void OnDrift(EmotionUpdateFrame u)
+        {
+            if (Bind() && _face != null)
+                _face.ShowEmotion(u.Emotion, u.EmotionIntensity, Blend(u.EmotionBlend), ambient: true);
+        }
+
+        void OnInnerState(InnerStateFrame s)
+        {
+            if (s.SleepPhase != null) _sleepPhase = s.SleepPhase;
+            if (s.Energy.HasValue) _energy = s.Energy;
+            if (Bind()) ApplyInnerState();
+        }
+
+        void ApplyInnerState()
+        {
+            if (_body == null) return;
+            if (_sleepPhase != null) _body.SetAsleep(_sleepPhase != "awake");
+            if (_face == null) return;
+            if (_sleepPhase != null) _face.SetSleepPhase(_sleepPhase);
+            if (_energy.HasValue) _face.SetEnergy(_energy.Value);
+        }
+
+        void OnAck(AckFrame a)
+        {
+            if (a.Status == "accepted" && Bind() && _face != null) _face.SetReplyPending(true);
+        }
+
+        /// <summary>Quand la joueuse écrit, Mika l'écoute (le regard se pose sur elle).</summary>
+        public void NoteUserTyping()
+        {
+            if (Bind() && _face != null) _face.NoteUserTyping();
+        }
+
+        static IReadOnlyList<KeyValuePair<string, float>> Blend(List<BlendPart> parts) =>
+            (parts ?? new List<BlendPart>())
+                .OrderByDescending(p => p.Weight)
+                .Select(p => new KeyValuePair<string, float>(p.Emotion, p.Weight))
+                .ToList();
+    }
+}

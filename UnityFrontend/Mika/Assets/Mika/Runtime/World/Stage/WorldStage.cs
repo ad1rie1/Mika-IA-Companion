@@ -183,7 +183,7 @@ namespace Mika.World.Engine
                 WorldObject view;
                 if (sceneObjects.TryGetValue(obj.Id, out var oa))
                 {
-                    view = oa.GetComponent<WorldObject>() ?? oa.gameObject.AddComponent<WorldObject>();
+                    view = oa.gameObject.GetOrAdd<WorldObject>();
                 }
                 else
                 {
@@ -218,7 +218,7 @@ namespace Mika.World.Engine
                 go.transform.localScale = Vector3.one * 0.12f;
             }
             go.name = name;
-            return go.GetComponent<WorldObject>() ?? go.AddComponent<WorldObject>();
+            return go.GetOrAdd<WorldObject>();
         }
 
         ActorBody EnsureActor(string id, string assetKey, string label)
@@ -239,9 +239,17 @@ namespace Mika.World.Engine
                 go.transform.localScale = new Vector3(0.4f, 0.8f, 0.4f);
             }
             go.name = string.IsNullOrEmpty(label) ? id : $"{label} ({id})";
-            var body = go.GetComponent<ActorBody>() ?? go.AddComponent<ActorBody>();
+            // Un avatar humanoïde reçoit le contrôleur du corps commun avant que le corps ne s'y relie.
+            var animator = go.GetComponentInChildren<Animator>();
+            if (animator != null && animator.isHuman && catalog != null && catalog.humanoidController != null)
+            {
+                animator.runtimeAnimatorController = catalog.humanoidController;
+                animator.applyRootMotion = false;
+            }
+            var body = go.GetOrAdd<ActorBody>();
+            if (animator != null) body.Bind(animator);
             body.actorId = id;
-            var player = go.GetComponent<IntentPlayer>() ?? go.AddComponent<IntentPlayer>();
+            var player = go.GetOrAdd<IntentPlayer>();
             player.Init(body, this);
             _actors[id] = body;
             ActorSpawned?.Invoke(id, body);
@@ -252,7 +260,8 @@ namespace Mika.World.Engine
         void OnReset()
         {
             if (_mirror?.World == null) return;
-            foreach (var p in _actors.Values) p.GetComponent<IntentPlayer>()?.Stop();
+            foreach (var p in _actors.Values)
+                if (p != null && p.TryGetComponent<IntentPlayer>(out var ip)) ip.Stop();
             // D'abord les objets qui ne sont pas tenus (une main a besoin de son corps posé).
             foreach (var o in _mirror.Objects.Values.Where(o => !(o.Location is Held)))
                 ApplyObject(o, instant: true);
@@ -450,7 +459,7 @@ namespace Mika.World.Engine
             if (intent.Actor == localActor) return;
             var body = Actor(intent.Actor);
             if (body == null) return;
-            body.GetComponent<IntentPlayer>()?.Play(intent, _clock, _reporter);
+            if (body.TryGetComponent<IntentPlayer>(out var player)) player.Play(intent, _clock, _reporter);
         }
 
         void OnIntentEnded(IntentEnd end)

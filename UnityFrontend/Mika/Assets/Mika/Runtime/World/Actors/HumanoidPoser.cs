@@ -79,18 +79,19 @@ namespace Mika.World.Engine
             var s = Mathf.Sin(phase) * walk;
             var k = Mathf.Max(0f, Mathf.Sin(phase + 1.2f)) * walk;
             var k2 = Mathf.Max(0f, Mathf.Sin(phase + Mathf.PI + 1.2f)) * walk;
-            Add(m, _lUpperLeg, 0.45f * s);
-            Add(m, _rUpperLeg, -0.45f * s);
+            Add(m, _lUpperLeg, -0.42f * s);
+            Add(m, _rUpperLeg, 0.42f * s);
             Add(m, _lLowerLeg, -0.6f * k);
             Add(m, _rLowerLeg, -0.6f * k2);
             Add(m, _lArmFront, -0.25f * s);
             Add(m, _rArmFront, 0.25f * s);
 
-            // Assise : cuisses à l'horizontale, genoux pliés, buste droit.
-            Add(m, _lUpperLeg, 0.95f * sit);
-            Add(m, _rUpperLeg, 0.95f * sit);
-            Add(m, _lLowerLeg, -0.95f * sit);
-            Add(m, _rLowerLeg, -0.95f * sit);
+            // Assise : cuisses à l'horizontale, genoux à angle droit, buste droit. Valeurs absolues mesurées sur
+            // l'avatar (−0,62 : genou à hauteur de hanche ; 0 : pied sous le genou) — un muscle négatif avance la cuisse.
+            Blend(m, _lUpperLeg, -0.62f, sit);
+            Blend(m, _rUpperLeg, -0.62f, sit);
+            Blend(m, _lLowerLeg, 0f, sit);
+            Blend(m, _rLowerLeg, 0f, sit);
             Add(m, _lArmFront, 0.25f * sit);
             Add(m, _rArmFront, 0.25f * sit);
 
@@ -118,6 +119,11 @@ namespace Mika.World.Engine
         static void Set(float[] m, int i, float v)
         {
             if (i >= 0) m[i] = v;
+        }
+
+        static void Blend(float[] m, int i, float target, float k)
+        {
+            if (i >= 0) m[i] = Mathf.Lerp(m[i], target, Mathf.Clamp01(k));
         }
 
         static void Add(float[] m, int i, float v)

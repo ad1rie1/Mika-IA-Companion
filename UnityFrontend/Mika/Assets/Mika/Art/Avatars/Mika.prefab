@@ -16,6 +16,14 @@ PrefabInstance:
       propertyPath: m_Name
       value: Mika
       objectReference: {fileID: 0}
+    - target: {fileID: 4870552773557632513, guid: 3a6a355347744974398cf9e25015df43, type: 3}
+      propertyPath: m_Controller
+      value: 
+      objectReference: {fileID: 9100000, guid: 251d1d4e5a3c3340e84f3c5d44340dfd, type: 2}
+    - target: {fileID: 4870552773557632513, guid: 3a6a355347744974398cf9e25015df43, type: 3}
+      propertyPath: m_CullingMode
+      value: 1
+      objectReference: {fileID: 0}
     - target: {fileID: 5159078012444724336, guid: 3a6a355347744974398cf9e25015df43, type: 3}
       propertyPath: m_LocalPosition.x
       value: 0

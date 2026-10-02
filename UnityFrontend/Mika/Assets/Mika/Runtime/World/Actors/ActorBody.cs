@@ -82,7 +82,7 @@ namespace Mika.World.Engine
             _poser = _procedural ? new HumanoidPoser(a) : null;
             if (_procedural)
                 a.enabled = false; // le poseur écrit les os lui-même
-            var relay = a.GetComponent<IkRelay>() ?? a.gameObject.AddComponent<IkRelay>();
+            var relay = a.gameObject.GetOrAdd<IkRelay>();
             relay.Body = this;
         }
 
@@ -147,7 +147,7 @@ namespace Mika.World.Engine
         /// <summary>Pose le corps sans rien jouer (un instantané, une arrivée tardive).</summary>
         public void Snap(Vector3 position, Quaternion rotation, Posture posture, PlaceView place = null)
         {
-            StopAgent();
+            StopAgent(keepEnabled: false);
             _posture = posture;
             _sit = _sitTarget = posture == Posture.Sit ? 1f : 0f;
             _lie = _lieTarget = posture == Posture.Lie ? 1f : 0f;
@@ -248,7 +248,7 @@ namespace Mika.World.Engine
         public IEnumerator ChangePosture(Posture to, PlaceView place, float duration)
         {
             if (to == _posture && (place == null || _anchor.HasValue)) yield break;
-            StopAgent();
+            StopAgent(keepEnabled: false); // la transition déplace le corps hors du sol navigable
             var fromPos = transform.position;
             var fromRot = transform.rotation;
             Vector3 toPos;
@@ -397,10 +397,18 @@ namespace Mika.World.Engine
         // --- navigation ---------------------------------------------------------------------------------------
         NavMeshAgent EnsureAgent()
         {
-            if (_agent != null) return _agent;
+            if (_agent != null)
+            {
+                if (!_agent.enabled)
+                {
+                    _agent.enabled = true;
+                    if (NavMesh.SamplePosition(transform.position, out var back, 1.5f, NavMesh.AllAreas)) _agent.Warp(back.position);
+                }
+                return _agent;
+            }
             if (!NavMesh.SamplePosition(transform.position, out var hit, 1.5f, NavMesh.AllAreas))
                 return null;
-            _agent = GetComponent<NavMeshAgent>() ?? gameObject.AddComponent<NavMeshAgent>();
+            _agent = gameObject.GetOrAdd<NavMeshAgent>();
             _agent.radius = 0.22f;
             _agent.height = 1.6f;
             _agent.acceleration = 6f;
@@ -418,7 +426,12 @@ namespace Mika.World.Engine
                 _agent.Warp(hit.position);
         }
 
-        void StopAgent()
+        /// <summary>
+        /// Arrête la marche. Actif, l'agent recloue le corps sur le sol navigable à chaque image : on le coupe dès
+        /// que le corps doit le quitter (une transition de posture, une assise, un lit) ; la marche suivante le
+        /// rallume (<see cref="EnsureAgent"/>).
+        /// </summary>
+        void StopAgent(bool keepEnabled)
         {
             if (_agent != null && _agent.enabled && _agent.isOnNavMesh)
             {
@@ -426,7 +439,7 @@ namespace Mika.World.Engine
                 _agent.ResetPath();
             }
             if (_agent != null)
-                _agent.enabled = _posture == Posture.Stand;
+                _agent.enabled = keepEnabled;
         }
 
         static float PathLength(NavMeshPath path)
