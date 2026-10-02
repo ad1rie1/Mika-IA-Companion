@@ -16,7 +16,7 @@ from types import MappingProxyType
 from mika.contracts.affect import MoodReading, StanceReading
 from mika.faculties.affect.params import AffectParams
 from mika.faculties.affect.physics import HOSTILE
-from mika.kernel.clock import MINUTE
+from mika.kernel.clock import HOUR, MINUTE
 from mika.vocab import affect as A
 from mika.vocab.affect import FR, Emotion, intensity_word, partitive
 
@@ -50,15 +50,27 @@ CAUSES: Mapping[str, str] = MappingProxyType({
     "email": "Ça vient d'un mail.",
     "rss": "Ça vient de quelque chose que tu as lu.",
     "camera": "Ça vient de quelque chose que tu as vu.",
+    "compagnie": "Quelqu'un est venu te parler après un moment creux, et ça te fait du bien.",
+    "une rêverie écrite": "Ça vient d'un moment où tu as laissé ton esprit vagabonder.",
 })
+#: Une cause qui est un état, dite quand cet état a pris fin (quelqu'un est venu te parler depuis) : au passé, et
+#: ce qui en reste au présent — jamais « personne ne t'a parlé » en pleine conversation (HUM-5).
+CAUSES_OVER: Mapping[str, str] = MappingProxyType({
+    "lonely": "Tu t'es sentie seule une partie de la journée ; il t'en reste un peu.",
+    "bored": "Tu t'es un peu ennuyée tout à l'heure ; il t'en reste un peu.",
+})
+#: Combien de temps elle se dit que quelqu'un s'est excusé (la posture), après.
+APOLOGY_SAID_US = 6 * HOUR
 UNKNOWN_CAUSE = "sans trop savoir pourquoi"
 #: En deçà, sa dernière balise date d'« à l'instant ».
 JUST_NOW_US = 3 * MINUTE
 
 
-def cause_line(cause: str, person: str = "", current: str = "") -> str:
+def cause_line(cause: str, person: str = "", current: str = "", ended: bool = False) -> str:
     """La cause, dite sans nommer personne : « votre échange » seulement si c'est
-    avec la personne à qui elle parle maintenant."""
+    avec la personne à qui elle parle maintenant ; un état qui a pris fin, au passé."""
+    if ended and cause in CAUSES_OVER:
+        return CAUSES_OVER[cause]
     if cause == "talk":
         if not person:
             return ""
@@ -88,7 +100,7 @@ def mood(m: MoodReading, p: AffectParams, current: str = "") -> str:
                         f"{partitive(residue)} de tout à l'heure.")
         return f"Ton humeur générale est {FR[default]}, comme d'habitude."
     word, adj = intensity_word(m.felt_intensity), FR[m.felt]
-    cause = cause_line(m.cause, m.cause_person, current)
+    cause = cause_line(m.cause, m.cause_person, current, m.cause_over)
     if m.felt is default:
         if m.felt_intensity >= p.marked_intensity:
             base = f"Ton humeur générale est {adj}, nettement plus que d'habitude."
@@ -153,6 +165,9 @@ def stance(s: StanceReading, p: AffectParams, *, name: str = "", now: int = 0) -
     if s.anchored and shown is not None:
         lasting = " : ça ne passera pas en deux minutes." if s.lasting else "."
         lines.append(f"Ça fait plusieurs échanges de suite que tu te sens {FR[shown]} avec {who}{lasting}")
+    if s.apologized_at and now and now - s.apologized_at < APOLOGY_SAID_US:
+        when = "à l'instant" if now - s.apologized_at < JUST_NOW_US else "tout à l'heure"
+        lines.append(f"{who[:1].upper()}{who[1:]} t'a présenté ses excuses {when}.")
     installed = fond(s, p, name)
     if installed:
         lines.append(installed)

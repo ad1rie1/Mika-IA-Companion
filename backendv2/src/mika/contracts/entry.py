@@ -25,6 +25,8 @@ class Admission:
     seq: int | None = None
     duplicate: bool = False
     reply: Awaitable[Any] | None = None
+    #: elle dort : la réponse attend son réveil (l'écran ne montre pas « Mika écrit… » pendant ce temps)
+    held: bool = False
 
 
 @dataclass(frozen=True, slots=True)

@@ -16,11 +16,17 @@ from __future__ import annotations
 import asyncio
 import re
 
+import pytest
+
 from mika.app import composition
+from mika.contracts import attention as attention_c
+from mika.contracts import memory as memory_c
+from mika.faculties.memory.consolidation import same_words
 from mika.kernel.clock import DAY, US
 from mika.sim.clock import run_virtual
+from mika.vocab.people import clean_tokens
 from tests.fixtures.memory import SIX, Script, chat, kept, section, seq_of, token
-from tests.fixtures.mika import DOC, boot, build, connect
+from tests.fixtures.mika import DOC, at_paris, boot, build, connect, said
 
 REVIENT = "CE QUI TE REVIENT"
 EXCHANGES = "VOS ÉCHANGES PASSÉS"
@@ -150,6 +156,42 @@ def test_past_exchanges_do_not_repeat_the_thread_she_sees(tmp_path):
     assert "Moustache a vomi" in run(5), "contrôle : hors du fil montré, l'échange revient"
 
 
+def test_a_burst_is_kept_whole_and_its_real_question_comes_back(tmp_path):
+    """« salut », « t'as vu le match hier soir contre Lyon ? », « allo ? » : une seule réponse règle les trois
+    (le tour, ADR 0040). L'échange gardé ne se réduisait qu'au dernier — « allo ? » —, et la vraie question
+    n'existait plus nulle part : ni le rappel ni la recherche ne la retrouvaient."""
+    script = Script(reply="Oui je l'ai vu, quel match !")
+    kernel, clock, _, _out = build(tmp_path, script, latency=lambda r: 8.0 if r.role == "reply" else 0.5)
+
+    async def main():
+        await boot(kernel)
+        await composition.configure(kernel, DOC, {"transcript": {"window": 2}})
+        await connect(kernel, "user_2", "Alice")
+        waits = []
+        for text in ("salut", "t'as vu le match hier soir contre Lyon ?", "allo ?"):
+            waits.append((await kernel.perceive(said("user_2", text))).reply)
+            await asyncio.sleep(1)
+        for w in waits:
+            if w is not None:
+                await w
+        await asyncio.sleep(10 * 60)
+        await chat(kernel, "user_2", ["il pleut chez moi", "j'ai mangé des pâtes", "tu fais quoi ce soir ?"])
+        await asyncio.sleep(15 * 60)
+        await chat(kernel, "user_2", ["au fait, tu te souviens du match contre Lyon ?"])
+        rows = kernel.mind.store.query_mind(f"SELECT question, user_text FROM {memory_c.CHUNKS_TABLE} ORDER BY id")
+        await kernel.stop()
+        return rows
+
+    rows = run_virtual(clock, main)
+    burst = [(q, text) for q, text in rows if "allo" in text]
+    assert len(burst) == 1, rows  # une réponse, un échange
+    question, text = burst[0]
+    assert text.index("salut") < text.index("match hier soir contre Lyon") < text.index("allo"), text
+    assert question < max(q for q, _ in rows)  # sa question est le premier message du tour
+    shown = section(script.replies("user_2")[-1], EXCHANGES)
+    assert "match hier soir contre Lyon" in shown, shown
+
+
 def test_in_a_room_each_past_exchange_names_who_spoke(tmp_path):
     room = {"room": "tg_chat_-9", "channel": "telegram"}
     script = Script()
@@ -225,6 +267,40 @@ def test_lyon_then_nantes_then_lyon_means_lyon(tmp_path):
     assert active == ["Alice habite à Lyon"], rows
 
 
+def test_restating_a_belief_while_pointing_at_itself_is_not_a_revision(tmp_path):
+    """Le modèle redit « Alice habite à Lyon » en désignant cette même croyance comme remplacée : ce n'est pas
+    changer d'avis — aucune pensée « Je croyais que… — apparemment ce n'est plus vrai » (sonde réelle du
+    2026-10-02, où elle « révisait » trois fois une croyance par elle-même). Contre-exemple : Lyon puis Nantes,
+    oui."""
+    def extract(prompt):
+        head, _, body = prompt.partition("Les messages :")
+        known = dict((city, int(i)) for i, city in re.findall(r"^\[#(\d+)\] Alice habite à (\w+)$", head, re.M))
+        said_ = re.findall(r"J'habite à (\w+)", body)
+        if not said_:
+            return None
+        city = said_[-1]
+        old = list(known.values())
+        return {"croyances": [{"texte": f"Alice habite à {city}", "personnes": [token(prompt, "Alice")],
+                               "sensibilite": "anodin", "remplace": old[0] if old else None}]}
+
+    script = Script(extract)
+    kernel, clock, _, _out = build(tmp_path, script)
+
+    async def main():
+        await boot(kernel)
+        await connect(kernel, "user_2", "Alice")
+        revisions = []
+        for city in ("Lyon", "Lyon", "Nantes"):
+            await chat(kernel, "user_2", [f"J'habite à {city}", *SIX[1:]], gap_s=30)
+            await asyncio.sleep(15 * 60)
+            revisions.append(len([t for t in kernel.mind.frame().get(attention_c.THOUGHTS)
+                                  if t.origin == attention_c.REVISION]))
+        await kernel.stop()
+        return revisions
+
+    assert run_virtual(clock, main) == [0, 0, 1]
+
+
 def test_the_same_informant_repeating_does_not_make_it_surer(tmp_path):
     """Alice le dit, Carol le confirme (plus sûr), puis Carol le redit : ce
     n'est pas une troisième source."""
@@ -257,3 +333,71 @@ def test_the_same_informant_repeating_does_not_make_it_surer(tmp_path):
     assert len(beliefs) == 1
     assert abs(beliefs[0]["confidence"] - 0.8) < 1e-9, "Carol a corroboré une fois ; se répéter n'ajoute rien"
     assert beliefs[0]["informants"] == ["user_2", "user_4"]
+
+
+@pytest.mark.parametrize("a, b, same", [
+    ("Alice habite à Lyon", "alice habite a Lyon.", True),
+    ("Adrien a un entretien jeudi", "Adrien a un entretien jeudi !", True),
+    ("Alice habite à Lyon", "Alice n'habite pas à Lyon", False),  # une négation n'est pas un détail
+    ("Alice habite à Lyon", "Alice habite à Nantes", False),
+    ("", "Alice habite à Lyon", False),
+])
+def test_a_belief_said_again_word_for_word_is_the_same_belief(a, b, same):
+    assert same_words(a, b) is same
+
+
+@pytest.mark.parametrize("cite", ["mika", "alice"])
+def test_what_she_said_about_someone_is_not_something_she_learned(tmp_path, cite):
+    """Ce qu'elle a dit elle-même d'autrui n'est pas ce qu'on lui a appris : la sonde réelle l'a vue inventer
+    « il ne m'a rien dit » devant Chloé, puis l'extraction en faire une croyance sur Adrien. Contre-exemple : ce
+    qu'Alice a dit d'elle-même se retient."""
+    def extract(prompt):
+        body = prompt.split("Les messages :")[-1]
+        if "CANARI-U1" not in body:
+            return None
+        cited = seq_of(body, "CANARI-M1" if cite == "mika" else "CANARI-U1")
+        return {"croyances": [{"texte": "Alice déménage à Lyon (CANARI-B1)", "personnes": [token(prompt, "Alice")],
+                               "sensibilite": "anodin", "messages": cited}]}
+
+    script = Script(extract, reply="CANARI-M1 ah, je crois qu'elle déménage à Lyon [EMOTION:curious:0.3]")
+    kernel, clock, _, _out = build(tmp_path, script)
+
+    async def main():
+        await boot(kernel)
+        await connect(kernel, "user_2", "Alice")
+        await chat(kernel, "user_2", ["CANARI-U1 je déménage à Lyon le mois prochain", *SIX[1:]], gap_s=30)
+        await asyncio.sleep(15 * 60)
+        rows = kept(kernel)
+        await kernel.stop()
+        return rows
+
+    stored = [r for r in run_virtual(clock, main) if "CANARI-B1" in r["text"]]
+    assert bool(stored) is (cite == "alice")
+    assert clean_tokens("J'ai discuté avec Chloé [P1] : elle dessine") == "J'ai discuté avec Chloé : elle dessine"
+
+
+def test_she_remembers_by_the_time_it_was_said(tmp_path):
+    """« tu te souviens de ce que je t'ai dit lundi matin ? » ne contient aucun mot du souvenir : elle le
+    retrouve par le temps (sonde réelle du 2026-10-02 : elle ne retrouvait pas l'entretien annoncé lundi matin).
+    Contre-exemple : la même question sur mardi soir rend ce qui s'est dit mardi soir, pas lundi matin."""
+    script = Script()
+    kernel, clock, _, _out = build(tmp_path, script, start=at_paris(2026, 10, 5, 8, 30))
+
+    async def main():
+        await boot(kernel)
+        await composition.configure(kernel, DOC, {"transcript": {"window": 2}})  # lundi n'est plus dans le fil
+        await connect(kernel, "user_2", "Adrien")
+        await chat(kernel, "user_2", ["CANARI-T1 j'ai un entretien chez Ubisoft jeudi à 14h", *SIX[1:3]], gap_s=60)
+        await asyncio.sleep((at_paris(2026, 10, 6, 20, 0) - clock.now()) / US)
+        await chat(kernel, "user_2", ["CANARI-T2 mon chat a vomi sur le canapé ce soir", *SIX[3:5]], gap_s=60)
+        await asyncio.sleep((at_paris(2026, 10, 11, 15, 0) - clock.now()) / US)
+        await chat(kernel, "user_2", ["tu te souviens de ce que je t'ai dit lundi matin ?"])
+        monday = section(script.replies("user_2")[-1], EXCHANGES)
+        await chat(kernel, "user_2", ["et ce que je t'ai raconté mardi soir ?"])
+        tuesday = section(script.replies("user_2")[-1], EXCHANGES)
+        await kernel.stop()
+        return monday, tuesday
+
+    monday, tuesday = run_virtual(clock, main)
+    assert "CANARI-T1" in monday and "CANARI-T2" not in monday, monday
+    assert "CANARI-T2" in tuesday, tuesday

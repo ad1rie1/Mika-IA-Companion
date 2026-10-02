@@ -108,6 +108,16 @@ class Linked(Payload):
     by: str = "operator"
 
 
+class NameBound(Payload):
+    """Un opérateur dit que la personne dont on lui a parlé sous ce nom (``name:alice``, une clé de la mémoire)
+    est cette personne-là (``None`` : défait). Jamais déduit d'une ressemblance de nom : deux Alice ne se
+    confondent pas d'elles-mêmes (la certitude sur qui est qui reste mécanique)."""
+
+    name: str
+    person: str | None
+    by: str = "operator"
+
+
 class Registered(Payload):
     """Un compte du système (web, console) tel qu'il est : il existe comme personne,
     authentifiée, sous son nom (nom complet, sinon identifiant), dès sa création — sans
@@ -124,7 +134,8 @@ EVIDENCE = event_type("identity.evidence", OWNER, Evidence, version=2, public=Tr
                       content=("name", "note"), subjects=("handle", "about"))
 LINKED = event_type("identity.linked", OWNER, Linked, public=True, subjects=("handle",))
 REGISTERED = event_type("identity.registered", OWNER, Registered, public=True, subjects=("handle",))
-ALL = (CLAIMED, EVIDENCE, LINKED, REGISTERED)
+NAME_BOUND = event_type("identity.name_bound", OWNER, NameBound, public=True, subjects=("name",))
+ALL = (CLAIMED, EVIDENCE, LINKED, REGISTERED, NAME_BOUND)
 
 
 @dataclass(frozen=True, slots=True)

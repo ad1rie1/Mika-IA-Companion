@@ -32,6 +32,7 @@ from mika.kernel.inspect import (
     Timeline,
     Vital,
     When,
+    num_fr,
 )
 from mika.vocab import circadian
 from mika.vocab.affect import emotion_cell
@@ -69,7 +70,7 @@ def _gate_fr(s: BodyState, frame: Frame) -> str:
     if m.veto is not None:
         return VETO_FR.get(m.veto, m.veto)
     if m.shift:
-        return f"plus rares (décalage {m.shift:+.1f})"
+        return f"plus rares (décalage {num_fr(m.shift, 1, signed=True)})"
     return "libres"
 
 

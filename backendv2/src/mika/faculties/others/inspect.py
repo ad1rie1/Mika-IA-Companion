@@ -123,7 +123,7 @@ def _guessed(s: OthersState, frame: Frame, ctx: InspectContext) -> list[Block]:
         answered, missed, estimate, shift = receptivity(s, person, band, p)
         effect: Cell = (Badge(num_fr(shift, 2, signed=True), "ok" if shift > 0 else "warn") if shift else
                         Text("aucun", kind="muted"))
-        rows.append((BANDS_FR[band] + (" — maintenant" if band == now_band else ""), f"{answered:g}", f"{missed:g}",
+        rows.append((BANDS_FR[band] + (" — maintenant" if band == now_band else ""), f"{num_fr(answered)}", f"{num_fr(missed)}",
                      _ratio(estimate), effect))
     blocks.append(Table((Column("quand elle écrit"), Column("réponses", "num"), Column("sans réponse", "num"),
                          Column("chance d'une réponse"), Column("effet sur ses initiatives", "fit")), tuple(rows),

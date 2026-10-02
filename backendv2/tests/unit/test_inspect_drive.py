@@ -67,6 +67,11 @@ SERIES = {"affect.valence": (-1.0, 1.0), "affect.eveil": (-1.0, 1.0), "body.ener
 ANGER = {"angry", "frustrated", "disgusted"}
 
 
+def _num(text: str) -> float:
+    """Un nombre affiché à la française (« −0,31 », « +0,12 ») relu."""
+    return float(text.replace("\u2212", "-").replace("+", "").replace(",", ".").replace("\u202f", ""))
+
+
 def when(t: int) -> str:
     return local(t, PARIS).strftime("%d/%m %H:%M")
 
@@ -351,15 +356,15 @@ def test_the_stance_toward_someone_reads_anger_then_warmth(tmp_path):
     a = _row(table(angry, "Postures envers chacun"), "Alice")
     w = _row(table(warm, "Postures envers chacun"), "Alice")
     assert a["ressentie envers elle"].key in ANGER and a["dernière balise"].key == "angry"
-    assert isinstance(a["hostilité"], Meter) and float(a["hostilité"].text) > 0.05
-    assert float(a["chaleur (−1…1)"].text) < 0 and a["chaleur (−1…1)"].tone == "danger"
+    assert isinstance(a["hostilité"], Meter) and _num(a["hostilité"].text) > 0.05
+    assert _num(a["chaleur (−1…1)"].text) < 0 and a["chaleur (−1…1)"].tone == "danger"
     # la ligne mène à la fiche de la personne, et son détail dit ce qu'elle se dit
     assert a["_row"].href == Ref.subject("person", "user_1", a["personne"].text, "affect")
     assert "en colère" in flat([a["_row"].detail[0]])
     assert isinstance(a["quand"], When)
     assert w["ressentie envers elle"].key not in ANGER and w["dernière balise"].key == "love"
-    assert float(w["chaleur (−1…1)"].text) > float(a["chaleur (−1…1)"].text)
-    assert float(w["hostilité"].text) < float(a["hostilité"].text)
+    assert _num(w["chaleur (−1…1)"].text) > _num(a["chaleur (−1…1)"].text)
+    assert _num(w["hostilité"].text) < _num(a["hostilité"].text)
     # l'humeur générale : la vue et la barre de vitaux se lisent en colère, la valence a baissé
     assert stat(angry_mood, "dernière balise").value.key == "angry"
     assert stat(angry_mood, "ressentie").value.key in ANGER
@@ -368,7 +373,7 @@ def test_the_stance_toward_someone_reads_anger_then_warmth(tmp_path):
     assert mood_vital.swatch.palette == "emotion" and 0.0 < mood_vital.ratio <= 1.0
     assert angry_measure["affect.valence"] < fresh["affect.valence"]
     assert warm_measure["affect.valence"] > angry_measure["affect.valence"]
-    assert "« Alice »" in stat(warm_mood, "dernière balise").sub
+    assert "Alice" in stat(warm_mood, "dernière balise").sub and "user_1" not in stat(warm_mood, "dernière balise").sub
     declared = table(warm_mood, "Dernières balises")
     assert column(declared, "émotion déclarée")[0].key == "love"
     assert isinstance(column(declared, "à qui")[0], Ref) and column(declared, "à qui")[0].key == "person/user_1"
@@ -393,14 +398,14 @@ def test_the_person_tab_speaks_only_of_that_person(tmp_path):
     alice_tags = timeline(alice, "Ses dernières balises envers elle").entries
     bruno_tags = timeline(bruno, "Ses dernières balises envers elle").entries
     # chacun ne voit que ce qui lui a été déclaré (une salutation d'elle-même comprise)
-    assert all(e.meta.endswith("· user_1") for e in alice_tags)
-    assert all(e.meta.endswith("· user_2") for e in bruno_tags)
+    # par où, jamais la clé de l'adresse (les réponses d'Alice, toutes en colère, ne sont pas celles de Bruno)
+    assert all(e.meta.endswith("· sur le web") and "user_" not in e.meta for e in (*alice_tags, *bruno_tags))
     alice_replies = [e.title for e in alice_tags if e.meta.startswith("en répondant")]
     bruno_replies = [e.title for e in bruno_tags if e.meta.startswith("en répondant")]
     assert len(alice_replies) == 4 and all("en colère" in t for t in alice_replies)
     assert len(bruno_replies) == 4 and all("amoureuse" in t for t in bruno_replies)
     assert stat(alice, "ressentie").value.key in ANGER and stat(alice, "dernière balise").value.key == "angry"
-    assert float(stat(alice, "chaleur").value.text) < 0 < float(stat(bruno, "chaleur").value.text)
+    assert _num(stat(alice, "chaleur").value.text) < 0 < _num(stat(bruno, "chaleur").value.text)
     assert stat(bruno, "dernière balise").value.key == "love"
     assert "Aucune posture" in flat(stranger) and "elle ne lui a encore rien déclaré" in flat(stranger)
     assert nobody[0].text == "Cette vue se lit sur la fiche d'une personne."
@@ -448,7 +453,7 @@ def test_an_unanswered_initiative_reads_as_such_then_as_answered(tmp_path):
 
     before, after = live(tmp_path, scenario, start=at_paris(2026, 9, 28, 9, 0))
     spoken = timeline(before, "Ce qu'elle a dit d'elle-même").entries
-    assert spoken and "« Alice »" in spoken[0].title and spoken[0].meta == "sans réponse pour l'instant"
+    assert spoken and spoken[0].title == "à Alice" and spoken[0].meta == "sans réponse pour l'instant"
     assert spoken[0].tone == "warn" and spoken[0].href.key == "person/user_1"
     assert stat(before, "ignorées d'affilée").value != 0 and stat(before, "ignorées d'affilée").tone == "warn"
     answered = timeline(after, "Ce qu'elle a dit d'elle-même").entries[0]

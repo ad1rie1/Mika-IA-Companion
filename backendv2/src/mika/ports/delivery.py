@@ -37,6 +37,9 @@ REPLY_FAILED = "reply_failed"
 REPLY_ABSTAINED = "reply_abstained"
 #: les sortes qui disent ce qu'est devenue une question (sans parole)
 REPLY_OUTCOMES = frozenset({REPLY_FAILED, REPLY_ABSTAINED})
+#: le détail d'un ``reply_failed`` pour une question abandonnée parce que trop vieille (une reprise au
+#: démarrage, des heures plus tard) : un transport peut le dire autrement qu'une panne
+TOO_LATE = "trop tard pour répondre"
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +67,9 @@ class Delivery:
     sleep_phase: str = "awake"
     local_hour: int = 12
     kind: str = SPEECH
+    #: les messages que cette réponse règle (tout le tour : une rafale reçoit une seule réponse, à son dernier
+    #: message, ``reply_to``) — un écran rattache aussi les précédents à leur ligne du fil
+    answers: tuple[int, ...] = ()
 
 
 class DeliveryPort(Protocol):

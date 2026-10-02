@@ -51,6 +51,7 @@ from mika.faculties.self import (
     ABANDONED,
     BLOCKED,
     DONE,
+    MUSED,
     OPENED,
     REMINDED,
     SELF,
@@ -72,6 +73,7 @@ from mika.vocab import affect as A
 from mika.vocab import circadian, privacy
 from mika.vocab.affect import Appraisal
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
+from mika.vocab.people import clean_tokens
 from mika.vocab.privacy import Sensitivity
 
 KEEP_JOURNALS = 14
@@ -103,7 +105,9 @@ def night_of(frame: Frame, asleep_since: int) -> str:
 def _journaled(s: SelfState, e, cx) -> SelfState:
     d = e.data
     rev = s.journals[d.day].rev + 1 if d.day in s.journals else 0
-    journals = s.journals.set(d.day, Journal(d.day, d.text.ref or "", tuple(d.about), d.dominant, e.at, rev))
+    shareable = d.shareable.ref or "" if d.shareable is not None else ""
+    journals = s.journals.set(d.day, Journal(d.day, d.text.ref or "", tuple(d.about), d.dominant, e.at, rev,
+                                             shareable))
     if len(journals) > KEEP_JOURNALS:
         journals = type(journals)(sorted(journals.items())[-KEEP_JOURNALS:])
     return replace(s, journals=journals)
@@ -159,7 +163,7 @@ def _yesterday(s: SelfState, cx) -> c.JournalReading | None:
     if not past:
         return None
     j = s.journals[past[-1]]
-    return c.JournalReading(j.day, j.text_ref, j.about, j.dominant)
+    return c.JournalReading(j.day, j.text_ref, j.about, j.dominant, j.shareable_ref)
 
 
 @SELF.fact(c.DREAM_RESIDUE)
@@ -249,6 +253,13 @@ avec qui tu as parlé (par leur prénom). Rien d'inventé : seulement ce que dis
 moments qu'elles disent (le matin, le soir…). Si tu as écrit à quelqu'un sans réponse, ce n'est pas que personne ne \
 t'a parlé : dis-le comme tu l'as vécu. Si la journée a été vide, dis-le simplement. Pas de date en tête, pas de \
 liste, pas de balise. Réponds seulement par le texte du journal."""
+
+SHAREABLE_SYSTEM = """Quelqu'un te demande « et toi, t'as fait quoi hier ? ». Écris en une à trois phrases, à la \
+première personne et avec tes mots, ce que tu lui raconterais de ta journée : ce que tu as fait de ton côté, ce qui \
+t'a occupée, comment tu te sentais. Seulement ta vie à toi, d'après tes notes : personne d'autre n'y figure et tu \
+n'en ajoutes pas ; rien d'inventé. Si tu as parlé avec des gens, dis seulement que tu as discuté — jamais avec qui, \
+ni de quoi, ni comment ils allaient. Si tu n'as rien fait de particulier, dis-le simplement. Pas de date, pas de \
+balise. Réponds seulement par ce texte."""
 
 #: ce que « [SILENCE] » et ses variantes ne sont pas : un journal
 _SILENT = re.compile(r"^\W*silence\W*$", re.IGNORECASE)
@@ -341,12 +352,31 @@ class Write:
         text = (response.text or "").strip()
         if silent(text):
             return
+        # ce qu'elle raconterait de sa journée à n'importe qui : écrit d'après des notes où personne d'autre
+        # n'apparaît — ce qui n'est pas dans les notes ne peut pas s'ébruiter (sonde réelle du 2026-10-02 : le
+        # journal, prénoms masqués, livrait à Chloé ce qu'Adrien avait demandé de lui taire)
+        told = await ctx.llm.call(LLMRequest(
+            role="journal", call_id=f"{ctx.run_id}#{key}:partage", persona=persona,
+            system_stable=persona.text + "\n\n" + SHAREABLE_SYSTEM,
+            messages=(Message("user", public_notes_of(frame, store, state, date.fromisoformat(day))),),
+            max_tokens=250, lane="background", priority=4, meta={"purpose": "shareable"}))
+        shareable = (told.text or "").strip()
         self.retry_at = 0
         await ctx.emit(c.JOURNALED.draft(
             day=day, text=Content.of(text[:2000], level=int(Sensitivity.PERSONAL)), about=about, dominant=dominant,
             messages=messages, voice=VoiceProvenance(call_id=request.call_id, persona_hash=persona.hash,
                                                      role="journal", model=response.model),
+            shareable=None if silent(shareable) else Content.of(shareable[:800]),
             dedupe_key=f"journal:{key}"))
+
+
+def _listed(raw: Any) -> list[str]:
+    """Une colonne JSON de clés de personnes (« [] » si vide ou illisible)."""
+    try:
+        got = json.loads(raw) if isinstance(raw, str) else raw
+    except ValueError:
+        return []
+    return [str(x) for x in got] if isinstance(got, list) else []
 
 
 def notes_of(frame: Frame, store: Any, state: SelfState, day: date) -> tuple[str, tuple[str, ...], str, int]:
@@ -414,14 +444,17 @@ def notes_of(frame: Frame, store: Any, state: SelfState, day: date) -> tuple[str
         people |= {r for _, r in promised if r}
         names.update(_names(frame, {r for _, r in promised if r and r not in names}))
     souvenirs = store.query_mind(
-        f"SELECT text FROM {memory_c.ITEMS_TABLE} WHERE kind=? AND born_at >= ? AND born_at < ? "
+        f"SELECT text, about, told_by FROM {memory_c.ITEMS_TABLE} WHERE kind=? AND born_at >= ? AND born_at < ? "
         "AND status='active' ORDER BY importance DESC, id LIMIT 6", (memory_c.SOUVENIR, start, end))
     if souvenirs:
-        lines += ["Ce que tu as retenu :"] + [f"- {r[0]}" for r in souvenirs]
+        lines += ["Ce que tu as retenu :"] + [f"- {clean_tokens(r[0])}" for r in souvenirs]
+        # le journal dit qui il concerne : tous ceux dont il parle, pas seulement ceux qui lui ont parlé
+        people |= {p for _t, a, t in souvenirs for p in (*_listed(a), *_listed(t))}
     thoughts = [t for t in frame.get(attention_c.THOUGHTS) if t.intensity >= 0.2][:3]
     thought_texts = store.content([t.text_ref for t in thoughts if t.text_ref])
     if thought_texts:
         lines += ["Ce qui te trotte dans la tête :"] + [f"- {t}" for t in thought_texts.values()]
+        people |= {p for t in thoughts if t.text_ref in thought_texts for p in t.about}
     mood = _mood_line(frame, felt)
     if mood:
         lines.append(mood)
@@ -431,18 +464,45 @@ def notes_of(frame: Frame, store: Any, state: SelfState, day: date) -> tuple[str
     return "\n".join(lines), about, dominant, sum(len(v) for v in told.values())
 
 
-def _deeds(frame: Frame, store: Any, state: SelfState, start: int, end: int) -> list[str]:
-    """Ce qu'elle a fait de son côté, cette journée-là."""
-    deeds = [x for x in state.deeds if start <= x.at < end]
+def public_notes_of(frame: Frame, store: Any, state: SelfState, day: date) -> str:
+    """Ses notes de la journée sans personne d'autre : ce qu'elle a fait de son côté (ce qui ne concerne qu'elle),
+    comment son humeur a tourné, et combien de gens elle a vus — jamais qui, ni ce qu'ils ont dit."""
+    tz = frame.env.tz_of(frame.root)
+    start, end = d_.day_window(day, tz, _starts(frame))
+    rows = store.query_mind(f"SELECT person, role, emotion FROM {transcript_c.THREAD_TABLE} "
+                            "WHERE at >= ? AND at < ? ORDER BY id", (start, end))
+    people = {frame.get(identity_c.PERSON(h)) for h, _r, _e in rows if h}
+    felt = store.query_mind(f"SELECT at, emotion FROM {transcript_c.THREAD_TABLE} "
+                            "WHERE at >= ? AND at < ? AND role != 'user' AND emotion != '' ORDER BY id", (start, end))
+    lines = [f"Ta journée du {circadian.day_fr(day)}."]
+    n = len({p for p in people if p})
+    lines.append("Tu n'as parlé avec personne." if not n else
+                 "Tu as parlé avec une personne." if n == 1 else f"Tu as parlé avec {n} personnes.")
+    lines += _deeds(frame, store, state, start, end, public=True)
+    mood = _mood_line(frame, [(int(at), str(e)) for at, e in felt])
+    if mood:
+        lines.append(mood)
+    return "\n".join(lines)
+
+
+def _deeds(frame: Frame, store: Any, state: SelfState, start: int, end: int, *, public: bool = False) -> list[str]:
+    """Ce qu'elle a fait de son côté, cette journée-là. ``public`` : seulement ce qui ne concerne qu'elle (pas un
+    but né de ce qu'on lui a confié, pas le projet de quelqu'un nommé)."""
+    deeds = [x for x in state.deeds if start <= x.at < end
+             and not (public and (x.about or x.sensitivity > Sensitivity.ANODYNE))]
     if not deeds:
         return []
     titles = store.content(sorted({x.title_ref for x in deeds if x.title_ref}))
-    projects = {pv.id: pv.title_ref for pv in frame.get(projects_c.LIVE)}
+    projects = {pv.id: pv.title_ref for pv in frame.get(projects_c.LIVE)
+                if not (public and (pv.about or pv.sensitivity > Sensitivity.ANODYNE))}
     project_titles = store.content(sorted({r for r in projects.values() if r}))
     parts: list[str] = []
     worked: set[int] = set()
+    mused = [titles.get(x.title_ref, "") for x in deeds if x.what == MUSED]
     for x in deeds:
         title = titles.get(x.title_ref, "")
+        if x.what == MUSED:
+            continue  # ses rêveries : une seule mention, à la fin (rien n'est arrivé, ce n'est pas un acte)
         if x.what == WORKED:
             if x.project in worked:
                 continue
@@ -457,9 +517,15 @@ def _deeds(frame: Frame, store: Any, state: SelfState, start: int, end: int) -> 
                 ABANDONED: "tu as laissé tomber", REMINDED: "tu as fait un rappel :"}.get(x.what)
         if verb:
             parts.append(f"{verb} « {_quote(title, 100)} »")
-    if not parts:
-        return []
-    return ["Ce que tu as fait de ton côté : " + " ; ".join(parts[:6]) + "."]
+    lines = ["Ce que tu as fait de ton côté : " + " ; ".join(parts[:6]) + "."] if parts else []
+    named = [t for t in mused if t]
+    if named and len(mused) > 1:
+        lines.append(f"Tu as aussi laissé ton esprit vagabonder, à plusieurs reprises (« {_quote(named[0], 100)} », "
+                     "entre autres) : des rêveries, rien de plus.")
+    elif named:
+        lines.append(f"Tu as aussi laissé ton esprit vagabonder un moment (« {_quote(named[0], 100)} ») : une "
+                     "rêverie, rien de plus.")
+    return lines
 
 
 def _mood_line(frame: Frame, felt: list[tuple[int, str]]) -> str:
@@ -593,7 +659,8 @@ class Dreaming:
         sensitivity = max([int(r[4]) for r in picked] + [t.sensitivity for t in thoughts] + [1])
         for r in picked:
             about |= set(_about(r[3]))
-        fragments = [f"- {r[1]}" for r in picked] + [f"- (ce qui te travaille) {t}" for t in texts.values()]
+        fragments = [f"- {clean_tokens(r[1])}" for r in picked] + [f"- (ce qui te travaille) {t}"
+                                                                    for t in texts.values()]
         persona = persona_for(frame, "full")
         request = LLMRequest(role="dream", call_id=f"{ctx.run_id}#{night}:{cycle}", persona=persona,
                              system_stable=persona.text + "\n\n" + DREAM_SYSTEM.format(tone=TONE_FR[kind]),
@@ -626,13 +693,6 @@ def hearable(about: tuple[str, ...], sensitivity: int, interlocutor: str | None,
     return privacy.hearable(about, sensitivity, interlocutor, aud.level, aud.witness_level, aud.private_ok)
 
 
-def mask(text: str, names: Mapping[str, str]) -> str:
-    """Les prénoms des autres remplacés par « quelqu'un »."""
-    for name in sorted({n for n in names.values() if n}, key=len, reverse=True):
-        text = re.sub(rf"\b{re.escape(name)}\b", "quelqu'un", text, flags=re.IGNORECASE)
-    return text
-
-
 @SELF.enricher("night", episodes=CONVERSATIONAL, deadline_ms=400)
 async def _night_texts(s: SelfState, frame: Frame, ports: Mapping[str, Any]) -> dict[str, str] | None:
     store = ports.get("store")
@@ -641,7 +701,7 @@ async def _night_texts(s: SelfState, frame: Frame, ports: Mapping[str, Any]) -> 
     refs = []
     y = frame.get(c.YESTERDAY)
     if y is not None:
-        refs.append(y.text_ref)
+        refs += [y.text_ref, y.shareable_ref]
     d = frame.get(c.DREAM_RESIDUE)
     if d is not None:
         refs.append(d.text_ref)
@@ -659,15 +719,17 @@ def _when_written(frame: Frame, day: str) -> str | None:
     return None
 
 
-def _journal_text(frame: Frame, reading: c.JournalReading, text: str) -> str:
-    """Le journal tel qu'elle peut l'avoir en tête devant cette audience : les
-    autres masqués pour qui ne peut pas entendre ce qui les concerne."""
+def _journal_text(frame: Frame, reading: c.JournalReading, texts: Mapping[str, str]) -> str | None:
+    """Le journal tel qu'elle peut l'avoir en tête devant cette audience. Son journal intime parle de tout le
+    monde, et ce qu'on lui a dit ou confié y est mêlé : il ne se montre qu'en privé à qui en est le seul concerné
+    (ou quand il ne parle de personne). Devant les autres, elle a en tête sa journée à elle, sans personne d'autre
+    — masquer des prénoms ne protège rien (« il m'a demandé de ne rien dire à Chloé », lu à Chloé)."""
     ep, aud = frame.episode, frame.audience
     person = frame.get(identity_c.PERSON(ep.target)) if ep is not None and ep.target else None
-    others = {p for p in reading.about if p != person}
-    if others and not hearable(reading.about, int(Sensitivity.PERSONAL), person, aud):
-        text = mask(text, _names(frame, others))  # elle garde son fil, sans nommer personne
-    return text
+    private = aud is not None and aud.private_ok
+    if not reading.about or (person is not None and private and set(reading.about) <= {person}):
+        return texts.get(reading.text_ref)
+    return texts.get(reading.shareable_ref) if reading.shareable_ref else None
 
 
 @SELF.section("yesterday", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=35, title="TON FIL D'HIER",
@@ -675,13 +737,14 @@ def _journal_text(frame: Frame, reading: c.JournalReading, text: str) -> str:
 def _yesterday_section(s: SelfState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     y = frame.get(c.YESTERDAY)
     texts = enrich.get("night") or {}
-    text = texts.get(y.text_ref) if y is not None else None
+    when = _when_written(frame, y.day) if y is not None else None
+    text = _journal_text(frame, y, texts) if y is not None and when is not None else None
     if not text or y is None:
         return None
-    when = _when_written(frame, y.day)
-    if when is None:
-        return None
-    return SectionBody(f"Ce que tu as écrit dans ton journal {when} : {_journal_text(frame, y, text)}")
+    if text == texts.get(y.text_ref):
+        return SectionBody(f"Ce que tu as écrit dans ton journal {when} : {text}")
+    day = "d'hier" if "d'hier" in when else "d'avant-hier"
+    return SectionBody(f"Ta journée {day}, telle que tu la raconterais : {text}")
 
 
 @SELF.section("dream", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=30, tags=[Tag.AFFECTIVE],
@@ -718,11 +781,12 @@ async def self_journal(args: JournalArgs, ctx: Any) -> str:
     day = (lived_day(frame) - timedelta(days=args.days_ago)).isoformat()
     j = s.journals.get(day)
     store = ctx.ports.get("store")
-    text = store.content([j.text_ref]).get(j.text_ref) if j is not None and store is not None and j.text_ref \
-        else None
-    if not text or j is None:
-        return f"Tu n'as rien écrit sur ta journée du {circadian.day_fr(date.fromisoformat(day))}."
-    reading = c.JournalReading(j.day, j.text_ref, j.about, j.dominant)
-    body = SectionBody(f"Ta journée du {circadian.day_fr(date.fromisoformat(day))} : "
-                       f"{_journal_text(frame, reading, text)}")
+    nothing = f"Tu n'as rien écrit sur ta journée du {circadian.day_fr(date.fromisoformat(day))}."
+    if j is None or store is None or not j.text_ref:
+        return nothing
+    reading = c.JournalReading(j.day, j.text_ref, j.about, j.dominant, j.shareable_ref)
+    text = _journal_text(frame, reading, store.content([r for r in (j.text_ref, j.shareable_ref) if r]))
+    if not text:
+        return nothing
+    body = SectionBody(f"Ta journée du {circadian.day_fr(date.fromisoformat(day))} : {text}")
     return readable(body, frame.audience) or "Tu n'as rien écrit ce jour-là."

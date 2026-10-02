@@ -224,6 +224,33 @@ def test_a_question_too_old_to_answer_is_abandoned_and_the_transport_told(tmp_pa
     assert driver.transport is not None and (a, "failed") in driver.transport.no_replies
 
 
+def test_a_queue_that_fills_while_journaling_settles_the_turn_instead_of_orphaning_it(tmp_path):
+    """La file était libre au contrôle, pleine après l'ajout au journal (d'autres messages sont arrivés pendant
+    l'écriture) : la question est au journal, en attente, sans épisode pour lui répondre — rien ne la relançait
+    avant le prochain démarrage, et la consolidation attendait sa réponse. Le tour est réglé tout de suite, en
+    le disant une fois au transport."""
+    kernel, clock, _llm, out = build(tmp_path, lambda req: LLMResponse("Coucou !"))
+
+    async def main():
+        await boot(kernel)
+        await connect(kernel, "user_1", "Adrien")
+        kernel.lanes.full = lambda kind: False  # le contrôle passe…
+        kernel.lanes.max_pending = 0  # …la file est pleine au moment de demander la réponse
+        got = await kernel.perceive(said("user_1", "t'es là ?"))
+        await asyncio.sleep(30)
+        awaiting = set(kernel.mind.frame().get(rt.AWAITING))
+        ended = _ended(kernel)
+        await kernel.stop()
+        return got, awaiting, ended
+
+    got, awaiting, ended = run_virtual(clock, main)
+    assert got.reply is None and not got.overloaded  # au journal : son sort est dit par la file de sortie
+    assert got.seq not in awaiting  # plus de question orpheline : la consolidation n'attend plus
+    assert [(e.data.outcome, e.data.unanswered) for e in ended] == [("failed", (got.seq,))]
+    told = [d for d in out.items if d.kind == REPLY_FAILED]
+    assert len(told) == 1 and told[0].reply_to == got.seq and told[0].target == "user_1"
+
+
 def test_a_night_message_found_at_a_restart_still_waits_for_her_morning(tmp_path):
     """La nuit compose avec la reprise : un message de 3 h qui ne l'a pas réveillée, le serveur qui repart à
     4 h — rien ne part au milieu de sa nuit ; au réveil, une réponse."""

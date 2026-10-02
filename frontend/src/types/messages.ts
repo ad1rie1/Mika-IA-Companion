@@ -41,6 +41,21 @@ export interface PendingProjectAction {
   created_at: string;
 }
 
+/**
+ * Les sortes de rêve que le serveur envoie (`contracts/self_.py::DREAM_KINDS`,
+ * via `app/mindport.py`). `InnerLifePanel` a un libellé pour chacune
+ * (vérifié par le compilateur) ; un test côté serveur confronte cette liste
+ * à la sienne.
+ */
+export const DREAM_TYPES = [
+  "associative",
+  "nightmare",
+  "pleasant",
+  "mundane",
+  "melancholic",
+] as const;
+export type DreamType = (typeof DREAM_TYPES)[number];
+
 export interface InnerState {
   drives?: Record<string, { tension: number; last_satisfied: number }>;
   energy?: number;
@@ -61,7 +76,7 @@ export interface InnerState {
   };
   last_dream?: {
     content: string;
-    dream_type: "associative" | "nightmare" | "pleasant" | "mundane";
+    dream_type: DreamType;
     vividness: number;
     emotion: string;
     night_of: string;
@@ -225,6 +240,8 @@ export interface AckMessage {
     | "overloaded"
     | "too_long"
     | "attachments_rejected"
+    // Une question acceptée, abandonnée parce que trop vieille (second ack).
+    | "too_late"
     // Refus émis par le client lui-même (WebSocketClient), jamais reçus du
     // serveur : un frame trop gros est rejeté par le transport avant
     // d'atteindre le consumer (fermeture 1009, donc aucun ack), et un frame

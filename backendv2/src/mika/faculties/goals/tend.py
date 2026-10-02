@@ -33,6 +33,7 @@ figé : ni reprise d'attente, ni clôture, avant qu'il ne le reprenne.
 from __future__ import annotations
 
 import math
+import random
 import re
 from dataclasses import replace
 from datetime import datetime, timedelta
@@ -57,13 +58,14 @@ from mika.faculties.goals.faculty import (
     budget,
     desire,
     live,
+    musing,
     params,
     ready_to_undertake,
     subject_key,
     workable,
 )
 from mika.faculties.goals.tools import closing
-from mika.kernel.clock import instant, within_daily_window
+from mika.kernel.clock import DAY, instant, within_daily_window
 from mika.kernel.codec import h64
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
@@ -184,14 +186,25 @@ class Seed:
         if not anytime and not _daytime(frame, p):
             return None
         busy = _live_sources(s, frame.now)
-        options = []
-        for i, interest in enumerate(frame.get(self_c.PERSONA).interests):
+        options: list[tuple[float, str]] = []
+        for interest in frame.get(self_c.PERSONA).interests:
             source = f"interest:{interest}"
             last = s.explored.get(source, 0)
             if source in busy or (last and frame.now - last < p.interest_rest_us):
                 continue
-            options.append((last, i, interest))
-        return min(options)[2] if options else None
+            # ce qu'elle a délaissé l'attire davantage (jamais exploré : comme une semaine), sans ordre fixe — un
+            # tourniquet sur la liste de sa persona, un sujet par jour dans l'ordre, se reconnaît (sonde du 2026-10-02)
+            idle_days = (frame.now - last) / DAY if last else 7.0
+            options.append((1.0 + min(7.0, idle_days), interest))
+        if not options:
+            return None
+        hour = frame.local().replace(minute=0, second=0, microsecond=0).isoformat()
+        pick = random.Random(h64("intérêt", hour)).random() * sum(w for w, _i in options)
+        for weight, interest in options:
+            pick -= weight
+            if pick <= 0:
+                return interest
+        return options[-1][1]
 
     def next_due(self, s: GoalsState, frame: Frame, last_run: int | None) -> int | None:
         p = params(frame.env.params_of("goals", frame.root))
@@ -240,12 +253,13 @@ class Seed:
         sources = _sources(frame)
         # avec ses flux, elle va voir ce qu'il y a de neuf ; sans, elle rêvasse (et rien ne se raconte comme une
         # nouvelle : il n'y a rien de nouveau)
-        title = f"Fouiller un peu du côté de {lowered(short(interest))}" if sources else \
-            f"Rêvasser un peu autour de {lowered(short(interest))}"
+        subject = of_words(lowered(short(interest)))
+        title = f"Fouiller un peu du côté {subject}" if sources else f"Rêvasser un peu autour {subject}"
         await ctx.emit(c.GOAL_OPENED.draft(
             kind=c.EXPLORATION, authority=c.SELF, title=Content.of(title, level=0),
             details=Content.of(interest, level=0), bundles=tuple(sorted({*EXPLORE_BUNDLES, *sources})),
-            max_steps=p.exploration_steps, source=source, sensitivity=0, origin=c.FROM_INTEREST, origin_at=frame.now,
+            max_steps=p.exploration_steps if sources else p.musing_steps, source=source, sensitivity=0,
+            origin=c.FROM_INTEREST, origin_at=frame.now, musing=not sources,
             desire=round(min(1.0, frame.get(needs_c.NEEDS).curiosity), 4), dedupe_key=f"but:{source}:{day}"))
 
 
@@ -253,6 +267,26 @@ def short(interest: str) -> str:
     """Un centre d'intérêt en quelques mots (la persona les rédige en phrases)."""
     head = re.split(r" \(| — | - |, ", interest.strip(), maxsplit=1)[0].strip()
     return head[:80] or interest[:80]
+
+
+#: une voyelle élide « de » (pas un h : « de Hollow Knight »)
+_VOWELS = "aeiouàâäéèêëîïôöùûüœæ"
+
+
+def of_words(words: str) -> str:
+    """« de » devant un sujet, à la française : « du gaming », « de la cuisine », « des jeux rétro », « de l'art »,
+    « d'Outer Wilds », « de Zelda »."""
+    head, _, rest = words.partition(" ")
+    low = head.lower()
+    if low == "le" and rest:
+        return f"du {rest}"
+    if low == "les" and rest:
+        return f"des {rest}"
+    if low in ("la", "l'") or low.startswith("l'"):
+        return f"de {words}"
+    if words[:1].lower() in _VOWELS and words[:1]:
+        return f"d'{words}"
+    return f"de {words}"
 
 
 def lowered(words: str) -> str:
@@ -303,6 +337,11 @@ def closures(s: GoalsState, frame: Frame) -> list[tuple[Goal, str, str]]:
             continue
         if g.failures >= p.failures_before_failed:
             out.append((g, c.FAILED, "le modèle ne répond pas"))
+        elif musing(g) and (g.silent >= p.silent_before_blocked or g.steps >= budget(g, p)
+                            or desire(g, now, p) < p.abandon_below):
+            # rêvasser ne se rate pas : une rêverie qui ne donne rien, ou dont l'envie passe, se dissipe — sans
+            # « je bloque », sans frustration ni mélancolie
+            out.append((g, c.ABANDONED, c.DISSIPATED))
         elif g.silent >= p.silent_before_blocked:
             out.append((g, c.STUCK, f"{g.silent} séances de suite sans rien conclure"))
         elif g.steps >= budget(g, p):

@@ -49,6 +49,8 @@ from mika.kernel.inspect import (
     Text,
     Timeline,
     When,
+    num_fr,
+    pct_fr,
 )
 from mika.vocab.affect import emotion_cell
 
@@ -78,11 +80,16 @@ DREAM_TONE = {c.NIGHTMARE: "danger", c.PLEASANT: "ok", c.MELANCHOLIC: "warn", c.
               c.MUNDANE: "muted"}
 CAUSE_FR = {IGNORED: "une initiative restée sans réponse", HEARD: "une réponse après des initiatives ignorées",
             ACHIEVED: "quelque chose mené à bout", STUCK: "un blocage", PROMISE: "une promesse non tenue",
-            c.THANKED: "un merci", c.COMPLIMENTED: "un compliment", c.INSULTED: "une insulte"}
+            c.THANKED: "un merci", c.COMPLIMENTED: "un compliment", c.INSULTED: "une insulte",
+            c.APOLOGIZED: "des excuses"}
 
 
 def number(value: float) -> str:
-    return f"{value:.2f}".replace(".", ",")
+    return num_fr(value, 2)
+
+
+def signed(value: float, digits: int = 2) -> str:
+    return num_fr(value, digits, signed=True)
 
 
 def clip(text: str, n: int = CLAMP) -> str:
@@ -151,24 +158,27 @@ def _esteem(s: SelfState, frame: Frame, ctx: InspectContext) -> list[Block]:
         Stat("La persona", s.revisions, "révision(s)"),
     ))
     rules = Fields((
-        ("demi-vie du retour au repos", f"{p.esteem_half_life_us / HOUR:g} h"),
+        ("demi-vie du retour au repos", f"{num_fr(p.esteem_half_life_us / HOUR)} h"),
         ("bornes", f"{number(p.esteem_min)} – {number(p.esteem_max)}"),
         ("elle doute sous", number(p.doubt_below)),
         ("sûre d'elle au-dessus de", number(p.assured_above)),
-        ("ce qui la bouscule", f"une initiative ignorée {p.ignored_knock:+.2f}, une réponse qui rompt la série "
-                               f"{p.heard_again_knock:+.2f}, un but bloqué {p.stuck_knock:+.2f}, une promesse non "
-                               f"tenue {p.broken_promise_knock:+.2f}".replace(".", ",")),
+        ("ce qui la bouscule", f"une initiative ignorée {signed(p.ignored_knock)}, une réponse qui rompt la série "
+                               f"{signed(p.heard_again_knock)}, un but bloqué {signed(p.stuck_knock)}, une promesse "
+                               f"non tenue {signed(p.broken_promise_knock)}"),
         ("ce qu'elle mène à bout", f"{number(p.achieved_base)} à {number(p.achieved_base + p.achieved_effort)} "
                                    f"selon l'effort (plein à {p.achieved_full_steps} séances, s'il est prouvé), "
                                    f"au plus {number(p.achieved_daily_cap)} par jour"),
-        ("ce qu'on lui dit d'elle", f"un merci ou un compliment {p.thanked_knock:+.3f}, une insulte qui la vise "
-                                    f"{p.insulted_knock:+.3f} (une amie : en entier ; une connaissance : × "
-                                    f"{number(p.acquaintance_weight)} ; une inconnue : × "
+        ("ce qu'on lui dit d'elle", f"un merci ou un compliment {signed(p.thanked_knock, 3)}, une insulte qui la vise "
+                                    f"{signed(p.insulted_knock, 3)} (une amitié : en entier ; une connaissance : × "
+                                    f"{number(p.acquaintance_weight)} ; pas encore de lien : × "
                                     f"{number(p.stranger_weight)}), au plus {number(p.social_daily_cap)} par "
-                                    "personne et par jour".replace(".", ",")),
+                                    "personne et par jour"),
+        ("des excuses", f"lui rendent {pct_fr(p.apology_mend)} de ce que les mots de cette personne lui avaient "
+                        "coûté ce jour-là — une fois par jour, et seulement s'il y avait de quoi pardonner"),
+        ("une rêverie", "n'est pas une réussite : elle ne la relève pas"),
     ), title="L'estime", columns=2)
     knocks = Table((Column("quand", "fit"), Column("pourquoi"), Column("coup", "fit")),
-                   tuple((When(k.at), CAUSE_FR.get(k.cause, k.cause), f"{k.delta:+.3f}".replace(".", ","))
+                   tuple((When(k.at), CAUSE_FR.get(k.cause, k.cause), signed(k.delta, 3))
                          for k in reversed(s.knocks)),
                    title="Les derniers coups", empty="jamais bousculée")
     cause = doubt_cause(s, frame.now, p) if now < p.doubt_below else ""
@@ -184,7 +194,7 @@ def _narrative(s: SelfState, frame: Frame, ctx: InspectContext) -> list[Block]:
     facts = Fields((
         ("écrit", When(s.narrated_at) if s.narrated_at else "jamais"),
         ("souvenirs vécus depuis", f"{lived} (il en faut {p.narrative_min_souvenirs} pour le réécrire, "
-                                   f"au plus une fois toutes les {p.narrative_every_us / HOUR:g} h)"),
+                                   f"au plus une fois toutes les {num_fr(p.narrative_every_us / HOUR)} h)"),
     ), title="Son récit d'elle-même")
     if not s.narrative_ref:
         return [facts, Note("Elle ne s'est pas encore racontée.", tone="muted")]
@@ -211,7 +221,10 @@ def _persona(s: SelfState) -> list[Block]:
         ("valeurs", _lines(doc.values)),
         ("centres d'intérêt", _lines(doc.interests)),
         ("façons de parler", _lines(doc.speech)),
-        ("salutations", _lines(doc.greetings)),
+        ("salutations (le ton, jamais recopiées)", _lines(doc.greetings)),
+        ("sa vie, à sa façon", _lines(doc.life)),
+        ("ses goûts et ses avis", _lines(doc.tastes)),
+        ("ce qui est vrai d'elle", _lines(doc.facts)),
     ), title="La persona", columns=2)
     rows: list[tuple[Cell, ...]] = []
     for name in type(t).model_fields:
@@ -284,7 +297,11 @@ def _history(s: SelfState, frame: Frame, ctx: InspectContext) -> Table:
         else:
             cells = (Ref("event", str(e.seq), f"#{e.seq}"), When(e.at), Badge("journal"), d.day, cell,
                      emotion_cell(d.dominant) if d.dominant else None, None, None, names(frame, d.about))
-        rows.append(Row(cells, detail=(Prose(text or FORGOTTEN, title="En entier"),)))
+        detail: tuple[Block, ...] = (Prose(text or FORGOTTEN, title="En entier"),)
+        told = getattr(d, "shareable", None)
+        if told is not None and told.text:
+            detail += (Prose(told.text, title="Ce qu'elle en raconterait à quelqu'un d'autre"),)
+        rows.append(Row(cells, detail=detail))
     pager = Pager(param="avant", size=PAGE, older=(("avant", str(events[-1].seq)),)) if len(found) > PAGE \
         else Pager(param="avant", size=PAGE)
     return Table((Column("n°", "fit", detail=True), Column("écrit", "fit", detail=True), Column("sorte", "fit"), Column("nuit", "fit"),

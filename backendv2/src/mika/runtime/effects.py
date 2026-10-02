@@ -77,6 +77,11 @@ class _Watched:
         return getattr(self._port, name)
 
 
+#: pourquoi une capacité trouvée « en cours » au démarrage n'a pas de compte rendu : le processus est mort
+#: pendant qu'elle tournait (le crochet ``on_interrupted`` le reçoit, pour dire ce qui s'est passé)
+STOPPED = "interrompue par un arrêt : pas relancée"
+
+
 class _Outcome:
     __slots__ = ("ok", "error", "retry")
 
@@ -259,7 +264,7 @@ class EffectExecutor:
             async with asyncio.timeout(spec.deadline_s):
                 out = await acall(spec.fn, ev, ports, label=f"effet {row.effect}")
         except TimeoutError:
-            return _Outcome(False, f"délai dépassé ({spec.deadline_s:.0f} s)")
+            return _Outcome(False, f"délai dépassé : coupée au bout de {spec.deadline_s:.0f} s")
         if isinstance(out, Failed):
             return _Outcome(False, repr(out.error)[:500])
         if watched is not None and watched.refused:
@@ -303,10 +308,12 @@ class EffectExecutor:
 
     async def _interrupt(self, row: OutboxRow, spec: EffectSpec | None, ev: Event[Any] | Failed, why: str) -> bool:
         """Un effet qui ne se rejoue pas sans risque, dont on ne sait pas s'il a eu lieu : son crochet
-        ``on_interrupted`` décide — ``None`` le rejoue (plus tard), des brouillons le closent en disant
-        l'échec (``interrupted``). Rend ``True`` si la ligne est close."""
+        ``on_interrupted(ev, ports, why)`` décide — ``None`` le rejoue (plus tard), des brouillons le closent
+        en disant l'échec (``interrupted``). ``why`` dit ce qui l'a coupé (``STOPPED`` : un arrêt, sinon son
+        échéance ou un compte rendu impossible) : on ne dit pas « arrêt » d'une capacité trop longue. Rend
+        ``True`` si la ligne est close."""
         hook = spec.on_interrupted if spec is not None else None
-        drafts = None if hook is None or isinstance(ev, Failed) else call(hook, ev, self.ports,
+        drafts = None if hook is None or isinstance(ev, Failed) else call(hook, ev, self.ports, why,
                                                                           label=f"interrompu : {row.effect}")
         if hook is None or drafts is None:
             await self._retry_later(row, why or "reprise")
@@ -344,7 +351,7 @@ class EffectExecutor:
         for raw in rows:
             row = OutboxRow(*raw)
             ev = call(self.load, row.seq, label=f"relecture de {row.effect}")
-            if await self._interrupt(row, self._spec(row), ev, "interrompue par un arrêt : pas relancée"):
+            if await self._interrupt(row, self._spec(row), ev, STOPPED):
                 closed += 1
             else:
                 self._next_try.pop(row.key, None)  # une reprise après un arrêt n'a pas à attendre

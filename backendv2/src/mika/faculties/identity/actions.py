@@ -321,3 +321,75 @@ def _testify(s: IdentityState, frame: Frame, args: EvidenceArgs, ctx: ActionCont
     if heavy and not args.confirmed:
         raise Refused(f"À confirmer : {heavy}", {"confirmed": f"{heavy} Coche « Je confirme »."})
     return Done(drafts=(draft,), message=f"Preuve versée : {_outcome(s, h, after)}.", guard=_seen(handle))
+
+
+# ── Un nom dont on lui a parlé : c'était elle ─────────────────────────────
+
+
+class NameArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: Annotated[str, Field(min_length=1, max_length=60), Knob(
+        label="Le nom sous lequel on lui en a parlé", advanced=False, order=10,
+        help="Tel qu'on lui en parlait (« Alice », « Alice Martin ») : ce que les autres lui ont dit de « Alice » "
+             "est désormais su d'elle — chacun garde qui le lui a confié, et ce qui ne se répète pas reste tu.")]
+    confirmed: Annotated[bool, Knob(label="Je confirme", advanced=False, order=20, help=CONFIRM_HELP)] = False
+
+
+def _named_key(name: str) -> str:
+    """La clé « connue seulement de nom », comme la mémoire la forme (``name:alice martin``)."""
+    return "name:" + " ".join(fold(clean_display_name(name)).split())
+
+
+def _can_name(s: IdentityState, frame: Frame, key: str) -> bool:
+    return is_identifiable(key) and not key.startswith("name:") and _root(s, key) == key
+
+
+@IDENTITY.action("nommer", title="C'est la personne dont on lui a parlé", args=NameArgs, emits=[c.NAME_BOUND],
+                 subject="person", available=_can_name, order=40,
+                 description="Quelqu'un lui avait parlé d'une « Alice » qu'elle ne connaissait pas : c'était cette "
+                             "personne. Ce qu'on lui a dit d'elle s'y rattache (chacun garde qui le lui a confié). "
+                             "Jamais deviné d'une ressemblance de nom : deux Alice ne se confondent pas d'elles-mêmes.",
+                 confirm="Relier ce nom à cette personne ?")
+def _bind_name(s: IdentityState, frame: Frame, args: NameArgs, ctx: ActionContext) -> Done:
+    person = ctx.subject
+    key = _named_key(args.name)
+    if key == "name:":
+        raise Refused("Nom manquant.", {"name": "Indique le nom sous lequel on lui en a parlé."})
+    current = s.names.get(key)
+    if current == person:
+        raise Refused("Déjà relié.", {"name": f"« {args.name} » désigne déjà {known_as(s, person)}."})
+    taken = f" (il désignait jusqu'ici {known_as(s, current)})" if current else ""
+    outcome = (f"Ce qu'on lui a dit de « {args.name} » sera su de {known_as(s, person)}{taken} — chacun garde qui "
+               "le lui a confié.")
+    if not args.confirmed:
+        raise Refused(f"À confirmer : {outcome}", {"confirmed": f"{outcome} Coche « Je confirme »."})
+    return Done(drafts=(c.NAME_BOUND.draft(name=key, person=person, by="operator"),),
+                message=f"« {args.name} », c'était {known_as(s, person)}.",
+                guard=Guard("nom inchangé", reads=(c.PERSON(key),)))
+
+
+class UnnameArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: Annotated[str, Field(min_length=1, max_length=60), Knob(
+        label="Le nom à détacher", advanced=False, order=10,
+        help="Un nom qu'un opérateur lui avait relié : ce qu'on a dit sous ce nom ne la désigne plus.")]
+
+
+def _can_unname(s: IdentityState, frame: Frame, key: str) -> bool:
+    return any(p == key for p in s.names.values())
+
+
+@IDENTITY.action("denommer", title="Détacher un nom", args=UnnameArgs, emits=[c.NAME_BOUND], subject="person",
+                 available=_can_unname, order=41,
+                 description="Ce n'était pas elle : ce qu'on avait dit sous ce nom redevient « quelqu'un dont on lui "
+                             "a parlé ».")
+def _unbind_name(s: IdentityState, frame: Frame, args: UnnameArgs, ctx: ActionContext) -> Done:
+    key = _named_key(args.name)
+    if s.names.get(key) != ctx.subject:
+        bound = ", ".join(f"« {k[5:]} »" for k, p in sorted(s.names.items()) if p == ctx.subject) or "aucun"
+        raise Refused("Nom inconnu.", {"name": f"Noms reliés à cette personne : {bound}."})
+    return Done(drafts=(c.NAME_BOUND.draft(name=key, person=None, by="operator"),),
+                message=f"« {args.name} » ne désigne plus {known_as(s, ctx.subject)}.",
+                guard=Guard("nom inchangé", reads=(c.PERSON(key),)))

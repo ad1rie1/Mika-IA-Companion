@@ -9,11 +9,13 @@ from typing import Annotated, Any
 from pydantic import BaseModel, ConfigDict
 
 from mika.contracts import affect as affect_c
-from mika.contracts import goals as goals_c
+from mika.contracts import agency as agency_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
+from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as c
+from mika.kernel.builtin import BOOT
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
@@ -29,6 +31,9 @@ STARTS_KEPT = 20
 OPENINGS_KEPT = 16
 #: Qui a ouvert une conversation.
 HER, THEM = "her", "them"
+#: Les connexions vivantes retenues (au-delà, les plus anciennes s'oublient) ; les départs retenus (les plus récents).
+LINKS_KEPT = 512
+LEFT_KEPT = 512
 _RANK = {level: i for i, level in enumerate(c.CLOSENESS_LEVELS)}
 
 
@@ -179,8 +184,20 @@ class SocialParams(BaseModel):
     # une rancune (hostilité installée) : ni initiative vers elle, ni amitié naissante
     grudge: Annotated[float, Knob(
         label="Seuil de rancune", group="Retenue", lo=0.05, hi=1, step=0.05,
-        help="À partir de cette hostilité installée (affect), aucune initiative vers la personne. Plus bas : la "
-             "moindre contrariété coupe les ponts.")] = 0.2
+        help="À partir de cette hostilité installée (affect), aucune initiative ordinaire vers la personne — pas "
+             "même une salutation. Plus bas : la moindre contrariété coupe les ponts.")] = 0.2
+    grudge_inform_shift: Annotated[float, Knob(
+        label="Prévenir malgré une rancune", group="Retenue", lo=-6, hi=0, step=0.5,
+        help="Une rancune n'arrête ni ce qui est dû (un rappel promis part à l'heure, tel quel) ni ce qui prévient "
+             "(un mail important, un projet confié qui n'avance plus sans la personne) : elle ne fait que décaler "
+             "l'annonce d'autant (log-odds) — elle prévient, sans se presser.")] = -2.0
+    # saluer : une arrivée, pas une reconnexion
+    away_us: Annotated[int, Knob(
+        label="Une arrivée après une absence d'au moins", group="Saluer", lo=5 * MINUTE, hi=12 * HOUR,
+        help="Une connexion n'est une arrivée (qu'elle salue) qu'après une absence d'au moins cette durée : un "
+             "onglet rechargé, une connexion coupée quelques minutes, un redémarrage d'elle (qui était là y est "
+             "compté parti à l'instant où elle revient) ne font pas revenir quelqu'un qui n'était pas parti.")] \
+        = HOUR
     grudge_demote: Annotated[float, Knob(
         label="Rancune qui défait une amitié installée", group="Retenue", lo=0.05, hi=1, step=0.05,
         help="Une amitié installée (ci-dessous) n'est rétrogradée pour rancune qu'à partir de cette hostilité : "
@@ -281,6 +298,12 @@ class SocialState:
     openings: FrozenDict[str, str] = field(default_factory=FrozenDict)
     #: quand elle a remarqué, pour la dernière fois, que c'est toujours elle qui écrit à cette personne
     noticed: FrozenDict[str, int] = field(default_factory=FrozenDict)
+    #: les connexions vivantes qu'elle a vues passer (connexion → adresse) : la présence, elle, ne survit pas à un
+    #: redémarrage ; il faut savoir qui était là quand elle s'est arrêtée
+    links: FrozenDict[str, str] = field(default_factory=FrozenDict)
+    #: quand chaque adresse a quitté ses écrans pour la dernière fois (sa dernière connexion fermée) ; à un
+    #: redémarrage, qui était là y est compté parti à l'instant où elle revient — ce n'est pas lui qui est parti
+    left: FrozenDict[str, int] = field(default_factory=FrozenDict)
 
 
 def derive(t: Temperament, overrides: Any = None) -> SocialParams:
@@ -295,8 +318,9 @@ def derive(t: Temperament, overrides: Any = None) -> SocialParams:
 #: v2 : messages par jour, histoire totale, conversations ouvertes, contenus des profils à part.
 #: ``ignored_shift`` est retiré : ne pas harceler quelqu'un qui ne répond pas est la retenue d'``agency``
 #: (ADR 0033) ; d'anciens réglages qui le portent se relisent sans lui.
+#: v3 : qui était là, et quand chacun est parti (une reconnexion, un redémarrage d'elle ne sont pas des arrivées).
 SOCIAL = Faculty("social", state=SocialState, init=lambda p: SocialState(), params=SocialParams, derive=derive,
-                 state_version=2, retired_params=("ignored_shift",))
+                 state_version=3, retired_params=("ignored_shift",))
 SOCIAL.declare(*c.ALL)
 
 
@@ -376,10 +400,49 @@ def _uttered(s: SocialState, e, cx) -> SocialState:
     ct = s.contacts.get(person) or Contact()
     initiative = d.kind == Kind.INITIATIVE
     ct, opens = _active(ct, e.at, p.conversation_gap_us)
-    if initiative and opens and not {c.GREETING, goals_c.REMIND} & set(reasons):
+    if initiative and opens and not agency_c.NOT_SPEAKING_UP & set(reasons):
         ct = _opened(ct, cx.local(e.at).date().toordinal(), HER)  # c'est elle qui écrit la première
     ct = replace(ct, last_out=e.at, unanswered=ct.unanswered + (1 if initiative else 0))
     return replace(s, contacts=s.contacts.set(person, ct))
+
+
+def _kept_left(left: FrozenDict[str, int]) -> FrozenDict[str, int]:
+    if len(left) <= LEFT_KEPT:
+        return left
+    return FrozenDict(sorted(left.items(), key=lambda kv: (kv[1], kv[0]))[-LEFT_KEPT:])
+
+
+@SOCIAL.reducer(presence_c.CONNECTED)
+def _connected(s: SocialState, e, cx) -> SocialState:
+    links = s.links.set(e.data.connection, e.data.handle)
+    if len(links) > LINKS_KEPT:  # des connexions jamais fermées (un transport qui ne le dit pas) : on les oublie
+        links = FrozenDict(sorted(links.items())[-LINKS_KEPT:])
+    return replace(s, links=links)
+
+
+@SOCIAL.reducer(presence_c.DISCONNECTED)
+def _disconnected(s: SocialState, e, cx) -> SocialState:
+    """Une connexion se ferme : quand c'était la dernière de l'adresse, elle est partie à cet instant."""
+    handle = s.links.get(e.data.connection)
+    if handle is None:
+        return s
+    links = s.links.delete(e.data.connection)
+    if handle in links.values():
+        return replace(s, links=links)  # encore là par un autre écran
+    return replace(s, links=links, left=_kept_left(s.left.set(handle, e.at)))
+
+
+@SOCIAL.reducer(BOOT)
+def _rebooted(s: SocialState, e, cx) -> SocialState:
+    """Elle redémarre : les connexions d'avant sont tombées avec elle (sans un mot, si elle s'est arrêtée
+    brutalement). Qui était là ne l'a pas quittée : il est compté parti à l'instant où elle revient, si bien que
+    son écran qui se reconnecte n'est pas une arrivée."""
+    if not s.links:
+        return s
+    left = s.left
+    for handle in sorted(set(s.links.values())):
+        left = left.set(handle, e.at)
+    return replace(s, links=FrozenDict(), left=_kept_left(left))
 
 
 @SOCIAL.reducer(memory_c.REMEMBERED, memory_c.BELIEVED)

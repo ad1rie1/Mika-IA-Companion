@@ -21,11 +21,12 @@ from pydantic import BaseModel
 from mika.contracts import identity as identity_c
 from mika.contracts import social as c
 from mika.faculties.social.faculty import SOCIAL, Profile, SocialState
-from mika.faculties.social.profile import describe_level, lines_of
+from mika.faculties.social.profile import describe_level, lines_of, register
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Frame
 from mika.kernel.prompt import SectionBody, readable
 from mika.vocab.episodes import CONVERSATIONAL
+from mika.vocab.people import is_identifiable
 from mika.vocab.privacy import Sensitivity
 
 
@@ -77,6 +78,17 @@ def _about(s: SocialState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBo
         return None
     # sa propre fiche : ce qu'elle dit d'autres gens, la personne l'a raconté elle-même (témoin)
     return SectionBody("\n".join(lines), level=int(Sensitivity.PERSONAL), witness=True)
+
+
+@SOCIAL.section("register", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["who"], before=["about_person"],
+                trim_rank=70, title="LE TON ENTRE VOUS", reads=[identity_c.PERSON, c.CLOSENESS])
+def _register(s: SocialState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
+    """Comment être avec la personne en face, selon ce qui vous lie — taquine avec qui elle connaît, pas avec une
+    inconnue. Rien de la fiche : juste une manière d'être, dite même quand la fiche est fermée."""
+    ep = frame.episode
+    if ep is None or not ep.target or not is_identifiable(ep.target):
+        return None
+    return SectionBody(register(frame.get(c.CLOSENESS(frame.get(identity_c.PERSON(ep.target))))))
 
 
 @SOCIAL.enricher("profile_text", episodes=CONVERSATIONAL, deadline_ms=500)

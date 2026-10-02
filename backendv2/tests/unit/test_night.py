@@ -50,6 +50,7 @@ from tests.fixtures.mika import PARIS, at_paris, befriend, boot, build, connect,
 class Script:
     def __init__(self) -> None:
         self.journal = "J'ai parlé avec Alice de son chagrin, et avec Bob de cuisine."
+        self.shareable = "J'ai surtout rangé mon bureau et écouté de la musique."
         self.dream = "Je vole au-dessus d'un marché où Alice vend des nuages."
         self.tag = "[EMOTION:happy:0.5]"
 
@@ -57,7 +58,7 @@ class Script:
         if req.role in ("extract", "profile", "compact"):
             return LLMResponse("{}")
         if req.role == "journal":
-            return LLMResponse(self.journal)
+            return LLMResponse(self.shareable if req.meta.get("purpose") == "shareable" else self.journal)
         if req.role == "dream":
             return LLMResponse(self.dream)
         if req.role in ("murmur", "narrative"):
@@ -140,24 +141,34 @@ def test_a_night_missed_with_the_server_off_is_written_in_the_morning(tmp_path):
     assert run_virtual(clock, second) == ["2026-09-28", "2026-09-29"]
 
 
-def test_yesterdays_thread_names_others_only_for_those_who_may_hear(tmp_path):
+def test_yesterdays_thread_tells_others_only_her_own_day(tmp_path):
+    """Son journal intime parle de tout le monde : devant quelqu'un qui n'en est pas le seul concerné, elle a en
+    tête sa journée à elle, écrite d'après des notes où personne d'autre n'apparaît — jamais ce qu'Alice lui a
+    dit, même prénom masqué (sonde réelle du 2026-10-02 : « il m'a demandé de ne rien dire à Chloé », lu à Chloé).
+    Contre-exemple : un jour où seule Alice lui a parlé, Alice retrouve le journal entier."""
     async def scenario(kernel):
         await connect(kernel, "user_1", "Alice")
-        p = await kernel.perceive(said("user_1", "je suis triste ce soir"))
-        await p.reply
+        await (await kernel.perceive(said("user_1", "je suis triste ce soir"))).reply
         await connect(kernel, "user_2", "Bob")
-        p = await kernel.perceive(said("user_2", "tu cuisines quoi ?"))
-        await p.reply
+        await (await kernel.perceive(said("user_2", "tu cuisines quoi ?"))).reply
         await until(kernel, at_paris(2026, 9, 29, 10, 0))
         for handle in ("user_1", "user_3"):
-            p = await kernel.perceive(said(handle, "salut, bien dormi ?"))
-            await p.reply
+            await (await kernel.perceive(said(handle, "salut, bien dormi ?"))).reply
+        await until(kernel, at_paris(2026, 9, 30, 18, 0))
+        await (await kernel.perceive(said("user_1", "re ! ça va mieux"))).reply  # ce jour-là, seule Alice
+        await until(kernel, at_paris(2026, 10, 1, 10, 0))
+        await (await kernel.perceive(said("user_1", "coucou"))).reply
 
     _, llm = build_run(tmp_path, scenario)
-    last = {c.meta.get("target"): c.messages[-1].content for c in llm.calls if c.role == "reply"}
-    assert "Alice de son chagrin" in last["user_1"]  # elle-même : son nom
-    stranger = last["user_3"]
-    assert "TON FIL D'HIER" in stranger and "Alice" not in stranger and "quelqu'un de son chagrin" in stranger
+    replies = [(c.meta.get("target"), c.messages[-1].content) for c in llm.calls if c.role == "reply"]
+    shareable_notes = [c.messages[-1].content for c in llm.calls if c.meta.get("purpose") == "shareable"]
+    assert shareable_notes and all("Alice" not in n and "Bob" not in n and "triste" not in n and "cuisine" not in n
+                                   for n in shareable_notes), "ses notes à raconter ne contiennent personne"
+    morning = {who: text for who, text in replies[2:4]}
+    for who in ("user_1", "user_3"):
+        assert "rangé mon bureau" in morning[who], who  # sa journée à elle…
+        assert "chagrin" not in morning[who] and "cuisine" not in morning[who], who  # …jamais celle des autres
+    assert "Alice de son chagrin" in replies[-1][1], "contre-exemple : seule concernée, Alice relit le journal"
 
 
 VOICE = VoiceProvenance(call_id="genese", persona_hash="-", role="dream", model="-")
@@ -345,7 +356,7 @@ def test_a_night_cut_by_a_conversation_rewrites_the_journal(tmp_path):
 
     journals, llm = build_run(tmp_path, scenario)
     assert [j.data.day for j in journals] == ["2026-09-28", "2026-09-28"]  # écrit, puis réécrit
-    notes = [c.messages[-1].content for c in llm.calls if c.role == "journal"]
+    notes = [c.messages[-1].content for c in llm.calls if c.role == "journal" and not c.meta.get("purpose")]
     assert "CANARI-NUIT" not in notes[0] and "CANARI-NUIT" in notes[-1]
 
 

@@ -12,10 +12,12 @@ soi et le récit qu'elle fait d'elle-même.
   selon l'effort que ça lui a demandé (une chose faite en un pas ne vaut pas
   une semaine de travail), et pas plus que tant par jour ; ce que les autres
   lui disent d'elle compte aussi — un merci, un compliment, une insulte qui
-  la vise —, selon qui le dit, et pas plus que tant par personne et par jour.
-  Une initiative restée sans réponse, une promesse non tenue, un blocage
-  l'abaissent. Elle ne touche jamais l'arbitrage ; elle se ressent, et le
-  doute dit sa vraie cause.
+  la vise —, selon qui le dit, et pas plus que tant par personne et par jour ;
+  des excuses sincères (une fois par jour et par personne, quand il y a de
+  quoi pardonner) adoucissent ce que ses mots avaient fait. Une initiative
+  restée sans réponse, une promesse non tenue, un blocage l'abaissent. Une
+  rêverie n'est pas une réussite : elle ne la relève pas. Elle ne touche
+  jamais l'arbitrage ; elle se ressent, et le doute dit sa vraie cause.
 - **Le récit** (« Je suis quelqu'un qui… ») est réécrit par sa propre voix au
   plus une fois par jour, quand elle a vécu assez de nouveau, à partir de
   souvenirs anodins seulement : il est montré à tout le monde.
@@ -32,6 +34,7 @@ from typing import Annotated, Any
 import yaml
 from pydantic import BaseModel, ConfigDict
 
+from mika.contracts import affect as affect_c
 from mika.contracts import attention as attention_c
 from mika.contracts import body as body_c
 from mika.contracts import goals as goals_c
@@ -45,7 +48,7 @@ from mika.faculties.self import days
 from mika.faculties.self.records import Deed, Dream, Effort, Journal, Knock
 from mika.faculties.self.worth import touched
 from mika.kernel.clock import DAY, HOUR, MINUTE
-from mika.kernel.codec import digest
+from mika.kernel.codec import digest, h64
 from mika.kernel.events import Content, Draft, VoiceProvenance
 from mika.kernel.faculty import CatchUp, Faculty, Zone
 from mika.kernel.forms import Knob
@@ -53,7 +56,7 @@ from mika.kernel.frame import Frame
 from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
 from mika.ports.llm import LLMRequest, Message, PersonaRender
-from mika.vocab.episodes import CONVERSATIONAL, Tag
+from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
 from mika.vocab.people import is_identifiable
 from mika.vocab.privacy import Sensitivity
 
@@ -120,6 +123,11 @@ class SelfParams(BaseModel):
     stranger_weight: Annotated[float, Knob(
         label="Venant d'une inconnue", group="Ce qu'on lui dit d'elle", lo=0.0, hi=1.0, step=0.05,
         help="La part qui compte quand ça vient de quelqu'un qu'elle ne connaît pas.")] = 0.3
+    apology_mend: Annotated[float, Knob(
+        label="Des excuses adoucissent", group="Ce qu'on lui dit d'elle", lo=0.0, hi=1.0, step=0.05,
+        help="Des excuses sincères (une fois par jour et par personne) lui rendent cette part de ce que les mots "
+             "de cette personne avaient coûté à son estime ce jour-là. Des excuses qui rient (« pardon mdr ») ne "
+             "comptent pas.")] = 0.5
     doubt_below: Annotated[float, Knob(
         label="Elle doute sous", group="L'estime", lo=0.0, hi=0.5, step=0.01,
         help="Sous ce seuil, son prompt lui dit qu'elle doute un peu d'elle-même (un ressenti, jamais un "
@@ -166,6 +174,8 @@ DEEDS_KEPT = 48
 IGNORED, HEARD, ACHIEVED, STUCK, PROMISE = "ignored", "heard", "achieved", "stuck", "promise"
 # ce qu'elle a fait (``Deed.what``)
 OPENED, DONE, BLOCKED, ABANDONED, REMINDED, WORKED = "opened", "done", "blocked", "abandoned", "reminded", "worked"
+#: elle a laissé son esprit vagabonder (une rêverie écrite) : rien n'est arrivé, son journal le dit une fois
+MUSED = "mused"
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,9 +212,13 @@ class SelfState:
     woke_night: str = ""
     #: sa dernière parole visible (une nuit coupée par une conversation fait réécrire son journal)
     spoke_at: int = 0
+    #: qui s'est excusé, et quelle journée vécue (une fois par jour et par personne)
+    apologies: FrozenDict[str, str] = field(default_factory=FrozenDict)
 
 
-SELF = Faculty("self", state=SelfState, init=lambda p: SelfState(), params=SelfParams, state_version=3,
+#: v5 : une rêverie n'est ni une réussite (estime) ni « se lancer » (journal), une réussite ne compte son effort
+#: que s'il est prouvé, des excuses adoucissent (ADR 0047)
+SELF = Faculty("self", state=SelfState, init=lambda p: SelfState(), params=SelfParams, state_version=5,
                retired_params=("achieved_knock",))
 SELF.declare(c.PERSONA_REVISED, c.NARRATED, c.JOURNALED, c.DREAMT, c.WOKE_WITH, c.TOUCHED)
 
@@ -304,28 +318,34 @@ def _ran(s: SelfState, e, cx) -> SelfState:
 @SELF.reducer(goals_c.GOAL_OPENED)
 def _goal_opened(s: SelfState, e, cx) -> SelfState:
     d = e.data
-    if d.authority != goals_c.SELF or d.kind == goals_c.REMINDER:
-        return s
-    return _deed(s, Deed(e.at, OPENED, d.title.ref or "", d.owner or ""))
+    if d.authority != goals_c.SELF or d.kind == goals_c.REMINDER or d.musing:
+        return s  # se laisser rêvasser n'est pas « se lancer dans » quelque chose
+    return _deed(s, Deed(e.at, OPENED, d.title.ref or "", d.owner or "", about=tuple(d.about),
+                         sensitivity=d.sensitivity))
 
 
 @SELF.reducer(goals_c.GOAL_CLOSED, reads=[body_c.RHYTHM])
 def _goal_closed(s: SelfState, e, cx) -> SelfState:
-    """Mener quelque chose à bout redonne confiance (selon l'effort) ; bloquer en
-    retire un peu. Un rappel dit n'y change rien ; renoncer non plus (ce n'est
-    pas un échec)."""
+    """Mener quelque chose à bout redonne confiance (selon l'effort, et seulement
+    s'il est prouvé) ; bloquer en retire un peu. Un rappel dit n'y change rien ;
+    renoncer non plus (ce n'est pas un échec) ; rêvasser non plus — ce n'est pas
+    un exploit (HUM-19), son journal le dit comme une rêverie."""
     d = e.data
     key = f"goal:{d.goal}"
     title = d.title.ref or ""
+    who = {"about": tuple(d.about), "sensitivity": d.sensitivity}
     if d.kind == goals_c.REMINDER:
-        s = _deed(s, Deed(e.at, REMINDED, title, d.owner or "")) if d.status == goals_c.ACHIEVED else s
+        s = _deed(s, Deed(e.at, REMINDED, title, d.owner or "", **who)) if d.status == goals_c.ACHIEVED else s
+    elif d.status == goals_c.ACHIEVED and d.reason in goals_c.MUSINGS:
+        s = _deed(s, Deed(e.at, MUSED, title, d.owner or "", **who))
     elif d.status == goals_c.ACHIEVED:
-        s = _deed(_achieved(s, key, e.at, True, cx), Deed(e.at, DONE, title, d.owner or ""))
+        # l'effort ne compte que s'il a été prouvé pendant ses séances (un but clos à la main n'en a pas)
+        s = _deed(_achieved(s, key, e.at, False, cx), Deed(e.at, DONE, title, d.owner or "", **who))
     elif d.status == goals_c.STUCK:
         p = params(cx.params)
-        s = _deed(_knock(s, p.stuck_knock, e.at, p, STUCK), Deed(e.at, BLOCKED, title, d.owner or ""))
-    elif d.status == goals_c.ABANDONED:
-        s = _deed(s, Deed(e.at, ABANDONED, title, d.owner or ""))
+        s = _deed(_knock(s, p.stuck_knock, e.at, p, STUCK), Deed(e.at, BLOCKED, title, d.owner or "", **who))
+    elif d.status == goals_c.ABANDONED and d.reason != goals_c.DISSIPATED:  # une rêverie qui s'efface n'est pas un acte
+        s = _deed(s, Deed(e.at, ABANDONED, title, d.owner or "", **who))
     return replace(s, efforts=s.efforts.delete(key)) if key in s.efforts else s
 
 
@@ -339,20 +359,34 @@ def _project_objective_closed(s: SelfState, e, cx) -> SelfState:
     key = f"objective:{d.project}:{d.objective}"
     title = d.title.ref or ""
     if d.status == projects_c.DONE:
-        s = _deed(_achieved(s, key, e.at, True, cx), Deed(e.at, DONE, title, d.owner or "", d.project))
+        s = _deed(_achieved(s, key, e.at, True, cx), Deed(e.at, DONE, title, d.owner or "", d.project,
+                                                          tuple(d.about), d.sensitivity))
     else:
         p = params(cx.params)
-        s = _deed(_knock(s, p.stuck_knock, e.at, p, STUCK), Deed(e.at, BLOCKED, title, d.owner or "", d.project))
+        s = _deed(_knock(s, p.stuck_knock, e.at, p, STUCK), Deed(e.at, BLOCKED, title, d.owner or "", d.project,
+                                                                tuple(d.about), d.sensitivity))
     return replace(s, efforts=s.efforts.delete(key)) if key in s.efforts else s
 
 
 # ── Ce qu'on lui dit d'elle (le sociomètre) ───────────────────────────────
 
 
+#: une hostilité en deçà de laquelle il n'y a rien à pardonner (des excuses tombent à plat, sans rien consommer)
+FORGIVABLE_FROM = 0.05
+
+
+def _lived_day(frame: Frame, at: int) -> str:
+    return days.lived_day(at, frame.env.tz_of(frame.root), days.day_starts(frame.get(body_c.RHYTHM))).isoformat()
+
+
 @SELF.interpret(rt.PERCEPTION_RECEIVED)
 def _read_worth(s: SelfState, frame: Frame, ev: Any, ports: Any) -> list[Draft[Any]]:
-    """Un merci, un compliment, une insulte qui la vise : un jugement lu dans la
-    forme du message, enregistré (le rejeu retombe sur la même estime)."""
+    """Un merci, un compliment, une insulte qui la vise, des excuses : un
+    jugement lu dans la forme du message, enregistré (le rejeu retombe sur la
+    même estime). Des excuses ne comptent qu'une fois par jour et par personne,
+    et seulement s'il y a quelque chose à pardonner (une rancune, des mots qui
+    l'ont blessée ce jour-là) : « pardon de te déranger » n'est pas un pardon, et
+    un troll qui s'excuse dix fois ne s'excuse qu'une."""
     d = ev.data
     if not d.addressed or not is_identifiable(d.handle):
         return []
@@ -360,25 +394,46 @@ def _read_worth(s: SelfState, frame: Frame, ev: Any, ports: Any) -> list[Draft[A
     if kind is None:
         return []
     person = frame.get(identity_c.PERSON(d.handle))
+    if kind == c.APOLOGIZED:
+        day = _lived_day(frame, ev.at)
+        if s.apologies.get(person) == day:
+            return []
+        hurt = s.social_day == day and s.social.get(person, 0.0) < 0
+        if not hurt and frame.get(affect_c.HOSTILITY(person)) < FORGIVABLE_FROM:
+            return []
     return [c.TOUCHED.draft(person=person, handle=d.handle, message=ev.seq, kind=kind)]
 
 
 @SELF.reducer(c.TOUCHED, reads=[social_c.CLOSENESS, body_c.RHYTHM])
 def _touched(s: SelfState, e, cx) -> SelfState:
-    """Selon qui le dit, et pas plus que tant par personne et par jour."""
+    """Selon qui le dit, et pas plus que tant par personne et par jour. Des
+    excuses lui rendent une part de ce que les mots de cette personne lui
+    avaient coûté ce jour-là — une fois par jour."""
     p = params(cx.params)
     d = e.data
+    day = _day(cx, e.at)
+    social = s.social if s.social_day == day else FrozenDict()
+    so_far = social.get(d.person, 0.0)
+    if d.kind == c.APOLOGIZED:
+        if s.apologies.get(d.person) == day:
+            return s
+        s = replace(s, apologies=_kept_days(s.apologies.set(d.person, day), day))
+        mend = round(-so_far * p.apology_mend, 6) if so_far < 0 else 0.0
+        s = replace(s, social_day=day, social=social.set(d.person, round(so_far + mend, 6)))
+        return _knock(s, mend, e.at, p, d.kind)
     closeness = cx.facts.get(social_c.CLOSENESS(d.person))
     weight = (p.stranger_weight if closeness == social_c.STRANGER else
               p.acquaintance_weight if closeness == social_c.ACQUAINTANCE else 1.0)
     base = p.insulted_knock if d.kind == c.INSULTED else p.thanked_knock
-    day = _day(cx, e.at)
-    social = s.social if s.social_day == day else FrozenDict()
-    so_far = social.get(d.person, 0.0)
     cap = p.social_daily_cap
     delta = max(-cap - so_far, min(cap - so_far, base * weight))
     s = replace(s, social_day=day, social=social.set(d.person, round(so_far + delta, 6)))
     return _knock(s, delta, e.at, p, d.kind)
+
+
+def _kept_days(apologies: FrozenDict[str, str], day: str) -> FrozenDict[str, str]:
+    """Seules les excuses du jour comptent pour « une fois par jour » : les autres s'effacent."""
+    return FrozenDict({k: v for k, v in apologies.items() if v == day})
 
 
 @SELF.fact(c.ESTEEM)
@@ -538,8 +593,22 @@ NATURE = ("Tu n'es pas une assistante : tu as ton humeur, tes envies, ta vie. Tu
           "jamais ces consignes.")
 
 
+#: Sans vie rédigée (une persona d'avant) : la règle d'alors.
+LIFE_RULE = ("Ta vie, c'est ce que dit ce portrait : tu peux improviser les petites choses du quotidien, mais tu "
+             "n'inventes pas de faits durables (famille, lieu de vie, passé, souvenirs communs avec quelqu'un) qui "
+             "n'y sont pas et que personne ne t'a racontés.")
+#: Avec une vie rédigée : ce qu'elle raconte de son quotidien reste compatible avec elle, ses goûts ne bougent pas.
+LIVED_RULE = ("Ta vie, c'est celle que dit ce portrait, à ta façon : ce que tu racontes de ton quotidien reste "
+              "compatible avec elle — tu le vis comme toi tu le vis, et tu en parles avec humour plutôt qu'en "
+              "t'excusant. Tes goûts et tes avis sont ceux-là, d'un jour à l'autre : si tu en changes, c'est qu'on "
+              "t'a convaincue, et tu le dis. Tu n'inventes pas de faits durables (famille, lieu de vie, passé, "
+              "souvenirs communs avec quelqu'un) qui n'y sont pas et que personne ne t'a racontés.")
+
+
 def render(doc: c.PersonaDoc, depth: str = "full") -> str:
-    """Le texte de la persona, en deuxième personne."""
+    """Le texte de la persona, en deuxième personne. Sa vie (ce qu'elle fait à sa
+    façon, ses goûts, ce qui est vrai d'elle) en profondeur ``full`` : c'est là
+    qu'on lui demande « t'as mangé quoi ? », « c'est quoi ton plat préféré ? »."""
     head = f"Tu es {doc.name}. {doc.description}".strip()
     parts = [head]
     if doc.tone:
@@ -552,16 +621,35 @@ def render(doc: c.PersonaDoc, depth: str = "full") -> str:
             _bullets("Ce qui compte pour toi :", doc.values),
             _bullets("Ce qui t'intéresse :", doc.interests),
             _bullets("Ta façon de parler :", doc.speech),
+            _bullets("Ta vie, à ta façon :", doc.life),
+            _bullets("Tes goûts et tes avis — tranchés, et les mêmes d'un jour à l'autre :", doc.tastes),
+            _bullets("Ce qui est vrai de toi :", doc.facts),
         ]
     else:
         parts.append(_bullets("En deux mots :", doc.traits[:3]))
     parts.append(f"Tu parles {doc.language}. {NATURE}")
-    parts.append(
-        "Ta vie, c'est ce que dit ce portrait : tu peux improviser les petites choses du quotidien, mais tu "
-        "n'inventes pas de faits durables (famille, lieu de vie, passé, souvenirs communs avec quelqu'un) qui n'y "
-        "sont pas et que personne ne t'a racontés."
-    )
+    parts.append(LIVED_RULE if doc.life or doc.tastes or doc.facts else LIFE_RULE)
     return "\n\n".join(p for p in parts if p)
+
+
+@SELF.section("greeting_tone", zone=Zone.VOLATILE, episodes=[Kind.INITIATIVE], trim_rank=50,
+              title="TA FAÇON DE DIRE BONJOUR")
+def _greeting_tone(s: SelfState, frame: Frame, enrich: Mapping[str, Any]) -> str | None:
+    """Quand elle salue quelqu'un qui arrive : le ton de ses bonjours, d'après sa
+    persona — des exemples, jamais à recopier (elle les redirait chaque soir, mot
+    pour mot, et ils parlent d'une humeur ou d'une heure qui ne sont pas les
+    siennes ce jour-là)."""
+    ep = frame.episode
+    if ep is None or social_c.GREETING not in (ep.attrs.get("reasons") or ()) or not s.persona.greetings:
+        return None
+    # un seul exemple, qui change d'un jour à l'autre : trois exemples montrés à chaque arrivée, un modèle en
+    # recopiait un mot pour mot (sonde finale du 2026-10-02 : « Yooo, te revoilà ! » cinq soirs sur six)
+    day = frame.local().date().isoformat()
+    pick = s.persona.greetings[h64("salut", day, ep.target) % len(s.persona.greetings)]
+    examples = f"- {pick}"
+    return (f"Pour le ton seulement — jamais cette phrase telle quelle, ni ses mots :\n{examples}\n"
+            "Ta salutation, maintenant, est la tienne : selon ton humeur du moment et la personne qui arrive ; si "
+            "tu as déjà salué comme ça récemment, autrement.")
 
 
 def persona_for(frame: Frame, depth: str) -> PersonaRender:

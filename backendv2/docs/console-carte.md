@@ -122,8 +122,9 @@ sont dans « Détails techniques ».
 | | Rôles | un sélecteur par rôle, rangés par famille (voix, compréhension, sens, travail), et ce qui sert **vraiment** chaque rôle après replis |
 | | Contexte | la fenêtre que le prompt peut remplir |
 | Personnage | Identité | nom, description, langue, fuseau |
-| | Ton et parole | ton, façons de parler, salutations |
+| | Ton et parole | ton, façons de parler, salutations (le ton de ses bonjours, jamais recopiées) |
 | | Caractère | traits, manies, fragilités, valeurs, centres d'intérêt |
+| | Sa vie | sa vie d'IA VTuber à sa façon, ses goûts et avis, ce qui est vrai d'elle (ADR 0047) |
 | | Tempérament | les huit curseurs, l'humeur de fond, ce que pilote chaque curseur |
 | | Import / export | le document YAML, revenir au fichier, l'historique des révisions |
 | Canaux | Telegram | robot, conversations autorisées, propriétaires |

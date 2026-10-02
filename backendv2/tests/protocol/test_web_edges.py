@@ -80,12 +80,12 @@ class Fake:
 def make(tmp_path) -> Iterator[Any]:
     clients: list[TestClient] = []
 
-    def _make(backend: Fake, *, gateway: LiveGateway | None = None):
+    def _make(backend: Fake, *, gateway: LiveGateway | None = None, **kw: Any):
         roles = {str(r): "fake" for r in Role}
         gw = gateway or LiveGateway(Gateway({"fake": backend}, roles, clock=RealClock(), voice_roles=frozenset(),
                                             slots={"fake": 4}))
         app, live = build(tmp_path / "data", web=WebConfig(), gateway=gw, embedder=HashEmbedder(),
-                          arbitration=ArbitrationPolicy())
+                          arbitration=ArbitrationPolicy(), **kw)
         client = TestClient(app, base_url="http://localhost:8001", headers={"Origin": ORIGIN})
         client.__enter__()
         clients.append(client)
@@ -185,6 +185,47 @@ def test_messages_of_one_connection_keep_their_order(make):
         assert acks == ["o1", "o2"]
 
 
+# ── Une rafale : chaque bulle rattachée à sa ligne du fil ─────────────────
+
+
+class SlowReply(Fake):
+    """Une réponse qui prend une seconde : la rafale arrive pendant qu'elle se compose."""
+
+    async def complete(self, req):
+        if req.role == "reply":
+            await asyncio.sleep(1.0)
+        return await super().complete(req)
+
+
+def test_a_burst_binds_every_bubble_not_only_the_last(make):
+    """« salut », « t'as vu le match ? », « allo ? » : une réponse règle les trois, mais sa trame ``speech`` ne
+    lie que le dernier message. Les deux autres bulles restaient sans identifiant — le curseur passait au-delà,
+    aucun ``sync`` ne les renvoyait, et hors de la fenêtre initiale elles finissaient sous tout le fil
+    (``chatSync.orderKey`` : sans id ⇒ +∞). Juste avant la réponse, une trame ``history`` (``catchup``) porte
+    leurs lignes : ``mergeHistory`` les adopte par leur texte."""
+    client, _ = make(SlowReply(reply="Oui, quel match ! [EMOTION:happy:0.6]"))
+    bootstrap(client)
+    burst = {"r1": "salut", "r2": "t'as vu le match hier soir ?", "r3": "allo ?"}
+    with client.websocket_connect(WS) as ws:
+        opening(ws)
+        for cid, text in burst.items():
+            ws.send_json({"type": "chat", "message": text, "client_msg_id": cid})
+        frames = []
+        while not any(f["type"] == "speech" and f["text"] for f in frames):
+            frames.append(ws.receive_json())
+    speech = next(f for f in frames if f["type"] == "speech" and f["text"])
+    bound_ids = {speech["client_msg_id"]: speech["user_message_id"]}
+    assert speech["client_msg_id"] == "r3"
+    catchups = [f for f in frames[: frames.index(speech)] if f["type"] == "history" and f["mode"] == "catchup"]
+    assert catchups, [f["type"] for f in frames]  # avant la réponse : le client les a déjà rattachées
+    by_text = {m["text"]: m["id"] for c in catchups for m in c["messages"] if m["role"] == "user"}
+    for cid, text in burst.items():
+        if cid != "r3":
+            bound_ids[cid] = by_text.get(text)
+    assert all(isinstance(i, int) and i > 0 for i in bound_ids.values()), bound_ids
+    assert bound_ids["r1"] < bound_ids["r2"] < bound_ids["r3"]  # l'ordre du fil, pas +∞
+
+
 # ── Ce que devient une question sans réponse ──────────────────────────────
 
 
@@ -252,6 +293,36 @@ def test_a_reply_failure_reported_by_the_outbox_is_said_once(make):
         assert frames[-1] == {"type": "ack", "client_msg_id": "k1", "status": "overloaded"}
         ws.send_json({"type": "ping", "t": 2})
         assert [f["type"] for f in until(ws, "pong")] == ["pong"]  # dit une fois, pas deux
+
+
+def test_a_question_abandoned_as_too_old_is_not_called_a_saturation(make):
+    """Une question reprise au démarrage, des heures après, est abandonnée (« trop tard ») : la bulle le dit
+    ainsi, pas « Mika est saturée, réessaie dans un instant »."""
+    client, live = make(Fake())
+    bootstrap(client)
+    with client.websocket_connect(WS) as ws:
+        opening(ws)
+        late = Delivery(key="e2", target="user_1", channel="web", room=None, kind=delivery_p.REPLY_FAILED,
+                        reply_to=42, client_msg_id="k2", text=delivery_p.TOO_LATE)
+        client.portal.call(lambda: live.hub.deliver(late))
+        frames = until(ws, "ack")
+        assert frames[-1] == {"type": "ack", "client_msg_id": "k2", "status": "too_late"}
+
+
+def test_a_message_held_for_her_morning_does_not_leave_her_typing_all_night(make):
+    """Elle dort, la personne ne peut pas la réveiller : la réponse attend son réveil. « Mika écrit… » ne
+    tourne pas cinq minutes pendant sa nuit — une trame sans texte (``voice_reason`` « asleep ») l'éteint et
+    rattache la bulle à sa ligne du fil ; la réponse viendra au matin."""
+    client, _ = make(Fake(), reply_wait=lambda frame, seq: 0)  # elle dort : toute réponse attend son réveil
+    bootstrap(client)
+    with client.websocket_connect(WS) as ws:
+        opening(ws)
+        ws.send_json({"type": "chat", "message": "tu dors ?", "client_msg_id": "n1"})
+        assert until(ws, "ack")[-1]["status"] == "accepted"
+        speech = until(ws, "speech")[-1]
+        assert speech["text"] == "" and speech["speak"] is False and speech["voice_reason"] == "asleep"
+        assert speech["client_msg_id"] == "n1" and speech["user_message_id"] > 0
+        assert speech["message_id"] is None  # rien de dit : le curseur n'avance pas
 
 
 # ── Le murmure, les panneaux, les onglets ─────────────────────────────────

@@ -9,9 +9,9 @@ soir », « avant-hier »), pas en durées.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime
 from typing import Any
 
+from mika.contracts import attention as attention_c
 from mika.contracts import identity as c
 from mika.contracts import social as social_c
 from mika.faculties.identity.faculty import IDENTITY, IdentityState, view_of
@@ -20,6 +20,7 @@ from mika.kernel.frame import CLOSED as CLOSED_AUDIENCE
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.prompt import SectionBody
 from mika.vocab import privacy
+from mika.vocab.days import part_of_day
 from mika.vocab.episodes import CONVERSATIONAL, Kind, is_work_target
 from mika.vocab.people import is_identifiable
 from mika.vocab.privacy import ChannelTrust
@@ -72,31 +73,21 @@ def describe(view: c.IdentityView, *, public: bool, names: Mapping[str, str] | N
     return lines
 
 
-def _moment(dt: datetime) -> str:
-    if dt.hour < 5:
-        return "nuit"
-    if dt.hour < 12:
-        return "matin"
-    if dt.hour < 18:
-        return "après-midi"
-    return "soir"
-
-
 def calendar_words(then: int, frame: Frame) -> str:
     """Quand, en mots de calendrier (« hier soir (lundi vers 18 h) », « avant-hier »,
     « il y a 5 jours ») — les jours comptés sur le calendrier, pas en durée."""
     now, past = frame.local(), frame.local(then)
     days = (now.date() - past.date()).days
-    moment = _moment(past)
+    moment = part_of_day(past.hour)
     precise = f"{WEEKDAYS_FR[past.weekday()]} vers {past.hour} h"
     if days <= 0:
         if frame.now - then < 3_600_000_000:
             return "tout à l'heure"
-        return {"nuit": "cette nuit", "matin": "ce matin", "après-midi": "cet après-midi",
+        return {"nuit": "cette nuit", "matin": "ce matin", "midi": "ce midi", "après-midi": "cet après-midi",
                 "soir": "ce soir"}[moment] + f" (vers {past.hour} h)"
     if days == 1:
-        label = {"nuit": "la nuit dernière", "matin": "hier matin", "après-midi": "hier après-midi",
-                 "soir": "hier soir"}[moment]
+        label = {"nuit": "la nuit dernière", "matin": "hier matin", "midi": "hier midi",
+                 "après-midi": "hier après-midi", "soir": "hier soir"}[moment]
         return f"{label} ({precise})"
     if days == 2:
         return f"avant-hier ({precise})"
@@ -111,7 +102,11 @@ def calendar_words(then: int, frame: Frame) -> str:
 
 def last_talk(frame: Frame, person: str, kind: str, name: str = "") -> list[str]:
     """Quand la personne lui a écrit pour la dernière fois, avant cette
-    conversation-ci — et si Mika lui a écrit depuis."""
+    conversation-ci — et si Mika lui a écrit depuis. « Sans réponse » seulement
+    pour ce qui attend vraiment une réponse : une initiative d'elle restée lettre
+    morte, une question laissée en suspens — jamais sa réponse à « bonne nuit »,
+    ni une conversation que l'autre a close en partant (``attention.awaiting``) :
+    on s'est quittées, on ne l'ignore pas."""
     reading = frame.get(social_c.CONTACT(person))
     who = f"« {name} »" if name else "cette personne"
     if kind == Kind.REPLY:
@@ -126,13 +121,18 @@ def last_talk(frame: Frame, person: str, kind: str, name: str = "") -> list[str]
     if reading.last_in:
         out.append(f"{who[:1].upper()}{who[1:]} t'a écrit pour la dernière fois "
                    f"{calendar_words(reading.last_in, frame)}.")
-    if reading.last_out > reading.last_in:
-        out.append(f"Tu lui as écrit depuis, {calendar_words(reading.last_out, frame)}, sans réponse pour l'instant.")
+    mine = frame.get(attention_c.AWAITING(person))
+    if mine.initiatives:
+        out.append(f"Tu lui as écrit depuis, {calendar_words(mine.last_initiative_at, frame)}, sans réponse pour "
+                   "l'instant.")
+    elif mine.unanswered and mine.asked and not mine.owed and mine.last_out > mine.last_in:
+        out.append(f"Ta dernière question, {calendar_words(mine.last_out, frame)}, attend encore sa réponse.")
     return out
 
 
 @IDENTITY.section("who", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=90, floor_chars=400,
-                  title="QUI TU AS EN FACE", reads=[c.IDENTITY, c.PERSON, social_c.CLOSENESS, social_c.CONTACT])
+                  title="QUI TU AS EN FACE", reads=[c.IDENTITY, c.PERSON, social_c.CLOSENESS, social_c.CONTACT,
+                                                    attention_c.AWAITING])
 def _who(s: IdentityState, frame: Frame, enrich: Any) -> SectionBody | None:
     aud = frame.audience
     ep = frame.episode
@@ -157,9 +157,11 @@ def acquaintance(first_seen: int, frame: Frame, closeness: str = "") -> str:
     days = (frame.local().date() - frame.local(first_seen).date()).days
     if closeness in _KNOWN:
         if days <= 0:
-            return "Vous vous parlez ici depuis aujourd'hui."
+            return "C'est la première fois que vous vous parlez ici."
         if days == 1:
             return "Vous vous parlez ici depuis hier."
+        if days < 14:
+            return f"Vous vous parlez ici depuis {days} jours."
     if days <= 0:
         return "Vous vous connaissez depuis aujourd'hui seulement : vous n'avez pas encore de passé commun."
     if days == 1:

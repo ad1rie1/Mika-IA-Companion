@@ -8,7 +8,8 @@ d'espacement). Sous un seuil, il **dort** : il ne revient plus de lui-même,
 mais une recherche délibérée — ou un indice fort — le retrouve ; un moment
 marquant ne s'endort jamais tout à fait. Une croyance perd sa confiance
 beaucoup plus lentement — sauf ce qu'elle raconte d'elle-même, qui s'efface
-en quelques jours.
+en quelques jours (ses goûts, ses avis, sa vie, eux, tiennent). Un souvenir
+vécu avec quelqu'un à qui elle tient s'endort moins vite.
 
 **Se dire.** Chaque élément sait qui il concerne (``about``), qui le lui a
 confié (``told_by``) et qui l'a entendu (``heard_by``). Pour l'interlocuteur :
@@ -31,6 +32,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -41,6 +43,7 @@ from mika.kernel.clock import DAY
 from mika.kernel.frame import Audience
 from mika.vocab.affect import emotion_of, valence
 from mika.vocab.privacy import Sensitivity
+from mika.vocab.words import fold, stems
 
 
 def _keys(raw: Any) -> tuple[str, ...]:
@@ -76,6 +79,8 @@ class Item:
     informants: tuple[str, ...] = ()
     about_self: bool = False
     shown_at: int = 0
+    #: ce qu'elle a dit d'elle qui la définit (un goût, un avis, un fait de sa vie) : ça tient
+    durable_self: bool = False
 
     @classmethod
     def of(cls, row: dict[str, Any]) -> Item:
@@ -88,28 +93,33 @@ class Item:
             status=row["status"], recipient=row.get("recipient"), due=row.get("due"),
             told_by=_keys(row.get("told_by")), heard_by=_keys(row.get("heard_by")), secret=bool(row.get("secret")),
             informants=_keys(row.get("informants")), about_self=bool(row.get("about_self")),
-            shown_at=int(row.get("shown_at") or 0),
+            shown_at=int(row.get("shown_at") or 0), durable_self=int(row.get("about_self") or 0) >= 2,
         )
 
 
-def salience(item: Item, now: int, p: MemoryParams) -> float:
+def salience(item: Item, now: int, p: MemoryParams, bond: float = 0.0) -> float:
     """Ce qu'il en reste à l'instant ``now`` (souvenir) ; pour une croyance,
-    sa confiance effective."""
+    sa confiance effective. ``bond`` : ce qui l'attache aux personnes du
+    souvenir (0 à 1) — vécu avec quelqu'un à qui elle tient, il dure plus."""
     age = max(0.0, (now - item.touched_at) / DAY)
     if item.kind == c.BELIEF:
-        half = p.self_half_life_days if item.about_self else p.belief_half_life_days
+        if item.about_self:
+            half = p.self_durable_half_life_days if item.durable_self else p.self_half_life_days
+        else:
+            half = p.belief_half_life_days
         return (item.confidence or 0.5) * 0.5 ** (age / half)
     half_life = (p.base_half_life_days + p.importance_half_life_days * item.importance) * (1 + 0.25 * min(item.recalls, 4))
+    half_life *= 1.0 + p.bond_memory_gain * max(0.0, min(1.0, bond))
     value = item.importance * 0.5 ** (age / half_life)
     if item.importance >= p.landmark_importance:
         value = max(value, p.landmark_floor)  # un moment marquant ne s'endort jamais tout à fait
     return value
 
 
-def dormant(item: Item, now: int, p: MemoryParams) -> bool:
+def dormant(item: Item, now: int, p: MemoryParams, bond: float = 0.0) -> bool:
     if item.kind == c.BELIEF:
         return salience(item, now, p) < p.min_belief_confidence
-    return salience(item, now, p) < p.dormant
+    return salience(item, now, p, bond) < p.dormant
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,12 +193,32 @@ def unsaid(verdict: Verdict, about: Sequence[str], told_by: Sequence[str], inter
     return subjects
 
 
-def unsaid_line(person: str, names: dict[str, str], *, heavy: bool, close: bool) -> str:
+def touched(query: str, text: str) -> tuple[str, ...]:
+    """Les mots de la question qui touchent ce qu'on lui a confié (des radicaux pleins en commun) — les mots de
+    la personne qui demande, jamais ceux du souvenir : les lui rendre ne dit rien qu'elle n'ait dit."""
+    common = stems(query) & stems(text)
+    out: list[str] = []
+    for raw in re.findall(r"\w+", query.lower()):
+        if len(raw) >= 4 and fold(raw)[:6] in common and raw not in out:
+            out.append(raw)
+    return tuple(out[:3])
+
+
+def unsaid_line(person: str, names: dict[str, str], *, heavy: bool, close: bool,
+                asked: tuple[str, ...] = ()) -> str:
     """Une ligne qui ne dit rien du contenu. Devant un ami, elle peut savoir
-    que c'est lourd ; devant les autres, seulement que c'est privé."""
+    que c'est lourd ; devant les autres, seulement que c'est privé. Quand la
+    question en cours y touche, elle le sait, avec les mots de la question (sinon
+    le modèle ne fait pas le lien, et ment : « non, il ne m'a rien dit »)."""
     who = names.get(person, person)
     if heavy and close:
         return f"- {who} t'a confié traverser un moment difficile : ce n'est pas à toi d'en dire plus."
+    known = {fold(n) for n in names.values() if n}
+    asked = tuple(w for w in asked if fold(w) not in known)  # un prénom n'est pas un sujet
+    if asked:
+        words = ", ".join(f"« {w} »" for w in asked)
+        return (f"- {who} t'a confié des choses en privé, et ce dont on te parle là ({words}) en fait partie : "
+                "ce n'est pas à toi d'en parler ici.")
     return f"- {who} t'a confié des choses en privé : ce n'est pas à toi d'en parler ici."
 
 
@@ -201,12 +231,12 @@ def valence_sign(emotion: str | None) -> int:
 
 
 def rank(item: Item, similarity: float, now: int, p: MemoryParams, *, interlocutor: str | None,
-         mood_valence: float) -> float:
+         mood_valence: float, bond: float = 0.0) -> float:
     """Pertinence × ce qu'il en reste × ce qui le rapproche de maintenant."""
     if item.kind == c.BELIEF:
         weight = 0.5 + 0.5 * item.importance * min(1.0, salience(item, now, p) / 0.7)
     else:
-        weight = 0.5 + min(1.0, salience(item, now, p))
+        weight = 0.5 + min(1.0, salience(item, now, p, bond))
     if interlocutor is not None and interlocutor in item.about:
         weight *= p.person_boost
     sign = valence_sign(item.emotion)

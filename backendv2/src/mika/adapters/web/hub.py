@@ -187,6 +187,8 @@ class Hub:
         if not targets:
             return True  # personne de connecté : rattrapage par l'historique (une pensée, elle, passe)
         handles = sorted({c.handle for c in targets})
+        if not inner and target:
+            await self._bind_turn(target, d)
         voices = set()  # une voix par personne : l'onglet qui a demandé, sinon le plus récemment actif
         for h in handles:
             chosen = self.speaker([c for c in targets if c.handle == h], d)
@@ -199,6 +201,24 @@ class Hub:
             self._hold(target, d)
         await self.refresh_panels(handles)
         return True
+
+    async def _bind_turn(self, handle: str, d: Delivery) -> None:
+        """Une réponse qui règle une rafale (« salut », « t'as vu le match ? », « allo ? ») ne lie par sa trame
+        ``speech`` que son dernier message (``user_message_id``, ``client_msg_id``). Les bulles d'avant restaient
+        sans identifiant : le curseur passait au-delà, aucun ``sync`` ne les renvoyait, et sorties de la fenêtre
+        initiale elles finissaient épinglées sous tout le fil. Juste avant la trame ``speech``, une trame
+        ``history`` (``catchup``) porte leurs lignes : le client les adopte par leur texte (contrat inchangé)."""
+        earlier = {a for a in d.answers if a != d.reply_to}
+        if not earlier:
+            return
+        try:
+            rows, _ = self.port.after(handle, min(earlier) - 1, protocol.HISTORY_MAX)
+        except Exception as exc:  # un fil illisible ne retient pas la réponse : un rattrapage les adoptera
+            log.warning("bulles d'une rafale non rattachées (%s) : %r", handle, exc)
+            return
+        rows = [r for r in rows if r.id in earlier and r.role == "user"]
+        if rows:
+            await self.send_to(handle, protocol.history("catchup", rows, after_id=min(earlier) - 1))
 
     def _hold(self, handle: str, d: Delivery) -> None:
         """La réplique livrée devient la référence du visage pour ce qui suit."""

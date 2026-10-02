@@ -18,3 +18,15 @@ describe("resolveSleepPhase", () => {
     expect(resolveSleepPhase(42)).toBe("awake");
   });
 });
+
+describe("DREAM_TYPE_LABEL", () => {
+  it("names in French every dream type the server sends", async () => {
+    // « melancholic » (contracts/self_.py) s'affichait brut, en gris.
+    const { DREAM_TYPE_LABEL } = await import("../InnerLifePanel");
+    const { DREAM_TYPES } = await import("../../types");
+    for (const kind of DREAM_TYPES) {
+      expect(DREAM_TYPE_LABEL[kind]?.label).toMatch(/^(rêve|cauchemar) /);
+    }
+    expect(Object.keys(DREAM_TYPE_LABEL).sort()).toEqual([...DREAM_TYPES].sort());
+  });
+});

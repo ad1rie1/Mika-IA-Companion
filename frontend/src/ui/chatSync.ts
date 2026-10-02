@@ -93,6 +93,9 @@ const ACK_REASONS: Record<string, string> = {
   rate_limited: "trop de messages d'affilée",
   empty: "message vide",
   overloaded: "Mika est saturée, réessaie dans un instant",
+  // Une question restée sans réponse jusqu'à ce qu'il soit trop tard (une
+  // reprise au démarrage, des heures après) : ce n'est pas une saturation.
+  too_late: "trop tard pour répondre — repose ta question",
   too_long: "message trop long",
   attachments_rejected: "pièces jointes refusées (format ou taille)",
   frame_too_large: "envoi trop volumineux — retire une pièce jointe",

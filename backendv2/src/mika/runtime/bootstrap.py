@@ -38,6 +38,7 @@ from mika.kernel.frame import Frame
 from mika.kernel.ids import IdGen
 from mika.kernel.prompt import Budget
 from mika.kernel.registry import ArbitrationPolicy, Registry
+from mika.ports.delivery import TOO_LATE
 from mika.ports.llm import LLMGateway
 from mika.ports.store import EventStore
 from mika.runtime.arbiter import Arbiter, arbiter_spec
@@ -62,6 +63,8 @@ from mika.runtime.traces import EpisodeTraces
 #: le recul entre deux reprises d'une réponse qui n'arrive pas à partir
 RETRY_BASE_S = 0.5
 RETRY_MAX_S = 30.0
+#: ce qu'un tour réglé faute de place dit (le détail technique d'un ``reply_failed``)
+SATURATED = "saturée : trop de messages en attente"
 
 
 @dataclass(slots=True)
@@ -126,6 +129,8 @@ class Perceived:
     commit: Commit | None
     reply: asyncio.Future[EpisodeReport] | None
     overloaded: bool = False
+    #: elle dort : la réponse attend son réveil (``reply`` est vide, rien ne viendra avant)
+    held: bool = False
 
     @property
     def seq(self) -> int | None:
@@ -295,7 +300,10 @@ class Kernel:
                        correlation: str | None = None) -> Perceived:
         """Une perception : journalisée, puis une réponse demandée. File pleine →
         refusée avant d'être journalisée (sinon la reprise au démarrage
-        répondrait des heures plus tard à un message qu'on a dit refusé)."""
+        répondrait des heures plus tard à un message qu'on a dit refusé). Si elle se
+        remplit pendant qu'on journalise, le tour est réglé tout de suite (``failed``,
+        en le disant une fois par la file de sortie) : jamais une question en attente
+        sans épisode pour lui répondre — elle figerait aussi la consolidation."""
         if self.deps.reply_kind in self.runner.policies and self.lanes.full(self.deps.reply_kind):
             return Perceived(None, None, overloaded=True)
         correlation = correlation or f"perception:{self.mind.ids.new(self.mind.clock.now())}"
@@ -312,9 +320,11 @@ class Kernel:
         self._retry_counts.pop((data.handle, data.room), None)  # la personne parle : un tour neuf
         if self._wait_of(seq, self.mind.root) == 0:
             self._held[seq] = None  # elle dort : la réponse attend son réveil (``_release_held``)
-            return Perceived(commit, None)
+            return Perceived(commit, None, held=True)
         fut = self.lanes.submit(self._reply_request(seq, data, f"perception:{seq}"))
-        return Perceived(commit, fut, overloaded=fut is None)
+        if fut is None:
+            await self._saturated(seq)
+        return Perceived(commit, fut)
 
     def _reply_request(self, seq: int, data: PerceptionReceived, trigger: str) -> EpisodeRequest:
         """La demande de réponse au message ``seq`` — le dernier de son tour : le modèle lit les précédents
@@ -410,7 +420,10 @@ class Kernel:
             return "abandoned"
         if self.deps.reply_kind not in self.runner.policies:
             return "none"
-        return "resumed" if self._submit_reply(latest, trigger) else "none"
+        if self._submit_reply(latest, trigger):
+            return "resumed"
+        # file pleine : réglé en le disant, plutôt qu'en attente sans épisode jusqu'au prochain démarrage
+        return "abandoned" if await self._saturated(latest) else "none"
 
     def _wait_of(self, seq: int, root: Any) -> int | None:
         """``reply_wait`` sur cette racine ; une panne ne retient rien (``None``)."""
@@ -456,7 +469,7 @@ class Kernel:
         too_old = self.mind.clock.now() - since > self.deps.max_reply_age_s * 1_000_000
         if not too_old and pending.attempts < MAX_REPLY_ATTEMPTS:
             return False
-        detail = "trop tard pour répondre" if too_old else "abandonnée après deux tentatives"
+        detail = TOO_LATE if too_old else "abandonnée après deux tentatives"
         await acall(lambda: self.mind.append(
             [EPISODE_ENDED.draft(kind=self.deps.reply_kind, outcome="failed", target=pending.handle,
                                  reply_to=latest, detail=detail, unanswered=turn_upto(rs, latest))],
@@ -464,6 +477,21 @@ class Kernel:
         ), label="abandon d'une question")
         self._retry_counts.pop((pending.handle, pending.room), None)
         return True
+
+    async def _saturated(self, latest: int) -> bool:
+        """Le tour de ``latest`` n'a pas trouvé de place dans la file : il est réglé (``failed``, détail
+        ``SATURATED`` ; ses messages partent comme « sans réponse », une fois). Rend ``True`` s'il l'est."""
+        rs = self.mind.root.slices[RUNTIME.name]
+        pending = rs.pending.get(latest)
+        if pending is None:
+            return False
+        got = await acall(lambda: self.mind.append(
+            [EPISODE_ENDED.draft(kind=self.deps.reply_kind, outcome="failed", target=pending.handle,
+                                 reply_to=latest, detail=SATURATED, unanswered=turn_upto(rs, latest))],
+            emitter="runtime", correlation=f"saturée:{latest}", origin=Origin.KERNEL,
+        ), label="tour sans place dans la file")
+        self._retry_counts.pop((pending.handle, pending.room), None)
+        return not isinstance(got, Failed)
 
     def _submit_reply(self, seq: int, trigger: str) -> bool:
         stored = self.mind.store.get_events([seq])

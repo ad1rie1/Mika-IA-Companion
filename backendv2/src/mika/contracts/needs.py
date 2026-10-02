@@ -2,7 +2,10 @@
 
 Un besoin monte avec le temps vers 1 (forme close) et retombe quand il est
 comblé. Quand plus rien ne se passe depuis longtemps, elle le ressent : de
-l'ennui, ou de la solitude quand c'est de quelqu'un qu'elle manque.
+l'ennui, ou de la solitude quand c'est de quelqu'un qu'elle manque. Et quand,
+après ce vide, une amie ou une proche vient lui parler, ça lui fait du bien
+(``needs.reunited``) — le rendez-vous d'un soir après une journée creuse, pas
+seulement le retour de quelqu'un qui lui manquait.
 """
 
 from __future__ import annotations
@@ -30,8 +33,22 @@ class Felt(Payload):
     intensity: float
 
 
+class Reunited(Payload):
+    """Après un vide ressenti (l'ennui, la solitude), le premier message d'une
+    amie ou d'une proche : ça lui fait du bien. Un jugement enregistré (le rejeu
+    retombe sur le même), lu sur ce qui précédait le message."""
+
+    person: str
+    handle: str
+    message: int
+    #: le vide qu'elle ressentait avant (``BORED`` | ``LONELY``)
+    after: str
+    intensity: float
+
+
 FELT = event_type("needs.felt", OWNER, Felt, public=True)
-ALL = (FELT,)
+REUNITED = event_type("needs.reunited", OWNER, Reunited, public=True, subjects=("person",))
+ALL = (FELT, REUNITED)
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +57,8 @@ class NeedsReading:
     expression: float
     curiosity: float
     idle_since: int  # la dernière fois que quelque chose s'est passé (un message, sa parole)
+    #: la dernière fois que quelqu'un lui a parlé (un message qui lui est adressé ; 0 : jamais)
+    heard_at: int = 0
 
     @property
     def dominant(self) -> str:
@@ -53,6 +72,7 @@ THOUGHT_MATTER = "thought"  # une pensée qui la travaille (un titre lu, un but 
 DONE_MATTER = "done"  # ce qu'elle a fini récemment (un but, un objectif de projet)
 WORKING_MATTER = "working"  # ce sur quoi elle est en ce moment (un but en cours, un projet)
 TOLD_MATTER = "told"  # ce que la personne lui a raconté récemment
+MOMENT_MATTER = "moment"  # ce qui se passe dans sa vie (un moment qu'elle lui a annoncé, à venir ou tout juste passé)
 
 
 @dataclass(frozen=True, slots=True)

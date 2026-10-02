@@ -59,11 +59,21 @@ STATES_FR = {"ok": "en forme", "degraded": "dégradé", "ko": "en panne"}
 CHECKS_FR = {"journal": "journal", "slices": "tranches", "loops": "boucles", "projections": "projections",
              "processes": "processus", "outbox": "file de sortie", "llm": "modèles", "lanes": "voies",
              "config": "configuration lisible"}
-#: les états d'une ligne de la file de sortie ; « seen » : un échec qu'un opérateur a vu et laissé
-OUTBOX_LABELS = {"pending": "en attente", "done": "parti", "failed": "échoué", "orphan": "orphelin",
+#: les états d'une ligne de la file de sortie (``runtime/effects.py``) ; « seen » : un échec qu'un opérateur a
+#: vu et laissé. « stale » : une parole qui n'a pas pu partir dans les dix minutes (elle ne la dira plus, et
+#: personne n'en a rien su) ; « interrupted » : une action coupée en cours (un arrêt, son délai) dont on ne
+#: sait pas si elle a eu lieu
+OUTBOX_LABELS = {"pending": "en attente", "running": "en cours", "done": "parti", "failed": "échoué",
+                 "orphan": "orphelin", "stale": "périmé (pas dit)", "interrupted": "interrompu (à vérifier)",
                  "seen": "vu, laissé"}
+OUTBOX_TONES = {"pending": "info", "running": "info", "done": "ok", "failed": "danger", "orphan": "warn",
+                "stale": "warn", "interrupted": "warn", "seen": "muted"}
 #: ce qui allume le badge « à traiter » de Sorties
-OUTBOX_PROBLEMS = ("failed", "orphan")
+OUTBOX_PROBLEMS = ("failed", "orphan", "stale", "interrupted")
+#: ce qu'on ne relance pas, on le marque seulement comme vu : une parole périmée repasserait « périmée » (elle
+#: ne part plus), une action interrompue a déjà dit son échec à qui l'avait voulue (la rejouer referait
+#: peut-être ce qui a eu lieu)
+OUTBOX_SEEN_ONLY = ("stale", "interrupted")
 #: les pages de Système qui lisent le journal ou une table, par page
 PAGE = 50
 REPORT_NAME = re.compile(r"^[\w.-]{1,120}\.(md|html|json|txt)$")
@@ -460,9 +470,9 @@ async def sorties(ui: Any, request: Request) -> Any:
     store = ui.kernel.mind.store
     counts = dict(store.query_mind("SELECT status, COUNT(*) FROM outbox GROUP BY status"))
     ctx = ui.inspection.context(request.query_params)
-    status = request.query_params.get("etat", "")
+    status = request.query_params.get("etat", "")[:40]
     labels = OUTBOX_LABELS
-    invalid = bool(status and status not in labels)
+    invalid = bool(status and status not in labels and status not in counts)
     if invalid:
         status = ""
     where, args = ("WHERE status=?", (status,)) if status else ("", ())
@@ -470,14 +480,14 @@ async def sorties(ui: Any, request: Request) -> Any:
     pager = ctx.pager("page", size=PAGE, total=total)
     rows = store.query_mind(f"SELECT key, seq, effect, status, attempts, last_error FROM outbox {where} "
                             f"ORDER BY seq DESC LIMIT ? OFFSET ?", (*args, pager.size, pager.offset))
-    tones = {"pending": "info", "done": "ok", "failed": "danger", "orphan": "warn", "seen": "muted"}
+    tones = OUTBOX_TONES
     chips = tuple(NavItem(f"{labels.get(k, k)}", Ref("local", "/inspecteur/systeme/sorties", k, (("etat", k),)),
                           count=n, active=k == status, tone=tones.get(k, "")) for k, n in sorted(counts.items()))
     back = request.url.path + (f"?{urlencode(_without(request.query_params, 'flash'))}"
                                if _without(request.query_params, "flash") else "")
     marks = ",".join("?" * len(OUTBOX_PROBLEMS))
     problems = [{"key": key, "seq": seq, "label": _effect_label(ui, effect), "status": labels.get(st, st),
-                 "error": names.detail(err) if err else ""}
+                 "error": names.detail(err) if err else "", "retry": st not in OUTBOX_SEEN_ONLY}
                 for key, seq, effect, st, err in store.query_mind(
                     f"SELECT key, seq, effect, status, last_error FROM outbox WHERE status IN ({marks}) "
                     f"ORDER BY seq DESC LIMIT {OUTBOX_PROBLEMS_SHOWN}", OUTBOX_PROBLEMS)]
@@ -494,12 +504,16 @@ async def sorties(ui: Any, request: Request) -> Any:
             Row((Ref("event", str(seq), f"n° {seq}"), Text(_effect_label(ui, effect), hint=effect),
                  Badge(labels.get(st, st), tones.get(st, "")), attempts,
                  Text(names.detail(err) if err else "—", "muted", clamp=200), Text(effect, "mono")),
-                href=Ref("event", str(seq), ""), tone={"failed": "danger", "orphan": "warn"}.get(st, ""))
+                href=Ref("event", str(seq), ""),
+                tone={"failed": "danger", "orphan": "warn", "stale": "warn", "interrupted": "warn"}.get(st, ""))
             for _key, seq, effect, st, attempts, err in rows),
             title="Effets", empty="Aucun effet.", pager=pager,
             caption="Orphelin : aucun exécuteur n'était déclaré pour cet effet quand il est parti — il n'a rien fait. "
-                    "Un effet échoué ou orphelin se relance (un essai de plus) ou se marque comme vu : le badge "
-                    "« à traiter » s'éteint, la ligne reste."),
+                    "Périmé : une parole qui n'a pas pu partir dans les dix minutes — elle ne la dira plus. "
+                    "Interrompu : une action coupée en cours (un arrêt, son délai) — on ne sait pas si elle a eu "
+                    "lieu, à vérifier. Un effet échoué ou orphelin se relance (un essai de plus) ou se marque comme "
+                    "vu ; un effet périmé ou interrompu se marque comme vu : le badge « à traiter » s'éteint, la "
+                    "ligne reste."),
     ]}
 
 
@@ -540,6 +554,9 @@ async def outbox_post(ui: Any, request: Request) -> Response:
         found = store.query_mind("SELECT status, last_error FROM outbox WHERE key=?", (key,))
         if not found or found[0][0] not in OUTBOX_PROBLEMS or what not in ("relancer", "vu"):
             ui.flash(token, "warn", "Rien à faire : cet effet n'est plus en échec (déjà relancé ou vu ?).")
+        elif what == "relancer" and found[0][0] in OUTBOX_SEEN_ONLY:
+            ui.flash(token, "warn", "Pas relancé : une parole périmée ne part plus, et une action interrompue a "
+                                    "peut-être déjà eu lieu. Vérifie, puis marque-le comme vu.")
         else:
             error = found[0][1]
             if what == "relancer":

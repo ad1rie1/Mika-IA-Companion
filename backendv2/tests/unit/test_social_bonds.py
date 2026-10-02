@@ -159,6 +159,10 @@ def test_the_words_of_her_profile_of_someone_are_forgotten_with_them(tmp_path):
     assert sorted(before.values()) == ["doux", "montagne", "sa santé"]
     assert after == {}  # oubliée, Alice n'a plus ni ton, ni intérêts, ni sujets délicats nulle part
     assert plain == []  # rien en clair dans l'enveloppe du journal
+    # le modèle de la fiche ne voit ni comptes ni ressenti : il les recopiait (« une connaissance récente de Mika,
+    # avec qui elle échange depuis 1 jour et 15 messages », sonde du 2026-10-02)
+    assert not any(ch.isdigit() for ch in prompts[0].split("Ce qu", 1)[0]) and "ressent" not in prompts[0]
+    assert "montagne" in prompts[0], "contre-exemple : ce qu'Alice a dit, il le voit"
 
 
 # ── PRM-1, 17, 18, 19 : « QUI TU AS EN FACE » ─────────────────────────────

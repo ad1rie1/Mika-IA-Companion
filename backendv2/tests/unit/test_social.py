@@ -7,20 +7,34 @@
   jamais quelqu'un qu'elle ne peut pas joindre ;
 - sous la détresse, elle va vers la personne auprès de qui elle se sent bien ;
 - sa fiche d'une personne n'entre dans le prompt que pour elle, en privé ;
-- un souvenir qui touche un sujet délicat de quelqu'un devient une confidence.
+- un souvenir qui touche un sujet délicat de quelqu'un devient une confidence ;
+- une rancune retient l'ordinaire, jamais une promesse (ADR 0044) : le rappel
+  qu'on lui a demandé part à l'heure, prévenir n'est que décalé ;
+- une reconnexion, un redémarrage d'elle ne sont pas des arrivées : on ne
+  resalue pas quelqu'un qui n'est jamais parti.
 """
 
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
+from mika.contracts import affect as affect_c
+from mika.contracts import agency as agency_c
+from mika.contracts import email as email_c
+from mika.contracts import goals as goals_c
+from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
+from mika.contracts import others as others_c
+from mika.contracts import projects as projects_c
+from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.faculties.others.tone import read_tone
 from mika.faculties.social.faculty import Contact, SocialParams, lived, owner_floored, rhythm
-from mika.kernel.clock import DAY, HOUR, US, local
+from mika.kernel.arbitration import Modulation, RowView
+from mika.kernel.clock import DAY, HOUR, MINUTE, US, local
 from mika.kernel.events import Content, Origin
 from mika.ports.llm import LLMResponse
 from mika.sim.clock import run_virtual
@@ -445,3 +459,124 @@ def test_a_night_owl_reaches_out_to_a_friend_late_in_the_evening(tmp_path):
     day = go(tmp_path / "jour", (10 * 60, 20 * 60 + 30))
     assert owl and all(h >= 18 or h <= 1 for h in owl), owl
     assert all(10 <= h <= 20 for h in day), day
+
+
+# ── Ce qui est dû, ce qui prévient, et la rancune (ADR 0044) ──────────────
+
+
+class _Frame:
+    """Ce qu'un modulateur lit : des faits posés à la main, les réglages par défaut."""
+
+    def __init__(self, facts):
+        self.facts, self.root = facts, None
+        self.env = SimpleNamespace(params_of=lambda owner, root: None)
+
+    def get(self, key):
+        return self.facts[key]
+
+
+def _resented(handle="user_9", hostility=0.4):
+    return _Frame({identity_c.PERSON(handle): handle, affect_c.HOSTILITY(handle): hostility})
+
+
+@pytest.mark.parametrize("reasons,veto,shift,why", [
+    ((goals_c.REMIND, social_c.PRESENT_PERSON), None, 0.0, "tenir parole : ni veto ni décalage"),
+    ((email_c.MENTION,), None, P.grudge_inform_shift, "prévenir d'un mail important : décalé, pas empêché"),
+    ((projects_c.NEED,), None, P.grudge_inform_shift, "« j'ai besoin de toi pour ton projet » : décalé"),
+    ((goals_c.REMIND, email_c.MENTION), None, 0.0, "une promesse à tenir l'emporte"),
+    ((social_c.GREETING, social_c.PRESENT_PERSON), social_c.GRUDGE, 0.0, "pas même une salutation (ADR 0013)"),
+    ((social_c.CHAT,), social_c.GRUDGE, 0.0, "pas d'envie de bavarder"),
+    ((others_c.FOLLOW_UP,), social_c.GRUDGE, 0.0, "« alors, cet entretien ? » n'est pas dû"),
+])
+def test_a_grudge_holds_back_the_ordinary_never_a_promise(reasons, veto, shift, why):
+    from mika.faculties.social.initiative import _restraint
+
+    got = _restraint(None, _resented(), RowView("INITIATIVE", "user_9", 9.0, tuple(sorted(reasons))))
+    assert (got.veto, got.shift) == (veto, shift), why
+    calm = _restraint(None, _resented(hostility=0.0), RowView("INITIATIVE", "user_9", 9.0, tuple(sorted(reasons))))
+    assert calm == Modulation()  # contrôle : sans rancune, rien
+
+
+def test_what_is_owed_is_declared_once_and_every_restraint_reads_it():
+    """Un rappel promis n'est retenu par aucune retenue — rancune, budget d'initiatives, heure où la personne
+    répond d'habitude : toutes lisent la même déclaration (``agency.OWED``), aucune ne la redit."""
+    from mika.faculties.agency import _budget
+    from mika.faculties.others.faculty import _receptive
+    from mika.faculties.social.initiative import _restraint
+
+    row = RowView("INITIATIVE", "user_9", 12.0, (goals_c.REMIND,))
+    frame = _resented()
+    assert [m(None, frame, row) for m in (_restraint, _budget, _receptive)] == [Modulation()] * 3
+    assert agency_c.OWED <= agency_c.NOT_SPEAKING_UP and agency_c.INFORMS.isdisjoint(agency_c.NOT_SPEAKING_UP)
+    assert social_c.GREETING not in agency_c.OWED  # saluer n'est pas dû : la rancune l'empêche
+
+
+def test_she_keeps_her_word_even_to_someone_she_resents(tmp_path):
+    """BUG-1 : Kev l'insulte douze fois — elle lui en veut —, puis lui demande un rappel. Elle accepte, et le rappel
+    part à l'heure : tenir parole ne dépend pas de ce qu'elle ressent. Rien d'autre ne va vers lui."""
+    from mika.sim.others import TROLL
+    from tests.unit.test_senses import run as run_senses
+
+    async def scenario(kernel, llm, mail, feeds):
+        await connect(kernel, "user_9", "Kev")
+        for text in TROLL:
+            await (await kernel.perceive(said("user_9", text))).reply
+            await asyncio.sleep(60)
+        hostility = kernel.mind.frame().get(affect_c.HOSTILITY("user_9"))
+        await (await kernel.perceive(said("user_9", "rappelle-moi dans 20 minutes de rappeler Paul"))).reply
+        asked = kernel.mind.clock.now()
+        await asyncio.sleep(4 * HOUR / US)
+        return hostility, asked
+
+    r = run_senses(tmp_path, scenario, start=at_paris(2026, 9, 28, 14, 0))
+    hostility, asked = r.result
+    assert hostility >= P.grudge  # une rancune installée
+    reasons = {e.correlation: set(e.data.reason.split(",")) for e in r.of(rt.EPISODE_STARTED)
+               if e.data.kind == "INITIATIVE" and e.data.target == "user_9"}
+    said_ = [e for e in r.of(rt.UTTERANCE) if e.correlation in reasons and e.data.visible]
+    assert len(said_) == 1 and goals_c.REMIND in reasons[said_[0].correlation]
+    assert 15 * MINUTE <= said_[0].at - asked <= 40 * MINUTE  # à l'heure
+    assert all(goals_c.REMIND in r_ for r_ in reasons.values())  # rien d'ordinaire vers lui
+
+
+# ── Une arrivée, pas une reconnexion (BUG-12) ─────────────────────────────
+
+
+def test_a_reconnection_or_her_restart_is_not_an_arrival(tmp_path):
+    """Bea est là depuis 9 h sans écrire : saluée une fois. Une coupure de quelques secondes à 11 h, un redémarrage
+    d'elle à 14 h : Bea n'est jamais partie, pas de nouveau « coucou ». Contre-exemple : Chloé, partie deux heures,
+    est saluée à son retour (et pas une fois de plus au redémarrage, puisqu'elle était là)."""
+    script = Script()
+    kernel, clock, llm, _ = build(tmp_path, script, start=at_paris(2026, 9, 28, 9, 0))
+
+    async def first():
+        await boot(kernel)
+        await connect(kernel, "user_2", "Bea")
+        await connect(kernel, "user_3", "Chloé")
+        await asyncio.sleep((at_paris(2026, 9, 28, 11, 0) - clock.now()) / US)
+        await disconnect(kernel, "user_2")  # une coupure de réseau…
+        await asyncio.sleep(5)
+        await connect(kernel, "user_2", "Bea", connection="c-user_2-bis")  # … et le navigateur se reconnecte
+        await disconnect(kernel, "user_3")  # Chloé s'en va
+        await asyncio.sleep((at_paris(2026, 9, 28, 13, 0) - clock.now()) / US)
+        await connect(kernel, "user_3", "Chloé")  # … et revient deux heures plus tard
+        await asyncio.sleep((at_paris(2026, 9, 28, 14, 0) - clock.now()) / US)
+        await kernel.stop()  # elle s'arrête, sans que personne soit parti
+
+    run_virtual(clock, first)
+    clock.advance_to(at_paris(2026, 9, 28, 14, 5))
+    again, _, _, _ = build(tmp_path, script, clock=clock, llm=llm)
+
+    async def second():
+        await boot(again)
+        await connect(again, "user_2", "Bea", connection="c-user_2-ter")  # leurs onglets se reconnectent
+        await connect(again, "user_3", "Chloé", connection="c-user_3-bis")
+        await asyncio.sleep(30 * MINUTE / US)
+        greeted = [(e.data.target, local(e.at, PARIS).hour) for e in started(again)
+                   if e.data.kind == "INITIATIVE" and social_c.GREETING in e.data.reason.split(",")]
+        await again.stop()
+        return greeted
+
+    greeted = run_virtual(clock, second)
+    assert [h for t, h in greeted if t == "user_2"] == [9], greeted  # une fois, à son arrivée
+    assert [h for t, h in greeted if t == "user_3"] == [9, 13], greeted  # partie deux heures : saluée au retour

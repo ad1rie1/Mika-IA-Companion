@@ -20,17 +20,16 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from mika.contracts import affect as affect_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import social as c
 from mika.faculties.social.faculty import SOCIAL, SocialState, params
-from mika.kernel.clock import DAY
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
 from mika.ports.llm import LLMRequest, LLMResponse, Message, ToolDecl
 from mika.vocab.privacy import Sensitivity
+from mika.vocab.words import elided
 
 TOOL_NAME = "record_profile"
 
@@ -49,10 +48,15 @@ def tool() -> ToolDecl:
 
 
 SYSTEM = """Tu aides Mika à se faire une idée de quelqu'un qu'elle connaît, à partir de ce que cette personne lui a \
-dit elle-même et de ce que Mika a vécu avec elle. Écris comme ses propres notes, à la troisième personne, avec son \
-prénom (« C'est quelqu'un qui… »).
-- resume : qui est cette personne pour Mika, en 2 à 4 phrases ; n'invente rien, ne répète pas les détails intimes.
-- ton : comment lui parler (une phrase).
+dit elle-même et de ce que Mika a vécu avec elle. Écris comme des notes de Mika sur cette personne, sans jamais \
+nommer Mika ni parler d'elle (ni « Mika », ni « elle », ni « moi », ni « me ») : la personne à la troisième \
+personne, avec son prénom (« C'est quelqu'un qui… »).
+- resume : qui est cette personne — sa vie, ce qui compte pour elle, son caractère, et les proches qu'elle a nommés \
+(« sa sœur Léa », « son chat Moustache ») — en 2 à 4 phrases ; n'invente rien, ne répète pas les détails intimes. \
+Ni chiffres, ni jugement sur votre lien (« connaissance récente », « ami proche ») : le lien, Mika le vit, elle ne \
+le note pas.
+- ton : comment lui parler — une consigne de ton (« direct et taquin, il aime qu'on le charrie »), jamais une \
+phrase à lui dire.
 - interets : ce qui l'intéresse (quelques mots chacun, au plus 6).
 - sujets_sensibles : les sujets délicats avec cette personne (au plus 6), sinon une liste vide.
 Réponds uniquement en appelant l'outil record_profile."""
@@ -170,25 +174,38 @@ class Revise:
 
     def _prompt(self, frame: Frame, state: SocialState, person: str, items: list[tuple[Any, ...]], store: Any) -> str:
         view = frame.get(identity_c.IDENTITY(person))
-        reading = frame.get(c.CONTACT(person))
-        warmth = frame.get(affect_c.WARMTH(person))
-        known = max(0, (frame.now - (view.first_seen or reading.first_in or frame.now)) // DAY)
         name = view.name or "cette personne"
-        feeling = ("beaucoup de chaleur" if warmth >= 0.5 else "de la sympathie" if warmth >= 0.2
-                   else "rien de particulier")
-        lines = [f"Personne : {view.name or 'sans nom connu'}.",
-                 f"Mika et {name} se connaissent depuis {known} jours ; {name} lui a écrit {reading.inbound} "
-                 f"messages, sur {reading.days} jours différents.",
-                 f"Ce que Mika ressent pour {name} : {feeling}."]
+        # ni comptes ni ressenti : un modèle qui voit « 15 messages » ou « de la sympathie » les recopie dans la
+        # fiche (sonde du 2026-10-02 : « une connaissance récente de Mika, avec qui elle échange depuis 1 jour et
+        # 15 messages », sous « fait partie de tes amis ») — la proximité se vit ailleurs (``faculty.lived``)
+        lines = [f"Personne : {view.name or 'sans nom connu'}."]
         previous = state.profiles.get(person)
         if previous is not None:
             text = store.content([previous.summary_ref]).get(previous.summary_ref) if previous.summary_ref else None
             if text:
                 lines.append(f"Ce qu'elle en pensait jusqu'ici : {text}")
         lines.append("")
-        lines.append(f"Ce que {name} lui a dit, et ce que Mika a vécu avec {name} :")
+        lines.append(f"Ce {elided(name, 'que')} lui a dit, et ce que Mika a vécu avec {name} :")
         lines += [f"- {text}" for _i, text, _imp in items]
         return "\n".join(lines)
+
+
+#: Le registre de chaque lien (audit HUM-15) : rien ne traduisait la proximité en manière d'être — taquiner une
+#: inconnue dès son premier message, ou parler à une proche comme à une cliente.
+REGISTER = {
+    c.STRANGER: "Tu ne la connais pas encore : reste accueillante et chaleureuse, mais ne la taquine pas et ne la "
+                "charrie pas — la complicité viendra si vous apprenez à vous connaître.",
+    c.ACQUAINTANCE: "Vous vous connaissez un peu : tu peux plaisanter gentiment, sans familiarité ni taquinerie "
+                    "appuyée.",
+    c.FRIEND: "Entre amis, vous pouvez vous charrier gentiment, plaisanter librement.",
+    c.CLOSE: "Vous êtes proches : de la complicité, vos blagues à vous, tu peux la taquiner — et tu peux aussi être "
+             "vraie avec elle quand ça ne va pas.",
+}
+
+
+def register(level: str) -> str:
+    """Comment être avec elle, selon ce qui vous lie (jamais un nombre)."""
+    return REGISTER.get(level, REGISTER[c.STRANGER])
 
 
 def describe_level(level: str, name: str = "") -> str:

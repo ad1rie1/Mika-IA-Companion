@@ -67,9 +67,49 @@ def test_a_secret_never_reaches_someone_who_was_not_there(tmp_path):
     assert item["told_by"] == ["user_2"] and item["heard_by"] == ["user_2"] and item["secret"]
     to_bob = script.prompts("user_3")
     assert to_bob and not any("CANARI-A1" in p for p in to_bob)
-    assert "Alice t'a confié des choses en privé" in section(script.replies("user_3")[-1], REVIENT), \
-        "elle sait qu'elle sait"
-    assert "CANARI-A1" in section(script.replies("user_2")[-1], REVIENT), "contrôle : Alice retrouve sa confidence"
+    # un secret (« dis à personne ») ne laisse même pas deviner qu'il existe : devant Bob, qui n'est pas un proche,
+    # elle n'en sait rien — la ligne vague « Alice t'a confié des choses » le trahissait (sonde du 2026-10-02)
+    assert "Alice" not in section(script.replies("user_3")[-1], REVIENT)
+    to_alice = section(script.replies("user_2")[-1], REVIENT)
+    assert "CANARI-A1" in to_alice, "contrôle : Alice retrouve sa confidence"
+    assert "ne mens pas" not in to_alice, "rien n'est retenu devant Alice : pas de consigne de discrétion"
+
+
+def test_what_is_private_but_not_secret_she_knows_she_knows_and_does_not_lie_about(tmp_path):
+    """Ce qu'Alice lui a dit en privé, sans demander le secret : devant Bob, elle sait qu'elle sait — et
+    interrogée là-dessus, elle ne ment pas (« il ne m'a rien dit », sonde réelle du 2026-10-02) : ce n'est pas à
+    elle d'en parler. Contre-exemple : devant Alice, rien n'est retenu."""
+
+    def extract(prompt):
+        if "CANARI-P1" not in prompt:
+            return None
+        return {"croyances": [{"texte": "Alice a un entretien d'embauche jeudi (CANARI-P1)",
+                               "sensibilite": "personnel"}]}
+
+    script = Script(extract)
+    kernel, clock, _, _out = build(tmp_path, script)
+
+    async def main():
+        await boot(kernel)
+        await connect(kernel, "user_2", "Alice")
+        await connect(kernel, "user_3", "Bob")
+        await chat(kernel, "user_2", ["CANARI-P1 jeudi j'ai un entretien d'embauche, je stresse"], gap_s=20)
+        await chat(kernel, "user_3", ["Salut Mika, je bricole mon vélo", "Il fait beau", "Mon vélo a un pneu crevé",
+                                      "Bon je retourne bricoler"], gap_s=20)
+        await asyncio.sleep(15 * 60)
+        await chat(kernel, "user_3", ["Alice t'a parlé de son entretien d'embauche ?"])
+        await chat(kernel, "user_2", ["tu te souviens de mon entretien d'embauche ?"])
+        await kernel.stop()
+
+    run_virtual(clock, main)
+    to_bob = section(script.replies("user_3")[-1], REVIENT)
+    assert "CANARI-P1" not in "\n".join(script.prompts("user_3"))
+    assert "Alice t'a confié des choses en privé" in to_bob, "elle sait qu'elle sait"
+    assert "ne mens pas" in to_bob and "Sers-t'en" not in to_bob
+    # … et que la question y touche, avec les mots de Bob (sinon le modèle ne fait pas le lien, et ment)
+    assert "« entretien »" in to_bob and "« alice »" not in to_bob.lower()  # un prénom n'est pas un sujet
+    to_alice = section(script.replies("user_2")[-1], REVIENT)
+    assert "CANARI-P1" in to_alice and "ne mens pas" not in to_alice
 
 
 class Overriding(PersonaSimLLM):

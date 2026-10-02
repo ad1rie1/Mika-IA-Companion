@@ -18,7 +18,19 @@ from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
 from mika.kernel.guards import floor
 from mika.kernel.state import FrozenDict
-from mika.plugins.email import BUNDLE, EMAIL, POLL_ASKED, READ, EmailState, keeper_name, name_of, params_of
+from mika.plugins.email import (
+    BUNDLE,
+    EMAIL,
+    MENTION_ARG,
+    MENTION_TITLE,
+    POLL_ASKED,
+    READ,
+    EmailState,
+    announceable,
+    keeper_name,
+    name_of,
+    params_of,
+)
 from mika.ports.llm import LLMRequest, Message
 from mika.ports.preprocess import inert
 from mika.vocab.episodes import Kind
@@ -128,19 +140,25 @@ class Poll:
 
 
 @EMAIL.propose(kinds=[Kind.INITIATIVE], reasons={c.MENTION: (0.0, 8.0)},
-               reads=[presence_c.PRESENT, identity_c.PERSON, identity_c.IS_OWNER, c.UNREAD])
+               reads=[presence_c.PRESENT, identity_c.SPEAKS_AS_OWNER])
 def _mention(s: EmailState, frame: Frame) -> list[Candidate]:
+    """Un mail important arrivé depuis peu, pas encore dit : elle a envie de le dire à sa propriétaire, si elle
+    est là. Les droits tiennent à l'adresse qui parle (``SPEAKS_AS_OWNER``, comme le contenu qu'elle verra) : une
+    adresse reliée à sa propriétaire par simple recoupement ne reçoit pas l'annonce. L'initiative porte les mails
+    qu'elle annonce : ce sont eux, et eux seuls, qui seront signalés une fois dits."""
     p = params_of(frame)
-    fresh = [m for m in frame.get(c.UNREAD) if m.importance >= p.mention_from
-             and frame.now - m.at <= p.mention_within_us and not s.mails[m.mail].mentioned]
+    fresh = announceable(s, frame.now, p)
     if not fresh:
         return []
+    several = len(fresh) > 1
+    brief = (f"{'Des mails qui ont' if several else 'Un mail qui a'} l'air important{'s' if several else ''} "
+             f"vien{'nent' if several else 't'} d'arriver dans ta boîte (plus haut, « {MENTION_TITLE} ») : "
+             "dis-le simplement, sans le lire en entier.")
+    args = FrozenDict({"brief:email": brief, MENTION_ARG: "\n".join(fresh)})
     out = []
     for handle in frame.get(presence_c.PRESENT):
-        if not frame.get(identity_c.IS_OWNER(frame.get(identity_c.PERSON(handle)))):
+        if not frame.get(identity_c.SPEAKS_AS_OWNER(handle)):
             continue
-        brief = ("Un mail qui a l'air important vient d'arriver dans ta boîte (« TES MAILS », plus haut) : "
-                 "dis-le simplement, sans le lire en entier.")
         out.append(Candidate(Kind.INITIATIVE, handle, c.MENTION, p.mention_evidence,
-                             resources=frozenset({floor(handle)}), args=FrozenDict({"brief:email": brief})))
+                             resources=frozenset({floor(handle)}), args=args))
     return out

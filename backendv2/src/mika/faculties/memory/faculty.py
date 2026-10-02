@@ -1,9 +1,13 @@
 """La faculté ``memory`` : sa tranche, ses paramètres, ses réducteurs, ses faits.
 
 La tranche ne garde que des résumés (point de contrôle, messages pas encore
-relus, promesses en cours, moments de la vie des autres à venir ou tout juste
-passés) ; les éléments retenus vivent dans la projection T0 ``memory_items``
-et leurs vecteurs dans l'index (un cache).
+relus, promesses en cours et ce qu'elle a fait pour les tenir, moments de la
+vie des autres à venir ou tout juste passés, situations en cours) ; les
+éléments retenus vivent dans la projection T0 ``memory_items`` et leurs
+vecteurs dans l'index (un cache).
+
+Qu'un moment ait été repris ne se déduit plus de ce qu'elle avait sous les
+yeux : c'est un jugement enregistré (``moment_followed``, ``life.py``).
 """
 
 from __future__ import annotations
@@ -13,18 +17,30 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict
 
+from mika.contracts import agency as agency_c
 from mika.contracts import attention as attention_c
-from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
 from mika.contracts import runtime as rt
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
+from mika.vocab.episodes import Kind
 
 PENDING_CAP = 500
 #: les moments de la vie des autres gardés dans la tranche, au plus
 EVENTS_CAP = 300
+#: les initiatives en cours qui tiennent une promesse (corrélation → promesse), au plus
+KEEPING_KEPT = 16
+#: le sujet d'une initiative qui tient une promesse : ``promise:<id>``
+PROMISE_SUBJECT = "promise:"
+
+
+def promise_of(subject: str | None) -> int | None:
+    """La promesse que tient une initiative (``promise:12``), ou ``None``."""
+    if not subject or not subject.startswith(PROMISE_SUBJECT) or not subject[len(PROMISE_SUBJECT):].isdigit():
+        return None
+    return int(subject[len(PROMISE_SUBJECT):])
 
 
 class MemoryParams(BaseModel):
@@ -107,14 +123,49 @@ class MemoryParams(BaseModel):
         label="Abandon après l'échéance (jours)", group="Promesses", lo=0, hi=60,
         help="Une promesse ni tenue ni abandonnée s'oublie (abandonnée) ce temps après son échéance : rien ne "
              "reste dû pour toujours.")] = 7.0
+    # tenir parole au moment dit : c'est dû (``agency.OWED``)
+    promise_lead_us: Annotated[int, Knob(
+        label="Tenir une promesse : un peu avant l'heure dite", group="Tenir parole", lo=0, hi=3 * HOUR,
+        help="« Je te demanderai jeudi à 20 h comment ça s'est passé » : l'envie de le faire monte à partir de ce "
+             "délai avant l'heure dite, et elle le fait d'elle-même — c'est dû, comme un rappel : ni budget, ni "
+             "retenue, ni rancune. Une promesse sans date ne déclenche rien.")] = 30 * MINUTE
+    promise_day_start_min: Annotated[int, Knob(
+        label="Une promesse pour un jour : à partir de", group="Tenir parole", lo=0, hi=24 * 60,
+        help="« Je t'envoie ça jeudi » (un jour sans heure) se tient dans la journée, à partir de cette heure "
+             "locale (minutes depuis minuit) et avant le soir.")] = 10 * 60
+    keep_evidence: Annotated[float, Knob(
+        label="Tenir une promesse : preuve pleine", group="Tenir parole", lo=0.0, hi=12.0, step=0.5,
+        help="La preuve (log-odds) à l'heure dite ; elle monte depuis 2 au début de la fenêtre (elle le fait à un "
+             "moment ou à un autre de la fenêtre, pas à heure fixe). Au-dessus du seuil d'initiative (9), elle "
+             "écrit seule.")] = 10.5
+    keep_late_us: Annotated[int, Knob(
+        label="Tenir une promesse : au plus tard après l'heure", group="Tenir parole", lo=0, hi=DAY,
+        help="Passé ce délai après l'heure dite, elle ne le fait plus d'elle-même : elle sait qu'elle ne l'a pas "
+             "fait (une pensée, après le délai de grâce de l'attention).")] = 2 * HOUR
+    keep_attempts: Annotated[int, Knob(
+        label="Tenir une promesse : essais", group="Tenir parole", lo=1, hi=5,
+        help="Après autant d'essais qui n'ont rien dit (un silence choisi, une panne), elle ne le refait plus "
+             "d'elle-même. Une initiative devancée (la personne a écrit) n'est pas un essai.")] = 2
+    keep_retry_us: Annotated[int, Knob(
+        label="Tenir une promesse : délai entre essais", group="Tenir parole", lo=MINUTE, hi=2 * HOUR,
+        help="Après un essai qui n'a rien dit, pas de nouvel essai avant ce délai (multiplié par le nombre "
+             "d'essais).")] = 10 * MINUTE
     event_ahead_days: Annotated[float, Knob(
         label="Moments à venir montrés (jours)", group="La vie des autres", lo=1, hi=60,
         help="Ce qui va arriver à la personne à qui elle parle (un entretien, un départ) lui revient quand c'est "
              "dans moins de tant de jours.")] = 7.0
     event_recent_days: Annotated[float, Knob(
         label="Moments passés à suivre (jours)", group="La vie des autres", lo=1, hi=30,
-        help="Un moment passé depuis moins de tant de jours, dont elle n'a pas encore reparlé avec la personne, "
-             "lui revient pour qu'elle demande comment ça s'est passé ; au-delà, il n'est plus suivi.")] = 3.0
+        help="Un moment passé depuis moins de tant de jours, dont elles n'ont pas encore reparlé (ni elle en lui "
+             "demandant, ni la personne en le racontant), lui revient pour qu'elle demande comment ça s'est passé ; "
+             "au-delà, il n'est plus suivi.")] = 3.0
+    situation_days: Annotated[float, Knob(
+        label="Situations en cours suivies (jours)", group="La vie des autres", lo=1, hi=60,
+        help="Une situation qui dure dans la vie de quelqu'un (« mon chat Moustache est malade ») lui revient, "
+             "pour qu'elle en prenne des nouvelles, pendant tant de jours après qu'elle a commencé.")] = 14.0
+    situation_reask_days: Annotated[float, Knob(
+        label="Situation : redemander après (jours)", group="La vie des autres", lo=0.5, hi=30, step=0.5,
+        help="Après en avoir reparlé, elle ne redemande pas des nouvelles d'une situation avant tant de jours.")] = 3.0
     # oubli : l'importance s'estompe à la lecture, jamais par balayage
     dormant: Annotated[float, Knob(
         label="Seuil d'endormissement", group="Oubli", lo=0.0, hi=0.5, step=0.01,
@@ -136,6 +187,16 @@ class MemoryParams(BaseModel):
         help="Ce qu'elle improvise sur sa vie (« j'ai ressorti mon fer à souder ») est gardé comme une note "
              "anodine qui s'efface en ce temps : assez pour ne pas se contredire d'un jour à l'autre, pas "
              "assez pour s'inventer un passé.")] = 3.0
+    self_durable_half_life_days: Annotated[float, Knob(
+        label="Demi-vie de ses goûts et avis (jours)", group="Oubli", lo=30, hi=3650,
+        help="Ce qu'elle a dit de ce qu'elle aime, de ce qu'elle pense, de sa vie (« mon plat préféré, c'est les "
+             "ramen ») tient bien plus longtemps : on ne change pas de plat préféré toutes les semaines. Quand elle "
+             "change d'avis, la nouvelle croyance remplace l'ancienne.")] = 365.0
+    bond_memory_gain: Annotated[float, Knob(
+        label="Ce qui dure avec quelqu'un à qui elle tient", group="Oubli", lo=0.0, hi=5.0, step=0.1,
+        help="Un souvenir vécu avec quelqu'un à qui elle tient s'endort moins vite : sa demi-vie est multipliée par "
+             "1 + ce gain × l'attachement (une proche compte au moins pour 1, une amie pour ½). 0 : comme avec "
+             "n'importe qui.")] = 2.0
     landmark_importance: Annotated[float, Knob(
         label="Importance d'un moment marquant", group="Oubli", lo=0.5, hi=1.0, step=0.01,
         help="Un souvenir au moins aussi important ne s'endort jamais tout à fait (ci-dessous) : un deuil, un "
@@ -160,6 +221,19 @@ class MemoryParams(BaseModel):
     repetition_penalty: Annotated[float, Knob(
         label="Pénalité de répétition", group="Rappel", lo=0.0, hi=1.0, step=0.05,
         help="Le poids d'un élément rappelé récemment est multiplié par ce facteur (1 : aucune pénalité).")] = 0.6
+    max_self_said: Annotated[int, Knob(
+        label="Ce qu'elle a déjà dit d'elle", group="Rappel", lo=0, hi=8,
+        help="Quand on lui parle d'elle (« c'est quoi ton plat préféré ? »), au plus autant de ce qu'elle a déjà "
+             "dit de ses goûts, de ses avis, de sa vie lui revient (« CE QUE TU AS DÉJÀ DIT DE TOI ») — les plus "
+             "proches du message : elle ne se contredit pas.")] = 3
+    person_recall_days: Annotated[float, Knob(
+        label="Sa vie à elle : depuis (jours)", group="Rappel", lo=1, hi=90,
+        help="Au premier mot d'une conversation (« salut ! »), ou quand elle écrit d'elle-même à quelqu'un, ce que "
+             "cette personne lui a raconté de sa vie depuis moins de tant de jours lui revient — « et Moustache, il "
+             "va mieux ? » —, sa fiche seulement si elle est ouverte. Une politesse ne réveille rien d'autre.")] = 14.0
+    max_person_items: Annotated[int, Knob(
+        label="Sa vie à elle : au plus", group="Rappel", lo=0, hi=10,
+        help="Au plus autant de ces éléments (les plus importants et les plus frais d'abord).")] = 3
     # la nuit
     night_after_sleep_us: Annotated[int, Knob(
         label="Tri de la nuit après", group="La nuit", lo=0, hi=10 * HOUR,
@@ -186,6 +260,14 @@ class Reflection:
 
 
 @dataclass(frozen=True, slots=True)
+class Keeping:
+    """Ce qu'elle a fait pour tenir une promesse : les essais qui n'ont rien dit, et quand réessayer."""
+
+    attempts: int = 0
+    retry_at: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class MemoryState:
     checkpoint: int = 0
     #: messages de personnes pas encore relus (``seq``), les plus récents
@@ -196,7 +278,12 @@ class MemoryState:
     items: int = 0
     chunks: int = 0
     promises: FrozenDict[int, c.PendingPromise] = field(default_factory=FrozenDict)
-    #: les moments de la vie des autres, à venir ou passés depuis peu
+    #: tenir une promesse au moment dit : les initiatives en cours (corrélation → (promesse, départ)), les essais,
+    #: et les promesses qu'elle vient de tenir en le disant (le règlement suit, par ``memory.promises``)
+    keeping: FrozenDict[str, tuple[int, int]] = field(default_factory=FrozenDict)
+    tries: FrozenDict[int, Keeping] = field(default_factory=FrozenDict)
+    kept: tuple[int, ...] = ()
+    #: les moments de la vie des autres, à venir ou passés depuis peu ; les situations en cours
     events: FrozenDict[int, c.LifeEvent] = field(default_factory=FrozenDict)
     reflections: tuple[Reflection, ...] = ()
     sorted_night: str = ""
@@ -208,7 +295,9 @@ class MemoryState:
     given_up_seq: int = 0
 
 
-MEMORY = Faculty("memory", state=MemoryState, init=lambda p: MemoryState(), params=MemoryParams, state_version=3)
+#: v4 : un moment repris est un jugement enregistré (``moment_followed``), plus « elle l'avait sous les yeux » ;
+#: les situations en cours ; tenir une promesse au moment dit.
+MEMORY = Faculty("memory", state=MemoryState, init=lambda p: MemoryState(), params=MemoryParams, state_version=4)
 MEMORY.declare(*c.ALL)
 
 
@@ -222,28 +311,64 @@ def _perceived(s: MemoryState, e, cx) -> MemoryState:
     return replace(s, pending=(*s.pending, e.seq)[-PENDING_CAP:], unaddressed=unaddressed, last_message_at=e.at)
 
 
-@MEMORY.reducer(rt.UTTERANCE, reads=[identity_c.PERSON])
+@MEMORY.reducer(rt.UTTERANCE)
 def _uttered(s: MemoryState, e, cx) -> MemoryState:
+    """Ce qu'elle dit : un échange de plus à indexer — et, quand c'est l'initiative qui tient une promesse, la
+    promesse est tenue (dite au moment dit ; ``memory.promises`` la règle). Qu'elle ait repris un moment de la vie
+    de la personne ne se lit pas ici : c'est un jugement sur ses mots (``life.py``)."""
     d = e.data
     if not d.visible:
         return s
-    s = replace(s, last_message_at=e.at, chunks=s.chunks + (1 if d.target and d.reply_to else 0))
-    return _followed(s, d, e.at, cx) if d.target and s.events else s
+    keeping = s.keeping.get(e.correlation)
+    if keeping is not None:
+        s = replace(s, keeping=s.keeping.delete(e.correlation))
+        if keeping[0] in s.promises and keeping[0] not in s.kept:
+            s = replace(s, kept=(*s.kept, keeping[0]))
+    return replace(s, last_message_at=e.at, chunks=s.chunks + (1 if d.target and d.reply_to else 0))
 
 
-def _followed(s: MemoryState, d, at: int, cx) -> MemoryState:
-    """Un moment passé qu'elle avait sous les yeux en parlant à la personne
-    qu'il concerne : elle a pu lui en demander des nouvelles."""
-    shown = {int(p.split(":", 1)[1]) for p in d.provenance if p.startswith("memory:") and p[7:].isdigit()}
-    hits = [ev for i in shown if (ev := s.events.get(i)) is not None and ev.when <= at]
-    if not hits:
+@MEMORY.reducer(rt.EPISODE_STARTED)
+def _started(s: MemoryState, e, cx) -> MemoryState:
+    """Une initiative part pour tenir une promesse (son sujet : ``promise:<id>``)."""
+    d = e.data
+    promise = promise_of(d.subject) if d.kind == Kind.INITIATIVE else None
+    if promise is None or promise not in s.promises:
         return s
-    person = cx.facts.get(identity_c.PERSON(d.target)) or d.target
-    events = s.events
-    for ev in hits:
-        if person in ev.about:
-            events = events.set(ev.id, replace(ev, followed_at=at))
-    return replace(s, events=events)
+    keeping = s.keeping.set(e.correlation, (promise, e.at))
+    if len(keeping) > KEEPING_KEPT:  # des épisodes jamais réglés : les identifiants sont chronologiques
+        keeping = FrozenDict(sorted(keeping.items())[-KEEPING_KEPT:])
+    return replace(s, keeping=keeping)
+
+
+@MEMORY.reducer(rt.EPISODE_ENDED, reads=[agency_c.RENOUNCED])
+def _ended(s: MemoryState, e, cx) -> MemoryState:
+    """L'initiative qui devait tenir une promesse finit sans l'avoir dite : un silence choisi, une panne sont un
+    essai (réessayer plus tard, pas indéfiniment) ; devancée, interrompue, ou un murmure sans suite (elle s'est
+    ravisée), ce n'en est pas un (``agency.tried``)."""
+    keeping = s.keeping.get(e.correlation)
+    if keeping is None:
+        return s
+    s = replace(s, keeping=s.keeping.delete(e.correlation))
+    promise, started = keeping
+    if promise not in s.promises:
+        return s
+    p = params(cx.params)
+    t = s.tries.get(promise) or Keeping()
+    renounced = cx.facts.get(agency_c.RENOUNCED(e.data.target)) if e.data.target else 0
+    if agency_c.tried(e.data.outcome, started, renounced):
+        n = t.attempts + 1
+        t = Keeping(n, e.at + p.keep_retry_us * n)
+    else:
+        t = replace(t, retry_at=e.at + p.keep_retry_us)
+    return replace(s, tries=s.tries.set(promise, t))
+
+
+@MEMORY.reducer(c.MOMENT_FOLLOWED)
+def _followed(s: MemoryState, e, cx) -> MemoryState:
+    """Un moment repris en mots, une fois passé : elle lui en a demandé des nouvelles, ou la personne lui en a
+    parlé d'elle-même."""
+    ev = s.events.get(e.data.event)
+    return replace(s, events=s.events.set(ev.id, replace(ev, followed_at=e.at))) if ev is not None else s
 
 
 @MEMORY.reducer(c.CONSOLIDATED)
@@ -257,14 +382,16 @@ def _consolidated(s: MemoryState, e, cx) -> MemoryState:
 @MEMORY.reducer(c.EVENT_NOTED)
 def _noted(s: MemoryState, e, cx) -> MemoryState:
     """Un moment de la vie de quelqu'un : gardé tant qu'il est à venir ou passé
-    depuis peu ; les plus anciens partent d'abord."""
+    depuis peu ; une situation en cours, quelques semaines ; les plus anciens
+    partent d'abord."""
     d = e.data
     p = params(cx.params)
     keep_until = e.at - round(p.event_recent_days * DAY)
+    keep_ongoing = e.at - round(p.situation_days * DAY)
     events = s.events.delete(d.replaces) if d.replaces is not None else s.events
     events = events.set(e.seq, c.LifeEvent(e.seq, tuple(d.about), d.when, d.all_day, d.sensitivity,
-                                           tuple(d.told_by), d.text.ref or "", d.secret))
-    stale = [ev.id for ev in events.values() if ev.when < keep_until]
+                                           tuple(d.told_by), d.text.ref or "", d.secret, ongoing=d.ongoing))
+    stale = [ev.id for ev in events.values() if ev.when < (keep_ongoing if ev.ongoing else keep_until)]
     for i in stale:
         events = events.delete(i)
     if len(events) > EVENTS_CAP:
@@ -299,13 +426,15 @@ def _promised(s: MemoryState, e, cx) -> MemoryState:
     due, implicit = e.data.due, e.data.implicit_due
     if due is None:
         due, implicit = e.at + round(params(cx.params).promise_horizon_days * DAY), True
-    promise = c.PendingPromise(e.seq, e.data.to, due, e.at, implicit)
+    promise = c.PendingPromise(e.seq, e.data.to, due, e.at, implicit, all_day=e.data.all_day and not implicit)
     return replace(s, items=s.items + 1, promises=s.promises.set(e.seq, promise))
 
 
 @MEMORY.reducer(c.PROMISE_RESOLVED)
 def _resolved(s: MemoryState, e, cx) -> MemoryState:
-    return replace(s, promises=s.promises.delete(e.data.promise))
+    promise = e.data.promise
+    return replace(s, promises=s.promises.delete(promise), tries=s.tries.delete(promise),
+                   kept=tuple(k for k in s.kept if k != promise))
 
 
 @MEMORY.fact(c.CHECKPOINT)

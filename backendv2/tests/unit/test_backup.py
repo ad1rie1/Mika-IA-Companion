@@ -11,6 +11,11 @@ remplacé qu'à la demande, et mis de côté.
 from __future__ import annotations
 
 import asyncio
+import json
+import os
+import shutil
+import subprocess
+import sys
 import tarfile
 from pathlib import Path
 
@@ -18,8 +23,8 @@ import pytest
 
 from mika.adapters.llm.config import BackendSpec, LLMConfig
 from mika.adapters.store_sqlite import SqliteStore
-from mika.app import backup
-from mika.app.cli import replay_verify
+from mika.app import backup, datadir
+from mika.app.cli import main, replay_verify
 from mika.app.settings import SecretBox, Settings
 from mika.contracts import memory as memory_c
 from mika.sim.clock import SimClock, run_virtual
@@ -231,3 +236,93 @@ def test_each_backup_and_verification_is_noted_for_the_console(tmp_path, monkeyp
         backup.verify(forged, record=data)
     failed = backup.recorded(data)["verification"]
     assert failed["ok"] is False and failed["erreur"] and backup.recorded(data)["sauvegarde"] == last
+
+
+def test_a_restore_under_a_running_mika_is_refused_and_touches_nothing(tmp_path, monkeypatch):
+    """Un serveur tient le dossier : restaurer par-dessus (même avec --force) le couperait en deux —
+    il écrirait encore, par ses descripteurs ouverts, dans le dossier mis de côté. Refusé, rien ne bouge."""
+    monkeypatch.delenv("MIKA_SECRET_KEY", raising=False)
+    data, dest = tmp_path / "data", tmp_path / "archives"
+    live(data, talk=False)
+    made = backup.backup(data, dest)
+    running = tmp_path / "en-marche"
+    running.mkdir()
+    (running / "mind.db").write_bytes(b"la vie en cours")
+    holder = subprocess.Popen([sys.executable, "-c", "import sys, time\nfrom pathlib import Path\n"
+                               "from mika.app import datadir\ndatadir.hold(Path(sys.argv[1]))\n"
+                               "print('tenu', flush=True)\ntime.sleep(60)\n", str(running)],
+                              stdout=subprocess.PIPE, text=True)
+    try:
+        assert holder.stdout is not None and holder.stdout.readline().strip() == "tenu"
+        with pytest.raises(datadir.DataDirBusy):
+            backup.restore(made.archive, running, force=True)
+        assert main(["--data", str(running), "restore", str(made.archive), "--force"]) == 3  # dit, refusé
+    finally:
+        holder.kill()
+        holder.wait()
+    assert (running / "mind.db").read_bytes() == b"la vie en cours"
+    assert not [p for p in tmp_path.iterdir() if ".avant-restauration-" in p.name]
+    # serveur arrêté : la restauration passe, et le verrou suit le dossier restauré
+    done = backup.restore(made.archive, running, force=True)
+    assert done.state == made.state and (running / datadir.LOCK_NAME).exists()
+    datadir.hold(running)  # rendu à la fin : ce processus le reprend
+    datadir.release(running)
+
+
+def test_workshop_symlinks_survive_a_backup_and_their_history_stays_clean(tmp_path, monkeypatch):
+    """Un atelier est un dépôt git : un lien symbolique perdu à la sauvegarde, c'est sa suppression
+    enregistrée au prochain commit (``git add -A``). Les liens reviennent tels quels, cible comprise."""
+    if shutil.which("git") is None:
+        pytest.skip("git absent")
+    monkeypatch.delenv("MIKA_SECRET_KEY", raising=False)
+    data, dest, restored = tmp_path / "data", tmp_path / "archives", tmp_path / "restauree"
+    live(data, talk=False)
+    shop = data / "ateliers" / "4-liens"
+    (shop / "docs").mkdir(parents=True)
+    (shop / "cible.txt").write_text("bonjour\n", encoding="utf-8")
+    (shop / "lien.txt").symlink_to("cible.txt")
+    (shop / "docs" / "vers-cible.txt").symlink_to("../cible.txt")
+    (shop / "systeme").symlink_to("/usr/bin")  # hors du dossier : gardé comme lien, jamais suivi
+    git = ["git", "-c", "user.name=Mika", "-c", "user.email=mika@localhost", "-C", str(shop)]
+    subprocess.run([*git, "init", "-q"], check=True)
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "commit", "-qm", "liens"], check=True)
+
+    made = backup.backup(data, dest)
+    with tarfile.open(made.archive) as tar:
+        assert "data/ateliers/4-liens/cible.txt" in tar.getnames()
+    backup.restore(made.archive, restored)
+    back = restored / "ateliers" / "4-liens"
+    assert os.readlink(back / "lien.txt") == "cible.txt" and (back / "lien.txt").read_text() == "bonjour\n"
+    assert os.readlink(back / "docs" / "vers-cible.txt") == "../cible.txt"
+    assert os.readlink(back / "systeme") == "/usr/bin"
+    status = subprocess.run(["git", "-C", str(back), "status", "--porcelain"], check=True, capture_output=True,
+                            text=True).stdout
+    assert status == ""  # rien à commettre : aucune suppression de lien
+
+
+def test_an_archive_whose_link_would_escape_the_folder_is_refused(tmp_path, monkeypatch):
+    """Un lien ne se recrée jamais hors du dossier, ni à travers un autre lien qui en sort."""
+    monkeypatch.delenv("MIKA_SECRET_KEY", raising=False)
+    data, dest = tmp_path / "data", tmp_path / "archives"
+    live(data, talk=False)
+    made = backup.backup(data, dest)
+    outside = tmp_path / "dehors"
+    outside.mkdir()
+    for links in ({"../evade": "x"}, {"a": str(outside), "a/b/c": "x"}):
+        unpacked = tmp_path / "déballée"
+        shutil.rmtree(unpacked, ignore_errors=True)
+        with tarfile.open(made.archive) as tar:
+            tar.extractall(unpacked, filter="data")
+        manifest = unpacked / "data" / "MANIFEST.json"
+        content = json.loads(manifest.read_text(encoding="utf-8"))
+        content["links"] = links
+        manifest.write_text(json.dumps(content), encoding="utf-8")
+        forged = dest / "mika-liens.tar.gz"
+        with tarfile.open(forged, "w:gz") as tar:
+            tar.add(unpacked / "data", arcname="data")
+        victim = tmp_path / "cible"
+        with pytest.raises(backup.BackupError, match="lien"):
+            backup.restore(forged, victim)
+        assert not victim.exists() and not any(outside.iterdir())
+

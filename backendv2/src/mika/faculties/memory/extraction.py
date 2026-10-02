@@ -28,7 +28,7 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
 
 from mika.kernel.clock import instant
 from mika.ports.llm import LLMResponse, ToolDecl
-from mika.vocab.people import fold
+from mika.vocab.people import clean_tokens, fold
 from mika.vocab.privacy import Sensitivity
 from mika.vocab.words import stems
 
@@ -82,9 +82,17 @@ class _Lenient(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
+#: ce que Mika dit d'elle-même : une anecdote s'efface en quelques jours ; un goût, un avis, un fait de sa vie tient
+SELF_KINDS = {"anecdote": "anecdote", "gout": "gout", "gouts": "gout", "avis": "avis", "opinion": "avis",
+              "fait": "fait", "biographie": "fait", "vie": "fait"}
+DURABLE_SELF = frozenset({"gout", "avis", "fait"})
+
+
 class _Item(_Lenient):
     texte: str = Field(min_length=3, max_length=600, validation_alias=_TEXT)
     sur_elle: bool = Field(default=False, description="ce que Mika raconte d'elle-même, de sa vie de tous les jours")
+    genre: str | None = Field(default=None, description="pour ce que Mika dit d'elle-même : anecdote (ce qu'elle a "
+                                                        "fait), gout, avis ou fait (sa vie, son histoire)")
     personnes: list[str] = Field(default_factory=list, description="qui c'est concerne : le jeton ([P1]) pour "
                                  "quelqu'un de la conversation, le prénom pour quelqu'un d'autre ; jamais Mika")
     sensibilite: str | None = Field(default=None, validation_alias=_SENS,
@@ -104,6 +112,13 @@ class _Item(_Lenient):
     def lenient_messages(cls, v: Any) -> list[int]:
         return _ints(v)
 
+    @field_validator("texte", mode="after")
+    @classmethod
+    def without_tokens(cls, v: str) -> str:
+        """Les jetons (« Chloé [P1] ») servent à dire qui c'est, dans « personnes » ; recopiés dans le texte, ils
+        finissaient dans son souvenir (« J'ai discuté avec Chloé [P1] »)."""
+        return clean_tokens(v)
+
 
 class XSouvenir(_Item):
     emotion: str | None = None
@@ -122,13 +137,19 @@ class XPromesse(_Lenient):
     texte: str = Field(min_length=3, max_length=400, validation_alias=_TEXT,
                        description="ce qu'elle a promis, à l'infinitif")
     envers: str
-    echeance: str | None = Field(default=None, validation_alias=AliasChoices("echeance", "échéance"))
+    echeance: str | None = Field(default=None, validation_alias=AliasChoices("echeance", "échéance"),
+                                 description="AAAA-MM-JJ, ou AAAA-MM-JJTHH:MM si l'heure est dite")
     messages: list[int] = Field(default_factory=list)
 
     @field_validator("messages", mode="before")
     @classmethod
     def lenient_messages(cls, v: Any) -> list[int]:
         return _ints(v)
+
+    @field_validator("texte", mode="after")
+    @classmethod
+    def without_tokens(cls, v: str) -> str:
+        return clean_tokens(v)
 
 
 class XTenue(_Lenient):
@@ -140,6 +161,8 @@ class XEvenement(_Item):
     texte: str = Field(min_length=3, max_length=300, validation_alias=_TEXT,
                        description="ce qui va arriver, en quelques mots (« son entretien chez Ubisoft »)")
     quand: str = Field(min_length=8, max_length=40, description="AAAA-MM-JJ, ou AAAA-MM-JJTHH:MM si l'heure est dite")
+    en_cours: bool = Field(default=False, description="une situation qui dure (son chat malade, un déménagement) : "
+                                                      "« quand » est le jour où elle a commencé")
 
 
 class Extraction(_Lenient):
@@ -174,18 +197,27 @@ Ce que tu peux retenir :
 matin »). Un souvenir se suffit à lui-même : des prénoms, jamais « il », « l'utilisateur » ou « la personne ».
 - des croyances : des faits sur quelqu'un ou sur le monde (« Le chat d'Adrien s'appelait Pixel »), avec qui les a \
 dits (source) et d'où elle le tient (origine : dit, observé ou déduit). Si une croyance déjà connue est contredite, \
-donne dans « remplace » le numéro qu'elle remplace. Ne répète pas une croyance déjà connue.
-- ce que Mika raconte d'elle-même, sa petite vie de tous les jours (« J'ai ressorti mon fer à souder pour réparer \
-ma lampe ») : une croyance à la première personne, avec « sur_elle » vrai, sans personne, importance 1 — elle s'en \
-souviendra quelques jours, pour ne pas se contredire.
+donne dans « remplace » le numéro qu'elle remplace. Ne répète pas une croyance déjà connue. Écris toute date en \
+absolu (« le week-end du 3 octobre », « depuis le 27 septembre »), jamais « ce week-end », « dimanche » ou « hier » : \
+relue dans trois semaines, une croyance doit encore être vraie. Ce qui ne vaut qu'un temps est un événement, pas une \
+croyance.
+- ce que Mika raconte d'elle-même : une croyance à la première personne, avec « sur_elle » vrai, sans personne, et \
+son « genre » — « anecdote » pour sa petite vie de tous les jours (« J'ai ressorti mon fer à souder pour réparer \
+ma lampe », importance 1 : elle s'en souviendra quelques jours) ; « gout », « avis » ou « fait » pour ce qui la \
+définit (« Mon plat préféré, c'est les ramen », « Je trouve les jeux mobiles sans intérêt », importance 3 : elle \
+s'en souviendra longtemps, pour ne jamais se contredire). Si elle change d'avis, donne dans « remplace » le numéro \
+de ce qu'elle pensait avant.
 - des promesses : ce que Mika elle-même a promis de faire pour quelqu'un — une chose à faire, à l'infinitif (« lui \
-demander comment s'est passé son entretien »), pas « garder le secret » (ça, c'est le secret lui-même) —, avec \
-l'échéance si elle a été dite (AAAA-MM-JJ). Si une promesse en cours a été tenue ou abandonnée, indique-la dans \
-promesses_tenues.
+demander comment s'est passé son entretien »), pas « garder le secret » (ça, c'est le secret lui-même), ni un rappel \
+qu'on lui a demandé (« rappelle-moi… » : il est noté ailleurs) —, avec l'échéance si elle a été dite (AAAA-MM-JJ, \
+ou AAAA-MM-JJTHH:MM si l'heure est dite ou se devine : « jeudi soir », 20:00). Si une promesse en cours a été tenue \
+ou abandonnée, indique-la dans promesses_tenues.
 - des événements : ce qui va arriver dans la vie de quelqu'un et dont on prend des nouvelles après (un entretien, \
 un examen, un rendez-vous médical, un départ, un mariage), en quelques mots (« son entretien chez Ubisoft »), avec \
 sa date dans « quand » (AAAA-MM-JJ, ou AAAA-MM-JJTHH:MM si l'heure est dite), calculée d'après la date \
-d'aujourd'hui. Seulement ce qui est à venir et daté.
+d'aujourd'hui. Seulement ce qui est à venir et daté. Ou une situation qui dure dans sa vie et dont on prend des \
+nouvelles (son chat malade, un déménagement en cours, un proche à l'hôpital) : « en_cours » vrai, et dans « quand » \
+le jour où ça a commencé (aujourd'hui si on ne sait pas).
 
 Pour chaque élément :
 - « personnes » : qui il concerne — le jeton pour quelqu'un de la conversation ([P1]), le prénom pour quelqu'un \
@@ -363,6 +395,12 @@ class People:
 
     def resolve(self, names: Sequence[str]) -> tuple[str, ...]:
         return tuple(sorted({k for n in names if (k := self.one(n)) is not None}))
+
+
+def durable_self(item: _Item) -> bool:
+    """Ce qu'elle a dit d'elle qui la définit (un goût, un avis, un fait de sa vie) : elle s'en souviendra
+    longtemps. Sans genre dit : une anecdote (ce qui s'efface en quelques jours, la règle d'avant)."""
+    return item.sur_elle and SELF_KINDS.get(fold(item.genre or "").strip()) in DURABLE_SELF
 
 
 def sensitivity(value: str | None, *, has_person: bool) -> int:

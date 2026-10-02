@@ -20,6 +20,15 @@
   une édition n'est pas un nouveau message (la relève les écarte).
 - La livraison est idempotente par clé (la file de sortie livre au moins une
   fois) ; un texte de plus de 4096 caractères est découpé, jamais tronqué.
+- **Une question restée sans réponse** se dit une fois : tout de suite, « je
+  n'arrive pas à te répondre là, réessaie dans un instant ». Mais une question
+  abandonnée parce qu'il était **trop tard** (elle était arrêtée, ou endormie,
+  quand on la lui a posée) ne reçoit pas ce « réessaie dans un instant » des
+  heures plus tard : en privé, elle s'excuse honnêtement de n'avoir pas pu
+  répondre plus tôt et invite à redire si c'est encore d'actualité — comme on
+  le fait en retrouvant un message manqué ; dans un salon, où la conversation
+  est passée à autre chose et où un mot sans destinataire ne voudrait rien
+  dire, elle ne dit rien.
 """
 
 from __future__ import annotations
@@ -55,6 +64,8 @@ TOO_FAST = "Doucement… je n'arrive pas à suivre, réessaie dans un instant."
 TOO_LONG = "C'est un peu long pour moi : tu peux faire plus court ?"
 OVERLOADED = "Je suis débordée, réessaie un peu plus tard."
 FAILED = "Désolée, je n'arrive pas à te répondre là tout de suite… Réessaie dans un instant ?"
+#: une question abandonnée parce qu'il était trop tard pour y répondre (dite en privé seulement)
+LATE = "Désolée, je n'ai pas pu te répondre plus tôt… Si c'est encore d'actualité, redis-le-moi ?"
 #: ce qu'elle perçoit quand quelqu'un ouvre la conversation (``/start``) : une arrivée, pas des mots
 OPENED = "(vient d'ouvrir la conversation avec toi sur Telegram)"
 
@@ -128,6 +139,12 @@ def handle_of(user_id: int) -> str:
 
 def room_of(chat_id: int) -> str:
     return f"{ROOM_PREFIX}{chat_id}"
+
+
+def too_late(d: Delivery) -> bool:
+    """Une question abandonnée parce qu'il était trop tard pour y répondre : le moteur le dit dans le détail
+    (« trop tard pour répondre » — une reprise au démarrage, ou au réveil, qui arrive après le délai)."""
+    return d.text.strip().casefold().startswith(delivery_p.TOO_LATE)  # la même constante que le moteur
 
 
 def clean_outgoing(text: str) -> str:
@@ -307,7 +324,10 @@ class TelegramChannel:
             return True  # plus admise depuis : on n'écrit pas
         if d.key in self._sent:
             return True
-        text = FAILED if d.kind == delivery_p.REPLY_FAILED else clean_outgoing(d.text)
+        late = d.kind == delivery_p.REPLY_FAILED and too_late(d)
+        if late and not private:
+            return True  # dans un salon, la conversation est passée à autre chose : rien
+        text = (LATE if late else FAILED) if d.kind == delivery_p.REPLY_FAILED else clean_outgoing(d.text)
         for part in split_message(text):
             await self.bot.send_message(chat, part)
             self.delivered.append((chat, part))

@@ -25,8 +25,18 @@ from mika.contracts import goals as c
 from mika.contracts import identity as identity_c
 from mika.contracts import presence as presence_c
 from mika.contracts import social as social_c
-from mika.faculties.goals.faculty import GOALS, Goal, GoalsState, budget, desire, live, params, rank, status
-from mika.faculties.goals.tools import musing
+from mika.faculties.goals.faculty import (
+    GOALS,
+    Goal,
+    GoalsState,
+    budget,
+    desire,
+    live,
+    musing,
+    params,
+    rank,
+    status,
+)
 from mika.kernel.arbitration import Candidate, Modulation, RowView
 from mika.kernel.clock import HOUR
 from mika.kernel.frame import Frame

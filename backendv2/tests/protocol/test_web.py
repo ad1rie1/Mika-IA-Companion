@@ -265,3 +265,21 @@ def test_a_reply_goes_only_to_its_person(world):
         b.send_json({"type": "ping", "t": 7})
         frames = recv_until(b, "pong")
         assert [f["type"] for f in frames] == ["pong"]  # rien de la réponse d'Adrien
+
+
+def test_every_dream_kind_the_server_sends_is_one_the_frontend_names():
+    """Le panneau intérieur reçoit ``last_dream.dream_type`` (``app/mindport.py``) ; une sorte que le frontend ne
+    connaît pas s'affiche brute (« melancholic », en gris). Sa liste (``DREAM_TYPES``, dont le compilateur exige
+    un libellé chacune) et celle du serveur sont la même."""
+    import re
+    from pathlib import Path
+
+    from mika.contracts import self_ as self_c
+
+    source = Path(__file__).resolve().parents[3] / "frontend" / "src" / "types" / "messages.ts"
+    if not source.exists():
+        pytest.skip("frontend absent")
+    declared = re.search(r"DREAM_TYPES\s*=\s*\[(.*?)\]\s*as const", source.read_text(encoding="utf-8"), re.S)
+    assert declared is not None, "DREAM_TYPES introuvable dans messages.ts"
+    kinds = set(re.findall(r'"([a-z_]+)"', declared.group(1)))
+    assert kinds == set(self_c.DREAM_KINDS)

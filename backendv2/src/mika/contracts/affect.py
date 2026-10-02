@@ -47,6 +47,9 @@ class MoodReading:
     #: ce que le fond garde de sa journée (« un petit reste de tristesse ») : l'émotion
     #: récente qui l'explique le mieux, pas une lecture contre le repos de l'heure
     fond_emotion: Emotion = Emotion.NEUTRAL
+    #: la cause est un état qui a pris fin (« personne ne t'a parlé » — et quelqu'un est venu depuis) : elle se
+    #: dit au passé, ce qui en reste au présent
+    cause_over: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +72,8 @@ class StanceReading:
     declared_reply: bool = True  # sa déclaration était une réponse (sinon : elle avait écrit d'elle-même)
     #: l'ancre porte ce que dit la posture : ça ne passera pas en deux minutes
     lasting: bool = False
+    #: la dernière fois que cette personne s'est excusée, et que ça a compté (0 : jamais)
+    apologized_at: int = 0
 
 
 @dataclass(frozen=True, slots=True)

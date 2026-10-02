@@ -27,7 +27,7 @@ from mika.contracts import needs as needs_c
 from mika.contracts import self_ as self_c
 from mika.contracts.entry import HistoryRow
 from mika.kernel.frame import Frame
-from mika.ports.delivery import Delivery
+from mika.ports.delivery import TOO_LATE, Delivery
 from mika.vocab import privacy, voice
 from mika.vocab.affect import Emotion, emotion_of
 from mika.vocab.people import is_identifiable
@@ -194,17 +194,22 @@ def speech(d: Delivery, *, present: bool = True, muted: bool = False, voiced: bo
     }
 
 
+#: la raison d'une trame sans texte quand elle dort : la réponse viendra à son réveil
+ASLEEP = "asleep"
+
+
 def silence(handle: str, face: affect_c.Face, *, user_message_id: int | None,
-            client_msg_id: str | None) -> dict[str, Any]:
-    """Elle a choisi de ne pas répondre : une trame ``speech`` sans texte. Le client
-    cesse d'afficher « Mika écrit… », rattache sa bulle au message enregistré, et le
-    visage garde ce qu'il montrait (son visage du moment, pas un neutre)."""
+            client_msg_id: str | None, reason: str = "silence") -> dict[str, Any]:
+    """Elle a choisi de ne pas répondre (ou elle dort, ``reason`` = ``ASLEEP`` : la réponse
+    attend son réveil) : une trame ``speech`` sans texte. Le client cesse d'afficher
+    « Mika écrit… », rattache sa bulle au message enregistré, et le visage garde ce qu'il
+    montrait (son visage du moment, pas un neutre)."""
     blend = [{"emotion": e.value, "weight": round(w, 2)} for e, w in face.blend]
     return {
         "type": "speech", "text": "", "emotion": face.emotion.value,
         "emotion_intensity": round(float(face.intensity), 2), "emotion_state": face_state(face),
         "emotion_blend": blend, "source": "reply", "person_id": handle, "speak": False,
-        "voice_reason": "silence", "voice_persona": voice.SPEAKING,
+        "voice_reason": reason, "voice_persona": voice.SPEAKING,
         "voice_profile": voice.profile_for(voice.SPEAKING).to_dict(), "message_id": None,
         "user_message_id": user_message_id, "client_msg_id": client_msg_id,
     }
@@ -277,6 +282,9 @@ ABSTAINED_OUTCOME = "abstained"
 #: le statut d'``ack`` qui dit qu'une question acceptée n'aura pas de réponse : le client
 #: passe la bulle en échec, avec sa raison (« Mika est saturée, réessaie dans un instant »)
 REPLY_FAILED_STATUS = "overloaded"
+#: …et celui d'une question abandonnée parce que trop vieille (une reprise au démarrage, des heures
+#: plus tard) : ce n'est pas une saturation, « trop tard pour répondre — repose ta question »
+TOO_LATE_STATUS = "too_late"
 UNCONFIGURED = "UnconfiguredRole"
 
 
@@ -314,8 +322,9 @@ def reply_failed_frames(handle: str, detail: str, face: affect_c.Face, *, user_m
     message reçoit l'ancienne trame de repli."""
     if not client_msg_id:
         return [fallback_speech(handle, detail, user_message_id=user_message_id, client_msg_id=None)]
+    status = TOO_LATE_STATUS if detail.startswith(TOO_LATE) else REPLY_FAILED_STATUS
     frames = [silence(handle, face, user_message_id=user_message_id, client_msg_id=client_msg_id),
-              ack(client_msg_id, REPLY_FAILED_STATUS)]
+              ack(client_msg_id, status)]
     if UNCONFIGURED in detail:
         frames.append(fallback_speech(handle, detail, user_message_id=user_message_id, client_msg_id=None,
                                       persona=voice.INNER))

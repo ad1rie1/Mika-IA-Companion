@@ -42,6 +42,7 @@ from mika.sim.clock import SimClock, run_virtual
 from mika.sim.llm.persona import PersonaSimLLM, _section
 from mika.sim.outside import FakeFeeds
 from mika.vocab.episodes import goal_target
+from tests.fixtures.endings import ENDINGS, initiative_ends
 from tests.fixtures.mika import PARIS, at_paris, befriend, boot, build, connect, disconnect, said
 from tests.unit.test_projects import llm_call
 from tests.unit.test_senses import entry
@@ -534,6 +535,57 @@ def test_a_daydream_is_written_but_never_told_as_news(tmp_path):
     assert not _shares(r.llm)  # pas une nouvelle à raconter
 
 
+def test_her_daydreams_follow_no_fixed_rotation_and_last_one_session(tmp_path):
+    """Sans flux où chercher du neuf, sa curiosité la fait rêvasser : chaque rêverie se vit d'un trait (une
+    séance), et ses sujets ne défilent pas dans l'ordre de sa persona, un par jour comme un métronome (sonde réelle
+    du 2026-10-02 : Gaming, Bidouille, Séries, Cuisine, Café, puis on recommence) — mais aucun n'est oublié."""
+    async def scenario(kernel, llm):
+        await kernel.set_params("goals", GoalsParams(seed_curiosity_from=0.0))
+        await asyncio.sleep(12 * DAY / US)
+
+    r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 8, 0))
+    musings = [o.data for o in r.of(goals_c.GOAL_OPENED) if o.data.origin == goals_c.FROM_INTEREST]
+    interests = list(r.frame.get(self_c.PERSONA).interests)
+    order = [interests.index(m.source.removeprefix("interest:")) for m in musings]
+    assert len(musings) >= len(interests) and all(m.max_steps == GoalsParams().musing_steps == 1 for m in musings)
+    assert set(order) == set(range(len(interests))), "aucun centre d'intérêt n'est oublié"
+    rotation = [i % len(interests) for i in range(len(order))]
+    assert order != rotation, "pas un tourniquet sur la liste de sa persona"
+
+
+@pytest.mark.parametrize("origin", [goals_c.FROM_INTEREST, goals_c.FROM_EXCHANGE])
+def test_a_daydream_that_gives_nothing_fades_away_it_never_blocks(tmp_path, origin):
+    """Rêvasser ne se rate pas : une rêverie dont les séances ne donnent rien se dissipe — ni « je bloque », ni
+    frustration, ni estime en baisse, ni « tu as laissé tomber » dans son journal. Contre-exemple : la même
+    absence de résultat sur ce qu'on lui a confié, c'est bloquer (sonde réelle du 2026-10-02 : « Je bloque sur :
+    Rêvasser un peu autour de Gaming — ça t'agace »)."""
+    async def scenario(kernel, llm):
+        llm._step = lambda req: LLMResponse("")  # des séances qui ne concluent rien
+        await connect(kernel, "user_1", "Adrien", operator=True)
+        esteem0 = kernel.mind.frame().get(self_c.ESTEEM)
+        await kernel.mind.append([goals_c.GOAL_OPENED.draft(
+            kind=goals_c.EXPLORATION, authority=goals_c.SELF, title=Content.of("Rêvasser un peu autour des jeux rétro"),
+            details=Content.of("Gaming"), bundles=("goals", "memory", "projects"), max_steps=5,
+            source="interest:Gaming" if origin == goals_c.FROM_INTEREST else "thought:42", sensitivity=0,
+            desire=1.0, origin=origin)], emitter="goals", correlation="genese", origin=Origin.GENESIS)
+        assert await when(kernel, closed_now, limit=12 * HOUR)
+        await asyncio.sleep(HOUR / US)
+        frame = kernel.mind.frame()
+        deeds = kernel.mind.root.slices["self"].deeds
+        return esteem0, frame.get(self_c.ESTEEM), frame.get(attention_c.THOUGHTS), deeds
+
+    r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 14, 0))
+    esteem0, esteem1, thoughts, deeds = r.result
+    [closed] = r.of(goals_c.GOAL_CLOSED)
+    blocked = [t for t in thoughts if t.origin == attention_c.BLOCKED]
+    if origin == goals_c.FROM_INTEREST:
+        assert (closed.data.status, closed.data.reason) == (goals_c.ABANDONED, goals_c.DISSIPATED)
+        assert not blocked and esteem1 == esteem0
+        assert not [d for d in deeds if d.what in ("abandoned", "blocked")]
+    else:
+        assert closed.data.status == goals_c.STUCK and blocked and esteem1 < esteem0
+
+
 def test_an_exploration_born_of_a_signal_inherits_only_reading_from_its_source():
     """Un titre de flux lui laisse ses flux (lire) ; un mail ne lui laisse pas son courrier (écrire, envoyer) ; les
     outils d'une app (qui appellent ses domaines) ne passent jamais (PRJ-3)."""
@@ -568,3 +620,32 @@ def test_a_refused_done_is_not_a_verdict_and_the_step_can_still_conclude(tmp_pat
     assert [(x.data.verdict, x.data.proven) for x in reports][-2:] == [("done", False), ("done", True)]
     assert reports[-1].correlation == reports[-2].correlation  # la même séance
     assert [c.data.status for c in r.of(goals_c.GOAL_CLOSED)] == [goals_c.ACHIEVED]
+
+
+
+# ── Ce qui compte comme un essai (BUG-8, ADR 0044) ────────────────────────
+
+@pytest.mark.parametrize("ending,counts,why", ENDINGS)
+def test_telling_what_she_finished_counts_only_real_tries(ending, counts, why):
+    """Deux récits devancés (la personne écrit pendant qu'elle compose : le cas courant quand elle est active)
+    laissent le récit à faire ; deux silences choisis, non (``share_attempts`` = 2)."""
+    from mika.faculties.goals.faculty import Goal, GoalsState, _ended, _set, _started
+
+    p = GoalsParams()
+    done = Goal(id=1, kind=goals_c.EXPLORATION, authority=goals_c.SELF, title_ref="t", opened_at=0,
+                status=goals_c.ACHIEVED, notable=0.9, owner="user_1")
+    s = initiative_ends((_started, _ended), _set(GoalsState(), done), p, goals_c.SHARE, goal_target(1), ending)
+    attempts = s.goals[1].share_attempts
+    assert attempts == (2 if counts else 0), why
+    assert (attempts >= p.share_attempts) is counts  # plus proposable / toujours proposable
+
+
+@pytest.mark.parametrize("ending,counts,why", ENDINGS)
+def test_a_reminder_counts_only_real_tries(ending, counts, why):
+    from mika.faculties.goals.faculty import Goal, GoalsState, _ended, _set, _started
+
+    due = Goal(id=1, kind=goals_c.REMINDER, authority=goals_c.USER, title_ref="t", opened_at=0, owner="user_1",
+               due=at_paris(2026, 9, 28, 15, 0))
+    s = initiative_ends((_started, _ended), _set(GoalsState(), due), GoalsParams(), goals_c.REMIND,
+                         goal_target(1), ending)
+    assert s.goals[1].attempts == (2 if counts else 0), why

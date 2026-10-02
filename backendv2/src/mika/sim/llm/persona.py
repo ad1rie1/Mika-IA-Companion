@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 from mika.kernel.clock import US, Clock
 from mika.kernel.codec import h64
 from mika.kernel.prompt import CONTEXT_FOOTER
+from mika.plugins.email import MENTION_TITLE
 from mika.plugins.forge.guide import EXAMPLE_CODE, EXAMPLE_MANIFEST
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall, Usage
 from mika.sim.llm.scripted import LognormalLatency
@@ -121,6 +122,14 @@ def _section(req: LLMRequest, title: str) -> str:
     return body.split("\n--- ", 1)[0].strip()
 
 
+def _cited_first(section: str) -> str:
+    """La première ligne citée d'une section (« > [réf] texte »), sans sa référence."""
+    for line in section.splitlines():
+        if line.startswith("> "):
+            return re.sub(r"^\[[^\]]*\]\s*", "", line[2:]).strip()
+    return ""
+
+
 def _message_of(req: LLMRequest) -> str:
     last = req.messages[-1].content if req.messages else ""
     return last.split(CONTEXT_FOOTER, 1)[1].strip() if CONTEXT_FOOTER in last else last
@@ -172,7 +181,9 @@ class PersonaSimLLM:
         if req.role == "journal":
             text = req.messages[-1].content if req.messages else ""
             who = "personne" if "Personne ne t'a parlé" in text else "des gens"
-            return self._out(req, f"Journée passée avec {who}. Je m'en souviendrai.")
+            # comme pour tout ce qu'on lui montre, la doublure recopie ses notes : un secret qu'on y aurait laissé
+            # passer se retrouverait dans le journal, puis partout où le journal se montre
+            return self._out(req, f"Journée passée avec {who}. Je m'en souviendrai. {text[:900]}")
         if req.role == "dream":
             return self._out(req, "Je marche dans une ville qui ressemble à un clavier ; les touches chantent.")
         if req.role == "profile":
@@ -203,14 +214,20 @@ class PersonaSimLLM:
             who = f" {names[0]}" if names else ""
             reminder = _section(req, "LE RAPPEL")
             done = _section(req, "CE QUE TU AS MENÉ À BOUT") or _section(req, "CE À QUOI TU AS REPENSÉ")
+            mail = _cited_first(_section(req, MENTION_TITLE))
             if reminder:
                 text, tone = f"Petit rappel, comme promis : {reminder}", Tone((), "happy", 0.5, "")
             elif done:
                 text, tone = f"Hé{who} ! J'ai fini quelque chose : {done}", Tone((), "proud", 0.6, "")
+            elif mail:
+                text, tone = f"Tiens{who}, un mail qui a l'air important vient d'arriver : {mail}", \
+                    Tone((), "curious", 0.4, "")
             elif rng.random() < self.abstain_rate:
                 return self._out(req, "[SILENCE]")
             else:
                 text, tone = f"Coucou{who} ! Contente de te voir.", Tone((), "happy", 0.6, "")
+            if mail and (reminder or done):  # deux choses à dire : elle dit les deux
+                text += f" Et au fait, un mail qui a l'air important vient d'arriver : {mail}"
         else:
             tone = appraise(message)
             text = f"{tone.phrase} (à propos de « {message[:40]} »)"

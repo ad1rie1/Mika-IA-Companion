@@ -100,3 +100,9 @@ def same_name(a: str | None, b: str | None) -> bool:
     if fa == fb:
         return True
     return fa.split()[0] == fb.split()[0]
+
+
+def clean_tokens(text: str) -> str:
+    """Le texte sans les jetons de personnes (« Chloé [P1] » → « Chloé ») : l'extraction s'en sert pour dire qui
+    c'est ; ils ne doivent finir ni dans un souvenir, ni dans un rêve."""
+    return re.sub(r"[ \t]*\[P\d{1,3}\]", "", text).strip()

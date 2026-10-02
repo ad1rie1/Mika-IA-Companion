@@ -8,6 +8,7 @@ vecteurs (un cache), rappel filtré par la divulgation, outils. Voir
 from mika.faculties.memory import (  # noqa: F401 — contributions
     consolidation,
     inspect,
+    life,
     night,
     projections,
     recall,

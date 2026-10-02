@@ -8,7 +8,9 @@ se reconstruit pas :
   forgées), copiées par l'API de sauvegarde de SQLite : cohérentes même
   serveur en marche, WAL compris ;
 - ses apps forgées (``forge/``, avec leurs versions) et ses ateliers
-  (``ateliers/``, avec leur git) ;
+  (``ateliers/``, avec leur git) ; un lien symbolique est gardé comme un lien
+  (sa cible, dans le manifeste) et recréé à la restauration : sans lui, le
+  prochain commit de l'atelier enregistrerait sa suppression ;
 - ``secret.key`` quand la clé de chiffrement vient de ce fichier (sans elle,
   les secrets rangés dans les réglages sont perdus) ;
 - ``MANIFEST.json`` : tête du journal, empreinte de l'état **rejoué depuis la
@@ -19,7 +21,9 @@ le journal au démarrage suivant.
 
 Restaurer vérifie les sommes, rejoue la copie et compare son empreinte au
 manifeste **avant** de toucher au dossier de données ; l'ancien dossier est
-mis de côté, jamais effacé.
+mis de côté, jamais effacé. Restaurer prend le verrou du dossier
+(``datadir``) : sous un serveur en marche, c'est refusé — il écrirait encore,
+par ses descripteurs ouverts, dans le dossier mis de côté.
 """
 
 from __future__ import annotations
@@ -34,11 +38,12 @@ import tarfile
 import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from mika.adapters.store_sqlite import SqliteStore
 from mika.adapters.system import RandomIdGen, RealClock
+from mika.app import datadir
 from mika.app.composition import faculties
 from mika.kernel.codec import digest
 from mika.kernel.registry import Registry
@@ -48,7 +53,8 @@ from mika.runtime.state import RUNTIME
 FORMAT = 1
 MANIFEST = "MANIFEST.json"
 #: jetables : se reconstruisent depuis le journal
-SKIPPED = frozenset({"views.db", "views.db-wal", "views.db-shm", "sauvegardes.json", "sauvegardes.partial"})
+SKIPPED = frozenset({"views.db", "views.db-wal", "views.db-shm", "sauvegardes.json", "sauvegardes.partial",
+                     datadir.LOCK_NAME})
 #: dossiers jamais archivés : ceux des appels de la CLI de Claude Code (prompts privés, jetons de session)
 #: d'une installation d'avant leur déménagement sous XDG_RUNTIME_DIR
 SKIPPED_DIRS = frozenset({"claude-code"})
@@ -121,18 +127,59 @@ def state_of(mind_db: Path) -> tuple[int, str]:
         return asyncio.run(replay())
 
 
-def _members(data: Path) -> list[Path]:
-    out = []
+def _walk(data: Path) -> tuple[list[Path], list[Path]]:
+    """(fichiers, liens symboliques) à archiver, relatifs au dossier. Un lien est un lien
+    (jamais suivi : un dossier lié n'est pas parcouru deux fois)."""
+    files, links = [], []
     for path in sorted(data.rglob("*")):
         rel = path.relative_to(data)
-        if path.is_dir() or path.is_symlink() or rel.name in SKIPPED or rel.parts[0].startswith("."):
+        if rel.name in SKIPPED or rel.parts[0].startswith(".") or rel.parts[0] in SKIPPED_DIRS:
             continue
-        if rel.parts[0] in SKIPPED_DIRS:
+        if path.is_symlink():
+            links.append(rel)
+            continue
+        if path.is_dir():
             continue
         if any(rel.name.endswith(".db" + s) for s in _SQLITE_SIDECARS):
             continue
-        out.append(rel)
-    return out
+        files.append(rel)
+    return files, links
+
+
+def _members(data: Path) -> list[Path]:
+    """Les fichiers à archiver (les liens symboliques à part : ``_links``)."""
+    return _walk(data)[0]
+
+
+def _links(data: Path) -> list[Path]:
+    """Les liens symboliques à garder comme des liens (leur cible, dans le manifeste)."""
+    return _walk(data)[1]
+
+
+def _safe_rel(rel: str) -> bool:
+    parts = PurePosixPath(rel).parts
+    return bool(parts) and not PurePosixPath(rel).is_absolute() and ".." not in parts \
+        and not parts[0].startswith(".") and "\x00" not in rel
+
+
+def _relink(root: Path, links: object) -> None:
+    """Recrée dans ``root`` les liens symboliques du manifeste. Un lien n'est créé que dans
+    le dossier (jamais à travers un lien qui en sortirait) ; une entrée invalide refuse
+    l'archive."""
+    if not isinstance(links, dict):
+        raise BackupError("liens illisibles dans le manifeste")
+    base = root.resolve()
+    for rel, target in sorted(links.items()):
+        if not isinstance(rel, str) or not _safe_rel(rel) or not isinstance(target, str) or not target \
+                or "\x00" in target:
+            raise BackupError(f"lien invalide dans l'archive : {rel!r}")
+        path = root / rel
+        if not path.parent.resolve().is_relative_to(base):  # avant de créer quoi que ce soit
+            raise BackupError(f"lien hors du dossier dans l'archive : {rel}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.is_symlink() or path.exists():
+            raise BackupError(f"lien en double dans l'archive : {rel}")
+        path.symlink_to(target)
 
 
 def backup(data: Path, dest: Path, *, keep: int = 0, now: datetime | None = None) -> Summary:
@@ -152,7 +199,9 @@ def backup(data: Path, dest: Path, *, keep: int = 0, now: datetime | None = None
         stage = Path(tmp) / "data"
         stage.mkdir()
         files: dict[str, str] = {}
-        for rel in _members(data):
+        members, linked = _walk(data)
+        links = {rel.as_posix(): os.readlink(data / rel) for rel in linked}
+        for rel in members:
             src, dst = data / rel, stage / rel
             dst.parent.mkdir(parents=True, exist_ok=True)
             if _is_sqlite(src):
@@ -161,7 +210,8 @@ def backup(data: Path, dest: Path, *, keep: int = 0, now: datetime | None = None
                 shutil.copy2(src, dst)
             files[rel.as_posix()] = _sha256(dst)
         head, state = state_of(stage / "mind.db")
-        manifest = {"format": FORMAT, "created": stamp, "head": head, "state": state, "files": files}
+        manifest = {"format": FORMAT, "created": stamp, "head": head, "state": state, "files": files,
+                    "links": links}
         (stage / MANIFEST).write_text(json.dumps(manifest, indent=1, ensure_ascii=False), encoding="utf-8")
         partial = archive.with_suffix(".partial")
         with tarfile.open(partial, "w:gz") as tar:
@@ -240,6 +290,7 @@ def _extract(archive: Path, into: Path) -> dict[str, Any]:
         path = root / rel
         if not path.is_file() or _sha256(path) != expected:
             raise BackupError(f"fichier absent ou altéré dans l'archive : {rel}")
+    _relink(root, manifest.get("links", {}))  # une archive d'avant les liens n'en a pas
     return manifest
 
 
@@ -263,31 +314,50 @@ def verify(archive: Path, *, record: Path | None = None, now: datetime | None = 
 
 def restore(archive: Path, data: Path, *, force: bool = False, now: datetime | None = None) -> Summary:
     """Restaure dans ``data``. Un dossier non vide n'est remplacé qu'avec
-    ``force`` ; il est alors mis de côté (``<data>.avant-restauration-…``)."""
+    ``force`` ; il est alors mis de côté (``<data>.avant-restauration-…``).
+
+    Le verrou du dossier est pris d'abord : un Mika qui tourne dessus (``DataDirBusy``) ne voit
+    rien bouger. Il passe au dossier restauré avec son fichier, tenu jusqu'au bout."""
     data = data.resolve()
-    if data.exists() and any(data.iterdir()) and not force:
-        raise BackupError(f"{data} n'est pas vide : relance avec --force (l'ancien dossier sera mis de côté)")
-    data.parent.mkdir(parents=True, exist_ok=True)
-    stamp = (now or datetime.now(UTC)).strftime("%Y%m%d-%H%M%S")
-    stage_root = Path(tempfile.mkdtemp(prefix=f".{data.name}.restauration-", dir=data.parent))
+    fresh = not data.exists()
+    datadir.hold(data)  # crée le dossier s'il n'existait pas : on le retire si rien n'est restauré
+    lock = data / datadir.LOCK_NAME
+    done = False
     try:
-        manifest = _extract(archive, stage_root)
-        stage = stage_root / "data"
-        head, state = state_of(stage / "mind.db")
-        if (head, state) != (manifest["head"], manifest["state"]):
-            raise BackupError("la copie ne rejoue pas à l'état enregistré dans le manifeste : rien n'est touché")
-        (stage / MANIFEST).unlink()
-        warnings = []
-        if data.exists():
-            aside = data.parent / f"{data.name}.avant-restauration-{stamp}"
-            data.rename(aside)
-            warnings.append(f"ancien dossier mis de côté : {aside}")
-        stage.rename(data)
-        for sub in ("forge", "ateliers"):
-            (data / sub).mkdir(exist_ok=True)
-        key = data / "secret.key"
-        if key.exists():
-            key.chmod(0o600)
+        if any(p.name != datadir.LOCK_NAME for p in data.iterdir()) and not force:
+            raise BackupError(f"{data} n'est pas vide : relance avec --force (l'ancien dossier sera mis de côté)")
+        stamp = (now or datetime.now(UTC)).strftime("%Y%m%d-%H%M%S")
+        stage_root = Path(tempfile.mkdtemp(prefix=f".{data.name}.restauration-", dir=data.parent))
+        try:
+            manifest = _extract(archive, stage_root)
+            stage = stage_root / "data"
+            head, state = state_of(stage / "mind.db")
+            if (head, state) != (manifest["head"], manifest["state"]):
+                raise BackupError("la copie ne rejoue pas à l'état enregistré dans le manifeste : rien n'est touché")
+            (stage / MANIFEST).unlink()
+            warnings = []
+            lock.replace(stage / datadir.LOCK_NAME)  # le verrou (son inode, tenu) suit le dossier restauré
+            if any(data.iterdir()):
+                aside = data.parent / f"{data.name}.avant-restauration-{stamp}"
+                data.rename(aside)
+                warnings.append(f"ancien dossier mis de côté : {aside}")
+            else:
+                data.rmdir()
+            stage.rename(data)
+            done = True
+            for sub in ("forge", "ateliers"):
+                (data / sub).mkdir(exist_ok=True)
+            key = data / "secret.key"
+            if key.exists():
+                key.chmod(0o600)
+        finally:
+            shutil.rmtree(stage_root, ignore_errors=True)
     finally:
-        shutil.rmtree(stage_root, ignore_errors=True)
+        datadir.release(data)
+        if fresh and not done:  # rien de restauré : le dossier n'existait pas, il n'existe plus
+            lock.unlink(missing_ok=True)
+            try:
+                data.rmdir()
+            except OSError:
+                pass
     return Summary(archive, head, state, len(manifest["files"]), archive.stat().st_size, tuple(warnings))

@@ -27,6 +27,8 @@ from mika.kernel.inspect import (
     Text,
     Vital,
     When,
+    num_fr,
+    pct_fr,
 )
 
 #: son nom en français, et ce qui le comble
@@ -36,6 +38,8 @@ RELIEF = {
     c.EXPRESSION: "répondre, et plus encore prendre la parole d'elle-même ; travailler, un peu",
     c.CURIOSITY: "un message, une croyance nouvelle, un pas d'exploration",
 }
+#: le vide ressenti, en mots
+FELT_FR = {c.LONELY: "de la solitude", c.BORED: "de l'ennui"}
 #: la clé de la série de chaque besoin
 SERIES = {c.SOCIAL: "social", c.EXPRESSION: "expression", c.CURIOSITY: "curiosite"}
 #: au-delà, un besoin se dit dans le prompt (voir ``describe``)
@@ -99,8 +103,8 @@ def _inspect(s: NeedsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     since = frame.now - span
     rows = tuple((
         NAMES[k],
-        Meter(values[k], f"{round(values[k] * 100)} %", tone=_tone(values[k])),
-        f"{_tau(k, p):.1f} h",
+        Meter(values[k], pct_fr(values[k]), tone=_tone(values[k])),
+        f"{num_fr(_tau(k, p))} h",
         RELIEF[k],
         When(s.levels[k].at) if k in s.levels and s.levels[k].at else Text("—", kind="muted"),
     ) for k in c.KINDS)
@@ -116,12 +120,17 @@ def _inspect(s: NeedsState, frame: Frame, ctx: InspectContext) -> list[Block]:
               empty="pas encore de mesure (une toutes les dix minutes) : la courbe se remplira"),
         Fields((
             ("rien ne s'est passé depuis", ctx.when(s.idle_since) if s.idle_since else "—"),
-            ("dernier vide ressenti", ctx.when(s.felt_at) if s.felt_at else "—"),
-            ("le vide se ressent après", f"{p.idle_before_empty_us / HOUR:.1f} h sans rien"),
-            ("le vide se creuse", f"de {p.empty_intensity:g} à {p.empty_max:g}, +{p.empty_growth_per_h:g} par heure"),
+            ("on lui a parlé pour la dernière fois", ctx.when(s.heard_at) if s.heard_at else "—"),
+            ("dernier vide ressenti", (f"{FELT_FR.get(s.felt, s.felt)} ({pct_fr(s.felt_level)}), "
+                                       if s.felt else "") + ctx.when(s.felt_at) if s.felt_at else "—"),
+            ("retrouver une amie après le vide", f"lui fait du bien : {num_fr(p.reunited_gain)} × ce que le vide "
+                                                 "pesait" if p.reunited_gain else "ne lui fait rien"),
+            ("le vide se ressent après", f"{num_fr(p.idle_before_empty_us / HOUR)} h sans rien"),
+            ("le vide se creuse", f"de {num_fr(p.empty_intensity)} à {num_fr(p.empty_max)}, {num_fr(p.empty_growth_per_h, signed=True)} par "
+                                   "heure"),
             ("en ce moment", "elle travaille (pas de vide)" if busy(s, frame.now) else "—"),
-            ("solitude plutôt qu'ennui", f"quand la compagnie dépasse {p.lonely_from:.0%}"),
-            ("pousse à parler (compagnie)", f"au-delà de {p.social_floor:.0%}"),
-            ("pousse à parler (s'exprimer)", f"au-delà de {p.expression_floor:.0%}"),
+            ("solitude plutôt qu'ennui", f"quand la compagnie dépasse {pct_fr(p.lonely_from)}"),
+            ("pousse à parler (compagnie)", f"au-delà de {pct_fr(p.social_floor)}"),
+            ("pousse à parler (s'exprimer)", f"au-delà de {pct_fr(p.expression_floor)}"),
         ), title="En détail", columns=2),
     ]

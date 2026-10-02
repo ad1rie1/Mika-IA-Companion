@@ -16,11 +16,18 @@ avec la durée (ADR 0033).
 projet dans son mode à elle, il n'y a pas de vide, et ce qu'elle y fait
 comble un peu l'envie de s'exprimer.
 
+**Retrouver quelqu'un** : après un vide ressenti, le premier message d'une
+amie ou d'une proche lui fait du bien (``needs.reunited``) — une inconnue n'y
+change rien de tel.
+
 **Pas de prise de parole dans le vide** : l'envie de compagnie ne dit pas
 *de quoi* parler. Une initiative qu'elle pousse seule a besoin d'une matière
-concrète, lue dans les faits publics (une pensée qui la travaille, ce qu'elle
-a fini ou ce qu'elle est en train de faire, ce que la personne lui a
-raconté) ; sans matière, sa preuve est nettement plus faible.
+concrète, lue dans les faits publics ; ce qui concerne la personne passe
+d'abord (une pensée sur elle, ce qui se passe dans sa vie, ce qu'elle lui a
+raconté de plus important), ses choses à elle ensuite (ce qu'elle a fini, ce
+sur quoi elle est — jamais une rêverie : rien de neuf n'est arrivé). Une
+matière déjà dite dans une initiative ne resert pas. Sans matière, sa preuve
+est nettement plus faible.
 """
 
 from __future__ import annotations
@@ -43,7 +50,7 @@ from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.kernel.arbitration import Anyone, Candidate, Modulation, RowView
-from mika.kernel.clock import DAY, HOUR, MINUTE
+from mika.kernel.clock import DAY, HOUR, MINUTE, local
 from mika.kernel.faculty import CatchUp, Faculty, Zone
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
@@ -56,6 +63,7 @@ from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
 from mika.vocab.people import is_identifiable
 from mika.vocab.privacy import Sensitivity, hearable
 from mika.vocab.temperament import Temperament, geometric, lerp
+from mika.vocab.words import elided
 
 
 class NeedsParams(BaseModel):
@@ -165,6 +173,17 @@ class NeedsParams(BaseModel):
         label="Solitude à partir de", group="Le vide", lo=0, hi=1, step=0.05,
         help="Si son besoin de compagnie atteint ce niveau, le vide se ressent comme de la solitude plutôt que "
              "de l'ennui.")] = 0.8
+    reunited_gain: Annotated[float, Knob(
+        label="Retrouver une amie après le vide", group="Le vide", lo=0, hi=2, step=0.05,
+        help="Après un vide ressenti, le premier message d'une amie ou d'une proche lui fait du bien : un "
+             "soulagement (après la solitude) ou de la joie (après l'ennui), d'autant plus que le vide pesait — "
+             "son intensité multipliée par ce facteur. 0 : ça ne lui fait rien. Une inconnue n'y change rien de "
+             "tel.")] = 0.8
+    matter_moment_ahead_us: Annotated[int, Knob(
+        label="Ce qui va lui arriver, dans les", group="De quoi parler", lo=0, hi=7 * DAY,
+        help="Un moment de sa vie qu'une personne lui a annoncé (un entretien, un départ) devient une matière "
+             "pour lui écrire (un mot d'encouragement) dans cette durée avant qu'il arrive — et jusqu'à « ce "
+             "qu'on lui a raconté, pendant » après. Jamais ce qu'un tiers lui en a dit.")] = 2 * DAY
 
 
 def derive(t: Temperament, overrides: Any = None) -> NeedsParams:
@@ -196,15 +215,20 @@ class Done:
 
 @dataclass(frozen=True, slots=True)
 class Told:
-    """Le dernier élément de mémoire qui ne concerne qu'une personne (ce qu'elle lui a raconté)."""
+    """Un élément de mémoire qui ne concerne qu'une personne (ce qu'elle lui a raconté), et ce qu'il pèse."""
 
     ref: str
     at: int
     sensitivity: int = 1
+    importance: float = 0.5
 
 
 #: au plus tant de choses faites gardées comme matière
 DONE_KEPT = 6
+#: au plus tant de choses racontées gardées par personne (les plus importantes)
+TOLD_KEPT = 4
+#: au plus tant de matières déjà dites retenues (pour ne pas en reprendre une deux fois)
+USED_KEPT = 64
 #: une séance de travail plus vieille que ça n'occupe plus (un épisode interrompu sans règlement)
 WORK_STALE = HOUR
 
@@ -217,11 +241,22 @@ class NeedsState:
     #: les séances de travail en cours (corrélation → début) : travailler l'occupe
     working: FrozenDict[str, int] = field(default_factory=FrozenDict)
     done: tuple[Done, ...] = ()
-    told: FrozenDict[str, Told] = field(default_factory=FrozenDict)
+    #: personne → ce qu'elle lui a raconté d'elle (les plus importants)
+    told: FrozenDict[str, tuple[Told, ...]] = field(default_factory=FrozenDict)
+    #: la dernière fois que quelqu'un lui a parlé, et la fois d'avant (retrouver quelqu'un après le vide)
+    heard_at: int = 0
+    heard_before: int = 0
+    #: le dernier vide ressenti : ``BORED`` | ``LONELY``, et son intensité
+    felt: str = ""
+    felt_level: float = 0.0
+    #: les matières déjà dites dans une initiative (référence → quand) : elles ne resservent pas
+    used: FrozenDict[str, int] = field(default_factory=FrozenDict)
 
 
+#: v3 : ce qu'on lui a raconté se classe par importance (plusieurs par personne), les matières déjà dites, qui lui
+#: a parlé en dernier et le vide ressenti (retrouver quelqu'un) ; une rêverie n'est plus une matière
 NEEDS = Faculty("needs", state=NeedsState, init=lambda p: NeedsState(), params=NeedsParams, derive=derive,
-                state_version=2)
+                state_version=3)
 NEEDS.declare(*c.ALL)
 
 #: les séances où elle travaille dans son mode à elle (une exécution impersonnelle n'est pas elle)
@@ -272,7 +307,7 @@ def _received(s: NeedsState, e, cx) -> NeedsState:
     p = params(cx.params)
     s = _touch(s, e.at, p)
     s = _relieve(_relieve(s, c.SOCIAL, p.received_social, e.at, p), c.CURIOSITY, p.received_curiosity, e.at, p)
-    return replace(s, idle_since=e.at)
+    return replace(s, idle_since=e.at, heard_at=e.at, heard_before=s.heard_at)
 
 
 @NEEDS.reducer(goals_c.STEP_REPORTED)
@@ -293,7 +328,8 @@ def _goal_closed(s: NeedsState, e, cx) -> NeedsState:
     d = e.data
     if d.status != goals_c.ACHIEVED or d.kind == goals_c.REMINDER:
         return s
-    if d.title.ref:
+    # une rêverie n'est pas « ce qu'elle a fini » : rien de neuf n'est arrivé, il n'y a rien à raconter (HUM-3)
+    if d.title.ref and d.reason not in goals_c.MUSINGS:
         done = Done(d.title.ref, e.at, _concerned(d.owner, d.about), d.sensitivity)
         s = replace(s, done=(*s.done, done)[-DONE_KEPT:])
     if d.kind != goals_c.EXPLORATION:
@@ -320,7 +356,13 @@ def _learned_a_belief(s: NeedsState, e, cx) -> NeedsState:
     dite) devient une matière avec elle — jamais ce qu'un autre a dit d'elle."""
     d = e.data
     if len(d.about) == 1 and d.source == d.about[0] and d.text.ref:
-        s = replace(s, told=s.told.set(d.about[0], Told(d.text.ref, e.at, d.sensitivity)))
+        person = d.about[0]
+        kept = (*(t for t in s.told.get(person, ()) if t.ref != d.text.ref),
+                Told(d.text.ref, e.at, d.sensitivity, round(d.importance, 4)))
+        # les plus importantes, puis les plus récentes : « mon chat est malade » ne cède pas sa place à « j'ai
+        # mangé des pâtes »
+        kept = tuple(sorted(kept, key=lambda t: (-t.importance, -t.at, t.ref))[:TOLD_KEPT])
+        s = replace(s, told=s.told.set(person, kept))
     p = params(cx.params)
     return _relieve(_touch(s, e.at, p), c.CURIOSITY, p.learned_curiosity, e.at, p)
 
@@ -335,6 +377,16 @@ def _said(s: NeedsState, e, cx) -> NeedsState:
         return replace(s, idle_since=e.at)
     if not d.visible or not d.target:
         return s
+    if d.kind == Kind.INITIATIVE:
+        # la matière qu'elle avait sous les yeux en écrivant d'elle-même : dite, elle ne resert pas
+        shown = [ref[len(MATTER_PROVENANCE):] for ref in d.provenance if ref.startswith(MATTER_PROVENANCE)]
+        if shown:
+            used = s.used
+            for ref in shown:
+                used = used.set(ref, e.at)
+            if len(used) > USED_KEPT:
+                used = FrozenDict(sorted(used.items(), key=lambda kv: (kv[1], kv[0]))[-USED_KEPT:])
+            s = replace(s, used=used)
     s = _touch(s, e.at, p)
     s = _relieve(s, c.SOCIAL, p.said_social, e.at, p)
     s = _relieve(s, c.EXPRESSION, p.initiative_expression if d.kind == Kind.INITIATIVE else p.reply_expression,
@@ -363,12 +415,12 @@ def _worked(s: NeedsState, e, cx) -> NeedsState:
 
 @NEEDS.reducer(c.FELT)
 def _felt(s: NeedsState, e, cx) -> NeedsState:
-    return replace(s, felt_at=e.at)
+    return replace(s, felt_at=e.at, felt=e.data.feeling, felt_level=e.data.intensity)
 
 
 def reading(s: NeedsState, t: int, p: NeedsParams) -> c.NeedsReading:
     return c.NeedsReading(tension(s, c.SOCIAL, t, p), tension(s, c.EXPRESSION, t, p),
-                          tension(s, c.CURIOSITY, t, p), s.idle_since)
+                          tension(s, c.CURIOSITY, t, p), s.idle_since, s.heard_at)
 
 
 @NEEDS.fact(c.NEEDS)
@@ -388,6 +440,8 @@ def busy(s: NeedsState, now: int) -> bool:
 SHAREABLE = frozenset({attention_c.SIGNAL, attention_c.BLOCKED, attention_c.REVISION})
 #: … et, avec la personne qu'elles concernent, ce qu'elle a vécu avec elle
 WITH_THEM = frozenset({*SHAREABLE, attention_c.EXCHANGE, attention_c.CONCERN, attention_c.MISSING})
+#: la provenance d'une matière montrée dans une initiative (``matter:<référence>``) : dite, elle ne resert pas
+MATTER_PROVENANCE = "matter:"
 
 
 def _for(person: str, about: tuple[str, ...], sensitivity: int) -> bool:
@@ -396,24 +450,46 @@ def _for(person: str, about: tuple[str, ...], sensitivity: int) -> bool:
     return about == (person,) or (not about and sensitivity <= Sensitivity.ANODYNE)
 
 
+def _their_moment(m: Any, person: str, now: int, p: NeedsParams) -> bool:
+    """Un moment de sa vie qu'elle lui a annoncé elle-même (jamais ce qu'un tiers en a dit : le demander
+    trahirait le tiers), pas un secret, bientôt ou tout juste passé."""
+    if tuple(m.about) != (person,) or m.secret or not m.text_ref or set(m.told_by) - {person}:
+        return False
+    if m.when <= now and getattr(m, "followed_at", 0) > m.when:
+        return False  # passé, et elle lui en a déjà reparlé
+    return -p.matter_moment_ahead_us <= now - m.when <= p.matter_told_us
+
+
 def matter(s: NeedsState, person: str, now: int, p: NeedsParams, thoughts: Any, goals: Any,
-           projects: Any) -> c.Matter | None:
-    """Ce dont elle pourrait parler à cette personne : une pensée qui la
-    travaille, ce qu'elle a fini, ce sur quoi elle est, ce que la personne lui a
-    raconté — jamais inventé, le premier qui convient."""
-    for t in thoughts:
-        if t.intensity < p.matter_thought_from or not t.text_ref:
-            continue
-        mine = t.about == (person,) and t.origin in WITH_THEM
-        shared = not t.about and t.origin in SHAREABLE and t.sensitivity <= Sensitivity.ANODYNE
-        if mine or shared:
+           projects: Any, moments: Any = ()) -> c.Matter | None:
+    """Ce dont elle pourrait parler à cette personne — jamais inventé, jamais déjà dit dans une initiative. **Ce
+    qui la concerne d'abord** : une pensée sur elle (une inquiétude, ce qu'elles ont vécu), un moment de sa vie
+    (bientôt, ou tout juste passé), ce qu'elle lui a raconté (le plus important, pas le plus récent) ; **ses
+    choses à elle ensuite** : une pensée anodine à partager, ce qu'elle a fini, ce sur quoi elle est (jamais une
+    rêverie : rien de neuf n'est arrivé). Un humain écrit à une amie pour elle avant d'écrire pour lui (HUM-10)."""
+    used = s.used
+    live = [t for t in thoughts if t.intensity >= p.matter_thought_from and t.text_ref and t.text_ref not in used]
+    for t in live:
+        if t.about == (person,) and t.origin in WITH_THEM:
             return c.Matter(c.THOUGHT_MATTER, t.text_ref, t.born_at, tuple(t.about), t.sensitivity,
                             external=t.origin == attention_c.SIGNAL)
+    for m in sorted(moments, key=lambda m: (abs(now - m.when), m.id)):
+        if _their_moment(m, person, now, p) and m.text_ref not in used:
+            return c.Matter(c.MOMENT_MATTER, m.text_ref, m.when, (person,), m.sensitivity)
+    told = [t for t in s.told.get(person, ()) if now - t.at <= p.matter_told_us and t.ref not in used]
+    if told:
+        best = max(told, key=lambda t: (t.importance, t.at, t.ref))
+        return c.Matter(c.TOLD_MATTER, best.ref, best.at, (person,), best.sensitivity)
+    for t in live:
+        if not t.about and t.origin in SHAREABLE and t.sensitivity <= Sensitivity.ANODYNE:
+            return c.Matter(c.THOUGHT_MATTER, t.text_ref, t.born_at, (), t.sensitivity,
+                            external=t.origin == attention_c.SIGNAL)
     for d in reversed(s.done):
-        if now - d.at <= p.matter_done_us and _for(person, d.about, d.sensitivity):
+        if now - d.at <= p.matter_done_us and _for(person, d.about, d.sensitivity) and d.ref not in used:
             return c.Matter(c.DONE_MATTER, d.ref, d.at, d.about, d.sensitivity)
     for g in goals:
         if g.status == goals_c.ACTIVE and g.steps >= 1 and g.kind != goals_c.REMINDER and g.title_ref \
+                and not g.musing and g.title_ref not in used \
                 and _for(person, _concerned(g.owner, g.about), g.sensitivity):
             return c.Matter(c.WORKING_MATTER, g.title_ref, g.opened_at, _concerned(g.owner, g.about), g.sensitivity)
     for pr in projects:
@@ -422,19 +498,18 @@ def matter(s: NeedsState, person: str, now: int, p: NeedsParams, thoughts: Any, 
                 and _for(person, _concerned(pr.owner, pr.about), pr.sensitivity):
             return c.Matter(c.WORKING_MATTER, pr.title_ref, pr.last_run_at, _concerned(pr.owner, pr.about),
                             pr.sensitivity)
-    told = s.told.get(person)
-    if told is not None and now - told.at <= p.matter_told_us:
-        return c.Matter(c.TOLD_MATTER, told.ref, told.at, (person,), told.sensitivity)
     return None
 
 
-@NEEDS.fact(c.MATTER, reads=[identity_c.PERSON, attention_c.THOUGHTS, goals_c.LIVE, projects_c.LIVE])
+@NEEDS.fact(c.MATTER, reads=[identity_c.PERSON, attention_c.THOUGHTS, goals_c.LIVE, projects_c.LIVE,
+                             memory_c.LIFE_EVENTS])
 def _matter(s: NeedsState, cx, handle: str) -> c.Matter | None:
     if not is_identifiable(handle):
         return None
     person = cx.facts.get(identity_c.PERSON(handle))
     return matter(s, person, cx.now, params(cx.params), cx.facts.get(attention_c.THOUGHTS),
-                  cx.facts.get(goals_c.LIVE), cx.facts.get(projects_c.LIVE))
+                  cx.facts.get(goals_c.LIVE), cx.facts.get(projects_c.LIVE),
+                  cx.facts.get(memory_c.LIFE_EVENTS(person)) or ())
 
 
 # ── Prendre la parole ─────────────────────────────────────────────────────
@@ -529,6 +604,39 @@ def _empty_felt(e, cx) -> Appraisal:
     return Appraisal(emotion, e.data.intensity, reason=e.data.feeling)
 
 
+#: qui elle est contente de retrouver après le vide (une inconnue ne comble pas une solitude)
+REUNITING = frozenset({social_c.FRIEND, social_c.CLOSE})
+
+
+@NEEDS.interpret(rt.PERCEPTION_RECEIVED)
+def _reunited(s: NeedsState, frame: Frame, ev: Any, ports: Any) -> list[Any]:
+    """Le premier message d'une amie ou d'une proche après un vide ressenti (depuis que quelqu'un lui a parlé
+    pour la dernière fois) : ça lui fait du bien, d'autant plus que le vide pesait. Le rendez-vous de chaque
+    soir après une journée creuse, pas seulement le retour de quelqu'un qui manquait (HUM-5)."""
+    d = ev.data
+    if not d.addressed or not is_identifiable(d.handle) or s.heard_at != ev.at:
+        return []
+    if not s.felt or s.felt_at <= s.heard_before:
+        return []  # pas de vide ressenti depuis la dernière fois qu'on lui a parlé
+    if frame.get(body_c.SLEEP) is not body_c.SleepPhase.AWAKE:
+        return []  # un message de nuit attend son réveil : ce n'est pas un moment partagé
+    person = frame.get(identity_c.PERSON(d.handle))
+    if frame.get(social_c.CLOSENESS(person)) not in REUNITING:
+        return []
+    p = params(frame.env.params_of("needs", frame.root))
+    intensity = round(min(1.0, p.reunited_gain * s.felt_level), 3)
+    if intensity <= 0:
+        return []
+    return [c.REUNITED.draft(person=person, handle=d.handle, message=ev.seq, after=s.felt, intensity=intensity)]
+
+
+@NEEDS.appraisal(c.REUNITED)
+def _reunited_felt(e, cx) -> Appraisal:
+    """Après la solitude, un soulagement ; après l'ennui, de la joie : sa compagnie lui fait du bien."""
+    emotion = Emotion.RELIEVED if e.data.after == c.LONELY else Emotion.HAPPY
+    return Appraisal(emotion, e.data.intensity, reason="compagnie")
+
+
 # ── Prompt ────────────────────────────────────────────────────────────────
 
 
@@ -548,7 +656,13 @@ def describe(r: c.NeedsReading) -> list[str]:
 @NEEDS.section("needs", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["mood"], trim_rank=55,
                tags=[Tag.AFFECTIVE], title="TES ENVIES", reads=[c.NEEDS])
 def _needs_section(s: NeedsState, frame: Frame, enrich: Any) -> str | None:
-    lines = describe(frame.get(c.NEEDS))
+    r = frame.get(c.NEEDS)
+    lines = describe(r)
+    if r.social >= 0.55:
+        # le manque se sent dans l'envie de parler, il ne se fait pas payer à l'autre (sonde réelle du 2026-10-02 :
+        # « je me sentais un peu seule cet après-midi » à qui rentre du travail, « enfin tu es là ! »)
+        lines.append("Ça se sent dans ton envie de parler ; tu ne le fais pas peser sur l'autre — pas de reproche, "
+                     "pas de « enfin tu es là », pas de « je me sentais seule » à qui avait sa journée.")
     return "\n".join(lines) if lines else None
 
 
@@ -572,6 +686,19 @@ async def _matter_text(s: NeedsState, frame: Frame, ports: Mapping[str, Any]) ->
     return store.content([got.ref])
 
 
+#: un jour à venir, en mots
+_AHEAD = ("aujourd'hui", "demain", "après-demain")
+_WEEKDAYS = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
+
+
+def ahead_fr(at: int, now: int, tz: Any) -> str:
+    """« aujourd'hui », « demain », « jeudi » — ou, passé, « hier soir », « avant-hier »."""
+    if at <= now:
+        return when_fr(at, now, tz)
+    days = (local(at, tz).date() - local(now, tz).date()).days
+    return _AHEAD[days] if days < len(_AHEAD) else _WEEKDAYS[local(at, tz).weekday()]
+
+
 def _lead(m: c.Matter, frame: Frame, name: str) -> str:
     tz = frame.env.tz_of(frame.root)
     when = when_fr(m.at, frame.now, tz)
@@ -581,7 +708,13 @@ def _lead(m: c.Matter, frame: Frame, name: str) -> str:
         return f"Ce que tu as fini, {when}"
     if m.kind == c.WORKING_MATTER:
         return "Ce sur quoi tu es en ce moment"
-    return f"Ce que {name} t'a dit de sa vie, {when}"
+    if m.kind == c.MOMENT_MATTER:
+        if m.at > frame.now:
+            return (f"Ce qui l'attend, {ahead_fr(m.at, frame.now, tz)} — {name} te l'avait annoncé (un mot pour "
+                    "l'encourager, si tu veux)")
+        return (f"Ce qui lui est arrivé, {ahead_fr(m.at, frame.now, tz)} — {name} te l'avait annoncé (comment ça "
+                "s'est passé ?)")
+    return f"Ce {elided(name, 'que')} t'a dit de sa vie, {when}"
 
 
 @NEEDS.section("matter", zone=Zone.VOLATILE, episodes=[Kind.INITIATIVE], after=["needs"], trim_rank=60,
@@ -605,8 +738,9 @@ def _matter_section(s: NeedsState, frame: Frame, enrich: Mapping[str, Any]) -> S
     lines = [f"{_lead(m, frame, name)} :", cited(body, 400) if m.external else body,
              "Si l'envie te vient de lui écrire, c'est de là que tu peux partir — pas d'un « quoi de neuf » "
              "dans le vide."]
-    # une matière ne concerne que la personne en face, ou personne (anodin) : rien d'autrui à dire ici
-    return SectionBody("\n".join(lines))
+    # une matière ne concerne que la personne en face, ou personne (anodin) : rien d'autrui à dire ici ; sa
+    # provenance voyage dans l'énoncé (dite, elle ne resert pas)
+    return SectionBody("\n".join(lines), provenance=(f"{MATTER_PROVENANCE}{m.ref}",))
 
 
 # ── Inspection ────────────────────────────────────────────────────────────

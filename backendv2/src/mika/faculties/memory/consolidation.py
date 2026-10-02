@@ -264,6 +264,7 @@ class Consolidate:
                       vectors: Any, p: MemoryParams, call_id: str) -> list[Draft[Any]]:
         drafts: list[Draft[Any]] = []
         known_ids = {i for i, _ in known}
+        known_texts = dict(known)
         heard = conv.persons
         lines = {ln.seq: ln for ln in conv.lines}
         speaking = tuple(sorted({ln.person for ln in conv.lines if ln.person}))
@@ -277,6 +278,13 @@ class Consolidate:
                 return conv.seqs, speaking, []
             persons = sorted({lines[s].person for s in seqs if lines[s].person})
             return tuple(seqs), tuple(str(k) for k in persons), [lines[s].text for s in seqs if lines[s].person]
+
+        def hers(cited: Sequence[int]) -> bool:
+            """L'élément ne s'appuie que sur ce qu'elle a dit elle-même : ce n'est pas quelque chose qu'on lui a
+            appris (sonde réelle du 2026-10-02 : elle avait inventé « il n'a rien voulu me dire » devant Chloé, et
+            l'extraction en avait fait une croyance sur Adrien)."""
+            seqs = [s for s in cited if s in lines]
+            return bool(seqs) and not any(lines[s].person for s in seqs)
 
         def concerned(names: list[str]) -> tuple[str, ...]:
             """Dans le doute, on ferme : un élément dont le modèle ne nomme
@@ -317,7 +325,7 @@ class Consolidate:
             if not fresh(c.SOUVENIR, s.texte):
                 continue
             if s.sur_elle:
-                drafts += await self._about_self(s, store, vectors, p, provenance, call_id)
+                drafts += await self._about_self(s, store, vectors, p, provenance, call_id, known_ids)
                 continue
             about = concerned(s.personnes)
             sources, told_by, cited = provenance(s.messages)
@@ -337,8 +345,10 @@ class Consolidate:
             if not fresh(c.BELIEF, b.texte):
                 continue
             if b.sur_elle:
-                drafts += await self._about_self(b, store, vectors, p, provenance, call_id)
+                drafts += await self._about_self(b, store, vectors, p, provenance, call_id, known_ids)
                 continue
+            if hers(b.messages):
+                continue  # ce qu'elle a dit des autres n'est pas ce qu'on lui a appris d'eux
             about = concerned(b.personnes)
             sources, told_by, cited = provenance(b.messages)
             source = people.one(b.source) if b.source else None
@@ -346,12 +356,16 @@ class Consolidate:
             secret = secret_of(b.secret, cited, sens, b.texte)
             replaces = b.remplace if b.remplace in known_ids else None
             twin = await self._twin(store, vectors, b.texte, c.BELIEF, about, p)
-            if twin is not None and twin != replaces:
+            if replaces is not None and same_words(known_texts.get(replaces, ""), b.texte):
+                twin = replaces  # la croyance « remplacée » dit la même chose : c'est elle
+            if twin is not None:
+                # redire une croyance en la désignant elle-même comme « remplacée » n'est pas la réviser : c'est la
+                # confirmer (sonde réelle du 2026-10-02 : « Je croyais que X — apparemment ce n'est plus vrai : X »)
                 new = set(informants_of(source, told_by))
                 drafts.append(c.REINFORCED.draft(
                     item=twin, corroborated=bool(new - set(self._informants(store, twin))), source=source,
                     sources=sources, sensitivity=sens, about=about, told_by=told_by, heard_by=heard, secret=secret,
-                    replaces=replaces))
+                    replaces=replaces if replaces != twin else None))
                 continue
             drafts.append(c.BELIEVED.draft(
                 text=Content.of(b.texte, level=sens), about=about, sensitivity=sens,
@@ -379,18 +393,22 @@ class Consolidate:
         return out
 
     async def _about_self(self, b: x.XSouvenir | x.XCroyance, store: Any, vectors: Any, p: MemoryParams,
-                          provenance: Any, call_id: str) -> list[Draft[Any]]:
+                          provenance: Any, call_id: str, known_ids: set[int]) -> list[Draft[Any]]:
         """Ce qu'elle a raconté d'elle-même : une note anodine, de peu
-        d'importance, qui s'efface en quelques jours."""
+        d'importance, qui s'efface en quelques jours — sauf ce qui la définit
+        (un goût, un avis, un fait de sa vie), qui tient longtemps ; quand elle
+        change d'avis, la nouvelle croyance remplace l'ancienne."""
         sources, _told, _cited = provenance(b.messages)
+        durable = x.durable_self(b)
+        replaces = getattr(b, "remplace", None)
+        replaces = replaces if durable and replaces in known_ids else None
         twin = await self._twin(store, vectors, b.texte, c.BELIEF, (), p)
-        if twin is not None:
+        if twin is not None and twin != replaces:
             return [c.REINFORCED.draft(item=twin, sources=sources)]
         return [c.BELIEVED.draft(
             text=Content.of(b.texte, level=int(Sensitivity.ANODYNE)), about=(), sensitivity=int(Sensitivity.ANODYNE),
-            importance=x.IMPORTANCE[1], confidence=round(getattr(b, "confiance", 0.7), 3), origin=c.OBSERVED,
-            sources=sources,
-            call_id=call_id, about_self=True)]
+            importance=x.IMPORTANCE[3 if durable else 1], confidence=round(getattr(b, "confiance", 0.7), 3),
+            origin=c.OBSERVED, sources=sources, replaces=replaces, call_id=call_id, about_self=True, durable=durable)]
 
     async def _promised(self, ex: x.Extraction, frame: Frame, store: Any, conv: x.Conversation, people: x.People,
                         promises: list[tuple[int, str, str]], vectors: Any, p: MemoryParams, provenance: Any,
@@ -409,7 +427,8 @@ class Consolidate:
                 continue
             if await self._already_promised(store, vectors, frame, to, pr.texte, p):
                 continue
-            due = x.due(pr.echeance, tz)
+            got = x.when(pr.echeance, tz)
+            due, all_day = got if got is not None else (None, False)
             implicit = due is None
             if due is None:
                 due = frame.now + round(p.promise_horizon_days * DAY)
@@ -417,7 +436,7 @@ class Consolidate:
             sens = int(Sensitivity.CONFIDENCE if secretive(pr.texte) else Sensitivity.PERSONAL)
             drafts.append(c.PROMISE_NOTICED.draft(
                 text=Content.of(pr.texte, level=sens), to=to, due=due, sensitivity=sens, sources=sources,
-                call_id=call_id, implicit_due=implicit))
+                call_id=call_id, implicit_due=implicit, all_day=all_day))
         pending_ids = {i for i, _, _ in promises}
         for done in ex.promesses_tenues:
             if done.id in pending_ids:
@@ -442,27 +461,31 @@ class Consolidate:
     async def _events(self, ex: x.Extraction, frame: Frame, state: MemoryState, store: Any, people: x.People,
                       vectors: Any, p: MemoryParams, provenance: Any, concerned: Any, secret_of: Any,
                       heard: tuple[str, ...], fresh: Any, call_id: str) -> list[Draft[Any]]:
-        """Ce qui va arriver dans la vie de quelqu'un : daté, à venir. Le même
-        moment redit ne se note pas deux fois ; une date qui change remplace."""
+        """Ce qui va arriver dans la vie de quelqu'un : daté, à venir ; ou une
+        situation qui dure (depuis quand). Le même moment redit ne se note pas
+        deux fois ; une date qui change remplace."""
         drafts: list[Draft[Any]] = []
         tz = frame.env.tz_of(frame.root)
         for ev in ex.evenements:
-            got = x.when(ev.quand, tz)
+            got = x.when(ev.quand, tz) or ((frame.now, True) if ev.en_cours else None)
             if got is None or not fresh(c.EVENT, ev.texte):
                 continue
             at, all_day = got
-            if at < frame.now - DAY:
+            if ev.en_cours:
+                # une situation : depuis quand (jamais dans le futur, jamais plus vieille que ce qu'on suit)
+                at = max(frame.now - round(p.situation_days * DAY) + DAY, min(at, frame.now))
+            elif at < frame.now - DAY:
                 continue  # du passé : ce n'est plus à suivre
             about = concerned(ev.personnes)
             sources, told_by, cited = provenance(ev.messages)
             sens = max(x.sensitivity(ev.sensibilite, has_person=True), int(Sensitivity.ANODYNE))
             twin = await self._same_event(store, state, vectors, ev.texte, about, p)
-            if twin is not None and abs(twin.when - at) < DAY // 2:
-                continue
+            if twin is not None and (ev.en_cours or abs(twin.when - at) < DAY // 2):
+                continue  # déjà noté (une situation redite dure toujours : rien à changer)
             drafts.append(c.EVENT_NOTED.draft(
                 text=Content.of(ev.texte, level=sens), when=at, about=about, all_day=all_day, sensitivity=sens,
                 sources=sources, told_by=told_by, heard_by=heard, secret=secret_of(ev.secret, cited, sens, ev.texte),
-                replaces=twin.id if twin is not None else None, call_id=call_id))
+                replaces=twin.id if twin is not None else None, call_id=call_id, ongoing=ev.en_cours))
         return drafts
 
     async def _same_event(self, store: Any, state: MemoryState, vectors: Any, text: str, about: tuple[str, ...],
@@ -512,10 +535,17 @@ class Consolidate:
         return _keys(rows[0][0]) or ([rows[0][1]] if rows[0][1] else [])
 
 
-@MEMORY.process("memory.promises", wake_on=[c.PROMISE_NOTICED, c.PROMISE_RESOLVED], lane="background",
-                catch_up=CatchUp.ONCE, max_quantum_s=3600)
+def same_words(a: str, b: str) -> bool:
+    """Deux textes qui disent la même chose mot pour mot (casse, accents et ponctuation à part ; pas un mot de
+    moins — « n'habite pas » n'est pas « habite »)."""
+    return bool(a) and WORD.findall(fold(a)) == WORD.findall(fold(b))
+
+
+@MEMORY.process("memory.promises", wake_on=[c.PROMISE_NOTICED, c.PROMISE_RESOLVED, rt.UTTERANCE],
+                lane="background", catch_up=CatchUp.ONCE, max_quantum_s=3600)
 class LetGo:
-    """Une promesse ni tenue ni abandonnée s'abandonne quelques jours après son
+    """Une promesse qu'elle vient de tenir en le disant (l'initiative qui la tenait a parlé) est réglée : tenue.
+    Une promesse ni tenue ni abandonnée s'abandonne quelques jours après son
     échéance : elle y a repensé (l'attention le lui a rappelé), puis elle laisse filer."""
 
     def _due(self, state: MemoryState, p: MemoryParams) -> list[tuple[int, int]]:
@@ -523,15 +553,21 @@ class LetGo:
         return sorted((pr.due + grace, pr.id) for pr in state.promises.values() if pr.due is not None)
 
     def next_due(self, state: MemoryState, frame: Frame, last_run: int | None) -> int | None:
+        if any(k in state.promises for k in state.kept):
+            return frame.now
         due = self._due(state, params(frame.env.params_of("memory", frame.root)))
         return max(frame.now, due[0][0]) if due else None
 
     async def run(self, ctx: Any) -> None:
         frame: Frame = ctx.frame
+        state: MemoryState = ctx.state
         p = params(frame.env.params_of("memory", frame.root))
-        drafts = [c.PROMISE_RESOLVED.draft(promise=pid, status=c.DROPPED, by=c.EXPIRED_BY,
-                                           dedupe_key=f"promesse-abandonnée:{pid}")
-                  for at, pid in self._due(ctx.state, p) if at <= frame.now]
+        kept = [k for k in state.kept if k in state.promises]
+        drafts = [c.PROMISE_RESOLVED.draft(promise=pid, status=c.HONORED, by=c.KEPT_BY,
+                                           dedupe_key=f"promesse-tenue:{pid}") for pid in kept]
+        drafts += [c.PROMISE_RESOLVED.draft(promise=pid, status=c.DROPPED, by=c.EXPIRED_BY,
+                                            dedupe_key=f"promesse-abandonnée:{pid}")
+                   for at, pid in self._due(state, p) if at <= frame.now and pid not in kept]
         if drafts:
             await ctx.emit(*drafts)
 

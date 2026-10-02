@@ -492,9 +492,10 @@ def _woke_line(s: BodyState, frame: Frame) -> str:
             when = f"vers {first.hour}h{first.minute:02d}"
             if len(held) > 1:
                 return (f"Ses messages de la nuit (le premier {when}) sont arrivés pendant que tu dormais : tu les "
-                        "découvres en te levant, tu peux le lui dire.")
-            return (f"Ce message est arrivé {when}, pendant que tu dormais : tu le découvres en te levant, tu peux "
-                    "le lui dire.")
+                        "découvres en te levant et tu réponds maintenant, pas comme si tu avais été réveillée à "
+                        "ce moment-là ; tu peux le lui dire.")
+            return (f"Ce message est arrivé {when}, pendant que tu dormais : tu le découvres en te levant et tu "
+                    "réponds maintenant, pas comme si tu avais été réveillée à ce moment-là ; tu peux le lui dire.")
     if s.sleep.woken_by_message and frame.now - s.sleep.since < WAKING_WINDOW_US:
         ago = _minutes(int((frame.now - s.sleep.since) // MINUTE))
         who = "Son message" if s.roused_handle and s.roused_handle == ep.target else "Un message"

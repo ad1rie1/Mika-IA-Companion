@@ -18,6 +18,11 @@
 - **Quand** : c'est de l'arrière-plan. En initiative ou au travail, elle a
   tout sous les yeux ; en réponse à quelqu'un, seulement les mails
   importants, et seulement quand le ton de la personne est assez léger.
+- **Ce qui est l'objet de l'épisode** (le mail qu'elle annonce, celui auquel
+  elle prépare une réponse) est cité comme le reste, donc coupé en premier
+  quand la place manque — mais jamais sous son plancher : elle ne rédige pas
+  la réponse à un mail qu'elle ne voit plus, n'annonce pas un mail absent de
+  son prompt.
 """
 
 from __future__ import annotations
@@ -36,14 +41,19 @@ from mika.plugins.email import (
     FAILED,
     GONE,
     KEEPER,
+    MENTION_FLOOR,
+    MENTION_PROVENANCE,
+    MENTION_TITLE,
     REFUSED,
     SENT_SHOWN_FOR,
     WAITING,
     EmailState,
     SentSeen,
+    announced,
     for_owner,
     keeper_name,
     keepers,
+    name_of,
     params_of,
     task_mail,
 )
@@ -62,6 +72,8 @@ ALL = [*CONVERSATIONAL, *WORKING, Kind.TASK]
 #: un courrier est personnel ; sa propriétaire le reçoit (témoin), un salon jamais
 LEVEL = int(Sensitivity.PERSONAL)
 BACKGROUND = "TES MAILS NON LUS — de l'arrière-plan : réponds d'abord à ce qu'on vient de te dire"
+#: le mail auquel elle prépare une réponse : ses en-têtes et le début de son texte restent, quoi qu'il arrive
+TASK_MAIL_FLOOR = 1500
 
 
 def voice_text(info: AccountInfo, *, owner_fallback: str = KEEPER) -> str:
@@ -120,8 +132,10 @@ def light(frame: Frame) -> bool:
 
 def _shown_unread(frame: Frame) -> list[c.MailView]:
     """Les mails non lus qu'elle a sous les yeux : tous (cinq) en initiative ou au travail ; en
-    réponse à quelqu'un, les importants seulement, et rien si la conversation est lourde."""
-    unread = list(frame.get(c.UNREAD))
+    réponse à quelqu'un, les importants seulement, et rien si la conversation est lourde. Ceux qu'une
+    initiative annonce ont leur propre section."""
+    told = set(announced(frame))
+    unread = [m for m in frame.get(c.UNREAD) if m.mail not in told]
     ep = frame.episode
     if ep is not None and ep.kind == Kind.REPLY:
         if not light(frame):
@@ -158,6 +172,7 @@ async def _gather(s: EmailState, frame: Frame, ports: Mapping[str, Any]) -> dict
         return None
     out: dict[str, Any] = {"texts": {}, "accounts": {}, "drafts": {}, "task": None}
     refs = [m.summary_ref for m in _shown_unread(frame) if m.summary_ref]
+    refs += [m.summary_ref for m in _announced_unread(frame) if m.summary_ref]
     refs += [m.summary_ref for _, m in _recent_sent(s, frame) if m.summary_ref]
     mail = task_mail(frame)
     ask = s.asked.get(mail) if mail else None
@@ -176,7 +191,31 @@ async def _gather(s: EmailState, frame: Frame, ports: Mapping[str, Any]) -> dict
     return out
 
 
+def _announced_unread(frame: Frame) -> list[c.MailView]:
+    """Les mails qu'annonce l'initiative en cours, s'ils sont toujours non lus, dans l'ordre de l'annonce."""
+    told = announced(frame)
+    if not told:
+        return []
+    unread = {m.mail: m for m in frame.get(c.UNREAD)}
+    return [unread[ref] for ref in told if ref in unread]
+
+
 # ── Ce qui est arrivé (cité) ──────────────────────────────────────────────
+
+
+@EMAIL.section("mail_mention", zone=Zone.VOLATILE, episodes=[Kind.INITIATIVE], trim_rank=90, floor_chars=MENTION_FLOOR,
+               title=MENTION_TITLE, untrusted=True, reads=[c.UNREAD])
+def _mention_section(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
+    """Le mail qu'elle va annoncer à sa propriétaire : l'objet de l'initiative (cité). Sa provenance
+    (``mail:<référence>``) dit, une fois l'énoncé écrit, ce qu'elle a annoncé : c'est cela, et cela seul, qui
+    sera signalé."""
+    mails = _announced_unread(frame)
+    if not mails or not for_owner(frame):
+        return None
+    texts = (enrich.get("mail") or {}).get("texts") or {}
+    lines = [f"[{m.mail}] {inert(texts.get(m.summary_ref) or f'Un mail de {name_of(m.sender)}')}" for m in mails]
+    return SectionBody("\n".join(lines), level=LEVEL, witness=True,
+                       provenance=tuple(f"{MENTION_PROVENANCE}{m.mail}" for m in mails))
 
 
 @EMAIL.section("mails", zone=Zone.VOLATILE, episodes=TALK, trim_rank=20, title="TES MAILS NON LUS",
@@ -271,7 +310,7 @@ def _render_mail(m: Mail) -> str:
     return "\n".join(head) + "\n\n" + m.body[:6000]
 
 
-@EMAIL.section("task_mail", zone=Zone.VOLATILE, episodes=[Kind.TASK], trim_rank=90,
+@EMAIL.section("task_mail", zone=Zone.VOLATILE, episodes=[Kind.TASK], trim_rank=90, floor_chars=TASK_MAIL_FLOOR,
                title="LE MAIL AUQUEL TU PRÉPARES UNE RÉPONSE", untrusted=True)
 def _task_mail(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     got = enrich.get("mail") or {}

@@ -20,8 +20,8 @@ from typing import Any
 from mika.contracts import goals as c
 from mika.contracts import identity as identity_c
 from mika.contracts import social as social_c
-from mika.faculties.goals.faculty import GOALS, Goal, GoalsState, live, status
-from mika.faculties.goals.tools import musing, reflective, titled
+from mika.faculties.goals.faculty import GOALS, Goal, GoalsState, live, musing, status
+from mika.faculties.goals.tools import reflective, titled
 from mika.faculties.goals.work import FULL, MENTION, worry_of
 from mika.kernel.clock import DAY, local
 from mika.kernel.faculty import Zone
@@ -202,8 +202,13 @@ def _step(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody
     return SectionBody("\n".join(lines), level=g.sensitivity, provenance=(f"goal:{g.id}",))
 
 
+#: ce qui a fait naître une exploration est la matière même de la séance : cité, coupé en premier, mais jamais
+#: au point de disparaître (le composeur coupe ce qui vient d'ailleurs avant tout le reste, jusqu'à ce plancher)
+ORIGIN_FLOOR = 400
+
+
 @GOALS.section("step_origin", zone=Zone.VOLATILE, episodes=[Kind.STEP], trim_rank=0, untrusted=True,
-               title="CE QUI L'A FAIT NAÎTRE")
+               floor_chars=ORIGIN_FLOOR, title="CE QUI L'A FAIT NAÎTRE")
 def _step_origin(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     """Ce qui a fait naître une exploration (ce qu'on lui a confié, un titre d'article) : cité, jamais le but."""
     gid = _subject(frame)
@@ -282,13 +287,26 @@ def _live_section(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> Sec
     if aud is None:
         return None
     person = frame.get(identity_c.PERSON(ep.target)) if ep is not None and ep.target else None
+    initiative = ep is not None and ep.kind == Kind.INITIATIVE
     lines, level, witness = [], 0, False
     tz = frame.env.tz_of(frame.root)
     for g in _recent(s, frame.now)[-SHOWN * 2:]:
         title = titled(g, texts)[0]
         if not title or not hearable(g.about, g.sensitivity, person, aud.level, aud.witness_level, aud.private_ok):
             continue
-        if g.status == c.ACHIEVED:
+        if musing(g):
+            # une rêverie n'est ni une nouvelle ni une réussite : rien de neuf n'est arrivé. Elle peut le dire si on
+            # lui demande ce qu'elle fait ; elle n'en fait pas la matière d'un message (sonde du 2026-10-02 : « je
+            # viens de finir de rêvasser autour de… » dans presque chaque initiative)
+            if initiative:
+                continue
+            if g.status == c.ACHIEVED:
+                lines.append(f"- {when_words(g.closed_at, frame.now, frame)}, tu as laissé ton esprit vagabonder "
+                             f"(« {title} ») : une rêverie, pas une nouvelle — seulement si on te demande ce que tu "
+                             "fais")
+            else:
+                lines.append(f"- en ce moment, tu laisses ton esprit vagabonder (« {title} ») : rien d'une nouvelle")
+        elif g.status == c.ACHIEVED:
             lines.append(f"- tu as mené à bout : {title}{_quoted(g, texts)}")
         elif status(g, frame.now) == c.PAUSED:
             lines.append(f"- mis en pause pour l'instant : {title}")

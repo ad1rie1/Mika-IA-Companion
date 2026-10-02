@@ -24,6 +24,7 @@ from mika.kernel.faculty import CAPABILITY_LANE, Faculty
 from mika.kernel.state import FrozenDict
 from mika.ports.delivery import REPLY_ABSTAINED, REPLY_FAILED, Delivery, EmotionView
 from mika.runtime.boundary import Failed, acall
+from mika.runtime.effects import STOPPED
 from mika.vocab import voice
 
 REPLY = "REPLY"
@@ -218,10 +219,21 @@ def _what_runs(ev: Any) -> tuple[int, str] | None:
     return (d.proposal, d.capability) if d.approved else None
 
 
-def _interrupted(ev: Any, ports: Mapping[str, Any]) -> list[Draft[Any]] | None:
-    """Une exécution trouvée « en cours » au démarrage : le processus est mort pendant qu'elle tournait. Une
-    capacité qui se rejoue sans risque repart (``None``) ; une autre (un envoi, une commande réseau) n'est pas
-    relancée en silence : son échec est journalisé, la décision revient à qui l'avait voulue."""
+def _cut(why: str) -> str:
+    """Ce qu'on dit d'une capacité dont on ne sait pas si elle a eu lieu, selon ce qui l'a coupée : un arrêt
+    brutal (au démarrage), ou son échéance — jamais « un arrêt » quand il n'y en a pas eu."""
+    if not why or why == STOPPED:
+        return INTERRUPTED
+    head = why if why.startswith("délai dépassé") else f"interrompue ({why})"
+    return (f"{head} — on ne sait pas si elle a eu lieu : pas relancée automatiquement (elle n'est pas rejouable "
+            "sans risque), à relancer si besoin")[:RESULT_MAX]
+
+
+def _interrupted(ev: Any, ports: Mapping[str, Any], why: str = "") -> list[Draft[Any]] | None:
+    """Une exécution dont on n'a pas le compte rendu : le processus est mort pendant qu'elle tournait (trouvée
+    « en cours » au démarrage), ou elle a dépassé son échéance. Une capacité qui se rejoue sans risque repart
+    (``None``) ; une autre (un envoi, une commande réseau) n'est pas relancée en silence : son échec est
+    journalisé, avec ce qui l'a coupée, et la décision revient à qui l'avait voulue."""
     running = _what_runs(ev)
     if running is None:
         return None  # rien n'était exécuté : rejouer ne coûte rien
@@ -230,7 +242,7 @@ def _interrupted(ev: Any, ports: Mapping[str, Any]) -> list[Draft[Any]] | None:
     spec = lookup(capability) if lookup is not None else None
     if spec is not None and spec.idempotent:
         return None
-    return [rt.EFFECT_EXECUTED.draft(proposal=proposal, ok=False, result=INTERRUPTED)]
+    return [rt.EFFECT_EXECUTED.draft(proposal=proposal, ok=False, result=_cut(why))]
 
 
 @RUNTIME.effect(rt.EFFECT_PROPOSED, lane=CAPABILITY_LANE, deadline_s=CAPABILITY_DEADLINE_S,

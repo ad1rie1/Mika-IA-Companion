@@ -3,6 +3,10 @@ change, coupe de l'historique avec hystérésis, section trop sensible bloquée.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
+import pytest
+
 from mika.kernel.faculty import SectionSpec, Zone
 from mika.kernel.prompt import (
     BACKGROUND,
@@ -253,3 +257,36 @@ def test_chat_prompt_without_marks_is_unchanged():
     assert p.chat_messages() == [{"role": "user", "content": "(reprise de la conversation)"},
                                  {"role": "assistant", "content": "salut"}, {"role": "user", "content": "coucou"},
                                  {"role": "user", "content": "ça va ?"}]
+
+
+
+# ── Ce qui est l'objet de l'épisode (BUG-6, ADR 0044) ─────────────────────
+
+
+@pytest.mark.parametrize("key", ["task_mail", "mail_mention", "step_origin", "project_network"])
+def test_what_the_episode_is_about_is_cut_first_but_never_out_of_sight(key):
+    """Sous un budget serré, ce qui vient d'ailleurs est coupé avant tout le reste — même quand c'est l'objet de
+    l'épisode : le mail auquel elle prépare une réponse, celui qu'elle annonce, ce qui a fait naître son but, ce
+    que le réseau a rendu. Ces sections gardent leur plancher (elle ne rédige pas la réponse à un mail qu'elle ne
+    voit plus) ; une section de confiance de rang plus bas est coupée à leur place. Contre-exemple : sans
+    plancher, la même section tombe bien en dessous."""
+    from mika.app.composition import faculties
+    from mika.kernel.registry import Registry
+    from mika.runtime.state import RUNTIME
+
+    subject = {s.key: s for s in Registry([RUNTIME, *faculties()]).sections}[key]
+    assert subject.untrusted and subject.floor_chars > 0
+    filler = SectionSpec("toy", "filler", Zone.VOLATILE, subject.episodes, lambda *a: None, trim_rank=10,
+                         title="À CÔTÉ")
+
+    def rendered(section):
+        blocks = [(section, SectionBody("l'objet de l'épisode. " * 150)), (filler, SectionBody("x" * 2400))]
+        _prompt, trace = Composer().compose(blocks, kind=sorted(subject.episodes)[0], audience_level=3,
+                                            muted_tags=frozenset(), message="?",
+                                            budget=Budget(max_tokens=600, chars_per_token=4.0))
+        return dict(trace.sizes).get(key, 0), trace
+
+    size, trace = rendered(subject)
+    assert size >= subject.floor_chars and "filler" in trace.trimmed + tuple(k for k, _ in trace.dropped)
+    bare, _ = rendered(replace(subject, floor_chars=0))
+    assert bare < subject.floor_chars  # le plancher est ce qui la garde

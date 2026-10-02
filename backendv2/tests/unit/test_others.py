@@ -28,6 +28,7 @@ from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.faculties.attention.faculty import AttentionParams, reply_window
+from mika.faculties.needs import NeedsParams
 from mika.faculties.others.faculty import Model, OthersParams, OthersState, current, learn, receptivity
 from mika.faculties.others.tone import measure
 from mika.kernel.clock import DAY, HOUR, MINUTE, US
@@ -239,9 +240,10 @@ def test_she_checks_on_a_friend_who_did_not_seem_well(tmp_path, last, expected):
 
 def test_she_learns_that_a_friend_takes_two_hours_and_stops_feeling_ignored(tmp_path):
     """Sur Telegram, une amie qui répond toujours deux heures plus tard : les
-    premières fois, l'attente (une heure) est déçue puis rattrapée ; une fois
-    le délai appris, elle ne l'est plus."""
+    premières fois, l'attente (réglée ici à une heure) est déçue puis rattrapée ;
+    une fois le délai appris, elle ne l'est plus."""
     async def scenario(kernel, script, out):
+        await kernel.set_params("attention", AttentionParams(reply_window_message_us=HOUR))
         await befriend(kernel, "tg_1", social_c.CLOSE)
         for day in range(3):  # une amie qui écrit chaque jour vers midi
             if day:
@@ -335,6 +337,7 @@ def test_a_broken_promise_is_not_forgotten_in_silence(tmp_path, kept_in_time):
         promise = commit.seqs[-1]
         await asyncio.sleep(20 * MINUTE / US)
         await chat(kernel, "user_1", ["au fait, tu as vu le match ?"])  # lui écrire ne tient pas la promesse
+        await disconnect(kernel, "user_1")  # partie, injoignable : elle ne pourra pas la tenir au moment dit
         if kept_in_time:
             await asyncio.sleep(30 * MINUTE / US)
             await kernel.mind.append([memory_c.PROMISE_RESOLVED.draft(promise=promise, status=memory_c.HONORED)],
@@ -365,3 +368,48 @@ def test_a_broken_promise_is_not_forgotten_in_silence(tmp_path, kept_in_time):
     assert "J'avais promis à" in prompt  # quand Alice revient, elle le sait
     assert after == []  # tenue, même en retard : la pensée s'éteint
 
+
+
+# ── « Alors, cet entretien ? » ────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("told_by", ["user_1", "user_2"])
+def test_she_asks_how_it_went_once_it_is_over_but_never_betrays_who_told_her(tmp_path, told_by):
+    """Adrien lui avait dit qu'il avait un entretien à 14 h : l'après-midi passé, sans qu'ils en aient reparlé, elle
+    lui demande comment ça s'est passé — une fois. Contre-exemple : si c'est Bob qui le lui a raconté, le
+    demander à Adrien trahirait Bob : elle n'en fait rien (le manque d'avant : les moments notés n'étaient lus
+    qu'en conversation, jamais elle n'y revenait d'elle-même)."""
+    async def scenario(kernel, script, out):
+        # aucune autre envie de parler : une initiative ordinaire qui l'aurait eu sous les yeux compterait comme
+        # l'occasion d'en reparler (c'est voulu, mais ce n'est pas ce qu'on mesure ici)
+        await kernel.set_params("needs", NeedsParams(social_floor=1.0, expression_floor=1.0))
+        await befriend(kernel, "user_1", social_c.FRIEND)
+        await connect(kernel, "user_1", "Adrien")
+        await chat(kernel, "user_1", ["salut ! grosse journée aujourd'hui"])
+        await kernel.mind.append([memory_c.EVENT_NOTED.draft(
+            text=Content.of("son entretien chez Ubisoft", level=2), when=at_paris(2026, 9, 28, 14, 0),
+            about=("user_1",), all_day=False, sensitivity=2, told_by=(told_by,))],
+            emitter="memory", correlation="genese", origin=Origin.GENESIS)
+        await asyncio.sleep(10 * HOUR / US)  # il reste là, silencieux, jusqu'au soir
+        started = [e for e in events(kernel, rt.EPISODE_STARTED.name)
+                   if e.data.kind == "INITIATIVE" and others_c.FOLLOW_UP in e.data.reason.split(",")]
+        return started
+
+    started, llm = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 10, 0), with_llm=True)
+    if told_by == "user_1":
+        assert len(started) == 1 and started[0].data.target == "user_1"  # une fois
+        asked = [c.messages[-1].content for c in llm.calls if c.role == "initiative" and "prévu" in
+                 c.messages[-1].content]
+        assert asked and "CE QUI SE PASSE DANS SA VIE" in asked[0] and "entretien chez Ubisoft" in asked[0]
+    else:
+        assert started == []
+
+
+@pytest.mark.parametrize("text, short", [
+    ("salut !", False), ("re", False), ("bonne nuit", False), ("coucou toi", False),  # courts par nature
+    ("ok.", True), ("bof", True),  # contre-exemples : là, la brièveté dit quelque chose
+])
+def test_a_greeting_is_short_by_nature_not_cold(text, short):
+    """« salut ! » n'est pas « un message très court » : l'indice faisait prêter de la froideur à chaque
+    salutation du soir (audit HUM-18)."""
+    assert ("un message très court" in measure(text).cues) is short

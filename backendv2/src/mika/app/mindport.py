@@ -63,7 +63,8 @@ class KernelPort:
         got = await self.kernel.perceive(p, dedupe_key=dedupe_key)
         if got.overloaded:
             return Admission("overloaded")
-        return Admission("accepted", got.seq, duplicate=bool(got.commit and got.commit.deduped), reply=got.reply)
+        return Admission("accepted", got.seq, duplicate=bool(got.commit and got.commit.deduped), reply=got.reply,
+                         held=got.held)
 
     async def connected(self, c: presence_c.Connected) -> None:
         await self.kernel.mind.append([presence_c.CONNECTED.draft(c)], emitter="presence",

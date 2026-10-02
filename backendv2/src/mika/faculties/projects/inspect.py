@@ -94,6 +94,7 @@ from mika.kernel.inspect import (
     Timeline,
     Toolbar,
     When,
+    num_fr,
     paginate,
 )
 from mika.ports.workshop import OutsideWorkshop, argv_lines
@@ -255,7 +256,7 @@ def _page(ctx: InspectContext, types: Sequence[Any], where: tuple[str, Any] | No
 
 
 def _size(n: int) -> str:
-    return f"{n} o" if n < 1024 else f"{n / 1024:.1f} Ko" if n < 1024 * 1024 else f"{n / 1024 / 1024:.1f} Mo"
+    return f"{n} o" if n < 1024 else f"{num_fr(n / 1024, 1)} Ko" if n < 1024 * 1024 else f"{num_fr(n / 1024 / 1024, 1)} Mo"
 
 
 def _cut(text: str, n: int) -> str:

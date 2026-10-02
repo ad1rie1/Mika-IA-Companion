@@ -42,6 +42,7 @@ from mika.faculties.goals.faculty import (
     desire,
     goal_at,
     live,
+    musing,
     params,
     ready_to_undertake,
     status,
@@ -75,7 +76,9 @@ from mika.kernel.inspect import (
     Timeline,
     Toolbar,
     When,
+    num_fr,
     paginate,
+    pct_fr,
 )
 from mika.vocab.episodes import Kind, goal_target
 
@@ -102,6 +105,11 @@ APPROVALS = Ref("local", "/inspecteur/approbations", "ouvrir les approbations")
 
 #: ``project`` : un ancien projet, d'avant les projets à part (ADR 0031), relu au rejeu
 KIND_FR = {c.REMINDER: "rappel", c.EXPLORATION: "exploration", c.PROJECT: "ancien projet"}
+
+
+def _kind_fr(g: Goal) -> str:
+    """Sa sorte, en mots : une rêverie se dit comme telle (rien de neuf n'en sort, ADR 0047)."""
+    return "rêverie" if musing(g) else KIND_FR.get(g.kind, g.kind)
 AUTHORITY_FR = {c.USER: "confié", c.SELF: "à elle"}
 STATUS_FR = {c.ACTIVE: "en cours", c.WAITING: "en attente", c.PAUSED: "en pause", c.ACHIEVED: "abouti",
              c.STUCK: "bloqué", c.ABANDONED: "abandonné", c.FAILED: "en échec", c.CANCELLED: "annulé"}
@@ -175,7 +183,7 @@ def _desire(g: Goal, now: int, frame: Frame) -> Meter | str:
         return "—"
     value = desire(g, now, params(frame.env.params_of("goals", frame.root)))
     suffix = " (figée : en pause)" if g.paused_at else ""
-    return Meter(value, f"{value:.0%}{suffix}", "warn" if value < 0.3 else "")
+    return Meter(value, f"{pct_fr(value)}{suffix}", "warn" if value < 0.3 else "")
 
 
 def _steps(g: Goal) -> str:
@@ -229,7 +237,7 @@ def _head(s: GoalsState, frame: Frame, ctx: InspectContext, key: str) -> Head | 
     if g is None:
         return None
     texts = _texts(ctx, (g.title_ref,))
-    kind, authority = KIND_FR.get(g.kind, g.kind), AUTHORITY_FR.get(g.authority, g.authority)
+    kind, authority = _kind_fr(g), AUTHORITY_FR.get(g.authority, g.authority)
     p = params(frame.env.params_of("goals", frame.root))
     # l'en-tête se lit en texte : des instants dits en heure locale
     facts: list[tuple[str, Any]] = []
@@ -313,7 +321,7 @@ def _live_view(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     for g in page:
         nxt = next_step_at(g, s, frame) if g.kind != c.REMINDER else None
         rows.append(Row((
-            _link(g), _text(texts, g.title_ref, "(sans titre)"), KIND_FR.get(g.kind, g.kind),
+            _link(g), _text(texts, g.title_ref, "(sans titre)"), _kind_fr(g),
             AUTHORITY_FR.get(g.authority, g.authority), _status(g, now), _desire(g, now, frame), _steps(g),
             ("dès que possible" if nxt <= now else When(nxt)) if nxt is not None else "—", _due(g),
             _person(frame, g.owner)), href=_link(g), tone="warn" if g.paused_at else ""))
@@ -396,7 +404,7 @@ def _fields(g: Goal, s: GoalsState, frame: Frame, ctx: InspectContext, texts: Ma
     current = status(g, now)
     pairs: list[tuple[str, Any]] = [
         ("titre", _text(texts, g.title_ref, "(sans titre)")),
-        ("sorte", KIND_FR.get(g.kind, g.kind)),
+        ("sorte", _kind_fr(g)),
         ("autorité", AUTHORITY_FR.get(g.authority, g.authority)),
         ("statut", _status(g, now)),
     ]
@@ -440,7 +448,7 @@ def _fields(g: Goal, s: GoalsState, frame: Frame, ctx: InspectContext, texts: Ma
         pairs += [
             ("clos", When(g.closed_at)),
             ("résultat", _text(texts, g.result_ref)),
-            ("notable", f"{g.notable:.1f}"),
+            ("notable", f"{num_fr(g.notable, 1)}"),
             ("raconté", "oui" if g.shared else f"non ({g.share_attempts} essai(s))"),
         ]
     return Fields(tuple(pairs), title=f"But n°{g.id}", columns=2)
@@ -711,7 +719,7 @@ def _steps_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Block]:
         d = e.data
         verdict, proof = _step_badges(str(d.verdict), bool(d.proven), frame, int(d.wait_s), d.wait_for)
         rows.append(Row((When(e.at), verdict, proof, Text(_said(d.summary), clamp=SUMMARY_CLAMP),
-                         ", ".join(d.tools) or "—", f"{float(d.notable):.1f}",
+                         ", ".join(d.tools) or "—", f"{num_fr(float(d.notable), 1)}",
                          Ref("episode", e.correlation, "épisode"))))
     blocks: list[Block] = [
         Fields((("séances faites", _steps(g)), ("sans verdict d'affilée", g.silent), ("« fini » sans preuve", g.unproven),
@@ -913,16 +921,16 @@ def _decisions_tab(s: GoalsState, frame: Frame, ctx: InspectContext) -> list[Blo
     rows = []
     for e, r in page:
         fired = f"{r.kind}:{r.target}" in e.data.fired
-        parts = "\n".join(f"{owner} · {reason}  {value:+.2f}" for owner, reason, value in r.parts) or "—"
-        detail = (Fields((("preuves", Text(parts, "mono")), ("décalage", f"{r.shift:+.2f}"),
-                          ("attente", f"{getattr(r, 'aging', 0.0):+.2f}"),
-                          ("seuil", f"{-getattr(r, 'threshold', 0.0):+.2f}"),
+        parts = "\n".join(f"{owner} · {reason}  {num_fr(value, 2, signed=True)}" for owner, reason, value in r.parts) or "—"
+        detail = (Fields((("preuves", Text(parts, "mono")), ("décalage", f"{num_fr(r.shift, 2, signed=True)}"),
+                          ("attente", f"{num_fr(getattr(r, 'aging', 0.0), 2, signed=True)}"),
+                          ("seuil", f"{num_fr(-getattr(r, 'threshold', 0.0), 2, signed=True)}"),
                           ("vetos", ", ".join(f"{o} ({why})" for o, why in r.vetoes) or "aucun"),
                           ("choisi ce jour-là", ", ".join(e.data.fired) or "rien")), title="Du signal au score"),)
         rows.append(Row((When(e.at), Badge("choisi", "ok") if fired else Badge("en lice", "muted"),
-                         Text(f"{r.score:+.2f}", "num", "ok" if r.score > 0 else ""), f"{r.hazard * 3600:.2f} /h",
+                         Text(f"{num_fr(r.score, 2, signed=True)}", "num", "ok" if r.score > 0 else ""), f"{num_fr(r.hazard * 3600, 2)} /h",
                          Badge(", ".join(o for o, _ in r.vetoes), "danger") if r.vetoes else "—",
-                         Text(", ".join(f"{reason} {value:+.1f}" for _o, reason, value in r.parts[:3]) or "—", "muted"),
+                         Text(", ".join(f"{reason} {num_fr(value, 1, signed=True)}" for _o, reason, value in r.parts[:3]) or "—", "muted"),
                          Ref("event", str(e.seq), f"n° {e.seq}")), href=Ref("event", str(e.seq), ""), detail=detail,
                         tone="ok" if fired else ""))
     # la suite reprend après la dernière montrée ; un lot épuisé sans remplir la page reprend où la lecture s'est

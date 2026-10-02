@@ -31,7 +31,7 @@ from mika.faculties.attention.faculty import (
     habituation,
     params,
 )
-from mika.kernel.clock import local_date_of_night
+from mika.kernel.clock import HOUR, local_date_of_night, next_local
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
@@ -39,7 +39,7 @@ from mika.vocab.affect import Emotion
 from mika.vocab.days import when_fr
 from mika.vocab.people import is_identifiable
 from mika.vocab.privacy import Sensitivity
-from mika.vocab.words import stems
+from mika.vocab.words import elided, stems
 
 EXCERPT = 160
 
@@ -51,6 +51,14 @@ def _clip(text: str, n: int = EXCERPT) -> str:
 
 def _name(frame: Frame, person: str) -> str:
     return frame.get(identity_c.IDENTITY(person)).name or "quelqu'un"
+
+
+def ripe(q: Pending, frame: Frame, p: Any) -> int:
+    """Quand une pensée en attente peut naître : tout de suite, sauf celle d'un échange — quand la personne n'a plus
+    rien écrit depuis ``exchange_settle_us`` (la pensée naît de ce qui a le plus marqué, pas du premier message)."""
+    if q.origin != c.EXCHANGE or not q.person:
+        return q.at
+    return max(q.at, _last_from(frame, q.person)) + p.exchange_settle_us
 
 
 def _last_from(frame: Frame, person: str) -> int:
@@ -94,13 +102,39 @@ def left_hanging(state: AttentionState, p: Any, present: dict[str, int]) -> list
                   and present.get(person, ex.last_out + 1) <= ex.last_out)
 
 
-def alone_due(state: AttentionState, p: Any) -> int | None:
+#: une amie ne « revient » pas le jour même où elle est passée : son heure habituelle se cherche après ce délai
+_EXPECTED_AFTER_US = 12 * HOUR
+
+
+def expected_back(frame: Frame, person: str, p: Any) -> int | None:
+    """Quand une amie ou une proche qui écrit presque chaque jour, à peu près à la même heure, passera sans doute :
+    son heure habituelle, le jour d'après son dernier message. ``None`` pour qui n'a pas ce rythme-là."""
+    if not is_identifiable(person) or frame.get(social_c.CLOSENESS(person)) not in (social_c.FRIEND, social_c.CLOSE):
+        return None
+    ct = frame.get(social_c.CONTACT(person))
+    if not ct.last_in or not ct.measured or ct.rhythm_days > p.alone_daily_rhythm_days:
+        return None
+    hours = frame.get(others_c.HOURS(person))
+    if not hours.learned or hours.usual is None:
+        return None
+    return next_local(ct.last_in + _EXPECTED_AFTER_US, hours.usual, 0, frame.env.tz_of(frame.root))
+
+
+def alone_due(state: AttentionState, p: Any, frame: Frame | None = None) -> int | None:
     """Quand la prochaine pensée de solitude viendra : un jour sans que
     personne ne lui écrive, puis une de plus par jour de silence ; ``None``
-    tant que personne ne lui a jamais écrit."""
+    tant que personne ne lui a jamais écrit. Une amie qui passe presque chaque
+    jour à la même heure, on l'attend : pas avant cette heure-là, plus une marge
+    (c'est quand elle ne vient pas qu'on se sent seule)."""
     if not state.last_contact or p.alone_after_us <= 0:
         return None
-    return max(state.last_contact, state.alone_at) + p.alone_after_us
+    due = max(state.last_contact, state.alone_at) + p.alone_after_us
+    if frame is None:
+        return due
+    expected = [t for person in sorted(state.exchanges) if (t := expected_back(frame, person, p)) is not None]
+    if expected:
+        due = max(due, min(expected) + p.alone_margin_us)
+    return due
 
 
 @ATTENTION.process("attention.watch", wake_on=[rt.PERCEPTION_RECEIVED, rt.UTTERANCE, rt.EPISODE_STARTED,
@@ -115,16 +149,17 @@ class Watch:
         self.missing_at = 0
 
     def next_due(self, state: AttentionState, frame: Frame, last_run: int | None) -> int | None:
-        if state.pending or state.signals or met(state, frame):
-            return frame.now
         p = params(frame.env.params_of("attention", frame.root))
+        if state.signals or met(state, frame) or any(ripe(q, frame, p) <= frame.now for q in state.pending):
+            return frame.now
         times = [x.deadline for x in state.expectations.values() if x.deadline is not None]
+        times += [ripe(q, frame, p) for q in state.pending]
         if frame.get(body_c.SLEEP) is body_c.SleepPhase.AWAKE:
             thoughts = frame.get(c.THOUGHTS)
             if thoughts and thoughts[0].intensity >= p.dwell_from:
                 times.append(state.dwelt_at + p.dwell_every_us)
             times.append(self.missing_at + p.missing_check_us)
-            alone = alone_due(state, p)
+            alone = alone_due(state, p, frame)
             if alone is not None:
                 times.append(alone)
             times += [t for t, _person in left_hanging(state, p, here(frame))[:1]]
@@ -136,7 +171,7 @@ class Watch:
         p = params(frame.env.params_of("attention", frame.root))
         store = ctx.ports.get("store")
         drafts: list[Draft[Any]] = []
-        for q in state.pending[:6]:
+        for q in [q for q in state.pending if ripe(q, frame, p) <= frame.now][:6]:
             drafts.append(self._thought(q, frame, store))
         drafts += self._signals(state, frame, store, p)
         met_keys = set(met(state, frame))
@@ -156,7 +191,7 @@ class Watch:
         if awake and frame.now - self.missing_at >= p.missing_check_us:
             self.missing_at = frame.now
             drafts += self._missing(state, frame, p)
-        alone = alone_due(state, p)
+        alone = alone_due(state, p, frame)
         if awake and alone is not None and alone <= frame.now:
             drafts.append(self._alone(state, frame, p))
         if awake:
@@ -197,6 +232,13 @@ class Watch:
                                         origin=q.origin, about=about, sensitivity=sens, source=q.source,
                                         dedupe_key=mark)
         who = _name(frame, q.person) if q.person else "quelqu'un"
+        if q.origin == c.REMORSE:
+            # être dure avec quelqu'un se regrette ; ça la concerne, sans rien dire de ce qui a été dit
+            sens = int(Sensitivity.PERSONAL)
+            return c.THOUGHT_BORN.draft(text=Content.of(f"J'ai été dure avec {who}.", level=sens),
+                                        emotion=q.emotion, intensity=q.intensity, origin=q.origin,
+                                        about=(q.person,) if q.person else (), sensitivity=sens, source=q.source,
+                                        dedupe_key=mark)
         if q.origin == c.UNANSWERED:
             # être ignorée se ressent ; ce n'est pas une confidence, mais ça concerne la personne
             sens = int(Sensitivity.PERSONAL)
@@ -266,7 +308,7 @@ class Watch:
             handles = frame.get(identity_c.HANDLES(person))
             if frame.get(identity_c.REACHABLE(person)) or any(h in present for h in handles):
                 continue
-            text = f"J'aimerais bien avoir des nouvelles de {_name(frame, person)}."
+            text = f"J'aimerais bien avoir des nouvelles {elided(_name(frame, person), 'de')}."
             out.append(c.THOUGHT_BORN.draft(
                 text=Content.of(text, level=int(Sensitivity.ANODYNE)), emotion=Emotion.NOSTALGIC.value,
                 intensity=p.missing_intensity, origin=c.MISSING, about=(person,),

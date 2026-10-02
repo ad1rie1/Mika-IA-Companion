@@ -27,6 +27,7 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict
 
+from mika.contracts import agency as agency_c
 from mika.contracts import goals as c
 from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
@@ -68,6 +69,11 @@ class GoalsParams(BaseModel):
         label="Séances par exploration", group="Les séances", lo=1, hi=20,
         help="Le budget de séances d'une exploration qu'elle ouvre d'elle-même ; à bout de séances sans conclure, elle "
              "bloque. Le tempérament le dérive de la persévérance.")] = 4
+    musing_steps: Annotated[int, Knob(
+        label="Séances par rêverie", group="Les séances", lo=1, hi=10,
+        help="Une rêverie (une curiosité sans endroit où chercher du neuf) se vit d'un trait : elle l'écrit, c'est "
+             "tout. Plus de séances la font tourner en rond, et chaque séance est une boucle d'outils du "
+             "modèle.")] = 1
     silent_before_blocked: Annotated[int, Knob(
         label="Séances sans verdict avant blocage", group="Les séances", lo=1, hi=10,
         help="Après autant de séances de suite où le modèle a travaillé sans rien conclure, le but est bloqué.")] = 3
@@ -153,8 +159,8 @@ class GoalsParams(BaseModel):
              "délai.")] = DAY
     interest_rest_us: Annotated[int, Knob(
         label="Repos d'un centre d'intérêt", group="Entreprendre d'elle-même", lo=HOUR, hi=90 * DAY,
-        help="Un centre d'intérêt exploré n'est pas réexploré avant ce délai ; elle va vers le moins récemment "
-             "exploré.")] = 3 * DAY
+        help="Un centre d'intérêt exploré n'est pas réexploré avant ce délai ; parmi les autres, elle va plus "
+             "volontiers vers ceux qu'elle a délaissés, sans ordre fixe.")] = 3 * DAY
     # raconter ce qu'elle a mené à bout
     share_notable_from: Annotated[float, Knob(
         label="Notable à partir de", group="Raconter", lo=0.0, hi=1.0, step=0.05,
@@ -274,6 +280,8 @@ class Run:
     goal: int
     purpose: str  # "step" | "remind" | "share"
     reported: bool = False
+    #: son départ (une initiative : pour reconnaître qu'elle s'est ravisée entre-temps)
+    started: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,8 +303,19 @@ class GoalsState:
     self_stuck_at: int = 0
 
 
+#: les lots qui ne touchent que sa tête (sa mémoire, ce qu'elle sait des autres, ses buts et ses projets) : ce
+#: qu'ils font ne prouve pas qu'elle a mené quelque chose à bout
+INNER_BUNDLES = frozenset({"goals", "memory", "identity", "self", "attention", "social", "projects"})
+
+
+def musing(g: Goal) -> bool:
+    """Une curiosité sans source où chercher du neuf : une rêverie."""
+    return g.origin == c.FROM_INTEREST and not set(g.bundles) - INNER_BUNDLES
+
+
+#: v3 : un rappel, un récit devancés, interrompus ou dont elle s'est ravisée ne comptent plus comme essais.
 GOALS = Faculty("goals", state=GoalsState, init=lambda p: GoalsState(), params=GoalsParams, derive=derive,
-                state_version=2,
+                state_version=3,
                 # les réglages des projets, quand ils étaient des buts (ADR 0031) : d'anciens journaux les portent
                 retired_params=("project_spacing_us", "project_steps", "project_evidence"))
 GOALS.declare(*c.ALL)
@@ -590,7 +609,7 @@ def _started(s: GoalsState, e, cx) -> GoalsState:
     purpose = "remind" if c.REMIND in reasons else "share" if c.SHARE in reasons else ""
     if not purpose:
         return s
-    return replace(s, running=s.running.set(e.correlation, Run(gid, purpose)))
+    return replace(s, running=s.running.set(e.correlation, Run(gid, purpose, started=e.at)))
 
 
 @GOALS.reducer(rt.UTTERANCE)
@@ -610,7 +629,7 @@ def _uttered(s: GoalsState, e, cx) -> GoalsState:
 REFUND = frozenset({"failed", "timeout", "superseded", "preempted", "cancelled", "interrupted"})
 
 
-@GOALS.reducer(rt.EPISODE_ENDED)
+@GOALS.reducer(rt.EPISODE_ENDED, reads=[agency_c.RENOUNCED])
 def _ended(s: GoalsState, e, cx) -> GoalsState:
     run = s.running.get(e.correlation)
     if run is None:
@@ -628,12 +647,13 @@ def _ended(s: GoalsState, e, cx) -> GoalsState:
             broke = outcome in ("failed", "timeout")
             return _set(s, replace(g, steps=max(0, g.steps - 1), failures=g.failures + (1 if broke else 0)))
         return _set(s, replace(g, silent=g.silent + 1))  # le modèle a travaillé, mais n'a rien conclu
+    renounced = cx.facts.get(agency_c.RENOUNCED(e.data.target)) if e.data.target else 0
     if run.purpose == "remind" and not g.delivered:
-        if outcome in ("superseded", "preempted", "cancelled", "interrupted"):
+        if not agency_c.tried(outcome, run.started, renounced):
             return _set(s, replace(g, retry_at=e.at + p.remind_retry_us))
         n = g.attempts + 1
         return _set(s, replace(g, attempts=n, retry_at=e.at + p.remind_retry_us * n))
-    if run.purpose == "share" and not g.shared:
+    if run.purpose == "share" and not g.shared and agency_c.tried(outcome, run.started, renounced):
         return _set(s, replace(g, share_attempts=g.share_attempts + 1))
     return s
 
@@ -882,7 +902,7 @@ def view(g: Goal, now: int) -> c.GoalView:
         due=g.due, waiting_until=g.waiting_until if status(g, now) == c.WAITING else 0,
         last_summary_ref=g.summary_ref, schedule=g.schedule, priority=g.priority, tasks_total=len(g.tasks),
         tasks_done=sum(1 for t in g.tasks if t.status == c.TASK_DONE),
-        tasks_blocked=sum(1 for t in g.tasks if t.status == c.TASK_BLOCKED),
+        tasks_blocked=sum(1 for t in g.tasks if t.status == c.TASK_BLOCKED), musing=musing(g),
     )
 
 
@@ -913,12 +933,14 @@ def _closed_felt(e, cx) -> Appraisal | None:
     d = e.data
     if d.kind == c.REMINDER:
         return None
-    if d.status == c.ACHIEVED and d.source.startswith("interest:") and d.reason == "rêverie":
+    if d.status == c.ACHIEVED and d.reason == c.MUSED:
         return Appraisal(Emotion.DREAMY, 0.2, reason="une rêverie écrite")
     if d.status == c.ACHIEVED:
         return Appraisal(Emotion.PROUD, 0.4, reason="abouti")
     if d.status == c.STUCK:
         return Appraisal(Emotion.FRUSTRATED, 0.35, reason="bloquée")
+    if d.status == c.ABANDONED and d.reason == c.DISSIPATED:
+        return None  # une rêverie qui s'efface ne laisse rien : on n'a renoncé à rien
     if d.status == c.ABANDONED:
         return Appraisal(Emotion.MELANCHOLIC, 0.25, reason="abandon")
     return None

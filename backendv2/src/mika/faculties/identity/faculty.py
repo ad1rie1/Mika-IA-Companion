@@ -89,11 +89,17 @@ class Handle:
 @dataclass(frozen=True, slots=True)
 class IdentityState:
     handles: FrozenDict[str, Handle] = field(default_factory=FrozenDict)
+    #: les personnes connues d'abord de nom (``name:alice`` → sa clé), reliées par un opérateur
+    names: FrozenDict[str, str] = field(default_factory=FrozenDict)
 
+
+#: une personne connue seulement de nom (une clé de la mémoire)
+NAMED = "name:"
 
 #: v2 : revendications à deux preuves, démentis jugés à la lecture, une session ne se relie jamais.
+#: v3 : les noms reliés (ADR 0048).
 IDENTITY = Faculty("identity", state=IdentityState, init=lambda p: IdentityState(), params=IdentityParams,
-                   state_version=2)
+                   state_version=3)
 IDENTITY.declare(*c.ALL)
 
 
@@ -310,12 +316,27 @@ def _linked(s: IdentityState, e, cx) -> IdentityState:
     return replace(s, handles=s.handles.set(d.handle, h))
 
 
+@IDENTITY.reducer(c.NAME_BOUND)
+def _name_bound(s: IdentityState, e, cx) -> IdentityState:
+    d = e.data
+    if not d.name.startswith(NAMED):
+        return s
+    if d.person is None:
+        return replace(s, names=s.names.delete(d.name)) if d.name in s.names else s
+    person = _root(s, d.person)
+    if person.startswith(NAMED) or is_internal(person):
+        return s
+    return replace(s, names=s.names.set(d.name, person))
+
+
 # ── Lectures ──────────────────────────────────────────────────────────────
 
 
 def _root(s: IdentityState, key: str) -> str:
     """La clé de personne d'une adresse (jamais de chaîne : une liaison vise
-    toujours une personne racine)."""
+    toujours une personne racine) ; un nom relié par un opérateur, sa personne."""
+    if key.startswith(NAMED):
+        return s.names.get(key, key)
     h = s.handles.get(key)
     return h.person if h is not None and h.person else key
 

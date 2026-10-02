@@ -149,14 +149,10 @@ class Subjects:
             return self.pages.render_page(request, title="Oubli refusé", active="", status=400,
                                           blocks=[Note(f"Retape « {shown} » pour confirmer.", "danger")],
                                           crumbs=[("Retour", fiche_url(kind, key))])
-        keys = [key, *(head.aliases if isinstance(head, Head) else ())]
-        removed = 0
-        for k in dict.fromkeys(keys):
-            got = await self.ui.kernel.forget(k)
-            removed += sum(v for v in got.values() if isinstance(v, int)) if isinstance(got, dict) else int(got or 0)
-        await operations.audit(self.ui.kernel, f"console.oublier.{kind}", by=account.handle, subject_kind=kind,
-                               subject=key)
-        self.ui.flash(f"oubli-{key}", "ok", f"« {shown} » est oublié·e ({removed} contenu(s) effacé(s)).")
+        # le même oubli que la ligne de commande : la clé et ses alias (ses adresses, ses noms)
+        gone = await operations.forget_subject(self.ui.kernel, kind, key, by=account.handle,
+                                               action=f"console.oublier.{kind}")
+        self.ui.flash(f"oubli-{key}", "ok", f"« {shown} » est oublié·e ({gone.total} contenu(s) effacé(s)).")
         return secure(RedirectResponse(f"{PREFIX}/?flash={quote('oubli-' + key, safe='')}", status_code=303))
 
     async def download(self, request: Request) -> Response:

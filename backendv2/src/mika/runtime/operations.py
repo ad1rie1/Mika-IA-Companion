@@ -25,10 +25,11 @@ from mika.kernel import forms
 from mika.kernel.events import Origin
 from mika.kernel.faculty import ActionSpec
 from mika.kernel.guards import Superseded
-from mika.kernel.inspect import Ref, describe_error
+from mika.kernel.inspect import Head, Ref, describe_error
 from mika.kernel.operate import ActionContext, Done, Refused
 from mika.runtime import decisions
 from mika.runtime.boundary import Failed, acall, call
+from mika.runtime.inspection import Inspection
 
 if TYPE_CHECKING:
     from mika.runtime.bootstrap import Kernel
@@ -295,3 +296,35 @@ async def audit(kernel: Kernel, action: str, *, by: str, subject_kind: str = "",
     draft = rt.OPERATED.draft(action=action, by=by, subject_kind=subject_kind, subject=subject, seqs=seqs,
                               outcome=outcome)
     await kernel.mind.append([draft], emitter="runtime", correlation=f"opérateur:{action}", origin=Origin.EXTERNAL)
+
+
+@dataclass(frozen=True, slots=True)
+class Forgotten:
+    """Ce qu'un oubli a emporté : les clés oubliées (l'objet et ses alias) et, par lieu, ce qui a
+    été effacé (contenus, traces, vecteurs…)."""
+
+    shown: str
+    keys: tuple[str, ...]
+    counts: Mapping[str, int]
+
+    @property
+    def total(self) -> int:
+        return sum(self.counts.values())
+
+
+async def forget_subject(kernel: Kernel, kind: str, key: str, *, by: str, action: str) -> Forgotten:
+    """L'oubli d'un objet **et de tout ce qui le désigne** : sa clé canonique et ses alias (pour une
+    personne : ses adresses et les noms qui ne désignent qu'elle, ADR 0035 §7). La console et la ligne
+    de commande passent par ici — deux chemins qui oublieraient différemment, c'est une promesse non
+    tenue. Un objet sans fiche (``kind`` vide, ou inconnu) n'oublie que sa clé. Audité
+    (``runtime.operated``)."""
+    head = Inspection(kernel).head(kind, key) if kind else None
+    aliases: tuple[str, ...] = (head.key, *head.aliases) if isinstance(head, Head) else ()
+    keys = tuple(dict.fromkeys(k for k in (key, *aliases) if k))
+    counts: dict[str, int] = {}
+    for k in keys:
+        got = await kernel.forget(k)
+        for where, n in got.items():
+            counts[where] = counts.get(where, 0) + int(n or 0)
+    await audit(kernel, action, by=by, subject_kind=kind, subject=key)
+    return Forgotten(head.title if isinstance(head, Head) else key, keys, counts)

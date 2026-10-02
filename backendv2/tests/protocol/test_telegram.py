@@ -10,6 +10,9 @@
 - un message relivré par Telegram n'est traité qu'une fois, une édition jamais ;
 - un texte long est découpé, sans jetons de voix ; une pensée ne part jamais en
   message ; sans robot, une livraison est à réessayer ;
+- une question abandonnée parce qu'il était trop tard reçoit, en privé, une
+  excuse honnête (pas « réessaie dans un instant » des heures après) ; dans un
+  salon, rien ;
 - seules les conversations privées deviennent des adresses où lui écrire.
 """
 
@@ -340,6 +343,67 @@ async def test_a_thought_never_leaves_as_a_message_and_a_failure_is_said_plainly
     assert bot.sent == []
     assert await channel.deliver(_delivery("TimeoutError()", key="k3", kind=delivery_p.REPLY_FAILED, reply_to=3))
     assert bot.sent == [(42, FAILED)]  # jamais le détail technique
+
+
+async def test_a_question_abandoned_too_late_gets_an_honest_apology_in_private_and_nothing_in_a_room():
+    """INT-7 : « Désolée, je n'arrive pas à te répondre là tout de suite… Réessaie dans un instant ? » des heures
+    après la question serait faux ; se taire laisserait la personne sans rien. En privé, elle s'excuse de n'avoir
+    pas pu répondre plus tôt et invite à redire ; dans un salon, la conversation est passée à autre chose : rien.
+    Contre-exemple : une panne sur le moment dit toujours « réessaie dans un instant »."""
+    from mika.adapters.telegram.channel import FAILED, LATE
+    from mika.ports import delivery as delivery_p
+
+    bot = FakeBot()
+    channel = TelegramChannel(None, bot, OPEN)  # type: ignore[arg-type]
+    late = {"kind": delivery_p.REPLY_FAILED, "reply_to": 3}
+    assert await channel.deliver(_delivery("trop tard pour répondre", key="k1", **late))
+    assert await channel.deliver(_delivery("trop tard pour répondre", key="k2", room="tg_chat_-100", **late))
+    assert await channel.deliver(_delivery("TimeoutError()", key="k3", **late))
+    assert bot.sent == [(42, LATE), (42, FAILED)]
+
+
+def test_the_engine_says_too_late_the_way_telegram_reads_it(tmp_path):
+    """Le lien entre le moteur et l'adaptateur : une question posée sur Telegram, un arrêt d'une heure, et la
+    reprise l'abandonne « trop tard » — la livraison qui en part est lue par Telegram comme telle."""
+    from mika.adapters.telegram.channel import LATE
+    from mika.app import composition
+    from mika.ports import delivery as delivery_p
+    from mika.sim.clock import SimClock
+    from mika.sim.llm.scripted import ScriptedLLM
+    from mika.sim.world import Driver
+    from tests.fixtures.mika import AFTERNOON
+
+    clock = SimClock(AFTERNOON)
+    llm = ScriptedLLM(clock, lambda r: LLMResponse("me revoilà [EMOTION:happy:0.5]"),
+                      latency=lambda r: 20.0 if r.role == "reply" else 1.0)
+    driver = Driver(tmp_path, composition.for_simulation(), llm, clock)
+    told: list = []
+
+    async def main():
+        await driver.boot()
+        assert driver.transport is not None
+        heard = driver.transport.deliver
+
+        async def deliver(d):
+            told.append(d)
+            return await heard(d)
+
+        driver.transport.deliver = deliver  # type: ignore[method-assign]
+        await driver.say("tg_7", "t'es là ?", wait=False)
+        await asyncio.sleep(2)
+        await driver.crash()
+        await asyncio.sleep(3600)  # une heure d'arrêt
+        await driver.boot()
+        await asyncio.sleep(5)
+        await driver.stop()
+
+    run_virtual(clock, main)
+    failed = [d for d in told if d.kind == delivery_p.REPLY_FAILED and d.target == "tg_7"]
+    assert failed, [d.kind for d in told]
+    bot = FakeBot()
+    channel = TelegramChannel(None, bot, OPEN)  # type: ignore[arg-type]
+    assert asyncio.run(channel.deliver(failed[-1]))
+    assert bot.sent == [(7, LATE)]
 
 
 async def test_without_the_robot_a_telegram_delivery_is_retried_not_dropped():

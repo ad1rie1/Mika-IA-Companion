@@ -102,7 +102,9 @@ class Items:
                         "origin": d.origin, "source": d.source, "born_at": e.at, "touched_at": e.at,
                         "status": "active", "replaces": d.replaces, "sources": json.dumps(list(d.sources)),
                         "told_by": _keys(d.told_by), "heard_by": _keys(d.heard_by), "secret": int(d.secret),
-                        "informants": _keys(informants_of(d.source, d.told_by)), "about_self": int(d.about_self)})
+                        "informants": _keys(informants_of(d.source, d.told_by)),
+                        # 1 : ce qu'elle raconte d'elle, qui s'efface ; 2 : ce qui la définit (un goût, un avis), qui tient
+                        "about_self": 2 if d.durable else int(d.about_self)})
                 if d.replaces is not None:
                     sql.execute(f"UPDATE {t} SET status='superseded' WHERE id=?", (d.replaces,))
             elif name == c.PROMISE_NOTICED.name:
@@ -200,7 +202,22 @@ class Items:
         sql.execute(f"UPDATE {t} SET source=NULL WHERE source=?", (subject,))
 
 
+def _joined(texts: Iterable[str | None]) -> str:
+    """Les messages d'un tour, à la suite (« salut / t'as vu le match ? / allo ? »), bornés à
+    ``CHUNK_TEXT_MAX`` : au-delà, chacun garde sa part plutôt que le premier mange tout."""
+    parts = [" ".join(t.split()) for t in texts if t and t.strip()]
+    if not parts:
+        return ""
+    joined = " / ".join(parts)
+    if len(joined) <= CHUNK_TEXT_MAX:
+        return joined
+    share = max(40, CHUNK_TEXT_MAX // len(parts) - 3)
+    return " / ".join(p if len(p) <= share else p[: share - 1] + "…" for p in parts)[:CHUNK_TEXT_MAX]
+
+
 class Chunks:
+    """T0 : un échange par réponse visible — ce qu'on lui a dit (tout le tour) et ce qu'elle a répondu."""
+
     def create(self, sql: Sql, sfx: str) -> None:
         sql.execute(
             f"CREATE TABLE IF NOT EXISTS {c.CHUNKS_TABLE}{sfx}(id INTEGER PRIMARY KEY, person TEXT NOT NULL, "
@@ -216,11 +233,16 @@ class Chunks:
             d = e.data
             if not d.visible or not d.target or d.reply_to is None:
                 continue
-            row = sql.execute(f"SELECT text FROM {transcript_c.THREAD_TABLE} WHERE id=?", (d.reply_to,)).fetchone()
-            user_text = (row[0] if row else "")[:CHUNK_TEXT_MAX]
+            # une réponse règle tout le tour (``answers`` : « salut », « t'as vu le match ? », « allo ? ») ; la
+            # question n'est souvent pas le dernier message — l'échange les garde tous, dans l'ordre (un journal
+            # d'avant le tour : ``reply_to`` seul)
+            asked = tuple(sorted({*d.answers, d.reply_to}))
+            marks = ",".join("?" * len(asked))
+            rows = sql.query(f"SELECT text FROM {transcript_c.THREAD_TABLE} WHERE id IN ({marks}) ORDER BY id", asked)
+            user_text = _joined(t for (t,) in rows)
             reply = strip_prosody(d.text.text or "")[:CHUNK_TEXT_MAX]
             sql.execute(f"INSERT OR REPLACE INTO {c.CHUNKS_TABLE}{sfx}(id, person, question, user_text, reply_text, at, "
-                        "room) VALUES(?,?,?,?,?,?,?)", (e.seq, d.target, d.reply_to, user_text, reply, e.at, d.room))
+                        "room) VALUES(?,?,?,?,?,?,?)", (e.seq, d.target, asked[0], user_text, reply, e.at, d.room))
 
     def forget(self, sql: Sql, subject: str, sfx: str) -> None:
         sql.execute(f"DELETE FROM {c.CHUNKS_TABLE}{sfx} WHERE person=?", (subject,))
@@ -255,5 +277,6 @@ class Told:
 
 MEMORY.projector(c.ITEMS_TABLE, version=2, tier=Tier.T0,
                  types=[*c.ALL, rt.UTTERANCE])(Items)
-MEMORY.projector(c.CHUNKS_TABLE, version=2, tier=Tier.T0, types=[rt.UTTERANCE])(Chunks)
+# v3 : l'échange garde tout le tour (``Utterance.answers``), pas seulement le dernier message d'une rafale
+MEMORY.projector(c.CHUNKS_TABLE, version=3, tier=Tier.T0, types=[rt.UTTERANCE])(Chunks)
 MEMORY.projector(c.TOLD_TABLE, version=1, tier=Tier.T0, types=[rt.UTTERANCE])(Told)

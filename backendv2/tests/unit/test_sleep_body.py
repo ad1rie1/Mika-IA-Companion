@@ -171,6 +171,9 @@ def test_at_three_a_stranger_waits_for_morning_a_close_friend_wakes_her(tmp_path
     assert len(to_bob) == 1 and woke and to_bob[0] >= woke[-1] and _hm(to_bob[0]) < 12  # au réveil, elle lui répond
     morning = replies_to(llm, "user_2")[0].messages[-1].content
     assert "pendant que tu dormais" in morning  # et elle sait qu'elle dormait
+    assert "tu ne le lis que maintenant" in morning.rsplit("--- FIN ETAT INTERNE ---", 1)[1], \
+        "…et le message lui-même dit qu'elle le lit au réveil, pas à 3 h"
+    assert "tu ne le lis que maintenant" not in to_alice[0], "contre-exemple : réveillée par lui, elle le lit aussitôt"
 
 
 def test_on_a_fresh_install_her_owner_wakes_her_at_three_a_stranger_waits(tmp_path):

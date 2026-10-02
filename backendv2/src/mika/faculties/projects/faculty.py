@@ -30,6 +30,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict
 
+from mika.contracts import agency as agency_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.kernel import schedule
@@ -303,8 +304,9 @@ class ProjectsState:
     awaiting: FrozenDict[int, str] = field(default_factory=FrozenDict)
 
 
+#: v3 : un récit, un appel à l'aide devancés, interrompus ou dont elle s'est ravisée ne comptent plus comme essais.
 PROJECTS = Faculty("projects", state=ProjectsState, init=lambda p: ProjectsState(), params=ProjectsParams,
-                   state_version=2)
+                   state_version=3)
 PROJECTS.declare(*c.ALL)
 
 
@@ -930,7 +932,8 @@ def _started(s: ProjectsState, e, cx) -> ProjectsState:
     if d.kind != Kind.INITIATIVE or got is None or got[0] not in s.projects:
         return s
     purpose = "share" if c.SHARE in reasons else "need" if c.NEED in reasons else ""
-    return replace(s, running=s.running.set(e.correlation, Run(got[0], got[1], purpose))) if purpose else s
+    return replace(s, running=s.running.set(e.correlation, Run(got[0], got[1], purpose, started=e.at))) \
+        if purpose else s
 
 
 @PROJECTS.reducer(rt.UTTERANCE)
@@ -952,7 +955,7 @@ REFUND = frozenset({"failed", "timeout", "superseded", "preempted", "cancelled",
 BROKEN = frozenset({"failed", "timeout"})
 
 
-@PROJECTS.reducer(rt.EPISODE_ENDED)
+@PROJECTS.reducer(rt.EPISODE_ENDED, reads=[agency_c.RENOUNCED])
 def _ended(s: ProjectsState, e, cx) -> ProjectsState:
     run = s.running.get(e.correlation)
     if run is None:
@@ -962,12 +965,13 @@ def _ended(s: ProjectsState, e, cx) -> ProjectsState:
     if p is None:
         return s
     o = objective_at(p, run.objective)
-    if run.purpose == "share":
-        if o is not None and not o.shared:
+    if run.purpose in ("share", "need"):
+        renounced = cx.facts.get(agency_c.RENOUNCED(e.data.target)) if e.data.target else 0
+        if o is None or not agency_c.tried(e.data.outcome, run.started, renounced):
+            return _set(s, p)
+        if run.purpose == "share" and not o.shared:
             p = _objective(p, replace(o, share_attempts=o.share_attempts + 1))
-        return _set(s, p)
-    if run.purpose == "need":
-        if o is not None and not o.asked:
+        elif run.purpose == "need" and not o.asked:
             p = _objective(p, replace(o, ask_attempts=o.ask_attempts + 1))
         return _set(s, p)
     if run.reported:

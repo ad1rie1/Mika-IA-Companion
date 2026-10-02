@@ -1,14 +1,14 @@
 {% if problems %}
 <section class="card stack" aria-label="Effets à traiter">
   <h3>À traiter : relancer, ou marquer comme vu</h3>
-  <p class="muted">Relancer : un essai de plus, tout de suite (ce qui partait repart — une parole d'hier arrive aujourd'hui). Marquer comme vu : la ligne reste, le badge « à traiter » s'éteint.</p>
+  <p class="muted">Relancer : un essai de plus, tout de suite (ce qui partait repart — une parole d'hier arrive aujourd'hui). Marquer comme vu : la ligne reste, le badge « à traiter » s'éteint. Une parole périmée ne part plus, et une action interrompue a peut-être eu lieu : elles se marquent seulement comme vues.</p>
   {% for p in problems %}
   <div class="outbox-problem">
     <p><b>n° {{ p.seq }} · {{ p.label }}</b> <span class="badge warn">{{ p.status }}</span>{% if p.error %} <span class="muted">— {{ p.error }}</span>{% endif %}</p>
     <form method="post" action="{{ PREFIX }}/systeme/sorties" class="inline">
       <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="cle" value="{{ p.key }}">
       <input type="hidden" name="_retour" value="{{ back }}">
-      <button class="btn small" name="faire" value="relancer" data-confirm="Relancer « {{ p.label }} » (n° {{ p.seq }}) : un essai de plus, tout de suite ?">Relancer</button>
+      {% if p.retry %}<button class="btn small" name="faire" value="relancer" data-confirm="Relancer « {{ p.label }} » (n° {{ p.seq }}) : un essai de plus, tout de suite ?">Relancer</button>{% endif %}
       <button class="btn quiet small" name="faire" value="vu">Marquer comme vu</button>
     </form>
   </div>

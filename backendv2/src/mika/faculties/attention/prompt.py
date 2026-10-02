@@ -12,6 +12,9 @@ flux, un mail, une app) — rendues citées, jamais comme une consigne.
 
 **Une pensée qui insiste** sur quelqu'un — une inquiétude, une peine —
 pousse à lui en reparler (preuve vers cette personne, si elle est joignable).
+**Un bel échange** avec une amie (« j'ai eu le poste !! »), le lendemain et
+s'il n'y a pas eu d'autre contact, peut donner envie de lui en reparler — une
+preuve faible : ce qu'on fait avec les gens qu'on aime, pas une relance.
 Être ignorée, se sentir seule : des pensées qui se ressentent, jamais des
 raisons de réécrire.
 """
@@ -169,6 +172,9 @@ def _insisting(origin: str, name: str, feeling_: str) -> str:
     if origin == c.CONCERN:
         return (f"« {name} » n'avait pas l'air comme d'habitude la dernière fois : tu t'inquiètes un peu, et tu as "
                 "envie de prendre de ses nouvelles.")
+    if origin == c.REMORSE:
+        return (f"Tu as été dure avec « {name} » la dernière fois, et ça te gêne : tu as envie de revenir vers "
+                f"« {name} », simplement — t'excuser si tu le penses, sans te flageller ni tout refaire.")
     return (f"Tu repenses à ton dernier échange avec « {name} » ({feeling_}) : tu as envie d'en reparler, "
             "ou simplement de prendre de ses nouvelles.")
 
@@ -182,12 +188,43 @@ def _address(frame: Frame, person: str) -> str | None:
     return reachable[0] if reachable else None
 
 
+def _glad(s: AttentionState, frame: Frame, p: Any, seen: set[str]) -> list[Candidate]:
+    """Un bel échange avec une amie ou une proche, le lendemain, sans autre contact depuis : l'envie (faible) de
+    lui en reparler — « encore bravo pour le poste, j'y repensais ce matin ! ». Pas envers une amie qui écrit
+    presque chaque jour : elle repassera, c'est là qu'elle le lui dira."""
+    out: list[Candidate] = []
+    for person, (_thought, born) in sorted(s.glad.items()):
+        if person in seen or not born + p.glad_after_us <= frame.now <= born + p.glad_until_us:
+            continue
+        if frame.get(social_c.CLOSENESS(person)) not in (social_c.FRIEND, social_c.CLOSE):
+            continue
+        contact = frame.get(social_c.CONTACT(person))
+        if contact.measured and contact.rhythm_days <= p.alone_daily_rhythm_days:
+            continue
+        handles = frame.get(identity_c.HANDLES(person)) or (person,)
+        if max(frame.get(transcript_c.LAST_FROM(h)) for h in handles) > born:
+            continue  # elles se sont reparlé depuis
+        address = _address(frame, person)
+        if address is None:
+            continue
+        seen.add(person)
+        name = frame.get(identity_c.IDENTITY(person)).name or "cette personne"
+        brief = (f"Tu repenses avec plaisir à ce que « {name} » t'a raconté la dernière fois : si l'envie te vient, "
+                 "dis-le-lui — un mot simple et chaleureux, sans en faire trop.")
+        guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
+        out.append(Candidate(Kind.INITIATIVE, address, c.THOUGHT, p.glad_evidence,
+                             resources=frozenset({floor(address)}), guards=(guard,),
+                             args=FrozenDict({"brief:attention": brief})))
+    return out
+
+
 @ATTENTION.propose(kinds=[Kind.INITIATIVE], reasons={c.THOUGHT: (0.0, 4.0)},
                    reads=[c.THOUGHTS, identity_c.HANDLES, identity_c.REACHABLE, identity_c.IDENTITY,
-                          presence_c.PRESENT, social_c.CLOSENESS, transcript_c.LAST_FROM])
+                          presence_c.PRESENT, social_c.CLOSENESS, social_c.CONTACT, transcript_c.LAST_FROM])
 def _insists(s: AttentionState, frame: Frame) -> list[Candidate]:
     """Une pensée forte sur quelqu'un : envie de lui en reparler. Le manque,
-    être ignorée, la solitude se ressentent — elles ne poussent pas à écrire."""
+    être ignorée, la solitude se ressentent — elles ne poussent pas à écrire.
+    Un bel échange, le lendemain : une envie faible (``_glad``)."""
     p = params(frame.env.params_of("attention", frame.root))
     out: list[Candidate] = []
     seen: set[str] = set()
@@ -214,7 +251,7 @@ def _insists(s: AttentionState, frame: Frame) -> list[Candidate]:
         guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
         out.append(Candidate(Kind.INITIATIVE, address, c.THOUGHT, evidence, resources=frozenset({floor(address)}),
                              guards=(guard,), args=FrozenDict({"brief:attention": brief})))
-    return out
+    return out + _glad(s, frame, p, seen)
 
 
 # ── Outil : relire ce qui lui trotte dans la tête (même filtre que les sections) ──

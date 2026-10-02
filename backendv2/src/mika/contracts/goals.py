@@ -49,6 +49,15 @@ VERDICTS = (CONTINUE, DONE, BLOCKED, WAIT)
 ACTIVE, WAITING, PAUSED = "active", "waiting", "paused"
 LIVE_STATUSES = (ACTIVE, WAITING, PAUSED)
 ACHIEVED, STUCK, ABANDONED, FAILED, CANCELLED = "done", "blocked", "abandoned", "failed", "cancelled"
+#: la raison d'une rêverie écrite (une curiosité sans endroit où chercher du neuf : elle a laissé son esprit
+#: vagabonder, et l'a écrit) : close « abouti », mais **rien n'est arrivé** — ni une nouvelle à raconter, ni une
+#: matière d'initiative, ni un exploit qui relève l'estime ; son journal la dit une fois, comme une rêverie
+MUSED = "rêverie"
+#: la raison d'une rêverie qui ne donne rien : elle se dissipe (abandonnée, sans rien ressentir ni rien retenir
+#: dans son journal) — rêvasser ne se rate pas, ça ne « bloque » jamais
+DISSIPATED = "rêverie dissipée"
+#: les raisons de clôture d'une rêverie, quelle qu'en soit l'issue : ce qui les lit n'a pas à recopier une chaîne
+MUSINGS = frozenset({MUSED, DISSIPATED})
 CLOSED_STATUSES = (ACHIEVED, STUCK, ABANDONED, FAILED, CANCELLED)
 
 # priorités (le vocabulaire du panneau du frontend) : elles déplacent la preuve d'un pas
@@ -102,6 +111,9 @@ class GoalOpened(Payload):
     origin: str = ""
     #: …et quand (la pensée d'où il vient est née à cet instant ; 0 : inconnu)
     origin_at: int = 0
+    #: une rêverie (un de ses centres d'intérêt, sans endroit où chercher du neuf) : elle s'y laisse aller, rien de
+    #: neuf n'arrivera — ce n'est pas « se lancer » dans quelque chose (``False`` dans un journal plus ancien)
+    musing: bool = False
 
 
 class StepReported(Payload):
@@ -172,6 +184,8 @@ class GoalView:
     tasks_total: int = 0
     tasks_done: int = 0
     tasks_blocked: int = 0
+    #: une rêverie en cours : ce n'est pas « ce sur quoi elle est » (rien de neuf ne se raconte)
+    musing: bool = False
 
 
 #: Les buts vivants (actifs ou en attente), du plus ancien au plus récent.

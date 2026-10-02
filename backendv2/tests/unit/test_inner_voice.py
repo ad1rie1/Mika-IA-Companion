@@ -103,6 +103,9 @@ def _t(day: int, hour: int, minute: int = 0) -> int:
     (_t(29, 9), _t(29, 15), "ce matin"),
     (_t(27, 15), _t(29, 9), "avant-hier"),
     (_t(24, 15), _t(29, 9), "il y a 5 jours"),
+    (_t(29, 12, 34), _t(29, 15), "ce midi"),  # midi n'est pas l'après-midi
+    (_t(28, 12, 30), _t(29, 9), "hier midi"),
+    (_t(29, 14, 10), _t(29, 17), "cet après-midi"),
 ])
 def test_when_is_said_in_calendar_days(then, now, said_):
     assert when_fr(then, now, PARIS) == said_

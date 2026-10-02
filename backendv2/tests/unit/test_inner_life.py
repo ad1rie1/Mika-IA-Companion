@@ -192,7 +192,7 @@ def test_a_charged_exchange_leaves_one_thought_that_eases_when_she_talks(tmp_pat
             p = await kernel.perceive(said("user_1", text))
             await p.reply
             await asyncio.sleep(60)
-        await asyncio.sleep(5)
+        await asyncio.sleep(11 * MINUTE / US)  # l'échange se pose : la pensée naît
         born = kernel.mind.frame().get(attention_c.THOUGHTS)
         await asyncio.sleep(40 * MINUTE / US)
         before = kernel.mind.frame().get(attention_c.THOUGHTS)
@@ -208,6 +208,32 @@ def test_a_charged_exchange_leaves_one_thought_that_eases_when_she_talks(tmp_pat
     assert eased[0].intensity < before[0].intensity * 0.6
 
 
+def test_the_thought_of_an_exchange_is_born_of_what_marked_most_once_it_settles(tmp_path):
+    """« bon ben voilà » (un peu lourd), puis « je crois que j'ai tout raté » (très lourd) : la pensée qui lui
+    reste naît quand l'échange s'est posé, et cite ce qui l'a le plus marquée — pas le premier message un peu
+    chargé (sonde réelle du 2026-10-02 : « Adrien m'a dit : « bon ben voilà » »). Pendant l'échange, rien n'est
+    encore né (contre-exemple : l'ancienne pensée naissait au premier message)."""
+    script = Script("[EMOTION:sad:0.55]")
+
+    async def scenario(kernel, script, out):
+        await connect(kernel, "user_1", "Alice")
+        await (await kernel.perceive(said("user_1", "bon ben voilà"))).reply
+        await asyncio.sleep(60)
+        script.tag = "[EMOTION:sad:0.9]"
+        await (await kernel.perceive(said("user_1", "je crois que j'ai tout raté à mon entretien"))).reply
+        await asyncio.sleep(60)
+        script.tag = "[EMOTION:sad:0.5]"
+        await (await kernel.perceive(said("user_1", "bref"))).reply
+        during = kernel.mind.frame().get(attention_c.THOUGHTS)
+        await asyncio.sleep(11 * MINUTE / US)
+        born = kernel.mind.frame().get(attention_c.THOUGHTS)
+        return during, born, kernel.mind.store.content([t.text_ref for t in born])
+
+    during, born, texts = run(tmp_path, scenario, script=script)
+    assert during == ()
+    assert len(born) == 1 and "tout raté" in next(iter(texts.values()))
+
+
 def test_a_thought_about_alice_is_not_shown_to_bob(tmp_path):
     script = Script("[EMOTION:sad:0.85]")
 
@@ -215,7 +241,7 @@ def test_a_thought_about_alice_is_not_shown_to_bob(tmp_path):
         await connect(kernel, "user_1", "Alice")
         p = await kernel.perceive(said("user_1", "CANARI-PENSEE ma mère est à l'hôpital"))
         await p.reply
-        await asyncio.sleep(5)
+        await asyncio.sleep(11 * MINUTE / US)  # l'échange se pose : la pensée naît
         script.tag = "[EMOTION:happy:0.5]"
         await connect(kernel, "user_2", "Bob")
         p = await kernel.perceive(said("user_2", "ça va toi ?"))
@@ -266,17 +292,19 @@ def test_ignored_she_doubts_a_little_and_a_late_reply_repairs_it_only_if_not_too
         ignored = kernel.mind.frame().get(attention_c.IGNORED)
         low = kernel.mind.frame().get(self_c.ESTEEM)
         await asyncio.sleep((late - 5 * MINUTE) / US)
+        before = kernel.mind.frame().get(self_c.ESTEEM)  # le temps, lui, a pu la ramener vers son équilibre
         p = await kernel.perceive(said("user_1", "oh pardon, je viens de voir ton message !"))
         await p.reply
         await asyncio.sleep(5)
-        return ignored, low, kernel.mind.frame().get(attention_c.IGNORED), kernel.mind.frame().get(self_c.ESTEEM)
+        return (ignored, low, before, kernel.mind.frame().get(attention_c.IGNORED),
+                kernel.mind.frame().get(self_c.ESTEEM))
 
-    ignored, low, after, repaired = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 9, 0))
+    ignored, low, before, after, repaired = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 9, 0))
     assert ignored >= 1 and low < 0.5
     if counts:
-        assert after == 0 and repaired > low  # une réponse tardive compte encore
+        assert after == 0 and repaired > before  # une réponse tardive compte encore
     else:
-        assert after >= 1 and repaired <= low  # trop tard : elle écrit, ce n'est plus une réponse
+        assert after >= 1 and repaired <= before + 1e-3  # trop tard : elle écrit, ce n'est plus une réponse
 
 
 def test_she_murmurs_before_speaking_up_but_not_every_time(tmp_path):

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.faculties.memory.faculty import MemoryParams
@@ -30,11 +32,14 @@ LIFE = "CE QUI SE PASSE DANS SA VIE"
 PROMISED = "CE QUE TU LUI AS PROMIS"
 
 
-def test_a_coming_moment_comes_back_before_and_after(tmp_path):
+@pytest.mark.parametrize("asked", [True, False])
+def test_a_coming_moment_comes_back_before_and_after(tmp_path, asked):
     """Lundi : « jeudi j'ai mon entretien chez Ubisoft ». Mardi, elle y pense
     (« jeudi, dans 2 jours ») ; vendredi, c'est passé : elle peut lui demander
-    comment ça s'est passé — une fois la conversation finie, elle n'y revient
-    plus. Bob, lui, n'en sait rien."""
+    comment ça s'est passé — et quand elle l'a fait (« alors, cet entretien ? »),
+    elle n'y revient plus. Contre-exemple (audit HUM-1) : l'avoir eu sous les
+    yeux sans en parler ne l'éteint pas — le moment reste, pour qu'elle le
+    demande. Bob, lui, n'en sait rien."""
 
     def extract(prompt):
         if "Ubisoft" not in prompt:
@@ -43,7 +48,12 @@ def test_a_coming_moment_comes_back_before_and_after(tmp_path):
                                 "quand": "2026-10-01", "sensibilite": "personnel",
                                 "messages": seq_of(prompt, "Ubisoft")}]}
 
-    script = Script(extract)
+    def reply(message):
+        if asked and "hello" in message:
+            return "Hello ! Alors, cet entretien, ça s'est passé comment ? [EMOTION:curious:0.5]"
+        return None
+
+    script = Script(extract, reply)
     kernel, clock, _, _out = build(tmp_path, script)
     assert AFTERNOON  # un lundi, 14 h
 
@@ -70,9 +80,15 @@ def test_a_coming_moment_comes_back_before_and_after(tmp_path):
     tuesday, friday, later = (section(p, LIFE) for p in script.replies("user_2")[-3:])
     assert "son entretien chez Ubisoft" in tuesday and "jeudi" in tuesday and "dans 2 jours" in tuesday
     assert "hier" in friday and "comment ça s'est passé" in friday
-    assert later == "", "elle en a eu l'occasion : le moment n'est plus suivi"
     assert not any("Ubisoft" in p for p in script.prompts("user_3"))
-    assert len(facts) == 1 and facts[0].followed_at > 0 and facts[0].about == ("user_2",), "le fait le dit suivi"
+    assert len(facts) == 1 and facts[0].about == ("user_2",)
+    if asked:
+        assert later == "", "elle lui a demandé : le moment n'est plus suivi"
+        assert facts[0].followed_at > 0, "le fait le dit repris"
+    else:
+        # montré, pas dit : il reste — c'est encore la chose à lui demander
+        assert "Ubisoft" in later and "c'est passé" in later
+        assert facts[0].followed_at == 0
 
 
 def test_a_promise_is_to_a_person_once_and_reads_like_a_sentence(tmp_path):

@@ -307,6 +307,46 @@ describe("mergeHistory", () => {
     expect(mine.reason).toBeUndefined();
   });
 
+  it("binds every bubble of a burst, not only the one the reply names", () => {
+    // « salut », « t'as vu le match ? », « allo ? » : une seule réponse règle
+    // les trois, et sa trame `speech` ne lie que le dernier (client_msg_id,
+    // user_message_id). Les deux premières bulles, sans id, sont « les plus
+    // récentes » pour l'ordre (+∞) : sous la réponse, pour toujours. Le
+    // serveur envoie leurs lignes juste avant la réponse (`history`
+    // `catchup`) ; elles sont adoptées par leur texte et retrouvent leur place.
+    const history = [
+      local("bonjour", "vtuber", { id: 20 }),
+      local("salut", "user", { cid: "r1", status: "sent", ts: 1 }),
+      local("t'as vu le match ?", "user", { cid: "r2", status: "sent", ts: 2 }),
+      local("allo ?", "user", { cid: "r3", status: "sent", ts: 3 }),
+    ];
+    // sans le rattrapage : la réponse lie « allo ? », les deux autres tombent sous elle
+    const unbound = history.map((m) => ({ ...m }));
+    bindServerId(unbound, "r3", 25);
+    unbound.push(local("Oui, quel match !", "vtuber", { id: 26 }));
+    expect(sortMessages(unbound).map((m) => m.text).slice(-2)).toEqual([
+      "salut",
+      "t'as vu le match ?",
+    ]);
+    // avec : les lignes du tour d'abord, puis la réponse
+    const result = mergeHistory(
+      history,
+      [entry(22, "user", "salut"), entry(23, "user", "t'as vu le match ?")],
+      MAX
+    );
+    expect(result.adopted).toBe(2);
+    expect(result.sawReply).toBe(false); // « Mika écrit… » attend toujours la réponse
+    bindServerId(result.history, "r3", 25);
+    result.history.push(local("Oui, quel match !", "vtuber", { id: 26 }));
+    expect(sortMessages(result.history).map((m) => m.text)).toEqual([
+      "bonjour",
+      "salut",
+      "t'as vu le match ?",
+      "allo ?",
+      "Oui, quel match !",
+    ]);
+  });
+
   it("tolerates a missing message list", () => {
     // A malformed frame must not take the thread down.
     const history: StoredMessage[] = [local("a", "user", { id: 1 })];
@@ -361,6 +401,13 @@ describe("ackReason", () => {
     expect(ackReason("overloaded")).toContain("saturée");
     expect(ackReason("too_long")).toContain("trop long");
     expect(ackReason("rate_limited")).toContain("messages");
+  });
+
+  it("does not call a question abandoned as too old a saturation", () => {
+    // Une question reprise au démarrage, des heures plus tard, est abandonnée
+    // (« trop tard ») : l'afficher « Mika est saturée » mentait sur la cause.
+    expect(ackReason("too_late")).toContain("trop tard");
+    expect(ackReason("too_late")).not.toContain("saturée");
   });
 });
 

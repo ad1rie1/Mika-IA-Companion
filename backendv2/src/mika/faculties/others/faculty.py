@@ -21,6 +21,15 @@
   quelques heures (et pas trop), en journée, elle lui écrit. Une fois : lui
   écrire (cette prise de nouvelles, ou la pensée inquiète qui l'a poussée à
   lui écrire avant), ou un vrai message d'elle qui va mieux, éteint l'inquiétude.
+- **Ce qu'une amie avait de prévu** : la veille au soir (ou le matin même,
+  pour un moment l'après-midi), un mot pour l'encourager, si elle ne lui a pas
+  déjà parlé ce soir-là ; quelques heures après, si elle n'a pas eu de
+  nouvelles d'elle depuis et qu'elles n'en ont pas reparlé, « alors, ça s'est
+  passé comment ? ». Une fois chacun (l'initiative qui le dit porte le moment
+  pour sujet). Jamais ce qu'un tiers a raconté d'elle.
+- **Les heures où elle écrit** : chaque message lu, rangé à son heure ; une
+  fois assez de jours vus, on sait quand elle dort et quand elle passe.
+- **« Bonne nuit »** : un message qui clôt la conversation se lit comme tel.
 
 Tout se déduit du journal : les lectures de ton sont des jugements
 enregistrés (``others.read``), le reste des événements publics des autres.
@@ -31,22 +40,24 @@ from __future__ import annotations
 import math
 import statistics
 from dataclasses import dataclass, field, replace
+from datetime import date, datetime, time
 from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict
 
+from mika.contracts import agency as agency_c
 from mika.contracts import attention as attention_c
 from mika.contracts import expression as expression_c
-from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
+from mika.contracts import memory as memory_c
 from mika.contracts import others as c
 from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
-from mika.faculties.others.tone import measure
+from mika.faculties.others.tone import closing, measure
 from mika.kernel.arbitration import Candidate, Modulation, RowView
-from mika.kernel.clock import DAY, HOUR, MINUTE, within_daily_window
+from mika.kernel.clock import DAY, HOUR, MINUTE, instant, within_daily_window
 from mika.kernel.events import Draft
 from mika.kernel.faculty import Faculty, Zone
 from mika.kernel.forms import Knob
@@ -63,6 +74,18 @@ from mika.vocab.temperament import Temperament, lerp
 OPENINGS_KEPT = 16
 #: Combien de réponses tardives on sait reconnaître.
 MISSED_KEPT = 64
+#: Les (jour, heure) où chacun a écrit, retenus au plus (distincts) : de quoi apprendre ses heures.
+HOURS_KEPT = 96
+#: Les moments dont elle a parlé d'elle-même (encourager, demander comment ça s'est passé), retenus au plus.
+SPOKE_KEPT = 128
+#: le sujet d'une initiative qui porte sur un moment de la vie de quelqu'un : ``moment:<id>``
+MOMENT_SUBJECT = "moment:"
+
+
+def moment_of(subject: str | None) -> int | None:
+    if not subject or not subject.startswith(MOMENT_SUBJECT) or not subject[len(MOMENT_SUBJECT):].isdigit():
+        return None
+    return int(subject[len(MOMENT_SUBJECT):])
 
 
 class OthersParams(BaseModel):
@@ -173,6 +196,41 @@ class OthersParams(BaseModel):
     checkin_day_end_min: Annotated[int, Knob(
         label="Prendre des nouvelles : jusqu'à", group="Prendre de ses nouvelles", lo=0, hi=24 * 60,
         help="Heure locale après laquelle elle ne le fait plus (avant le début : la plage passe minuit).")] = 22 * 60
+    # demander comment ça s'est passé
+    followup_after_us: Annotated[int, Knob(
+        label="Demander comment ça s'est passé après", group="Demander comment ça s'est passé", lo=0, hi=2 * DAY,
+        help="Ce qu'une amie lui avait dit de prévu (un entretien, un examen) : passé l'heure dite (18 h pour un "
+             "jour sans heure) et ce délai, elle a envie de savoir comment ça s'est passé — sauf si elles en ont "
+             "déjà reparlé.")] = 2 * HOUR
+    followup_until_us: Annotated[int, Knob(
+        label="… et jusqu'à", group="Demander comment ça s'est passé", lo=HOUR, hi=7 * DAY,
+        help="Au-delà, ce n'est plus d'actualité : elle n'y revient pas d'elle-même.")] = 36 * HOUR
+    followup_evidence: Annotated[float, Knob(
+        label="Preuve d'une telle question", group="Demander comment ça s'est passé", lo=0.0, hi=12.0, step=0.5,
+        help="La preuve pleine (log-odds) ; elle monte comme pour une prise de nouvelles. La retenue (pas deux "
+             "messages de suite sans réponse) s'applique.")] = 9.5
+    cheer_evidence: Annotated[float, Knob(
+        label="Encourager la veille : preuve", group="Demander comment ça s'est passé", lo=0.0, hi=12.0, step=0.5,
+        help="La veille au soir (ou le matin même, pour un moment l'après-midi), l'envie de lui souhaiter bonne "
+             "chance : plus faible que demander comment ça s'est passé — elle le fait si elle y pense. Monte depuis "
+             "l'envie du début, comme une prise de nouvelles.")] = 6.0
+    cheer_eve_start_min: Annotated[int, Knob(
+        label="Encourager la veille : à partir de", group="Demander comment ça s'est passé", lo=0, hi=24 * 60,
+        help="Heure locale (minutes depuis minuit) à partir de laquelle, la veille, elle peut lui souhaiter bonne "
+             "chance (jusqu'à la fin de ses heures pour prendre des nouvelles). Si elles se sont parlé depuis, la "
+             "conversation en était l'occasion.")] = 18 * 60
+    # les heures où elle écrit
+    hours_min_days: Annotated[int, Knob(
+        label="Ses heures : jours vus avant d'en tenir compte", group="Les heures où elle écrit", lo=2, hi=30,
+        help="Après tant de jours où la personne a écrit, elle sait à quelles heures elle écrit (et quand elle "
+             "dort) ; avant, elle lui prête une nuit ordinaire (ci-dessous).")] = 4
+    assumed_night_start_min: Annotated[int, Knob(
+        label="Nuit supposée : à partir de", group="Les heures où elle écrit", lo=0, hi=24 * 60,
+        help="Avant de connaître ses heures, elle suppose que la personne dort à partir de cette heure locale…")] = \
+        23 * 60
+    assumed_night_end_min: Annotated[int, Knob(
+        label="Nuit supposée : jusqu'à", group="Les heures où elle écrit", lo=0, hi=24 * 60,
+        help="… et jusqu'à celle-ci : sa nuit n'est pas un silence.")] = 8 * 60
     receptivity_late_weight: Annotated[float, Knob(
         label="Une réponse tardive compte pour", group="Les heures où elle répond", lo=0.0, hi=1.0, step=0.05,
         help="Une réponse arrivée après le délai attendu rattrape d'autant l'initiative restée sans réponse.")] = 0.5
@@ -249,11 +307,18 @@ class OthersState:
     concerns: FrozenDict[str, tuple[int, int, int]] = field(default_factory=FrozenDict)
     #: personne → (début de la fenêtre, contagion déjà reçue dans la fenêtre)
     contagion: FrozenDict[str, tuple[int, float]] = field(default_factory=FrozenDict)
+    #: personne → les (jour local, heure locale) où elle a écrit, distincts, les plus récents
+    hours: FrozenDict[str, tuple[tuple[int, int], ...]] = field(default_factory=FrozenDict)
+    #: les initiatives en cours qui portent sur un moment de la vie de quelqu'un (corrélation → moment)
+    moments: FrozenDict[str, int] = field(default_factory=FrozenDict)
+    #: moment → quand elle en a parlé d'elle-même (encourager, demander comment ça s'est passé) : une fois chacun
+    spoke: FrozenDict[int, int] = field(default_factory=FrozenDict)
 
 
 #: v2 : ce qui rassure se juge à la lecture ; sa propre réponse peut l'inquiéter ; la contagion.
+#: v3 : les heures où chacun écrit ; encourager la veille, demander après — une fois chacun.
 OTHERS = Faculty("others", state=OthersState, init=lambda p: OthersState(), params=OthersParams, derive=derive,
-                 state_version=2)
+                 state_version=3)
 OTHERS.declare(*c.ALL)
 
 
@@ -367,7 +432,7 @@ def _read(s: OthersState, frame: Frame, ev: Any, ports: Any) -> list[Draft[Any]]
                          surprise=round(abs(tone.valence - expected) * known, 3), concern=concern,
                          public=bool(d.public or d.room), grave=tone.grave,
                          relief=reassuring(m, tone.valence, text, p), contagion=contagion,
-                         contagion_emotion=emotion)]
+                         contagion_emotion=emotion, closing=closing(text) and not d.room)]
 
 
 def reassuring(m: Model, valence: float, text: str, p: OthersParams) -> bool:
@@ -412,6 +477,11 @@ def _learned(s: OthersState, e, cx) -> OthersState:
     p = params(cx.params)
     m = learn(s.people.get(d.person) or Model(), d.valence, d.arousal, d.message, tuple(d.cues), e.at, p)
     s = replace(s, people=s.people.set(d.person, m))
+    moment = cx.local(e.at)
+    seen = (moment.date().toordinal(), moment.hour)
+    pairs = s.hours.get(d.person, ())
+    if seen not in pairs:  # une heure d'un jour compte une fois, quel que soit le nombre de messages
+        s = replace(s, hours=s.hours.set(d.person, (*pairs, seen)[-HOURS_KEPT:]))
     if d.contagion > 0:
         start, used = s.contagion.get(d.person, (e.at, 0.0))
         if e.at - start >= p.contagion_window_us:
@@ -436,7 +506,14 @@ def _reaching_out(s: OthersState, e, cx) -> OthersState:
     openings = s.openings.set(e.correlation, d.reason)
     if len(openings) > OPENINGS_KEPT:  # les identifiants d'épisode sont chronologiques
         openings = FrozenDict(sorted(openings.items())[-OPENINGS_KEPT:])
-    return replace(s, openings=openings)
+    s = replace(s, openings=openings)
+    moment = moment_of(d.subject)
+    if moment is None:
+        return s
+    moments = s.moments.set(e.correlation, moment)
+    if len(moments) > OPENINGS_KEPT:
+        moments = FrozenDict(sorted(moments.items())[-OPENINGS_KEPT:])
+    return replace(s, moments=moments)
 
 
 #: Ce qu'elle déclare en répondant et qui dit qu'elle s'inquiète pour la personne.
@@ -477,6 +554,14 @@ def _wrote(s: OthersState, e, cx) -> OthersState:
     d = e.data
     if d.kind == Kind.REPLY and d.visible and d.target and is_identifiable(d.target) and d.room is None:
         return _worried_reply(s, e, cx)
+    moment = s.moments.get(e.correlation)
+    if moment is not None:
+        s = replace(s, moments=s.moments.delete(e.correlation))
+        if d.visible:  # elle l'a dit (encourager, demander comment ça s'est passé) : une fois
+            spoke = s.spoke.set(moment, e.at)
+            if len(spoke) > SPOKE_KEPT:  # les identifiants de moment sont chronologiques
+                spoke = FrozenDict(sorted(spoke.items())[-SPOKE_KEPT:])
+            s = replace(s, spoke=spoke)
     if d.kind != Kind.INITIATIVE or not d.visible or not d.target or not is_identifiable(d.target):
         return s
     reasons = s.openings.get(e.correlation, "").split(",")
@@ -484,8 +569,8 @@ def _wrote(s: OthersState, e, cx) -> OthersState:
     person = cx.facts.get(identity_c.PERSON(d.target))
     if REACHED & set(reasons):
         s = replace(s, concerns=s.concerns.delete(person))  # c'est fait : elle a pris de ses nouvelles
-    if social_c.GREETING in reasons or goals_c.REMIND in reasons:
-        return s
+    if (agency_c.NOT_SPEAKING_UP | c.WELL_WISHES) & set(reasons):
+        return s  # rien n'est attendu en retour : pas un délai de réponse à mesurer
     return replace(s, awaiting=s.awaiting.set(person, (e.at, channel_class(d.channel))))
 
 
@@ -546,6 +631,28 @@ def _reply_delay(s: OthersState, cx, arg: tuple[str, str]) -> c.DelayReading:
     return c.DelayReading(len(samples), int(statistics.median(samples)) if samples else 0)
 
 
+def hours_reading(pairs: tuple[tuple[int, int], ...], p: OthersParams) -> c.HoursReading:
+    """Les heures où elle écrit : une heure est « à elle » quand elle a écrit à cette heure-là, ou juste à côté,
+    un jour au moins ; son heure habituelle, celle où elle a écrit le plus de jours. Tant que trop peu de jours
+    sont vus, une nuit ordinaire (supposée) — jamais rien d'appris sur trois messages."""
+    days = len({day for day, _h in pairs})
+    if days < p.hours_min_days:
+        night = tuple(within_daily_window(h * 60 + 30, p.assumed_night_start_min, p.assumed_night_end_min)
+                      for h in range(24))
+        return c.HoursReading(days, tuple(not n for n in night), False, None)
+    counts = [0] * 24
+    for _day, h in set(pairs):
+        counts[h % 24] += 1
+    active = tuple(counts[(h - 1) % 24] + counts[h] + counts[(h + 1) % 24] > 0 for h in range(24))
+    usual = max(range(24), key=lambda h: (counts[h], -h))
+    return c.HoursReading(days, active, True, usual)
+
+
+@OTHERS.fact(c.HOURS)
+def _hours(s: OthersState, cx, person: str) -> c.HoursReading:
+    return hours_reading(s.hours.get(person, ()), params(cx.params))
+
+
 # ── Ce que ses lectures lui font ressentir ────────────────────────────────
 
 
@@ -574,10 +681,10 @@ def _read_felt(e, cx) -> list[Appraisal]:
 def _receptive(s: OthersState, frame: Frame, row: RowView) -> Modulation:
     """Écrire à quelqu'un à une heure où il répond d'habitude, plutôt qu'à une
     heure où ses messages restent sans réponse. Ni une salutation (quelqu'un
-    arrive), ni un rappel promis n'en dépendent."""
+    arrive), ni un rappel promis n'en dépendent (``agency.NOT_SPEAKING_UP``)."""
     if row.target in ("any", "none") or not is_identifiable(row.target):
         return Modulation()
-    if social_c.GREETING in row.reasons or goals_c.REMIND in row.reasons:
+    if agency_c.NOT_SPEAKING_UP & set(row.reasons):
         return Modulation()
     p = params(frame.env.params_of("others", frame.root))
     person = frame.get(identity_c.PERSON(row.target))
@@ -629,6 +736,119 @@ def _check_in(s: OthersState, frame: Frame) -> list[Candidate]:
         out.append(Candidate(Kind.INITIATIVE, address, c.CHECK_IN, round(evidence, 3),
                              resources=frozenset({floor(address)}), guards=(guard,),
                              args=FrozenDict({"brief:others": brief})))
+    return out
+
+
+def _last_from(frame: Frame, person: str) -> int:
+    handles = frame.get(identity_c.HANDLES(person)) or (person,)
+    return max(frame.get(transcript_c.LAST_FROM(h)) for h in handles)
+
+
+def _at(day: date, minutes: int, tz: Any) -> int:
+    return instant(datetime.combine(day, time(minutes // 60 % 24, minutes % 60), tzinfo=tz))
+
+
+#: une conversation depuis midi, la veille, était l'occasion de l'encourager
+CHEER_QUIET_FROM_MIN = 12 * 60
+
+
+def _cheer_window(ev: memory_c.LifeEvent, frame: Frame, p: OthersParams) -> tuple[int, int] | None:
+    """Quand lui souhaiter bonne chance : (début, depuis quand une conversation en tenait lieu). La veille au
+    soir ; ou le matin même, pour un moment à une heure dite l'après-midi (jusqu'à deux heures avant). Si elles
+    se sont parlé depuis midi la veille, la conversation en était l'occasion. ``None`` : pas pour un moment déjà
+    là, ni pour une situation."""
+    if ev.ongoing or ev.when <= frame.now:
+        return None
+    tz = frame.env.tz_of(frame.root)
+    day = frame.local(ev.when).date()
+    eve = date.fromordinal(day.toordinal() - 1)
+    quiet = _at(eve, CHEER_QUIET_FROM_MIN, tz)
+    start, end = _at(eve, p.cheer_eve_start_min, tz), _at(eve, p.checkin_day_end_min, tz)
+    if start <= frame.now <= end:
+        return start, quiet
+    if not ev.all_day and frame.local(ev.when).hour >= 12:
+        morning = _at(day, p.checkin_day_start_min, tz)
+        if morning <= frame.now <= ev.when - 2 * HOUR:
+            return morning, quiet
+    return None
+
+
+@OTHERS.propose(kinds=[Kind.INITIATIVE], reasons={c.CHEER: (0.0, 12.0)},
+                reads=[identity_c.HANDLES, identity_c.REACHABLE, identity_c.IDENTITY, presence_c.PRESENT,
+                       social_c.CLOSENESS, transcript_c.LAST_FROM, memory_c.LIFE_EVENTS])
+def _cheer(s: OthersState, frame: Frame) -> list[Candidate]:
+    """Une amie lui avait dit ce qui l'attendait (« demain, mon entretien chez Ubisoft ») : la veille au soir, un
+    mot pour l'encourager — si elles ne se sont pas déjà parlé depuis midi (la conversation en était
+    l'occasion), une fois. Plus faible que demander comment ça s'est passé : elle le fait si elle y pense.
+    Seulement ce que la personne lui a dit elle-même."""
+    p = params(frame.env.params_of("others", frame.root))
+    out: list[Candidate] = []
+    for person in sorted(s.people.keys()):
+        if frame.get(social_c.CLOSENESS(person)) not in (social_c.FRIEND, social_c.CLOSE):
+            continue
+        last = _last_from(frame, person)
+        due = [(ev, w) for ev in frame.get(memory_c.LIFE_EVENTS(person))
+               if ev.id not in s.spoke and set(ev.told_by) <= {person}
+               and (w := _cheer_window(ev, frame, p)) is not None and last < w[1]]
+        address = _address(frame, person) if due else None
+        if address is None:
+            continue
+        ev, (start, _end) = due[0]  # le plus proche
+        name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(address)).name
+        who = f"« {name} »" if name else "cette personne"
+        soon = "demain" if frame.local(ev.when).date() > frame.local().date() else "tout à l'heure"
+        brief = (f"{who[0].upper()}{who[1:]} a quelque chose d'important {soon} (tu le vois dans « CE QUI SE PASSE "
+                 "DANS SA VIE ») : si tu y penses, un petit mot pour l'encourager — simple, sans en faire une "
+                 "affaire.")
+        handles = frame.get(identity_c.HANDLES(person)) or (person,)
+        guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
+        ramp = min(1.0, (frame.now - start) / p.checkin_ramp_us)
+        evidence = p.checkin_evidence_start + (p.cheer_evidence - p.checkin_evidence_start) * ramp
+        out.append(Candidate(Kind.INITIATIVE, address, c.CHEER, round(evidence, 3),
+                             resources=frozenset({floor(address)}), guards=(guard,),
+                             args=FrozenDict({"brief:others": brief, "subject": f"{MOMENT_SUBJECT}{ev.id}"})))
+    return out
+
+
+@OTHERS.propose(kinds=[Kind.INITIATIVE], reasons={c.FOLLOW_UP: (0.0, 12.0)},
+                reads=[identity_c.HANDLES, identity_c.REACHABLE, identity_c.IDENTITY, presence_c.PRESENT,
+                       social_c.CLOSENESS, transcript_c.LAST_FROM, memory_c.LIFE_EVENTS])
+def _follow_up(s: OthersState, frame: Frame) -> list[Candidate]:
+    """Une amie lui avait dit ce qui l'attendait (un entretien jeudi à 14 h) : quelques heures après, si elles
+    n'en ont pas reparlé, elle a envie de savoir comment ça s'est passé — « alors, cet entretien ? ». Seulement
+    ce que la personne lui a dit elle-même (ce qu'un tiers a raconté d'elle, le lui demander trahirait le tiers),
+    une fois par moment. Si la personne lui a écrit depuis, c'était l'occasion : la conversation (« CE QUI SE
+    PASSE DANS SA VIE ») s'en charge, pas une initiative de plus."""
+    p = params(frame.env.params_of("others", frame.root))
+    local = frame.local()
+    if not within_daily_window(local.hour * 60 + local.minute, p.checkin_day_start_min, p.checkin_day_end_min):
+        return []
+    out: list[Candidate] = []
+    for person in sorted(s.people.keys()):
+        if frame.get(social_c.CLOSENESS(person)) not in (social_c.FRIEND, social_c.CLOSE):
+            continue
+        last = _last_from(frame, person)
+        due = [ev for ev in frame.get(memory_c.LIFE_EVENTS(person))
+               if not ev.ongoing and not ev.followed_at and set(ev.told_by) <= {person}
+               and s.spoke.get(ev.id, 0) < ev.when and last <= ev.when
+               and ev.when + p.followup_after_us <= frame.now <= ev.when + p.followup_until_us]
+        address = _address(frame, person) if due else None
+        if address is None:
+            continue
+        ev = due[-1]  # le plus récent
+        name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(address)).name
+        who = f"« {name} »" if name else "cette personne"
+        brief = (f"{who[0].upper()}{who[1:]} t'avait parlé de quelque chose de prévu (tu le vois dans « CE QUI SE "
+                 "PASSE DANS SA VIE ») : c'est passé, et tu as envie de savoir comment ça s'est passé. Un mot simple "
+                 "et spontané, comme on demande des nouvelles à quelqu'un qu'on aime bien — sans en faire une "
+                 "affaire.")
+        handles = frame.get(identity_c.HANDLES(person)) or (person,)
+        guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
+        ramp = min(1.0, (frame.now - ev.when - p.followup_after_us) / p.checkin_ramp_us)
+        evidence = p.checkin_evidence_start + (p.followup_evidence - p.checkin_evidence_start) * ramp
+        out.append(Candidate(Kind.INITIATIVE, address, c.FOLLOW_UP, round(evidence, 3),
+                             resources=frozenset({floor(address)}), guards=(guard,),
+                             args=FrozenDict({"brief:others": brief, "subject": f"{MOMENT_SUBJECT}{ev.id}"})))
     return out
 
 

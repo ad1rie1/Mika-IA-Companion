@@ -6,6 +6,10 @@ des autres lui font ressentir (évaluations déclarées). Pas de balise, ou
 ``neutral`` → aucune impulsion : « rien de particulier » ne déplace rien. Ses
 pas de travail et ses murmures ne la font pas vibrer. Le sommeil gèle le fond
 de sa journée et l'allège au réveil (ADR 0032).
+
+Des excuses sincères (``self.touched``, une fois par jour et par personne)
+ôtent une part de ce que la relation a installé d'hostile — davantage venant
+d'une amie que d'une inconnue, dont la méfiance plancher reste (ADR 0047).
 """
 
 from __future__ import annotations
@@ -17,7 +21,9 @@ from mika.contracts import affect as c
 from mika.contracts import body as body_c
 from mika.contracts import expression as expression_c
 from mika.contracts import identity as identity_c
+from mika.contracts import needs as needs_c
 from mika.contracts import runtime as rt
+from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.faculties.affect import physics as ph
 from mika.faculties.affect import prose
@@ -39,9 +45,9 @@ class AffectState:
 
 
 #: v2 : une humeur à trois couches (repos jumeau, émotion du moment, fond), des
-#: ancres mesurées depuis le repos moyen, l'attachement (ADR 0032).
+#: ancres mesurées depuis le repos moyen, l'attachement (ADR 0032). v3 : des excuses pardonnent (ADR 0047).
 AFFECT = Faculty("affect", state=AffectState, init=lambda p: AffectState(), params=AffectParams, derive=derive,
-                 state_version=2, retired_params=("declared_window_us",))
+                 state_version=3, retired_params=("declared_window_us",))
 
 #: Ni une amie ni une proche : une hostilité forte y laisse de la méfiance.
 _DISTANT = frozenset({social_c.STRANGER, social_c.ACQUAINTANCE})
@@ -120,6 +126,30 @@ def _feel(s: AffectState, appraisals: tuple[A.Appraisal, ...], e, cx) -> AffectS
     return s
 
 
+#: ni une amie ni une proche : ses excuses comptent moins (``apology_distant``)
+_FORGIVEN_FULLY = frozenset({social_c.FRIEND, social_c.CLOSE})
+
+
+@AFFECT.reducer(self_c.TOUCHED, reads=[body_c.RHYTHM, social_c.CLOSENESS])
+def _apologized(s: AffectState, e, cx) -> AffectState:
+    """Des excuses (lues par ``self`` dans la forme, une fois par jour et par
+    personne, quand il y avait de quoi pardonner) : ce que la relation avait
+    installé d'hostile en perd une part — moins venant de quelqu'un de peu
+    proche, dont la méfiance plancher reste. Un troll qui écrit « pardon mdr »
+    dix fois n'obtient rien (``self`` ne l'a pas lu comme des excuses)."""
+    d = e.data
+    if d.kind != self_c.APOLOGIZED or not d.person:
+        return s
+    stored = s.stances.get(d.person)
+    if stored is None:
+        return s
+    p = _params(cx.params)
+    share = p.apology_heal * (1.0 if cx.facts.get(social_c.CLOSENESS(d.person)) in _FORGIVEN_FULLY
+                              else p.apology_distant)
+    stance = ph.forgive(ph.advance_stance(stored, e.at, p, _clockwork(cx)), share, e.at)
+    return replace(s, stances=s.stances.set(d.person, stance))
+
+
 @AFFECT.reducer(body_c.FELL_ASLEEP, reads=[body_c.RHYTHM])
 def _asleep(s: AffectState, e, cx) -> AffectState:
     """Pendant qu'elle dort, le fond de sa journée ne bouge plus."""
@@ -137,15 +167,39 @@ def _woke(s: AffectState, e, cx) -> AffectState:
 # ── Lectures ──────────────────────────────────────────────────────────────
 
 
-def _cause(m: ph.Mood, toward: A.Vec3, now: int, p: AffectParams) -> tuple[str, str]:
-    """La plus récente impulsion qui pousse dans le sens de ce qu'elle ressent."""
+#: en deçà, ce qu'elle ressent n'a pas de sens (agréable ou non) qui départage les causes
+_VALENCE_SAID = 0.02
+
+
+def _cause(m: ph.Mood, toward: A.Vec3, now: int, p: AffectParams) -> tuple[str, str, int]:
+    """La plus récente impulsion qui pousse dans le sens de ce qu'elle ressent (cause, personne, quand) — et du
+    même côté : un soulagement n'explique pas qu'il lui reste de la mélancolie."""
     for mark in reversed(m.marks):
         emotion = A.emotion_of(mark.emotion)
         if emotion is None or not mark.cause or now - mark.at > 2 * p.fond_tau_us:
             continue
-        if A.dot(A.sub(A.ANCHORS[emotion], m.rest.position), toward) > 0:
-            return mark.cause, mark.person
-    return "", ""
+        ray = A.sub(A.ANCHORS[emotion], m.rest.position)
+        if abs(toward[0]) > _VALENCE_SAID and A.ANCHORS[emotion][0] * toward[0] < 0:
+            continue
+        if A.dot(ray, toward) > 0:
+            return mark.cause, mark.person, mark.at
+    return "", "", 0
+
+
+#: les causes qui sont des états, et ce qui y met fin : « personne ne t'a parlé » cesse d'être vrai dès qu'on lui
+#: parle ; « il ne se passe pas grand-chose », dès que quelque chose se passe (HUM-5)
+ENDED_BY_SOMEONE, ENDED_BY_ANYTHING = frozenset({"lonely"}), frozenset({"bored"})
+
+
+def over(cause: str, at: int, needs: Any) -> bool:
+    """La cause d'une humeur est-elle un état qui a pris fin depuis ?"""
+    if needs is None or not at:
+        return False
+    if cause in ENDED_BY_SOMEONE:
+        return needs.heard_at > at
+    if cause in ENDED_BY_ANYTHING:
+        return needs.idle_since > at
+    return False
 
 
 def _lingering(m: ph.Mood, fond: A.Vec3, now: int, p: AffectParams, cw: ph.Clockwork) -> Emotion:
@@ -167,7 +221,7 @@ def _lingering(m: ph.Mood, fond: A.Vec3, now: int, p: AffectParams, cw: ph.Clock
     return best if best is not Emotion.NEUTRAL else A.felt(A.add(ref, fond), ref)[0]
 
 
-def mood_reading(s: AffectState, now: int, p: AffectParams, cw: ph.Clockwork) -> c.MoodReading:
+def mood_reading(s: AffectState, now: int, p: AffectParams, cw: ph.Clockwork, needs: Any = None) -> c.MoodReading:
     m = ph.advance_mood(s.mood, now, p, cw)
     rest = m.rest.position
     fond = ph.fond_of(m, p)
@@ -175,9 +229,9 @@ def mood_reading(s: AffectState, now: int, p: AffectParams, cw: ph.Clockwork) ->
     position = A.add(moment, fond)
     felt, felt_i = A.felt(position, rest)
     label, intensity = A.label(position)
-    cause, who = _cause(m, A.sub(position, rest), now, p)
+    cause, who, at = _cause(m, A.sub(position, rest), now, p)
     return c.MoodReading(position, rest, felt, felt_i, A.felt(moment, rest)[1], label, intensity, fond, cause, who,
-                         _lingering(m, fond, now, p, cw))
+                         _lingering(m, fond, now, p, cw), over(cause, at, needs))
 
 
 def stance_reading(s: AffectState, person: str, now: int, p: AffectParams, cw: ph.Clockwork) -> c.StanceReading:
@@ -200,12 +254,12 @@ def stance_reading(s: AffectState, person: str, now: int, p: AffectParams, cw: p
     return c.StanceReading(
         person, position, rest, felt, felt_i, declared, anchor, quiet, anchored, ref,
         ph.regard_of(st.anchor, st.bond, ref, p), ph.hostility_of(st.anchor, st.bond, st.wary_until, now, ref, p),
-        st.bond, st.declared_at, st.declared_reply, lasting)
+        st.bond, st.declared_at, st.declared_reply, lasting, st.apologized_at)
 
 
-@AFFECT.fact(c.MOOD, reads=[body_c.RHYTHM])
+@AFFECT.fact(c.MOOD, reads=[body_c.RHYTHM, needs_c.NEEDS])
 def _mood(s: AffectState, cx) -> c.MoodReading:
-    return mood_reading(s, cx.now, _params(cx.params), _clockwork(cx))
+    return mood_reading(s, cx.now, _params(cx.params), _clockwork(cx), cx.facts.get(needs_c.NEEDS))
 
 
 @AFFECT.fact(c.STANCE, reads=[body_c.RHYTHM])
@@ -257,7 +311,7 @@ def _bond(s: AffectState, cx, person: str) -> float:
 
 
 def face_reading(s: AffectState, person: str, now: int, p: AffectParams, cw: ph.Clockwork) -> c.Face:
-    m = mood_reading(s, now, p, cw)
+    m = mood_reading(s, now, p, cw)  # le visage ne dit pas de cause
     stored = s.stances.get(person)
     if stored is None:
         position, declared = ph.common_home(now, p, cw), None

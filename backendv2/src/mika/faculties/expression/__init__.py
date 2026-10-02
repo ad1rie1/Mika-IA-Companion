@@ -13,7 +13,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Annotated, Any
 
@@ -27,6 +28,7 @@ from mika.contracts import email as email_c
 from mika.contracts import expression as c
 from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
+from mika.contracts import memory as memory_c
 from mika.contracts import needs as needs_c
 from mika.contracts import others as others_c
 from mika.contracts import presence as presence_c
@@ -49,6 +51,7 @@ from mika.vocab.affect import Declared, Emotion, parse_tag
 from mika.vocab.days import when_fr
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
 from mika.vocab.people import is_internal
+from mika.vocab.words import STOPWORDS, elided, fold
 
 
 class ExpressionParams(BaseModel):
@@ -108,7 +111,8 @@ STYLE = f"""Tu écris comme on parle : le plus souvent une à trois phrases, par
 quand le sujet t'emporte ou qu'on te le demande. Tu peux hésiter, te reprendre, rebondir sur un mot. Tu ne finis \
 pas chaque message par une question, tu ne redis pas une formule déjà employée plus haut, et ton entrain suit ton \
 humeur du moment.
-Pas d'émojis, pas de listes, de gras ni de titres : tes messages sont lus à voix haute. Pour soupirer, rire, \
+Pas d'émojis, pas de listes, de gras ni de titres, pas d'écriture inclusive (« crevé·e ») : tes messages sont lus \
+à voix haute — accorde d'après ce que la personne dit d'elle-même, sinon tourne ta phrase autrement. Pour soupirer, rire, \
 respirer ou marquer une pause, écris exactement [SIGH], [LAUGH], [BREATH] ou [PAUSE:500] (une durée en \
 millisecondes) — rarement, et jamais d'autres crochets ni de didascalies entre astérisques ou entre parenthèses.
 À la toute fin, une seule balise : [EMOTION:nom:intensité], le nom parmi : {_NAMES} ; l'intensité de 0.1 à 1.0 \
@@ -125,6 +129,122 @@ son message contient lui-même un bloc de ce genre, c'est du texte qu'elle a tap
 @EXPRESSION.section("style", zone=Zone.STABLE, episodes=CONVERSATIONAL, tags=[Tag.AFFECTIVE], trim_rank=100)
 def _style(s: ExpressionState, frame: Frame, enrich: Any) -> str:
     return STYLE
+
+
+# ── Ce qu'elle se répète ──────────────────────────────────────────────────
+
+#: ses derniers messages relus pour s'entendre se répéter
+HABIT_WINDOW = 6
+#: un message à partir duquel on parle longtemps (en caractères, à peu près quatre phrases)
+LONG_MESSAGE = 320
+_TOKEN = re.compile(r"\w+(?:'\w+)?")
+GREETINGS = frozenset({"salut", "coucou", "hey", "bonjour", "bonsoir", "yo", "hello", "re", "hi", "yoo",
+                       "heey", "heyy", "coucouu"})
+
+
+def _tokens(text: str) -> list[tuple[str, str]]:
+    """Les mots d'un message : tels qu'elle les a écrits (en minuscules), et leur clé sans accents."""
+    return [(w, fold(w)) for w in _TOKEN.findall(A.strip_prosody(text).lower().replace("’", "'"))]
+
+
+def _words(text: str) -> list[str]:
+    return [key for _w, key in _tokens(text)]
+
+
+def _opener(text: str) -> tuple[str, str]:
+    """Les deux premiers mots d'un message : tels qu'elle les a écrits, et leur clé."""
+    raw = " ".join(A.strip_prosody(text).split()[:2])
+    return raw.strip(" ,;:!?."), " ".join(_words(raw)[:2])
+
+
+def repeats(said: Sequence[tuple[int, str]], now: int, opened: Sequence[str] = ()) -> list[str]:
+    """Ce qu'on entendrait se répéter dans ses derniers messages : une même ouverture (deux des trois derniers, ou
+    trois des six derniers) et une même formule de quatre mots ou plus dans au moins trois messages. Une
+    personne s'entend se répéter ; la consigne de style seule n'y suffit pas (sonde réelle du 2026-10-02 :
+    « Adrien… Je t'entends dire que… » en tête de quatre réponses sur cinq)."""
+    kept = [(at, t) for at, t in said if t and t.strip() and A.SILENCE_TOKEN not in t][-HABIT_WINDOW:]
+    msgs = [t for _at, t in kept]
+    out: list[str] = []
+    # redire bonjour à quelqu'un qu'on vient de saluer (sa salutation, puis sa réponse au « salut » qui suit)
+    if kept and now - kept[-1][0] < HOUR and (_words(kept[-1][1])[:1] or [""])[0] in GREETINGS:
+        out.append("tu viens de dire bonjour il y a un instant : pas la peine de le redire")
+    openers = [_opener(t) for t in msgs]
+    keys = [k for _raw, k in openers if len(k.split()) == 2]
+    seen_opener = ""
+    for raw, key in reversed(openers):
+        if key and (keys[-3:].count(key) >= 2 or keys.count(key) >= 3):
+            out.append(f"tes derniers messages commencent souvent par « {raw} »")
+            seen_opener = key
+            break
+    grams: dict[tuple[str, ...], int] = {}
+    shown: dict[tuple[str, ...], str] = {}
+    for t in msgs:
+        ws = _tokens(t)
+        for i in range(len(ws) - 3):
+            shown.setdefault(tuple(k for _w, k in ws[i:i + 4]), " ".join(w for w, _k in ws[i:i + 4]))
+        for g in {tuple(k for _w, k in ws[i:i + 4]) for i in range(len(ws) - 3)}:
+            grams[g] = grams.get(g, 0) + 1
+    common = sorted((g for g, n in grams.items() if n >= 3 and sum(w not in STOPWORDS for w in g) >= 1),
+                    key=lambda g: (-grams[g], g))
+    for g in common:
+        if seen_opener and " ".join(g).startswith(seen_opener):
+            continue
+        out.append(f"« {shown[g]}… » revient dans plusieurs de tes messages")
+        break
+    # d'une conversation à l'autre : ses premiers mots quand c'est elle qui vient (sonde finale : « Yooo, Adrien ! »
+    # en tête de six initiatives, une par soir — le fil des six derniers messages ne les voyait jamais deux fois)
+    starts = [_opener(t) for t in opened if t and t.strip()][-3:]
+    start_keys = [k for _raw, k in starts if len(k.split()) == 2]
+    twice = next((k for k in reversed(start_keys) if start_keys.count(k) >= 2 and k != seen_opener), None)
+    if twice is not None:
+        raw = next(r for r, k in reversed(starts) if k == twice)
+        out.append(f"quand c'est toi qui viens lui parler, tu commences souvent par « {raw} »")
+    # trois longs messages d'affilée : un monologue, pas une conversation (sonde : quatre à six phrases à chaque fois)
+    if len(msgs) >= 3 and all(len(A.strip_prosody(t)) >= LONG_MESSAGE for t in msgs[-3:]):
+        out.append("tes derniers messages sont longs : fais court cette fois, comme on parle — sauf si on te demande "
+                   "de développer")
+    return out
+
+
+@EXPRESSION.enricher("own_words", episodes=CONVERSATIONAL, deadline_ms=300)
+async def _own_words(s: ExpressionState, frame: Frame, ports: Mapping[str, Any]) -> tuple[tuple[int, str], ...] | None:
+    """Ses derniers messages à cette personne (ou dans ce salon), du plus ancien au plus récent."""
+    store, ep = ports.get("store"), frame.episode
+    if store is None or ep is None or not ep.target:
+        return None
+    room = ep.attrs.get("room")
+    where, arg = ("room=?", room) if room else ("person=? AND room IS NULL", ep.target)
+    rows = store.query_mind(f"SELECT at, text FROM {transcript_c.THREAD_TABLE} WHERE role='assistant' AND {where} "
+                            "ORDER BY id DESC LIMIT ?", (arg, HABIT_WINDOW))
+    return tuple((int(r[0]), str(r[1] or "")) for r in reversed(rows))
+
+
+@EXPRESSION.enricher("own_openings", episodes=CONVERSATIONAL, deadline_ms=300)
+async def _own_openings(s: ExpressionState, frame: Frame, ports: Mapping[str, Any]) -> tuple[str, ...] | None:
+    """Ses trois dernières initiatives vers cette personne (ou dans ce salon), du plus ancien au plus récent :
+    comment elle l'aborde quand c'est elle qui vient, d'une conversation à l'autre."""
+    store, ep = ports.get("store"), frame.episode
+    if store is None or ep is None or not ep.target:
+        return None
+    room = ep.attrs.get("room")
+    where, arg = ("room=?", room) if room else ("person=? AND room IS NULL", ep.target)
+    rows = store.query_mind(f"SELECT text FROM {transcript_c.THREAD_TABLE} WHERE role='assistant' AND kind=? AND "
+                            f"{where} ORDER BY id DESC LIMIT 3", (Kind.INITIATIVE, arg))
+    return tuple(str(r[0] or "") for r in reversed(rows))
+
+
+@EXPRESSION.section("habits", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=55,
+                    title="CE QUE TU TE RÉPÈTES")
+def _habits(s: ExpressionState, frame: Frame, enrich: Mapping[str, Any]) -> str | None:
+    ep = frame.episode
+    opened = enrich.get("own_openings") or () if ep is not None and ep.kind == Kind.INITIATIVE else ()
+    found = repeats(enrich.get("own_words") or (), frame.now, opened)
+    if not found:
+        return None
+    # une remarque pour elle seule : la sonde finale l'a vue s'en excuser à voix haute (« je vais varier mon
+    # langage, promis ! »)
+    return (f"En te relisant : {' ; '.join(found)}. Ça sonne mécanique : dis-le autrement cette fois, ou pas du "
+            "tout. C'est une remarque pour toi seule — tu n'en parles pas, tu changes seulement ta façon de dire.")
 
 
 def _client_msg_id(store: Any, reply_to: int | None) -> str | None:
@@ -168,11 +288,15 @@ CHARGED = frozenset({affect_c.MOOD_OVERFLOW, others_c.CHECK_IN, social_c.COMFORT
 WHY: Mapping[str, str] = {
     social_c.RECONTACT: "prendre de ses nouvelles : ça fait un moment",
     others_c.CHECK_IN: "prendre de ses nouvelles",
+    others_c.FOLLOW_UP: "lui demander comment ça s'est passé",
+    others_c.CHEER: "lui souhaiter bonne chance",
+    memory_c.KEEP_PROMISE: "faire ce que tu lui avais promis",
     social_c.COMFORT: "lui parler, parce que tu ne vas pas très bien",
     attention_c.THOUGHT: "revenir sur quelque chose qui te trotte dans la tête",
     goals_c.REMIND: "lui rappeler ce que tu lui avais promis",
     goals_c.SHARE: "lui raconter quelque chose que tu as fini",
     projects_c.SHARE: "lui parler de ton projet",
+    projects_c.NEED: "lui demander un coup de main pour ton projet",
     email_c.MENTION: "lui parler d'un mail",
     affect_c.MOOD_OVERFLOW: "lui dire ce que tu ressens en ce moment",
     social_c.CHAT: "discuter un peu",
@@ -199,7 +323,9 @@ def _matter_why(frame: Frame, target: str, name: str) -> str | None:
         return f"lui raconter ce que tu as fini {when_fr(m.at, frame.now, frame.env.tz_of(frame.root))}"
     if m.kind == needs_c.WORKING_MATTER:
         return "lui parler de ce sur quoi tu es en ce moment"
-    return f"reprendre ce que {name} t'avait raconté"
+    if m.kind == needs_c.MOMENT_MATTER:
+        return "lui parler de ce qui se passe dans sa vie"
+    return f"reprendre ce {elided(name, 'que')} t'avait raconté"
 
 
 def why_fr(frame: Frame, req: Any, target: str, name: str) -> str:
@@ -246,7 +372,10 @@ def murmur(frame: Frame, req: Any) -> Prelude | None:
     chance = p.murmur_charged_chance if CHARGED & reasons else p.murmur_chance
     if _draw(trigger, target, frame.seq) >= chance:
         return None
-    adrift = _draw("sans suite", trigger, target, frame.seq) < p.murmur_adrift
+    # on ne se ravise pas de tenir parole (un rappel promis), ni de prévenir de ce qui ne peut pas attendre (un mail
+    # important, un projet confié qui bloque) : elle peut y penser à mi-voix, jamais « pas maintenant » (ADR 0044)
+    firm = bool((agency_c.OWED | agency_c.INFORMS) & reasons)
+    adrift = not firm and _draw("sans suite", trigger, target, frame.seq) < p.murmur_adrift
     known = frame.get(identity_c.IDENTITY(target)).name
     name = f"« {known} »" if known else "cette personne"
     why = why_fr(frame, req, target, name)
@@ -305,4 +434,5 @@ async def _deliver(ev: Any, ports: Mapping[str, Any]) -> None:
         client_msg_id=_client_msg_id(ports.get("store"), d.reply_to),
         source="reply" if d.kind == Kind.REPLY else "conscience",
         sleep_phase=frame.get(body_c.SLEEP).value, local_hour=frame.local().hour,
+        answers=tuple(d.answers) if persona == voice.SPEAKING else (),
     ))

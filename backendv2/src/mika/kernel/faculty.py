@@ -195,10 +195,11 @@ class EffectSpec:
 
     ``lane`` : ``delivery`` (la parole, les changements d'état) ou ``capability`` (un effet lent sur le monde).
     ``deadline_s`` : au-delà, le gestionnaire est coupé et la ligne réessayée plus tard. ``when(charge)`` :
-    pure ; faux, l'événement ne met rien en file (évite des lignes sans objet). ``on_interrupted(ev, ports)`` :
-    pour un effet qui ne se rejoue pas sans risque — la ligne est marquée « en cours » avant de partir, et si
-    le processus meurt pendant, au démarrage suivant ce crochet décide : ``None`` la rejoue, des brouillons
-    (l'échec dit) la closent sans la relancer."""
+    pure ; faux, l'événement ne met rien en file (évite des lignes sans objet). ``on_interrupted(ev, ports,
+    why)`` : pour un effet qui ne se rejoue pas sans risque — la ligne est marquée « en cours » avant de partir,
+    et si le processus meurt pendant (au démarrage suivant) ou si l'échéance la coupe, ce crochet décide :
+    ``None`` la rejoue, des brouillons (l'échec dit, avec ``why`` : ce qui l'a coupée) la closent sans la
+    relancer."""
 
     owner: str
     type: EventType[Any]

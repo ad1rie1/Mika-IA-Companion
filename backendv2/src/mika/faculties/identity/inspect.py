@@ -240,6 +240,8 @@ def name_aliases(s: IdentityState, person: str) -> tuple[str, ...]:
         # le prénom : personne d'autre n'a ce prénom
         if not any(o.split()[:1] == [first] for o in others if o):
             out.add(f"{NAMED}{first}")
+    # les noms qu'un opérateur lui a reliés (« l'Alice dont Bob parlait », c'était elle) : à elle, sans conteste
+    out |= {k for k, p in s.names.items() if p == person}
     return tuple(sorted(out))
 
 

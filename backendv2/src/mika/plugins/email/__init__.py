@@ -6,8 +6,11 @@
   et habitue. Le monde (les mails) reste dans le cache de l'adaptateur ; le
   journal ne garde que ce qu'elle en a remarqué. Un mail lu ailleurs (dans un
   autre client) ne lui sera plus signalé.
-- **Dire** à sa propriétaire, si elle est là, qu'un mail important est arrivé
-  (une preuve, jamais une parole forcée).
+- **Dire** à sa propriétaire, si elle est là (l'adresse qui parle en a les
+  droits), qu'un mail important est arrivé (une preuve, jamais une parole
+  forcée). Le mail annoncé est l'objet de l'initiative : il a sa section, et
+  il n'est « signalé » qu'une fois **dit** — un silence, une initiative
+  devancée, un « finalement non » le laissent à dire (ADR 0033, 0044).
 - **Lire** (outils) : lister, chercher, ouvrir — réservé à ses propriétaires **en
   privé** (jamais devant un salon, même si la propriétaire y parle), ou à
   elle-même quand elle travaille.
@@ -35,6 +38,7 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict
 
+from mika.contracts import agency as agency_c
 from mika.contracts import email as c
 from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
@@ -58,6 +62,18 @@ SENT_KEPT = 30
 DRAFTS_KEPT = 100
 #: les états d'un brouillon proposé
 WAITING, APPROVED, REFUSED, GONE, FAILED = "attend", "approuve", "refuse", "parti", "echec"
+#: l'argument d'une initiative « un mail important est arrivé » : les références qu'elle annonce (une par ligne)
+MENTION_ARG = "mail_mention"
+#: la provenance d'un mail annoncé dans le prompt (``mail:<référence>``) : l'énoncé qui la porte l'a dit
+MENTION_PROVENANCE = "mail:"
+#: au plus tant de mails annoncés à la fois (les plus importants)
+MENTION_MAX = 3
+#: le titre de la section qui montre les mails annoncés : la consigne de l'initiative y renvoie
+MENTION_TITLE = "LE MAIL IMPORTANT QUI VIENT D'ARRIVER"
+#: ce qui reste au moins de cette section quand la place manque (elle est l'objet de l'initiative)
+MENTION_FLOOR = 500
+#: les initiatives d'annonce en cours dont on retient le départ
+OPENINGS_KEPT = 16
 
 
 class EmailParams(BaseModel):
@@ -86,6 +102,12 @@ class EmailParams(BaseModel):
     mention_within_us: Annotated[int, Knob(
         label="Le dire dans les", group="Le dire", lo=10 * MINUTE, hi=2 * DAY,
         help="Passé ce délai après son arrivée, un mail important ne se signale plus de lui-même.")] = 6 * HOUR
+    mention_attempts: Annotated[int, Knob(
+        label="Essais pour le dire", group="Le dire", lo=1, hi=5,
+        help="Un mail n'est « signalé » qu'une fois dit. Une annonce à laquelle elle renonce (un silence choisi) "
+             "ou qui échoue compte comme un essai ; après autant d'essais, elle ne l'annonce plus d'elle-même (il "
+             "reste dans ses mails). Une annonce devancée (on lui écrit pendant qu'elle compose), interrompue, ou "
+             "dont elle s'est ravisée (« pas maintenant ») ne compte pas.")] = 2
     #: ce qui sort de la machine attend un accord (une politique, pas un trait)
     send_needs_approval: Annotated[bool, Knob(
         label="Un envoi attend un accord", group="Envoyer",
@@ -139,6 +161,8 @@ class Seen:
     folder: str = ""
     #: comment il a quitté ses non-lus (« lu », « ailleurs », « archivé », « répondu »…)
     how: str = ""
+    #: les annonces qui n'ont rien dit (un silence choisi, une panne) : au-delà d'un plafond, elle n'insiste pas
+    mention_attempts: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,6 +222,9 @@ class EmailState:
     asked: FrozenDict[str, AskSeen] = field(default_factory=FrozenDict)
     #: les tâches de rédaction déjà tentées, par mail
     attempts: FrozenDict[str, int] = field(default_factory=FrozenDict)
+    #: les initiatives d'annonce en cours : corrélation → (départ, mails annoncés) — un mail n'est signalé
+    #: qu'une fois dit
+    openings: FrozenDict[str, tuple[int, tuple[str, ...]]] = field(default_factory=FrozenDict)
 
 
 class MailRead(Payload):
@@ -212,7 +239,9 @@ class PollAsked(Payload):
     by: str
 
 
-EMAIL = Faculty("email", state=EmailState, init=lambda p: EmailState(), params=EmailParams, state_version=3)
+#: v4 : un mail important n'est « signalé » qu'à l'énoncé qui l'annonce (il l'était au départ de l'initiative) ;
+#: les demandes de rédaction sont élaguées (elles ne l'étaient pas en v3)
+EMAIL = Faculty("email", state=EmailState, init=lambda p: EmailState(), params=EmailParams, state_version=4)
 EMAIL.declare(*c.ALL)
 EMAIL.bundle(BUNDLE, "tes boîtes aux lettres : lister, chercher et lire ce qui est arrivé, préparer une réponse "
                      "(elle attend l'accord de la personne qui s'occupe de toi)")
@@ -277,9 +306,21 @@ def _asked(s: EmailState, e, cx) -> EmailState:
                    attempts=s.attempts.delete(d.mail))
 
 
+def announceable(s: EmailState, now: int, p: EmailParams) -> tuple[str, ...]:
+    """Les mails qu'elle a envie d'annoncer à sa propriétaire : non lus, importants, arrivés depuis peu, pas
+    encore dits ni annoncés en vain trop souvent — les plus importants d'abord (une seule définition : la
+    preuve d'initiative et le compte des essais lisent la même)."""
+    fresh = [(k, m) for k, m in s.mails.items()
+             if not m.read and not m.mentioned and m.importance >= p.mention_from
+             and 0 <= now - m.at <= p.mention_within_us and m.mention_attempts < p.mention_attempts]
+    fresh.sort(key=lambda kv: (-kv[1].importance, -kv[1].at, kv[0]))
+    return tuple(k for k, _ in fresh[:MENTION_MAX])
+
+
 @EMAIL.reducer(rt.EPISODE_STARTED)
 def _episode(s: EmailState, e, cx) -> EmailState:
-    """Dire qu'un mail est arrivé ne se fait qu'une fois ; une tâche de rédaction compte ses essais."""
+    """Une tâche de rédaction compte ses essais ; une initiative qui va annoncer un mail est retenue jusqu'à
+    son énoncé (c'est lui qui compte, pas son départ), avec les mails qu'elle annonce."""
     d = e.data
     if d.kind == Kind.TASK:
         found = task_of(d.target)
@@ -288,10 +329,50 @@ def _episode(s: EmailState, e, cx) -> EmailState:
         return replace(s, attempts=s.attempts.set(found[1], s.attempts.get(found[1], 0) + 1))
     if d.kind != Kind.INITIATIVE or c.MENTION not in d.reason.split(","):
         return s
+    openings = s.openings.set(e.correlation, (e.at, announceable(s, e.at, params(cx.params))))
+    if len(openings) > OPENINGS_KEPT:  # des épisodes jamais réglés : les identifiants sont chronologiques
+        openings = FrozenDict(sorted(openings.items())[-OPENINGS_KEPT:])
+    return replace(s, openings=openings)
+
+
+@EMAIL.reducer(rt.UTTERANCE)
+def _announced(s: EmailState, e, cx) -> EmailState:
+    """Elle l'a dit : les mails que son prompt lui annonçait (``mail:<référence>``) sont signalés — eux seuls.
+    Sans cette provenance (un énoncé d'avant cette règle), ceux que l'initiative annonçait à son départ."""
+    opening = s.openings.get(e.correlation)
+    if opening is None:
+        return s
+    s = replace(s, openings=s.openings.delete(e.correlation))
+    d = e.data
+    if not d.visible or d.kind != Kind.INITIATIVE:
+        return s
+    shown = {p[len(MENTION_PROVENANCE):] for p in d.provenance if p.startswith(MENTION_PROVENANCE)}
+    refs = shown or set(opening[1])
     mails = s.mails
-    for k, m in s.mails.items():
-        if not m.read and not m.mentioned:
-            mails = mails.set(k, replace(m, mentioned=True))
+    for ref in sorted(refs):
+        m = mails.get(ref)
+        if m is not None and not m.read and not m.mentioned:
+            mails = mails.set(ref, replace(m, mentioned=True))
+    return replace(s, mails=mails)
+
+
+@EMAIL.reducer(rt.EPISODE_ENDED, reads=[agency_c.RENOUNCED])
+def _settled(s: EmailState, e, cx) -> EmailState:
+    """Une annonce qui finit sans avoir rien dit : le mail reste à dire. Un silence choisi ou une panne compte
+    comme un essai ; une annonce devancée, interrompue, ou dont elle s'est ravisée, non (``agency.tried``)."""
+    opening = s.openings.get(e.correlation)
+    if opening is None:
+        return s
+    s = replace(s, openings=s.openings.delete(e.correlation))
+    started, refs = opening
+    renounced = cx.facts.get(agency_c.RENOUNCED(e.data.target)) if e.data.target else 0
+    if not agency_c.tried(e.data.outcome, started, renounced):
+        return s
+    mails = s.mails
+    for ref in refs:
+        m = mails.get(ref)
+        if m is not None and not m.mentioned:
+            mails = mails.set(ref, replace(m, mention_attempts=m.mention_attempts + 1))
     return replace(s, mails=mails)
 
 
@@ -429,6 +510,16 @@ def task_mail(frame: Frame) -> str:
     ep = frame.episode
     found = task_of(ep.target) if ep is not None and ep.kind == Kind.TASK else None
     return found[1] if found is not None and found[0] == "email" else ""
+
+
+def announced(frame: Frame) -> tuple[str, ...]:
+    """Les mails qu'annonce l'initiative en cours (« un mail important vient d'arriver »), tels que sa raison
+    les a choisis — vide si ce n'en est pas une."""
+    ep = frame.episode
+    if ep is None or ep.kind != Kind.INITIATIVE or c.MENTION not in (ep.attrs.get("reasons") or ()):
+        return ()
+    args = ep.attrs.get("args") or {}
+    return tuple(r for r in str(args.get(MENTION_ARG) or "").split("\n") if r)
 
 
 # les contributions : le relevé, sa voix et ce qu'elle voit, ses outils, ses tâches, la console

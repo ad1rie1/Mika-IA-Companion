@@ -42,6 +42,7 @@ from mika.sim.clock import SimClock, run_virtual
 from mika.sim.llm.persona import PersonaSimLLM, _section
 from mika.vocab.episodes import Kind, goal_target, project_target
 from tests.fixtures.atelier import Atelier
+from tests.fixtures.endings import initiative_ends
 from tests.fixtures.mika import at_paris, boot, build, connect
 
 MONDAY = at_paris(2026, 9, 28, 14, 0)
@@ -1030,3 +1031,29 @@ def test_blocked_reopened_and_blocked_again_after_the_same_number_of_runs(tmp_pa
     first, second, closed = live(tmp_path, scenario)
     assert first.status == c.BLOCKED and first.runs == second.runs  # le même compte, la même situation
     assert second.status == c.BLOCKED and len(closed) == 2
+
+
+
+# ── Ce qui compte comme un essai (BUG-8, ADR 0044) ────────────────────────
+
+
+@pytest.mark.parametrize("purpose", [c.NEED, c.SHARE])
+@pytest.mark.parametrize("ending,counts,why", [
+    (("superseded", None), False, "la personne a écrit pendant qu'elle composait"),
+    (("preempted", None), False, "interrompue"),
+    (("abstained", "after"), False, "elle s'est ravisée (« pas maintenant »)"),
+    (("abstained", None), True, "elle a choisi de se taire"),
+    (("failed", None), True, "une panne"),
+])
+def test_asking_for_help_or_telling_counts_only_real_tries(purpose, ending, counts, why):
+    """« J'ai besoin de toi pour… » devancé deux fois (la personne écrit pendant qu'elle compose) reste à dire ;
+    deux silences choisis, non."""
+    from mika.faculties.projects.faculty import Objective, Project, ProjectsState, _ended, _set, _started
+
+    o = Objective(id=1, text_ref="o", status=c.BLOCKED, closed_at=at_paris(2026, 9, 28, 14, 0), notable=0.9)
+    p = Project(id=1, title_ref="t", authority=c.USER, created_at=0, owner="user_1", objectives=(o,))
+    s = initiative_ends((_started, _ended), _set(ProjectsState(), p), params(None), purpose, subject_of(1, 1),
+                         ending)
+    got = s.projects[1].objectives[0]
+    attempts = got.ask_attempts if purpose == c.NEED else got.share_attempts
+    assert attempts == (2 if counts else 0), why

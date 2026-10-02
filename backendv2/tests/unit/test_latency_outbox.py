@@ -303,6 +303,37 @@ def test_a_non_replayable_capability_cut_by_a_crash_is_not_rerun(tmp_path):
     assert any(e.ok and e.result == "récupéré" for e in executed)
 
 
+@CAP.capability("hang", description="une commande qui ne finit pas (non rejouable)")
+async def _hang(args, context, ports):
+    RAN.append("hang")
+    await asyncio.sleep(5000)
+    return True, "fini"
+
+
+def test_a_capability_cut_by_its_deadline_says_so_not_a_crash(tmp_path):
+    """Au-delà de son échéance (900 s), une capacité est coupée : on ne sait pas si elle a eu lieu, on ne la
+    relance pas — mais il n'y a pas eu d'arrêt, et elle (comme l'opérateur) ne doit pas lire « un arrêt »."""
+    RAN.clear()
+    clock = SimClock(START)
+
+    async def main():
+        kernel, _, _ = build_toy(tmp_path, [CAP], clock=clock)
+        await kernel.start()
+        await kernel.mind.append([_propose("cap.hang")], emitter="runtime", correlation="t", origin=Origin.KERNEL)
+        await asyncio.sleep(1200)
+        executed = [e.data for e in events_of(kernel, rt.EFFECT_EXECUTED.name)]
+        rows = kernel.mind.store.query_mind("SELECT status, last_error FROM outbox WHERE effect LIKE '%proposed'")
+        await kernel.stop()
+        return executed, rows
+
+    executed, rows = run_virtual(clock, main)
+    assert RAN == ["hang"]  # pas relancée
+    assert len(executed) == 1 and not executed[0].ok
+    said_ = executed[0].result
+    assert "900 s" in said_ and "délai dépassé" in said_ and "arrêt" not in said_
+    assert rows == [("interrupted", "délai dépassé : coupée au bout de 900 s")]
+
+
 # ── KER-24 : le murmure ───────────────────────────────────────────────────
 
 

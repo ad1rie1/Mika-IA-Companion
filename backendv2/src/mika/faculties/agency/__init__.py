@@ -16,7 +16,15 @@
 - **Se raviser** : un murmure « sans suite » (elle allait écrire à quelqu'un,
   puis non) arrête l'initiative qu'il précédait.
 - La salutation et le rappel promis ne sont pas concernés — saluer
-  quelqu'un qui arrive, tenir parole, ce n'est pas « prendre la parole ».
+  quelqu'un qui arrive, tenir parole, ce n'est pas « prendre la parole » ;
+  prévenir (un mail important, un projet confié qui bloque) n'est pas
+  relancer, et être ignorée n'y change rien : seule la période réfractaire de
+  base et le plafond du jour s'y appliquent. Ce qui est dû, ce qui prévient et
+  ce qui salue est déclaré une fois, dans le contrat (``agency.OWED``,
+  ``INFORMS``, ``GREETS``).
+- **La consigne dit une raison** : la plus forte (d'après les preuves de la
+  ligne choisie), et au plus une seconde, « et aussi » — on écrit pour une
+  raison, pas pour toutes (HUM-10).
 """
 
 from __future__ import annotations
@@ -30,7 +38,6 @@ from pydantic import BaseModel, ConfigDict
 from mika.contracts import affect as affect_c
 from mika.contracts import agency as c
 from mika.contracts import attention as attention_c
-from mika.contracts import email as email_c
 from mika.contracts import expression as expression_c
 from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
@@ -60,16 +67,13 @@ OPENINGS_KEPT = 16
 HESITANT = frozenset({"abstained", "failed", "timeout"})
 #: au-delà de tant de fois sa durée, la période réfractaire ne pèse plus rien (e^-3 du recul initial)
 REFRACTORY_SPAN = 3
-#: ce qui la concerne, elle — prendre de ses nouvelles parce qu'on s'inquiète, revenir sur ce qui pèse entre vous,
-#: lui rendre ce qu'on a fait de ce qui la concernait, lui dire que le projet qu'elle lui a confié bloque sans elle,
-#: lui signaler un mail pour elle : ça n'attend pas que son dernier message ait trouvé sa réponse (mais une
-#: initiative restée sans réponse, si). Ce qui vient de Mika (l'envie de parler, son humeur, le manque) attend.
-ABOUT_THEM = frozenset({others_c.CHECK_IN, attention_c.THOUGHT, goals_c.SHARE, projects_c.SHARE, projects_c.NEED,
-                        email_c.MENTION})
-#: prévenir de ce qui ne peut pas attendre — un mail important arrivé pour sa propriétaire — n'est pas relancer
-#: quelqu'un : l'annonce passe même après une initiative restée sans réponse (elle est déjà bornée par sa source :
-#: une fois par mail, au-dessus d'un seuil d'importance) ; le plafond du jour et le recul s'y appliquent toujours
-INFORMS = frozenset({email_c.MENTION})
+#: ce qui la concerne, elle — prendre de ses nouvelles parce qu'on s'inquiète, lui demander comment s'est passé ce
+#: qu'elle avait de prévu, revenir sur ce qui pèse entre vous, lui rendre ce qu'on a fait de ce qui la concernait —
+#: et tout ce qui la prévient (``c.INFORMS``) : ça n'attend pas que son dernier message ait trouvé sa réponse (mais
+#: une initiative restée sans réponse, si — sauf pour prévenir). Ce qui vient de Mika (l'envie de parler, son
+#: humeur, le manque) attend.
+ABOUT_THEM = c.INFORMS | frozenset({others_c.CHECK_IN, others_c.FOLLOW_UP, attention_c.THOUGHT, goals_c.SHARE,
+                                    projects_c.SHARE})
 
 
 class AgencyParams(BaseModel):
@@ -120,6 +124,11 @@ class AgencyParams(BaseModel):
         label="Après un message resté sans réponse", group="Ne pas harceler", lo=0, hi=2 * DAY,
         help="Quand son dernier message à quelqu'un (une réponse, une salutation) est resté sans réponse, pas "
              "d'initiative ordinaire vers cette personne pendant cette durée.")] = 4 * HOUR
+    farewell_quiet_us: Annotated[int, Knob(
+        label="Après un au revoir", group="Ne pas harceler", lo=0, hi=DAY,
+        help="Quand la personne a clos la conversation (« bonne nuit », « je file »), pas d'initiative ordinaire vers "
+             "elle pendant cette durée, même si elle reste connectée — « t'es encore là ? » dix minutes après un au "
+             "revoir ne se fait pas. Ce qui est dû ou prévient passe.")] = 4 * HOUR
     quiet_after_question_us: Annotated[int, Knob(
         label="Après une question restée sans réponse", group="Ne pas harceler", lo=0, hi=3 * DAY,
         help="Le même délai quand ce dernier message lui posait une question : on ne repose pas la question, "
@@ -155,10 +164,11 @@ def _params(p: AgencyParams | None) -> AgencyParams:
     return p if p is not None else AgencyParams()
 
 
-def _owed(reasons: Any) -> bool:
+def _uncounted(reasons: Any) -> bool:
     """Saluer qui arrive, dire un rappel promis : ce n'est pas « prendre la
-    parole » — ni le plafond ni la période réfractaire ne s'y appliquent."""
-    return social_c.GREETING in reasons or goals_c.REMIND in reasons
+    parole » — ni le plafond ni la période réfractaire ne s'y appliquent
+    (``c.NOT_SPEAKING_UP``)."""
+    return bool(c.NOT_SPEAKING_UP & set(reasons))
 
 
 def murmur_reason(reason: str) -> tuple[str, str]:
@@ -194,7 +204,7 @@ def _said(s: AgencyState, e, cx) -> AgencyState:
         if tag == expression_c.MURMUR_ADRIFT and target:
             return replace(s, renounced=s.renounced.set(target, e.at), hesitated_at=e.at)
         return s
-    if not d.visible or _owed(reason.split(",")):
+    if not d.visible or _uncounted(reason.split(",")):
         return s
     p = _params(cx.params)
     kept = tuple(t for t in s.initiatives if e.at - t < DAY)
@@ -210,7 +220,7 @@ def _ended(s: AgencyState, e, cx) -> AgencyState:
     if reason is None:
         return s
     s = replace(s, openings=s.openings.delete(e.correlation))
-    if e.data.kind != Kind.INITIATIVE or _owed(reason.split(",")) or e.data.outcome not in HESITANT:
+    if e.data.kind != Kind.INITIATIVE or _uncounted(reason.split(",")) or e.data.outcome not in HESITANT:
         return s
     return replace(s, hesitated_at=e.at)
 
@@ -226,7 +236,8 @@ def reading(s: AgencyState, now: int, p: AgencyParams, tz: Any, ignored: int = 0
     count = sum(1 for t in s.initiatives if local(t, tz).date() == today)
     last = s.initiatives[-1] if s.initiatives else 0
     until = last + REFRACTORY_SPAN * length(s, p, ignored) if last else 0
-    return c.AgencyReading(count, last, until, s.murmured_at, s.hesitated_at)
+    base = last + REFRACTORY_SPAN * length(s, p, 0) if last else 0
+    return c.AgencyReading(count, last, until, s.murmured_at, s.hesitated_at, base)
 
 
 @AGENCY.fact(c.AGENCY, reads=[attention_c.IGNORED])
@@ -253,7 +264,7 @@ def _second_thoughts(s: AgencyState, frame: Frame) -> list[Candidate]:
 @AGENCY.modulate(kinds=[Kind.INITIATIVE], reads=[c.AGENCY, c.RENOUNCED, attention_c.AWAITING, identity_c.PERSON,
                                                  social_c.CLOSENESS, social_c.CONTACT])
 def _budget(s: AgencyState, frame: Frame, row: RowView) -> Modulation:
-    if _owed(row.reasons):
+    if _uncounted(row.reasons):
         return Modulation()
     return restraint(frame, None if row.target in (Anyone.ANY, Anyone.NONE) else row.target, row.reasons)
 
@@ -274,8 +285,8 @@ def harassing(frame: Frame, target: str, reasons: Any, p: AgencyParams) -> str |
     ce qui concerne la personne elle-même (``ABOUT_THEM``) n'attend pas la fin
     de cette retenue-là ; ce qui vient de Mika (l'envie de parler, son humeur,
     le manque), si. Rend le veto, ou ``None``."""
-    if not is_identifiable(target) or INFORMS & set(reasons):
-        return None
+    if not is_identifiable(target) or c.INFORMS & set(reasons):
+        return None  # prévenir n'est pas relancer
     person = frame.get(identity_c.PERSON(target))
     mine = frame.get(attention_c.AWAITING(person))
     if mine.initiatives >= 2:
@@ -285,6 +296,8 @@ def harassing(frame: Frame, target: str, reasons: Any, p: AgencyParams) -> str |
         if friendly and frame.now - mine.last_initiative_at >= follow_up_after(frame, person, p):
             return None  # la relance douce (la consigne le lui dit)
         return c.UNANSWERED
+    if mine.closed_at and frame.now - mine.closed_at < p.farewell_quiet_us:
+        return c.FAREWELL  # on s'est quittées : pas de « t'es encore là ? »
     if mine.unanswered and not ABOUT_THEM & set(reasons):
         quiet = p.quiet_after_question_us if mine.asked and not mine.owed else p.quiet_after_reply_us
         if frame.now - mine.last_out < quiet:
@@ -301,19 +314,23 @@ def restraint(frame: Frame, target: str | None = None, reasons: Any = ()) -> Mod
     r = frame.get(c.AGENCY)
     if r.initiatives_today >= p.daily_cap:
         return Modulation(veto=c.DAILY_CAP)
+    # prévenir de ce qui ne peut pas attendre : être ignorée n'y change rien (ni l'allongement, ni l'envie moindre,
+    # ni s'être ravisée de lui écrire pour autre chose) — le plafond et la période de base, si (ADR 0044, 0047)
+    informs = bool(c.INFORMS & set(reasons))
     if target:
         renounced = frame.get(c.RENOUNCED(target))
-        if renounced and frame.now - renounced < p.renounce_hold_us:
+        if renounced and frame.now - renounced < p.renounce_hold_us and not informs:
             return Modulation(veto=c.CHANGED_MIND)
         veto = harassing(frame, target, reasons, p)
         if veto is not None:
             return Modulation(veto=veto)
     shift = 0.0
-    if target and is_identifiable(target):
+    if target and is_identifiable(target) and not informs:
         mine = frame.get(attention_c.AWAITING(frame.get(identity_c.PERSON(target))))
         shift += p.ignored_shift * min(3, mine.ignored)
-    if r.last_initiative_at and r.refractory_until > frame.now:
-        tau = max(1, (r.refractory_until - r.last_initiative_at) / REFRACTORY_SPAN)
+    until = (r.base_until or r.refractory_until) if informs else r.refractory_until
+    if r.last_initiative_at and until > frame.now:
+        tau = max(1, (until - r.last_initiative_at) / REFRACTORY_SPAN)
         shift += p.refractory_shift * math.exp(-(frame.now - r.last_initiative_at) / tau)
     if r.hesitated_at and p.hesitation_us and frame.now - r.hesitated_at < p.hesitation_us:
         shift += p.hesitation_shift * (1.0 - (frame.now - r.hesitated_at) / p.hesitation_us)
@@ -331,7 +348,7 @@ def _name(frame: Frame, person: str) -> str:
 def holding_back(frame: Frame, target: str, reasons: Any) -> str | None:
     """Ce qu'elle se dit avant d'écrire à quelqu'un qui ne lui a pas répondu :
     une relance douce, ou ne pas revenir sur ce qui est resté sans réponse."""
-    if not is_identifiable(target) or _owed(reasons):
+    if not is_identifiable(target) or _uncounted(reasons):
         return None
     person = frame.get(identity_c.PERSON(target))
     mine = frame.get(attention_c.AWAITING(person))
@@ -374,23 +391,76 @@ def _urge(frame: Frame, target: str | None, reasons: Any) -> str | None:
             "vient, ne dis rien.")
 
 
-def brief(frame: Frame, req: Any) -> str:
-    """Le dernier tour d'une initiative : personne ne lui a écrit, c'est elle
-    qui parle — et pourquoi, dit par chaque faculté qui l'y pousse ; quand ce
-    sont ses envies, de quoi parler ; et si la personne ne lui a pas répondu,
-    la retenue que ça demande."""
-    lines: list[str] = []
+#: une seconde raison ne se dit (« et aussi ») que si elle pèse au moins cette part de la plus forte
+SECOND_REASON_SHARE = 0.5
+
+
+def _weights(req: Any) -> tuple[dict[str, float], set[str]]:
+    """Ce que pèse chaque faculté dans la ligne choisie (la somme de ses preuves), et celles qui y portent ce qui
+    est dû ou ce qui prévient (``OWED``, ``INFORMS``) : ce qu'on ne tait jamais au profit d'une autre raison."""
+    selected = getattr(req, "selected", None)
+    out: dict[str, float] = {}
+    firm: set[str] = set()
+    for source, reason, evidence in getattr(selected, "parts", ()) or ():
+        out[source] = out.get(source, 0.0) + float(evidence)
+        if reason in c.OWED | c.INFORMS:
+            firm.add(source)
+    return out, firm
+
+
+def motives(frame: Frame, req: Any) -> list[str]:
+    """Ce qui la pousse à écrire, la raison la plus forte d'abord, et au plus une seconde : on écrit pour une
+    raison, pas pour toutes — trois consignes côte à côte donnent un message qui veut tout faire (« coucou, ça va
+    pas fort, j'ai rêvassé sur le café, bref »), ou qui récite ses motifs (HUM-10). La force d'une raison, c'est
+    ce que sa faculté a apporté de preuves à la ligne choisie."""
     ep = frame.episode
     args = ep.attrs.get("args") if ep is not None else None
     reasons = tuple(ep.attrs.get("reasons") or ()) if ep is not None else ()
     target = ep.target if ep is not None else None
+    weights, firm = _weights(req)
+    # (tenir parole ou prévenir, poids, ordre, consigne)
+    found: list[tuple[bool, float, int, str]] = []
     if args:
-        for key, value in args.items():
+        for i, (key, value) in enumerate(args.items()):
+            owner = str(key)[len("brief:"):]
             if str(key).startswith("brief:") and value:
-                lines.append(f"- {value}")
-    for extra in (_overflow(frame, reasons), _urge(frame, target, reasons)):
+                found.append((owner in firm, weights.get(owner, 0.0), i, str(value)))
+    extras = ((_overflow(frame, reasons), affect_c.OWNER), (_urge(frame, target, reasons), needs_c.OWNER))
+    for i, (extra, owner) in enumerate(extras, start=len(found)):
         if extra is not None:
-            lines.append(f"- {extra}")
+            found.append((False, weights.get(owner, 0.0), i, extra))
+    found.sort(key=lambda f: (not f[0], -f[1], f[2]))
+    if not found:
+        return []
+    if not weights:  # une initiative que l'arbitre n'a pas choisie (aucune preuve à comparer) : tout se dit
+        return [text for _f, _w, _i, text in found]
+    # ce qui est dû ou prévient se dit toujours ; sinon, la plus forte, et une seconde si elle pèse assez
+    kept = [f for f in found if f[0]] or [found[0]]
+    rest = [f for f in found if f not in kept]
+    if len(kept) == 1 and rest and rest[0][1] >= SECOND_REASON_SHARE * max(kept[0][1], 1e-9):
+        kept.append(rest[0])
+    return [text if n == 0 else f"Et aussi : {_continued(text)}" for n, (_f, _w, _i, text) in enumerate(kept)]
+
+
+#: les premiers mots qui se mettent en minuscule à la suite d'« Et aussi : » (jamais un nom)
+_LOWERED = frozenset({"tu", "ton", "ta", "tes", "ce", "cette", "ça", "il", "elle", "un", "une", "le", "la", "les",
+                      "quelque", "quelqu'un", "personne"})
+
+
+def _continued(text: str) -> str:
+    head = text.split(" ", 1)[0]
+    return text[:1].lower() + text[1:] if head.lower() in _LOWERED else text
+
+
+def brief(frame: Frame, req: Any) -> str:
+    """Le dernier tour d'une initiative : personne ne lui a écrit, c'est elle
+    qui parle — et pourquoi : la raison la plus forte, au plus une seconde ;
+    quand ce sont ses envies, de quoi parler ; et si la personne ne lui a pas
+    répondu, la retenue que ça demande."""
+    ep = frame.episode
+    reasons = tuple(ep.attrs.get("reasons") or ()) if ep is not None else ()
+    target = ep.target if ep is not None else None
+    lines = [f"- {m}" for m in motives(frame, req)]
     if not lines:
         lines.append("- Rien de précis ne te pousse : écris seulement si quelque chose de vrai te vient.")
     held = holding_back(frame, target, reasons) if target else None

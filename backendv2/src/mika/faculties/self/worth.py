@@ -2,10 +2,13 @@
 (il passe sur chaque message).
 
 Un merci, un compliment qui la vise (« t'es géniale », « je t'adore »), une
-insulte qui la vise (« t'es nulle », « ta gueule »). Ce qui se dit d'autre
-chose (« ce film est nul », « merci de rien ») n'en dit rien ; la négation
-(« t'es pas nulle ») non plus. Un indice, pas un verdict : l'estime ne bouge
-que de petits coups, et la proximité de qui le dit pèse (``self``).
+insulte qui la vise (« t'es nulle », « ta gueule »), des excuses (« pardon,
+j'étais à cran, je le pensais pas »). Ce qui se dit d'autre chose (« ce film
+est nul », « merci de rien ») n'en dit rien ; la négation (« t'es pas nulle »)
+non plus ; une excuse qui rit (« pardon mdr »), une formule de politesse
+(« pardon de te déranger », « pardon ? ») ou des condoléances (« désolée pour
+ton chat ») ne sont pas des excuses. Un indice, pas un verdict : l'estime ne
+bouge que de petits coups, et la proximité de qui le dit pèse (``self``).
 """
 
 from __future__ import annotations
@@ -39,6 +42,19 @@ _TEASE = re.compile(r" (?:mdr|lol|ptdr|xd|jk|haha\w*|hihi\w*|hehe\w*|je rigole|j
 _TEASE_EMOJI = frozenset("😂🤣😜😝😛😉")
 #: « je t'aime pas », « je te déteste plus » : la négation qui suit retourne le sens
 _DENIED = frozenset({"pas", "plus", "jamais", "point"})
+_HARSH = r"(?:dur|dure|con|conne|mechant|mechante|nul|nulle|lourd|lourde|blessant|blessante|odieux|odieuse|injuste)"
+#: des excuses : ce qu'on dit quand on regrette ce qu'on a dit ou fait
+_APOLOGY = re.compile(
+    r" (?:pardon|desolee?s?|dsl|je m excuse|je vous prie de m excuser|excuse moi|excusez moi|mes excuses|"
+    r"toutes mes excuses|je le pensais pas|je ne le pensais pas|je pensais pas ce que j ai dit|"
+    r"je retire ce que j ai dit|je suis allee? trop loin|j ai ete " + _MORE + _HARSH + r"|"
+    r"c etait (?:pas sympa|mechant|nul de ma part|pas cool)) ")
+#: … et ce qui en a la forme sans en être : la politesse (« pardon de te déranger », « excuse-moi, tu sais
+#: où… »), les condoléances (« désolée pour ton chat »), « pardon ? » (« quoi ? »)
+_NOT_APOLOGY = re.compile(
+    r" (?:(?:pardon|desolee?s?|dsl|excuse moi|excusez moi) (?:de te deranger|de vous deranger|de deranger|"
+    r"pour toi|pour vous|pour ta|pour ton|pour tes|pour ce qui t arrive|d insister|mais tu sais|"
+    r"tu sais|vous savez|je peux)) ")
 
 
 def _plain(text: str) -> str:
@@ -50,13 +66,32 @@ def _said(pattern: re.Pattern[str], low: str) -> bool:
     return any(not _DENIED & set(low[m.end():].split()[:1]) for m in pattern.finditer(low))
 
 
+def _owned(low: str) -> bool:
+    """Des excuses dites, ni niées après (« désolé pas désolé ») ni avant (« je suis pas désolée »)."""
+    return any(not _DENIED & set(low[m.end():].split()[:1]) and not _DENIED & set(low[:m.start()].split()[-1:])
+               for m in _APOLOGY.finditer(low))
+
+
+def apologized(text: str) -> bool:
+    """Des excuses, dans la forme : pas en riant, pas une politesse, pas « pardon ? »."""
+    low = _plain(text)
+    if not _owned(low) or _NOT_APOLOGY.search(low):
+        return False
+    if low.strip() in ("pardon", "quoi pardon") and "?" in text:
+        return False  # « pardon ? » : « quoi ? »
+    return not (_TEASE.search(low) or set(text) & _TEASE_EMOJI)
+
+
 def touched(text: str) -> str | None:
-    """``INSULTED``, ``COMPLIMENTED``, ``THANKED`` ou ``None`` (le plus
-    souvent). Une insulte l'emporte sur le reste du message."""
+    """``INSULTED``, ``APOLOGIZED``, ``COMPLIMENTED``, ``THANKED`` ou ``None``
+    (le plus souvent). Une insulte l'emporte sur le reste du message ; des
+    excuses, sur un merci ou un compliment."""
     low = _plain(text)
     if _said(_INSULT, low):
         teasing = _TEASE.search(low) or set(text) & _TEASE_EMOJI
         return None if teasing else c.INSULTED
+    if apologized(text):
+        return c.APOLOGIZED
     if _said(_COMPLIMENT, low):
         return c.COMPLIMENTED
     if _THANKS.search(low) and not _NOT_THANKS.search(low):

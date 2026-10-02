@@ -349,6 +349,11 @@ _THINKING_END = re.compile(r"^.*?<\s*/\s*(?:thinking|think|reasoning)\s*>", re.I
 _SPEAKER = re.compile(r"^\s*(?:\*\*|__)?(?:Mika|Assistant)(?:\*\*|__)?\s*[:：]\s*", re.IGNORECASE)
 _STARRED = re.compile(r"(?<![*\w])(\*{1,2}|_)(?!\s)([^*_\n]{1,60}?)(?<!\s)\1(?![*\w])")
 _PARENS = re.compile(r"\(\s*([^()\n]{1,40}?)\s*\)")
+#: Les émojis (pictogrammes, symboles, drapeaux, sélecteurs de variante, liants) : sa parole est lue à voix haute, et
+#: la consigne de style les interdit — un modèle qui en met quand même ne les fait pas lire (sonde réelle du
+#: 2026-10-02 : « bisous Chloé ! 😊 »). Les flèches, les lettres et la ponctuation françaises ne sont pas touchées.
+_EMOJI = re.compile("[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF\U0000FE0F\U0000200D"
+                    "\U00002B50\U00002B55\U00002B1B\U00002B1C\U0000203C\U00002049]")
 _QUOTES = (("«", "»"), ("“", "”"), ('"', '"'))
 
 #: Les didascalies qui ont une voix : un rire, un soupir, une respiration.
@@ -607,7 +612,7 @@ def parse_tag(text: str) -> Tag:
         found.append(_found(tail))
     found.sort()
     clean = _cut(raw, [(s, e) for s, e, *_ in found])
-    clean = _gestures(_voice(clean))
+    clean = _EMOJI.sub("", _gestures(_voice(clean)))
     clean = _unquote(_tidy(_SPEAKER.sub("", _tidy(clean))))
     declared: Declared | None = None
     unknown: str | None = None

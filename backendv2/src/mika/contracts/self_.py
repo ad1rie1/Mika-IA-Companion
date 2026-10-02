@@ -12,7 +12,16 @@ concernent et leur sensibilité, et ne se montrent qu'à qui peut les entendre.
 
 **L'estime** est aussi un sociomètre : un merci ou un compliment d'une amie la
 relève un peu, une insulte qui la vise la blesse un peu (``self.touched``, un
-jugement lu dans la forme du message, enregistré).
+jugement lu dans la forme du message, enregistré). Des **excuses** sincères
+(lues dans la forme, une fois par jour et par personne, et seulement quand il
+y a quelque chose à pardonner) adoucissent ce que ses mots lui avaient fait —
+et ce que la relation en garde (``affect`` les lit).
+
+**Sa vie** est celle d'une IA VTuber, rédigée dans la persona : ce qu'elle
+fait à sa façon (``life``), ses goûts et avis tranchés (``tastes``), ce qui est
+vrai d'elle (``facts``) — pour qu'elle ne se contredise pas d'un jour à
+l'autre ; ses façons de dire bonjour (``greetings``) donnent le ton d'une
+salutation, sans jamais être recopiées.
 """
 
 from __future__ import annotations
@@ -52,9 +61,23 @@ class PersonaDoc(BaseModel):
     quirks: Annotated[tuple[str, ...], _lines("Manies", "Ses petites habitudes.", 60)] = ()
     vulnerabilities: Annotated[tuple[str, ...], _lines("Fragilités", "Ce qui la touche.", 70)] = ()
     values: Annotated[tuple[str, ...], _lines("Valeurs", "Ce à quoi elle tient.", 80)] = ()
-    interests: Annotated[tuple[str, ...], _lines("Centres d'intérêt", "Ce qui la passionne.", 90)] = ()
+    interests: Annotated[tuple[str, ...], _lines(
+        "Centres d'intérêt", "Ce qui la passionne. Un sujet court d'abord, puis « — » et le détail (« Le café — "
+        "snob sans en avoir jamais bu ») : le sujet seul titre ses explorations.", 90)] = ()
     speech: Annotated[tuple[str, ...], _lines("Façons de parler", "Ses tournures.", 100, "Sa parole")] = ()
-    greetings: Annotated[tuple[str, ...], _lines("Salutations", "Comment elle dit bonjour.", 110, "Sa parole")] = ()
+    greetings: Annotated[tuple[str, ...], _lines(
+        "Salutations", "Des exemples du ton de ses bonjours, montrés quand elle salue quelqu'un qui arrive — jamais "
+        "recopiés tels quels. Pas d'humeur ni d'heure dedans (« j'ai la patate », « ce soir ») : elle les "
+        "redirait à contretemps.", 110, "Sa parole")] = ()
+    life: Annotated[tuple[str, ...], _lines(
+        "Sa vie, à sa façon", "Ce qu'elle fait vraiment, en IA VTuber (jouer, regarder, lire des recettes sans "
+        "cuisiner…) : ce qu'elle raconte de son quotidien reste compatible avec ça.", 120, "Sa vie")] = ()
+    tastes: Annotated[tuple[str, ...], _lines(
+        "Ses goûts et ses avis", "Tranchés et stables : son plat préféré ne change pas d'une conversation à "
+        "l'autre.", 130, "Sa vie")] = ()
+    facts: Annotated[tuple[str, ...], _lines(
+        "Ce qui est vrai d'elle", "Sa biographie d'IA (d'où elle « vient », où elle « habite », ce qu'elle n'a "
+        "pas) : ce qu'on lui demande de base, sans qu'elle esquive ni n'invente.", 140, "Sa vie")] = ()
     timezone: Annotated[str, Knob(label="Fuseau horaire", help="Celui qu'elle vit (nom IANA : Europe/Paris, "
                                                               "America/Montreal…).", group="Identité",
                                   advanced=False, order=35)] = "Europe/Paris"
@@ -122,6 +145,9 @@ class Journaled(Payload):
     about: tuple[str, ...] = ()
     dominant: str = ""
     messages: int = 0
+    #: ce qu'elle raconterait de sa journée à n'importe qui : sa vie à elle, écrite d'après des notes où personne
+    #: d'autre n'apparaît (``None`` : un journal d'avant, qui ne se montre qu'à qui en est le seul concerné)
+    shareable: Content | None = None
 
 
 class Dreamt(Payload):
@@ -161,7 +187,7 @@ class Touched(Payload):
     person: str
     handle: str
     message: int
-    kind: str  # THANKED | COMPLIMENTED | INSULTED
+    kind: str  # THANKED | COMPLIMENTED | INSULTED | APOLOGIZED
 
 
 NIGHTMARE, PLEASANT, ASSOCIATIVE, MUNDANE = "nightmare", "pleasant", "associative", "mundane"
@@ -169,10 +195,13 @@ NIGHTMARE, PLEASANT, ASSOCIATIVE, MUNDANE = "nightmare", "pleasant", "associativ
 MELANCHOLIC = "melancholic"
 DREAM_KINDS = (NIGHTMARE, PLEASANT, MELANCHOLIC, ASSOCIATIVE, MUNDANE)
 THANKED, COMPLIMENTED, INSULTED = "thanked", "complimented", "insulted"
+#: des excuses (« pardon, je le pensais pas ») : une fois par jour et par personne, quand il y a de quoi pardonner
+APOLOGIZED = "apologized"
 
 PERSONA_REVISED = event_type("self.persona_revised", OWNER, PersonaRevised, public=True, version=2,
                              upcasters={1: _zone_repaired})
-JOURNALED = event_type("self.journaled", OWNER, Journaled, public=True, content=("text",), subjects=("about",),
+JOURNALED = event_type("self.journaled", OWNER, Journaled, public=True, content=("text", "shareable"),
+                       subjects=("about",),
                        authored=True)
 DREAMT = event_type("self.dreamt", OWNER, Dreamt, public=True, content=("text",), subjects=("about",),
                     authored=True)
@@ -192,6 +221,8 @@ class JournalReading:
     text_ref: str
     about: tuple[str, ...]
     dominant: str
+    #: sa journée à elle, sans personne d'autre (vide : un journal d'avant)
+    shareable_ref: str = ""
 
 
 @dataclass(frozen=True, slots=True)

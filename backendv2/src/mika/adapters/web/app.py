@@ -526,6 +526,10 @@ class _Session:
         )
         admission = await self.port.perceive(perception, dedupe_key=f"{c.handle}:{cid}" if cid else None)
         await self.send(protocol.ack(cid, admission.status, rejected))
+        if admission.held:
+            # elle dort : la réponse attend son réveil — « Mika écrit… » ne tourne pas pendant sa nuit
+            await self.send(protocol.silence(c.handle, self.hub.face(c.handle), user_message_id=admission.seq,
+                                             client_msg_id=cid or None, reason=protocol.ASLEEP))
         if admission.reply is not None:
             task = asyncio.ensure_future(self._watch(admission, cid or None))
             self._watchers.add(task)

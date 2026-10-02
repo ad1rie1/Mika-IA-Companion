@@ -29,9 +29,19 @@ merci truc trucs genre vraiment juste toujours jamais maintenant aujourd hier de
 """.split())
 
 
+#: Les mots d'une salutation ou d'une clôture (repliés) : « salut ! », « bonne nuit » sont courts par nature, pas
+#: froids.
+SALUTATIONS = frozenset("""
+salut coucou hey heey yo yop re bonjour bonsoir hello hi bonne nuit soiree journee bisous bises bisou ciao bye
+plus tard demain dodo merci toi vous tout le monde mika
+""".split())
+
+
 def fold(text: str) -> str:
-    """Casse et accents repliés."""
-    return "".join(c for c in unicodedata.normalize("NFKD", text.lower()) if not unicodedata.combining(c))
+    """Casse et accents repliés ; les ligatures dépliées (« sœur » → « soeur », sinon elle ne recoupait jamais
+    rien : NFKD ne les décompose pas)."""
+    text = text.lower().replace("œ", "oe").replace("æ", "ae")
+    return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
 
 
 def words(text: str, *, min_len: int = 3) -> list[str]:
@@ -43,3 +53,15 @@ def stems(text: str, *, min_len: int = 4, width: int = 6) -> set[str]:
     """Des radicaux grossiers (les ``width`` premières lettres) : « rechute »
     ≈ « rechuté », « mariage » ≈ « mariages »."""
     return {w[:width] for w in words(text, min_len=min_len)}
+
+
+def elided(word: str, before: str) -> str:
+    """« de » / « que » devant un mot, élidés devant une voyelle ou un h (« d'Adrien », « qu'Hugo », « de
+    Chloé ») ; un nom entre guillemets (« de « Adrien » ») ne s'élide pas."""
+    folded = fold(word.strip())
+    head = folded[:1]
+    # un y devant une voyelle se prononce comme une consonne : « de Yanis », mais « d'Yves »
+    vowel = head in "aeiouh" or (head == "y" and folded[1:2] not in ("", *"aeiou"))
+    if head and vowel and before in ("de", "que"):
+        return f"{before[:-1]}'{word.strip()}"
+    return f"{before} {word}"

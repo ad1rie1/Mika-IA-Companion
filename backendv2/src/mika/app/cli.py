@@ -15,14 +15,17 @@
   (jeton chiffré ; fermé par défaut : liste blanche et propriétaires) ;
 - ``serve --origin URL --cookie-secure --behind-proxy`` : derrière un mandataire TLS ;
 - ``console apercu --out DOSSIER`` : chaque page de la console, exportée ;
-- ``identity link|unlink`` et ``social closeness`` : ce qu'un opérateur sait
-  mieux qu'elle (serveur arrêté : une seule écriture à la fois dans ``mind.db``).
+- ``identity link|unlink``, ``social closeness`` et ``forge promote|demote`` : ce
+  qu'un opérateur sait mieux qu'elle (serveur arrêté : une seule écriture à la fois
+  dans ``mind.db``). Ce sont les actions de la console, par le même chemin
+  (``runtime/operations.py``) : mêmes refus, même garde, même audit.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib.util
 import json
 import os
 import subprocess
@@ -32,7 +35,7 @@ import time
 from pathlib import Path
 
 from mika.adapters.llm.claude_code import FORBIDDEN, ClaudeCodeBackend, ClaudeCodeError, runtime_dir
-from mika.adapters.llm.config import BackendSpec, LLMConfig
+from mika.adapters.llm.config import BackendSpec, LLMConfig, build_backend
 from mika.adapters.mail import LEGACY_ACCOUNT
 from mika.adapters.mcp.relay import Relay
 from mika.adapters.store_sqlite import SqliteStore
@@ -44,17 +47,25 @@ from mika.app.composition import faculties, for_simulation
 from mika.app.server import serve
 from mika.app.settings import SecretBox, Settings
 from mika.contracts import identity as identity_c
-from mika.contracts import social as social_c
+from mika.kernel import forms
 from mika.kernel.codec import digest
+from mika.kernel.events import Origin
+from mika.kernel.inspect import Head
 from mika.kernel.registry import Registry
-from mika.plugins.forge import SWITCHED
 from mika.ports.llm import LLMRequest, Message
+from mika.runtime import operations
 from mika.runtime.bootstrap import Kernel
+from mika.runtime.inspection import Inspection
 from mika.runtime.mind import Mind
 from mika.runtime.state import RUNTIME
 from mika.sim.catalog import run_lane
 from mika.sim.report import write as write_report
 from mika.sim.selftest import run as sim_selftest
+from mika.sim.sonde import run_probe
+from mika.vocab.people import is_identifiable
+
+#: qui opère depuis la ligne de commande (l'audit ``runtime.operated`` le dit)
+CLI_BY = "ligne de commande"
 
 
 def _mind(data: Path, *, snapshot_every: int = 500) -> Mind:
@@ -102,24 +113,112 @@ async def rebuild(data: Path, owners: list[str]) -> dict[str, object]:
     return report
 
 
-async def forget(data: Path, subject: str) -> dict[str, object]:
-    """L'oubli, comme la console le fait : par ``Kernel.forget`` — contenus et
-    projections, traces d'épisode, et tout port qui garde une trace dérivée
-    (l'index des vecteurs). Rien ne démarre : aucun processus, aucun modèle."""
+async def _offline(data: Path, *, vectors: bool = False) -> Kernel:
+    """Un noyau relu, rien de vivant : aucun processus, aucun modèle (serveur arrêté)."""
     datadir.hold(data)  # serveur arrêté : une seule écriture à la fois
     store = SqliteStore(data / "mind.db", data / "views.db", threaded=False)
-    vectors = SqliteVectorIndex(store, SentenceEmbedder())  # le modèle ne se charge qu'à un plongement : jamais ici
-    kernel = Kernel(composition.deps(store=store, clock=RealClock(), ids=RandomIdGen(), ports={"vectors": vectors}))
+    ports: dict[str, object] = {}
+    if vectors:  # le modèle ne se charge qu'à un plongement : jamais ici
+        ports["vectors"] = SqliteVectorIndex(store, SentenceEmbedder())
+    kernel = Kernel(composition.deps(store=store, clock=RealClock(), ids=RandomIdGen(), ports=ports))
     try:
         await kernel.mind.boot(append_boot=False)
-        await vectors.open()
-        await kernel.traces.open()
-        report = await kernel.forget(subject)
-    finally:
-        await kernel.mind.close()
+    except BaseException:
         datadir.release(data)
-    return {"sujet": subject, "contenus_effacés": report.get("contents", 0), "traces_effacées": report.get("traces", 0),
-            "vecteurs_effacés": report.get("vectors", 0)}
+        raise
+    return kernel
+
+
+async def _close(kernel: Kernel, data: Path) -> None:
+    try:
+        await kernel.mind.close()
+    finally:
+        datadir.release(data)
+
+
+async def forget(data: Path, subject: str) -> dict[str, object]:
+    """L'oubli, comme la console le fait (``operations.forget_subject``) : la clé et tout ce qui
+    la désigne — pour une personne, ses autres adresses et les noms qui ne désignent qu'elle —,
+    contenus et projections, traces d'épisode, et tout port qui garde une trace dérivée (l'index
+    des vecteurs). Audité. Rien ne démarre : aucun processus, aucun modèle."""
+    kernel = await _offline(data, vectors=True)
+    try:
+        await kernel.deps.ports["vectors"].open()
+        await kernel.traces.open()
+        kinds = sorted(k for k, spec in kernel.registry.subjects.items() if spec.forgettable)
+        ins = Inspection(kernel)
+        kind = next((k for k in kinds if isinstance(ins.head(k, subject), Head)), "")
+        gone = await operations.forget_subject(kernel, kind, subject, by=CLI_BY, action=f"cli.oublier.{kind or 'cle'}")
+    finally:
+        await _close(kernel, data)
+    return {"sujet": subject, "clés": list(gone.keys), "contenus_effacés": gone.counts.get("contents", 0),
+            "traces_effacées": gone.counts.get("traces", 0), "vecteurs_effacés": gone.counts.get("vectors", 0)}
+
+
+async def _perform(kernel: Kernel, key: str, subject: str, values: dict[str, str]) -> dict[str, object]:
+    spec = kernel.registry.actions.get(key)
+    if spec is not None and not operations.offered(kernel, spec, subject):
+        return {"ok": False, "message": f"Pas possible sur « {subject} » : {spec.description}".strip()}
+    form = {forms.RENDERED: list(values), **{k: [v] for k, v in values.items()}}
+    out = await operations.perform(kernel, key, form, by=CLI_BY, subject=subject)
+    got: dict[str, object] = {"ok": out.ok and not out.deduped, "message": out.message}
+    if out.errors:
+        got["erreurs"] = dict(out.errors)
+    if out.seqs:
+        got["seq"] = out.seqs[-1]
+    return got
+
+
+async def operate(data: Path, key: str, subject: str, values: dict[str, str]) -> dict[str, object]:
+    """Une action d'opérateur de la console (``faculté.action``), par le même chemin qu'elle
+    (``operations.perform``) : ce qu'elle refuserait est refusé, en le disant ; rien ne dit « ok »
+    sans effet ; l'audit ``runtime.operated`` est écrit. La commande tapée vaut confirmation."""
+    kernel = await _offline(data)
+    try:
+        return await _perform(kernel, key, subject, values)
+    finally:
+        await _close(kernel, data)
+
+
+async def _prelink(kernel: Kernel, handle: str, person: str) -> dict[str, object]:
+    """Relier une adresse qui n'a encore jamais écrit (un compte Telegram qu'on attend) : la console
+    n'en a pas la fiche, le réducteur l'accepte. Seulement vers une personne connue, par sa clé ;
+    jamais une adresse interne ou jetable. Audité."""
+    frame = kernel.mind.frame()
+    root = frame.get(identity_c.PERSON(person))
+    if not is_identifiable(handle):
+        return {"ok": False, "message": f"« {handle} » n'est pas une adresse durable : on ne la relie pas."}
+    if not frame.get(identity_c.IDENTITY(person)).known or not is_identifiable(root):
+        return {"ok": False, "message": f"Personne inconnue : « {person} ». Donne la clé d'une personne connue "
+                                        "(une de ses adresses, ex. user_2)."}
+    draft = identity_c.LINKED.draft(handle=handle, person=root, by="operator")
+    commit = await kernel.mind.append([draft], emitter=identity_c.OWNER, correlation="opérateur:cli.identity",
+                                      origin=Origin.EXTERNAL)
+    seqs = tuple(commit.seqs)
+    await operations.audit(kernel, "cli.identity.relier", by=CLI_BY, subject_kind="handle", subject=handle, seqs=seqs)
+    return {"ok": True, "message": f"« {handle} » parlera pour {root} dès qu'elle écrira.",
+            "seq": seqs[-1] if seqs else None}
+
+
+async def identity_command(data: Path, cmd: str, handle: str, person: str | None) -> dict[str, object]:
+    """``identity link|unlink`` : l'action de la console sur une adresse connue (mêmes refus : jamais
+    une session authentifiée, que le réducteur ignorerait) ; une adresse jamais vue ne peut qu'être
+    reliée d'avance."""
+    kernel = await _offline(data)
+    try:
+        view = kernel.mind.frame().get(identity_c.IDENTITY(handle))
+        if cmd == "link" and person is not None:
+            if view.authenticated:
+                return {"ok": False, "message": "Une session authentifiée prouve déjà qui écrit : on ne la relie "
+                                                "à personne."}
+            if not view.known:
+                return await _prelink(kernel, handle, person)
+            return await _perform(kernel, "identity.relier", handle, {"person": person, "confirmed": "1"})
+        if not view.known:
+            return {"ok": False, "message": f"Adresse inconnue : « {handle} »."}
+        return await _perform(kernel, "identity.delier", handle, {})
+    finally:
+        await _close(kernel, data)
 
 
 async def _with_settings(data: Path, fn):  # type: ignore[no-untyped-def]
@@ -131,6 +230,30 @@ async def _with_settings(data: Path, fn):  # type: ignore[no-untyped-def]
         return await fn(settings, store)
     finally:
         await store.close()
+
+
+def _sonde(data: Path, args: argparse.Namespace) -> int:
+    """Une semaine de sa vie avec le vrai modèle configuré dans ``data`` (sans y écrire : la semaine vit à part,
+    dans ``--out``)."""
+    cfg = asyncio.run(_with_settings(data, _llm_of))
+    name = args.backend or cfg.routes.get("reply", "")
+    spec = cfg.backends.get(name)
+    if spec is None:
+        print(f"Aucun fournisseur « {name or '(rôle reply)'} » : déclare-le avec « mika llm backend » d'abord.")
+        return 2
+    if spec.kind == "claude_code":
+        print("La sonde ne passe pas par Claude Code : son relais d'outils ne vit que dans le serveur.")
+        return 2
+    # le vrai modèle de plongements quand il est installé (la mémoire rappelle comme en service), sinon le hachage
+    embedder = SentenceEmbedder() if importlib.util.find_spec("sentence_transformers") else None
+    out = run_probe(for_simulation(), build_backend(name, spec), args.out, embedder=embedder)
+    print((out / "bilan.txt").read_text(), end="")
+    print(f"la semaine : {out / 'fil.txt'}")
+    return 0
+
+
+async def _llm_of(settings: Settings, store: object) -> LLMConfig:
+    return settings.llm()
 
 
 async def llm_command(data: Path, args: argparse.Namespace) -> dict[str, object]:
@@ -291,18 +414,6 @@ async def world_command(data: Path, args: argparse.Namespace) -> dict[str, objec
     return await _with_settings(data, run)
 
 
-async def operator_event(data: Path, draft, emitter: str) -> dict[str, object]:  # type: ignore[no-untyped-def]
-    from mika.kernel.events import Origin  # noqa: PLC0415
-
-    mind = _mind(data)
-    await mind.boot(append_boot=False)
-    try:
-        commit = await mind.append([draft], emitter=emitter, correlation="opérateur", origin=Origin.EXTERNAL)
-    finally:
-        await mind.close()
-    return {"ok": True, "seq": commit.seqs[-1] if commit.seqs else None}
-
-
 def main(argv: list[str] | None = None) -> int:
     try:
         return _run(argv)
@@ -319,12 +430,15 @@ def _run(argv: list[str] | None) -> int:
     rp.add_argument("--verify", action="store_true")
     rb = sub.add_parser("rebuild")
     rb.add_argument("owners", nargs="+")
-    fg = sub.add_parser("forget")
-    fg.add_argument("subject")
-    sm = sub.add_parser("sim")
-    sm.add_argument("action", choices=["selftest", "run"])
+    fg = sub.add_parser("forget", help="oublier quelqu'un (serveur arrêté), comme la console")
+    fg.add_argument("subject", help="sa clé ou l'une de ses adresses : elle est oubliée avec toutes ses adresses "
+                                    "et les noms qui ne désignent qu'elle")
+    sm = sub.add_parser("sim", help="le simulateur ; « sonde » : une semaine de sa vie avec le vrai modèle configuré")
+    sm.add_argument("action", choices=["selftest", "run", "sonde"])
     sm.add_argument("--lane", default="quick", choices=["quick"])
     sm.add_argument("--report", type=Path, default=Path("sim-reports"))
+    sm.add_argument("--out", type=Path, default=Path("sonde"), help="sonde : où écrire la semaine (vidé d'abord)")
+    sm.add_argument("--backend", default="", help="sonde : le fournisseur (défaut : celui qui répond, rôle reply)")
     sv = sub.add_parser("serve")
     sv.add_argument("--port", type=int, default=8001)
     sv.add_argument("--host", default="127.0.0.1")
@@ -465,6 +579,18 @@ def _run(argv: list[str] | None) -> int:
     if args.cmd == "forget":
         print(json.dumps(asyncio.run(forget(args.data, args.subject)), ensure_ascii=False))
         return 0
+    if args.cmd in ("identity", "social", "forge"):
+        if args.cmd == "identity":
+            out = asyncio.run(identity_command(args.data, args.id_cmd, args.handle,
+                                               args.person if args.id_cmd == "link" else None))
+        elif args.cmd == "social":
+            out = asyncio.run(operate(args.data, "social.proximite", args.person,
+                                      {"closeness": args.level, "confirmed": "1"}))
+        else:
+            action = "forge.promouvoir" if args.forge_cmd == "promote" else "forge.retrograder"
+            out = asyncio.run(operate(args.data, action, args.app, {}))
+        print(json.dumps(out, ensure_ascii=False))
+        return 0 if out["ok"] else 1
     if args.cmd == "sim" and args.action == "run":
         with tempfile.TemporaryDirectory() as tmp:
             results = run_lane(for_simulation(), Path(tmp))
@@ -476,6 +602,8 @@ def _run(argv: list[str] | None) -> int:
                     print(f"    ✘ {c.name} : {c.detail}")
         print(f"rapport : {path}")
         return 0 if all(r.ok for r in results) else 1
+    if args.cmd == "sim" and args.action == "sonde":
+        return _sonde(args.data, args)
     if args.cmd == "sim":
         out = sim_selftest()
         print(json.dumps(out, ensure_ascii=False))
@@ -522,11 +650,6 @@ def _run(argv: list[str] | None) -> int:
     if args.cmd == "telegram":
         print(json.dumps(asyncio.run(telegram_command(args.data, args)), ensure_ascii=False))
         return 0
-    if args.cmd == "identity":
-        person = args.person if args.id_cmd == "link" else None
-        draft = identity_c.LINKED.draft(handle=args.handle, person=person, by="operator")
-        print(json.dumps(asyncio.run(operator_event(args.data, draft, "identity")), ensure_ascii=False))
-        return 0
     if args.cmd == "mcp":
         async def mcp_token(settings: Settings, store) -> dict[str, object]:  # type: ignore[no-untyped-def]
             token = await settings.new_console_mcp_token()
@@ -544,15 +667,6 @@ def _run(argv: list[str] | None) -> int:
         return 0
     if args.cmd in ("mail", "rss", "stt"):
         print(json.dumps(asyncio.run(world_command(args.data, args)), ensure_ascii=False, indent=2))
-        return 0
-    if args.cmd == "forge":
-        draft = SWITCHED.draft(app=args.app, state=f"{args.forge_cmd}d", reason="opérateur")
-        print(json.dumps(asyncio.run(operator_event(args.data, draft, "forge")), ensure_ascii=False))
-        return 0
-    if args.cmd == "social":
-        level = "" if args.level == "auto" else args.level
-        draft = social_c.CLOSENESS_SET.draft(person=args.person, closeness=level, by="operator")
-        print(json.dumps(asyncio.run(operator_event(args.data, draft, "social")), ensure_ascii=False))
         return 0
     return 2
 

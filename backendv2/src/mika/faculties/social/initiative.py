@@ -3,23 +3,29 @@ quelqu'un qui manque, chercher du réconfort — et la retenue.
 
 - **Saluer** : à l'arrivée (dans les dix minutes), une fois par heure et par
   personne, jamais quelqu'un qui a déjà écrit depuis son arrivée, ni quelqu'un
-  avec qui on parlait il y a moins d'une demi-heure (une reconnexion n'est
-  pas une arrivée).
+  avec qui on parlait il y a moins d'une demi-heure. Une reconnexion n'est
+  pas une arrivée : il faut une absence d'au moins une heure (``away_us``) —
+  un onglet rechargé, une coupure, un redémarrage d'elle ne font pas revenir
+  quelqu'un qui n'était pas parti.
 - **Le manque** se mesure au rythme de *cette* relation : un ami qui écrit
   tous les deux jours manque après trois jours de silence, un ami mensuel pas
   avant six semaines. Seulement une amie ou un proche, joignable, en journée.
 - **Le réconfort** : quand elle va nettement mal, vers la personne auprès de
   qui elle se sent bien.
-- **La retenue** : rien vers quelqu'un qui a installé une rancune. Ne pas
-  harceler quelqu'un qui ne répond pas (plus d'initiative ordinaire tant qu'il
-  n'a pas écrit, une seule relance douce après un long délai) est la règle
-  du budget d'initiatives (``agency``, ADR 0033), qui vaut pour toutes les
-  raisons à la fois.
+- **La retenue** : rien d'ordinaire vers quelqu'un qui a installé une
+  rancune, pas même une salutation. Mais tenir parole (un rappel promis,
+  ``agency.OWED``) ne dépend pas de ce qu'elle ressent, et prévenir (un mail
+  important, un projet confié qui bloque, ``agency.INFORMS``) n'est que
+  décalé. Ne pas harceler quelqu'un qui ne répond pas (plus d'initiative
+  ordinaire tant qu'il n'a pas écrit, une seule relance douce après un long
+  délai) est la règle du budget d'initiatives (``agency``, ADR 0033), qui vaut
+  pour toutes les raisons à la fois.
 """
 
 from __future__ import annotations
 
 from mika.contracts import affect as affect_c
+from mika.contracts import agency as agency_c
 from mika.contracts import identity as identity_c
 from mika.contracts import presence as presence_c
 from mika.contracts import social as c
@@ -79,10 +85,11 @@ def _guard(frame: Frame, person: str) -> Guard:
 
 @SOCIAL.propose(kinds=[Kind.INITIATIVE], reasons={c.GREETING: (0.0, GREETING_EVIDENCE), c.PRESENT_PERSON: (0.0, 0.0)},
                 reads=[presence_c.PRESENT, presence_c.SINCE, identity_c.PERSON, identity_c.IDENTITY,
-                       transcript_c.LAST_FROM, transcript_c.LAST_TO])
+                       transcript_c.LAST_FROM, transcript_c.LAST_TO, affect_c.HOSTILITY])
 def _arrivals(s: SocialState, frame: Frame) -> list[Candidate]:
     out: list[Candidate] = []
     now = frame.now
+    p = params(frame.env.params_of("social", frame.root))
     for handle in frame.get(presence_c.PRESENT):
         if is_internal(handle):
             continue
@@ -96,9 +103,14 @@ def _arrivals(s: SocialState, frame: Frame) -> list[Candidate]:
         last = max(frame.get(transcript_c.LAST_FROM(handle)), frame.get(transcript_c.LAST_TO(handle)))
         if last >= since - RECENT_CONVERSATION:
             continue
+        left = s.left.get(handle)
+        if left and since - left < p.away_us:
+            continue  # elle n'était pas partie : un onglet rechargé, une coupure, un redémarrage d'elle
         person = frame.get(identity_c.PERSON(handle))
         if now - s.greeted.get(person, -GREETING_SPACING) < GREETING_SPACING:
             continue
+        if grudging(frame.get(affect_c.HOSTILITY(person)), p):
+            continue  # pas même une salutation (la retenue le dit aussi : son veto reste sur la ligne)
         name = frame.get(identity_c.IDENTITY(handle)).name
         brief = (f"« {name} » vient d'arriver : salue « {name} » à ta façon, en une phrase ou deux." if name else
                  "Quelqu'un vient d'arriver : salue cette personne à ta façon, en une phrase ou deux.")
@@ -180,13 +192,21 @@ def _in_conversation(s: SocialState, frame: Frame, row: RowView) -> Modulation:
 
 @SOCIAL.modulate(kinds=[Kind.INITIATIVE], reads=[identity_c.PERSON, affect_c.HOSTILITY])
 def _restraint(s: SocialState, frame: Frame, row: RowView) -> Modulation:
-    """Rien vers quelqu'un qui a installé une rancune — même pas une salutation.
-    (Ne pas harceler quelqu'un qui ne répond pas, quelle que soit la raison, est
-    la retenue du budget d'initiatives : ``agency``.)"""
+    """Rien d'ordinaire vers quelqu'un qui a installé une rancune — même pas
+    une salutation. Tenir parole (``agency.OWED`` : le rappel qu'il lui a
+    demandé) n'en dépend pas ; prévenir (``agency.INFORMS``) n'est que décalé :
+    on prévient quelqu'un même fâchée contre lui, sans se presser. (Ne pas
+    harceler quelqu'un qui ne répond pas, quelle que soit la raison, est la
+    retenue du budget d'initiatives : ``agency``.)"""
     if row.target in ("any", "none") or not is_identifiable(row.target):
         return Modulation()
     p = params(frame.env.params_of("social", frame.root))
     person = frame.get(identity_c.PERSON(row.target))
-    if grudging(frame.get(affect_c.HOSTILITY(person)), p):
-        return Modulation(veto=c.GRUDGE)
-    return Modulation()
+    if not grudging(frame.get(affect_c.HOSTILITY(person)), p):
+        return Modulation()
+    reasons = set(row.reasons)
+    if agency_c.OWED & reasons:
+        return Modulation()
+    if agency_c.INFORMS & reasons:
+        return Modulation(shift=p.grudge_inform_shift) if p.grudge_inform_shift else Modulation()
+    return Modulation(veto=c.GRUDGE)

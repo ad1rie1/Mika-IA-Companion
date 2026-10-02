@@ -402,11 +402,17 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                                                                "vit (ses nuits, ses salutations en dépendent)."),
                             SettingsPage("parole", "Ton et parole", ("tone", "speech", "greetings"), order=20,
                                          facts=False, description="Comment elle parle : son ton général, ses "
-                                                                  "tournures, ses façons de dire bonjour."),
+                                                                  "tournures, le ton de ses bonjours (des "
+                                                                  "exemples, jamais recopiés)."),
                             SettingsPage("caractere", "Caractère",
                                          ("traits", "quirks", "vulnerabilities", "values", "interests"), order=30,
                                          facts=False, description="Ce qui la définit, la touche et la passionne : "
                                                                   "une phrase par ligne."),
+                            SettingsPage("vie", "Sa vie", ("life", "tastes", "facts"), order=40, facts=False,
+                                         description="Sa vie d'IA VTuber, rédigée : ce qu'elle fait à sa façon, "
+                                                     "ses goûts et avis tranchés, ce qui est vrai d'elle. Ce "
+                                                     "qu'elle raconte de son quotidien en découle, et elle ne se "
+                                                     "contredit pas d'un jour à l'autre."),
                             SettingsPage("document", "Import / export", order=50, form=False, yaml=True,
                                          commands=True, extra=revisions, description=(
                                              "Le personnage entier en YAML (pour le garder ou le coller d'un "

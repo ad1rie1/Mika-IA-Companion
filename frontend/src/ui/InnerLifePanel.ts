@@ -17,6 +17,7 @@
  */
 
 import type {
+  DreamType,
   EmotionBlend,
   InnerState,
   PendingProjectAction,
@@ -65,11 +66,14 @@ const SLEEP_PHASE_META: Record<SleepPhase, { label: string; icon: string }> = {
   deep_sleep: { label: "sommeil profond", icon: "💤" },
 };
 
-const DREAM_TYPE_LABEL: Record<string, { label: string; color: string }> = {
+// Une entrée par sorte que le serveur envoie : `Record<DreamType, …>` fait
+// refuser au compilateur une sorte oubliée (« melancholic » s'affichait brut).
+export const DREAM_TYPE_LABEL: Record<DreamType, { label: string; color: string }> = {
   associative: { label: "rêve associatif", color: "#a78bfa" },
   nightmare: { label: "cauchemar léger", color: "#ef4444" },
   pleasant: { label: "rêve doux", color: "#fbbf24" },
   mundane: { label: "rêve banal", color: "#9ca3af" },
+  melancholic: { label: "rêve mélancolique", color: "#60a5fa" },
 };
 
 export class InnerLifePanel {
@@ -482,7 +486,7 @@ export class InnerLifePanel {
     section.removeAttribute("hidden");
     // The fallback branch exists for values the whitelist doesn't cover —
     // i.e. raw LLM output — so it has to be escaped like any other.
-    const typeMeta = DREAM_TYPE_LABEL[dream.dream_type] || {
+    const typeMeta = DREAM_TYPE_LABEL[dream.dream_type as DreamType] || {
       label: escapeHtml(dream.dream_type ?? ""),
       color: "#9ca3af",
     };

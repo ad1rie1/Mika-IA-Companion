@@ -16,10 +16,18 @@ import asyncio
 
 import pytest
 
-from mika.faculties.transcript import gap_mark, opening_mark, window_start
+from mika.faculties.transcript import (
+    SHE_SPOKE_FIRST,
+    SHE_WROTE_FIRST,
+    gap_mark,
+    opening_mark,
+    read_late,
+    thread_turns,
+    window_start,
+)
 from mika.kernel.clock import HOUR, MINUTE, US
 from mika.kernel.codec import canonical_json
-from mika.kernel.prompt import CONTEXT_FOOTER, Budget
+from mika.kernel.prompt import CONTEXT_FOOTER, Budget, ChatPrompt
 from mika.ports.llm import LLMResponse
 from mika.sim.clock import run_virtual
 from mika.vocab.affect import parse_tag
@@ -56,6 +64,19 @@ MARKS = [
 @pytest.mark.parametrize("before,after,expected,why", MARKS)
 def test_a_mark_reads_like_time_as_a_person_perceives_it(before, after, expected, why):
     assert gap_mark(before, after, PARIS) == expected, why
+
+
+@pytest.mark.parametrize("written,read,expected,why", [
+    (mon(3, 10, 1), mon(7, 14, 1), "tu ne le lis que maintenant, mardi 7h14",
+     "écrit dans la nuit, lu au réveil : un autre jour vécu"),
+    (mon(14), mon(17, 10), "tu ne le lis que maintenant, vers 17h", "le même jour, l'heure à la demi-heure près"),
+    (mon(14), mon(14, 2), "", "contre-exemple : une réponse aussitôt n'est pas une lecture en retard"),
+    (mon(14), mon(14, 19), "", "contre-exemple : une file d'attente de quelques minutes non plus"),
+])
+def test_a_message_read_late_says_when_she_reads_it(written, read, expected, why):
+    """Un message de 3 h lu à 7 h 14 : son repère seul (« vers 3h ») faisait répondre « non je dors pas »
+    (sonde réelle du 2026-10-02)."""
+    assert read_late(written, read, PARIS) == expected, why
 
 
 def test_the_quiet_needed_for_a_mark_is_a_setting():
@@ -217,3 +238,38 @@ def test_the_budget_counts_persona_and_tools(tmp_path):
     assert sent <= budget.max_chars, (sent, budget.max_chars)
     assert reports[-1].trace.reserved >= len(last.persona.text) + tools
     assert reports[-1].trace.history_turns > 0, "le fil n'est pas sacrifié pour autant"
+
+
+# ── Un message qu'elle a écrit d'elle-même (HUM-22) ───────────────────────
+
+
+def _row(n: int, at: int, role: str, kind: str, text: str, room: str | None = None) -> dict:
+    return {"id": n, "at": at, "role": role, "person": "tg_1", "room": room, "kind": kind, "text": text,
+            "emotion": None, "emotion_intensity": None}
+
+
+def test_her_own_initiative_is_never_read_as_an_empty_message_from_the_person():
+    """Le fil montre un repère avant son message ; pour une initiative, le repère seul (« [trois jours plus tard, jeudi
+    19h06] ») se lisait comme un message vide de la personne — comme si Alice l'avait relancée. Il dit maintenant que
+    c'est elle qui a écrit. Contre-exemple : une réponse garde son repère nu ; dans un salon, elle a « pris la
+    parole »."""
+    rows = [_row(1, mon(19), "user", "message", "bonne nuit !"),
+            _row(2, mon(19, 1), "assistant", "REPLY", "bonne nuit Alice !"),
+            _row(3, mon(19, 6, 3), "assistant", "INITIATIVE", "coucou, alors cet entretien ?"),
+            _row(4, mon(19, 30, 3), "user", "message", "trop bien !"),
+            _row(5, mon(9, 0, 4), "assistant", "REPLY", "trop contente pour toi")]
+    turns = thread_turns(rows, PARIS, mon(12, 0, 4), 20 * MINUTE)
+    msgs = ChatPrompt("", history=tuple(turns), message="x").chat_messages()
+    separator = [m["content"] for m in msgs if m["role"] == "user" and "jeudi 19h06" in m["content"]]
+    assert separator == [f"[trois jours plus tard, jeudi 19h06 — {SHE_WROTE_FIRST}]"]
+    assert any(m["content"] == "[le lendemain, vendredi 9h00]" for m in msgs)  # une réponse : le repère nu
+    # elle ouvre l'historique : son repère absolu le dit aussi
+    opening = thread_turns(rows[2:3], PARIS, mon(12, 0, 4), 20 * MINUTE)[0]
+    assert opening.opening.endswith(f"— {SHE_WROTE_FIRST}")
+    # une initiative qui suit de près garde la précision (sans repère de temps)
+    close = thread_turns([rows[0], _row(9, mon(19, 5), "assistant", "INITIATIVE", "et au fait…")], PARIS,
+                         mon(20), 20 * MINUTE)
+    assert close[-1].mark == SHE_WROTE_FIRST
+    room = thread_turns([_row(7, mon(19), "assistant", "INITIATIVE", "yo tout le monde", room="salon")], PARIS,
+                        mon(20), 20 * MINUTE)
+    assert room[0].opening.endswith(SHE_SPOKE_FIRST)

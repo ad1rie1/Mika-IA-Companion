@@ -107,6 +107,8 @@ class Stance:
     declared_at: int = 0
     declared_reply: bool = True
     recent: tuple[tuple[int, str], ...] = field(default_factory=tuple)
+    #: la dernière fois que cette personne s'est excusée (et que ça a compté)
+    apologized_at: int = 0
 
     @property
     def at(self) -> int:
@@ -298,6 +300,23 @@ def advance_stance(st: Stance, t: int, p: AffectParams, cw: Clockwork) -> Stance
     gap, vel = propagate(oscillator, st.gap, st.gap_velocity, ZERO, dt_us / 1e6)
     return replace(st, rest=rest, gap=gap, gap_velocity=vel, anchor=anchor, bond=bond_at(st.bond, dt_us, p),
                    hostile=st.hostile if anchor is not None else 0)
+
+
+def forgive(st: Stance, share: float, at: int) -> Stance:
+    """Des excuses : ce que la relation a installé de déplaisant perd cette part (l'ancre, et la répétition qui
+    en allongeait la guérison), la colère du moment s'apaise d'autant. Ce qui était chaleureux n'en a pas besoin ;
+    la méfiance plancher envers un inconnu hostile reste (elle a sa propre échéance)."""
+    keep = 1.0 - max(0.0, min(1.0, share))
+    anchor = st.anchor
+    hostile = st.hostile
+    if anchor is not None and anchor[0] < 0:
+        anchor = A.scale(anchor, keep)
+        anchor = None if A.norm(anchor) < HEALED_NORM else anchor
+        hostile = round(hostile * keep)
+    gap, velocity = st.gap, st.gap_velocity
+    if gap[0] < 0:
+        gap, velocity = A.scale(gap, keep), A.scale(velocity, keep)
+    return replace(st, anchor=anchor, hostile=hostile, gap=gap, gap_velocity=velocity, apologized_at=at)
 
 
 def push_stance(st: Stance, target: Vec3, gain: float) -> Stance:

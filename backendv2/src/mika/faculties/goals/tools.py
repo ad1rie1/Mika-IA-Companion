@@ -29,12 +29,14 @@ from mika.contracts import goals as c
 from mika.contracts import identity as identity_c
 from mika.faculties.goals.faculty import (
     GOALS,
+    INNER_BUNDLES,
     NOTED,
     TASK_ADDED,
     TASK_CHANGED,
     TASKS_KEPT,
     Goal,
     GoalsState,
+    musing,
     task_at,
     workable,
 )
@@ -50,9 +52,6 @@ TASK_ADD, TASK_UPDATE = "goal_task_add", "goal_task_update"
 #: ce qui n'est pas du travail : dire où on en est, renoncer, tenir son plan, noter, fouiller sa mémoire, ouvrir
 #: un projet (l'exploration continue alors là-bas)
 NOT_WORK = frozenset({REPORT, DROP, TASK_ADD, TASK_UPDATE, NOTE, REFLECT, "memory_search", "start_project"})
-#: les lots qui ne touchent que sa tête (sa mémoire, ce qu'elle sait des autres, ses buts et ses projets) : ce
-#: qu'ils font ne prouve pas qu'elle a mené quelque chose à bout
-INNER_BUNDLES = frozenset({"goals", "memory", "identity", "self", "attention", "social", "projects"})
 #: une réflexion se prouve par quelques phrases à elle
 REFLECT_MIN_WORDS = 15
 _WORD = re.compile(r"[\wÀ-ÿ']+")
@@ -64,11 +63,6 @@ def proves(ctx: Any, name: str) -> bool:
         return False
     spec = ctx.mind.registry.tools.get(name) if getattr(ctx, "mind", None) is not None else None
     return spec is not None and spec.bundle not in INNER_BUNDLES
-
-
-def musing(g: Goal) -> bool:
-    """Une curiosité sans source où chercher du neuf : une rêverie."""
-    return g.origin == c.FROM_INTEREST and not set(g.bundles) - INNER_BUNDLES
 
 
 def reflective(g: Goal) -> bool:
@@ -165,7 +159,7 @@ async def report_step(args: ReportArgs, ctx: Any) -> Any:
         wait_for=g.owner if args.verdict == c.WAIT and args.until_they_answer and g.owner else None)]
     if proven:
         drafts.append(closing(ctx, g, c.ACHIEVED, result=args.summary.strip(), notable=args.notable,
-                              reason="rêverie" if musing(g) else ""))
+                              reason=c.MUSED if musing(g) else ""))
     elif args.verdict == c.BLOCKED:
         drafts.append(closing(ctx, g, c.STUCK, reason=args.summary))
     await ctx.emit(*drafts)

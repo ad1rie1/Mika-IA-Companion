@@ -1,8 +1,9 @@
 """Contrat d'``attention`` : ce qui lui trotte dans la tête, et ce qu'elle attend.
 
 - une **pensée** naît d'un échange qui l'a marquée, d'une croyance qu'elle
-  doit réviser, ou du manque de quelqu'un qu'elle ne peut pas joindre ; elle
-  s'estompe (demi-vie), revient par moments, et s'allège quand elle en parle ;
+  doit réviser, du manque de quelqu'un qu'elle ne peut pas joindre, ou d'avoir
+  été dure avec une amie ; elle s'estompe (demi-vie), revient par moments, et
+  s'allège quand elle en parle ;
 - une **attente** naît quand elle écrit d'elle-même à quelqu'un (une
   réponse), quand quelqu'un lui manque (un retour), ou quand elle promet
   quelque chose pour une date (sa parole : une attente envers elle-même) :
@@ -12,7 +13,8 @@
   Une réponse tardive ne compte que dans trois fois le délai attendu ;
 - le **fil avec chacun** (``AWAITING``) : ses initiatives restées sans réponse
   et si son dernier message attend encore — par personne ; la retenue
-  d'``agency`` s'en sert (ADR 0033). Être ignorée, rester sans réponse à une
+  d'``agency`` s'en sert (ADR 0033). Une conversation close (« bonne nuit »,
+  ou la personne partie juste après sa réponse) ne laisse rien en attente. Être ignorée, rester sans réponse à une
   question, plus d'un jour sans que personne n'écrive : des pensées qui se
   ressentent, jamais des raisons de réécrire.
 """
@@ -39,6 +41,8 @@ SIGNAL = "signal"
 UNANSWERED = "unanswered"
 #: personne ne lui a écrit depuis plus d'un jour : « Personne ne m'a parlé depuis hier »
 ALONE = "alone"
+#: elle a répondu fâchée à une amie ou une proche : « J'ai été dure avec Alice » — l'envie de revenir vers elle
+REMORSE = "remorse"
 REPLY, RETURN = "reply", "return"
 #: une attente envers elle-même : tenir une promesse avant son échéance (clé : ``PROMISE``)
 #: Raison de preuve d'initiative : une pensée qui insiste, vers la personne concernée.
@@ -174,8 +178,11 @@ class AwaitingReading:
     initiatives: int = 0  # ses initiatives ordinaires depuis le dernier message de la personne
     last_initiative_at: int = 0
     ignored: int = 0  # parmi elles, celles dont l'attente de réponse est passée
-    #: son dernier message attend encore une réponse (la personne n'a pas écrit depuis)
+    #: son dernier message attend encore une réponse (la personne n'a pas écrit depuis) — pas sa réponse à
+    #: « bonne nuit », ni une conversation que la personne a close en partant juste après
     unanswered: bool = False
+    #: quand la conversation s'est close ainsi (0 : elle ne l'est pas) — on s'est quittées, on ne l'ignore pas
+    closed_at: int = 0
 
 
 #: Les pensées vivantes, la plus forte d'abord.

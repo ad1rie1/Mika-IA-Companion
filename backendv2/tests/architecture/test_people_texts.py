@@ -38,6 +38,8 @@ PLAIN = {
     },
     "identity.linked": {"handle": "une adresse", "person": "une clé de personne", "by": "qui (code)"},
     "identity.registered": {"handle": "une adresse", "name": "le nom du compte (un réglage de la console)"},
+    "identity.name_bound": {"name": "une clé de personne connue de nom (``name:alice``, celle de la mémoire)",
+                            "person": "une clé de personne", "by": "qui (code)"},
     "social.profile_revised": {
         "person": "une clé de personne", "call_id": "un identifiant d'appel", "model": "un nom de modèle",
         "legacy_tone": "héritage : avant la version 2, le ton était en clair",

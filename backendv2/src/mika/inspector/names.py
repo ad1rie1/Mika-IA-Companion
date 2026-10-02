@@ -221,6 +221,15 @@ class Names:
         spec = self.kernel.registry.actions.get(key)
         if spec is not None:
             return spec.title
+        if key.startswith("cli."):  # la ligne de commande : une action de la console, ou l'oubli
+            rest = key[len("cli."):]
+            inner = self.kernel.registry.actions.get(rest)
+            if inner is not None:
+                return f"{inner.title} (ligne de commande)"
+            if rest.startswith("oublier"):
+                kind = self.kernel.registry.subjects.get(rest.partition(".")[2])
+                return f"Oublier{' · ' + kind.label.lower() if kind is not None else ''} (ligne de commande)"
+            return f"{self.action(rest)} (ligne de commande)"
         if key.startswith("console."):
             parts = key.split(".")
             what = {"oublier": "Oublier", "reglages": "Réglages", "parametres": "Paramètres",

@@ -396,6 +396,21 @@ def gap_mark(prev: int, at: int, tz: ZoneInfo, after_us: int = MARK_AFTER) -> st
     return f"{lap}, {_date(now, now.year != then.year)}"
 
 
+#: au-delà, un message auquel elle répond est un message qu'elle lit en retard (elle dormait, elle était prise)
+READ_LATE_US = 20 * MINUTE
+
+
+def read_late(at: int, now: int, tz: ZoneInfo) -> str:
+    """Quand elle lit seulement maintenant un message écrit bien avant (la nuit, pendant qu'elle dormait) : « tu
+    ne le lis que maintenant, jeudi vers 7h ». Sans ça, le repère du message (« vers 3h ») lui fait répondre comme
+    si elle était éveillée à 3 h (sonde réelle du 2026-10-02 : « non je dors pas », à 7 h 14)."""
+    if now - at < READ_LATE_US:
+        return ""
+    same = local_date_of_night(at, tz, DAY_STARTS_AT) == local_date_of_night(now, tz, DAY_STARTS_AT)
+    when = _about(local(now, tz)) if same else _day(local(now, tz))
+    return f"tu ne le lis que maintenant, {when}"
+
+
 def opening_mark(at: int, now: int, tz: ZoneInfo) -> str:
     """Le repère absolu d'un message qui ouvre l'historique : « lundi 28
     septembre, 18h02 » (avec l'année quand ce n'est pas celle-ci)."""
@@ -443,11 +458,23 @@ def tagged(r: Mapping[str, Any]) -> str:
     return f"{text} [EMOTION:{r['emotion']}:{value + '0' if value.endswith('.') else value}]"
 
 
+#: ce que dit le repère d'un message qu'elle a écrit d'elle-même : sans lui, le repère seul (« [jeudi 19h06] »)
+#: se lit comme un message vide de la personne, qui l'aurait relancée (HUM-22)
+SHE_WROTE_FIRST = "c'est toi qui lui as écrit"
+SHE_SPOKE_FIRST = "c'est toi qui as pris la parole"
+
+
+def _first(mark: str, note: str) -> str:
+    return f"{mark} — {note}" if mark else note
+
+
 def thread_turns(rows: Sequence[Mapping[str, Any]], tz: ZoneInfo, now: int, after_us: int,
                  names: Mapping[str, str] | None = None) -> list[ChatTurn]:
     """Les tours du fil, chacun avec son repère par rapport au précédent (et le
     repère absolu qui le remplace s'il ouvre l'historique) ; dans un salon,
-    chacun sous son nom."""
+    chacun sous son nom. Un message qu'elle a écrit d'elle-même le dit dans son
+    repère (« [jeudi 19h06 — c'est toi qui lui as écrit] ») : personne ne l'avait
+    relancée."""
     out: list[ChatTurn] = []
     prev: int | None = None
     for r in rows:
@@ -455,7 +482,11 @@ def thread_turns(rows: Sequence[Mapping[str, Any]], tz: ZoneInfo, now: int, afte
         mark = gap_mark(prev, at, tz, after_us) if prev is not None else ""
         prev = at
         opening = opening_mark(at, now, tz)
-        if r["role"] == "assistant":
+        if r["role"] == "assistant" and r.get("kind") == Kind.INITIATIVE:
+            note = SHE_SPOKE_FIRST if r.get("room") else SHE_WROTE_FIRST
+            out.append(ChatTurn("assistant", tagged(r), id=r["id"], mark=_first(mark, note),
+                                opening=_first(opening, note)))
+        elif r["role"] == "assistant":
             out.append(ChatTurn("assistant", tagged(r), id=r["id"], mark=mark, opening=opening))
         else:
             out.append(ChatTurn("user", r["text"] or "", speaker=(names or {}).get(r["person"], ""), id=r["id"],
@@ -506,6 +537,9 @@ async def _thread(s: TranscriptState, frame: Frame, ports: Mapping[str, Any]) ->
     # le message en cours (la question, ou « maintenant » pour une initiative), situé par rapport au dernier tour
     at = int(asked["at"]) if asked else frame.now
     mark = gap_mark(int(rows[-1]["at"]), at, tz, p.mark_after_us) if rows else ""
+    late = read_late(at, frame.now, tz)
+    if late:
+        mark = f"{mark} — {late}" if mark else late
     who = names.get(str(asked["person"]), "") if (room and asked) else ""
     return ThreadView(key, tuple(turns), ChatTurn("user", "", speaker=who, mark=mark) if (mark or who) else None)
 
@@ -529,7 +563,8 @@ def _compact_lines(frame: Frame, person: str, rows: Sequence[Mapping[str, Any]],
         at = int(r["at"])
         mark = gap_mark(prev, at, tz, after_us) if prev is not None else opening_mark(at, frame.now, tz)
         prev = at
-        who = "Mika" if r["role"] == "assistant" else name
+        who = ("Mika (d'elle-même)" if r.get("kind") == Kind.INITIATIVE else "Mika") if r["role"] == "assistant" \
+            else name
         lines.append(f"{f'[{mark}] ' if mark else ''}{who} : {r['text']}")
     return "\n".join(lines)
 

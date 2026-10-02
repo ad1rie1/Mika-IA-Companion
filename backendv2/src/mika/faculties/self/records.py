@@ -14,6 +14,8 @@ class Journal:
     at: int
     #: combien de fois elle l'a réécrit (une nuit coupée par une conversation)
     rev: int = 0
+    #: sa journée à elle, sans personne d'autre : ce qui se montre à qui n'est pas le seul concerné
+    shareable_ref: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,3 +63,6 @@ class Deed:
     title_ref: str = ""
     owner: str = ""
     project: int = 0
+    #: qui ce qu'elle a fait concerne, et à quel point c'est sensible (un but né d'une confidence)
+    about: tuple[str, ...] = ()
+    sensitivity: int = 0

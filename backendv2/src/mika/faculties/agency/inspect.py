@@ -31,6 +31,7 @@ from mika.kernel.inspect import (
     Text,
     Timeline,
     When,
+    num_fr,
 )
 from mika.vocab.episodes import Kind
 from mika.vocab.people import is_identifiable
@@ -40,11 +41,15 @@ SPOKEN_PAGE = 25
 EXCERPT = 160
 
 
+#: ses retenues, en mots (la console les nomme aussi : ``app/console.py``)
+VETO_FR = {c.DAILY_CAP: "le plafond du jour est atteint", c.UNANSWERED: "une initiative est restée sans réponse",
+           c.AWAITING_REPLY: "son dernier message attend encore une réponse", c.CHANGED_MIND: "elle s'est ravisée"}
+
+
 def _name(frame: Frame, handle: str) -> str:
     if not handle:
         return "quiconque était là"
-    name = frame.get(identity_c.IDENTITY(handle)).name
-    return f"« {name} » ({handle})" if name else handle
+    return frame.get(identity_c.IDENTITY(handle)).name or handle  # la clé, au survol ou dans le lien
 
 
 def _restraint_fr(frame: Frame) -> str:
@@ -52,8 +57,8 @@ def _restraint_fr(frame: Frame) -> str:
     if m.veto == c.DAILY_CAP:
         return "retenues : le plafond du jour est atteint"
     if m.veto is not None:
-        return f"retenues : {m.veto}"
-    return f"plus rares (décalage {m.shift:+.1f})" if m.shift else "libres"
+        return f"retenues : {VETO_FR.get(m.veto, m.veto)}"
+    return f"plus rares (décalage {num_fr(m.shift, 1, signed=True)})" if m.shift else "libres"
 
 
 def _handles(frame: Frame, handle: str) -> tuple[str, ...]:
@@ -154,7 +159,9 @@ def _inspect(s: AgencyState, frame: Frame, ctx: InspectContext) -> list[Block]:
         Fields((
             ("dernière initiative comptée", ctx.when(r.last_initiative_at) if r.last_initiative_at else "—"),
             ("durée tirée à la dernière", f"{(s.refractory_us or p.refractory_us) / MINUTE:.0f} min"),
-            ("allongement par ignorée", f"×{p.ignored_backoff:g}, au plus {p.max_refractory_us / HOUR:.0f} h"),
+            ("allongement par ignorée", f"×{num_fr(p.ignored_backoff)}, au plus {p.max_refractory_us / HOUR:.0f} h"),
+            ("prévenir (un mail important, un projet qui bloque)",
+             "période de base seulement — être ignorée n'y change rien"),
             ("dernier murmure", ctx.when(r.murmured_at) if r.murmured_at else "—"),
             ("dernière hésitation", ctx.when(r.hesitated_at) if r.hesitated_at else "—"),
         ), title="En détail", columns=2),

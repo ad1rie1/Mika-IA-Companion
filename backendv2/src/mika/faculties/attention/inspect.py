@@ -36,6 +36,7 @@ from mika.kernel.inspect import (
     Table,
     Text,
     When,
+    num_fr,
 )
 from mika.vocab.affect import emotion_cell
 from mika.vocab.privacy import Sensitivity
@@ -48,14 +49,14 @@ HISTORY = 25
 ORIGIN_FR = {c.EXCHANGE: "un échange", c.REVISION: "une croyance révisée", c.MISSING: "un manque",
              c.BLOCKED: "un but bloqué", c.SIGNAL: "un signal", c.CONCERN: "une inquiétude",
              c.PROMISE: "une promesse non tenue", c.UNANSWERED: "une initiative sans réponse",
-             c.ALONE: "personne ne lui écrit"}
+             c.ALONE: "personne ne lui écrit", c.REMORSE: "elle a été dure avec quelqu'un"}
 EXPECTED_FR = {c.REPLY: "sa réponse", c.RETURN: "son retour", c.PROMISE: "tenir sa promesse"}
 SENSITIVITY_FR = {int(Sensitivity.NONE): "rien d'autrui", int(Sensitivity.ANODYNE): "anodin",
                   int(Sensitivity.PERSONAL): "personnel", int(Sensitivity.CONFIDENCE): "confidence"}
 
 
 def number(value: float) -> str:
-    return f"{value:.2f}".replace(".", ",")
+    return num_fr(value, 2)
 
 
 def _p(frame: Frame) -> Any:
@@ -125,7 +126,7 @@ def _thought_rows(s: AttentionState, frame: Frame, ctx: InspectContext,
                 *(("concerne", person_ref(frame, a)) for a in t.about),
                 ("sensibilité", SENSITIVITY_FR.get(t.sensitivity, str(t.sensitivity))),
                 ("intensité à la dernière ravivée", number(kept.intensity) if kept is not None else "—"),
-                ("s'éteint", f"sous {number(p.fade_below)} (demi-vie {p.half_life_us / HOUR:g} h)"),
+                ("s'éteint", f"sous {number(p.fade_below)} (demi-vie {num_fr(p.half_life_us / HOUR)} h)"),
                 ("outils qui vont avec", t.bundle or "aucun"),
             ), title="Détail"),
             Prose(texts.get(t.text_ref) or FORGOTTEN, title="En entier"),
@@ -187,7 +188,7 @@ def _inspect_thoughts(s: AttentionState, frame: Frame, ctx: InspectContext) -> l
     live = Table(THOUGHT_COLUMNS, rows, title="Ce qui lui trotte dans la tête",
                  empty="rien ne lui trotte dans la tête")
     rules = Fields((
-        ("demi-vie d'une pensée", f"{p.half_life_us / HOUR:g} h ; s'éteint sous {number(p.fade_below)}"),
+        ("demi-vie d'une pensée", f"{num_fr(p.half_life_us / HOUR)} h ; s'éteint sous {number(p.fade_below)}"),
         ("un échange qui marque", f"émotion déclarée ≥ {number(p.marking_intensity)}, ou valence ≤ "
                                   f"{number(p.marking_valence)} ; au plus {p.exchange_cap} à la fois"),
         ("dernière nuit digérée", s.digested_night or "—"),
@@ -350,7 +351,7 @@ def _thread(s: AttentionState, frame: Frame, key: str) -> Fields | None:
         ("elle a ressenti ce silence", "oui" if ex.felt else "non"),
     ), title="Le fil avec cette personne", columns=2,
         hints=(("ses initiatives depuis, sans réponse", "Après une, plus d'initiative ordinaire tant que la personne "
-                "n'a pas écrit — sauf une relance douce, bien plus tard, vers une amie ; après deux, plus rien."),))
+                "n'a pas écrit — sauf une relance douce, bien plus tard, vers une personne amie ou proche ; après deux, plus rien."),))
 
 #: le type d'objet « personne » (déclaré par l'identité) : l'onglet se range sur sa fiche
 PERSON_KIND = "person"

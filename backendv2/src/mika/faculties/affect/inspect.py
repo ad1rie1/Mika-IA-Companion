@@ -18,7 +18,6 @@ from mika.faculties.affect import (
     AffectState,
     _params,
     hostility,
-    mood_reading,
     prose,
     regard,
     stance_reading,
@@ -51,7 +50,9 @@ from mika.kernel.inspect import (
     Timeline,
     Vital,
     When,
+    num_fr,
     paginate,
+    pct_fr,
 )
 from mika.vocab import affect as A
 from mika.vocab.episodes import Kind
@@ -72,11 +73,11 @@ PERIOD = Param("periode", "Période", kind="select", choices=PERIODS, default="2
 def _vec(v: A.Vec3 | None) -> str:
     if v is None:
         return "—"
-    return f"P {v[0]:+.2f} · A {v[1]:+.2f} · D {v[2]:+.2f}"
+    return " · ".join(f"{axis} {num_fr(x, 2, signed=True)}" for axis, x in zip("PAD", v, strict=True))
 
 
 def _feeling(emotion: A.Emotion, intensity: float) -> str:
-    return f"{A.FR[emotion]} ({intensity:.0%})"
+    return f"{A.FR[emotion]} ({pct_fr(intensity)})"
 
 
 def _swatch(emotion: A.Emotion, intensity: float | None = None) -> Swatch:
@@ -92,9 +93,9 @@ def _declared_cell(name: object, intensity: object) -> Cell:
 
 
 def _name(frame: Frame, key: str) -> str:
-    """Le nom qu'elle connaît à cette personne, et sa clé."""
-    name = frame.get(identity_c.IDENTITY(key)).name
-    return f"« {name} » ({key})" if name else key
+    """Le nom qu'elle connaît à cette personne (sa clé reste au survol, ou dans le lien de sa fiche) ; une
+    adresse sans nom se lit par sa clé."""
+    return frame.get(identity_c.IDENTITY(key)).name or key
 
 
 def _who_text(frame: Frame, handle: str) -> str:
@@ -105,7 +106,7 @@ def _who(frame: Frame, handle: str, tab: str = "") -> Cell:
     """La personne derrière une adresse, en lien vers sa fiche (si c'est une personne)."""
     person = frame.get(identity_c.PERSON(handle)) if handle else ""
     if not is_identifiable(person):
-        return Text(_who_text(frame, handle), kind="muted")
+        return Text(_who_text(frame, handle), kind="muted", hint=handle)
     return Ref.subject("person", person, _name(frame, person), tab)
 
 
@@ -207,7 +208,7 @@ def _excerpt(text: object) -> str:
                 description="Son humeur générale : ce qu'elle ressent, sa courbe, ses dernières balises.")
 def _mood_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Block]:
     p = _p(frame)
-    m = mood_reading(s, frame.now, p, _clockwork(frame))
+    m = frame.get(c.MOOD)  # la lecture du fait : la cause dite au bon temps
     rest = _at_rest(m, p)
     declared, pager = _declared_page(ctx)
     # la dernière balise, quelle que soit la page lue
@@ -224,9 +225,9 @@ def _mood_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Block]
     return [
         Stats((
             Stat("ressentie", "au repos" if rest else _swatch(m.felt, m.felt_intensity), sub="l'écart à son repos"),
-            Stat("débordement", Meter(m.overflow, f"{m.overflow:.0%}",
+            Stat("débordement", Meter(m.overflow, pct_fr(m.overflow),
                                       tone="warn" if m.overflow > p.overflow_floor else ""),
-                 sub=f"pousse à parler au-delà de {p.overflow_floor:.0%}",
+                 sub=f"pousse à parler au-delà de {pct_fr(p.overflow_floor)}",
                  tone="warn" if m.overflow > p.overflow_floor else ""),
             Stat("son fond", _swatch(p.background), sub="ce vers quoi elle revient"),
             Stat("dernière balise", last, sub=last_sub),
@@ -243,9 +244,9 @@ def _mood_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Block]
             title="Dernières balises", empty="elle n'a encore rien déclaré", pager=pager),
         Disclosure("Détails", (Fields((
             ("ressentie (écart au repos)", "au repos" if rest else _feeling(m.felt, m.felt_intensity)),
-            ("émotion du moment (ce qui déborde)", f"{m.overflow:.0%}"),
+            ("émotion du moment (ce qui déborde)", pct_fr(m.overflow)),
             ("fond de la journée", _vec(m.fond) if A.norm(m.fond) > 1e-3 else "aucun"),
-            ("cause", prose.cause_line(m.cause, m.cause_person) or prose.UNKNOWN_CAUSE),
+            ("cause", prose.cause_line(m.cause, m.cause_person, ended=m.cause_over) or prose.UNKNOWN_CAUSE),
             ("lecture absolue (le visage)", _feeling(m.label, m.intensity)),
             ("position", _vec(m.position)),
             ("repos à cette heure", _vec(m.home)),
@@ -259,15 +260,16 @@ def _mood_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Block]
 
 def _warmth_cell(value: float) -> Meter:
     """La chaleur installée, signée : la jauge dit l'ampleur, le ton le sens."""
-    return Meter(abs(value), f"{value:+.2f}", tone="ok" if value > 0.05 else "danger" if value < -0.05 else "")
+    return Meter(abs(value), num_fr(value, 2, signed=True),
+                 tone="ok" if value > 0.05 else "danger" if value < -0.05 else "")
 
 
 def _hostility_cell(value: float) -> Meter:
-    return Meter(value, f"{value:.2f}", tone="danger" if value >= 0.3 else "warn" if value > 0.05 else "")
+    return Meter(value, num_fr(value, 2), tone="danger" if value >= 0.3 else "warn" if value > 0.05 else "")
 
 
 def _bond_cell(value: float) -> Meter:
-    return Meter(value, f"{value:.2f}", tone="ok" if value >= 0.35 else "")
+    return Meter(value, num_fr(value, 2), tone="ok" if value >= 0.35 else "")
 
 
 def _anchor_cell(r: c.StanceReading) -> Cell:
@@ -287,7 +289,7 @@ def _stance_row(s: AffectState, frame: Frame, ctx: InspectContext, person: str, 
     r = stance_reading(s, person, frame.now, p, cw)
     last = A.Declared.decode(stored.declared)
     who = (Ref.subject("person", person, _name(frame, person), "affect") if is_identifiable(person)
-           else Text(_name(frame, person), kind="muted"))
+           else Text(_name(frame, person), kind="muted", hint=person))
     detail = (
         Note(_stance_prose(frame, r, p) or "rien de particulier envers cette personne", title="ce qu'elle se dit"),
         Fields((
@@ -295,6 +297,7 @@ def _stance_row(s: AffectState, frame: Frame, ctx: InspectContext, person: str, 
             ("ancre (depuis son repos moyen)", _vec(None if r.anchor is None else A.sub(r.anchor, r.reference))),
             ("jours de contact", str(stored.days)),
             ("méfiance jusqu'à", ctx.when(stored.wary_until) if stored.wary_until > frame.now else "—"),
+            ("excuses (qui ont compté)", ctx.when(stored.apologized_at) if stored.apologized_at else "—"),
             ("position", _vec(r.position)),
             ("son repos envers elle", _vec(r.home)),
             ("dernier mouvement", ctx.when(stored.at) if stored.at else "—"),
@@ -375,16 +378,27 @@ def _person_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Bloc
             Note(_stance_prose(frame, r, p) or "Rien de particulier envers cette personne."),
         ]
     tags, pager = _declared_page(ctx, handles)
-    blocks.append(Timeline(tuple(_tag_entry(*row[1:]) for row in tags), title="Ses dernières balises envers elle",
+    blocks.append(Timeline(tuple(_tag_entry(frame, *row[1:]) for row in tags), title="Ses dernières balises envers elle",
                            empty="elle ne lui a encore rien déclaré", pager=pager))
     return blocks
 
 
-def _tag_entry(at: int, handle: str, name: str, intensity: float, kind: str, text: str | None) -> Entry:
-    """Une balise envers quelqu'un : l'émotion, ce qu'elle a dit, sur quelle adresse."""
+#: par où elle lui a parlé (une personne peut avoir plusieurs adresses)
+CHANNEL_FR = {"web": "sur le web", "telegram": "sur Telegram"}
+
+
+def _where(frame: Frame, handle: str) -> str:
+    channel = frame.get(identity_c.IDENTITY(handle)).channel if handle else ""
+    return CHANNEL_FR.get(channel, f"par {channel}" if channel else "")
+
+
+def _tag_entry(frame: Frame, at: int, handle: str, name: str, intensity: float, kind: str,
+               text: str | None) -> Entry:
+    """Une balise envers quelqu'un : l'émotion, ce qu'elle a dit, et par où (jamais la clé de l'adresse)."""
+    meta = " · ".join(x for x in (_how(kind), _where(frame, handle)) if x)
     emotion = A.emotion_of(name)
     if emotion is None:
-        return Entry(at, name, _excerpt(text), meta=f"{_how(kind)} · {handle}")
+        return Entry(at, name, _excerpt(text), meta=meta)
     v = A.valence(emotion)
     return Entry(at, _feeling(emotion, intensity), _excerpt(text), tone="ok" if v >= 0.3 else "warn" if v <= -0.3 else "",
-                 meta=f"{_how(kind)} · {handle}")
+                 meta=meta)

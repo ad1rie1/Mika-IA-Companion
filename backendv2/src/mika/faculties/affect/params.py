@@ -285,6 +285,16 @@ class AffectParams(BaseModel):
     wary_us: Annotated[int, Knob(
         label="Méfiance : durée", group="L'histoire d'une relation", lo=0, hi=90 * DAY,
         help="Combien de temps dure la méfiance plancher après la dernière hostilité forte.")] = 14 * DAY
+    apology_heal: Annotated[float, Knob(
+        label="Des excuses : ce qu'elles pardonnent", group="L'histoire d'une relation", lo=0, hi=1, step=0.05,
+        help="Des excuses sincères d'une amie ou d'une proche (une fois par jour, et seulement s'il y a de quoi "
+             "pardonner) ôtent cette part de ce que la relation avait installé d'hostile, et de sa colère du "
+             "moment. Des excuses qui rient (« pardon mdr ») ne comptent pas.")] = 0.3
+    apology_distant: Annotated[float, Knob(
+        label="Des excuses : venant de quelqu'un de moins proche", group="L'histoire d'une relation", lo=0, hi=1,
+        step=0.05, help="La part qui compte quand elles viennent de quelqu'un qui n'est ni une amie ni une "
+                        "proche (une connaissance, une inconnue) : on pardonne moins vite à qui on ne connaît "
+                        "pas, et la méfiance plancher reste.")] = 0.3
     #: Débordement d'humeur → preuve d'initiative (log-odds).
     overflow_floor: Annotated[float, Knob(
         label="Seuil de débordement de l'humeur", group="Humeur qui déborde", lo=0, hi=0.95, step=0.05,

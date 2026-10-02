@@ -32,7 +32,7 @@ from mika.kernel.clock import DAY, US
 from mika.kernel.events import Content, Origin
 from mika.kernel.operate import ActionContext
 from mika.ports.llm import LLMResponse
-from mika.runtime.operations import offered, perform
+from mika.runtime.operations import forget_subject, offered, perform
 from mika.sim.clock import SimClock, run_virtual
 from mika.sim.outside import FakeFeeds, FakeMail
 from mika.vocab.people import clean_display_name
@@ -593,3 +593,40 @@ def test_a_display_name_cannot_mimic_the_prompt(raw):
 def test_an_ordinary_hyphenated_name_survives():
     assert clean_display_name("Marie-Ève") == "Marie-Ève"
     assert clean_display_name("  Jean–Luc  ") == "Jean–Luc"
+
+
+# ── HUM-8 : l'Alice dont Bob parlait, c'était elle ────────────────────────
+
+
+@pytest.mark.parametrize("bound", [True, False])
+def test_an_operator_says_who_the_alice_bob_talked_about_was_and_forgetting_her_takes_it_too(tmp_path, bound):
+    """Bob avait parlé d'« Alice Martin » avant qu'elle n'arrive. Un opérateur dit que c'était cette Alice-là
+    (jamais deviné d'une ressemblance de nom) : la clé ``name:alice martin`` la désigne, et « Oublier » Alice
+    efface aussi ce qu'on avait dit d'elle sous ce nom. Contre-exemple : sans la liaison, le nom complet échappait
+    à l'oubli (l'heuristique ne relie que les noms exacts qu'elle porte)."""
+    async def scenario(kernel, llm):
+        await connect(kernel, "user_1", "Adrien", operator=True)
+        await connect(kernel, "user_2", "Bob")
+        await connect(kernel, "user_3", "Alice")
+        p = await say(kernel, said("user_2", "ma coloc Alice Martin part vivre au Japon en décembre"))
+        await kernel.mind.append([memory_c.BELIEVED.draft(
+            text=Content.of("Alice Martin, la coloc de Bob, part vivre au Japon (CANARI-N1)", level=1),
+            about=("name:alice martin",), sensitivity=1, source="user_2", told_by=("user_2",), sources=(p.seq,))],
+            emitter="memory", correlation="genese", origin=Origin.GENESIS)
+        refused = await perform(kernel, "identity.nommer", form(name="Alice Martin"), by="user_1", subject="user_3",
+                                nonce="a")
+        if bound:
+            done = await perform(kernel, "identity.nommer", form(name="Alice Martin", confirmed="on"), by="user_1",
+                                 subject="user_3", nonce="b")
+            assert done.ok, done
+        person = kernel.mind.frame().get(identity_c.PERSON("name:alice martin"))
+        await forget_subject(kernel, "person", "user_3", by="user_1", action="oublier.person")
+        left = kernel.mind.store.query_mind("SELECT text FROM memory_items WHERE text LIKE '%CANARI-N1%'")
+        return refused, person, left
+
+    refused, person, left = run(tmp_path, scenario)
+    assert not refused.ok  # sans « Je confirme », rien
+    if bound:
+        assert person == "user_3" and left == []
+    else:
+        assert person == "name:alice martin" and left

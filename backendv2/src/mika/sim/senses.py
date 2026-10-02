@@ -2,8 +2,9 @@
 
 - **S17** une journée de courrier et de flux : un flot de lettres
   d'information et de titres ne la submerge pas (habituation, dosage) ; un
-  mail important d'une amie est dit à sa propriétaire, une fois ; le courrier
-  ne se montre qu'à ses propriétaires ; un titre qui la passionne, elle le lit.
+  mail important d'une amie est dit à sa propriétaire, une fois — compté à
+  l'énoncé, le mail sous les yeux (ADR 0044) ; le courrier ne se montre qu'à
+  ses propriétaires ; un titre qui la passionne, elle le lit.
 - **S18** ses apps : une app qui marche lui signale quelque chose, cité ; une
   app qui s'emballe est tuée à son délai, s'arrête après cinq échecs, et elle
   s'en rend compte ; rien de tout ça ne sort de sa zone volatile. Et, à la
@@ -89,7 +90,13 @@ async def s17(driver: Driver, rng: RngTree, res: Result) -> None:
     mails = _of(events, email_c.NOTICED.name)
     heard_mail = [e for e in _of(events, attention_c.NOTICED.name) if e.data.source == "email"]
     promo_weights = [e.data.weight for e in heard_mail[:20]]
-    mentions = [e for e in _of(events, rt.EPISODE_STARTED.name) if email_c.MENTION in e.data.reason.split(",")]
+    # une annonce compte à l'énoncé visible, pas au départ de l'initiative (ADR 0033, 0044) : un silence, une
+    # initiative devancée la laissent à dire
+    announcing = {e.correlation for e in _of(events, rt.EPISODE_STARTED.name)
+                  if email_c.MENTION in e.data.reason.split(",")}
+    mentions = [e for e in _of(events, rt.UTTERANCE.name)
+                if e.correlation in announcing and e.data.visible and e.data.kind == "INITIATIVE"]
+    alice = "<alice-1@exemple.fr>"
     noticed_rss = {e.data.entry for e in _of(events, rss_c.NOTICED.name)}
     calls: Any = driver.llm
     last = {c.meta.get("target"): c.messages[-1].content for c in calls.calls if c.role == "reply"}
@@ -107,8 +114,14 @@ async def s17(driver: Driver, rng: RngTree, res: Result) -> None:
         expect.invariant("ce qui ne la touche pas passe inaperçu", not any(e.startswith("eco-") for e in noticed_rss),
                          "le cours de l'or ne l'intéresse pas", f"{sorted(noticed_rss)}"),
         expect.invariant("le mail important est dit à sa propriétaire, une fois",
-                         len(mentions) == 1 and mentions[0].data.target == "user_1",
-                         "« un mail urgent d'Alice vient d'arriver »", f"{[m.data.target for m in mentions]}"),
+                         len(mentions) == 1 and mentions[0].data.target == "user_1"
+                         and f"mail:{alice}" in mentions[0].data.provenance,
+                         "« un mail urgent d'Alice vient d'arriver » — dit, pas seulement entrepris",
+                         f"{[(m.data.target, m.data.provenance) for m in mentions]}"),
+        expect.invariant("elle l'a sous les yeux en le disant", "soutenance" in (
+            mentions[0].data.text.text or "" if mentions else ""),
+                         "le mail annoncé est l'objet de l'initiative : il a sa section",
+                         f"{[m.data.text.text for m in mentions]}"),
         expect.invariant("son courrier n'est qu'à ses propriétaires",
                          "soutenance" not in last.get("user_2", "") and "TES MAILS" not in last.get("user_2", ""),
                          "Bea n'entend rien de la boîte de Mika"),

@@ -85,6 +85,12 @@ def test_parse_tag(text, clean, declared):
     ('"Coucou Adrien !"', "Coucou Adrien !"),
     ("<thinking>Il a l'air triste.</thinking>Oh… ça va ?", "Oh… ça va ?"),
     ("Bon , ok .", "Bon, ok."),
+    # les émojis : sa parole est lue à voix haute (une synthèse lit « visage souriant ») et le style les interdit
+    ("Trop bien 😄", "Trop bien"),
+    ("Bisous Chloé ! 😊", "Bisous Chloé !"),
+    ("J'adore ❤️ ça", "J'adore ça"),
+    ("Ok 👍🏽 vas-y", "Ok vas-y"),
+    ("Tu vas déchirer jeudi ! 💪\nÀ ce soir !", "Tu vas déchirer jeudi !\nÀ ce soir !"),
 ])
 def test_the_text_is_ready_to_deliver(text, clean):
     assert parse_tag(text).text == clean
@@ -95,8 +101,8 @@ def test_the_text_is_ready_to_deliver(text, clean):
     "(voir pièce jointe) merci",  # une vraie parenthèse reste
     "Alors :\n- un\n- deux",
     "J'ai mis [x] la case",
-    "Trop bien 😄",
     "Je dirais « non » franchement.",  # des guillemets au milieu, pas englobants
+    "« ça » … → là, 3 °C, 50 %, ½ et Œuvre",  # ni la ponctuation française, ni les symboles ordinaires
 ])
 def test_ordinary_text_is_left_alone(text):
     """Contre-exemples : le nettoyage ne mange jamais du texte légitime."""

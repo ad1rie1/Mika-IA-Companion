@@ -118,6 +118,8 @@ class Driver:
     #: le monde extérieur (il survit aux redémarrages du noyau)
     mail: FakeMail = field(default_factory=FakeMail)
     feeds: FakeFeeds = field(default_factory=FakeFeeds)
+    #: les plongements de la mémoire (un vrai modèle pour la sonde ; par défaut, le hachage, déterministe et rapide)
+    embedder: Any = None
 
     def __post_init__(self) -> None:
         # une messagerie (Telegram) reçoit même hors ligne : on y écrit à quelqu'un d'absent
@@ -131,7 +133,7 @@ class Driver:
                           preempt=frozenset({self.llm.name}) if self.slots == 1 else frozenset(),
                           fallbacks={str(k): str(v) for k, v in FALLBACKS.items()})
         store = SqliteStore(self.root / "mind.db", self.root / "views.db", threaded=False)
-        ports = {"delivery": self.transport, "vectors": SqliteVectorIndex(store, HashEmbedder()),
+        ports = {"delivery": self.transport, "vectors": SqliteVectorIndex(store, self.embedder or HashEmbedder()),
                  "workshop": BwrapWorkshop(self.root / "ateliers"), "mail": self.mail, "feeds": self.feeds,
                  "forge": ForgeHost(self.root / "forge")}
         deps = self.composition.deps(store=store, clock=self.clock, ids=SeededIdGen(f"{self.seed}:{self.boots}"),

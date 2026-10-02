@@ -339,6 +339,38 @@ def test_a_failed_delivery_can_be_retried_or_marked_seen(world):  # noqa: F811
     assert any("console.sorties" in a.data for a in audit)
 
 
+def test_stale_and_interrupted_effects_are_named_filtered_and_to_handle(world):  # noqa: F811
+    """Une réponse Telegram devenue « stale » (robot coupé plus de dix minutes) n'est jamais dite, ni par une
+    réponse ni par « désolée » ; une commande réseau « interrupted » non plus. La console les montrait en anglais,
+    refusait leur filtre (« État inconnu ») et n'allumait rien dans « À traiter »."""
+    client, live, _ = world
+    bootstrap(client)
+    converse(client)
+    with client.websocket_connect(WS) as ws:  # un second échange (un autre identifiant : pas dédoublonné)
+        ws.receive_json(), ws.receive_json()
+        ws.send_json({"type": "chat", "message": "et demain, tu fais quoi ?", "client_msg_id": "o2"})
+        recv_until(ws, "speech")
+    store = live.kernel.mind.store
+    keys = [k for (k,) in client.portal.call(lambda: store.query_mind("SELECT key FROM outbox ORDER BY seq"))]
+    assert len(keys) >= 2
+    client.portal.call(store.mark_outbox, keys[-1], "stale", "trop tard : elle ne le dit plus")
+    client.portal.call(store.mark_outbox, keys[-2], "interrupted", "délai dépassé : coupée au bout de 900 s")
+    page = html_of(client.get(f"{BASE}/systeme/sorties"))
+    assert "Périmé (pas dit)" in page and "Interrompu (à vérifier)" in page
+    assert "Stale" not in page and "Interrupted" not in page
+    assert '<span class="count">2</span>' in client.get(f"{BASE}/systeme/sorties").text  # « à traiter »
+    assert "Marquer comme vu" in page and ">Relancer</button>" not in page  # on ne relance pas une parole périmée
+    filtered = html_of(client.get(f"{BASE}/systeme/sorties?etat=stale"))
+    assert "État inconnu" not in filtered and "périmé (pas dit)" in filtered
+    assert "État inconnu" in html_of(client.get(f"{BASE}/systeme/sorties?etat=inexistant"))  # contre-exemple
+    refused = post(client, f"{BASE}/systeme/sorties", {"cle": keys[-1], "faire": "relancer"})
+    assert "Pas relancé" in html_of(refused)
+    assert client.portal.call(lambda: store.outbox_status(keys[-1])) == "stale"
+    seen = post(client, f"{BASE}/systeme/sorties", {"cle": keys[-1], "faire": "vu"})
+    assert "Marqué comme vu" in html_of(seen)
+    assert client.portal.call(lambda: store.outbox_status(keys[-1])) == "seen"
+
+
 def test_giant_cursors_never_break_a_page(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)

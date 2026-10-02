@@ -2,8 +2,10 @@
 
 - un mail remarqué est un signal : dosé, habitué, jamais une consigne — cité
   dans le prompt, montré à ses propriétaires seulement ;
-- un mail important, sa propriétaire présente : elle le lui dit ; écrire un
-  mail attend un accord, puis part ;
+- un mail important, sa propriétaire présente : elle le lui dit — compté à
+  l'énoncé, le mail sous les yeux ; un silence, une initiative devancée, un
+  « finalement non » le laissent à dire, sans insister au-delà de deux essais
+  (ADR 0044) ; écrire un mail attend un accord, puis part ;
 - dans ses flux, elle ne remarque que ce qui la touche ; le quarantième titre
   n'est plus un événement (habituation), une source ne fait jamais plus
   qu'une petite émotion (dosage) ;
@@ -15,21 +17,29 @@ from __future__ import annotations
 import asyncio
 import json
 
+import pytest
+
 from mika.app.mindport import KernelPort
 from mika.contracts import attention as attention_c
 from mika.contracts import email as email_c
 from mika.contracts import goals as goals_c
+from mika.contracts import identity as identity_c
 from mika.contracts import rss as rss_c
 from mika.contracts import runtime as rt
 from mika.kernel.clock import HOUR, MINUTE, US
+from mika.kernel.events import Origin
 from mika.kernel.prompt import UNTRUSTED_NOTE
+from mika.kernel.state import FrozenDict
+from mika.plugins.email import MENTION_TITLE, EmailParams
 from mika.ports.feeds import Entry
+from mika.ports.llm import LLMResponse
 from mika.ports.mail import Mail
 from mika.runtime.effects import with_content
 from mika.sim.clock import SimClock, run_virtual
 from mika.sim.llm.persona import PersonaSimLLM
 from mika.sim.outside import FakeFeeds, FakeMail
-from tests.fixtures.mika import at_paris, boot, build, connect, said
+from tests.fixtures.endings import ENDINGS, initiative_ends
+from tests.fixtures.mika import at_paris, boot, build, connect, disconnect, said
 
 
 def events(kernel):
@@ -48,9 +58,9 @@ class Run:
         return [c for c in self.llm.calls if c.role == role and (target is None or c.meta.get("target") == target)]
 
 
-def run(tmp_path, scenario, *, start, mail=None, feeds=None):
+def run(tmp_path, scenario, *, start, mail=None, feeds=None, model=PersonaSimLLM):
     clock = SimClock(start)
-    llm = PersonaSimLLM(clock, seed=1, abstain_rate=0.0, latency=2.0)
+    llm = model(clock, seed=1, abstain_rate=0.0, latency=2.0)
     mail, feeds = mail or FakeMail(), feeds or FakeFeeds()
     kernel, clock, _, _ = build(tmp_path, None, clock=clock, llm=llm, ports={"mail": mail, "feeds": feeds})
 
@@ -116,8 +126,107 @@ def test_an_important_mail_is_mentioned_to_her_owner_once(tmp_path):
         await asyncio.sleep(HOUR / US)
 
     r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 10, 0), mail=box)
-    mentions = [e for e in r.of(rt.EPISODE_STARTED) if email_c.MENTION in e.data.reason.split(",")]
-    assert len(mentions) == 1 and mentions[0].data.target == "user_1"
+    said_ = mentions(r)
+    assert len(said_) == 1 and said_[0].data.target == "user_1"
+    assert "mail:<m1@exemple.fr>" in said_[0].data.provenance and "toit" in said_[0].data.text.text  # sous les yeux
+
+
+def mentions(r):
+    """Les annonces d'un mail **dites** (un énoncé visible), pas seulement entreprises."""
+    announcing = {e.correlation for e in r.of(rt.EPISODE_STARTED) if email_c.MENTION in e.data.reason.split(",")}
+    return [e for e in r.of(rt.UTTERANCE) if e.correlation in announcing and e.data.visible]
+
+
+class Hesitant(PersonaSimLLM):
+    """Le modèle se tait aux ``silent`` premières annonces d'un mail, puis le dit."""
+
+    silent = 1
+
+    async def complete(self, req):
+        if req.role == "initiative" and MENTION_TITLE in req.messages[-1].content and self.silent:
+            self.silent -= 1
+            self.calls.append(req)
+            return LLMResponse("[SILENCE]")
+        return await super().complete(req)
+
+
+class Mute(Hesitant):
+    silent = 99
+
+
+def _announce(*extra):
+    """Adrien est là ; un mail urgent arrive (et d'autres, ordinaires) ; on la laisse vivre trois heures."""
+    async def scenario(kernel, llm, mail_, feeds):
+        await connect(kernel, "user_1", "Adrien", operator=True)
+        await asyncio.sleep(20 * MINUTE / US)
+        mail_.deliver(mail(1, "Urgent : le toit fuit", "C'est urgent, appelle le plombier."))
+        for m in extra:
+            mail_.deliver(m)
+        await asyncio.sleep(3 * HOUR / US)
+        return kernel.mind.root.slices["email"]
+
+    return scenario
+
+
+def test_a_mail_she_held_back_is_still_to_be_said_and_said_once(tmp_path):
+    """BUG-2 : elle se tait à la première annonce (« [SILENCE] ») — le mail reste à dire ; à la suivante elle le
+    dit, une fois. Seul le mail annoncé est « signalé », pas le courrier ordinaire non lu à côté."""
+    ordinary = mail(2, "Compte rendu de la réunion", "Voici le compte rendu.", sender="Bob <bob@exemple.fr>")
+    r = run(tmp_path, _announce(ordinary), start=at_paris(2026, 9, 28, 10, 0), mail=FakeMail(),
+            model=Hesitant)
+    tries = [e for e in r.of(rt.EPISODE_STARTED) if email_c.MENTION in e.data.reason.split(",")]
+    said_ = mentions(r)
+    assert len(tries) == 2 and len(said_) == 1, (len(tries), len(said_))
+    state = r.result
+    assert state.mails["<m1@exemple.fr>"].mentioned  # dit : signalé
+    assert not state.mails["<m2@exemple.fr>"].mentioned  # jamais annoncé : pas « signalé »
+
+
+def test_she_does_not_insist_on_a_mail_she_keeps_not_saying(tmp_path):
+    """Le contre-exemple : un modèle qui se tait toujours. Deux essais (``mention_attempts``), pas un de plus en
+    trois heures — et le mail n'est jamais dit « signalé », puisqu'il ne l'a pas été."""
+    r = run(tmp_path, _announce(), start=at_paris(2026, 9, 28, 10, 0), mail=FakeMail(), model=Mute)
+    tries = [e for e in r.of(rt.EPISODE_STARTED) if email_c.MENTION in e.data.reason.split(",")]
+    assert len(tries) == EmailParams().mention_attempts and not mentions(r)
+    assert not r.result.mails["<m1@exemple.fr>"].mentioned
+
+
+@pytest.mark.parametrize("ending,counts,why", ENDINGS)
+def test_an_announcement_counts_as_a_try_only_when_it_really_was_one(ending, counts, why):
+    from mika.plugins.email import EmailState, Seen, _episode, _settled
+
+    state = EmailState(mails=FrozenDict({"<m1@exemple.fr>": Seen(1, "Alice", "alice@exemple.fr", 0.9, False,
+                                                                   at_paris(2026, 9, 28, 14, 50), "r")}))
+    s = initiative_ends((_episode, _settled), state, EmailParams(), email_c.MENTION, None, ending)
+    m = s.mails["<m1@exemple.fr>"]
+    assert m.mention_attempts == (2 if counts else 0) and not m.mentioned, why
+
+
+def test_a_handle_linked_to_her_owner_without_speaking_for_her_is_not_told(tmp_path):
+    """BUG-9 : un navigateur sans compte, relié par un opérateur à sa propriétaire, ne parle pas pour elle
+    (``SPEAKS_AS_OWNER``) : ce qu'elle annoncerait (sa boîte) ne lui serait pas montré — l'annonce ne part donc
+    pas là. Contre-exemple : la vraie session de sa propriétaire l'entend."""
+    async def scenario(kernel, llm, mail_, feeds):
+        await connect(kernel, "user_1", "Adrien", operator=True)
+        await disconnect(kernel, "user_1")
+        await kernel.mind.append([identity_c.LINKED.draft(handle="web_abc", person="user_1", by="operator")],
+                                 emitter="identity", correlation="genese", origin=Origin.GENESIS)
+        await connect(kernel, "web_abc", "Adrien", authenticated=False)
+        await asyncio.sleep(20 * MINUTE / US)
+        mail_.deliver(mail(1, "Urgent : le toit fuit", "C'est urgent, appelle le plombier."))
+        await asyncio.sleep(HOUR / US)
+        linked = [e.data.target for e in r_of(kernel, rt.EPISODE_STARTED) if email_c.MENTION in e.data.reason]
+        await connect(kernel, "user_1", "Adrien", operator=True)
+        await asyncio.sleep(HOUR / US)
+        return linked
+
+    r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 10, 0), mail=FakeMail())
+    assert r.result == []  # rien vers l'adresse reliée
+    assert [e.data.target for e in mentions(r)] == ["user_1"]  # la vraie session l'entend
+
+
+def r_of(kernel, t):
+    return [e for e in events(kernel) if e.type.name == t.name]
 
 
 def test_a_burst_of_urgent_mails_is_one_small_emotion_not_ten(tmp_path):

@@ -52,7 +52,7 @@ MOMENT_FR: Mapping[Phase, str] = MappingProxyType({
 _TENDENCY_FR: Mapping[Phase, str] = MappingProxyType({
     Phase.MORNING: "Le matin, tu es d'ordinaire plutôt d'attaque.",
     Phase.AFTERNOON: "L'après-midi, tu es souvent en forme, facilement enjouée.",
-    Phase.EVENING: "Le soir, tu te poses, et ton ton se fait souvent plus doux.",
+    Phase.EVENING: "Le soir, d'habitude, tu te poses et ton ton se fait plus doux.",
     Phase.NIGHT: "La nuit, tu es souvent plus rêveuse.",
 })
 
@@ -180,7 +180,7 @@ def date_fr(dt: date) -> str:
 
 def day_fr(dt: date) -> str:
     """« lundi 28 septembre » (sans l'année, comme on le dit)."""
-    return f"{DAYS_FR[dt.weekday()]} {dt.day} {MONTHS_FR[dt.month - 1]}"
+    return f"{DAYS_FR[dt.weekday()]} {'1er' if dt.day == 1 else dt.day} {MONTHS_FR[dt.month - 1]}"
 
 
 def energy_feel(value: float) -> str:

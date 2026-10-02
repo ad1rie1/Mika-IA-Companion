@@ -15,10 +15,17 @@ de modèle de langage :
 - **les heures où elle répond** : chaque initiative restée sans réponse, ou
   comblée, à une heure donnée, rend la suivante à cette heure-là plus ou moins
   probable ;
+- **les heures où elle écrit** (``HOURS``) : on n'est pas ignorée par quelqu'un
+  qui dort, ni seule à 19 h quand une proche passe d'habitude à 20 h ;
+- **une conversation qui se clôt** (« bonne nuit », « à demain ») : la
+  réponse qu'elle y fait n'attend rien en retour ;
 - **prendre de ses nouvelles** : une amie qui n'avait pas l'air bien (ou dont
   la réponse l'a elle-même attristée ou inquiétée) et qui n'a plus rien dit
   depuis, quelques heures plus tard, elle lui écrit ; un « ok » ne la rassure
   pas, un vrai message plus léger, si ;
+- **ce qu'une amie avait de prévu** : la veille (ou le matin même), un mot pour
+  l'encourager ; quelques heures après, si elle n'a pas eu de nouvelles,
+  « alors, ça s'est passé comment ? » — une fois chacun ;
 - **la contagion** : le ton du moment de quelqu'un la colore un peu, selon
   leur proximité — elle s'allège avec quelqu'un de joyeux, se tend avec
   quelqu'un de stressé.
@@ -44,6 +51,14 @@ NIGHT, MORNING, AFTERNOON, EVENING = "night", "morning", "afternoon", "evening"
 BANDS = (NIGHT, MORNING, AFTERNOON, EVENING)
 #: Raison de preuve d'initiative : prendre des nouvelles de quelqu'un qui n'avait pas l'air bien.
 CHECK_IN = "check_in"
+#: ce qu'elle lui avait entendu dire de prévu (un entretien, un examen) est passé : « alors, ça s'est passé comment ? »
+FOLLOW_UP = "follow_up"
+#: … et la veille (ou le matin même) : « bonne chance pour demain ! » — plus faible, elle le fait si elle y pense
+CHEER = "cheer"
+#: Un mot pour encourager n'attend pas de réponse : ni attente déçue, ni « sans réponse », et il n'empêche pas de
+#: demander le lendemain comment ça s'est passé (la retenue envers qui ne répond pas ne le compte pas). Il reste
+#: une prise de parole (le budget du jour, la période réfractaire s'y appliquent).
+WELL_WISHES = frozenset({CHEER})
 
 
 class ToneRead(Payload):
@@ -75,6 +90,8 @@ class ToneRead(Payload):
     #: temps) : l'émotion et son intensité — jamais un mot du message
     contagion: float = 0.0
     contagion_emotion: str = ""
+    #: elle clôt la conversation (« bonne nuit », « à demain », « je file ») : y répondre n'attend rien en retour
+    closing: bool = False
 
 
 READ = event_type("others.read", OWNER, ToneRead, public=True, subjects=("person",))
@@ -111,3 +128,20 @@ MIND = FactFamily("others.mind", arg=str, type=MindReading, time_varying=True)
 #: ``REPLY_DELAY((personne, canal))`` — le canal tel que le transport le nomme
 #: (« web », « telegram ») ; la classe (écran, messagerie) est tranchée ici.
 REPLY_DELAY = FactFamily("others.reply_delay", arg=tuple, type=DelayReading)
+
+
+@dataclass(frozen=True, slots=True)
+class HoursReading:
+    """Les heures (locales) où une personne écrit d'habitude. ``active[h]`` :
+    elle écrit à cette heure-là, ou juste à côté — appris de son histoire
+    (``learned``), sinon tout sauf une nuit supposée. ``usual`` : l'heure où
+    elle écrit le plus souvent (``None`` tant que rien n'est appris)."""
+
+    days: int  # jours distincts où elle a écrit, dans ce qui est retenu
+    active: tuple[bool, ...]  # 24 heures
+    learned: bool
+    usual: int | None = None
+
+
+#: ``HOURS(personne)`` : les heures où elle écrit — on n'est pas ignorée par quelqu'un qui dort.
+HOURS = FactFamily("others.hours", arg=str, type=HoursReading)

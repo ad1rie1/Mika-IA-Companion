@@ -18,6 +18,7 @@ import asyncio
 from mika.app import composition
 from mika.contracts import agency as agency_c
 from mika.contracts import attention as attention_c
+from mika.contracts import goals as goals_c
 from mika.contracts import memory as memory_c
 from mika.contracts import needs as needs_c
 from mika.contracts import runtime as rt
@@ -116,12 +117,14 @@ def test_a_friend_who_stays_connected_and_silent_gets_one_gentle_word_then_silen
 def test_a_question_left_behind_by_someone_who_left_is_not_an_affront(tmp_path):
     """Le contre-exemple du ressenti : Adrien ferme l'application après sa
     réponse (une question) — on se reparlera ; ce n'est pas l'ignorer, ni
-    quand il revient le lendemain. Resté là sans répondre, si (la sonde)."""
-    def scenario(leaves, back=False):
+    quand il revient le lendemain. Il dit « bon je file, à plus ! » sans fermer
+    l'application : la conversation s'est close, pas davantage (audit HUM-4).
+    Resté là sans répondre, si (la sonde)."""
+    def scenario(leaves, back=False, last="bof, longue journée"):
         async def go(kernel, script, out, llm):
             await befriend(kernel, "user_1", social_c.FRIEND)
             await connect(kernel, "user_1", "Adrien")
-            await chat(kernel, "user_1", ["salut mika ! ça va ?", "bon je file, à plus !"])
+            await chat(kernel, "user_1", ["salut mika ! ça va ?", last])
             if leaves:
                 await disconnect(kernel, "user_1")
             if back:
@@ -136,7 +139,31 @@ def test_a_question_left_behind_by_someone_who_left_is_not_an_affront(tmp_path):
     assert run(tmp_path / "parti", scenario(True), start=start) == []
     back = run(tmp_path / "revenu", scenario(True, back=True), start=start)
     assert not any("à ma question" in t for t in back), back  # (s'il ignore ensuite son initiative, c'est autre chose)
+    # « je file » : sa réponse ne laisse aucune question en suspens (une initiative ignorée ensuite, c'est autre chose)
+    clos = run(tmp_path / "clos", scenario(False, last="bon je file, à plus !"), start=start)
+    assert not any("à ma question" in t for t in clos), clos
     assert run(tmp_path / "reste", scenario(False), start=start) == ["Adrien n'a pas répondu à ma question."]
+
+
+def test_after_a_goodbye_she_does_not_write_right_away_even_if_the_tab_stays_open(tmp_path):
+    """« bon je file, bonne soirée » et l'onglet reste ouvert : pas de « t'es encore là ? » dix minutes après ;
+    quelques heures plus tard, si. Ce qui est dû (un rappel promis) passe quand même (contre-exemples)."""
+    async def scenario(kernel, script, out, llm):
+        await befriend(kernel, "user_1", social_c.FRIEND)
+        await connect(kernel, "user_1", "Adrien")
+        await chat(kernel, "user_1", ["salut mika ! ça va ?", "bon je file, bonne soirée"])
+        await asyncio.sleep(20 * MINUTE / US)
+        soon = kernel.mind.frame()
+        await asyncio.sleep(5 * HOUR / US)
+        later = kernel.mind.frame()
+        def veto(f, *reasons):
+            return _budget(f.state("agency"), f, RowView("INITIATIVE", "user_1", 5.0, reasons)).veto
+
+        return [veto(f, social_c.CHAT) for f in (soon, later)], veto(soon, goals_c.REMIND)
+
+    (chat_soon, chat_later), remind = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 14, 0))
+    assert chat_soon == agency_c.FAREWELL and chat_later != agency_c.FAREWELL
+    assert remind != agency_c.FAREWELL
 
 
 def test_a_friend_who_answers_keeps_getting_initiatives(tmp_path):
@@ -338,14 +365,19 @@ def test_a_needs_driven_initiative_is_told_what_to_talk_about_never_to_speak_for
 
 
 def test_the_void_deepens_with_time_but_never_drowns_her(tmp_path):
+    """Tant que rien ne l'occupe, le vide se creuse ; une rêverie qu'elle entreprend l'occupe (le vide repart de
+    son plancher, c'est voulu) : on mesure la montée avant qu'elle ne s'occupe."""
     async def scenario(kernel, script, out, llm):
         p = await kernel.perceive(said("user_1", "bon, à plus"))
         await p.reply
         await asyncio.sleep(10 * HOUR / US)
-        return [e.data.intensity for e in events(kernel, needs_c.FELT.name)]
+        busy = [e.at for e in events(kernel, goals_c.GOAL_OPENED.name)]
+        return [e.data.intensity for e in events(kernel, needs_c.FELT.name)
+                if not busy or e.at < busy[0]], events(kernel, needs_c.FELT.name)
 
-    felt = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 9, 0))
+    felt, every = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 9, 0))
     assert felt and felt[-1] > felt[0] + 0.1  # elle s'aggrave avec la durée…
+    felt = [e.data.intensity for e in every]
     assert max(felt) <= 0.35  # … sans la faire sombrer
     assert len(felt) <= 8 * 4 + 1  # toutes les quinze minutes, pas plus
 

@@ -104,19 +104,26 @@ SECTION_LABELS: dict[str, str] = {
     "views": "Ce que voit la caméra", "apps": "Ses apps forgées",
     # déclarées par des lots voisins (ADR 0033, 0034, 0036) : nommées d'avance, sans effet tant qu'elles n'existent pas
     "life": "Ce qui se passe dans la vie de la personne", "matter": "Ce dont elle pourrait parler",
-    "noticed": "Ce qu'elle a remarqué",
+    "noticed": "Ce qu'elle a remarqué", "habits": "Ce qu'elle s'entend répéter",
+    "mail_mention": "Le mail important qu'elle annonce", "step_origin": "Ce qui a fait naître le but",
+    "project_network": "Ce que le réseau a rendu",
+    # ADR 0047
+    "greeting_tone": "Le ton de ses bonjours (sa persona)",
+    # ADR 0046
+    "self_said": "Ce qu'elle a déjà dit d'elle-même", "register": "Le ton entre elles (selon leur lien)",
 }
 
 #: Les raisons des preuves de l'arbitre : ce qui la pousse à agir.
 REASON_LABELS: dict[str, str] = {
     "mood_overflow": "Une humeur qui déborde", "need_expression": "Besoin de s'exprimer",
-    "need_social": "Envie de compagnie", "check_in": "Prendre des nouvelles", "thought": "Une pensée à partager",
+    "need_social": "Envie de compagnie", "check_in": "Prendre des nouvelles", "follow_up": "Demander comment ça s'est passé", "thought": "Une pensée à partager",
     "greeting": "Saluer", "present": "Quelqu'un de présent", "chat": "Envie de bavarder",
     "comfort": "Réconforter", "recontact": "Reprendre contact après un silence", "work": "Avancer sur un but",
     "remind": "Rappeler ce qu'on lui a demandé", "share": "Partager où en est un but",
     "run": "Travailler sur un projet", "project_share": "Partager où en est un projet",
     "mail_mention": "Parler d'un mail reçu", "mail_draft": "Préparer une réponse à un mail",
-    "second_thoughts": "Elle s'est ravisée",
+    "second_thoughts": "Elle s'est ravisée", "project_need": "Demander un coup de main pour un projet",
+    "keep_promise": "Tenir une promesse au moment dit", "cheer": "Encourager avant un moment important",
 }
 
 #: Les vetos : ce qui l'empêche d'agir.
@@ -125,7 +132,7 @@ VETO_LABELS: dict[str, str] = {
     "daily_cap": "Budget d'initiatives du jour épuisé", "grudge": "Elle est fâchée contre cette personne",
     "unanswered": "Sa dernière initiative est restée sans réponse", "run_cap": "Assez d'exécutions pour l'heure",
     "step_cap": "Assez de séances de travail pour l'heure",
-    "awaiting_reply": "Son dernier message attend encore une réponse", "changed_mind": "Elle s'est ravisée",
+    "awaiting_reply": "Son dernier message attend encore une réponse", "farewell": "Ils viennent de se dire au revoir", "changed_mind": "Elle s'est ravisée",
 }
 
 #: Les processus de fond : ce qu'ils font.
@@ -140,7 +147,9 @@ PROCESS_LABELS: dict[str, str] = {
     "projects.remote": "Pousser et récupérer les dépôts", "email.poll": "Relever le courrier",
     "rss.poll": "Relever les flux", "camera.look": "Regarder par la caméra", "forge.tick": "Faire tourner les apps",
     "forge.events": "Transmettre les événements aux apps", "forge.discover": "Découvrir les apps",
-    "memory.promises": "Laisser filer les promesses échues", "self.wake": "Se réveiller avec sa nuit",
+    "memory.promises": "Tenir ou laisser filer ses promesses", "self.wake": "Se réveiller avec sa nuit",
+    "social.reciprocity": "Remarquer qui écrit en premier",
+    "memory.follow": "Remarquer qu'elle a repris un moment de la vie de quelqu'un",
 }
 
 #: Les événements des facultés : ce qui s'est passé (ceux du noyau et du moteur sont nommés par la console).
@@ -148,6 +157,7 @@ EVENT_LABELS: dict[str, str] = {
     "presence.connected": "Connexion", "presence.disconnected": "Déconnexion",
     "identity.claimed": "Un nom revendiqué", "identity.evidence": "Une preuve d'identité",
     "identity.linked": "Une adresse reliée", "identity.registered": "Un compte enregistré",
+    "identity.name_bound": "Un nom relié à une personne (« celle dont on lui a parlé »)",
     "transcript.compacted": "Un fil replié en résumé",
     "memory.believed": "Une croyance retenue", "memory.consolidated": "Une relecture de la mémoire",
     "memory.night_sorted": "La mémoire triée la nuit", "memory.promise_noticed": "Une promesse remarquée",
@@ -185,6 +195,10 @@ EVENT_LABELS: dict[str, str] = {
     "memory.event_noted": "Un événement de la vie de quelqu'un, noté", "body.roused": "Réveillée par un message",
     "body.waited": "Un message attend son réveil", "attention.touched": "Une pensée effleurée par un message",
     "self.woke_with": "Ce qu'elle emporte de sa nuit", "self.touched": "Touchée par ce qu'on lui a dit",
+    "projects.network_queued": "Une commande réseau mise en file (après l'exécution)",
+    "social.one_sided": "C'est presque toujours elle qui écrit",
+    "needs.reunited": "Une amie revenue après un moment creux",
+    "memory.moment_followed": "Un moment de la vie de quelqu'un, repris",
 }
 
 #: Tout ce que la console nomme en français, d'un bloc.

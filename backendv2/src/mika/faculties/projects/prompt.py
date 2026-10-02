@@ -259,10 +259,16 @@ def _atelier_lines(tree: Mapping[str, Any]) -> list[str]:
     return out
 
 
+#: ce que sa dernière commande réseau a rendu est ce sur quoi elle travaille : coupé en premier (venu d'Internet),
+#: jamais au point de disparaître
+NETWORK_FLOOR = 600
+
+
 @PROJECTS.section("project_network", zone=Zone.VOLATILE, episodes=RUNS, trim_rank=0, untrusted=True,
-                  title="CE QUE LE RÉSEAU A RENDU")
+                  floor_chars=NETWORK_FLOOR, title="CE QUE LE RÉSEAU A RENDU")
 def _network_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
-    """La sortie de sa dernière commande réseau : une donnée venue d'Internet, citée, coupée en premier."""
+    """La sortie de sa dernière commande réseau : une donnée venue d'Internet, citée, coupée en premier — jusqu'à
+    son plancher (c'est ce sur quoi elle travaille)."""
     got = _project(s, frame)
     if got is None or not got[0].network_out:
         return None
