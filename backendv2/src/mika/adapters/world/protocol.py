@@ -30,15 +30,32 @@ import enum
 import json
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from mika.contracts import world as w
+from mika.contracts.world import (  # noqa: F401 — réexportées : elles font partie du protocole
+    Act,
+    Address,
+    Describe,
+    Edit,
+    Finished,
+    Loaded,
+    Moved,
+    NpcUpdate,
+    Progress,
+    Reply,
+    Report,
+    ReportBody,
+    Settled,
+    Sound,
+)
 
 PROTOCOL = "mika.world/1"
 PATH = "/ws/world"
 
-#: L'identifiant d'une commande, choisi par le client (unique pour sa session).
-CmdId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
+#: Les commandes (``act``, ``moved``, ``address``, ``answer``, ``report``, ``edit``, ``describe``) sont des types
+#: du contrat (``contracts/world.py``) : le port d'entrée du noyau les reçoit telles quelles.
+CmdId = w.CmdId
 
 
 class Role(enum.StrEnum):
@@ -86,144 +103,6 @@ class Hello(Wire):
     token: str | None = Field(default=None, max_length=200)
     #: l'apparence que la personne a choisie (un prefab du moteur)
     avatar: w.AssetKey | None = None
-
-
-class Act(Wire):
-    """La personne fait quelque chose avec son corps : une action de base (``take``, ``put``, ``give``,
-    ``drop``, ``sit``, ``lie``, ``stand``) ou une affordance d'un objet (``allumer``). ``place`` : le lieu
-    où s'asseoir ; ``target`` : où poser ; ``to_actor`` : à qui donner — donner, c'est tendre : ``give``
-    ouvre une demande ``offer`` que l'autre accepte ou non. ``expect`` : le ``seq`` sur lequel elle a décidé
-    (un état qui a changé depuis sur ce qu'elle touche : ``stale``)."""
-
-    type: Literal["act"] = "act"
-    cmd: CmdId
-    action: w.Ident
-    object: w.Ident | None = None
-    place: w.Ident | None = None
-    target: w.Location | None = None
-    to_actor: w.ActorId | None = None
-    expect: int | None = Field(default=None, ge=0)
-
-
-class Moved(Wire):
-    """Le corps de la personne est arrivé quelque part (grossièrement : une pièce, le lieu le plus proche).
-    Son client la déplace librement ; le noyau ne retient que ces arrivées. S'asseoir ou s'allonger occupe une
-    place : c'est une action (``act`` ``sit``), pas un déplacement."""
-
-    type: Literal["moved"] = "moved"
-    cmd: CmdId
-    room: w.Ident
-    near: w.Ident | None = None
-
-
-class Address(Wire):
-    """Un geste vers quelqu'un (``gesture``), ou une demande qui attend son accord (``request``)."""
-
-    type: Literal["address"] = "address"
-    cmd: CmdId
-    to: w.ActorId = w.MIKA
-    gesture: w.Gesture | None = None
-    request: w.RequestKind | None = None
-    object: w.Ident | None = None
-    place: w.Ident | None = None
-
-
-class Reply(Wire):
-    """La personne répond à une demande (Mika lui tend une tasse, l'invite à s'asseoir)."""
-
-    type: Literal["answer"] = "answer"
-    cmd: CmdId
-    request: str = Field(max_length=64)
-    accept: bool
-
-
-class Progress(Wire):
-    """L'hôte a commencé à jouer un pas d'une action (pour les autres écrans : rien à décider)."""
-
-    kind: Literal["progress"] = "progress"
-    intent: str = Field(max_length=64)
-    step: int = Field(ge=0, le=7)
-
-
-class Finished(Wire):
-    """L'hôte a fini de jouer une action, ou n'y arrive pas (``failed`` + ``reason``). ``at`` : où l'acteur
-    est vraiment, si ce n'est pas là où l'action devait le mener."""
-
-    kind: Literal["finished"] = "finished"
-    intent: str = Field(max_length=64)
-    outcome: w.Outcome
-    reason: w.Refusal | None = None
-    at: w.ActorMoved | None = None
-
-
-class Settled(Wire):
-    """Un objet s'est posé ailleurs (il est tombé, un personnage du moteur l'a poussé)."""
-
-    kind: Literal["settled"] = "settled"
-    object: w.Ident
-    to: w.Location
-
-
-class NpcUpdate(Wire):
-    """Un personnage du moteur (``controller: host``) est arrivé quelque part, ou fait autre chose."""
-
-    kind: Literal["npc"] = "npc"
-    actor: w.ActorId
-    room: w.Ident
-    near: w.Ident | None = None
-    posture: w.Posture = w.Posture.STAND
-    activity: w.Ident | None = None
-
-
-class Sound(Wire):
-    """Un bruit du monde (la pluie se met à tomber, un fracas) : ``kind`` est une clé connue du monde,
-    ``loudness`` dit jusqu'où il porte."""
-
-    kind: Literal["sound"] = "sound"
-    sound: w.Ident
-    room: w.Ident
-    loudness: float = Field(ge=0, le=1)
-
-
-class Loaded(Wire):
-    """L'hôte a chargé la définition ``rev`` ; ce qui lui manque (ressources, ancres) se lit dans la console."""
-
-    kind: Literal["loaded"] = "loaded"
-    rev: int = Field(ge=0)
-    missing_assets: tuple[str, ...] = Field(default=(), max_length=200)
-    missing_anchors: tuple[str, ...] = Field(default=(), max_length=200)
-
-
-ReportBody = Annotated[Progress | Finished | Settled | NpcUpdate | Sound | Loaded, Field(discriminator="kind")]
-
-
-class Report(Wire):
-    """Ce que constate l'hôte (le rôle ``host`` seulement). Un constat est validé comme une action : ce que
-    les règles du monde n'admettent pas est refusé (``implausible``)."""
-
-    type: Literal["report"] = "report"
-    cmd: CmdId
-    report: ReportBody
-
-
-class Edit(Wire):
-    """Un lot d'édition de la définition, écrit sur la révision ``base`` (rôle ``creator``)."""
-
-    type: Literal["edit"] = "edit"
-    cmd: CmdId
-    base: int = Field(ge=0)
-    changes: tuple[w.DefChange, ...] = Field(min_length=1, max_length=500)
-
-
-class Describe(Wire):
-    """Ce qu'un élément est pour elle, en prose (rôle ``creator``) ; ``about`` : les personnes qu'il nomme."""
-
-    type: Literal["describe"] = "describe"
-    cmd: CmdId
-    of: w.DefKind
-    id: str = Field(max_length=120)
-    text: str = Field(max_length=500)
-    about: tuple[str, ...] = Field(default=(), max_length=8)
 
 
 class PoseIn(Wire):

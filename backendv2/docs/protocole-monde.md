@@ -404,6 +404,7 @@ plus là — comme elle remarquerait qu'on a touché à ses affaires.
 | `implausible` | un constat que les règles du monde n'admettent pas |
 | `not_host` / `not_creator` | le rôle manque |
 | `rate_limited` | trop de commandes |
+| `unsupported` | ce noyau ne sait pas encore faire ça (une commande d'une version plus récente du protocole) |
 
 Une trame illisible ou interdite reçoit une erreur de protocole (`fatal` : la connexion se ferme) :
 

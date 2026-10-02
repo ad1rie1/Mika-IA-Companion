@@ -1,0 +1,3261 @@
+{
+ "format": "mika.room-layout/1",
+ "source": "frontend/assets-src",
+ "units": "m",
+ "space": "room (three.js: y up, facing = (sin φ, cos φ))",
+ "room": {
+  "min": {
+   "x": -4.0,
+   "y": 0.0,
+   "z": -4.5
+  },
+  "max": {
+   "x": 4.0,
+   "y": 3.2,
+   "z": 3.5
+  }
+ },
+ "objects": [
+  {
+   "id": "room_floor",
+   "category": "architecture",
+   "asset": "architecture/room_floor",
+   "fbx": "Models/architecture/room_floor.fbx",
+   "parts": [
+    "Shell_Floor"
+   ],
+   "pos": {
+    "x": 0.0,
+    "y": 0.0,
+    "z": -0.5
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 8.0,
+    "y": 0.0,
+    "z": 8.0
+   },
+   "materials": [
+    "M_Floor"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 2
+  },
+  {
+   "id": "room_walls",
+   "category": "architecture",
+   "asset": "architecture/room_walls",
+   "fbx": "Models/architecture/room_walls.fbx",
+   "parts": [
+    "Shell_Walls",
+    "Shell_Skirt_B",
+    "Shell_Skirt_L",
+    "Shell_Skirt_R",
+    "Shell_Skirt_F1",
+    "Shell_Skirt_F2"
+   ],
+   "pos": {
+    "x": -0.075,
+    "y": 0.0,
+    "z": -0.425
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 8.15,
+    "y": 3.2,
+    "z": 8.15
+   },
+   "materials": [
+    "M_Wall",
+    "M_Skirting"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 572
+  },
+  {
+   "id": "room_ceiling",
+   "category": "architecture",
+   "asset": "architecture/room_ceiling",
+   "fbx": "Models/architecture/room_ceiling.fbx",
+   "parts": [
+    "Shell_Ceiling"
+   ],
+   "pos": {
+    "x": 0.0,
+    "y": 3.2,
+    "z": -0.5
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 8.0,
+    "y": 0.0,
+    "z": 8.0
+   },
+   "materials": [
+    "M_Ceiling"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 2
+  },
+  {
+   "id": "window_sky",
+   "category": "architecture",
+   "asset": "architecture/window_sky",
+   "fbx": "Models/architecture/window_sky.fbx",
+   "parts": [
+    "Window_Sky"
+   ],
+   "pos": {
+    "x": -4.6,
+    "y": -0.6,
+    "z": -1.2
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.0,
+    "y": 4.5,
+    "z": 5.2
+   },
+   "materials": [
+    "M_WindowSky"
+   ],
+   "emissive": true,
+   "children": [],
+   "surfaces": [],
+   "triangles": 2
+  },
+  {
+   "id": "writing_desk",
+   "category": "furniture",
+   "asset": "furniture/desk",
+   "fbx": "Models/furniture/writing_desk.fbx",
+   "parts": [
+    "Desk_Top",
+    "Desk_Unit",
+    "Desk_UnitKick",
+    "Desk_Leg",
+    "Desk_Stretcher",
+    "Desk_Apron",
+    "Desk_Drawer0",
+    "Desk_Pull0",
+    "Desk_PullPost0",
+    "Desk_Drawer1",
+    "Desk_Pull1",
+    "Desk_PullPost1",
+    "Desk_Drawer2",
+    "Desk_Pull2",
+    "Desk_PullPost2"
+   ],
+   "pos": {
+    "x": -1.4,
+    "y": 0.0,
+    "z": -4.09
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 1.9,
+    "y": 0.76,
+    "z": 0.72
+   },
+   "materials": [
+    "M_WoodOak",
+    "M_WoodWalnut",
+    "M_Brass"
+   ],
+   "emissive": false,
+   "children": [
+    {
+     "name": "Desk_Drawer0",
+     "pivot": {
+      "x": 0.72,
+      "y": 0.167,
+      "z": 0.32
+     },
+     "parts": [
+      "Desk_Drawer0",
+      "Desk_Pull0",
+      "Desk_PullPost0"
+     ],
+     "motion": {
+      "type": "slide",
+      "dir": {
+       "x": 0.0,
+       "y": 0.0,
+       "z": 1.0
+      }
+     }
+    },
+    {
+     "name": "Desk_Drawer1",
+     "pivot": {
+      "x": 0.72,
+      "y": 0.402,
+      "z": 0.32
+     },
+     "parts": [
+      "Desk_Drawer1",
+      "Desk_Pull1",
+      "Desk_PullPost1"
+     ],
+     "motion": {
+      "type": "slide",
+      "dir": {
+       "x": 0.0,
+       "y": 0.0,
+       "z": 1.0
+      }
+     }
+    },
+    {
+     "name": "Desk_Drawer2",
+     "pivot": {
+      "x": 0.72,
+      "y": 0.5895,
+      "z": 0.32
+     },
+     "parts": [
+      "Desk_Drawer2",
+      "Desk_Pull2",
+      "Desk_PullPost2"
+     ],
+     "motion": {
+      "type": "slide",
+      "dir": {
+       "x": 0.0,
+       "y": 0.0,
+       "z": 1.0
+      }
+     }
+    }
+   ],
+   "surfaces": [
+    {
+     "piece": "Desk_Top",
+     "height": 0.76,
+     "min": {
+      "x": -0.95,
+      "z": -0.36
+     },
+     "max": {
+      "x": 0.95,
+      "z": 0.36
+     }
+    }
+   ],
+   "triangles": 1684
+  },
+  {
+   "id": "desk_chair",
+   "category": "furniture",
+   "asset": "furniture/desk_chair",
+   "fbx": "Models/furniture/desk_chair.fbx",
+   "parts": [
+    "Chair_Spoke",
+    "Chair_Fork",
+    "Chair_Wheel",
+    "Chair_Hub",
+    "Chair_Gas",
+    "Chair_GasCover",
+    "Chair_Plate",
+    "Chair_Seat",
+    "Chair_BackBar",
+    "Chair_Back",
+    "Chair_Headrest",
+    "Chair_Lumbar",
+    "Chair_ArmPost",
+    "Chair_ArmPad",
+    "Chair_ArmLink",
+    "Desk_Hoodie",
+    "Desk_HoodieSleeve",
+    "Desk_HoodieCuff",
+    "Desk_HoodieHood"
+   ],
+   "pos": {
+    "x": -1.4,
+    "y": 0.0,
+    "z": -3.3
+   },
+   "yaw": 0.3,
+   "size": {
+    "x": 0.7028,
+    "y": 1.2336,
+    "z": 0.6875
+   },
+   "materials": [
+    "M_MetalDark",
+    "M_PlasticDark",
+    "M_MetalLight",
+    "M_ChairFabric",
+    "M_ChairAccent",
+    "M_Hoodie"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 9544
+  },
+  {
+   "id": "bed_frame",
+   "category": "furniture",
+   "asset": "furniture/bed",
+   "fbx": "Models/furniture/bed_frame.fbx",
+   "parts": [
+    "Bed_Plinth",
+    "Bed_Frame",
+    "Bed_Head",
+    "Bed_HeadPad",
+    "Bed_HeadButton",
+    "Bed_Mattress",
+    "Bed_Pillow",
+    "Bed_Cushion",
+    "Bed_Duvet",
+    "Bed_Throw"
+   ],
+   "pos": {
+    "x": -3.2815,
+    "y": 0.0,
+    "z": 1.2839
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 1.3904,
+    "y": 0.86,
+    "z": 2.2822
+   },
+   "materials": [
+    "M_WoodWalnut",
+    "M_WoodWarm",
+    "M_FloorCushion",
+    "M_Mattress",
+    "M_Pillow",
+    "M_PillowPink",
+    "M_Duvet",
+    "M_Throw"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 21332
+  },
+  {
+   "id": "nightstand",
+   "category": "furniture",
+   "asset": "furniture/nightstand",
+   "fbx": "Models/furniture/nightstand.fbx",
+   "parts": [
+    "Bedside_Leg",
+    "Bedside_Top",
+    "Bedside_Bottom",
+    "Bedside_Side",
+    "Bedside_Back",
+    "Bedside_Shelf",
+    "Bedside_Drawer",
+    "Bedside_Knob"
+   ],
+   "pos": {
+    "x": -3.592,
+    "y": 0.0,
+    "z": 2.75
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.456,
+    "y": 0.48,
+    "z": 0.42
+   },
+   "materials": [
+    "M_WoodWalnut",
+    "M_WoodWarm",
+    "M_Brass"
+   ],
+   "emissive": false,
+   "children": [
+    {
+     "name": "Bedside_Drawer",
+     "pivot": {
+      "x": 0.188,
+      "y": 0.38,
+      "z": 0.0
+     },
+     "parts": [
+      "Bedside_Drawer",
+      "Bedside_Knob"
+     ],
+     "motion": {
+      "type": "slide",
+      "dir": {
+       "x": 1.0,
+       "y": 0.0,
+       "z": 0.0
+      }
+     }
+    }
+   ],
+   "surfaces": [
+    {
+     "piece": "Bedside_Bottom",
+     "height": 0.135,
+     "min": {
+      "x": -0.218,
+      "z": -0.19
+     },
+     "max": {
+      "x": 0.202,
+      "z": 0.19
+     }
+    },
+    {
+     "piece": "Bedside_Top",
+     "height": 0.48,
+     "min": {
+      "x": -0.228,
+      "z": -0.21
+     },
+     "max": {
+      "x": 0.212,
+      "z": 0.21
+     }
+    }
+   ],
+   "triangles": 1036
+  },
+  {
+   "id": "wardrobe",
+   "category": "furniture",
+   "asset": "furniture/wardrobe",
+   "fbx": "Models/furniture/wardrobe.fbx",
+   "parts": [
+    "Wardrobe_Body",
+    "Wardrobe_Kick",
+    "Wardrobe_Crown",
+    "Wardrobe_Door",
+    "Wardrobe_Inset",
+    "Wardrobe_Handle",
+    "Wardrobe_HandlePost"
+   ],
+   "pos": {
+    "x": -3.6845,
+    "y": 0.0,
+    "z": -3.88
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.641,
+    "y": 2.085,
+    "z": 1.23
+   },
+   "materials": [
+    "M_WoodWarm",
+    "M_WoodWalnut",
+    "M_WoodOak",
+    "M_Brass"
+   ],
+   "emissive": false,
+   "children": [
+    {
+     "name": "Wardrobe_DoorR",
+     "pivot": {
+      "x": 0.2845,
+      "y": 0.09,
+      "z": -0.59
+     },
+     "parts": [
+      "Wardrobe_Door",
+      "Wardrobe_Inset",
+      "Wardrobe_Handle",
+      "Wardrobe_HandlePost"
+     ],
+     "motion": {
+      "type": "hinge",
+      "axis": "y",
+      "opens_toward": {
+       "x": 1.0,
+       "y": 0.0,
+       "z": 0.0
+      }
+     }
+    },
+    {
+     "name": "Wardrobe_DoorL",
+     "pivot": {
+      "x": 0.2845,
+      "y": 0.09,
+      "z": 0.59
+     },
+     "parts": [
+      "Wardrobe_Door",
+      "Wardrobe_Inset",
+      "Wardrobe_Handle",
+      "Wardrobe_HandlePost"
+     ],
+     "motion": {
+      "type": "hinge",
+      "axis": "y",
+      "opens_toward": {
+       "x": 1.0,
+       "y": 0.0,
+       "z": 0.0
+      }
+     }
+    }
+   ],
+   "surfaces": [],
+   "triangles": 1244
+  },
+  {
+   "id": "shelves",
+   "category": "furniture",
+   "asset": "furniture/bookshelf",
+   "fbx": "Models/furniture/shelves.fbx",
+   "parts": [
+    "Bookshelf_Side",
+    "Bookshelf_Top",
+    "Bookshelf_Back",
+    "Bookshelf_Kick",
+    "Bookshelf_Board"
+   ],
+   "pos": {
+    "x": 3.805,
+    "y": 0.0,
+    "z": -2.2
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.39,
+    "y": 2.0,
+    "z": 1.51
+   },
+   "materials": [
+    "M_WoodWalnut"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [
+    {
+     "piece": "Bookshelf_Board",
+     "height": 0.082,
+     "min": {
+      "x": -0.183,
+      "z": -0.728
+     },
+     "max": {
+      "x": 0.18,
+      "z": 0.728
+     }
+    },
+    {
+     "piece": "Bookshelf_Board",
+     "height": 0.472,
+     "min": {
+      "x": -0.183,
+      "z": -0.728
+     },
+     "max": {
+      "x": 0.18,
+      "z": 0.728
+     }
+    },
+    {
+     "piece": "Bookshelf_Board",
+     "height": 0.862,
+     "min": {
+      "x": -0.183,
+      "z": -0.728
+     },
+     "max": {
+      "x": 0.18,
+      "z": 0.728
+     }
+    },
+    {
+     "piece": "Bookshelf_Board",
+     "height": 1.252,
+     "min": {
+      "x": -0.183,
+      "z": -0.728
+     },
+     "max": {
+      "x": 0.18,
+      "z": 0.728
+     }
+    },
+    {
+     "piece": "Bookshelf_Board",
+     "height": 1.632,
+     "min": {
+      "x": -0.183,
+      "z": -0.728
+     },
+     "max": {
+      "x": 0.18,
+      "z": 0.728
+     }
+    },
+    {
+     "piece": "Bookshelf_Top",
+     "height": 2.0,
+     "min": {
+      "x": -0.195,
+      "z": -0.755
+     },
+     "max": {
+      "x": 0.19,
+      "z": 0.755
+     }
+    }
+   ],
+   "triangles": 920
+  },
+  {
+   "id": "dresser",
+   "category": "furniture",
+   "asset": "furniture/dresser",
+   "fbx": "Models/furniture/dresser.fbx",
+   "parts": [
+    "Dresser_Body",
+    "Dresser_Top",
+    "Dresser_Leg",
+    "Dresser_Drawer",
+    "Dresser_Knob"
+   ],
+   "pos": {
+    "x": 3.7587,
+    "y": 0.0,
+    "z": 0.6
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.4735,
+    "y": 0.76,
+    "z": 1.13
+   },
+   "materials": [
+    "M_WoodOak",
+    "M_WoodWalnut",
+    "M_Brass"
+   ],
+   "emissive": false,
+   "children": [
+    {
+     "name": "Dresser_Drawer00",
+     "pivot": {
+      "x": -0.1987,
+      "y": 0.22,
+      "z": -0.271
+     },
+     "parts": [
+      "Dresser_Drawer",
+      "Dresser_Knob"
+     ],
+     "motion": {
+      "type": "slide",
+      "dir": {
+       "x": -1.0,
+       "y": 0.0,
+       "z": 0.0
+      }
+     }
+    },
+    {
+     "name": "Dresser_Drawer01",
+     "pivot": {
+      "x": -0.1987,
+      "y": 0.22,
+      "z": 0.271
+     },
+     "parts": [
+      "Dresser_Drawer",
+      "Dresser_Knob"
+     ],
+     "motion": {
+      "type": "slide",
+      "dir": {
+       "x": -1.0,
+       "y": 0.0,
+       "z": 0.0
+      }
+     }
+    },
+    {
+     "name": "Dresser_Drawer10",
+     "pivot": {
+      "x": -0.1987,
+      "y": 0.4275,
+      "z": -0.271
+     },
+     "parts": [
+      "Dresser_Drawer",
+      "Dresser_Knob"
+     ],
+     "motion": {
+      "type": "slide",
+      "dir": {
+       "x": -1.0,
+       "y": 0.0,
+       "z": 0.0
+      }
+     }
+    },
+    {
+     "name": "Dresser_Drawer11",
+     "pivot": {
+      "x": -0.1987,
+      "y": 0.4275,
+      "z": 0.271
+     },
+     "parts": [
+      "Dresser_Drawer",
+      "Dresser_Knob"
+     ],
+     "motion": {
+      "type": "slide",
+      "dir": {
+       "x": -1.0,
+       "y": 0.0,
+       "z": 0.0
+      }
+     }
+    },
+    {
+     "name": "Dresser_Drawer20",
+     "pivot": {
+      "x": -0.1987,
+      "y": 0.62,
+      "z": -0.271
+     },
+     "parts": [
+      "Dresser_Drawer",
+      "Dresser_Knob"
+     ],
+     "motion": {
+      "type": "slide",
+      "dir": {
+       "x": -1.0,
+       "y": 0.0,
+       "z": 0.0
+      }
+     }
+    },
+    {
+     "name": "Dresser_Drawer21",
+     "pivot": {
+      "x": -0.1987,
+      "y": 0.62,
+      "z": 0.271
+     },
+     "parts": [
+      "Dresser_Drawer",
+      "Dresser_Knob"
+     ],
+     "motion": {
+      "type": "slide",
+      "dir": {
+       "x": -1.0,
+       "y": 0.0,
+       "z": 0.0
+      }
+     }
+    }
+   ],
+   "surfaces": [
+    {
+     "piece": "Dresser_Top",
+     "height": 0.76,
+     "min": {
+      "x": -0.2133,
+      "z": -0.565
+     },
+     "max": {
+      "x": 0.2367,
+      "z": 0.565
+     }
+    }
+   ],
+   "triangles": 2144
+  },
+  {
+   "id": "trinket_shelf",
+   "category": "furniture",
+   "asset": "furniture/trinket_shelf",
+   "fbx": "Models/furniture/trinket_shelf.fbx",
+   "parts": [
+    "Trinket_Shelf",
+    "Trinket_BracketV",
+    "Trinket_BracketH"
+   ],
+   "pos": {
+    "x": 1.9,
+    "y": 1.59,
+    "z": -4.39
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 1.0,
+    "y": 0.16,
+    "z": 0.22
+   },
+   "materials": [
+    "M_WoodWarm",
+    "M_MetalDark"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [
+    {
+     "piece": "Trinket_Shelf",
+     "height": 0.16,
+     "min": {
+      "x": -0.5,
+      "z": -0.11
+     },
+     "max": {
+      "x": 0.5,
+      "z": 0.11
+     }
+    }
+   ],
+   "triangles": 364
+  },
+  {
+   "id": "window_pane",
+   "category": "fixture",
+   "asset": "fixtures/window",
+   "fbx": "Models/fixture/window_pane.fbx",
+   "parts": [
+    "Window_FrameB",
+    "Window_FrameT",
+    "Window_FrameL",
+    "Window_FrameR",
+    "Window_Sill",
+    "Window_Apron",
+    "Window_CasingT",
+    "Window_CasingL",
+    "Window_CasingR",
+    "Window_MullionV",
+    "Window_MullionH"
+   ],
+   "pos": {
+    "x": -4.005,
+    "y": 1.118,
+    "z": -1.2
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.29,
+    "y": 1.247,
+    "z": 1.56
+   },
+   "materials": [
+    "M_TrimPaint"
+   ],
+   "emissive": false,
+   "children": [
+    {
+     "name": "Window_Sash",
+     "pivot": {
+      "x": -0.065,
+      "y": 0.137,
+      "z": -0.645
+     },
+     "parts": [
+      "Window_MullionV",
+      "Window_MullionH"
+     ],
+     "motion": {
+      "type": "hinge",
+      "axis": "y",
+      "opens_toward": {
+       "x": 1.0,
+       "y": 0.0,
+       "z": 0.0
+      }
+     }
+    }
+   ],
+   "surfaces": [],
+   "triangles": 1268
+  },
+  {
+   "id": "bedroom_door",
+   "category": "fixture",
+   "asset": "fixtures/door",
+   "fbx": "Models/fixture/bedroom_door.fbx",
+   "parts": [
+    "Door_CasingL",
+    "Door_CasingR",
+    "Door_CasingT",
+    "Door_Slab",
+    "Door_Panel",
+    "Door_Rose",
+    "Door_LeverNeck",
+    "Door_Lever"
+   ],
+   "pos": {
+    "x": 1.8,
+    "y": 0.0,
+    "z": 3.542
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 1.04,
+    "y": 2.13,
+    "z": 0.116
+   },
+   "materials": [
+    "M_TrimPaint",
+    "M_DoorPaint",
+    "M_Brass"
+   ],
+   "emissive": false,
+   "children": [
+    {
+     "name": "Door_Leaf",
+     "pivot": {
+      "x": 0.43,
+      "y": 0.005,
+      "z": 0.018
+     },
+     "parts": [
+      "Door_Slab",
+      "Door_Panel",
+      "Door_Rose",
+      "Door_LeverNeck",
+      "Door_Lever"
+     ],
+     "motion": {
+      "type": "hinge",
+      "axis": "y",
+      "opens_toward": {
+       "x": 0.0,
+       "y": 0.0,
+       "z": -1.0
+      }
+     }
+    }
+   ],
+   "surfaces": [],
+   "triangles": 1036
+  },
+  {
+   "id": "light_switch",
+   "category": "fixture",
+   "asset": "fixtures/light_switch",
+   "fbx": "Models/fixture/light_switch.fbx",
+   "parts": [
+    "Door_Switch",
+    "Door_SwitchRocker"
+   ],
+   "pos": {
+    "x": 1.08,
+    "y": 1.09,
+    "z": 3.492
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.085,
+    "y": 0.12,
+    "z": 0.016
+   },
+   "materials": [
+    "M_PlasticWhite"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 216
+  },
+  {
+   "id": "curtains",
+   "category": "fixture",
+   "asset": "fixtures/curtains",
+   "fbx": "Models/fixture/curtains.fbx",
+   "parts": [
+    "Curtain_Rod",
+    "Curtain_Finial",
+    "Curtain_Bracket",
+    "Curtain_L",
+    "Curtain_L_Ring",
+    "Curtain_R",
+    "Curtain_R_Ring"
+   ],
+   "pos": {
+    "x": -3.9059,
+    "y": 0.035,
+    "z": -1.2
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.1882,
+    "y": 2.507,
+    "z": 2.784
+   },
+   "materials": [
+    "M_MetalDark",
+    "M_Curtain"
+   ],
+   "emissive": false,
+   "children": [
+    {
+     "name": "Curtain_L",
+     "pivot": {
+      "x": 0.0459,
+      "y": 2.455,
+      "z": -1.3233
+     },
+     "parts": [
+      "Curtain_L",
+      "Curtain_L_Ring"
+     ],
+     "motion": {
+      "type": "scale",
+      "axis": "z"
+     }
+    },
+    {
+     "name": "Curtain_R",
+     "pivot": {
+      "x": 0.0418,
+      "y": 2.455,
+      "z": 1.3405
+     },
+     "parts": [
+      "Curtain_R",
+      "Curtain_R_Ring"
+     ],
+     "motion": {
+      "type": "scale",
+      "axis": "z"
+     }
+    }
+   ],
+   "surfaces": [],
+   "triangles": 7564
+  },
+  {
+   "id": "ceiling_lamp",
+   "category": "fixture",
+   "asset": "fixtures/ceiling_lamp",
+   "fbx": "Models/fixture/ceiling_lamp.fbx",
+   "parts": [
+    "CeilingLamp_Canopy",
+    "CeilingLamp_Cord",
+    "CeilingLamp_Cap",
+    "CeilingLamp_Shade",
+    "CeilingLamp_Bulb"
+   ],
+   "pos": {
+    "x": 0.0,
+    "y": 2.62,
+    "z": -0.5
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.43,
+    "y": 0.58,
+    "z": 0.43
+   },
+   "materials": [
+    "M_MetalDark",
+    "M_Cable",
+    "M_CeilingLampShade",
+    "M_CeilingLampBulb"
+   ],
+   "emissive": true,
+   "children": [],
+   "surfaces": [],
+   "triangles": 1434
+  },
+  {
+   "id": "monitor",
+   "category": "fixture",
+   "asset": "fixtures/monitor",
+   "fbx": "Models/fixture/monitor.fbx",
+   "parts": [
+    "Desk_MonBezel",
+    "Desk_MonBack",
+    "Desk_MonNeck",
+    "Desk_MonFoot",
+    "Monitor_Screen"
+   ],
+   "pos": {
+    "x": -1.38,
+    "y": 0.76,
+    "z": -4.28
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.72,
+    "y": 0.6525,
+    "z": 0.19
+   },
+   "materials": [
+    "M_PlasticDark",
+    "M_MetalDark",
+    "M_MonitorScreen"
+   ],
+   "emissive": true,
+   "children": [
+    {
+     "name": "Monitor_Screen",
+     "pivot": {
+      "x": 0.0,
+      "y": 0.2526,
+      "z": 0.0213
+     },
+     "parts": [
+      "Monitor_Screen"
+     ],
+     "motion": {
+      "type": "toggle"
+     }
+    }
+   ],
+   "surfaces": [],
+   "triangles": 674
+  },
+  {
+   "id": "snake_plant",
+   "category": "prop",
+   "asset": "props/snake_plant",
+   "fbx": "Models/prop/snake_plant.fbx",
+   "parts": [
+    "Plant_SnakePot",
+    "Plant_SnakePotSoil",
+    "Plant_SnakeLeaves"
+   ],
+   "pos": {
+    "x": -3.56,
+    "y": 0.0,
+    "z": 3.2178
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.2544,
+    "y": 0.885,
+    "z": 0.29
+   },
+   "materials": [
+    "M_Terracotta",
+    "M_Soil",
+    "M_LeafSnake"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 1288
+  },
+  {
+   "id": "ficus",
+   "category": "prop",
+   "asset": "props/ficus",
+   "fbx": "Models/prop/ficus.fbx",
+   "parts": [
+    "Plant_FigPot",
+    "Plant_FigPotSoil",
+    "Plant_FigFoot",
+    "Plant_FigTrunk",
+    "Plant_FigStem",
+    "Plant_FigLeaves"
+   ],
+   "pos": {
+    "x": 3.4454,
+    "y": 0.0,
+    "z": -3.9418
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.6657,
+    "y": 1.6002,
+    "z": 0.6284
+   },
+   "materials": [
+    "M_CeramicWhite",
+    "M_Soil",
+    "M_WoodWalnut",
+    "M_Trunk",
+    "M_Stem",
+    "M_Leaf",
+    "M_LeafLight"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 3156
+  },
+  {
+   "id": "pothos",
+   "category": "prop",
+   "asset": "props/pothos",
+   "fbx": "Models/prop/pothos.fbx",
+   "parts": [
+    "Plant_PothosPot",
+    "Plant_PothosPotSoil",
+    "Plant_PothosVine",
+    "Plant_PothosLeaves"
+   ],
+   "pos": {
+    "x": 3.7283,
+    "y": 1.3953,
+    "z": -2.4948
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.3602,
+    "y": 0.7428,
+    "z": 0.4521
+   },
+   "materials": [
+    "M_CeramicSage",
+    "M_Soil",
+    "M_Stem",
+    "M_Leaf",
+    "M_LeafLight"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 3512
+  },
+  {
+   "id": "cactus_windowsill",
+   "category": "prop",
+   "asset": "props/cactus_windowsill",
+   "fbx": "Models/prop/cactus_windowsill.fbx",
+   "parts": [
+    "Plant_SillPot1",
+    "Plant_SillCactus",
+    "Plant_SillCactusArm"
+   ],
+   "pos": {
+    "x": -3.98,
+    "y": 1.204,
+    "z": -1.7189
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.084,
+    "y": 0.19,
+    "z": 0.0863
+   },
+   "materials": [
+    "M_Terracotta",
+    "M_Succulent"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 388
+  },
+  {
+   "id": "succulent_windowsill",
+   "category": "prop",
+   "asset": "props/succulent_windowsill",
+   "fbx": "Models/prop/succulent_windowsill.fbx",
+   "parts": [
+    "Plant_SillBowl",
+    "Plant_SillSucculent"
+   ],
+   "pos": {
+    "x": -3.97,
+    "y": 1.204,
+    "z": -0.75
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.12,
+    "y": 0.0696,
+    "z": 0.1188
+   },
+   "materials": [
+    "M_CeramicWhite",
+    "M_Succulent"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 484
+  },
+  {
+   "id": "keyboard",
+   "category": "prop",
+   "asset": "props/keyboard",
+   "fbx": "Models/prop/keyboard.fbx",
+   "parts": [
+    "Desk_KbBase",
+    "Desk_Key"
+   ],
+   "pos": {
+    "x": -1.38,
+    "y": 0.764,
+    "z": -3.93
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.44,
+    "y": 0.031,
+    "z": 0.145
+   },
+   "materials": [
+    "M_PlasticWhite",
+    "M_Keycap",
+    "M_KeycapPink"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 3100
+  },
+  {
+   "id": "mouse",
+   "category": "prop",
+   "asset": "props/mouse",
+   "fbx": "Models/prop/mouse.fbx",
+   "parts": [
+    "Desk_Mouse"
+   ],
+   "pos": {
+    "x": -0.96,
+    "y": 0.747,
+    "z": -3.9
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.063,
+    "y": 0.04,
+    "z": 0.1107
+   },
+   "materials": [
+    "M_PlasticWhite"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 288
+  },
+  {
+   "id": "desk_mat",
+   "category": "prop",
+   "asset": "props/desk_mat",
+   "fbx": "Models/prop/desk_mat.fbx",
+   "parts": [
+    "Desk_Mat"
+   ],
+   "pos": {
+    "x": -1.28,
+    "y": 0.76,
+    "z": -3.92
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.86,
+    "y": 0.004,
+    "z": 0.34
+   },
+   "materials": [
+    "M_MousePad"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 44
+  },
+  {
+   "id": "mug",
+   "category": "prop",
+   "asset": "props/mug",
+   "fbx": "Models/prop/mug.fbx",
+   "parts": [
+    "Desk_Mug",
+    "Desk_Coffee",
+    "Desk_MugHandle"
+   ],
+   "pos": {
+    "x": -0.8047,
+    "y": 0.76,
+    "z": -3.86
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.1225,
+    "y": 0.098,
+    "z": 0.092
+   },
+   "materials": [
+    "M_CeramicPink",
+    "M_Coffee"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 684
+  },
+  {
+   "id": "notebook",
+   "category": "prop",
+   "asset": "props/notebook",
+   "fbx": "Models/prop/notebook.fbx",
+   "parts": [
+    "Desk_Notebook",
+    "Desk_NotebookPages"
+   ],
+   "pos": {
+    "x": -1.98,
+    "y": 0.76,
+    "z": -3.93
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.2372,
+    "y": 0.012,
+    "z": 0.273
+   },
+   "materials": [
+    "M_Notebook",
+    "M_Paper"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 56
+  },
+  {
+   "id": "pen",
+   "category": "prop",
+   "asset": "props/pen",
+   "fbx": "Models/prop/pen.fbx",
+   "parts": [
+    "Desk_Pen"
+   ],
+   "pos": {
+    "x": -1.9935,
+    "y": 0.7725,
+    "z": -3.8452
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.0937,
+    "y": 0.009,
+    "z": 0.115
+   },
+   "materials": [
+    "M_PinBlue"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 40
+  },
+  {
+   "id": "pen_cup",
+   "category": "prop",
+   "asset": "props/pen_cup",
+   "fbx": "Models/prop/pen_cup.fbx",
+   "parts": [
+    "Desk_PenCup",
+    "Desk_CupPen"
+   ],
+   "pos": {
+    "x": -0.9243,
+    "y": 0.76,
+    "z": -4.32
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.0786,
+    "y": 0.1595,
+    "z": 0.0693
+   },
+   "materials": [
+    "M_CeramicSage",
+    "M_PinBlue",
+    "M_PinRed",
+    "M_Book03",
+    "M_Book04"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 304
+  },
+  {
+   "id": "book_desk_1",
+   "category": "prop",
+   "asset": "props/book_desk_1",
+   "fbx": "Models/prop/book_desk_1.fbx",
+   "parts": [
+    "Desk_BookA",
+    "Desk_BookAPages"
+   ],
+   "pos": {
+    "x": -0.62,
+    "y": 0.76,
+    "z": -4.08
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.1882,
+    "y": 0.028,
+    "z": 0.2523
+   },
+   "materials": [
+    "M_Book01",
+    "M_BookPages"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 56
+  },
+  {
+   "id": "book_desk_2",
+   "category": "prop",
+   "asset": "props/book_desk_2",
+   "fbx": "Models/prop/book_desk_2.fbx",
+   "parts": [
+    "Desk_BookB",
+    "Desk_BookBPages"
+   ],
+   "pos": {
+    "x": -0.63,
+    "y": 0.788,
+    "z": -4.09
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.1733,
+    "y": 0.022,
+    "z": 0.2257
+   },
+   "materials": [
+    "M_Book07",
+    "M_BookPages"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 56
+  },
+  {
+   "id": "succulent_desk",
+   "category": "prop",
+   "asset": "props/succulent_desk",
+   "fbx": "Models/prop/succulent_desk.fbx",
+   "parts": [
+    "Desk_SuccPot",
+    "Desk_SuccLeaf",
+    "Desk_SuccCore"
+   ],
+   "pos": {
+    "x": -0.63,
+    "y": 0.81,
+    "z": -4.09
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.076,
+    "y": 0.087,
+    "z": 0.076
+   },
+   "materials": [
+    "M_CeramicWhite",
+    "M_Succulent"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 940
+  },
+  {
+   "id": "waste_bin",
+   "category": "prop",
+   "asset": "props/waste_bin",
+   "fbx": "Models/prop/waste_bin.fbx",
+   "parts": [
+    "Desk_Bin",
+    "Desk_Paper1",
+    "Desk_Paper2"
+   ],
+   "pos": {
+    "x": -0.22,
+    "y": 0.0,
+    "z": -4.18
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.25,
+    "y": 0.3278,
+    "z": 0.25
+   },
+   "materials": [
+    "M_Bin",
+    "M_PaperBall"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 384
+  },
+  {
+   "id": "paper_ball",
+   "category": "prop",
+   "asset": "props/paper_ball",
+   "fbx": "Models/prop/paper_ball.fbx",
+   "parts": [
+    "Desk_Paper3"
+   ],
+   "pos": {
+    "x": -0.0594,
+    "y": 0.0007,
+    "z": -4.3587
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.0646,
+    "y": 0.0594,
+    "z": 0.0628
+   },
+   "materials": [
+    "M_PaperBall"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 80
+  },
+  {
+   "id": "desk_lamp",
+   "category": "prop",
+   "asset": "props/desk_lamp",
+   "fbx": "Models/prop/desk_lamp.fbx",
+   "parts": [
+    "DeskLamp_Base",
+    "DeskLamp_Joint0",
+    "DeskLamp_ArmA",
+    "DeskLamp_ArmB",
+    "DeskLamp_Elbow",
+    "DeskLamp_Joint1",
+    "DeskLamp_Spring",
+    "DeskLamp_Head",
+    "DeskLamp_Bulb"
+   ],
+   "pos": {
+    "x": -2.0474,
+    "y": 0.76,
+    "z": -4.2144
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.4052,
+    "y": 0.556,
+    "z": 0.3702
+   },
+   "materials": [
+    "M_LampPaint",
+    "M_MetalDark",
+    "M_MetalLight",
+    "M_DeskLampGlow"
+   ],
+   "emissive": true,
+   "children": [],
+   "surfaces": [],
+   "triangles": 2322
+  },
+  {
+   "id": "plushie",
+   "category": "prop",
+   "asset": "props/plushie",
+   "fbx": "Models/prop/plushie.fbx",
+   "parts": [
+    "Plush_Body",
+    "Plush_Head",
+    "Plush_Ear",
+    "Plush_InnerEar",
+    "Plush_Arm",
+    "Plush_Foot",
+    "Plush_Pad",
+    "Plush_Eye",
+    "Plush_Cheek",
+    "Plush_Nose",
+    "Plush_Tail"
+   ],
+   "pos": {
+    "x": -3.554,
+    "y": 0.411,
+    "z": 1.9431
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.1968,
+    "y": 0.391,
+    "z": 0.229
+   },
+   "materials": [
+    "M_Plush",
+    "M_PlushPink",
+    "M_EyeBlack",
+    "M_Blush"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 2764
+  },
+  {
+   "id": "slippers",
+   "category": "prop",
+   "asset": "props/slippers",
+   "fbx": "Models/prop/slippers.fbx",
+   "parts": [
+    "Slipper_Sole",
+    "Slipper_Bed",
+    "Slipper_Upper"
+   ],
+   "pos": {
+    "x": -2.4983,
+    "y": -0.042,
+    "z": 2.7014
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.3202,
+    "y": 0.12,
+    "z": 0.4351
+   },
+   "materials": [
+    "M_PlasticWhite",
+    "M_Slipper"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 1544
+  },
+  {
+   "id": "bedside_lamp",
+   "category": "prop",
+   "asset": "props/bedside_lamp",
+   "fbx": "Models/prop/bedside_lamp.fbx",
+   "parts": [
+    "BedLamp_Base",
+    "BedLamp_Stem",
+    "BedLamp_Socket",
+    "BedLamp_Shade",
+    "BedLamp_Bulb"
+   ],
+   "pos": {
+    "x": -3.66,
+    "y": 0.48,
+    "z": 2.69
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.252,
+    "y": 0.424,
+    "z": 0.252
+   },
+   "materials": [
+    "M_CeramicPink",
+    "M_Brass",
+    "M_BedLampShade",
+    "M_BedLampBulb"
+   ],
+   "emissive": true,
+   "children": [],
+   "surfaces": [],
+   "triangles": 864
+  },
+  {
+   "id": "alarm_clock",
+   "category": "prop",
+   "asset": "props/alarm_clock",
+   "fbx": "Models/prop/alarm_clock.fbx",
+   "parts": [
+    "Bedside_Clock",
+    "Bedside_ClockFace",
+    "Bedside_ClockHand",
+    "Bedside_ClockFoot"
+   ],
+   "pos": {
+    "x": -3.486,
+    "y": 0.478,
+    "z": 2.85
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.038,
+    "y": 0.086,
+    "z": 0.084
+   },
+   "materials": [
+    "M_PlasticWhite",
+    "M_Paper",
+    "M_EyeBlack"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 568
+  },
+  {
+   "id": "book_nightstand_1",
+   "category": "prop",
+   "asset": "props/book_nightstand_1",
+   "fbx": "Models/prop/book_nightstand_1.fbx",
+   "parts": [
+    "Bedside_Book1"
+   ],
+   "pos": {
+    "x": -3.59,
+    "y": 0.135,
+    "z": 2.72
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.2124,
+    "y": 0.03,
+    "z": 0.2694
+   },
+   "materials": [
+    "M_Book04"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 44
+  },
+  {
+   "id": "book_nightstand_2",
+   "category": "prop",
+   "asset": "props/book_nightstand_2",
+   "fbx": "Models/prop/book_nightstand_2.fbx",
+   "parts": [
+    "Bedside_Book2"
+   ],
+   "pos": {
+    "x": -3.58,
+    "y": 0.165,
+    "z": 2.73
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.2015,
+    "y": 0.025,
+    "z": 0.2462
+   },
+   "materials": [
+    "M_Book09"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 44
+  },
+  {
+   "id": "shelf_basket_1",
+   "category": "prop",
+   "asset": "props/shelf_basket_1",
+   "fbx": "Models/prop/shelf_basket_1.fbx",
+   "parts": [
+    "Bookshelf_Basket"
+   ],
+   "pos": {
+    "x": 3.8175,
+    "y": 0.082,
+    "z": -2.72
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.215,
+    "y": 0.205,
+    "z": 0.2534
+   },
+   "materials": [
+    "M_Basket"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 40
+  },
+  {
+   "id": "shelf_basket_2",
+   "category": "prop",
+   "asset": "props/shelf_basket_2",
+   "fbx": "Models/prop/shelf_basket_2.fbx",
+   "parts": [
+    "Bookshelf_Basket"
+   ],
+   "pos": {
+    "x": 3.8175,
+    "y": 0.082,
+    "z": -2.27
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.215,
+    "y": 0.205,
+    "z": 0.2534
+   },
+   "materials": [
+    "M_Basket"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 40
+  },
+  {
+   "id": "vase_bookshelf",
+   "category": "prop",
+   "asset": "props/vase_bookshelf",
+   "fbx": "Models/prop/vase_bookshelf.fbx",
+   "parts": [
+    "Bookshelf_Vase"
+   ],
+   "pos": {
+    "x": 3.8075,
+    "y": 0.472,
+    "z": -1.68
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.11,
+    "y": 0.18,
+    "z": 0.11
+   },
+   "materials": [
+    "M_CeramicSage"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 288
+  },
+  {
+   "id": "bunny_figurine",
+   "category": "prop",
+   "asset": "props/bunny_figurine",
+   "fbx": "Models/prop/bunny_figurine.fbx",
+   "parts": [
+    "Bookshelf_FigBody",
+    "Bookshelf_FigHead",
+    "Bookshelf_FigEar",
+    "Bookshelf_FigEye"
+   ],
+   "pos": {
+    "x": 3.7969,
+    "y": 0.9782,
+    "z": -2.8
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.0614,
+    "y": 0.1449,
+    "z": 0.0682
+   },
+   "materials": [
+    "M_Figurine",
+    "M_EyeBlack"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 736
+  },
+  {
+   "id": "moon_lamp",
+   "category": "prop",
+   "asset": "props/moon_lamp",
+   "fbx": "Models/prop/moon_lamp.fbx",
+   "parts": [
+    "MoonLamp_Stand",
+    "MoonLamp"
+   ],
+   "pos": {
+    "x": 3.8075,
+    "y": 1.252,
+    "z": -2.7807
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.15,
+    "y": 0.167,
+    "z": 0.1486
+   },
+   "materials": [
+    "M_WoodWarm",
+    "M_MoonLamp"
+   ],
+   "emissive": true,
+   "children": [],
+   "surfaces": [],
+   "triangles": 960
+  },
+  {
+   "id": "photo_frame_bookshelf",
+   "category": "prop",
+   "asset": "props/photo_frame_bookshelf",
+   "fbx": "Models/prop/photo_frame_bookshelf.fbx",
+   "parts": [
+    "Bookshelf_Frame",
+    "Bookshelf_Photo"
+   ],
+   "pos": {
+    "x": 3.8527,
+    "y": 1.6301,
+    "z": -1.98
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.0449,
+    "y": 0.1697,
+    "z": 0.13
+   },
+   "materials": [
+    "M_FrameWhite",
+    "M_Photos"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 110
+  },
+  {
+   "id": "cactus_bookshelf",
+   "category": "prop",
+   "asset": "props/cactus_bookshelf",
+   "fbx": "Models/prop/cactus_bookshelf.fbx",
+   "parts": [
+    "Bookshelf_CactusPot",
+    "Bookshelf_Cactus",
+    "Bookshelf_CactusArm"
+   ],
+   "pos": {
+    "x": 3.8075,
+    "y": 1.632,
+    "z": -1.6593
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.084,
+    "y": 0.17,
+    "z": 0.0853
+   },
+   "materials": [
+    "M_Terracotta",
+    "M_Succulent"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 388
+  },
+  {
+   "id": "storage_box_bookshelf",
+   "category": "prop",
+   "asset": "props/storage_box_bookshelf",
+   "fbx": "Models/prop/storage_box_bookshelf.fbx",
+   "parts": [
+    "Bookshelf_Box",
+    "Bookshelf_BoxLid"
+   ],
+   "pos": {
+    "x": 3.7975,
+    "y": 2.0,
+    "z": -1.75
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.31,
+    "y": 0.175,
+    "z": 0.35
+   },
+   "materials": [
+    "M_PaperPink"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 216
+  },
+  {
+   "id": "star_lamp",
+   "category": "prop",
+   "asset": "props/star_lamp",
+   "fbx": "Models/prop/star_lamp.fbx",
+   "parts": [
+    "Trinket_StarBase",
+    "Trinket_Star"
+   ],
+   "pos": {
+    "x": 1.55,
+    "y": 1.75,
+    "z": -4.39
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.1331,
+    "y": 0.154,
+    "z": 0.07
+   },
+   "materials": [
+    "M_WoodWalnut",
+    "M_StarGlow"
+   ],
+   "emissive": true,
+   "children": [],
+   "surfaces": [],
+   "triangles": 280
+  },
+  {
+   "id": "cactus_trinket_shelf",
+   "category": "prop",
+   "asset": "props/cactus_trinket_shelf",
+   "fbx": "Models/prop/cactus_trinket_shelf.fbx",
+   "parts": [
+    "Trinket_Pot",
+    "Trinket_Cactus",
+    "Trinket_CactusFlower"
+   ],
+   "pos": {
+    "x": 1.8,
+    "y": 1.75,
+    "z": -4.39
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.092,
+    "y": 0.163,
+    "z": 0.092
+   },
+   "materials": [
+    "M_Terracotta",
+    "M_Succulent",
+    "M_PaperPink"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 408
+  },
+  {
+   "id": "cat_figurine",
+   "category": "prop",
+   "asset": "props/cat_figurine",
+   "fbx": "Models/prop/cat_figurine.fbx",
+   "parts": [
+    "Trinket_CatBody",
+    "Trinket_CatHead",
+    "Trinket_CatEar",
+    "Trinket_CatEye",
+    "Trinket_CatTail"
+   ],
+   "pos": {
+    "x": 2.0502,
+    "y": 1.75,
+    "z": -4.3911
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.0883,
+    "y": 0.149,
+    "z": 0.0784
+   },
+   "materials": [
+    "M_Figurine",
+    "M_EyeBlack"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 652
+  },
+  {
+   "id": "photo_frame_trinket_shelf",
+   "category": "prop",
+   "asset": "props/photo_frame_trinket_shelf",
+   "fbx": "Models/prop/photo_frame_trinket_shelf.fbx",
+   "parts": [
+    "Trinket_Frame",
+    "Trinket_Photo"
+   ],
+   "pos": {
+    "x": 2.3,
+    "y": 1.7503,
+    "z": -4.4447
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.15,
+    "y": 0.1894,
+    "z": 0.0463
+   },
+   "materials": [
+    "M_FrameWhite",
+    "M_Photos"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 110
+  },
+  {
+   "id": "candle",
+   "category": "prop",
+   "asset": "props/candle",
+   "fbx": "Models/prop/candle.fbx",
+   "parts": [
+    "Candle_Jar",
+    "Candle_Wax",
+    "Candle_Flame"
+   ],
+   "pos": {
+    "x": 2.15,
+    "y": 1.75,
+    "z": -4.36
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.072,
+    "y": 0.082,
+    "z": 0.0713
+   },
+   "materials": [
+    "M_JarTint",
+    "M_CandleWax",
+    "M_CandleFlame"
+   ],
+   "emissive": true,
+   "children": [
+    {
+     "name": "Candle_Flame",
+     "pivot": {
+      "x": 0.0,
+      "y": 0.054,
+      "z": 0.0
+     },
+     "parts": [
+      "Candle_Flame"
+     ],
+     "motion": {
+      "type": "toggle"
+     }
+    }
+   ],
+   "surfaces": [],
+   "triangles": 304
+  },
+  {
+   "id": "speaker",
+   "category": "prop",
+   "asset": "props/speaker",
+   "fbx": "Models/prop/speaker.fbx",
+   "parts": [
+    "Dresser_Speaker"
+   ],
+   "pos": {
+    "x": 3.8275,
+    "y": 0.76,
+    "z": 0.26
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.12,
+    "y": 0.17,
+    "z": 0.16
+   },
+   "materials": [
+    "M_SpeakerFabric"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 300
+  },
+  {
+   "id": "jewelry_box",
+   "category": "prop",
+   "asset": "props/jewelry_box",
+   "fbx": "Models/prop/jewelry_box.fbx",
+   "parts": [
+    "Dresser_JewelBox",
+    "Dresser_JewelLid"
+   ],
+   "pos": {
+    "x": 3.7975,
+    "y": 0.76,
+    "z": 0.55
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.1533,
+    "y": 0.072,
+    "z": 0.1846
+   },
+   "materials": [
+    "M_PaperPink",
+    "M_CeramicPink"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 216
+  },
+  {
+   "id": "perfume_bottle",
+   "category": "prop",
+   "asset": "props/perfume_bottle",
+   "fbx": "Models/prop/perfume_bottle.fbx",
+   "parts": [
+    "Dresser_Perfume",
+    "Dresser_PerfumeCap"
+   ],
+   "pos": {
+    "x": 3.7275,
+    "y": 0.76,
+    "z": 0.72
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.06,
+    "y": 0.11,
+    "z": 0.06
+   },
+   "materials": [
+    "M_JarTint",
+    "M_Brass"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 176
+  },
+  {
+   "id": "dried_flowers",
+   "category": "prop",
+   "asset": "props/dried_flowers",
+   "fbx": "Models/prop/dried_flowers.fbx",
+   "parts": [
+    "Dresser_Vase",
+    "Dresser_Stem",
+    "Dresser_Bud"
+   ],
+   "pos": {
+    "x": 3.8233,
+    "y": 0.76,
+    "z": 0.9453
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.1756,
+    "y": 0.5499,
+    "z": 0.1454
+   },
+   "materials": [
+    "M_CeramicWhite",
+    "M_Trunk",
+    "M_Basket"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 1006
+  },
+  {
+   "id": "floor_cushion",
+   "category": "prop",
+   "asset": "props/floor_cushion",
+   "fbx": "Models/prop/floor_cushion.fbx",
+   "parts": [
+    "Floor_Cushion"
+   ],
+   "pos": {
+    "x": 3.0,
+    "y": -0.0145,
+    "z": -0.9
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.7755,
+    "y": 0.1552,
+    "z": 0.7755
+   },
+   "materials": [
+    "M_FloorCushion"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 1408
+  },
+  {
+   "id": "book_stack_floor",
+   "category": "prop",
+   "asset": "props/book_stack_floor",
+   "fbx": "Models/prop/book_stack_floor.fbx",
+   "parts": [
+    "Floor_Books",
+    "Floor_BooksPages"
+   ],
+   "pos": {
+    "x": 3.743,
+    "y": 0.0,
+    "z": -0.2
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.3175,
+    "y": 0.1104,
+    "z": 0.213
+   },
+   "materials": [
+    "M_Book06",
+    "M_BookPages",
+    "M_Book09",
+    "M_Book02"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 168
+  },
+  {
+   "id": "open_book",
+   "category": "prop",
+   "asset": "props/open_book",
+   "fbx": "Models/prop/open_book.fbx",
+   "parts": [
+    "Floor_OpenBook",
+    "Floor_OpenBookCover"
+   ],
+   "pos": {
+    "x": 3.02,
+    "y": 0.143,
+    "z": -0.88
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.3712,
+    "y": 0.015,
+    "z": 0.3234
+   },
+   "materials": [
+    "M_Paper",
+    "M_Book04"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 56
+  },
+  {
+   "id": "laundry_basket",
+   "category": "prop",
+   "asset": "props/laundry_basket",
+   "fbx": "Models/prop/laundry_basket.fbx",
+   "parts": [
+    "Laundry_Basket",
+    "Laundry_Cloth"
+   ],
+   "pos": {
+    "x": 3.5498,
+    "y": 0.0,
+    "z": 3.0934
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.4244,
+    "y": 0.4491,
+    "z": 0.4509
+   },
+   "materials": [
+    "M_Basket",
+    "M_Hoodie",
+    "M_FloorCushion",
+    "M_Pillow"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 4608
+  },
+  {
+   "id": "tote_bag",
+   "category": "prop",
+   "asset": "props/tote_bag",
+   "fbx": "Models/prop/tote_bag.fbx",
+   "parts": [
+    "Tote_Body",
+    "Tote_Strap"
+   ],
+   "pos": {
+    "x": 0.75,
+    "y": 1.0403,
+    "z": 3.4399
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.34,
+    "y": 0.6282,
+    "z": 0.0719
+   },
+   "materials": [
+    "M_Basket"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 1496
+  },
+  {
+   "id": "scarf",
+   "category": "prop",
+   "asset": "props/scarf",
+   "fbx": "Models/prop/scarf.fbx",
+   "parts": [
+    "Tote_Scarf"
+   ],
+   "pos": {
+    "x": 0.9286,
+    "y": 0.9756,
+    "z": 3.4536
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.08,
+    "y": 0.6868,
+    "z": 0.0241
+   },
+   "materials": [
+    "M_ChairAccent"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 176
+  },
+  {
+   "id": "wardrobe_box_a",
+   "category": "prop",
+   "asset": "props/wardrobe_box_a",
+   "fbx": "Models/prop/wardrobe_box_a.fbx",
+   "parts": [
+    "Wardrobe_BoxA"
+   ],
+   "pos": {
+    "x": -3.71,
+    "y": 2.085,
+    "z": -4.13
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.4435,
+    "y": 0.22,
+    "z": 0.5194
+   },
+   "materials": [
+    "M_Basket"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 108
+  },
+  {
+   "id": "wardrobe_box_b",
+   "category": "prop",
+   "asset": "props/wardrobe_box_b",
+   "fbx": "Models/prop/wardrobe_box_b.fbx",
+   "parts": [
+    "Wardrobe_BoxB",
+    "Wardrobe_BoxBLid"
+   ],
+   "pos": {
+    "x": -3.69,
+    "y": 2.085,
+    "z": -3.6
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.4006,
+    "y": 0.1725,
+    "z": 0.4373
+   },
+   "materials": [
+    "M_PaperPink"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 216
+  },
+  {
+   "id": "desk_cables",
+   "category": "decor",
+   "asset": "decor/desk_cables",
+   "fbx": "Models/decor/desk_cables.fbx",
+   "parts": [
+    "Desk_CableMon",
+    "Desk_CableLamp"
+   ],
+   "pos": {
+    "x": -1.9501,
+    "y": 0.002,
+    "z": -4.405
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 2.1001,
+    "y": 1.0587,
+    "z": 0.1589
+   },
+   "materials": [
+    "M_Cable"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 196
+  },
+  {
+   "id": "pinboard",
+   "category": "decor",
+   "asset": "decor/pinboard",
+   "fbx": "Models/decor/pinboard.fbx",
+   "parts": [
+    "Pinboard_Cork",
+    "Pinboard_Frame",
+    "Pinboard_Photo",
+    "Pinboard_Pin",
+    "Pinboard_Note",
+    "Pinboard_Calendar",
+    "Pinboard_CalHead"
+   ],
+   "pos": {
+    "x": -1.72,
+    "y": 1.535,
+    "z": -4.4867
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.95,
+    "y": 0.65,
+    "z": 0.0265
+   },
+   "materials": [
+    "M_Cork",
+    "M_WoodWarm",
+    "M_Photos",
+    "M_PinBlue",
+    "M_PinRed",
+    "M_PaperPink",
+    "M_PaperYellow",
+    "M_PaperBlue",
+    "M_Paper"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 1072
+  },
+  {
+   "id": "print_cat",
+   "category": "decor",
+   "asset": "decor/print_cat",
+   "fbx": "Models/decor/print_cat.fbx",
+   "parts": [
+    "Wall_PrintCat_F",
+    "Wall_PrintCat_Art"
+   ],
+   "pos": {
+    "x": -3.989,
+    "y": 1.215,
+    "z": 0.85
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.022,
+    "y": 0.41,
+    "z": 0.34
+   },
+   "materials": [
+    "M_FrameWhite",
+    "M_PrintCat"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 434
+  },
+  {
+   "id": "print_flower",
+   "category": "decor",
+   "asset": "decor/print_flower",
+   "fbx": "Models/decor/print_flower.fbx",
+   "parts": [
+    "Wall_PrintFlower_F",
+    "Wall_PrintFlower_Art"
+   ],
+   "pos": {
+    "x": -3.989,
+    "y": 1.34,
+    "z": 1.45
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.022,
+    "y": 0.36,
+    "z": 0.3
+   },
+   "materials": [
+    "M_FrameWhite",
+    "M_PrintFlower"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 434
+  },
+  {
+   "id": "poster_moon",
+   "category": "decor",
+   "asset": "decor/poster_moon",
+   "fbx": "Models/decor/poster_moon.fbx",
+   "parts": [
+    "Poster_Moon_F",
+    "Poster_Moon_Art"
+   ],
+   "pos": {
+    "x": 0.6,
+    "y": 1.723,
+    "z": -4.489
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.664,
+    "y": 0.854,
+    "z": 0.022
+   },
+   "materials": [
+    "M_FrameBlack",
+    "M_PosterMoon"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 434
+  },
+  {
+   "id": "poster_peaks",
+   "category": "decor",
+   "asset": "decor/poster_peaks",
+   "fbx": "Models/decor/poster_peaks.fbx",
+   "parts": [
+    "Poster_Peaks_F",
+    "Poster_Peaks_Art"
+   ],
+   "pos": {
+    "x": 3.989,
+    "y": 1.408,
+    "z": -0.7
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.022,
+    "y": 0.624,
+    "z": 0.624
+   },
+   "materials": [
+    "M_FrameWhite",
+    "M_PosterPeaks"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 434
+  },
+  {
+   "id": "poster_city",
+   "category": "decor",
+   "asset": "decor/poster_city",
+   "fbx": "Models/decor/poster_city.fbx",
+   "parts": [
+    "Poster_City_F",
+    "Poster_City_Art"
+   ],
+   "pos": {
+    "x": -0.45,
+    "y": 1.4145,
+    "z": 3.489
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.844,
+    "y": 0.611,
+    "z": 0.022
+   },
+   "materials": [
+    "M_FrameBlack",
+    "M_PosterCity"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 434
+  },
+  {
+   "id": "mirror",
+   "category": "decor",
+   "asset": "decor/mirror",
+   "fbx": "Models/decor/mirror.fbx",
+   "parts": [
+    "Mirror_Frame",
+    "Mirror"
+   ],
+   "pos": {
+    "x": 3.975,
+    "y": 1.175,
+    "z": 0.6
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.038,
+    "y": 0.61,
+    "z": 0.61
+   },
+   "materials": [
+    "M_Brass",
+    "M_Mirror"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 1152
+  },
+  {
+   "id": "neon_sign",
+   "category": "decor",
+   "asset": "decor/neon_sign",
+   "fbx": "Models/decor/neon_sign.fbx",
+   "parts": [
+    "Neon_Moon",
+    "Neon_Star",
+    "Neon_Mount",
+    "Neon_Cable"
+   ],
+   "pos": {
+    "x": -0.5747,
+    "y": 0.02,
+    "z": -4.4787
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.3655,
+    "y": 2.1872,
+    "z": 0.0425
+   },
+   "materials": [
+    "M_NeonSign",
+    "M_MetalLight",
+    "M_Cable"
+   ],
+   "emissive": true,
+   "children": [],
+   "surfaces": [],
+   "triangles": 1180
+  },
+  {
+   "id": "wall_clock",
+   "category": "decor",
+   "asset": "decor/wall_clock",
+   "fbx": "Models/decor/wall_clock.fbx",
+   "parts": [
+    "Clock_Ring",
+    "Clock_Face",
+    "Clock_Mark",
+    "Clock_Cap",
+    "Clock_HourHand",
+    "Clock_MinuteHand"
+   ],
+   "pos": {
+    "x": 3.0,
+    "y": 2.062,
+    "z": -4.4745
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.316,
+    "y": 0.316,
+    "z": 0.051
+   },
+   "materials": [
+    "M_WoodWarm",
+    "M_Paper",
+    "M_ClockHand"
+   ],
+   "emissive": false,
+   "children": [
+    {
+     "name": "Clock_HourHand",
+     "pivot": {
+      "x": 0.0,
+      "y": 0.158,
+      "z": 0.0155
+     },
+     "parts": [
+      "Clock_HourHand"
+     ],
+     "motion": {
+      "type": "rotate",
+      "axis": "z"
+     }
+    },
+    {
+     "name": "Clock_MinuteHand",
+     "pivot": {
+      "x": 0.0,
+      "y": 0.158,
+      "z": 0.0185
+     },
+     "parts": [
+      "Clock_MinuteHand"
+     ],
+     "motion": {
+      "type": "rotate",
+      "axis": "z"
+     }
+    }
+   ],
+   "surfaces": [],
+   "triangles": 984
+  },
+  {
+   "id": "wall_hooks",
+   "category": "decor",
+   "asset": "decor/wall_hooks",
+   "fbx": "Models/decor/wall_hooks.fbx",
+   "parts": [
+    "Hooks_Rail",
+    "Hooks_Peg",
+    "Hooks_PegEnd"
+   ],
+   "pos": {
+    "x": 0.75,
+    "y": 1.615,
+    "z": 3.459
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.55,
+    "y": 0.07,
+    "z": 0.082
+   },
+   "materials": [
+    "M_WoodWarm",
+    "M_Brass"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 756
+  },
+  {
+   "id": "rug",
+   "category": "decor",
+   "asset": "decor/rug",
+   "fbx": "Models/decor/rug.fbx",
+   "parts": [
+    "Rug"
+   ],
+   "pos": {
+    "x": 0.0,
+    "y": 0.0,
+    "z": -0.5
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 3.0,
+    "y": 0.016,
+    "z": 3.0
+   },
+   "materials": [
+    "M_Rug"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 1200
+  },
+  {
+   "id": "books_shelf_0",
+   "category": "decor",
+   "asset": "decor/books_shelf_0",
+   "fbx": "Models/decor/books_shelf_0.fbx",
+   "parts": [
+    "Bookshelf_Mag",
+    "Bookshelf_MagPages"
+   ],
+   "pos": {
+    "x": 3.8333,
+    "y": 0.082,
+    "z": -1.75
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.3095,
+    "y": 0.1272,
+    "z": 0.2592
+   },
+   "materials": [
+    "M_Book07",
+    "M_BookPages",
+    "M_Book08",
+    "M_Book12"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 224
+  },
+  {
+   "id": "books_shelf_1",
+   "category": "decor",
+   "asset": "decor/books_shelf_1",
+   "fbx": "Models/decor/books_shelf_1.fbx",
+   "parts": [
+    "Bookshelf_Book",
+    "Bookshelf_BookBand"
+   ],
+   "pos": {
+    "x": 3.7558,
+    "y": 0.472,
+    "z": -2.4356
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.2456,
+    "y": 0.2959,
+    "z": 0.9736
+   },
+   "materials": [
+    "M_Book01",
+    "M_Book05",
+    "M_Book06",
+    "M_Book12",
+    "M_Book09",
+    "M_Book08",
+    "M_Book03",
+    "M_Book04",
+    "M_Book11",
+    "M_Book02",
+    "M_Book00",
+    "M_Book07",
+    "M_Book10"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 1524
+  },
+  {
+   "id": "books_shelf_2",
+   "category": "decor",
+   "asset": "decor/books_shelf_2",
+   "fbx": "Models/decor/books_shelf_2.fbx",
+   "parts": [
+    "Bookshelf_Stack",
+    "Bookshelf_StackPages",
+    "Bookshelf_Book",
+    "Bookshelf_BookBand"
+   ],
+   "pos": {
+    "x": 3.7981,
+    "y": 0.862,
+    "z": -2.2012
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.3311,
+    "y": 0.2967,
+    "z": 1.4301
+   },
+   "materials": [
+    "M_Book00",
+    "M_BookPages",
+    "M_Book07",
+    "M_Book03",
+    "M_Book02",
+    "M_Book05",
+    "M_Book09",
+    "M_Book06",
+    "M_Book01",
+    "M_Book12",
+    "M_Book04",
+    "M_Book08",
+    "M_Book11"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 1656
+  },
+  {
+   "id": "books_shelf_3",
+   "category": "decor",
+   "asset": "decor/books_shelf_3",
+   "fbx": "Models/decor/books_shelf_3.fbx",
+   "parts": [
+    "Bookshelf_Book",
+    "Bookshelf_BookBand"
+   ],
+   "pos": {
+    "x": 3.7559,
+    "y": 1.252,
+    "z": -2.025
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.244,
+    "y": 0.2992,
+    "z": 1.0515
+   },
+   "materials": [
+    "M_Book02",
+    "M_Book09",
+    "M_Book10",
+    "M_Book05",
+    "M_Book08",
+    "M_Book11",
+    "M_Book04",
+    "M_Book06",
+    "M_Book01",
+    "M_Book12",
+    "M_Book03",
+    "M_Book07",
+    "M_Book00"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 1508
+  },
+  {
+   "id": "books_shelf_4",
+   "category": "decor",
+   "asset": "decor/books_shelf_4",
+   "fbx": "Models/decor/books_shelf_4.fbx",
+   "parts": [
+    "Bookshelf_Book",
+    "Bookshelf_BookBand"
+   ],
+   "pos": {
+    "x": 3.7546,
+    "y": 1.632,
+    "z": -2.5847
+   },
+   "yaw": 0.0,
+   "size": {
+    "x": 0.2428,
+    "y": 0.2974,
+    "z": 0.6723
+   },
+   "materials": [
+    "M_Book03",
+    "M_Book05",
+    "M_Book02",
+    "M_Book10",
+    "M_Book04",
+    "M_Book06",
+    "M_Book08",
+    "M_Book07",
+    "M_Book12",
+    "M_Book01",
+    "M_Book00",
+    "M_Book09"
+   ],
+   "emissive": false,
+   "children": [],
+   "surfaces": [],
+   "triangles": 944
+  }
+ ],
+ "light_anchors": [
+  {
+   "name": "LightAnchor_BedLamp",
+   "pos": {
+    "x": -3.63,
+    "y": 0.84,
+    "z": 2.67
+   },
+   "object": "bedside_lamp",
+   "local": {
+    "x": 0.03,
+    "y": 0.36,
+    "z": -0.02
+   }
+  },
+  {
+   "name": "LightAnchor_Ceiling",
+   "pos": {
+    "x": 0.0,
+    "y": 2.3,
+    "z": -0.5
+   },
+   "object": "ceiling_lamp",
+   "local": {
+    "x": 0.0,
+    "y": -0.32,
+    "z": 0.0
+   }
+  },
+  {
+   "name": "LightAnchor_DeskLamp",
+   "pos": {
+    "x": -1.914,
+    "y": 1.1505,
+    "z": -4.0957
+   },
+   "object": "desk_lamp",
+   "local": {
+    "x": 0.1334,
+    "y": 0.3905,
+    "z": 0.1187
+   }
+  },
+  {
+   "name": "LightAnchor_Monitor",
+   "pos": {
+    "x": -1.38,
+    "y": 1.2,
+    "z": -3.92
+   },
+   "object": "monitor",
+   "local": {
+    "x": 0.0,
+    "y": 0.44,
+    "z": 0.36
+   }
+  },
+  {
+   "name": "LightAnchor_Window",
+   "pos": {
+    "x": -3.4,
+    "y": 1.8,
+    "z": -1.2
+   },
+   "object": "window_pane",
+   "local": {
+    "x": 0.605,
+    "y": 0.682,
+    "z": 0.0
+   }
+  }
+ ],
+ "materials_file": "materials.json"
+}

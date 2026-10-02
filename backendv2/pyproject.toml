@@ -37,6 +37,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "mika.inspector" = ["templates/*.html", "static/*.css", "static/*.js"]
+"mika.faculties.world" = ["*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -108,6 +109,7 @@ modules = [
     "mika.faculties.needs",
     "mika.faculties.presence",
     "mika.faculties.place",
+    "mika.faculties.world",
     "mika.faculties.identity",
     "mika.faculties.social",
     "mika.faculties.transcript",

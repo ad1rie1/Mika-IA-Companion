@@ -27,6 +27,7 @@ from pydantic import ValidationError
 from mika.contracts import attention as attention_c
 from mika.contracts import place as place_c
 from mika.contracts import world as w
+from mika.faculties.world import DEFAULT_WORLD
 
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "monde" / "chambre.json"
 #: La table des lieux du client web, tant qu'elle ne lit pas la définition (ADR 0050, P3).
@@ -127,8 +128,9 @@ class TestLaChambreDuClientWeb:
     def test_la_table_du_client_se_lit(self) -> None:
         assert set(_room_layout()) == {p.value for p in place_c.Place}
 
-    def test_memes_approches_memes_orientations_memes_postures(self) -> None:
-        world = _world()
+    @pytest.mark.parametrize("which", ["exemple", "par défaut"])
+    def test_memes_approches_memes_orientations_memes_postures(self, which: str) -> None:
+        world = _world() if which == "exemple" else DEFAULT_WORLD
         for ident, (x, z, facing, posture) in _room_layout().items():
             place = world.place(ident)
             assert place is not None, ident

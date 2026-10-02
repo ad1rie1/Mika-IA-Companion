@@ -1,0 +1,14 @@
+{
+    "name": "Mika.World.Model",
+    "rootNamespace": "Mika.World.Model",
+    "references": ["Mika.World.Protocol"],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": ["Newtonsoft.Json.dll"],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": true
+}

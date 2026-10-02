@@ -74,7 +74,7 @@ PARAM_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Émotions", ("affect", "needs", "body", "self")),
     ("Esprit", ("attention", "memory", "transcript")),
     ("Relations", ("social", "others", "identity")),
-    ("Action", ("agency", "goals", "projects")),
+    ("Action", ("agency", "goals", "projects", "world")),
     ("Canaux", ("email", "rss", "camera", "forge")),
     ("Noyau", ("kernel",)),
 )
@@ -85,6 +85,7 @@ FACULTY_LABELS: dict[str, str] = {
     "agency": "Initiatives", "goals": "Buts", "projects": "Projets", "email": "Courrier", "rss": "Flux RSS", "camera": "Caméra",
     "forge": "Moteur de la Forge", "kernel": "Noyau", "presence": "Présence", "expression": "Expression",
     "sensors": "Appareils", "runtime": "Moteur", "place": "Où elle est (sa chambre)",
+    "world": "Son monde et son corps",
 }
 
 #: Les sections du prompt, nommées par ce qu'elles lui montrent (Pourquoi a-t-elle dit ça ?, Prompt).
@@ -111,7 +112,7 @@ SECTION_LABELS: dict[str, str] = {
     "greeting_tone": "Le ton de ses bonjours (sa persona)",
     # ADR 0046
     "self_said": "Ce qu'elle a déjà dit d'elle-même", "register": "Le ton entre elles (selon leur lien)",
-    "place": "Où elle est dans sa chambre",
+    "world": "Autour d'elle : son corps, ce qu'elle a à portée",
 }
 
 #: Les raisons des preuves de l'arbitre : ce qui la pousse à agir.
@@ -151,12 +152,19 @@ PROCESS_LABELS: dict[str, str] = {
     "memory.promises": "Tenir ou laisser filer ses promesses", "self.wake": "Se réveiller avec sa nuit",
     "social.reciprocity": "Remarquer qui écrit en premier",
     "memory.follow": "Remarquer qu'elle a repris un moment de la vie de quelqu'un",
+    "world.settle": "Conclure ses gestes dans le monde",
 }
 
 #: Les événements des facultés : ce qui s'est passé (ceux du noyau et du moteur sont nommés par la console).
 EVENT_LABELS: dict[str, str] = {
     "presence.connected": "Connexion", "presence.disconnected": "Déconnexion",
     "place.moved": "Elle s'est déplacée dans sa chambre",
+    "world.authored": "Le monde édité", "world.described": "Un élément du monde décrit",
+    "world.intended": "Un geste commencé dans le monde", "world.ended": "Un geste terminé dans le monde",
+    "world.changed": "Le monde a changé", "world.requested": "Une demande dans le monde",
+    "world.answered": "Une réponse à une demande", "world.gestured": "Un geste vers quelqu'un",
+    "world.joined": "Quelqu'un est entré dans le monde", "world.left": "Quelqu'un est sorti du monde",
+    "world.noticed": "Quelque chose de remarqué dans le monde",
     "identity.claimed": "Un nom revendiqué", "identity.evidence": "Une preuve d'identité",
     "identity.linked": "Une adresse reliée", "identity.registered": "Un compte enregistré",
     "identity.name_bound": "Un nom relié à une personne (« celle dont on lui a parlé »)",

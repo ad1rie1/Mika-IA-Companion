@@ -98,10 +98,32 @@ appel de modèle (un monde vivant ruinerait le budget et la latence).
     qui lui manque pour charger une révision (`loaded`), la console l'affiche. Elle **remarque** ce qui change
     chez elle (un objet apparu, son lit déplacé).
 
-11. *Ce qui est fait maintenant (P0)* : le contrat (`contracts/world.py`), les trames (`adapters/world/
-    protocol.py`), un monde d'exemple (`examples/monde/chambre.json` : la chambre de l'ADR 0049 et un salon, une
-    vingtaine d'objets, un chat), la spécification, et leurs tests. **Rien n'est encore branché** : ni faculté
-    dans la composition, ni route, ni changement de `place`.
+11. *Ce qui est fait.*
+    - **P0** : le contrat (`contracts/world.py`), les trames (`adapters/world/protocol.py`), un monde d'exemple
+      (`examples/monde/chambre.json` : la chambre de l'ADR 0049 et un salon, des objets qu'on porte, un chat), la
+      spécification, et leurs tests.
+    - **P1, la faculté `world`** (`faculties/world/`) : la tranche (définition, acteurs, objets, actions en
+      cours) ; un planificateur pur (`plan.py` : aller de lieu en lieu et de pièce en pièce, les mains, les
+      surfaces, les contenants, les affordances, conclure en revalidant) ; deux outils en main, `go_to` (un lieu
+      de l'énumération, une posture) et `interact` (un objet, une action, une cible) — `respond` et `gesture`
+      attendent qu'il y ait des personnes dans le monde (P4) ; la section « AUTOUR DE TOI » (où elle est, ce
+      qu'elle fait, ce qu'elle tient, ce qui est à portée, ce dont elle peut se servir ailleurs, avec les
+      identifiants qu'attendent ses outils) ; le coucher et le réveil en réducteurs ; le processus `world.settle`
+      qui conclut chaque action à son échéance ; l'état poussé aux écrans quand elle part quelque part ; une vue de
+      console (« Son monde »). **Le monde chargé par défaut** (`faculties/world/chambre.json`) est sa chambre telle
+      que l'écran la montre : les six lieux, les meubles de `room.glb` et ce qu'on peut en faire (ouvrir sa
+      fenêtre, regarder dehors, dessiner à son bureau, arroser ses plantes…), **aucun objet portable** tant que
+      le client web ne sait pas montrer ce qu'elle tient. `place` devient une vue de compatibilité : le type
+      `place.moved` (relu par le monde) et les faits `place.current`/`place.since` (là où elle est, ou va),
+      qu'`inner_state.place` sert toujours. Reportés : le réflexe « elle travaille → au bureau » (P1 bis), les
+      baux de réservation (la revalidation à la conclusion tient lieu de garde tant qu'elle est seule), un schéma
+      de `go_to` par épisode quand le monde sera édité (P5).
+    - **L'interface de P2** : les commandes d'un client (`act`, `moved`, `address`, `answer`, `report`, `edit`,
+      `describe`) sont des types du contrat (`w.Command`, `w.CommandResult`), que `protocol.py` porte tels quels
+      sur le fil (le schéma JSON n'a pas changé) ; le port d'entrée les passe à `faculties/world/commands.handle`,
+      qui rend un verdict (brouillons sous garde, ou refus) sans rien écrire. Déjà traité : l'hôte qui termine une
+      action plus tôt (conclue par le noyau, pas crue sur parole) ou qui n'y arrive pas (seul ce qui est vrai
+      change) ; le reste répond `unsupported` jusqu'à P4 et P5.
 
 12. *La suite.*
     - **P1, la faculté `world`** : tranche, réducteurs, validation des actions, faits, section, outils,
@@ -142,12 +164,19 @@ appel de modèle (un monde vivant ruinerait le budget et la latence).
 - La surface d'injection reste fermée : les personnes n'envoient au monde que des identifiants et des codes
   (seule la conversation porte du texte libre, et elle passe par `/ws`) ; les noms sont bornés ; la prose est
   citée comme le reste de ce qui vient d'ailleurs.
-- Questions laissées à l'utilisateur : un seul monde ou plusieurs ; des personnages animés par un modèle (pas
-  seulement par le moteur) ; Mika qui fait entrer de nouveaux objets dans son monde (une capacité, proposée puis
-  approuvée, comme le courrier) ; plusieurs personnes à distance dans le même monde.
+- Décisions de l'utilisateur (2026-10-02) : **un seul monde** (des pièces s'y ajoutent) ; les personnages sont
+  **animés par le moteur** d'abord (des personnages à esprit viendront sans changer le protocole) ; Mika pourra
+  **faire entrer des objets** dans son monde, sur proposition approuvée comme ses mails (après P1) ; **plusieurs
+  personnes à distance** : prévu par le protocole, pas une priorité (une personne à la fois, ou le même réseau).
 
 Tests : `tests/unit/test_world_contract.py` (le monde d'exemple est cohérent et garde les six lieux de l'ADR
 0049 ; chaque incohérence est refusée, tout est dit d'un coup ; une édition passe en entier ou pas du tout ; un nom
 ne peut pas porter de retour à la ligne) et `tests/protocol/test_world_wire.py` (chaque exemple JSON de la
 spécification se lit et respecte le schéma publié ; une trame inconnue ou un champ inconnu est refusé ; chaque
-commande déclare ses rôles et son débit).
+commande déclare ses rôles et son débit). P1 : `tests/unit/test_world_plan.py` (aller de pièce en pièce, s'asseoir, un lieu plein, les mains,
+les surfaces et les contenants, ce qu'on tient se prend d'abord, une occupation à une chaise se fait assise,
+conclure revalide — la tasse prise entre-temps), `tests/unit/test_world.py` (un trajet se conclut à son
+échéance, regarder dehors et le dire, ouvrir sa fenêtre, s'asseoir pour dessiner, ce qu'elle invente ne s'écrit
+pas et le refus dit ce qui se peut, allongée puis assise au réveil, le monde se rejoue, une édition sur une révision
+dépassée ne passe pas) et `tests/unit/test_place.py` (les intentions de l'ADR 0049, tenues par le monde). Non vides
+par mutation : un déplacement par épisode, le coucher dans la même transaction, la conclusion à l'échéance.

@@ -1,0 +1,19 @@
+{
+    "name": "Mika.World.Engine",
+    "rootNamespace": "Mika.World.Engine",
+    "references": [
+        "Mika.World.Protocol",
+        "Mika.World.Model",
+        "Mika.Net",
+        "Unity.AI.Navigation"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": ["Newtonsoft.Json.dll"],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

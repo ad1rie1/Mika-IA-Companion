@@ -33,6 +33,7 @@ from mika.faculties.projects import PROJECTS, job_brief, work_brief
 from mika.faculties.self import SELF, load, persona_for
 from mika.faculties.social import SOCIAL
 from mika.faculties.transcript import TRANSCRIPT
+from mika.faculties.world import WORLD
 from mika.kernel.episode import EpisodePolicy
 from mika.kernel.events import Origin
 from mika.kernel.faculty import Faculty
@@ -54,7 +55,7 @@ log = logging.getLogger("mika.composition")
 
 def faculties() -> list[Faculty[Any, Any]]:
     """Les facultés de Mika, puis ses plugins (M7)."""
-    return [PRESENCE, IDENTITY, TRANSCRIPT, MEMORY, BODY, PLACE, AFFECT, NEEDS, OTHERS, ATTENTION, SELF,
+    return [PRESENCE, IDENTITY, TRANSCRIPT, MEMORY, BODY, WORLD, PLACE, AFFECT, NEEDS, OTHERS, ATTENTION, SELF,
             EXPRESSION, SOCIAL, AGENCY, GOALS, PROJECTS, EMAIL, RSS, CAMERA, FORGE, SENSORS]
 
 
@@ -81,10 +82,10 @@ PROJECT_TOOLS = frozenset({"projects", "workshop", "memory", "email", "rss", "ca
 # réponse ordinaire ne porte plus trente outils d'emblée (ni l'invitation à « vérifier » ce que ses sections
 # lui disent déjà). Un épisode dont le candidat a choisi ses lots (un pas sur un but, une exécution de
 # projet) les a tous en main.
-# « room » (se déplacer dans sa chambre) est en main : un seul petit outil, et c'est son corps — aller à la
-# fenêtre ne se cherche pas dans un catalogue.
-REPLY_IN_HAND = frozenset({"memory", "goals", "room"})
-INITIATIVE_IN_HAND = frozenset({"memory", "room"})
+# « world » (se déplacer et faire des choses dans sa chambre) est en main : deux petits outils, et c'est son
+# corps — aller à la fenêtre ou l'ouvrir ne se cherche pas dans un catalogue (ADR 0049, 0050).
+REPLY_IN_HAND = frozenset({"memory", "goals", "world"})
+INITIATIVE_IN_HAND = frozenset({"memory", "world"})
 STEP_IN_HAND = frozenset({"goals", "memory"})
 PROJECT_IN_HAND = frozenset({"projects", "workshop", "memory"})
 
@@ -95,12 +96,12 @@ def policies() -> dict[str, EpisodePolicy]:
                                   guard=_reply_guard, max_tokens=1024, deadline_s=180.0,
                                   tool_bundles=frozenset({"memory", "identity", "goals", "projects", "email", "rss",
                                                           "camera", "forge", "forge_apps", "self", "attention",
-                                                          "social", "room"}),
+                                                          "social", "world"}),
                                   core_bundles=REPLY_IN_HAND),
         Kind.INITIATIVE: EpisodePolicy(kind=Kind.INITIATIVE, role=Role.INITIATIVE, priority=1, lane="conversation",
                                        brief=initiative_brief, max_tokens=600, deadline_s=180.0,
                                        tool_bundles=frozenset({"memory", "identity", "rss", "forge_apps", "self",
-                                                               "attention", "social", "room"}),
+                                                               "attention", "social", "world"}),
                                        core_bundles=INITIATIVE_IN_HAND),
         # un pas de travail : sa voix (compacte), pour elle seule — ni fil, ni livraison ; le verdict fait l'affect
         Kind.STEP: EpisodePolicy(kind=Kind.STEP, role=Role.STEP, priority=2, lane="background",

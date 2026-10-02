@@ -1,0 +1,37 @@
+# Unity : ce qui se régénère à l'ouverture du projet ne se versionne pas.
+# (Library/, Temp/… sont déjà suivis par git dans ce dépôt : `git rm -r --cached` pour les retirer.)
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
+*.csproj
+*.sln
+*.slnx
+*.suo
+*.user
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+.vscode/
+crashlytics-buildid.txt
+sysinfo.txt
+*.apk
+*.aab
+*.unitypackage
+
+# L'avatar (100 Mo) n'est pas versionné, comme dans frontend/public/models :
+# menu Mika › Avatar › Importer l'avatar du frontend le recopie ici.
+/Assets/Mika/Art/Avatars/*.vrm
+/Assets/Mika/Art/Avatars/*.vrm.meta
+/Assets/Mika/Art/Avatars/default.prefab*
+/Assets/Mika/Art/Avatars/default.Assets/
+/Assets/Mika/Art/Avatars/default.Assets.meta

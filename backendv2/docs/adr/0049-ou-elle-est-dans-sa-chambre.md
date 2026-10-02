@@ -1,5 +1,7 @@
 # 0049 — Où elle est dans sa chambre
 
+> Repris par l'ADR 0050 : son corps vit dans la faculté `world`, l'outil s'appelle `go_to` (mêmes règles : lieu fermé, même lieu sans écriture, un déplacement par épisode), le coucher est un réducteur de `world`. `place` garde le type `place.moved` et les faits que lisent les écrans.
+
 **Contexte.** Le frontend montre Mika dans sa chambre (bureau, fenêtre, lit, bibliothèque, porte, le tapis au
 milieu), mais elle y restait plantée au milieu, debout, y compris pour dormir. Le corps sait maintenant marcher,
 contourner les meubles, s'asseoir et s'allonger (`frontend/src/vtuber/locomotion/`) ; restait à dire **qui décide**

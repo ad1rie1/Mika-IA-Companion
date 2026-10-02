@@ -1,0 +1,4372 @@
+{
+ "format": "mika.room-materials/1",
+ "source": "frontend/assets-src",
+ "color_note": "linear = valeurs du shader Blender ; srgb_hex = même couleur encodée sRGB",
+ "materials": {
+  "M_Basket": {
+   "base_color": {
+    "linear": [
+     0.47932,
+     0.296138,
+     0.138432,
+     1.0
+    ],
+    "srgb_hex": "#b89468"
+   },
+   "roughness": 0.9,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/fabric_linen.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.434154,
+     0.254152,
+     0.102242,
+     1.0
+    ],
+    "srgb_hex": "#b08a5a"
+   }
+  },
+  "M_BedLampBulb": {
+   "base_color": {
+    "linear": [
+     1.0,
+     0.921582,
+     0.806952,
+     1.0
+    ],
+    "srgb_hex": "#fff6e8"
+   },
+   "roughness": 0.3,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      0.584078,
+      0.254152,
+      1.0
+     ],
+     "srgb_hex": "#ffc98a"
+    },
+    "strength": 5.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     1.0,
+     0.921582,
+     0.806952,
+     1.0
+    ],
+    "srgb_hex": "#fff6e8"
+   }
+  },
+  "M_BedLampShade": {
+   "base_color": {
+    "linear": [
+     1.0,
+     0.768151,
+     0.47932,
+     1.0
+    ],
+    "srgb_hex": "#ffe3b8"
+   },
+   "roughness": 0.9,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      0.584078,
+      0.254152,
+      1.0
+     ],
+     "srgb_hex": "#ffc98a"
+    },
+    "strength": 1.6
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": true,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     1.0,
+     0.768151,
+     0.47932,
+     1.0
+    ],
+    "srgb_hex": "#ffe3b8"
+   }
+  },
+  "M_Bin": {
+   "base_color": {
+    "linear": [
+     0.042311,
+     0.035601,
+     0.08022,
+     1.0
+    ],
+    "srgb_hex": "#3a3550"
+   },
+   "roughness": 0.4,
+   "metallic": 0.3,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.042311,
+     0.035601,
+     0.08022,
+     1.0
+    ],
+    "srgb_hex": "#3a3550"
+   }
+  },
+  "M_Blush": {
+   "base_color": {
+    "linear": [
+     0.871367,
+     0.254152,
+     0.391572,
+     1.0
+    ],
+    "srgb_hex": "#f08aa8"
+   },
+   "roughness": 0.9,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.871367,
+     0.254152,
+     0.391572,
+     1.0
+    ],
+    "srgb_hex": "#f08aa8"
+   }
+  },
+  "M_Book00": {
+   "base_color": {
+    "linear": [
+     0.571125,
+     0.104616,
+     0.155926,
+     1.0
+    ],
+    "srgb_hex": "#c75b6e"
+   },
+   "roughness": 0.55,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.571125,
+     0.104616,
+     0.155926,
+     1.0
+    ],
+    "srgb_hex": "#c75b6e"
+   }
+  },
+  "M_Book01": {
+   "base_color": {
+    "linear": [
+     0.07036,
+     0.109462,
+     0.262251,
+     1.0
+    ],
+    "srgb_hex": "#4b5d8c"
+   },
+   "roughness": 0.59,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.07036,
+     0.109462,
+     0.262251,
+     1.0
+    ],
+    "srgb_hex": "#4b5d8c"
+   }
+  },
+  "M_Book02": {
+   "base_color": {
+    "linear": [
+     0.147027,
+     0.274677,
+     0.165132,
+     1.0
+    ],
+    "srgb_hex": "#6b8f71"
+   },
+   "roughness": 0.63,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.147027,
+     0.274677,
+     0.165132,
+     1.0
+    ],
+    "srgb_hex": "#6b8f71"
+   }
+  },
+  "M_Book03": {
+   "base_color": {
+    "linear": [
+     0.768151,
+     0.450786,
+     0.102242,
+     1.0
+    ],
+    "srgb_hex": "#e3b35a"
+   },
+   "roughness": 0.67,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.768151,
+     0.450786,
+     0.102242,
+     1.0
+    ],
+    "srgb_hex": "#e3b35a"
+   }
+  },
+  "M_Book04": {
+   "base_color": {
+    "linear": [
+     0.254152,
+     0.114435,
+     0.391572,
+     1.0
+    ],
+    "srgb_hex": "#8a5fa8"
+   },
+   "roughness": 0.71,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.254152,
+     0.114435,
+     0.391572,
+     1.0
+    ],
+    "srgb_hex": "#8a5fa8"
+   }
+  },
+  "M_Book05": {
+   "base_color": {
+    "linear": [
+     0.871367,
+     0.686685,
+     0.57758,
+     1.0
+    ],
+    "srgb_hex": "#f0d8c8"
+   },
+   "roughness": 0.55,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.871367,
+     0.686685,
+     0.57758,
+     1.0
+    ],
+    "srgb_hex": "#f0d8c8"
+   }
+  },
+  "M_Book06": {
+   "base_color": {
+    "linear": [
+     0.046665,
+     0.035601,
+     0.08022,
+     1.0
+    ],
+    "srgb_hex": "#3d3550"
+   },
+   "roughness": 0.59,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.046665,
+     0.035601,
+     0.08022,
+     1.0
+    ],
+    "srgb_hex": "#3d3550"
+   }
+  },
+  "M_Book07": {
+   "base_color": {
+    "linear": [
+     0.693872,
+     0.254152,
+     0.391572,
+     1.0
+    ],
+    "srgb_hex": "#d98aa8"
+   },
+   "roughness": 0.63,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.693872,
+     0.254152,
+     0.391572,
+     1.0
+    ],
+    "srgb_hex": "#d98aa8"
+   }
+  },
+  "M_Book08": {
+   "base_color": {
+    "linear": [
+     0.102242,
+     0.274677,
+     0.351533,
+     1.0
+    ],
+    "srgb_hex": "#5a8fa0"
+   },
+   "roughness": 0.67,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.102242,
+     0.274677,
+     0.351533,
+     1.0
+    ],
+    "srgb_hex": "#5a8fa0"
+   }
+  },
+  "M_Book09": {
+   "base_color": {
+    "linear": [
+     0.434154,
+     0.174647,
+     0.045186,
+     1.0
+    ],
+    "srgb_hex": "#b0743c"
+   },
+   "roughness": 0.71,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.434154,
+     0.174647,
+     0.045186,
+     1.0
+    ],
+    "srgb_hex": "#b0743c"
+   }
+  },
+  "M_Book10": {
+   "base_color": {
+    "linear": [
+     0.028426,
+     0.068478,
+     0.042311,
+     1.0
+    ],
+    "srgb_hex": "#2f4a3a"
+   },
+   "roughness": 0.55,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.028426,
+     0.068478,
+     0.042311,
+     1.0
+    ],
+    "srgb_hex": "#2f4a3a"
+   }
+  },
+  "M_Book11": {
+   "base_color": {
+    "linear": [
+     0.332452,
+     0.068478,
+     0.102242,
+     1.0
+    ],
+    "srgb_hex": "#9c4a5a"
+   },
+   "roughness": 0.59,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.332452,
+     0.068478,
+     0.102242,
+     1.0
+    ],
+    "srgb_hex": "#9c4a5a"
+   }
+  },
+  "M_Book12": {
+   "base_color": {
+    "linear": [
+     0.62396,
+     0.545724,
+     0.822786,
+     1.0
+    ],
+    "srgb_hex": "#cfc3ea"
+   },
+   "roughness": 0.63,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.62396,
+     0.545724,
+     0.822786,
+     1.0
+    ],
+    "srgb_hex": "#cfc3ea"
+   }
+  },
+  "M_BookPages": {
+   "base_color": {
+    "linear": [
+     0.863157,
+     0.791298,
+     0.64448,
+     1.0
+    ],
+    "srgb_hex": "#efe6d2"
+   },
+   "roughness": 0.9,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.863157,
+     0.791298,
+     0.64448,
+     1.0
+    ],
+    "srgb_hex": "#efe6d2"
+   }
+  },
+  "M_Brass": {
+   "base_color": {
+    "linear": [
+     0.658375,
+     0.42869,
+     0.144128,
+     1.0
+    ],
+    "srgb_hex": "#d4af6a"
+   },
+   "roughness": 0.28,
+   "metallic": 1.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.658375,
+     0.42869,
+     0.144128,
+     1.0
+    ],
+    "srgb_hex": "#d4af6a"
+   }
+  },
+  "M_Cable": {
+   "base_color": {
+    "linear": [
+     0.006995,
+     0.006995,
+     0.009134,
+     1.0
+    ],
+    "srgb_hex": "#141418"
+   },
+   "roughness": 0.5,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.006995,
+     0.006995,
+     0.009134,
+     1.0
+    ],
+    "srgb_hex": "#141418"
+   }
+  },
+  "M_CandleFlame": {
+   "base_color": {
+    "linear": [
+     1.0,
+     0.686685,
+     0.351533,
+     1.0
+    ],
+    "srgb_hex": "#ffd8a0"
+   },
+   "roughness": 0.5,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      0.434154,
+      0.08022,
+      1.0
+     ],
+     "srgb_hex": "#ffb050"
+    },
+    "strength": 5.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     1.0,
+     0.686685,
+     0.351533,
+     1.0
+    ],
+    "srgb_hex": "#ffd8a0"
+   }
+  },
+  "M_CandleWax": {
+   "base_color": {
+    "linear": [
+     0.896269,
+     0.799103,
+     0.651406,
+     1.0
+    ],
+    "srgb_hex": "#f3e7d3"
+   },
+   "roughness": 0.6,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.896269,
+     0.799103,
+     0.651406,
+     1.0
+    ],
+    "srgb_hex": "#f3e7d3"
+   }
+  },
+  "M_Ceiling": {
+   "base_color": {
+    "linear": [
+     0.023153,
+     0.023153,
+     0.08022,
+     1.0
+    ],
+    "srgb_hex": "#2a2a50"
+   },
+   "roughness": 0.95,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/wall_plaster.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.019382,
+     0.019382,
+     0.068478,
+     1.0
+    ],
+    "srgb_hex": "#26264a"
+   }
+  },
+  "M_CeilingLampBulb": {
+   "base_color": {
+    "linear": [
+     1.0,
+     0.921582,
+     0.806952,
+     1.0
+    ],
+    "srgb_hex": "#fff6e8"
+   },
+   "roughness": 0.3,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      0.791298,
+      0.57758,
+      1.0
+     ],
+     "srgb_hex": "#ffe6c8"
+    },
+    "strength": 3.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     1.0,
+     0.921582,
+     0.806952,
+     1.0
+    ],
+    "srgb_hex": "#fff6e8"
+   }
+  },
+  "M_CeilingLampShade": {
+   "base_color": {
+    "linear": [
+     0.887923,
+     0.791298,
+     0.686685,
+     1.0
+    ],
+    "srgb_hex": "#f2e6d8"
+   },
+   "roughness": 0.85,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      0.791298,
+      0.57758,
+      1.0
+     ],
+     "srgb_hex": "#ffe6c8"
+    },
+    "strength": 0.7
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": true,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.887923,
+     0.791298,
+     0.686685,
+     1.0
+    ],
+    "srgb_hex": "#f2e6d8"
+   }
+  },
+  "M_CeramicPink": {
+   "base_color": {
+    "linear": [
+     0.745404,
+     0.258183,
+     0.434154,
+     1.0
+    ],
+    "srgb_hex": "#e08bb0"
+   },
+   "roughness": 0.22,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.745404,
+     0.258183,
+     0.434154,
+     1.0
+    ],
+    "srgb_hex": "#e08bb0"
+   }
+  },
+  "M_CeramicSage": {
+   "base_color": {
+    "linear": [
+     0.346704,
+     0.47932,
+     0.351533,
+     1.0
+    ],
+    "srgb_hex": "#9fb8a0"
+   },
+   "roughness": 0.3,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.346704,
+     0.47932,
+     0.351533,
+     1.0
+    ],
+    "srgb_hex": "#9fb8a0"
+   }
+  },
+  "M_CeramicWhite": {
+   "base_color": {
+    "linear": [
+     0.863157,
+     0.822786,
+     0.775822,
+     1.0
+    ],
+    "srgb_hex": "#efeae4"
+   },
+   "roughness": 0.28,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.863157,
+     0.822786,
+     0.775822,
+     1.0
+    ],
+    "srgb_hex": "#efeae4"
+   }
+  },
+  "M_ChairAccent": {
+   "base_color": {
+    "linear": [
+     0.871367,
+     0.194618,
+     0.371238,
+     1.0
+    ],
+    "srgb_hex": "#f07aa4"
+   },
+   "roughness": 0.8,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/fabric_linen.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     1.0,
+     0.147027,
+     0.337164,
+     1.0
+    ],
+    "srgb_hex": "#ff6b9d"
+   }
+  },
+  "M_ChairFabric": {
+   "base_color": {
+    "linear": [
+     0.03434,
+     0.029557,
+     0.072272,
+     1.0
+    ],
+    "srgb_hex": "#34304c"
+   },
+   "roughness": 0.85,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/fabric_linen.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.027321,
+     0.023153,
+     0.057805,
+     1.0
+    ],
+    "srgb_hex": "#2e2a44"
+   }
+  },
+  "M_ClockHand": {
+   "base_color": {
+    "linear": [
+     0.011612,
+     0.01033,
+     0.017642,
+     1.0
+    ],
+    "srgb_hex": "#1c1a24"
+   },
+   "roughness": 0.4,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.011612,
+     0.01033,
+     0.017642,
+     1.0
+    ],
+    "srgb_hex": "#1c1a24"
+   }
+  },
+  "M_Coffee": {
+   "base_color": {
+    "linear": [
+     0.023153,
+     0.009134,
+     0.005182,
+     1.0
+    ],
+    "srgb_hex": "#2a1810"
+   },
+   "roughness": 0.12,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.023153,
+     0.009134,
+     0.005182,
+     1.0
+    ],
+    "srgb_hex": "#2a1810"
+   }
+  },
+  "M_Cork": {
+   "base_color": {
+    "linear": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "srgb_hex": "#ffffff"
+   },
+   "roughness": 0.95,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/cork.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.341914,
+     0.155926,
+     0.059511,
+     1.0
+    ],
+    "srgb_hex": "#9e6e45"
+   }
+  },
+  "M_Curtain": {
+   "base_color": {
+    "linear": [
+     0.155926,
+     0.084376,
+     0.332452,
+     1.0
+    ],
+    "srgb_hex": "#6e529c"
+   },
+   "roughness": 0.88,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": true,
+   "textures": {
+    "base": "Textures/fabric_velvet.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.144128,
+     0.078187,
+     0.304987,
+     1.0
+    ],
+    "srgb_hex": "#6a4f96"
+   }
+  },
+  "M_DeskLampGlow": {
+   "base_color": {
+    "linear": [
+     1.0,
+     0.871367,
+     0.723055,
+     1.0
+    ],
+    "srgb_hex": "#fff0dd"
+   },
+   "roughness": 0.4,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      0.434154,
+      0.132868,
+      1.0
+     ],
+     "srgb_hex": "#ffb066"
+    },
+    "strength": 4.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     1.0,
+     0.871367,
+     0.723055,
+     1.0
+    ],
+    "srgb_hex": "#fff0dd"
+   }
+  },
+  "M_DoorPaint": {
+   "base_color": {
+    "linear": [
+     0.027321,
+     0.023153,
+     0.072272,
+     1.0
+    ],
+    "srgb_hex": "#2e2a4c"
+   },
+   "roughness": 0.5,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.027321,
+     0.023153,
+     0.072272,
+     1.0
+    ],
+    "srgb_hex": "#2e2a4c"
+   }
+  },
+  "M_Duvet": {
+   "base_color": {
+    "linear": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "srgb_hex": "#ffffff"
+   },
+   "roughness": 0.92,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": true,
+   "textures": {
+    "base": "Textures/duvet_print.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.254152,
+     0.162029,
+     0.527115,
+     1.0
+    ],
+    "srgb_hex": "#8a70c0"
+   }
+  },
+  "M_EyeBlack": {
+   "base_color": {
+    "linear": [
+     0.009134,
+     0.006995,
+     0.011612,
+     1.0
+    ],
+    "srgb_hex": "#18141c"
+   },
+   "roughness": 0.2,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.009134,
+     0.006995,
+     0.011612,
+     1.0
+    ],
+    "srgb_hex": "#18141c"
+   }
+  },
+  "M_Figurine": {
+   "base_color": {
+    "linear": [
+     0.921582,
+     0.879622,
+     0.822786,
+     1.0
+    ],
+    "srgb_hex": "#f6f1ea"
+   },
+   "roughness": 0.35,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.921582,
+     0.879622,
+     0.822786,
+     1.0
+    ],
+    "srgb_hex": "#f6f1ea"
+   }
+  },
+  "M_Floor": {
+   "base_color": {
+    "linear": [
+     0.693872,
+     0.552011,
+     0.423268,
+     1.0
+    ],
+    "srgb_hex": "#d9c4ae"
+   },
+   "roughness": 0.5,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/floor_wood.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.254152,
+     0.127438,
+     0.057805,
+     1.0
+    ],
+    "srgb_hex": "#8a6444"
+   }
+  },
+  "M_FloorCushion": {
+   "base_color": {
+    "linear": [
+     0.287441,
+     0.174647,
+     0.508881,
+     1.0
+    ],
+    "srgb_hex": "#9274bd"
+   },
+   "roughness": 0.9,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/fabric_velvet.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.266356,
+     0.158961,
+     0.47932,
+     1.0
+    ],
+    "srgb_hex": "#8d6fb8"
+   }
+  },
+  "M_FrameBlack": {
+   "base_color": {
+    "linear": [
+     0.011612,
+     0.01033,
+     0.017642,
+     1.0
+    ],
+    "srgb_hex": "#1c1a24"
+   },
+   "roughness": 0.45,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.011612,
+     0.01033,
+     0.017642,
+     1.0
+    ],
+    "srgb_hex": "#1c1a24"
+   }
+  },
+  "M_FrameWhite": {
+   "base_color": {
+    "linear": [
+     0.863157,
+     0.814847,
+     0.745404,
+     1.0
+    ],
+    "srgb_hex": "#efe9e0"
+   },
+   "roughness": 0.45,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.863157,
+     0.814847,
+     0.745404,
+     1.0
+    ],
+    "srgb_hex": "#efe9e0"
+   }
+  },
+  "M_Hoodie": {
+   "base_color": {
+    "linear": [
+     0.806952,
+     0.381326,
+     0.564712,
+     1.0
+    ],
+    "srgb_hex": "#e8a6c6"
+   },
+   "roughness": 0.9,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": true,
+   "textures": {
+    "base": "Textures/fabric_fleece.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.814847,
+     0.366253,
+     0.552011,
+     1.0
+    ],
+    "srgb_hex": "#e9a3c4"
+   }
+  },
+  "M_JarTint": {
+   "base_color": {
+    "linear": [
+     0.584078,
+     0.47932,
+     0.806952,
+     1.0
+    ],
+    "srgb_hex": "#c9b8e8"
+   },
+   "roughness": 0.15,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.584078,
+     0.47932,
+     0.806952,
+     1.0
+    ],
+    "srgb_hex": "#c9b8e8"
+   }
+  },
+  "M_Keycap": {
+   "base_color": {
+    "linear": [
+     0.693872,
+     0.630757,
+     0.854993,
+     1.0
+    ],
+    "srgb_hex": "#d9d0ee"
+   },
+   "roughness": 0.45,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.693872,
+     0.630757,
+     0.854993,
+     1.0
+    ],
+    "srgb_hex": "#d9d0ee"
+   }
+  },
+  "M_KeycapPink": {
+   "base_color": {
+    "linear": [
+     0.871367,
+     0.381326,
+     0.552011,
+     1.0
+    ],
+    "srgb_hex": "#f0a6c4"
+   },
+   "roughness": 0.45,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.871367,
+     0.381326,
+     0.552011,
+     1.0
+    ],
+    "srgb_hex": "#f0a6c4"
+   }
+  },
+  "M_LampPaint": {
+   "base_color": {
+    "linear": [
+     0.597202,
+     0.47932,
+     0.806952,
+     1.0
+    ],
+    "srgb_hex": "#cbb8e8"
+   },
+   "roughness": 0.35,
+   "metallic": 0.3,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": true,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.597202,
+     0.47932,
+     0.806952,
+     1.0
+    ],
+    "srgb_hex": "#cbb8e8"
+   }
+  },
+  "M_Leaf": {
+   "base_color": {
+    "linear": [
+     0.028426,
+     0.194618,
+     0.061246,
+     1.0
+    ],
+    "srgb_hex": "#2f7a46"
+   },
+   "roughness": 0.55,
+   "metallic": 0.0,
+   "specular": 0.4,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": true,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.028426,
+     0.194618,
+     0.061246,
+     1.0
+    ],
+    "srgb_hex": "#2f7a46"
+   }
+  },
+  "M_LeafLight": {
+   "base_color": {
+    "linear": [
+     0.068478,
+     0.323143,
+     0.097587,
+     1.0
+    ],
+    "srgb_hex": "#4a9a58"
+   },
+   "roughness": 0.55,
+   "metallic": 0.0,
+   "specular": 0.4,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": true,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.068478,
+     0.323143,
+     0.097587,
+     1.0
+    ],
+    "srgb_hex": "#4a9a58"
+   }
+  },
+  "M_LeafSnake": {
+   "base_color": {
+    "linear": [
+     0.025187,
+     0.111932,
+     0.042311,
+     1.0
+    ],
+    "srgb_hex": "#2c5e3a"
+   },
+   "roughness": 0.5,
+   "metallic": 0.0,
+   "specular": 0.4,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": true,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.025187,
+     0.111932,
+     0.042311,
+     1.0
+    ],
+    "srgb_hex": "#2c5e3a"
+   }
+  },
+  "M_Mattress": {
+   "base_color": {
+    "linear": [
+     0.791298,
+     0.745404,
+     0.854993,
+     1.0
+    ],
+    "srgb_hex": "#e6e0ee"
+   },
+   "roughness": 0.9,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/fabric_linen.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.83077,
+     0.783538,
+     0.871367,
+     1.0
+    ],
+    "srgb_hex": "#ebe5f0"
+   }
+  },
+  "M_MetalDark": {
+   "base_color": {
+    "linear": [
+     0.017642,
+     0.016807,
+     0.025187,
+     1.0
+    ],
+    "srgb_hex": "#24232c"
+   },
+   "roughness": 0.35,
+   "metallic": 0.7,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.017642,
+     0.016807,
+     0.025187,
+     1.0
+    ],
+    "srgb_hex": "#24232c"
+   }
+  },
+  "M_MetalLight": {
+   "base_color": {
+    "linear": [
+     0.47932,
+     0.467784,
+     0.552011,
+     1.0
+    ],
+    "srgb_hex": "#b8b6c4"
+   },
+   "roughness": 0.3,
+   "metallic": 1.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.47932,
+     0.467784,
+     0.552011,
+     1.0
+    ],
+    "srgb_hex": "#b8b6c4"
+   }
+  },
+  "M_Mirror": {
+   "base_color": {
+    "linear": [
+     0.658375,
+     0.658375,
+     0.760525,
+     1.0
+    ],
+    "srgb_hex": "#d4d4e2"
+   },
+   "roughness": 0.07,
+   "metallic": 1.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.658375,
+     0.658375,
+     0.760525,
+     1.0
+    ],
+    "srgb_hex": "#d4d4e2"
+   }
+  },
+  "M_MonitorScreen": {
+   "base_color": {
+    "linear": [
+     0.001518,
+     0.001518,
+     0.002428,
+     1.0
+    ],
+    "srgb_hex": "#050508"
+   },
+   "roughness": 0.25,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 1.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": "Textures/monitor_screen.jpg"
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.001518,
+     0.001518,
+     0.002428,
+     1.0
+    ],
+    "srgb_hex": "#050508"
+   }
+  },
+  "M_MoonLamp": {
+   "base_color": {
+    "linear": [
+     1.0,
+     0.879622,
+     0.672443,
+     1.0
+    ],
+    "srgb_hex": "#fff1d6"
+   },
+   "roughness": 0.6,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      0.760525,
+      0.47932,
+      1.0
+     ],
+     "srgb_hex": "#ffe2b8"
+    },
+    "strength": 1.4
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     1.0,
+     0.879622,
+     0.672443,
+     1.0
+    ],
+    "srgb_hex": "#fff1d6"
+   }
+  },
+  "M_MousePad": {
+   "base_color": {
+    "linear": [
+     0.090842,
+     0.057805,
+     0.201556,
+     1.0
+    ],
+    "srgb_hex": "#55447c"
+   },
+   "roughness": 0.9,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/fabric_linen.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.068478,
+     0.042311,
+     0.155926,
+     1.0
+    ],
+    "srgb_hex": "#4a3a6e"
+   }
+  },
+  "M_NeonSign": {
+   "base_color": {
+    "linear": [
+     1.0,
+     0.274677,
+     0.57758,
+     1.0
+    ],
+    "srgb_hex": "#ff8fc8"
+   },
+   "roughness": 0.4,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      0.158961,
+      0.47932,
+      1.0
+     ],
+     "srgb_hex": "#ff6fb8"
+    },
+    "strength": 4.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     1.0,
+     0.274677,
+     0.57758,
+     1.0
+    ],
+    "srgb_hex": "#ff8fc8"
+   }
+  },
+  "M_Notebook": {
+   "base_color": {
+    "linear": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "srgb_hex": "#ffffff"
+   },
+   "roughness": 0.6,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/notebook.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.799103,
+     0.366253,
+     0.527115,
+     1.0
+    ],
+    "srgb_hex": "#e7a3c0"
+   }
+  },
+  "M_Paper": {
+   "base_color": {
+    "linear": [
+     0.904661,
+     0.863157,
+     0.791298,
+     1.0
+    ],
+    "srgb_hex": "#f4efe6"
+   },
+   "roughness": 0.92,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.904661,
+     0.863157,
+     0.791298,
+     1.0
+    ],
+    "srgb_hex": "#f4efe6"
+   }
+  },
+  "M_PaperBall": {
+   "base_color": {
+    "linear": [
+     0.871367,
+     0.83077,
+     0.760525,
+     1.0
+    ],
+    "srgb_hex": "#f0ebe2"
+   },
+   "roughness": 0.95,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.871367,
+     0.83077,
+     0.760525,
+     1.0
+    ],
+    "srgb_hex": "#f0ebe2"
+   }
+  },
+  "M_PaperBlue": {
+   "base_color": {
+    "linear": [
+     0.391572,
+     0.630757,
+     0.871367,
+     1.0
+    ],
+    "srgb_hex": "#a8d0f0"
+   },
+   "roughness": 0.9,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.391572,
+     0.630757,
+     0.871367,
+     1.0
+    ],
+    "srgb_hex": "#a8d0f0"
+   }
+  },
+  "M_PaperPink": {
+   "base_color": {
+    "linear": [
+     0.930111,
+     0.467784,
+     0.62396,
+     1.0
+    ],
+    "srgb_hex": "#f7b6cf"
+   },
+   "roughness": 0.9,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.930111,
+     0.467784,
+     0.62396,
+     1.0
+    ],
+    "srgb_hex": "#f7b6cf"
+   }
+  },
+  "M_PaperYellow": {
+   "base_color": {
+    "linear": [
+     0.930111,
+     0.745404,
+     0.254152,
+     1.0
+    ],
+    "srgb_hex": "#f7e08a"
+   },
+   "roughness": 0.9,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.930111,
+     0.745404,
+     0.254152,
+     1.0
+    ],
+    "srgb_hex": "#f7e08a"
+   }
+  },
+  "M_Photos": {
+   "base_color": {
+    "linear": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "srgb_hex": "#ffffff"
+   },
+   "roughness": 0.35,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/photos.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "srgb_hex": "#ffffff"
+   }
+  },
+  "M_Pillow": {
+   "base_color": {
+    "linear": [
+     0.887923,
+     0.854993,
+     0.938686,
+     1.0
+    ],
+    "srgb_hex": "#f2eef8"
+   },
+   "roughness": 0.9,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/fabric_linen.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.896269,
+     0.854993,
+     0.938686,
+     1.0
+    ],
+    "srgb_hex": "#f3eef8"
+   }
+  },
+  "M_PillowPink": {
+   "base_color": {
+    "linear": [
+     0.822786,
+     0.361307,
+     0.552011,
+     1.0
+    ],
+    "srgb_hex": "#eaa2c4"
+   },
+   "roughness": 0.85,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/fabric_velvet.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.799103,
+     0.366253,
+     0.545724,
+     1.0
+    ],
+    "srgb_hex": "#e7a3c3"
+   }
+  },
+  "M_PinBlue": {
+   "base_color": {
+    "linear": [
+     0.102242,
+     0.212231,
+     0.745404,
+     1.0
+    ],
+    "srgb_hex": "#5a7fe0"
+   },
+   "roughness": 0.3,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.102242,
+     0.212231,
+     0.745404,
+     1.0
+    ],
+    "srgb_hex": "#5a7fe0"
+   }
+  },
+  "M_PinRed": {
+   "base_color": {
+    "linear": [
+     0.745404,
+     0.064803,
+     0.102242,
+     1.0
+    ],
+    "srgb_hex": "#e0485a"
+   },
+   "roughness": 0.3,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.745404,
+     0.064803,
+     0.102242,
+     1.0
+    ],
+    "srgb_hex": "#e0485a"
+   }
+  },
+  "M_PlasticDark": {
+   "base_color": {
+    "linear": [
+     0.008023,
+     0.008023,
+     0.012286,
+     1.0
+    ],
+    "srgb_hex": "#16161d"
+   },
+   "roughness": 0.32,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.008023,
+     0.008023,
+     0.012286,
+     1.0
+    ],
+    "srgb_hex": "#16161d"
+   }
+  },
+  "M_PlasticWhite": {
+   "base_color": {
+    "linear": [
+     0.814847,
+     0.783538,
+     0.863157,
+     1.0
+    ],
+    "srgb_hex": "#e9e5ef"
+   },
+   "roughness": 0.38,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.814847,
+     0.783538,
+     0.863157,
+     1.0
+    ],
+    "srgb_hex": "#e9e5ef"
+   }
+  },
+  "M_Plush": {
+   "base_color": {
+    "linear": [
+     0.930111,
+     0.73791,
+     0.630757,
+     1.0
+    ],
+    "srgb_hex": "#f7dfd0"
+   },
+   "roughness": 0.95,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/fabric_fleece.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.921582,
+     0.715693,
+     0.597202,
+     1.0
+    ],
+    "srgb_hex": "#f6dccb"
+   }
+  },
+  "M_PlushPink": {
+   "base_color": {
+    "linear": [
+     0.887923,
+     0.434154,
+     0.597202,
+     1.0
+    ],
+    "srgb_hex": "#f2b0cb"
+   },
+   "roughness": 0.95,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/fabric_fleece.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.887923,
+     0.396755,
+     0.564712,
+     1.0
+    ],
+    "srgb_hex": "#f2a9c6"
+   }
+  },
+  "M_PosterCity": {
+   "base_color": {
+    "linear": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "srgb_hex": "#ffffff"
+   },
+   "roughness": 0.55,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/poster_city.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "srgb_hex": "#ffffff"
+   }
+  },
+  "M_PosterMoon": {
+   "base_color": {
+    "linear": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "srgb_hex": "#ffffff"
+   },
+   "roughness": 0.55,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/poster_moon.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "srgb_hex": "#ffffff"
+   }
+  },
+  "M_PosterPeaks": {
+   "base_color": {
+    "linear": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "srgb_hex": "#ffffff"
+   },
+   "roughness": 0.55,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/poster_peaks.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "srgb_hex": "#ffffff"
+   }
+  },
+  "M_PrintCat": {
+   "base_color": {
+    "linear": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "srgb_hex": "#ffffff"
+   },
+   "roughness": 0.6,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/print_cat.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "srgb_hex": "#ffffff"
+   }
+  },
+  "M_PrintFlower": {
+   "base_color": {
+    "linear": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "srgb_hex": "#ffffff"
+   },
+   "roughness": 0.6,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/print_flower.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "srgb_hex": "#ffffff"
+   }
+  },
+  "M_Rug": {
+   "base_color": {
+    "linear": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "srgb_hex": "#ffffff"
+   },
+   "roughness": 0.97,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/rug.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.068478,
+     0.035601,
+     0.191202,
+     1.0
+    ],
+    "srgb_hex": "#4a3579"
+   }
+  },
+  "M_Skirting": {
+   "base_color": {
+    "linear": [
+     0.023153,
+     0.021219,
+     0.08022,
+     1.0
+    ],
+    "srgb_hex": "#2a2850"
+   },
+   "roughness": 0.55,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.023153,
+     0.021219,
+     0.08022,
+     1.0
+    ],
+    "srgb_hex": "#2a2850"
+   }
+  },
+  "M_Slipper": {
+   "base_color": {
+    "linear": [
+     0.871367,
+     0.502886,
+     0.62396,
+     1.0
+    ],
+    "srgb_hex": "#f0bccf"
+   },
+   "roughness": 0.95,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/fabric_fleece.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.887923,
+     0.47932,
+     0.603827,
+     1.0
+    ],
+    "srgb_hex": "#f2b8cc"
+   }
+  },
+  "M_Soil": {
+   "base_color": {
+    "linear": [
+     0.027321,
+     0.015209,
+     0.009134,
+     1.0
+    ],
+    "srgb_hex": "#2e2118"
+   },
+   "roughness": 1.0,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.027321,
+     0.015209,
+     0.009134,
+     1.0
+    ],
+    "srgb_hex": "#2e2118"
+   }
+  },
+  "M_SpeakerFabric": {
+   "base_color": {
+    "linear": [
+     0.045186,
+     0.036889,
+     0.08022,
+     1.0
+    ],
+    "srgb_hex": "#3c3650"
+   },
+   "roughness": 0.95,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/fabric_linen.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.042311,
+     0.03434,
+     0.064803,
+     1.0
+    ],
+    "srgb_hex": "#3a3448"
+   }
+  },
+  "M_StarGlow": {
+   "base_color": {
+    "linear": [
+     1.0,
+     0.679542,
+     0.194618,
+     1.0
+    ],
+    "srgb_hex": "#ffd77a"
+   },
+   "roughness": 0.4,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      0.679542,
+      0.194618,
+      1.0
+     ],
+     "srgb_hex": "#ffd77a"
+    },
+    "strength": 1.6
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     1.0,
+     0.679542,
+     0.194618,
+     1.0
+    ],
+    "srgb_hex": "#ffd77a"
+   }
+  },
+  "M_Stem": {
+   "base_color": {
+    "linear": [
+     0.102242,
+     0.147027,
+     0.042311,
+     1.0
+    ],
+    "srgb_hex": "#5a6b3a"
+   },
+   "roughness": 0.7,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.102242,
+     0.147027,
+     0.042311,
+     1.0
+    ],
+    "srgb_hex": "#5a6b3a"
+   }
+  },
+  "M_Succulent": {
+   "base_color": {
+    "linear": [
+     0.274677,
+     0.47932,
+     0.323143,
+     1.0
+    ],
+    "srgb_hex": "#8fb89a"
+   },
+   "roughness": 0.5,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.274677,
+     0.47932,
+     0.323143,
+     1.0
+    ],
+    "srgb_hex": "#8fb89a"
+   }
+  },
+  "M_Terracotta": {
+   "base_color": {
+    "linear": [
+     0.552011,
+     0.162029,
+     0.043735,
+     1.0
+    ],
+    "srgb_hex": "#c4703b"
+   },
+   "roughness": 0.8,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.552011,
+     0.162029,
+     0.043735,
+     1.0
+    ],
+    "srgb_hex": "#c4703b"
+   }
+  },
+  "M_Throw": {
+   "base_color": {
+    "linear": [
+     0.791298,
+     0.715693,
+     0.921582,
+     1.0
+    ],
+    "srgb_hex": "#e6dcf6"
+   },
+   "roughness": 0.95,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": true,
+   "textures": {
+    "base": "Textures/fabric_plaid.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.686685,
+     0.57758,
+     0.871367,
+     1.0
+    ],
+    "srgb_hex": "#d8c8f0"
+   }
+  },
+  "M_TrimPaint": {
+   "base_color": {
+    "linear": [
+     0.686685,
+     0.630757,
+     0.791298,
+     1.0
+    ],
+    "srgb_hex": "#d8d0e6"
+   },
+   "roughness": 0.45,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.686685,
+     0.630757,
+     0.791298,
+     1.0
+    ],
+    "srgb_hex": "#d8d0e6"
+   }
+  },
+  "M_Trunk": {
+   "base_color": {
+    "linear": [
+     0.144128,
+     0.08022,
+     0.039546,
+     1.0
+    ],
+    "srgb_hex": "#6a5038"
+   },
+   "roughness": 0.85,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.144128,
+     0.08022,
+     0.039546,
+     1.0
+    ],
+    "srgb_hex": "#6a5038"
+   }
+  },
+  "M_Wall": {
+   "base_color": {
+    "linear": [
+     0.035601,
+     0.035601,
+     0.114435,
+     1.0
+    ],
+    "srgb_hex": "#35355f"
+   },
+   "roughness": 0.93,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/wall_plaster.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.042311,
+     0.042311,
+     0.138432,
+     1.0
+    ],
+    "srgb_hex": "#3a3a68"
+   }
+  },
+  "M_WindowSky": {
+   "base_color": {
+    "linear": [
+     0.003035,
+     0.004777,
+     0.027321,
+     1.0
+    ],
+    "srgb_hex": "#0a0f2e"
+   },
+   "roughness": 1.0,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      0.068478,
+      0.114435,
+      0.391572,
+      1.0
+     ],
+     "srgb_hex": "#4a5fa8"
+    },
+    "strength": 1.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": null,
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.003035,
+     0.004777,
+     0.027321,
+     1.0
+    ],
+    "srgb_hex": "#0a0f2e"
+   }
+  },
+  "M_WoodOak": {
+   "base_color": {
+    "linear": [
+     0.686685,
+     0.527115,
+     0.381326,
+     1.0
+    ],
+    "srgb_hex": "#d8c0a6"
+   },
+   "roughness": 0.42,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/wood_grain.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.584078,
+     0.391572,
+     0.246201,
+     1.0
+    ],
+    "srgb_hex": "#c9a888"
+   }
+  },
+  "M_WoodWalnut": {
+   "base_color": {
+    "linear": [
+     0.254152,
+     0.127438,
+     0.08022,
+     1.0
+    ],
+    "srgb_hex": "#8a6450"
+   },
+   "roughness": 0.5,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/wood_grain.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.144128,
+     0.068478,
+     0.039546,
+     1.0
+    ],
+    "srgb_hex": "#6a4a38"
+   }
+  },
+  "M_WoodWarm": {
+   "base_color": {
+    "linear": [
+     0.434154,
+     0.254152,
+     0.14996,
+     1.0
+    ],
+    "srgb_hex": "#b08a6c"
+   },
+   "roughness": 0.48,
+   "metallic": 0.0,
+   "specular": 0.5,
+   "emission": {
+    "color": {
+     "linear": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "srgb_hex": "#ffffff"
+    },
+    "strength": 0.0
+   },
+   "alpha": 1.0,
+   "blend": "opaque",
+   "double_sided": false,
+   "textures": {
+    "base": "Textures/wood_grain.jpg",
+    "normal": null,
+    "roughness": null,
+    "emission": null
+   },
+   "uv_scale": null,
+   "flat_color": {
+    "linear": [
+     0.323143,
+     0.174647,
+     0.097587,
+     1.0
+    ],
+    "srgb_hex": "#9a7458"
+   }
+  }
+ }
+}

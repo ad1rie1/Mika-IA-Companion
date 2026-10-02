@@ -1,4 +1,10 @@
 ﻿<Solution>
+  <Project Path="Mika.World.Engine.csproj" />
+  <Project Path="Mika.World.Protocol.csproj" />
+  <Project Path="Mika.World.Model.csproj" />
+  <Project Path="Mika.Net.csproj" />
+  <Project Path="Mika.Tests.EditMode.csproj" />
   <Project Path="Assembly-CSharp.csproj" />
+  <Project Path="Mika.Editor.csproj" />
   <Project Path="Assembly-CSharp-Editor.csproj" />
 </Solution>

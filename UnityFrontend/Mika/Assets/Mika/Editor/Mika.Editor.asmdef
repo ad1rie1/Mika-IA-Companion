@@ -1,0 +1,20 @@
+{
+    "name": "Mika.Editor",
+    "rootNamespace": "Mika.Editor",
+    "references": [
+        "Mika.World.Protocol",
+        "Mika.World.Model",
+        "Mika.Net",
+        "UnityEditor.TestRunner",
+        "UnityEngine.TestRunner"
+    ],
+    "includePlatforms": ["Editor"],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": ["Newtonsoft.Json.dll", "nunit.framework.dll"],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
